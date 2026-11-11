@@ -10,6 +10,8 @@ the behaviours and macros a plugin `use`s.
 | `Kiln.FieldType` (+ `Kiln.Tokens`) | A custom-field value type admins can pick |
 | `Kiln.Forms.SpamCheck` (+ `Kiln.Forms.SpamCheck.Context`) | A heuristic run on every public form submission |
 | `Kiln.ImageBackend` (`check/0` since 1.2) | An external image service new uploads can go to |
+| `Kiln.Challenge.Provider`, since 1.4 | A human-verification widget and its check, which the operator can pick instead of Turnstile or reCAPTCHA |
+| `Kiln.Security.Check` (+ `Result`, `Context`), since 1.4 | A line on the console's Security posture page: is a security setting on, and what fixes it |
 | `Kiln.Advisory` (+ `Finding`, `Context`, `Body`), since 1.1 | An editorial check shown in the content editor's advice panels |
 | `Kiln.SafeFetch`, since 1.3 | Fetch a URL from content or settings without an SSRF hole: the address is checked and pinned, redirects re-checked, the body capped |
 
@@ -79,11 +81,14 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Contribution | As a dependency |
 | --- | --- |
 | Blocks (`blocks/0`) | Yes |
-| Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import |
+| Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import. The optional `graphql_kind/1` (how the GraphQL API types the value) and `widgets/1` (a choice of editor input, read back with `Kiln.FieldType.widget/2`) are from 1.4 (`{:kiln_plugin, "~> 1.4"}`) |
 | Spam checks (`spam_checks/0`) | Yes |
 | Image backends (`image_backends/0`) | Yes. The connection check, `check/0`, from 1.2 (`{:kiln_plugin, "~> 1.2"}`) |
+| Human-verification providers (`challenge_providers/0`, `Kiln.Challenge.Provider`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). The provider verifies through the `:post` function the core hands it, so it needs no HTTP client of its own |
+| Security posture checks (`security_checks/0`, `Kiln.Security.Check`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). Each runs in its own process under a deadline; a check that crashes or overruns shows as "could not run", never as a pass. Its summary and details are shown as written (translate them with `Context.locale`), and its facts must never carry a secret |
 | Nav items, supervision children, Oban queues | Yes |
 | Admin, editor and public routes | Only for a LiveView that depends on `phoenix_live_view` directly; one that does `use KilnCMSWeb, :live_view` or renders `Layouts.app` needs the core, so it stays an overlay |
+| Plug routes (`plug_routes/0`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). A route is `{verb, path, plug_module, plug_opts}` or `{:forward, path, plug, opts}`, so the dependency needs `plug` and nothing else |
 | Content types (`use KilnCMS.CMS.Content`), Ash domains (`domains/0`) | No: they need the core's repo, domains and policies. Overlay only |
 | Advisory checks (`advisories/0`, `Kiln.Advisory`) | Yes, from 1.1 (`{:kiln_plugin, "~> 1.1"}`). The core walks the blocks and fills `%Kiln.Advisory.Body{}`; a check only reads it |
 | Outbound HTTP to a URL the plugin didn't write (`Kiln.SafeFetch`) | Yes, from 1.3 (`{:kiln_plugin, "~> 1.3"}`). The core does the fetch; with no core loaded (a plugin's own test suite) every call is an error unless `config :kiln_plugin, :safe_fetch` names a stand-in |

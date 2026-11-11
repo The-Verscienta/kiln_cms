@@ -20,7 +20,22 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       unique `name/0` — it is recorded on every image the backend holds — and
       the backend selected in `config :kiln_cms, :image_backend` is one an
       installed plugin declares;
+    * human-verification providers (#2249) pass
+      `Kiln.Challenge.Provider.conformance/1`, and their ids collide neither
+      with a built-in (`turnstile`, `recaptcha`, which always win) nor with
+      each other; when `CHALLENGE_PROVIDER` names a provider, one is
+      installed under that id;
+    * security posture checks (#2252) pass `Kiln.Security.Check.conformance/1`,
+      take no id under `core.` (KilnCMS's own, which a plugin's never
+      displaces) and no id another plugin's check already has (the first
+      registered is the one shown);
     * nav paths and admin routes are well-formed (`/editor/...`);
+    * plug routes (#2272) are well-formed `{verb, path, plug, opts}` /
+      `{:forward, path, plug, opts}` tuples, take no first segment a core route
+      already owns (`/editor`, `/api`, `/gql`, `/mcp`, and every other static
+      root in the compiled router) and no parameter or wildcard first segment,
+      and do not overlap another plugin's plug or public routes, compared on
+      whole path segments;
     * a block's `:json` render agrees with its exported schema (#937) —
       the same conformance check `test/kiln/block/json_schema_test.exs` runs
       for core blocks, which a third-party plugin never executes;
@@ -31,6 +46,10 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       was actually bundled: the name it returns is registered in LiveView's
       colocated-hook manifest. A typo, or a `<script>` in a template that never
       compiled, otherwise surfaces only as a silent no-op in the browser;
+    * a field type's editor inputs (`c:Kiln.FieldType.widgets/1`, #2284) are
+      a list of machine-name atoms or `{name, label}` pairs, with no name
+      twice. The host drops a malformed entry without a word, so the fields
+      admin would simply not offer it;
     * every dependency that requires `kiln_plugin` (a plugin shipped as a
       Hex, git or `path:` dependency, #1909) accepts the version this core
       bundles. The core takes the package with `override: true`, which is
@@ -89,10 +108,14 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         block_collisions(plugins, blocks_by_plugin) ++
         field_type_problems(plugins, field_types_by_plugin) ++
         queue_collisions(plugins) ++
+        plug_route_problems(plugins) ++
         image_backend_problems(plugins, Application.get_env(:kiln_cms, :image_backend)) ++
+        challenge_provider_problems(plugins, selected_challenge_provider()) ++
+        security_check_problems(plugins) ++
         block_schema_problems(plugins, blocks_by_plugin) ++
         field_type_schema_problems(plugins, field_types_by_plugin) ++
         field_type_hook_problems(plugins, field_types_by_plugin) ++
+        field_type_widget_problems(plugins, field_types_by_plugin) ++
         sdk_requirement_problems(sdk_version(), sdk_requirements(declared_deps())) ++
         project_lock_problems(File.cwd!())
 
@@ -364,6 +387,104 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     nav ++ routes ++ editor_routes ++ public_routes
   end
 
+  @doc false
+  # Plug routes (#2272). `core_roots` is injectable so a test can pass a table
+  # without compiling a router; by default it is read from the compiled
+  # `KilnCMSWeb.Router`, minus the routes plugins themselves mounted there.
+  def plug_route_problems(plugins, core_roots \\ core_route_roots()) do
+    claims =
+      for plugin <- plugins,
+          Code.ensure_loaded?(plugin),
+          route <- Kiln.Plugins.PlugRoute.of(plugin),
+          do: {plugin, route}
+
+    {valid, shape_problems} =
+      Enum.reduce(claims, {[], []}, fn {plugin, route} = claim, {valid, problems} ->
+        case plug_route_problem(plugin, route, core_roots) do
+          nil -> {[claim | valid], problems}
+          problem -> {valid, [problem | problems]}
+        end
+      end)
+
+    public =
+      for plugin <- plugins,
+          Code.ensure_loaded?(plugin),
+          function_exported?(plugin, :public_routes, 0),
+          {path, _lv, _action} <- plugin.public_routes(),
+          do: {plugin, {:get, path, :public_route, nil}}
+
+    valid = Enum.reverse(valid)
+
+    Enum.reverse(shape_problems) ++ plug_route_overlaps(valid ++ public)
+  end
+
+  defp plug_route_problem(plugin, route, core_roots) do
+    case Kiln.Plugins.PlugRoute.validate(route) do
+      {:error, reason} ->
+        "#{plugin.name()}: plug route #{reason}"
+
+      :ok ->
+        {_verb, path, _plug, _opts} = route
+        root = Kiln.Plugins.PlugRoute.root(path)
+
+        if root in core_roots do
+          "#{plugin.name()}: plug route #{inspect(path)} sits under /#{root}, " <>
+            "which core routes already own"
+        end
+    end
+  end
+
+  # Every pair that can answer the same request. At least one side must be a
+  # plug route: public routes are not this check's business among themselves.
+  defp plug_route_overlaps(claims) do
+    for {{plugin_a, {verb_a, path_a, plug_a, _}}, index} <- Enum.with_index(claims),
+        {plugin_b, {verb_b, path_b, plug_b, _}} <- Enum.drop(claims, index + 1),
+        :public_route != plug_a or :public_route != plug_b,
+        Kiln.Plugins.PlugRoute.overlap?({verb_a, path_a}, {verb_b, path_b}) do
+      "#{plugin_a.name()}: plug route #{inspect(path_a)} overlaps #{plugin_b.name()}'s " <>
+        "#{route_kind(plug_b)} #{inspect(path_b)}"
+    end
+  end
+
+  defp route_kind(:public_route), do: "public route"
+  defp route_kind(_plug), do: "plug route"
+
+  # The static first segments of the compiled core route table. Routes a plugin
+  # mounted itself are left out (they would collide with their own plugin), and
+  # the roots the endpoint answers outside the router are always included.
+  defp core_route_roots do
+    plugin_modules =
+      Kiln.Plugins.all()
+      |> Enum.flat_map(fn plugin ->
+        for {_verb, _path, mod, _opts} <- Kiln.Plugins.PlugRoute.of(plugin), do: mod
+      end)
+
+    live_views =
+      for {_path, lv, _action} <-
+            Kiln.Plugins.admin_routes() ++
+              Kiln.Plugins.editor_routes() ++ Kiln.Plugins.public_routes(),
+          do: lv
+
+    roots =
+      for route <- Phoenix.Router.routes(KilnCMSWeb.Router),
+          not plugin_mounted?(route, plugin_modules, live_views),
+          root = Kiln.Plugins.PlugRoute.root(route.path),
+          not String.starts_with?(root, [":", "*"]),
+          do: root
+
+    Enum.uniq(roots ++ Kiln.Plugins.PlugRoute.reserved_roots())
+  end
+
+  defp plugin_mounted?(route, plugin_modules, live_views) do
+    live_view =
+      case route.metadata do
+        %{phoenix_live_view: {view, _action, _opts, _session}} -> view
+        _ -> nil
+      end
+
+    route.plug in plugin_modules or live_view in live_views
+  end
+
   defp block_collisions(plugins, blocks_by_plugin) do
     core = KilnCMS.Blocks.core_types()
 
@@ -510,6 +631,191 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
   defp usable_backend_name?(name),
     do: is_binary(name) and String.trim(name) != "" and String.length(name) <= 64
+
+  # ── human-verification providers (#2249) ───────────────────────────────────
+  #
+  # The core checks a provider the same way before it uses one, and turns
+  # verification off when it fails — safe, but silent until a page asks. This
+  # says so before deploy. A plugin id equal to a built-in's is a problem even
+  # though the built-in wins: the plugin's provider can never be selected.
+  @doc false
+  def challenge_provider_problems(plugins, selected) do
+    # The raw list, not the registry's tolerant reading of it: the registry
+    # drops an entry that is not a module, which is right at run time and
+    # exactly what an author needs to hear about here.
+    raw = for plugin <- plugins, do: {plugin, raw_challenge_providers(plugin)}
+
+    malformed =
+      for {plugin, {:error, message}} <- raw,
+          do: "#{plugin.name()}: challenge_providers/0 #{message}"
+
+    entries =
+      for {plugin, {:ok, list}} <- raw,
+          entry <- list,
+          do: {plugin, entry}
+
+    {declared, not_modules} = Enum.split_with(entries, fn {_plugin, entry} -> is_atom(entry) end)
+
+    malformed =
+      malformed ++
+        for {plugin, entry} <- not_modules do
+          "#{plugin.name()}: challenge_providers/0 entry #{inspect(entry)} is not a module"
+        end
+
+    conformance =
+      for {plugin, mod} <- declared,
+          {:error, problems} <- [Kiln.Challenge.Provider.conformance(mod)],
+          problem <- problems do
+        "#{plugin.name()}: challenge provider #{inspect(mod)}: #{problem}"
+      end
+
+    built_in_ids = Enum.map(KilnCMS.Challenge.Registry.built_in(), & &1.id())
+
+    named =
+      for {plugin, mod} <- Enum.uniq_by(declared, &elem(&1, 1)),
+          id <- [KilnCMS.Challenge.Registry.id_of(mod)],
+          is_binary(id),
+          do: {plugin, mod, id}
+
+    built_in_collisions =
+      for {plugin, mod, id} <- named, id in built_in_ids do
+        "#{plugin.name()}: challenge provider #{inspect(mod)} takes the id #{inspect(id)}, " <>
+          "which is a built-in's: it can never be selected"
+      end
+
+    collisions =
+      named
+      |> Enum.reject(fn {_plugin, _mod, id} -> id in built_in_ids end)
+      |> Enum.group_by(fn {_plugin, _mod, id} -> id end)
+      |> Enum.flat_map(fn
+        {_id, [_one]} ->
+          []
+
+        {id, _many} ->
+          ["challenge provider id #{inspect(id)} is declared by more than one module"]
+      end)
+
+    installed_ids = built_in_ids ++ Enum.map(named, fn {_plugin, _mod, id} -> id end)
+
+    malformed ++
+      conformance ++
+      built_in_collisions ++ collisions ++ selected_provider_problems(selected, installed_ids)
+  end
+
+  # `{:ok, list}`, or `{:error, why}` for a callback that raises or answers
+  # something other than a list; `{:ok, []}` for a plugin built against an
+  # SDK without the callback.
+  defp raw_challenge_providers(plugin) do
+    if Code.ensure_loaded?(plugin) and function_exported?(plugin, :challenge_providers, 0) do
+      case plugin.challenge_providers() do
+        list when is_list(list) -> {:ok, list}
+        other -> {:error, "must return a list, got #{inspect(other)}"}
+      end
+    else
+      {:ok, []}
+    end
+  rescue
+    error -> {:error, "raised: " <> Exception.message(error)}
+  end
+
+  defp selected_provider_problems(nil, _installed_ids), do: []
+
+  defp selected_provider_problems(id, installed_ids) do
+    if id in installed_ids,
+      do: [],
+      else: ["CHALLENGE_PROVIDER names #{inspect(id)}, which no installed provider answers to"]
+  end
+
+  # Only what the operator set: a provider configured in a config file is the
+  # project's own business, and an unset variable selects nothing.
+  defp selected_challenge_provider do
+    case KilnCMS.Challenge.parse_provider_id(System.get_env("CHALLENGE_PROVIDER")) do
+      {:ok, id} -> id
+      _unset_or_invalid -> nil
+    end
+  end
+
+  # ── security posture checks (#2252) ────────────────────────────────────────
+  #
+  # The core resolves checks the same way at run time and drops a bad one with
+  # a log line, so the page just shows one line fewer. This says so before
+  # deploy, and names the collision the registry settles silently.
+  @doc false
+  def security_check_problems(plugins) do
+    raw = for plugin <- plugins, do: {plugin, raw_security_checks(plugin)}
+
+    malformed =
+      for {plugin, {:error, message}} <- raw,
+          do: "#{plugin.name()}: security_checks/0 #{message}"
+
+    entries =
+      for {plugin, {:ok, list}} <- raw,
+          entry <- list,
+          do: {plugin, entry}
+
+    {declared, not_modules} = Enum.split_with(entries, fn {_plugin, entry} -> is_atom(entry) end)
+
+    malformed =
+      malformed ++
+        for {plugin, entry} <- not_modules do
+          "#{plugin.name()}: security_checks/0 entry #{inspect(entry)} is not a module"
+        end
+
+    described =
+      for {plugin, mod} <- Enum.uniq_by(declared, &elem(&1, 1)),
+          do: {plugin, mod, Kiln.Security.Check.describe(mod)}
+
+    conformance =
+      for {plugin, mod, {:error, problems}} <- described, problem <- problems do
+        "#{plugin.name()}: security check #{inspect(mod)}: #{problem}"
+      end
+
+    named = for {plugin, mod, {:ok, %{id: id}}} <- described, do: {plugin, mod, id}
+
+    reserved =
+      for {plugin, mod, id} <- named, String.starts_with?(id, "core.") do
+        "#{plugin.name()}: security check #{inspect(mod)} takes the id #{inspect(id)}, " <>
+          "which is reserved for KilnCMS's own checks: it is never shown"
+      end
+
+    collisions =
+      named
+      |> Enum.reject(fn {_plugin, _mod, id} -> String.starts_with?(id, "core.") end)
+      |> Enum.group_by(fn {_plugin, _mod, id} -> id end)
+      |> Enum.flat_map(fn
+        {_id, [_one]} ->
+          []
+
+        {id, [{first, _mod, _id} | _rest] = many} ->
+          [
+            "security check id #{inspect(id)} is declared by more than one module " <>
+              "(#{Enum.map_join(many, ", ", fn {_p, mod, _id} -> inspect(mod) end)}); " <>
+              "only #{first.name()}'s is shown"
+          ]
+      end)
+
+    malformed ++ conformance ++ reserved ++ collisions
+  end
+
+  # `{:ok, list}`, or `{:error, why}` for a callback that raises or answers
+  # something other than a list; `{:ok, []}` for a plugin built against an
+  # SDK without the callback.
+  defp raw_security_checks(plugin) do
+    if Code.ensure_loaded?(plugin) and function_exported?(plugin, :security_checks, 0) do
+      case plugin.security_checks() do
+        list when is_list(list) -> {:ok, list}
+        other -> {:error, "must return a list, got #{inspect(other)}"}
+      end
+    else
+      {:ok, []}
+    end
+  rescue
+    error -> {:error, "raised: " <> Exception.message(error)}
+  catch
+    # A throw or an exit is the plugin's fault too: reported, not a crash of
+    # the whole doctor run.
+    kind, reason -> {:error, "#{kind}: #{inspect(reason)}"}
+  end
 
   # ── block :json render vs exported schema (#937) ───────────────────────────
   #
@@ -778,6 +1084,64 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   rescue
     e -> raised_problem(plugin, "field type #{inspect(mod)}", "building its input_hook/1", e)
   end
+
+  # #2284: `widgets/1` is read by the host on every field-definition write and
+  # editor render, where a malformed entry is dropped silently (a plugin must
+  # not be able to fail a save). This is where it gets named instead.
+  defp field_type_widget_problems(plugins, field_types_by_plugin) do
+    for plugin <- plugins,
+        mod <- field_types_by_plugin[plugin],
+        field_type_module?(mod),
+        function_exported?(mod, :widgets, 1),
+        problem <- widget_problems(plugin, mod),
+        do: problem
+  end
+
+  defp widget_problems(plugin, mod) do
+    definition =
+      struct(FieldDefinition,
+        name: "sample_field",
+        field_type: mod.name(),
+        required: false,
+        content_type: probe_content_type()
+      )
+
+    subject = "#{plugin.name()}: field type #{inspect(mod.name())} widgets/1"
+
+    case mod.widgets(definition) do
+      widgets when is_list(widgets) ->
+        names = Enum.map(widgets, &widget_entry_name/1)
+
+        malformed =
+          for {entry, nil} <- Enum.zip(widgets, names) do
+            "#{subject} has entry #{inspect(entry)}; expected a machine-name atom " <>
+              ~s[(lowercase letters, digits and underscores) or {name, "Label"}]
+          end
+
+        duplicates =
+          names
+          |> Enum.reject(&is_nil/1)
+          |> Enum.frequencies()
+          |> Enum.filter(fn {_name, count} -> count > 1 end)
+          |> Enum.map(fn {name, _count} -> "#{subject} names #{inspect(name)} more than once" end)
+
+        malformed ++ duplicates
+
+      other ->
+        ["#{subject} returned #{inspect(other)}; expected a list of names or {name, label} pairs"]
+    end
+  rescue
+    e -> raised_problem(plugin, "field type #{inspect(mod)}", "listing its widgets/1", e)
+  end
+
+  # The widget's name when `entry` is one the SDK allows, else nil.
+  defp widget_entry_name({name, label}) when is_binary(label), do: widget_entry_name(name)
+
+  defp widget_entry_name(name) when is_atom(name) and name not in [nil, true, false] do
+    if Regex.match?(~r/\A[a-z][a-z0-9_]*\z/, Atom.to_string(name)), do: name
+  end
+
+  defp widget_entry_name(_entry), do: nil
 
   defp colocated_manifest do
     case File.read(colocated_manifest_path()) do

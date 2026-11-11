@@ -37,9 +37,11 @@ config :kiln_cms,
     KilnCMS.Newsletter,
     KilnCMS.Automation,
     KilnCMS.Billing,
+    KilnCMS.Backups,
     KilnCMS.Federation,
     KilnCMS.Experiments,
     KilnCMS.Social,
+    KilnCMS.Security,
     Example.Catalog
   ],
   # Scanned by `KilnCMS.CMS.ContentTypes` for content types, and (via

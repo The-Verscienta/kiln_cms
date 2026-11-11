@@ -63,7 +63,8 @@ defmodule KilnCMSWeb.MenuLiveTest do
   test "viewers are denied", %{conn: conn} do
     conn = log_in(conn, authed_user(:viewer))
 
-    assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/menus")
+    assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} =
+             live(conn, ~p"/editor/menus")
   end
 
   test "an editor creates a menu and lands in its builder", %{conn: conn} do

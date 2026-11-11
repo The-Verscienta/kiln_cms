@@ -141,7 +141,7 @@ pull-to-refresh on a detail screen cost a few hundred bytes.
 
 ```http
 GET /api/content/post/hello
-If-None-Match: W/"6f1c…-en-json-1792656000"
+If-None-Match: W/"6f1c…-en-json-bq3Xv…"
 
 HTTP/1.1 304 Not Modified
 ```
@@ -150,11 +150,12 @@ HTTP/1.1 304 Not Modified
   ignored, a comma-separated list matches if any tag in it does, and `*`
   matches any current version. The tag is weak so that Kiln can gzip the
   response: send `Accept-Encoding: gzip` (`URLSession` and OkHttp do by
-  default) and the JSON arrives compressed. The tag changes when the
-  document is republished, and it also names the served locale, the A/B
-  variant (`?variant_key=`) and the `?expand=` targets, so a tag from one of
-  those representations never `304`s another. A `?fields=`
-  response is tagged by its body instead (below).
+  default) and the JSON arrives compressed. The tag is a digest of the
+  body, so it changes when the body does: a republish that changed the
+  document, a republished `?expand=` target, or a re-fire after a Kiln
+  upgrade. It also names the served locale and the A/B variant
+  (`?variant_key=`), so a tag from one of those never `304`s another. A
+  `?fields=` response is digested after the cut (below).
 - `URLCache` (iOS) and OkHttp's `Cache` (Android) store the `ETag` and
   revalidate for you once the `max-age` has passed. Enable the cache with a
   real disk size and you get conditional requests without writing them.
@@ -179,8 +180,10 @@ curl -s 'https://cms.example.com/api/content/recipe/pancakes?fields=title,slug,c
 ```
 
 - Comma-separated **top-level keys** (`title`, `slug`, `locale`, `blocks`,
-  `custom_fields`, `custom_fields_plain`, `custom_fields_portable`, and any
-  other key the artifact carries) plus
+  `custom_fields`, `custom_fields_plain`, `custom_fields_portable`, `social`
+  for a share sheet's link preview
+  ([the `social` object](headless-consumer-guide.md#link-previews-the-social-object)),
+  and any other key the artifact carries) plus
   **`custom_fields.<name>`** for one custom field. `custom_fields` on its own
   keeps all of them.
 - `id` and `type` are **always** kept. So is `expanded` when you also pass
@@ -322,6 +325,46 @@ changes when an admin edits them, without a redeploy.
   upgrade or a plugin can add a block kind your shipped binary has never seen.
 - The fieldset caveat above applies: generated types describe the full
   document.
+
+If the app reads with GraphQL rather than the `json` artifact, ask for
+`?format=typescript-graphql` (a `.ts` module) or `?format=typescript` (a `.d.ts`)
+for web and React Native clients. They include a ready fragment per content type
+that reads the site's custom fields through typed accessors; see
+[headless-graphql-api.md → Generate types and fragments for your site](headless-graphql-api.md#generate-types-and-fragments-for-your-site).
+
+A Swift or Kotlin app that reads with GraphQL asks for `?format=swift-graphql`
+or `?format=kotlin-graphql`. Each is the same file `mix kiln.export.schema`
+writes for that language (the `json` artifact models) plus a GraphQL section:
+per content type a `<Type>CustomFields` result type and the fragment that
+selects it. The fragment, the aliases and the collision rules are identical to
+the TypeScript module, so the three languages read the same response.
+
+```bash
+curl -s 'https://cms.example.com/api/schema?format=swift-graphql&type=post' \
+  -o Sources/Kiln/Kiln.swift
+curl -s 'https://cms.example.com/api/schema?format=kotlin-graphql&type=post' \
+  -o app/src/main/java/kiln/Kiln.kt
+```
+
+- **Swift.** `PostCustomFields` is a `Codable` struct and
+  `PostCustomFields.fragment` the fragment string. A string, integer, float,
+  boolean, date or datetime field is an optional property under its alias
+  (`price` is `Double?`, `launch_date` is `launchDate: String?`). Every other
+  kind is in `fields: [KilnCustomFieldValue]`, an enum with a case per
+  `CustomFieldValue` member (`.geolocation(name:value:)` carries a
+  `KilnGeolocationValue`, `.media` a `KilnMediaValue`) and `.unknown` for a
+  kind added after you generated the file.
+- **Kotlin.** `PostCustomFields` is a `@Serializable` data class and
+  `PostCustomFields.FRAGMENT` the fragment string. Scalars are nullable
+  properties with a `null` default; `fields` is `List<KilnCustomFieldValue>`,
+  a sealed interface (`KilnCustomFieldValue.GeolocationValue`, `.MediaValue`,
+  `.Unknown`, ...) read by a bundled serializer that works with any `Json`
+  instance. The endpoint's package is `kiln`; change the `package` line after
+  downloading, or call `KilnCMS.SchemaExport.Kotlin.emit_graphql/2` with
+  `package:` from a release `rpc`.
+
+Dates and datetimes are strings, as in the rest of the file. Regenerate after
+an admin changes fields; the names are the site's definitions *now*.
 
 The schema is cacheable (`public, max-age=300`). An app can fetch it at runtime
 to detect drift, but it can't change its compiled types. Use it in CI

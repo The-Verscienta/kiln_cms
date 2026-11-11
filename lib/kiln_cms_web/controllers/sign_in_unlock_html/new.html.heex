@@ -1,0 +1,51 @@
+<div class="auth-page">
+  <div class="auth-card py-12">
+    <%!-- An h2: `Layouts.auth/1` draws the page's one (sr-only) h1 from the
+          page title (#2162). --%>
+    <h2 class="auth-title mb-2">{gettext("Lift a sign-in pause")}</h2>
+
+    <%!-- One sentence for every address, whatever happened behind it (#2250). --%>
+    <p :if={@sent?} id="sign-in-unlock-sent" role="status" class="auth-muted mb-6">
+      {gettext(
+        "If an account with that address is paused after too many sign-in attempts, we've emailed it a link to lift the pause. The link works once, within %{minutes} minutes.",
+        minutes: @minutes
+      )}
+    </p>
+
+    <div :if={!@sent?}>
+      <p id="sign-in-unlock-help" class="auth-muted mb-6">
+        {gettext(
+          "Sign-in pauses for a while after too many attempts that don't complete. Enter your email address and, if your account is paused, we'll email you a link that lifts the pause. It doesn't sign you in."
+        )}
+      </p>
+
+      <p :if={@error} id="sign-in-unlock-error" role="alert" class="mb-4 text-sm text-error">
+        {@error}
+      </p>
+
+      <.form for={%{}} id="sign-in-unlock-form" action={~p"/sign-in/unlock"} method="post">
+        <.input
+          id="sign-in-unlock-email"
+          name="email"
+          type="email"
+          value=""
+          label={gettext("Email")}
+          autocomplete="email"
+          required
+          aria-describedby="sign-in-unlock-help"
+        />
+        <button type="submit" class="btn btn-primary btn-block mt-4">
+          {gettext("Email me an unlock link")}
+        </button>
+      </.form>
+
+      <p class="auth-muted mt-6 text-sm">
+        {gettext("Waiting also works: the pause lifts on its own after a few minutes.")}
+      </p>
+    </div>
+
+    <p class="mt-6 text-center">
+      <a href={~p"/sign-in"} class="link auth-muted">{gettext("Back to sign in")}</a>
+    </p>
+  </div>
+</div>

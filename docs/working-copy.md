@@ -82,9 +82,25 @@ the draft's value over it without a word. It no longer does (#1815):
 - **In the editor**, *Publish changes* with a conflict opens a panel —
   *Someone changed the live page after you saved your draft* — listing the
   fields, each with *Keep the live version* / *Use mine* (or one choice for
-  all). Nothing is published until every field has a choice. The editor
+  all). Nothing is published until every field has a choice. Custom fields
+  are one row, *Custom fields*, with one choice for the whole map (see below).
+  The editor
   needs to be looking at the current page: one opened before the API edit
   gets the usual "changed elsewhere, reload" banner first.
+- **Custom fields: one conflict, per-key detail (#2294).** Custom fields are
+  held, fingerprinted and resolved as a single whole-map key,
+  `custom_fields`. That did not change: if both the draft and the live page
+  moved *any* custom field, the panel shows one *Custom fields* row, and
+  *Keep the live version* / *Use mine* applies to the entire map. There is
+  no per-key merge, and a `resolve` map names `"custom_fields"`, never one
+  custom key. What is new is display: beneath that row the panel lists each
+  key whose draft value differs from live, with the field's label, an
+  *Added* / *Removed* / *Changed* pill and the live and draft values (select
+  labels, media filenames, reference titles). `WorkingCopy.custom_field_changes/1`
+  computes it, draft against live only. Computed fields are left out, since the
+  system writes them, not the editor, and when nothing is left (for example
+  only computed values differ) no detail is drawn. Values are shown as stored,
+  not masked, so an editor sees private keys here as they do in the form.
 - **`:publish_changes`** takes the decisions as `resolve`
   (`%{"seo_title" => "theirs", "*" => "mine"}`); undecided conflicts refuse
   the publish with an error naming the fields.
@@ -156,7 +172,7 @@ history panel's *Live published* mark follows.
 | Action | On | Does |
 | --- | --- | --- |
 | `save_working_copy` | published | accepts `working_title` / `working_blocks`, and a `fields` map of held params in `:update`'s shape. `StageWorkingFields` judges `fields` with an unsubmitted `:update` changeset on the working view (custom-field coercion, slug derivation and the slug / alias / URL checks, field grants, tag merge verbs all run) plus a slug-uniqueness probe, and stores what differs from the live row; an absent key keeps what the copy held. `StampWorkingCopy` stamps `working_copy_at`, **or clears the copy when nothing in it differs from the live row** — a copy exists only while it runs ahead. Operational keys are refused. Coalesced with the draft autosave (`CoalesceAutosaveVersions`), `optimistic_lock`. |
-| `publish_changes` | published + pending | `PromoteWorkingCopy` moves the whole copy into the live columns and links at changeset-build time (so the alt-text and claim gates judge it, as on `:update`; held custom fields go back through the field registry), then the slug redirect, the slug / alias / URL checks again, search text, embedding, oEmbed, `RecordPublishedVersion`, artifacts, `updated` webhook. No `published_at` change, no workflow email. `optimistic_lock` first: a stale struct fails rather than publishing yesterday's draft. |
+| `publish_changes` | published + pending | `PromoteWorkingCopy` moves the whole copy into the live columns and links at changeset-build time (so the alt-text and claim gates judge it, as on `:update`; held custom fields go back through the field registry), then the slug redirect, the slug / alias / URL checks again, search text, embedding, oEmbed, `RecordPublishedVersion`, artifacts, `updated` webhook. No `published_at` change, no workflow email. `optimistic_lock` first: a stale struct fails rather than publishing yesterday's draft. A document trashed since the struct was loaded is refused too (`Changes.RefuseTrashed`, #2332): nothing goes live, nothing is fired, no `updated` follows the `deleted`. |
 | `discard_changes` | published + pending | clears the four columns; its own version row marks the discard. |
 | `unpublish`, `unpublish_scheduled`, `archive`, `archive_scheduled` | published | `FoldWorkingCopy` folds a pending copy — text, fields, links — into the row under a row lock, then `SetSearchText`. The author's latest version becomes the draft; what was live is still the version `published_version_id` pointed at. A held slug or alias claimed since is left at the live value rather than failing the transition. |
 
@@ -216,6 +232,70 @@ published text back over it.
   the copy's (`WorkingCopy.with_held_relationships/2`), so the pickers show
   what the copy holds.
 - *Publish changes* flushes first too, so what goes live is what is on screen.
+- *Publish changes* is also where the **change severity** is asked
+  ([json-api.md](json-api.md#change-severity-how-much-an-edit-matters)): saving
+  a working copy and autosave write no live text and never prompt, but if the
+  promotion would change a field the site lists as safety-relevant, the editor
+  asks how much the change matters (critical / notable / routine) before it goes
+  live, and the answer is stored on that publish's version.
+
+## Comparing and restoring versions
+
+Custom fields are first-class in the version panel (#2294). No API, migration
+or setting changed; this is the editor only.
+
+1. Open a document, open the history panel, tick two versions (or one against
+   the current document) and choose *Compare selected*.
+2. Under *Fields*, *Custom fields* lists each key on its own: the field's
+   label (the raw key if its definition has been retired), an *Added* /
+   *Removed* / *Changed* pill, and the value on each side as an editor would
+   read it. A select shows its option labels, media shows the filename,
+   a reference shows the target's title, rich text has its tags stripped and a
+   group shows `Label: value` pairs (bounded). If you cannot read a media item
+   or referenced record, the stored id is shown instead of a title.
+3. Choose *Restore* on a version, either from the compare modal or from the
+   history list. A **Restore this version?** dialog opens and nothing has been
+   written yet. It shows what the document will look like against what is
+   there now. This replaces the old browser "Restore content to this
+   version?" prompt.
+4. If the version stored custom keys that no definition declares any more, the
+   dialog lists them under *These custom fields will be discarded*. A restore
+   re-validates against today's definitions, so those values are dropped, not
+   brought back. Blank values are not listed.
+5. Choose *Restore this version* to apply it, or *Cancel*. If the restore
+   would change nothing the dialog says *Restoring this version would not
+   change anything.*
+
+What can go wrong:
+
+- *You can't restore versions of this content.* The role cannot run
+  `:restore_version`.
+- *Restoring a version requires full field access for this content type.* An
+  editor with a field grant is refused restore outright (a restore rewrites
+  every field), so no preview is offered.
+- *That version changed since the preview. Review it again.* The document or
+  the field definitions moved between the preview and the confirm; the dialog
+  is redrawn with the fresh result and nothing was restored.
+- A version that cannot be restored (a category or media item since deleted)
+  opens the dialog with the reason and no confirm button.
+- *Couldn't restore that version.* The history read failed.
+- *This content changed elsewhere. Reload to get the latest before saving.*
+  Someone saved, published, unpublished or archived the document after you
+  opened it, so the restore was refused and nothing was written (#2532). The
+  banner above the form pauses saving; your unsaved text stays in the form.
+  Copy anything you need, choose **Reload latest**, then restore again from
+  the reloaded history. If the document was moved to the trash meanwhile, the
+  message is *This content was moved to the trash or deleted.* and the banner
+  offers **Back to content** instead.
+
+A restore also counts as a save for every other open editor: a tab that
+loaded the document before the restore gets the same banner on its next save
+instead of writing the old text back over it.
+
+The preview and the restore run the same `KilnCMS.CMS.Changes.RestoreVersion.plan/3`,
+so the preview cannot promise something the restore does not do. The preview
+reads as the signed-in user and writes, notifies and records a severity for
+nothing; only the confirm does.
 
 ## Shared fields across locales
 

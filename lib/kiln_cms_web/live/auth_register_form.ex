@@ -29,13 +29,27 @@ defmodule KilnCMSWeb.AuthRegisterForm do
   `KilnCMSWeb.AuthOverrides.override_for/4`, and `KilnCMSWeb.AuthOverridesTest`
   renders it with the toggle off against upstream's and asserts the two are
   identical, so an upstream change fails a test instead of going stale here.
+
+  The human-verification widget (#2249) sits above the submit button and
+  renders nothing until a challenge is needed — see
+  `KilnCMSWeb.ChallengeComponents`.
   """
   use KilnCMSWeb, :live_component
 
   import AshAuthentication.Phoenix.Components.Helpers, only: [auth_path: 5]
 
   alias AshAuthentication.Phoenix.Components.Password.Input
-  alias KilnCMSWeb.{AuthConfirmationFeedback, AuthOverrides, AuthPasswordInput}
+  alias AshAuthentication.Phoenix.Utils.Flash
+  alias AshPhoenix.Form
+  alias KilnCMS.Accounts.Errors.AlreadyRegistered
+
+  alias KilnCMSWeb.{
+    AuthConfirmationFeedback,
+    AuthIdentityInput,
+    AuthOverrides,
+    AuthPasswordInput,
+    ChallengeComponents
+  }
 
   # Aliased, not spelled out: the template below names it, and inside `~H` a
   # `@`-prefixed name is an assign rather than a module attribute.
@@ -44,7 +58,11 @@ defmodule KilnCMSWeb.AuthRegisterForm do
   @impl true
   def update(assigns, socket) do
     {:ok, socket} = Upstream.update(assigns, socket)
-    {:ok, assign_new(socket, :password_reveal, fn -> true end)}
+
+    {:ok,
+     socket
+     |> assign_new(:password_reveal, fn -> true end)
+     |> assign_new(:challenge, fn -> ChallengeComponents.initial(:register, assigns[:context]) end)}
   end
 
   @impl true
@@ -69,13 +87,14 @@ defmodule KilnCMSWeb.AuthRegisterForm do
         method="POST"
         class={AuthOverrides.override_for(@overrides, Upstream, :form_class)}
       >
-        <Input.identity_field
+        <AuthIdentityInput.identity_field
           strategy={@strategy}
           form={form}
           overrides={@overrides}
           gettext_fn={@gettext_fn}
         />
         <AuthPasswordInput.password_field
+          autocomplete="new-password"
           strategy={@strategy}
           form={form}
           overrides={@overrides}
@@ -85,6 +104,7 @@ defmodule KilnCMSWeb.AuthRegisterForm do
 
         <%= if @strategy.confirmation_required? do %>
           <AuthPasswordInput.password_confirmation_field
+            autocomplete="new-password"
             strategy={@strategy}
             form={form}
             overrides={@overrides}
@@ -98,6 +118,13 @@ defmodule KilnCMSWeb.AuthRegisterForm do
             {render_slot(@inner_block, form)}
           </div>
         <% end %>
+
+        <ChallengeComponents.challenge_widget
+          id={@form.id}
+          state={@challenge}
+          name={form[:challenge_token].name}
+          action={:register}
+        />
 
         <Input.submit
           strategy={@strategy}
@@ -125,5 +152,48 @@ defmodule KilnCMSWeb.AuthRegisterForm do
     {:noreply, assign(socket, form: form)}
   end
 
+  # Submitting is not signing in (#2255). A registration for an address with an
+  # account is refused by the action (`AlreadyRegistered`) and one for a new
+  # address succeeds; the visitor is told the same thing either way and signed
+  # in as neither. Upstream's submit redirects a success to a sign-in-token
+  # URL, which is itself the answer to "was this address new?".
+  def handle_event("submit", params, socket) do
+    params = Map.get(params, socket.assigns.form.name, %{})
+
+    # Any submit spent the challenge token it carried (#2249), and a refusal
+    # that asked for one shows the widget with its reason.
+    socket =
+      case Form.submit(socket.assigns.form, params: params) do
+        {:ok, _user} ->
+          requested(socket)
+
+        {:error, form} ->
+          if AlreadyRegistered.in?(form.source) do
+            requested(socket)
+          else
+            socket
+            |> assign(:form, Form.clear_value(form, socket.assigns.strategy.password_field))
+            |> update(:challenge, &ChallengeComponents.after_submit(&1, form.source))
+          end
+      end
+
+    {:noreply, socket}
+  end
+
   def handle_event(event, params, socket), do: Upstream.handle_event(event, params, socket)
+
+  # A blank form again (the same rebuild `update/2` does) and one fixed sentence.
+  defp requested(socket) do
+    kept = Map.take(socket.assigns, ~w(strategy overrides label gettext_fn current_tenant context
+        auth_routes_prefix inner_block)a)
+
+    {:ok, socket} = update(kept, socket)
+    socket = update(socket, :challenge, &ChallengeComponents.after_submit(&1, nil))
+
+    Flash.put_flash!(
+      socket,
+      :info,
+      gettext("Check your email - we have sent instructions for what to do next.")
+    )
+  end
 end

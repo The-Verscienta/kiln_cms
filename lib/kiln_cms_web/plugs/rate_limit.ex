@@ -4,16 +4,75 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
   API pipelines get the JSON error shape; browser pipelines (sign-in, public
   delivery pages) get a small HTML page instead of raw JSON (audit U-M7).
+
+  ## `:delivery` is charged per client class (#2243)
+
+  The request's `User-Agent` is classified (`KilnCMS.BotClass`) and the one
+  per-address `:delivery` counter is charged against that class's ceiling
+  (`KilnCMS.BotBudgets`). The operator's ceiling is charged first, without a
+  database read, so a request it refuses never reaches the site's row; only an
+  allowed non-browser request looks up the site's (cached) lower ceiling and is
+  refused if the count is past it. The refusal is this plug's ordinary 429 and
+  never names the class. Every `:delivery` check emits
+  `[:kiln_cms, :delivery, :client_class]` with `%{class, result}` and nothing
+  else: no user agent, address or org.
+
+  Classification happens only here, on the `:delivery` pipeline. robots.txt,
+  llms.txt, sitemaps, feeds and the health probes are on `:probe` and never
+  classified.
+
+  ## A search-engine claim is checked against DNS (#2254)
+
+  A user agent that names a search engine is checked with
+  `KilnCMS.CrawlerVerification.check/3`, which never waits on DNS, and the
+  answer decides what the request is charged as:
+
+    * `:verified`, or `:disabled` (verification is off): a search engine, at
+      the search-engine ceiling.
+    * `{:unverified, :failed}`, the claim is **proven** false: charged as
+      `:empty`, a client that will not say what it is.
+    * any other `{:unverified, reason}` (the lookup is pending, was skipped or
+      got no answer, the engine cannot be verified, or the address is not one
+      whose PTR record says anything about the client): a search engine, but
+      with the operator's ceiling held to the `:delivery` limit
+      (`KilnCMS.BotBudgets.unverified_search_limit/0`). A search-engine
+      percentage above 100 is spent only on proven addresses; a site's lower
+      value still applies.
+
+  Every unverified claim also emits `[:kiln_cms, :delivery, :unverified_crawler]`
+  with `%{engine, reason}`. The `:client_class` event's `class` is the class
+  **charged**, so a proven spoof is reported as `:empty`. No other class is
+  ever checked: a browser never reaches the verifier.
   """
   import Plug.Conn
 
   use Gettext, backend: KilnCMSWeb.Gettext
 
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.BotBudgets
+  alias KilnCMS.BotClass
+  alias KilnCMS.CrawlerVerification
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Plugs.ClientIp
   alias KilnCMSWeb.RateLimit
 
   def init(bucket) when is_atom(bucket), do: bucket
+
+  def call(conn, :delivery) do
+    {class, operator_limit} = client_class(conn)
+
+    case RateLimit.check_limit(:delivery, remote_ip(conn), operator_limit) do
+      {:deny, retry_after_ms} ->
+        conn |> record(class, :throttled) |> deny(retry_after_ms)
+
+      {:allow, count} ->
+        if within_site_ceiling?(conn, class, count) do
+          record(conn, class, :allowed)
+        else
+          conn |> record(class, :throttled) |> deny(RateLimit.window_remaining_ms(:delivery))
+        end
+    end
+  end
 
   def call(conn, bucket) do
     case RateLimit.check(bucket, remote_ip(conn)) do
@@ -103,6 +162,68 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
       </body>
     </html>
     """
+  end
+
+  # The one place a request becomes a client class: `{charged_class,
+  # operator_ceiling}`. Only a search-engine claim is checked against DNS
+  # (#2254); see the moduledoc for what each answer is charged as.
+  defp client_class(conn) do
+    case get_req_header(conn, "user-agent") do
+      [user_agent | _rest] ->
+        case BotClass.classify(user_agent) do
+          :search_engine -> search_engine_class(conn, BotClass.search_engine(user_agent))
+          class -> {class, BotBudgets.operator_limit(class)}
+        end
+
+      [] ->
+        {:empty, BotBudgets.operator_limit(:empty)}
+    end
+  end
+
+  defp search_engine_class(conn, engine) do
+    forwarded_untrusted? = ClientIp.untrusted_forwarding?(conn.req_headers)
+
+    case CrawlerVerification.check(engine, conn.remote_ip,
+           forwarded_untrusted?: forwarded_untrusted?
+         ) do
+      status when status in [:verified, :disabled] ->
+        {:search_engine, BotBudgets.operator_limit(:search_engine)}
+
+      # Proven false: a client lying about what it is gets the ceiling of one
+      # that says nothing.
+      {:unverified, :failed} ->
+        unverified_crawler(engine, :failed)
+        {:empty, BotBudgets.operator_limit(:empty)}
+
+      # Not proven either way: the search-engine class, but never above what
+      # a browser gets.
+      {:unverified, reason} ->
+        unverified_crawler(engine, reason)
+        {:search_engine, BotBudgets.unverified_search_limit()}
+    end
+  end
+
+  defp unverified_crawler(engine, reason) do
+    :telemetry.execute([:kiln_cms, :delivery, :unverified_crawler], %{count: 1}, %{
+      engine: engine,
+      reason: reason
+    })
+  end
+
+  # A browser's ceiling IS the `:delivery` limit, which the charge already
+  # applied; a site may only lower the other classes.
+  defp within_site_ceiling?(_conn, :browser, _count), do: true
+
+  defp within_site_ceiling?(conn, class, count),
+    do: count <= BotBudgets.limit(conn.assigns[:current_org], class)
+
+  defp record(conn, class, result) do
+    :telemetry.execute([:kiln_cms, :delivery, :client_class], %{count: 1}, %{
+      class: class,
+      result: result
+    })
+
+    conn
   end
 
   # Through `RateLimit.client_key/1` rather than formatted here, so this and the

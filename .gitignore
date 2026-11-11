@@ -68,3 +68,13 @@ _build_strict/
 # Playwright output written when tests are run from the repo root instead of
 # e2e/ (e2e/.gitignore already covers e2e/test-results/).
 /test-results/
+
+# Raw 2880x1800 console captures from e2e/screenshots/home.spec.js. They are
+# inputs to scripts/optimize_home_images.sh, never shipped (#2165).
+/e2e/screenshots/raw/
+
+# Backups BSD/macOS `sed -i -e` (or `sed -i -E`) leaves beside the edited file:
+# the flag after -i is taken as the backup suffix. Use `sed -i.bak … && rm`
+# or `sed -i ''` instead (#2589).
+*.*-e
+*.*-E

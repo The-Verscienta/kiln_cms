@@ -104,24 +104,118 @@ defmodule KilnCMS.Accounts.Sessions do
   end
 
   @doc """
-  Stamp a session at sign-in: the browser it signed in from and the remember-me
-  cookie issued with it. Best-effort.
+  Stamp a session at sign-in: the browser it signed in from, the site it
+  signed in on (#2246), and the remember-me cookie issued with it — which is
+  stamped with the same site and noted as just used. Best-effort.
   """
-  @spec record_sign_in(String.t(), map(), String.t() | nil) :: :ok
-  def record_sign_in(jti, %{browser: browser, platform: platform}, remember_me_jti)
+  @spec record_sign_in(String.t(), map(), String.t() | nil, Ash.UUID.t() | nil, String.t() | nil) ::
+          :ok
+  def record_sign_in(
+        jti,
+        %{browser: browser, platform: platform},
+        remember_me_jti,
+        org_id \\ nil,
+        subject \\ nil
+      )
       when is_binary(jti) do
-    args = %{browser: browser, platform: platform, remember_me_jti: remember_me_jti}
+    args = %{
+      browser: browser,
+      platform: platform,
+      remember_me_jti: remember_me_jti,
+      org_id: org_id
+    }
+
     record(fn -> Accounts.record_session_sign_in(by_jti(jti), args, @bookkeeping) end)
+
+    if is_binary(remember_me_jti) and is_binary(org_id) and is_binary(subject) do
+      bind_to_site([remember_me_jti], org_id, subject)
+    end
+
+    :ok
   end
 
   @doc """
-  Note that a session was used just now. Writes at most once per
-  `Token.last_used_interval_minutes/0`; the rest match no row. Best-effort.
+  Bind the rows `jtis` (sessions or remember-me cookies) of the account
+  `subject` to the site `org_id` and note their use now — unless one belongs
+  to another account, is already bound to another site, or predates the
+  site's last "sign out everyone" (#2246). Best-effort.
   """
-  @spec record_use(String.t(), map()) :: :ok
-  def record_use(jti, %{browser: browser, platform: platform}) when is_binary(jti) do
-    args = %{browser: browser, platform: platform}
-    record(fn -> Accounts.record_session_use(by_jti(jti), args, @bookkeeping) end)
+  @spec bind_to_site([String.t()], Ash.UUID.t(), String.t()) :: :ok
+  def bind_to_site(jtis, org_id, subject)
+      when is_list(jtis) and is_binary(org_id) and is_binary(subject) do
+    record(fn ->
+      Accounts.bind_sessions_to_site(
+        Ash.Query.filter(Token, jti in ^jtis),
+        %{org_id: org_id, subject: subject},
+        @bookkeeping
+      )
+    end)
+  end
+
+  @doc """
+  Note that a session — and the remember-me row named with it — was used just
+  now on the site `org_id`. Writes at most once per `:interval_seconds`
+  (default `Token.last_used_interval_minutes/0`); the rest match no row, and a
+  row stamped for another site is never touched (#2246). Best-effort.
+
+  Options: `:org_id` (required) and `:interval_seconds`.
+  """
+  @spec record_use(String.t() | [String.t()], map(), keyword()) :: :ok
+  def record_use(jtis, labels, opts) do
+    jtis = List.wrap(jtis)
+    org_id = Keyword.fetch!(opts, :org_id)
+
+    args =
+      %{
+        browser: Map.get(labels, :browser),
+        platform: Map.get(labels, :platform),
+        org_id: org_id
+      }
+      |> maybe_put(:interval_seconds, Keyword.get(opts, :interval_seconds))
+
+    record(fn ->
+      Accounts.record_session_use(Ash.Query.filter(Token, jti in ^jtis), args, @bookkeeping)
+    end)
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  @doc """
+  Sign out every session, remember-me cookie and held two-factor sign-in
+  stamped for the site `org_id`, except the rows in `keep` (#2246). Run by
+  `KilnCMS.Accounts.SignOutAll`, inside its transaction and after its
+  authorization; drops nothing live itself.
+
+  Returns `{:ok, sessions, others}`: the revoked session rows (purpose
+  `"user"`) and every other revoked row.
+  """
+  @spec revoke_org(Ash.UUID.t(), [String.t()]) ::
+          {:ok, [Token.t()], [Token.t()]} | {:error, term()}
+  def revoke_org(org_id, keep) when is_binary(org_id) and is_list(keep) do
+    user_purpose = Token.user_purpose()
+
+    # Two statements so the sessions can be counted and their pages closed:
+    # once revoked, every row reads "revocation" and no longer says what it was.
+    with {:ok, sessions} <-
+           revoke_org_rows(Ash.Query.filter(Token, purpose == ^user_purpose), org_id, keep),
+         {:ok, others} <-
+           revoke_org_rows(Ash.Query.filter(Token, purpose != ^user_purpose), org_id, keep) do
+      {:ok, sessions, others}
+    end
+  end
+
+  defp revoke_org_rows(query, org_id, keep) do
+    # authorize?: false — "sign out everyone" has already been authorized as an
+    # org admin by `SiteSessionPolicy.sign_out_all`; the action is scoped to the
+    # tenant's own rows by its filter and forbids every other caller.
+    case Accounts.revoke_org_sessions(query, %{org_id: org_id, keep: keep},
+           authorize?: false,
+           bulk_options: [strategy: :atomic, return_records?: true, return_errors?: true]
+         ) do
+      %Ash.BulkResult{status: :success, records: records} -> {:ok, records || []}
+      %Ash.BulkResult{errors: errors} -> {:error, errors}
+    end
   end
 
   # --- internals ---------------------------------------------------------------

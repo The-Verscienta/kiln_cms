@@ -102,6 +102,70 @@ on the next request. The cached tree is resolved for the **anonymous**
 audience only — it is shared across visitors, so it must never carry a link
 only a signed-in audience may see.
 
+## Which language the page text is in
+
+A content page can be served in a language other than the reader's: a reader
+on `/fr/…` follows a link to a page that has no French translation and gets
+the English one. The page then holds two languages, and Kiln keeps them apart:
+
+* **The chrome is the reader's**: the language in the URL, the path prefix,
+  or the site's default language when there is none. It is never the
+  visitor's session, because a public page is cached under its URL and handed
+  to every later visitor. `<html lang>` and the `Content-Language` header
+  declare it. It covers the header and footer menus, the stock **Blog** and
+  **Search** links (which keep the `/fr/` prefix), the language switcher,
+  the feed advertised in `<head>`, and every word Kiln writes outside the
+  article. On the locked-page and members-only screens it covers Kiln's own
+  text there (**Protected**, the passphrase form).
+* **The article is the document's**: `<article class="public-article">` always
+  carries its own `lang`, which differs from `<html lang>` on a fallback page.
+  The `x-kiln-locale` header names it. Kiln's text inside the article follows
+  it: the byline and its date, a form block's labels and messages, a
+  newsletter sign-up's fields, the human-verification widget and an untitled
+  embed's title. On a locked page or a members-only teaser, the document's
+  title and summary carry its `lang`.
+* **The page's description for machines is the document's too**:
+  `og:locale`, the canonical URL, the `hreflang` alternates and the JSON-LD
+  all name the record that was served, so `/fr/x` answered in English
+  canonicalizes to the English URL.
+
+So `/fr/about`, answered by the English page, starts like this:
+
+```html
+<html lang="fr">
+  …
+  <article class="public-article prose max-w-none" lang="en">
+```
+
+and is sent with `Content-Language: fr` and `x-kiln-locale: en`.
+
+A theme that styles article text by language (quotation marks, hyphenation,
+a typeface for one script) should select the article, not the document:
+`.public-article:lang(fr)`, not `html[lang="fr"]`. `:lang()` matches the
+nearest `lang` attribute up the tree, so it also matches the chrome by its
+own language.
+
+A plugin block that ships its own Gettext backend renders in the request's
+language, so on a fallback page its words can differ from the `<article lang>`
+around it.
+
+On a multilingual site, form and newsletter sign-up blocks on a content page
+post under the article's language prefix (`/en/forms/<slug>`,
+`/fr/newsletter/subscribe`). A form's own page and its embed post under the
+URL's language, the default's included: `/forms/<slug>` and
+`/forms/<slug>/embed` post to `/en/forms/<slug>` when English is the default.
+A locked page's passphrase form posts to `/fr/_unlock` under `/fr/`, so the
+page after unlocking stays French. A stylesheet or script that selects these
+forms by `action` no longer matches; select `.kiln-form` and
+`.kiln-newsletter-signup` instead.
+
+Two gaps remain: the header's brand link always points to `/`, so it drops
+the reader's prefix
+([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)), and a
+locale that runs without a Gettext catalog shows English chrome under its
+own `<html lang>`
+([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)).
+
 ## Custom CSS
 
 A plain-CSS field on the code-injection screen, served inside a
@@ -120,3 +184,44 @@ only. Two rules, both enforced:
 
 `style-src` already allows inline styles, so no CSP work accompanies the
 field. The 64 KB bound and the paper trail come with the resource.
+
+### Keep the focus rings on code blocks and tables
+
+Every code block and every table on a public page is a keyboard stop, so a
+reader without a mouse can Tab to it and scroll it with the arrow keys:
+
+- a code block is `<pre tabindex="0" role="group" aria-label="Code sample">`
+  ([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164));
+- a table sits in
+  `<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">`
+  ([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)).
+
+The outline each one draws on `:focus-visible` is the only sign of where
+focus went. Custom CSS and presets may change its color, but must not remove
+it:
+
+```css
+/* Don't: a keyboard reader can no longer see which block has focus. */
+.public-body pre:focus,
+.public-body .kiln-table-wrap:focus { outline: none; }
+
+/* Fine: a different color, still a visible outline. */
+pre[tabindex="0"]:focus-visible,
+.kiln-table-wrap[tabindex="0"]:focus-visible { outline-color: #0b5394; }
+```
+
+Both stock rules are `outline: 2px solid var(--color-primary-ink)`; they
+differ in where the outline sits:
+
+- **Code block:** `outline-offset: -2px`, drawn inside the block, so a parent
+  with `overflow: hidden` or `overflow-x: clip` (monograph sets the latter)
+  cannot trim it. A replacement color needs 3:1 against the block's background
+  (`--color-base-200`).
+- **Table:** `outline-offset: 2px`, drawn outside the wrapper, because inside
+  it would land on the cells' `--color-base-300` borders and the header's
+  `--color-base-200` fill. A replacement color needs 3:1 against the page
+  background (`--color-base-100`).
+
+Check a replacement in both light and dark mode (WCAG 1.4.11). A broader
+reset such as `*:focus { outline: none }` takes these rings away too, along
+with every other focus indicator on the page.

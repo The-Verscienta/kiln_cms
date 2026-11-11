@@ -1,7 +1,8 @@
 defmodule KilnCMS.CMS.FieldConversion do
   @moduledoc """
   Moves JSON-in-text custom-field values into a `:group` field, a multiple
-  `:select` (several terms) or a multiple `:string` (a list of phrases) —
+  `:select` (several terms), a multiple `:string` (a list of phrases) or a
+  typed list (a multiple `:integer`, `:date`, `:url`, … — #2289) —
   `mix kiln.fields.convert`
   (docs/field-conversion.md).
 
@@ -12,8 +13,9 @@ defmodule KilnCMS.CMS.FieldConversion do
   resource's internal `:convert_custom_field` action, as the
   `:field_conversion` system actor. `Changes.ApplyCustomFields` coerces them
   exactly as an editor's save of the group would, so the rules are the
-  field's own: sub-field types, `required`, `:select` options and
-  `min_items`/`max_items`.
+  field's own: sub-field types, `required`, `:select` options,
+  `min_items`/`max_items` and the sub-fields' value constraints (`validation`,
+  #2276).
 
   A multiple `:select` target takes the same source shapes, but its rows are
   terms: `["adaptogen","tonic"]`, or that encoded again. Each term must be one
@@ -23,14 +25,19 @@ defmodule KilnCMS.CMS.FieldConversion do
   add them as options or open the vocabulary. Renames do not apply.
 
   A multiple `:string` target takes the same JSON arrays of strings, with no
-  vocabulary to check. With `lines?: true` (`--lines`), a source that is not
-  JSON is read as **one item per line** instead of being refused — the
+  vocabulary to check. A typed list takes a JSON array of its items
+  (`["2026-03-01","2026-03-08"]`, `[3, 5]`), each coerced as the field's own
+  save would coerce it, so an item that does not fit is reported with its
+  position (`item 2 …`). With `lines?: true` (`--lines`), for any of these
+  lists, a source that is not JSON is read as **one item per line** instead
+  of being refused — the
   convention some importers used for a list kept in a text field
   ("One service per line"). It is opt-in because prose would otherwise
   become a one-item list without a word.
 
   Every report counts the **published** records a run would write (or wrote):
-  each of those writes re-fires the record's artifact.
+  each of those writes re-fires the record's artifact. A record in the trash
+  is not among them; `trashed` counts those (below).
 
   ## All or nothing, unless told otherwise
 
@@ -59,7 +66,22 @@ defmodule KilnCMS.CMS.FieldConversion do
   `lock_version` kept, and a write loses to an editor's save in between
   (reported, and picked up by the next run). Drafts are converted too; a live
   record's pending working copy gets its own held value converted alongside.
-  Trashed records are not visited.
+
+  ## Trashed records
+
+  Records in the trash are converted too, after the live ones (#2533): the
+  source field is dropped a release later, and a record trashed now and
+  restored after that would otherwise come back holding only the string. A
+  trashed record's write fires nothing, as its artifacts were purged when it
+  was trashed. `trashed` counts the trashed records a run would convert (or
+  converted).
+
+  A trashed record that does not fit is reported with `trashed?: true` and
+  keeps its string, but it does not block `--apply`: all or nothing is about
+  the content on the site. The live and trashed records are two reads, so a
+  record trashed or restored during a run can be missed by both; run again
+  right before the release that drops the source field (re-running is cheap:
+  converted records are `kept`).
   """
 
   require Logger
@@ -67,9 +89,13 @@ defmodule KilnCMS.CMS.FieldConversion do
   alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.CMS.WorkingCopy
 
   @batch 100
+
+  @scalar_lists ScalarLists.types()
+  @typed_lists ScalarLists.typed()
 
   # A string still decoding to a string after this many passes is not a list
   # that was encoded twice by accident.
@@ -80,18 +106,21 @@ defmodule KilnCMS.CMS.FieldConversion do
           id: Ash.UUID.t(),
           slug: String.t() | nil,
           kind: :unparseable | :invalid | :not_written,
-          messages: [String.t()]
+          messages: [String.t()],
+          trashed?: boolean()
         }
 
   @typedoc """
   A run's outcome. `convertible` counts the records whose write is valid;
   `written` the ones actually written (always 0 on a dry run, or when
-  `blocked?` — an invalid record stopped the run before any write).
-  `published` counts the convertible records that are published. For a
-  multiple `:select` target, `terms` counts each distinct term across the
-  convertible and invalid records' values (live and held), and `new_terms`
-  lists the ones not in the field's `options`, most used first; both are
-  empty for a group.
+  `blocked?` — an invalid live record stopped the run before any write; a
+  trashed one never does). `published` counts the convertible records that
+  are published and not trashed, `trashed` the convertible records in the
+  trash. For a multiple `:select` target, `terms` counts each distinct term
+  across the convertible and invalid records' values (live and held), and
+  `new_terms` lists the ones not in the field's `options`, most used first;
+  both are empty for any other target. A problem's `trashed?` says the
+  record is in the trash.
   """
   @type report :: %{
           type: String.t(),
@@ -105,6 +134,7 @@ defmodule KilnCMS.CMS.FieldConversion do
           empty: non_neg_integer(),
           kept: non_neg_integer(),
           published: non_neg_integer(),
+          trashed: non_neg_integer(),
           terms: %{String.t() => pos_integer()},
           new_terms: [String.t()],
           problems: [problem()]
@@ -115,11 +145,11 @@ defmodule KilnCMS.CMS.FieldConversion do
   `org_id`.
 
   Options: `dry_run?` (default `true`), `skip_invalid?`, `overwrite?`,
-  `renames` (`%{"old_key" => "new_key"}`), `lines?` (a multiple `:string`
-  target only: read non-JSON text as one item per line) and `:batch` (read
-  page size).
+  `renames` (`%{"old_key" => "new_key"}`), `lines?` (a list target only:
+  read non-JSON text as one item per line) and `:batch` (read page size).
   Returns `{:error, message}` when the fields themselves do not fit (no such
-  type or field, a target that is not a group, a rename to no sub-field).
+  type or field, a target that is not a group or a list, a rename to no
+  sub-field).
   """
   @spec run(Ash.UUID.t(), String.t(), String.t(), String.t(), keyword()) ::
           {:ok, report()} | {:error, String.t()}
@@ -130,7 +160,7 @@ defmodule KilnCMS.CMS.FieldConversion do
          {:ok, group} <- target_definition(definitions, target),
          renames = Map.new(Keyword.get(opts, :renames, %{})),
          :ok <- check_renames(renames, group) do
-      # `group` is the target either way: a group, or a multiple select.
+      # `group` is the target whatever it is: a group, a multiple select or a list.
       plan = %{
         descriptor: descriptor,
         org_id: org_id,
@@ -234,17 +264,27 @@ defmodule KilnCMS.CMS.FieldConversion do
       else: inspect(text)
   end
 
+  @doc """
+  The problems that stop `--apply` without `--skip-invalid`: the live
+  records'. A trashed record is reported, but never blocks.
+  """
+  @spec blocking(report()) :: [problem()]
+  def blocking(report), do: Enum.reject(report.problems, fn problem -> problem.trashed? end)
+
   @doc "A plain-text summary of `report` for the task's output."
   @spec describe(report()) :: String.t()
   def describe(report) do
     problems =
       Enum.map(report.problems, fn problem ->
-        "\n  #{problem.id}#{if problem.slug, do: " (#{problem.slug})"} — #{problem.kind}:" <>
+        trashed = if problem.trashed?, do: " (trashed)", else: ""
+
+        "\n  #{problem.id}#{if problem.slug, do: " (#{problem.slug})"}#{trashed} — #{problem.kind}:" <>
           Enum.map_join(problem.messages, "", &"\n      #{&1}")
       end)
 
     "#{report.type}: #{report.source} → #{report.target}: scanned #{report.scanned}, " <>
-      "#{verb(report)} (#{report.published} published), #{report.empty} empty, " <>
+      "#{verb(report)} (#{report.published} published, #{report.trashed} trashed), " <>
+      "#{report.empty} empty, " <>
       "#{report.kept} already converted, " <>
       "#{length(report.problems)} invalid" <>
       if(report.problems == [], do: ".", else: ":") <>
@@ -268,22 +308,31 @@ defmodule KilnCMS.CMS.FieldConversion do
   defp verb(%{dry_run?: true} = report), do: "would convert #{report.convertible}"
 
   defp verb(%{blocked?: true} = report),
-    do: "converted 0 (nothing written: #{length(report.problems)} invalid)"
+    do: "converted 0 (nothing written: #{length(blocking(report))} invalid)"
 
   defp verb(report), do: "converted #{report.written}"
 
-  defp hint(%{dry_run?: true, problems: [_ | _]}),
+  defp hint(report), do: fix_hint(report, blocking(report)) <> trashed_hint(report)
+
+  defp fix_hint(%{dry_run?: true}, [_ | _]),
     do:
       "\nFix the records above (or pass --skip-invalid to leave them as strings), " <>
         "then run with --apply."
 
-  defp hint(%{dry_run?: true, convertible: n}) when n > 0,
+  defp fix_hint(%{dry_run?: true, convertible: n}, []) when n > 0,
     do: "\nRun again with --apply to write."
 
-  defp hint(%{blocked?: true}),
+  defp fix_hint(%{blocked?: true}, _blocking),
     do: "\nFix the records above, or pass --skip-invalid to leave them as strings."
 
-  defp hint(_report), do: ""
+  defp fix_hint(_report, _blocking), do: ""
+
+  defp trashed_hint(report) do
+    case Enum.count(report.problems, fn problem -> problem.trashed? end) do
+      0 -> ""
+      n -> "\n#{n} trashed record(s) keep their string; they do not block --apply."
+    end
+  end
 
   # --- setup -----------------------------------------------------------------
 
@@ -318,31 +367,40 @@ defmodule KilnCMS.CMS.FieldConversion do
          "No field #{inspect(target)} on this type (#{names(definitions)}) — " <>
            "create the group and its sub-fields first"}
 
-      %{field_type: :group} = group ->
-        if FieldDefinition.group_fields(group) == [],
-          do: {:error, "The group #{target} has no sub-fields yet"},
-          else: {:ok, group}
-
-      %{field_type: :select, multiple: true} = select ->
-        {:ok, select}
-
-      %{field_type: :select} ->
-        {:error, "#{target} is a select that holds one choice — make it hold several terms first"}
-
-      %{field_type: :string, multiple: true} = list ->
-        {:ok, list}
-
-      %{field_type: :string} ->
-        {:error, "#{target} is a string field that holds one line — make it a list first"}
-
-      %{field_type: type} ->
-        {:error, "#{target} is a #{type} field, not a group, a multiple select or a list"}
+      definition ->
+        target_kind(definition, target)
     end
   end
 
+  defp target_kind(%{field_type: :group} = group, target) do
+    if FieldDefinition.group_fields(group) == [],
+      do: {:error, "The group #{target} has no sub-fields yet"},
+      else: {:ok, group}
+  end
+
+  defp target_kind(%{field_type: :select, multiple: true} = select, _target), do: {:ok, select}
+
+  defp target_kind(%{field_type: :select}, target),
+    do: {:error, "#{target} is a select that holds one choice — make it hold several terms first"}
+
+  defp target_kind(%{field_type: :string, multiple: true} = list, _target), do: {:ok, list}
+
+  defp target_kind(%{field_type: :string}, target),
+    do: {:error, "#{target} is a string field that holds one line — make it a list first"}
+
+  defp target_kind(%{field_type: type, multiple: true} = list, _target)
+       when type in @typed_lists,
+       do: {:ok, list}
+
+  defp target_kind(%{field_type: type}, target) when type in @typed_lists,
+    do: {:error, "#{target} is a single #{type} field — make it a list first"}
+
+  defp target_kind(%{field_type: type}, target),
+    do: {:error, "#{target} is a #{type} field, not a group, a multiple select or a list"}
+
   defp check_renames(renames, _select) when map_size(renames) == 0, do: :ok
 
-  defp check_renames(_renames, %{field_type: type} = list) when type in [:select, :string],
+  defp check_renames(_renames, %{field_type: type} = list) when type in @scalar_lists,
     do: {:error, "--map renames the keys of rows; #{list.name} holds items, which have none"}
 
   defp check_renames(renames, group) do
@@ -364,12 +422,12 @@ defmodule KilnCMS.CMS.FieldConversion do
 
   # --- the pass ---------------------------------------------------------------
 
-  # The check pass, then — only if every record fits — the write pass, which
-  # re-reads: a record an editor saved in between is judged on what it holds
-  # now.
+  # The check pass, then — only if every live record fits — the write pass,
+  # which re-reads: a record an editor saved in between is judged on what it
+  # holds now. A trashed record that does not fit does not block (moduledoc).
   defp checked_then_written(plan) do
     checked = pass(plan, false)
-    if checked.problems == [], do: pass(plan, true), else: %{checked | blocked?: true}
+    if blocking(checked) == [], do: pass(plan, true), else: %{checked | blocked?: true}
   end
 
   defp pass(plan, write?) do
@@ -385,6 +443,7 @@ defmodule KilnCMS.CMS.FieldConversion do
         empty: 0,
         kept: 0,
         published: 0,
+        trashed: 0,
         terms: %{},
         problems: []
       },
@@ -395,8 +454,12 @@ defmodule KilnCMS.CMS.FieldConversion do
 
   # Keyset pages, read without a policy check as `Media.Resnapshot` reads
   # them: one tenant, one type, and it must see drafts and gated records. The
-  # write is authorized.
-  defp records(%{descriptor: descriptor, org_id: org_id, batch: batch}) do
+  # write is authorized. The live records, then the trashed ones (#2533).
+  defp records(plan) do
+    Stream.concat(pages(plan, &ContentTypes.list!/2), pages(plan, &ContentTypes.list_trashed!/2))
+  end
+
+  defp pages(%{descriptor: descriptor, org_id: org_id, batch: batch}, read) do
     Stream.unfold(:start, fn
       :done ->
         nil
@@ -404,7 +467,7 @@ defmodule KilnCMS.CMS.FieldConversion do
       cursor ->
         filter = if cursor == :start, do: [], else: [id: [greater_than: cursor]]
 
-        ContentTypes.list!(descriptor,
+        read.(descriptor,
           # authorize?: false — one tenant, one type, the write is authorized (above)
           authorize?: false,
           tenant: org_id,
@@ -420,14 +483,20 @@ defmodule KilnCMS.CMS.FieldConversion do
   end
 
   # Each outcome is tagged with the record's terms (a multiple select target
-  # only) and whether it is published, for the report's counts.
+  # only), whether it is published and whether it is trashed, for the
+  # report's counts.
   defp visit(record, plan, write?) do
-    {visited(record, plan, write?), terms(record, plan), record_published?(record)}
+    {visited(record, plan, write?), terms(record, plan), record_published?(record),
+     trashed?(record)}
   end
 
   defp record_published?(record), do: Map.get(record, :state) == :published
 
-  defp terms(_record, %{group: %{field_type: type}}) when type in [:group, :string], do: []
+  defp trashed?(record), do: Map.get(record, :archived_at) != nil
+
+  # Terms are a select's alone: a group holds rows, and every other list
+  # holds items with no vocabulary to report them against.
+  defp terms(_record, %{group: %{field_type: type}}) when type != :select, do: []
 
   defp terms(record, plan) do
     held =
@@ -495,9 +564,10 @@ defmodule KilnCMS.CMS.FieldConversion do
     end
   end
 
-  # `--lines`: a list of phrases kept as plain text, one item per line.
-  defp lines(value, %{lines?: true, group: %{field_type: :string}}, _error)
-       when is_binary(value) do
+  # `--lines`: a list kept as plain text, one item per line — phrases, dates,
+  # numbers, links. Each line is then coerced as an item of the target.
+  defp lines(value, %{lines?: true, group: %{field_type: type}}, _error)
+       when type in @scalar_lists and is_binary(value) do
     case value |> String.split(~r/\R/u) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do
       [] -> :empty
       items -> {:ok, items}
@@ -560,8 +630,16 @@ defmodule KilnCMS.CMS.FieldConversion do
     end
   end
 
-  defp problem(record, kind, messages),
-    do: {:problem, %{id: record.id, slug: Map.get(record, :slug), kind: kind, messages: messages}}
+  defp problem(record, kind, messages) do
+    {:problem,
+     %{
+       id: record.id,
+       slug: Map.get(record, :slug),
+       kind: kind,
+       messages: messages,
+       trashed?: trashed?(record)
+     }}
+  end
 
   defp messages(errors) when is_list(errors), do: Enum.map(errors, &message/1)
   defp messages(%{errors: [_ | _] = errors}), do: messages(errors)
@@ -571,7 +649,7 @@ defmodule KilnCMS.CMS.FieldConversion do
   defp message(error) when is_exception(error), do: Exception.message(error)
   defp message(error), do: inspect(error)
 
-  defp tally({outcome, terms, published?}, acc) do
+  defp tally({outcome, terms, published?, trashed?}, acc) do
     acc = tally(outcome, acc)
 
     acc =
@@ -582,9 +660,12 @@ defmodule KilnCMS.CMS.FieldConversion do
           | terms: Enum.reduce(terms, acc.terms, &Map.update(&2, &1, 1, fn n -> n + 1 end))
         }
 
-    if published? and outcome in [:convertible, :written],
-      do: %{acc | published: acc.published + 1},
-      else: acc
+    cond do
+      outcome not in [:convertible, :written] -> acc
+      trashed? -> %{acc | trashed: acc.trashed + 1}
+      published? -> %{acc | published: acc.published + 1}
+      true -> acc
+    end
   end
 
   defp tally(:kept, acc), do: %{acc | scanned: acc.scanned + 1, kept: acc.kept + 1}

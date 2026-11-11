@@ -81,10 +81,13 @@ defmodule KilnCMSWeb.ApiAuthController do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.Errors.ChallengeRequired
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.SecondFactor
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Challenge
+  alias KilnCMS.Security.AuthEvents
   alias KilnCMSWeb.ApiError
 
   @doc """
@@ -113,9 +116,12 @@ defmodule KilnCMSWeb.ApiAuthController do
              :sign_in,
              %{
                "email" => email,
-               "password" => password
+               "password" => password,
+               "challenge_token" => challenge_token(params)
              },
-             []
+             # The audit hook on the action reads the client and org from here
+             # (#2241); human verification reads the door (#2249).
+             context: Map.merge(AuthEvents.context(conn), Challenge.context(:api))
            ) do
       if Accounts.totp_enabled?(user) do
         two_factor_required(conn, user)
@@ -123,10 +129,58 @@ defmodule KilnCMSWeb.ApiAuthController do
         issue_token(conn, user)
       end
     else
-      {:missing, detail} -> missing_params(conn, detail)
-      # Includes `false` from the type check: a *supplied* email or password of
-      # the wrong type is a bad credential, not a missing field.
-      _ -> unauthorized(conn)
+      {:missing, detail} ->
+        missing_params(conn, detail)
+
+      {:error, reason} ->
+        case ChallengeRequired.find(reason) do
+          %ChallengeRequired{} = challenge -> challenge_refused(conn, challenge)
+          nil -> unauthorized(conn)
+        end
+
+      # `false` from the type check: a *supplied* email or password of the
+      # wrong type is a bad credential, not a missing field.
+      _ ->
+        unauthorized(conn)
+    end
+  end
+
+  # Only a string is a token; anything else is sent on as absent, which the
+  # gate answers as "a challenge is required" when one is.
+  defp challenge_token(%{"challenge_token" => token}) when is_binary(token), do: token
+  defp challenge_token(_params), do: nil
+
+  # Human verification on the headless door (#2249), reached only when the
+  # operator turned `api_sign_in` on — with it off the gate never asks, and
+  # these responses never occur. `meta` carries what a client needs to draw the
+  # widget itself and retry with `challenge_token`. None of it depends on the
+  # account: whether a challenge is required is decided from counters keyed on
+  # the submitted address and the caller's own, so a known and an unknown
+  # address get the same answer.
+  defp challenge_refused(conn, %ChallengeRequired{reason: :unavailable}) do
+    conn
+    |> put_resp_header("retry-after", "30")
+    |> ApiError.send(
+      :service_unavailable,
+      "challenge_unavailable",
+      "Human verification is unavailable right now. Try again shortly."
+    )
+  end
+
+  defp challenge_refused(conn, %ChallengeRequired{reason: reason}) do
+    {code, detail} =
+      case reason do
+        :failed -> {"challenge_failed", "The human-verification token was not accepted."}
+        _required -> {"challenge_required", "Complete a human-verification challenge."}
+      end
+
+    ApiError.send(conn, :unauthorized, code, detail, meta: challenge_meta())
+  end
+
+  defp challenge_meta do
+    case Challenge.widget(Challenge.config(), :sign_in) do
+      %{} = widget -> Challenge.headless_widget(widget)
+      nil -> %{}
     end
   end
 
@@ -143,7 +197,7 @@ defmodule KilnCMSWeb.ApiAuthController do
 
     with :ok <- require_params([{"pending_token", pending}, {"code", code}]),
          {:ok, resolved} <- PendingSignIn.resolve(:encrypted, conn, pending),
-         {:ok, user} <- SecondFactor.check(resolved.user, code),
+         {:ok, user} <- SecondFactor.check(resolved.user, code, context: AuthEvents.context(conn)),
          # Only now, and only on success: a wrong code or a spent budget leaves
          # the blob alive, because neither is a failed authentication and
          # neither should turn "that code isn't valid" into "start over".
@@ -240,6 +294,10 @@ defmodule KilnCMSWeb.ApiAuthController do
   end
 
   defp issue_token(conn, user) do
+    # Both steps (password, or password then code) end here: the sign-in is
+    # complete (#2241).
+    AuthEvents.signed_in(conn, user, "password")
+
     conn
     |> put_status(:created)
     |> json(%{

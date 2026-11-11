@@ -47,10 +47,8 @@ defmodule KilnCMSWeb.FeedSettingsLiveTest do
     end
 
     test "turns away a non-admin", %{conn: conn} do
-      assert {:error, {:redirect, %{to: "/", flash: flash}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn |> log_in(authed_user(:editor)) |> live(~p"/editor/feeds")
-
-      assert flash["error"] =~ "admin access"
     end
 
     test "loads for an org admin on their own site", %{conn: conn, org: org} do

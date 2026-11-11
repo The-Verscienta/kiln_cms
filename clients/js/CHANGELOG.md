@@ -7,11 +7,47 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+- **Human verification on forms (kiln_cms#2249):** `FormSchema` gains an
+  optional `challenge` (`FormChallenge | null`, new exported type), what a
+  front end needs to draw the form's Turnstile widget: `provider`,
+  `site_key`, `script_url`, `action` and `field` (`"_kiln_challenge"`).
+  `FormSubmitResult` gains an optional `challenge`, `"verified"` or
+  `"held"` (stored for review, not acted on). Relay the widget's token in
+  `submitForm`'s values under `challenge.field`; a refused token is a
+  `KilnValidationError` whose `fieldErrors()` name `_kiln_challenge`. Both
+  fields are absent from servers older than this and from forms that do not
+  ask, so nothing changes for existing callers.
+- **Any provider's widget (kiln_cms#2249):** `FormChallenge` gains optional
+  `global`, `onload_param`, `render_options`, `action_option`,
+  `interactive` and `api`, so a front end can draw the operator's provider,
+  whether Cloudflare Turnstile, Google reCAPTCHA v2 or a plugin's, with one
+  piece of code: load `script_url` (adding `<onload_param>=<callback>` and
+  waiting for it when `onload_param` is set), then call
+  `window[global].render(element, options)` with `render_options`,
+  `sitekey` and, only when `action_option` is not `null`, `action` under
+  that name. reCAPTCHA's `action_option` is `null`. Types only; the client
+  passes the schema through unchanged.
 - **Richer form field types (kiln_cms#2261):** `FormField.type` gains `radio`,
   `checkboxes`, `phone`, `url`, `hidden`, `number` and `rating`, and a field
   carries `min`, `max` and `step`. New `FormValue` and `FormSubmittedData`
   types: a `checkboxes` answer is a `string[]`, `number`/`rating` are numbers.
   Treat a `type` you do not know as `"text"`.
+
+## 0.4.0
+
+- `textSearch` / `semanticSearch` take `customSort` (kiln_cms#2292). The server
+  also accepts a custom field's bare name in `filter` / `sort`, but this client
+  keeps emitting `custom_filter` / `custom_sort`, the stable form.
+
+- **`:draft_write` keys (kiln_cms#2273):** `create()` takes `onBehalfOf`
+  (`CreateOptions`), sent as the `X-Kiln-On-Behalf-Of` header, which Kiln
+  records on a draft created with a `:draft_write` API key so reviewers see
+  which of your users it was for. Stored only, never authorization; other
+  writes never send it (the server reads it on `POST` only). New
+  `ContentProvenance` type for the three optional attributes a created record
+  carries back (`created_via_key_id`, `created_via_key_name`, `on_behalf_of`):
+  `create<Item & ContentProvenance>(…)`. Needs a Kiln server newer than 1.8;
+  an older one ignores the header.
 
 ## 0.3.0
 

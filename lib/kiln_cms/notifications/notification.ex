@@ -69,7 +69,10 @@ defmodule KilnCMS.Notifications.Notification do
   (tenant, recipient, event, document), so two submits racing each other
   still leave one row. Once the row is read, the next occurrence is new
   again. Comment, mention and task events are never collapsed: each is a
-  different thing to read.
+  different thing to read. A registration notice (`:registration_pending`,
+  #2251) collapses the same way, anchored on the site (`content_id` is the
+  org's id): it says the queue has someone in it, so a second applicant while
+  it is unread adds nothing.
 
   `:notify` is the counterpart: system-only, because it writes a row addressed
   to somebody *other* than whoever acted. It is gated by `forbid_if
@@ -198,6 +201,13 @@ defmodule KilnCMS.Notifications.Notification do
       change set_attribute(:actor_name, nil)
       change set_attribute(:actor_id, nil)
     end
+
+    # The erased account's own inbox (#2514): the rows are addressed to it and
+    # name what it was told, so erasure deletes them rather than leaving them
+    # on a tombstone nobody can sign in to read.
+    destroy :forget_recipient do
+      description "Delete an erased account's own notifications (system-only — see the moduledoc)."
+    end
   end
 
   policies do
@@ -225,10 +235,11 @@ defmodule KilnCMS.Notifications.Notification do
       authorize_if expr(user_id == ^actor(:id))
     end
 
-    # Erasure (`KilnCMS.Notifications.anonymize_actor/1`): the rows belong to
-    # other recipients, so like `:notify` it is the system's, and refused to
-    # any request carrying an actor.
-    policy action(:forget_actor) do
+    # Erasure (`KilnCMS.Notifications.anonymize_actor/1` and
+    # `forget_recipient/1`): the first rewrites rows that belong to other
+    # recipients, the second deletes an erased account's own; both are the
+    # system's, like `:notify`, and refused to any request carrying an actor.
+    policy action([:forget_actor, :forget_recipient]) do
       forbid_if actor_present()
       authorize_if always()
     end
@@ -270,7 +281,11 @@ defmodule KilnCMS.Notifications.Notification do
     # under, so one vocabulary covers all three channels — `:comment_mention`
     # included, which is a distinct event from `:comment_added` precisely
     # because being named is the stronger signal.
-    attribute :event, :atom do
+    #
+    # `KnownAtom`, not `:atom`: an event a newer release added loads as
+    # `KilnCMS.Types.UnknownAtom` instead of failing the bell, the inbox and
+    # mark-all-read (#2509). Writes stay limited to the list below.
+    attribute :event, KilnCMS.Types.KnownAtom do
       allow_nil? false
       public? true
 
@@ -284,7 +299,19 @@ defmodule KilnCMS.Notifications.Notification do
                     :task_assigned,
                     # A retraction webhook that exhausted its retries (#1926),
                     # to the site's admins — `KilnCMS.Webhooks.RetractionLost`.
-                    :retraction_lost
+                    :retraction_lost,
+                    # Someone confirmed their address and waits for approval
+                    # (#2251), to the site's admins — one row per admin and
+                    # site, about the queue rather than the applicant
+                    # (`KilnCMS.Notifications.Registrations`).
+                    :registration_pending,
+                    # A security alert (#2245), to a site's member admins or the
+                    # platform admins: `content_type` "security_alert_dispatch",
+                    # `content_id` the `KilnCMS.Security.AlertDispatch` row.
+                    :security_alert,
+                    # An `alerts_silenced` notice (#2245): someone made the site's
+                    # alerts quieter. Same anchor as `:security_alert`.
+                    :security_notice
                   ]
     end
 

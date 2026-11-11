@@ -119,6 +119,8 @@ defmodule KilnCMS.CMS.VersionDiff do
 
   # Compared key-by-key rather than as one opaque value.
   @map_fields ~w(custom_fields)a
+  # Booleans whose absence in a snapshot means `false` (see `absent_as_default/2`).
+  @default_false ~w(noindex nofollow)a
 
   # Fields whose text the block-level inline diff already renders. Listing them
   # again in the field table would print a Portable Text AST directly beneath its
@@ -198,8 +200,8 @@ defmodule KilnCMS.CMS.VersionDiff do
     |> diffable_fields()
     |> Enum.flat_map(fn name ->
       key = to_string(name)
-      old_value = Map.get(old, key)
-      new_value = Map.get(new, key)
+      old_value = Map.get(old, key) |> absent_as_default(name)
+      new_value = Map.get(new, key) |> absent_as_default(name)
 
       cond do
         old_value == new_value ->
@@ -220,6 +222,12 @@ defmodule KilnCMS.CMS.VersionDiff do
       end
     end)
   end
+
+  # A boolean flag added by a later migration has no key in a version below it:
+  # the document was not noindexed then, so absent reads as `false` rather than
+  # as a "Changed: — → No" row.
+  defp absent_as_default(nil, name) when name in @default_false, do: false
+  defp absent_as_default(value, _name), do: value
 
   defp scalar_field(name, old_value, new_value, restorable?) do
     %Field{

@@ -11,16 +11,21 @@ as [#570](https://github.com/The-Verscienta/kiln_cms/issues/570) — the feature
 ## Registering an endpoint
 
 Admins manage endpoints at **`/editor/webhooks`**. Adding one takes a URL and a
-set of events to subscribe to; Kiln generates a signing secret at creation time
-(shown on the endpoint's row — it never changes, even across edits). The secret
+set of events to subscribe to; Kiln generates a signing secret at creation time.
+It does not change when you edit the endpoint; an admin replaces it on purpose with
+**Rotate secret** ([Rotate a webhook signing secret](#rotate-a-webhook-signing-secret)
+below). Each row shows the secret masked
+until an admin reveals it ([Copy a webhook signing secret](#copy-a-webhook-signing-secret)
+below). The secret
 is stored encrypted with the app's vault key, which is derived from
 `SECRET_KEY_BASE`. Rotating that key leaves every endpoint's secret unreadable:
 the row says so, and deliveries are refused rather than sent unsigned.
-Re-create the endpoints after a rotation ([secrets rotation](secrets-rotation.md)). Toggling
+Rotate each endpoint's secret after that ([secrets rotation](secrets-rotation.md)). Toggling
 **Active** or editing an endpoint gives it a clean slate: its failure count
 resets (see [Auto-disable](#auto-disable) below).
 
-Deleting an endpoint takes its delivery history with it.
+Deleting an endpoint keeps its delivery history (see
+[Delete an endpoint](#delete-an-endpoint) below).
 
 The form starts with the default subscription ticked, the same list an
 endpoint created over code or AshAdmin gets when it names no events: the
@@ -32,6 +37,157 @@ tasks, releases, experiments, memberships, and the tag, tag group and category
 taxonomy) has its own toggle. An endpoint
 that receives unpublished content says so on its row.
 
+## Copy a webhook signing secret
+
+Your receiver needs the endpoint's signing secret to
+[verify each delivery](#verifying-the-signature). The list keeps it masked so
+that it isn't on screen, or in the page, for anyone looking over your shoulder
+or watching a screen share. You need the admin role; `/editor/webhooks` is
+admin-only.
+
+1. Open **Webhooks** in the console navigation (`/editor/webhooks`). Each
+   endpoint's row says **Signing secret:** followed by `••••` and the
+   secret's last four characters, and a **Reveal** button. A secret shorter
+   than 16 characters shows the dots alone, since its last four would give
+   away too much of it.
+2. Click **Reveal**. The full secret replaces the dots, with **Copy** and
+   **Hide** buttons beside it.
+3. Click **Copy**. The secret goes to your clipboard and the page says
+   "Signing secret copied." Paste it into your receiver's configuration.
+4. Click **Hide** to mask it again. Reloading the page or leaving it masks
+   every secret too: a reveal lasts only while the page stays open.
+
+A newly added endpoint skips step 2. After **Add webhook** the page says
+"Webhook added. Copy its signing secret into your receiver." and the new row's
+secret is already revealed, with **Copy** beside it.
+
+The masked row carries only the last four characters. The full secret is sent
+to the browser when you click **Reveal** (or add the endpoint), after the
+server reads the endpoint again as you, on the current site.
+
+What can go wrong:
+
+- **"Couldn't reveal that signing secret."**: the endpoint was not found,
+  usually because another admin deleted it after your page loaded. Reload the
+  page to see the current list.
+- **The row says the secret is "unreadable"** and has no **Reveal** or
+  **Copy**: it was encrypted under a `SECRET_KEY_BASE` this server no longer
+  has. Click **Rotate secret** and give the receiver the new secret
+  ([Rotate a webhook signing secret](#rotate-a-webhook-signing-secret),
+  [secrets rotation](secrets-rotation.md)).
+- **Copy does nothing and no "copied" message appears**: the browser refused
+  the clipboard write, which it does on a page not served over HTTPS (other
+  than `localhost`) or when clipboard access is blocked. Select the revealed
+  secret and copy it by hand.
+
+## Rotate a webhook signing secret
+
+Replace an endpoint's signing secret when it may have leaked, or when the row
+says the secret is "unreadable". You need the admin role; `/editor/webhooks`
+is admin-only, and so is the rotation. The URL, events and **Active** setting
+stay as they are.
+
+The old secret stops working at once. There is no window in which both are
+accepted: rotation is the remedy for a leaked secret, and a grace period would
+leave the leaked one valid. If your receiver can accept two secrets at a time,
+do this in order:
+
+1. Change the receiver to accept signatures made with either the old or the
+   new secret. You have the old one; you get the new one in step 4. If the
+   receiver can't do this, skip to step 3 and expect the gap described below.
+2. Open **Webhooks** in the console navigation (`/editor/webhooks`) and find
+   the endpoint's row.
+3. Click **Rotate secret**. The browser asks: "Rotate this signing secret?
+   Deliveries start using the new secret now, and the old one stops working,
+   so update the receiver with the new secret." Click **OK**.
+4. The page says "Signing secret replaced. Copy the new secret into your
+   receiver; the old one no longer works." and the row's secret is already
+   revealed, with **Copy** beside it and, under it, "Update your receiver
+   now: deliveries already use this secret." Click **Copy** and put it in the
+   receiver ([Copy a webhook signing secret](#copy-a-webhook-signing-secret)).
+5. Once the receiver uses the new secret, remove the old one from it.
+6. Click **Ping** on the row and check the receiver accepts it.
+
+What to expect:
+
+- **Deliveries sign at send time.** Queued deliveries and retries read the
+  endpoint's secret when each attempt is sent, so everything sent after the
+  click uses the new secret, whatever its age.
+- **One in-flight attempt can fail.** An attempt already on the wire when you
+  click was signed with the old secret. A receiver that has switched to the
+  new one rejects it; Oban retries it, and the retry carries the new
+  signature. A receiver that has not switched yet rejects every attempt made
+  after the click until it does.
+- **Failures count toward auto-disable.** Rotation leaves `consecutive_failures`
+  and `auto_disabled_at` as they are. An endpoint near the limit of 10 can be
+  auto-disabled by deliveries that exhaust their retries while the receiver
+  still holds the old secret ([Auto-disable](#auto-disable)). Update the
+  receiver promptly, and check the row afterwards. Rotating does not
+  re-enable an auto-disabled endpoint; tick **Active** for that.
+- **An unreadable secret can be rotated.** Kiln never opens the old value, so
+  an endpoint whose secret was encrypted under a lost `SECRET_KEY_BASE` gets a
+  working one, and the receiver then needs it ([secrets rotation](secrets-rotation.md)).
+- **The record is a log line.** Each rotation logs at info level
+  `webhook secret rotated endpoint_id=… org_id=… actor_id=…`, never the
+  secret. There is no other audit trail.
+
+What can go wrong:
+
+- **"Couldn't rotate that signing secret."**: the endpoint was not found
+  (another admin deleted it after your page loaded) or the rotation was
+  refused. Reload the page to see the current list.
+- **No Rotate secret button**: your role can't rotate secrets. Ask an admin.
+- **The receiver answers 4xx after the rotation**: it still holds the old
+  secret. Reveal the new one and update the receiver; failed deliveries retry
+  on their own and can be redelivered ([Ping and redeliver](#ping-and-redeliver)).
+
+## Delete an endpoint
+
+You need the admin role; `/editor/webhooks` is admin-only, and so is the
+delete itself. An endpoint can be deleted whether it is active, disabled or
+auto-disabled: there is no need to disable it first.
+
+1. Open **Webhooks** in the console navigation (`/editor/webhooks`). Each
+   endpoint's row ends with **Ping**, **Disable** (or **Enable**), **Edit**,
+   **Rotate secret** and a red **Delete**.
+2. Click **Delete** on the endpoint's row. If you already have the endpoint
+   open under **Edit**, the form's **Delete webhook** button, to the right of
+   **Save** and **Cancel**, does the same.
+3. The browser asks: "Delete this webhook? Queued deliveries, including
+   retractions, won't be sent. Delivery history is kept." Click **OK**.
+4. The page says "Webhook deleted." and the endpoint's row is gone.
+
+What deleting does:
+
+- **Nothing more is sent to the URL.** A delivery already queued or waiting
+  to retry settles as `failed` with the error `endpoint deleted` on its next
+  attempt, instead of being sent. That includes retractions
+  (`unpublished`, `archived`, `deleted`), which disabling an endpoint does not
+  stop ([Retractions are exempt](#retractions-are-exempt)).
+- **The history stays.** Past deliveries keep their ledger rows under the
+  usual [retention](#delivery-history). In **Recent deliveries** each row
+  still shows the URL it was sent to, followed by "(deleted endpoint)", and
+  has no **Redeliver** button: there is no endpoint to send it to, and the
+  signing secret went with it. A failed retraction in a document's
+  **Retractions not delivered** panel on the governance trail is shown the
+  same way.
+- **It can't be undone.** The signing secret goes with the endpoint. To
+  deliver to the same URL again, add it as a new endpoint and give the
+  receiver its new secret.
+
+What can go wrong:
+
+- **"Couldn't delete that webhook."**: the endpoint was not found (another
+  admin deleted it first, or the page was stale) or the delete was refused.
+  Reload the page to see the current list.
+- **"That delivery's endpoint was deleted, so it can't be redelivered."**
+  after clicking **Redeliver**: the endpoint was deleted after your page
+  loaded (by another admin, or in another tab). Nothing is sent, and the row
+  updates to "(deleted endpoint)" without the button. A deleted endpoint's
+  deliveries can't be replayed; to reach the same receiver again, add its URL
+  as a new endpoint and give the receiver the new secret. Events from then on
+  go there.
+
 ## Event names & payload
 
 An event name is `<type>.<verb>`. Every registered content type — built-in and
@@ -42,7 +198,7 @@ can emit, so a new content type has webhook events for free:
 | --- | --- | --- |
 | `published` | A document goes live | Yes |
 | `unpublished` | A live document is taken down | Yes |
-| `updated` | A **published** document is edited (draft edits/autosaves stay silent) | Yes |
+| `updated` | A **published** document is edited (draft edits/autosaves stay silent), or re-rendered without an edit (see below) | Yes |
 | `in_review` | A document is submitted for review ([#375](https://github.com/The-Verscienta/kiln_cms/issues/375)) | **No — opt in** |
 | `returned_to_draft` | A review is sent back to draft | **No — opt in** |
 | `created` | A document is created (API, editor, or import) | **No — opt in** |
@@ -61,6 +217,28 @@ mirror must re-ingest it); otherwise it sends the tombstone too.
 
 The trash is a soft delete. A hard purge from the trash, or the nightly
 auto-purge, sends nothing more: the receiver already heard `deleted`.
+
+After `deleted`, a document sends nothing until `restored` (#2332). An editor,
+API client or job that loaded it before the trash can no longer write to it,
+so no `updated`, `unpublished` or `archived` follows a `deleted`. Trashing it
+twice sends one `deleted`, and restoring it twice sends one `restored`. When a
+purge clears the purged document out of another document's reference field,
+a referrer that is itself in the trash is cleared silently; a live referrer
+still sends `updated`.
+
+`updated` also fires when a published document's fired artifacts are
+re-rendered without an edit, so what delivery serves may have changed while
+`updated_at` did not: an overlay's `KilnCMS.Firing.refire/3`
+([#2048](https://github.com/The-Verscienta/kiln_cms/issues/2048)), and an
+operator's re-fire sweep run with `notify: true` after an upgrade
+([Re-render published content after an upgrade](releasing.md#re-render-published-content-after-an-upgrade)).
+Those payloads carry `"reason": "refire"` in `data`; an edit's carries no
+`reason` key ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
+Treat a re-fire like an edit: refetch the document. Don't drop it as a
+duplicate because its `updated_at` matches what you hold. A sweep's
+`updated` reaches webhook endpoints and the public change feed only, not
+automation, federation or the CDN purge, and the change feed's event does not
+say it was a re-fire.
 
 `unpublished` fires for both an explicit unpublish **and** archiving a
 published document (#914) — both remove it from delivery, and a receiver
@@ -91,12 +269,19 @@ More event names exist outside the `<type>.<verb>` pattern:
   receiver that caches taxonomy (a tag cloud, a list of payers kept as a tag
   group) can invalidate on them instead of polling. See
   [Taxonomy events](#taxonomy-events) below.
+- **`security.new_admin`**, **`security.role_elevation`**,
+  **`security.failed_sign_ins`**, **`security.lockout`**,
+  **`security.two_factor_disabled`**, **`security.sso_config_changed`** and
+  **`security.alerts_silenced`** — the site's
+  [security alerts](security-alerts.md) and the notice that someone turned
+  them down ([#2245](https://github.com/The-Verscienta/kiln_cms/issues/2245));
+  opt in. See [Security alert events](#security-alert-events) below.
 - **`ping`** — a manual test delivery (see [Ping](#ping-and-redeliver) below);
   never subscribed to, and delivered on demand regardless of an endpoint's
   active state or event list.
 
 Each of these namespaces (`form`, `membership`, `task`, `release`,
-`experiment`, `tag`, `tag_group`, `category`) is reserved: a new content type
+`experiment`, `tag`, `tag_group`, `category`, `security`) is reserved: a new content type
 cannot take one as its name, so `release.published` always means a release
 and never a document of a type called `release`
 ([#1994](https://github.com/The-Verscienta/kiln_cms/issues/1994)). A type
@@ -121,7 +306,9 @@ dedupe key. `data` shape depends on the event:
   trimmed to `type`, `content`, `data`, `order`, `children`. Internal-only
   fields (e.g. search text) are never included. These payloads also carry
   **`affected`**: the published documents whose fired artifacts embed this
-  one, each as `{"type", "id", "slug", "locale"}` (see below).
+  one, each as `{"type", "id", "slug", "locale"}` (see below). An `updated`
+  sent for a re-render rather than an edit also carries `"reason": "refire"`
+  (above).
 - **`form.submitted`** — `{"form": "<slug>", "data": {...submitted fields...}}`.
   A value is a string, number, boolean or, for a `checkboxes` field, a list of
   strings (see [Forms](forms.md#field-types)); don't assume every value is a string.
@@ -134,6 +321,9 @@ dedupe key. `data` shape depends on the event:
   `updated` adds `previous_slug` when the slug changed and, for a tag,
   `previous_tag_group_id` when it moved group. A `deleted` is the record as it
   was. See [Taxonomy events](#taxonomy-events).
+- **Security alert events** (`security.*`) — the alert, its window's summary
+  or a silencing notice, told apart by `phase`. See
+  [Security alert events](#security-alert-events).
 - **`ping`** — `{"message": "KilnCMS webhook test", "endpoint_url": "...", "sent_at": "<ISO 8601>"}`.
 
 ```jsonc
@@ -195,6 +385,45 @@ receives none of them until an admin ticks them.
 - A content type cannot be named `tag`, `tag_group` or `category`, so these
   names always mean taxonomy. The same goes for every other namespace above
   (`form`, `membership`, `task`, `release`, `experiment`).
+
+### Security alert events
+
+A site's [security alerts](security-alerts.md) can be sent to its endpoints:
+one event per site alert kind, `security.<kind>`, and
+`security.alerts_silenced` for the notice that someone turned the alerts down
+(an alert kind or admin notifications switched off, a security webhook
+changed, deleted, re-keyed or auto-disabled, an admin removed or demoted, the
+site's mail relay changed).
+
+- **Opt in.** None is in the defaults, so an endpoint receives none until an
+  admin ticks them in the `security` group of its event list.
+- **When.** Within about a minute of the event. Alerts are grouped per kind
+  into 15-minute windows: the first event of a window is sent as an alert
+  (`"phase": "alert"`), and when more followed, one summary
+  (`"phase": "summary"`, with the window's `count`) about a minute after the
+  window closes. Notices are never grouped.
+- **What the site's settings change.** A kind the site turned off is sent to
+  nobody, webhooks included. Switching off the admins' bell and email leaves
+  webhooks on.
+- **What it carries.** The site, the window, and for an alert the security log
+  event that raised it (id, type, actor and target ids, metadata), with its IP
+  address cut to the network (`/24`, `/48`) unless the site shows full
+  addresses. Never an email address, user agent, secret or endpoint URL. The
+  full shape and examples are in
+  [Security alerts → Payload](security-alerts.md#payload).
+- **Platform alerts** (new platform admins, platform role changes, new API
+  keys, a stolen API key used again) are not webhook events in this release;
+  they go to the platform admins by bell and email only.
+- **Sent only to the endpoint.** A security event is not a content change:
+  it does not run [automation](automation.md) rules, federate, purge the CDN
+  or appear in the change feed. It is otherwise an ordinary delivery: on the
+  ledger, retried, redeliverable, and counted toward auto-disable.
+- **Changing a subscribed endpoint is announced.** Editing the URL of an
+  endpoint subscribed to any `security.*` event, unticking **Active** or one
+  of its `security.*` events, rotating its secret, deleting it, or its being
+  auto-disabled sends `security.alerts_silenced` to the site's admins (and to
+  every endpoint of the site subscribed to it). Subscribing to more events
+  does not.
 
 ### `affected`: the other pages this change touched
 
@@ -421,6 +650,9 @@ is an ordinary delivery.)
     the identity only.
 
 Fix the receiver, then press **Redeliver** on the row in the trail's panel.
+A row whose endpoint has since been deleted keeps its URL, marked
+"(deleted endpoint)", and has no **Redeliver** button
+([Delete an endpoint](#delete-an-endpoint)).
 `/editor/webhooks` lists only the 25 newest deliveries, and a retraction is
 given up on about a day after it was sent.
 
@@ -432,7 +664,9 @@ given up on about a day after it was sent.
   off).
 - **Redeliver** replays a recorded delivery — same endpoint, event, and
   payload — as a **new** ledger row. History is immutable; a redelivery never
-  overwrites the original failed attempt.
+  overwrites the original failed attempt. A delivery whose endpoint was
+  deleted can't be redelivered and shows no button
+  ([Delete an endpoint](#delete-an-endpoint)).
 
 ## Delivery history
 

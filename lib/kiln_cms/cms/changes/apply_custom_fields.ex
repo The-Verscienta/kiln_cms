@@ -81,6 +81,17 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   the next write as it always was, now with a warning naming it, so the scrub
   is at least visible once.
 
+  ## A new draft from the editor may start blank
+
+  The content editor creates a document's row from a scaffold title and slug
+  before the writer has seen a single field
+  (`KilnCMSWeb.ContentEditor.NewDraft.create/4`), so it passes
+  `context: %{custom_fields_required: :defer}` and that one create leaves a
+  blank required field blank. Every later save sends the whole map, so the
+  writer is asked for the value on the first save, and the editor saves the
+  form before Publish or Submit for review. The flag is ignored on anything but
+  a create.
+
   ## Link fields: data on each connection
 
   A `:reference` definition may declare link fields (`FieldDefinition`
@@ -130,6 +141,21 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   fields resolve in a second pass, after the editable ones, from the document
   and the values just coerced — and the payload is never consulted, so posting
   a value under a computed field's key can't overwrite it.
+
+  ## A field type this release does not know
+
+  A definition whose `field_type` this release does not register (#2605: a
+  newer release's type after a rollback, a removed plugin's) is left out of
+  every ordinary read (`KilnCMS.CMS.Preparations.RegisteredFieldTypes`), so
+  the editor never shows it and freshly computed delivery leaves it out
+  (the content API's raw `custom_fields` still returns a non-private value).
+  Its values are still what a record holds, and erasing them on the next title edit would be
+  the very loss described above. So this change reads the definitions with
+  those rows included and **holds** their values: a held key counts as
+  declared, is never coerced, checked or seen by a formula, and is written
+  back as stored. Under `:strict`, a supplied value must equal the stored one
+  (a whole-map round-trip); under `:drop`, a supplied value is carried
+  verbatim. `definitions/3` still answers the registered definitions only.
   """
   use Ash.Resource.Change
 
@@ -137,9 +163,17 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   require Logger
 
   alias Ash.Error.Changes.InvalidAttribute
+  alias KilnCMS.CMS.Conditions
+  alias KilnCMS.CMS.DynamicDefaults
+  alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.PrivateFields
+  alias KilnCMS.CMS.ScalarLists
+  alias KilnCMS.CMS.UniqueValues
   alias KilnCMS.CMS.WorkingCopy
+
+  @scalar_list_types ScalarLists.types()
+  @typed_list_types ScalarLists.typed()
 
   @impl true
   def change(changeset, opts, context) do
@@ -162,8 +196,26 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       # computed fields: their inputs are the *document* — a retitled page
       # changes `{{ slugify(title) }}`, a reworded one changes reading time.
       true ->
-        refresh_computed(changeset)
+        changeset |> refresh_computed() |> unique_after_move()
     end
+  end
+
+  # Bulk writes run `change/3` per record, as before; the batch hook exists so
+  # a batch's unique-value locks are taken together and in order (#2276).
+  @impl true
+  def batch_change(changesets, opts, context),
+    do: Enum.map(changesets, &change(&1, opts, context))
+
+  @impl true
+  def before_batch(changesets, _opts, _context), do: UniqueValues.lock_batch(changesets)
+
+  # A locale or type change moves the record into another uniqueness scope
+  # (#2276) even when `custom_fields` is untouched.
+  defp unique_after_move(changeset) do
+    if Ash.Changeset.changing_attribute?(changeset, :locale) or
+         Ash.Changeset.changing_attribute?(changeset, :type_definition_id),
+       do: UniqueValues.register(changeset, stashed_definitions(changeset) || []),
+       else: changeset
   end
 
   # `:resnapshot_media` (`mix kiln.media.resnapshot`): re-resolve every stored
@@ -224,7 +276,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     def = Enum.find(definitions_for(changeset), &(&1.name == name))
     read_opts = context |> Ash.Context.to_opts() |> Keyword.put(:tenant, changeset.to_tenant)
 
-    case accumulate(def, %{name => rows}, held, {read_opts, :strict}, {%{}, []}) do
+    case accumulate(def, %{name => rows}, held, {read_opts, :strict, true}, {%{}, []}) do
       {cleaned, []} ->
         converted =
           case Map.fetch(cleaned, name) do
@@ -295,7 +347,13 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   #710.
   """
   @spec apply_restored(Ash.Changeset.t(), Ash.Resource.Change.Context.t()) :: Ash.Changeset.t()
-  def apply_restored(changeset, context), do: apply_definitions(changeset, %{}, :drop, context)
+  def apply_restored(changeset, context) do
+    # A restored or promoted map was valid when it was written; a constraint
+    # tightened since (#2276) is for the next edit, not a reason to fail this.
+    changeset
+    |> Ash.Changeset.set_context(%{custom_fields_constraints: :skip})
+    |> apply_definitions(%{}, :drop, context)
+  end
 
   # How this write treats a supplied `custom_fields` key no `FieldDefinition`
   # declares: `:strict` (the default) refuses it; `:drop` discards it with a
@@ -317,7 +375,13 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
   defp apply_definitions(changeset, existing, mode, context, supplied \\ nil) do
-    defs = definitions_for(changeset)
+    {defs, held} = scope_for(changeset)
+
+    # A content import carries ANOTHER site's map (`custom_fields_held:
+    # :drop`): a value under a held name was written by that site's field,
+    # which may share only the name with this one. Not carried — dropped with
+    # a warning like any key this site does not declare.
+    held = if changeset.context[:custom_fields_held] == :drop, do: [], else: held
 
     # The writing org (epic #336). `:media`/`:reference` fields resolve a snapshot
     # by id under this tenant, so a value pointing at another site's media/content
@@ -331,6 +395,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # error, never a write.
     read_opts = context |> Ash.Context.to_opts() |> Keyword.put(:tenant, changeset.to_tenant)
 
+    # Value constraints (#2276) are skipped for machinery that carries values
+    # the record already holds (a restore, a copy): `custom_fields_constraints:
+    # :skip` in the changeset context.
+    check? = changeset.context[:custom_fields_constraints] != :skip
+    # `required_when` (#2277) binds an ordinary write only: a restore, a copy
+    # and the media/convert passes (which hand their own `supplied`) skip it.
+    required_when? = mode == :strict and is_nil(supplied)
+
     supplied =
       supplied ||
         stringify_keys(Ash.Changeset.get_attribute(changeset, :custom_fields) || %{})
@@ -341,25 +413,75 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # dependency order.
     {computed, editable} = Enum.split_with(defs, &(&1.field_type == :computed))
 
+    # A duplicate (#2276) starts a new record, which must not claim the
+    # source's unique values: they are left blank, and `required` does not
+    # ask for them (the draft needs a value before it can be published).
+    editable =
+      if changeset.context[:custom_fields_unique] == :blank,
+        do: Enum.reject(editable, &UniqueValues.unique_def?/1),
+        else: editable
+
+    # Dynamic defaults (#2286) settle first: on an ordinary create each stands
+    # in for its field's `default`; on any other write none does.
+    {editable, defaulted} =
+      DynamicDefaults.settle(editable, %{
+        create?:
+          changeset.action_type == :create and
+            changeset.context[:custom_fields_constraints] != :skip,
+        today: DynamicDefaults.today(changeset),
+        actor: context.actor,
+        tenant: changeset.to_tenant,
+        supplied: supplied
+      })
+
+    # Conditional rules (#2277) read the merged view; they only adjust `required`.
+    editable =
+      editable
+      |> Conditions.apply_to(Map.merge(existing, supplied), required_when: required_when?)
+      |> defer_required(changeset)
+
     {cleaned, errors} =
       Enum.reduce(
         editable,
         {%{}, []},
-        &accumulate(&1, supplied, existing, {read_opts, mode}, &2)
+        &accumulate(&1, supplied, existing, {read_opts, mode, check?}, &2)
       )
 
     {cleaned, errors} = apply_computed(computed, changeset, cleaned, errors)
 
-    {refused, dropped} = undefined(defs, supplied, existing, mode)
+    # After the formulas, so none of them reads a held value (#2605).
+    {cleaned, errors} = hold(held, changeset, supplied, mode, {cleaned, errors})
+
+    {refused, dropped} = undefined(defs ++ held, supplied, existing, mode)
     errors = Enum.map(refused, &undefined_error(&1, defs)) ++ errors
 
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
     |> stash(defs)
+    |> stash_held(held)
     |> stash_supplied(supplied)
+    |> stash_defaulted(defaulted)
     |> note_dropped(dropped)
     |> then(fn cs -> Enum.reduce(errors, cs, &Ash.Changeset.add_error(&2, &1)) end)
+    |> UniqueValues.register(defs)
   end
+
+  # The editor's scaffold create (`KilnCMSWeb.ContentEditor.NewDraft`) writes a
+  # row before the writer has seen a single field, so it cannot satisfy
+  # `required` — and refusing it left a type with a required, default-less
+  # field impossible to start from the editor at all. It passes
+  # `custom_fields_required: :defer`: on that create only, a blank required
+  # field is left blank. Every later write the editor makes sends the whole
+  # map, so the first save — and the flush that runs before Publish or Submit
+  # — asks for the value as usual. Ignored on any write but a create, so the
+  # flag cannot be used to clear a required field on an existing record.
+  defp defer_required(editable, %{
+         action_type: :create,
+         context: %{custom_fields_required: :defer}
+       }),
+       do: Enum.map(editable, &%{&1 | required: false})
+
+  defp defer_required(editable, _changeset), do: editable
 
   # Split the keys no definition declares into the ones this write refuses and
   # the ones it drops. Neither is ever stored — the cleaned map is folded out of
@@ -419,16 +541,16 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # derives nothing new stays byte-identical to before — no spurious version
   # diff, no phantom "changed" attribute for anything downstream to react to.
   defp refresh_computed(changeset) do
-    defs = definitions_for(changeset)
-    changeset = stash(changeset, defs)
+    {defs, held} = scope_for(changeset)
+    changeset = changeset |> stash(defs) |> stash_held(held)
 
     case Enum.filter(defs, &(&1.field_type == :computed)) do
       [] -> changeset
-      computed -> recompute(changeset, defs, computed)
+      computed -> recompute(changeset, {defs, held}, computed)
     end
   end
 
-  defp recompute(changeset, defs, computed) do
+  defp recompute(changeset, {defs, held}, computed) do
     stored =
       changeset.data.custom_fields
       |> Kernel.||(%{})
@@ -444,10 +566,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # so. A record should not be in this state at all: `Changes.SyncFieldValues`
     # scrubs the key when the definition is destroyed and moves the values when
     # it is renamed, so what is left is a row written before that existed.
-    {defined, undefined} = Map.split(stored, Enum.map(defs, & &1.name))
+    #
+    # A held field's value (#2605) is kept as stored, out of the formulas' sight.
+    {defined, undefined} = Map.split(stored, Enum.map(defs ++ held, & &1.name))
+    {held_values, defined} = Map.split(defined, Enum.map(held, & &1.name))
 
     editable = Map.drop(defined, Enum.map(computed, & &1.name))
     {cleaned, errors} = apply_computed(computed, changeset, editable, [])
+    cleaned = Map.merge(cleaned, held_values)
 
     if cleaned == stored and errors == [] do
       changeset
@@ -515,12 +641,22 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # the cleaned map is folded out of the definitions — so "no definitions"
   # would drop every stored value on the record, skip every `required`, and
   # refuse every key the caller sent. A refusal raises instead.
-  defp definitions_for(%{resource: resource} = changeset) do
-    definitions(
-      resource,
+  defp definitions_for(changeset), do: changeset |> scope_for() |> elem(0)
+
+  # The definitions in scope, and the "held" ones beside them (#2605): rows
+  # whose `field_type` this release does not register. One read that includes
+  # them (`FieldDefinition.all_types_context/0`), split here. A held field is
+  # not coerced, checked, computed over or offered to anything — its stored
+  # value is only carried through the write (module doc, "A field type this
+  # release does not know").
+  defp scope_for(%{resource: resource} = changeset) do
+    resource
+    |> read_definitions(
       Ash.Changeset.get_attribute(changeset, :type_definition_id),
-      changeset.to_tenant
+      changeset.to_tenant,
+      FieldDefinition.all_types_context()
     )
+    |> Enum.split_with(&(not FieldDefinition.unknown_type?(&1)))
   end
 
   @doc """
@@ -531,11 +667,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   the same schema for a loaded record.
   """
   @spec definitions(module(), Ash.UUID.t() | nil, term()) :: [KilnCMS.CMS.FieldDefinition.t()]
-  def definitions(resource, type_definition_id, tenant) do
+  def definitions(resource, type_definition_id, tenant),
+    do: read_definitions(resource, type_definition_id, tenant, %{})
+
+  defp read_definitions(resource, type_definition_id, tenant, context) do
     opts = [
       actor: KilnCMS.CMS.Bookkeeping.system(),
       authorize_with: :error,
-      tenant: tenant
+      tenant: tenant,
+      context: context
     ]
 
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
@@ -559,6 +699,71 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp stash(changeset, defs),
     do: Ash.Changeset.set_context(changeset, %{kiln_field_definitions: defs})
 
+  @doc """
+  The names of the held fields this change carried for `changeset` (#2605):
+  defined, but of a field type this release does not know, so their stored
+  values were kept rather than coerced. `[]` if the change did not run.
+  """
+  @spec held_names(Ash.Changeset.t()) :: [String.t()]
+  def held_names(changeset), do: changeset.context[:kiln_held_fields] || []
+
+  defp stash_held(changeset, held),
+    do: Ash.Changeset.set_context(changeset, %{kiln_held_fields: Enum.map(held, & &1.name)})
+
+  # Carry each held field's value through the write (#2605). Its type is one
+  # this release cannot coerce or check, so the value is never re-derived,
+  # only kept:
+  #
+  #   * absent from the payload, the stored value stays (an update);
+  #   * `:strict`: a supplied value must equal the stored one (a client
+  #     writing back the map it read), anything else is refused;
+  #   * `:drop` (a restore, a promote, a copy): a supplied value is carried
+  #     verbatim — it is a whole map from somewhere this site wrote. (Not an
+  #     import, which passes `custom_fields_held: :drop` and holds nothing.)
+  #
+  # A duplicate leaves a held field that is unique blank, as it does any
+  # other unique field (#2276).
+  defp hold([], _changeset, _supplied, _mode, acc), do: acc
+
+  defp hold(held, changeset, supplied, mode, acc) do
+    stored = held_base(changeset)
+    blank_unique? = changeset.context[:custom_fields_unique] == :blank
+
+    Enum.reduce(held, acc, fn def, {cleaned, errors} = acc ->
+      name = def.name
+
+      cond do
+        blank_unique? and UniqueValues.unique_def?(def) ->
+          acc
+
+        Map.has_key?(supplied, name) and mode == :drop ->
+          {Map.put(cleaned, name, supplied[name]), errors}
+
+        Map.has_key?(supplied, name) and supplied[name] != Map.get(stored, name) ->
+          {cleaned, [held_error(def) | errors]}
+
+        Map.has_key?(stored, name) ->
+          {Map.put(cleaned, name, stored[name]), errors}
+
+        true ->
+          acc
+      end
+    end)
+  end
+
+  # What a held field holds now: a restore's `existing` is `%{}`, so this is
+  # read off the record, not the merge base.
+  defp held_base(%{action_type: :create}), do: %{}
+  defp held_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
+
+  defp held_error(def) do
+    error(
+      def,
+      "can't be changed: its field type (#{def.field_type}) is not one this release " <>
+        "knows. Upgrade Kiln or reinstall the plugin that provides it, or delete the field"
+    )
+  end
+
   # The keys the caller actually sent, before the merge and the defaults
   # filled the rest in. `KilnCMS.I18n.Validations.SharedFieldsReadOnly` judges
   # only these: a default this change filled into a key the payload never
@@ -573,21 +778,62 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   @spec supplied_keys(Ash.Changeset.t()) :: [String.t()] | nil
   def supplied_keys(changeset), do: changeset.context[:kiln_custom_fields_supplied]
 
+  defp stash_defaulted(changeset, names),
+    do: Ash.Changeset.set_context(changeset, %{kiln_custom_fields_defaulted: names})
+
+  @doc """
+  The keys a dynamic default (#2286) stands in for on this write: the payload
+  left them blank or absent. A field grant does not count them as the editor's
+  change.
+  """
+  @spec defaulted_keys(Ash.Changeset.t()) :: [String.t()]
+  def defaulted_keys(changeset), do: changeset.context[:kiln_custom_fields_defaulted] || []
+
+  @doc """
+  One error per required custom field that `changeset` would leave blank on
+  the record — read off the `custom_fields` it writes, after `required_when`
+  (#2277) has settled. Computed fields never count: they cannot be required.
+
+  The check `KilnCMS.CMS.Validations.RequiredCustomFields` runs at publish. A
+  write that never names `custom_fields` does not run the editable pass, and
+  the editor's scaffold create defers `required` (module doc, "A new draft
+  from the editor may start blank"), so a draft can reach Publish with a
+  required field still empty.
+  """
+  @spec missing_required(Ash.Changeset.t()) :: [Exception.t()]
+  def missing_required(changeset) do
+    defs = stashed_definitions(changeset) || definitions_for(changeset)
+
+    values =
+      changeset
+      |> Ash.Changeset.get_attribute(:custom_fields)
+      |> Kernel.||(%{})
+      |> stringify_keys()
+
+    defs
+    |> Enum.reject(&(&1.field_type == :computed))
+    |> Conditions.apply_to(values, required_when: true)
+    |> Enum.filter(&(&1.required and blank_for?(&1, Map.get(values, &1.name))))
+    |> Enum.map(&error(&1, "is required before publishing"))
+  end
+
   # Resolve one definition's value and fold it into the {cleaned, errors} acc.
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field
   # they omitted keeps its `existing` stored value (the merge); a field with
   # neither falls to its default (fresh field / create).
-  defp accumulate(def, supplied, existing, {read_opts, mode}, {cleaned, errors}) do
+  defp accumulate(def, supplied, existing, {read_opts, mode, check?}, {cleaned, errors}) do
+    ctx = {read_opts, mode, check?}
+
     cond do
       Map.has_key?(supplied, def.name) ->
         def
-        |> resolve_field(Map.get(supplied, def.name), read_opts, mode)
-        |> with_links(
-          def,
+        |> resolve_field(
           Map.get(supplied, def.name),
-          Map.get(existing, def.name),
-          {read_opts, mode}
+          read_opts,
+          {mode, grandfather(check?, Map.get(existing, def.name))}
         )
+        |> constrain(def, Map.get(existing, def.name), check?)
+        |> with_links(def, Map.get(supplied, def.name), Map.get(existing, def.name), ctx)
         |> fold(def, cleaned, errors)
 
       Map.has_key?(existing, def.name) ->
@@ -599,10 +845,61 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
       true ->
         def
-        |> resolve_field(nil, read_opts, mode)
-        |> with_links(def, def.default, nil, {read_opts, mode})
+        |> resolve_field(nil, read_opts, {mode, grandfather(check?, nil)})
+        |> constrain(def, nil, check?)
+        |> with_links(def, def.default, nil, ctx)
         |> fold(def, cleaned, errors)
     end
+  end
+
+  # What a group row is compared against to be left unchecked: the rows the
+  # field stored, or nothing when constraints are off (every row passes).
+  defp grandfather(false, _stored), do: :skip
+  defp grandfather(true, stored), do: {:rows, List.wrap(stored)}
+
+  # Value constraints (#2276) on a coerced value. A value equal to the stored
+  # one is grandfathered — a form resubmits every field, and a constraint
+  # tightened since must not reject what the record already holds. Groups
+  # check their own rows (`coerce_row`), where the row index is still known.
+  defp constrain({:ok, _value} = ok, %{field_type: :group}, _stored, _check?), do: ok
+  defp constrain({:ok, _value} = ok, _def, _stored, false), do: ok
+
+  defp constrain({:ok, value} = ok, def, stored, true) do
+    cond do
+      value == stored ->
+        ok
+
+      stored_item_list?(def, value, stored) ->
+        constrain_problems(ok, new_items(def, value, stored))
+
+      true ->
+        constrain_problems(ok, FieldConstraints.check(def, value))
+    end
+  end
+
+  defp constrain(other, _def, _stored, _check?), do: other
+
+  defp constrain_problems(ok, []), do: ok
+  defp constrain_problems(_ok, problems), do: {:errors, problems}
+
+  # A scalar list (`multiple` string, integer, date, …) is checked per item;
+  # an item already stored is not re-litigated, so adding a tag to a list
+  # holding one now-too-long tag — or a score to a list holding one above a
+  # since-tightened `max` — still saves. Only the items it did not hold are
+  # checked, each under its own position (`scores[2]`).
+  defp stored_item_list?(%{multiple: true, field_type: type}, value, stored)
+       when type in @scalar_list_types,
+       do: is_list(value) and is_list(stored)
+
+  defp stored_item_list?(_def, _value, _stored), do: false
+
+  defp new_items(def, value, stored) do
+    value
+    |> Enum.with_index()
+    |> Enum.reject(fn {item, _index} -> item in stored end)
+    |> Enum.flat_map(fn {item, index} ->
+      FieldConstraints.check(def, item, "#{def.name}[#{index}]")
+    end)
   end
 
   # --- link fields (R3) ----------------------------------------------------------
@@ -665,15 +962,16 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # One connection's link values: per link field, the supplied value
   # (coerced), else the one this connection stored, else the default.
-  defp link_item(item, input, links, stored, {read_opts, mode}) do
+  defp link_item(item, input, links, stored, {read_opts, mode, check?}) do
     given = link_input(input)
     kept = Map.get(stored, item["id"], %{})
 
     {cleaned, problems} =
       Enum.reduce(links, {%{}, []}, fn link, {cleaned, problems} ->
-        case link_value(link, given, kept, read_opts) do
+        case link_value(link, given, kept, read_opts, check?) do
           :skip -> {cleaned, problems}
           {:ok, value} -> {Map.put(cleaned, link.name, value), problems}
+          {:error, {:full, text}} -> {cleaned, [text | problems]}
           {:error, message} -> {cleaned, ["#{link.label} #{message}" | problems]}
         end
       end)
@@ -687,13 +985,31 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
-  defp link_value(link, given, kept, read_opts) do
+  defp link_value(link, given, kept, read_opts, check?) do
     cond do
-      Map.has_key?(given, link.name) -> resolve(link, Map.get(given, link.name), read_opts)
-      Map.has_key?(kept, link.name) -> {:ok, Map.get(kept, link.name)}
-      true -> resolve(link, nil, read_opts)
+      Map.has_key?(given, link.name) ->
+        link
+        |> resolve(Map.get(given, link.name), read_opts)
+        |> link_constraints(link, Map.get(kept, link.name), check?)
+
+      Map.has_key?(kept, link.name) ->
+        {:ok, Map.get(kept, link.name)}
+
+      true ->
+        resolve(link, nil, read_opts)
     end
   end
+
+  # The same constraints a top-level field gets, on a connection's value; the
+  # first problem stands for the item (`link_item` joins what it collects).
+  defp link_constraints({:ok, value} = ok, link, kept, true) when value != kept do
+    case FieldConstraints.check(link, value, link.name) do
+      [] -> ok
+      [{_path, _label, text} | _] -> {:error, text}
+    end
+  end
+
+  defp link_constraints(result, _link, _kept, _check?), do: result
 
   defp link_input(%{"link" => %{} = link}), do: stringify_keys(link)
   defp link_input(%{link: %{} = link}), do: stringify_keys(link)
@@ -717,15 +1033,20 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # --- groups ------------------------------------------------------------------
 
-  defp resolve_field(%{field_type: :group} = def, raw, _read_opts, mode),
-    do: resolve_group(def, raw, mode)
+  defp resolve_field(%{field_type: :group} = def, raw, _read_opts, {mode, held}),
+    do: resolve_group(def, raw, mode, held)
 
   defp resolve_field(def, raw, read_opts, _mode), do: resolve(def, raw, read_opts)
+
+  # Whether a coerced group row still has to meet its sub-fields' constraints:
+  # not when constraints are off, nor when the field already stores that row.
+  defp row_unchecked?(:skip, _row), do: true
+  defp row_unchecked?({:rows, stored}, row), do: row in stored
 
   # A group's value from what the caller sent: `:skip` when there are no rows
   # and none are required, else one coerced object (or a list of them), or
   # every problem found, each under its path.
-  defp resolve_group(def, raw, mode) do
+  defp resolve_group(def, raw, mode, held) do
     rows =
       raw
       |> group_rows()
@@ -735,10 +1056,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     cond do
       rows == [] and def.required -> {:error, "is required"}
       rows == [] -> :skip
-      def.multiple -> coerce_rows(rows, def, mode)
+      def.multiple -> coerce_rows(rows, def, mode, held)
       # A single group handed a list (stored while the field was `multiple`)
       # keeps its first row, as a single media field keeps its first image.
-      true -> rows |> hd() |> elem(0) |> coerce_row(def, def.name, mode) |> one_row()
+      true -> rows |> hd() |> elem(0) |> coerce_row(def, def.name, mode, held) |> one_row()
     end
   end
 
@@ -751,10 +1072,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   defp blank_row?(row), do: blank?(row)
 
-  defp coerce_rows(rows, def, mode) do
+  defp coerce_rows(rows, def, mode, held) do
     {kept, problems} =
       Enum.reduce(rows, {[], []}, fn {row, index}, {kept, problems} ->
-        case coerce_row(row, def, "#{def.name}[#{index}]", mode) do
+        case coerce_row(row, def, "#{def.name}[#{index}]", mode, held) do
           {:ok, cleaned} -> {[cleaned | kept], problems}
           {:errors, found} -> {kept, problems ++ found}
         end
@@ -771,9 +1092,13 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # One object: each sub-field coerced from its key (or its default when the
   # key is absent), and every key no sub-field declares refused.
-  defp coerce_row(%{} = row, def, path, mode) when not is_struct(row) do
+  defp coerce_row(%{} = row, def, path, mode, held) when not is_struct(row) do
     given = stringify_keys(row)
-    subs = FieldDefinition.group_fields(def)
+
+    subs =
+      Conditions.apply_to(FieldDefinition.group_fields(def), given,
+        required_when: mode == :strict
+      )
 
     {cleaned, problems} =
       Enum.reduce(subs, {%{}, []}, fn sub, {cleaned, problems} ->
@@ -784,13 +1109,22 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         end
       end)
 
-    case Enum.reverse(problems) ++ undefined_sub_fields(given, subs, def, path, mode) do
+    # Constraints (#2276) on the coerced values, under this row's index. A row
+    # the field already stores is left alone.
+    constraints =
+      if row_unchecked?(held, cleaned),
+        do: [],
+        else: FieldConstraints.check_row(def, cleaned, path)
+
+    case Enum.reverse(problems) ++
+           undefined_sub_fields(given, subs, def, path, mode) ++ constraints do
       [] -> {:ok, cleaned}
       problems -> {:errors, problems}
     end
   end
 
-  defp coerce_row(_row, def, path, _mode), do: {:errors, [{path, def.label, "must be an object"}]}
+  defp coerce_row(_row, def, path, _mode, _held),
+    do: {:errors, [{path, def.label, "must be an object"}]}
 
   # Sub-fields are scalar (`FieldDefinition.link_field_types/0`), so a nested
   # object or list is refused before it reaches a coercion that would
@@ -837,6 +1171,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
+  # A key/value list (#2278) has no parts: it is empty when it holds no pair,
+  # or only pairs with neither key nor value. Never stored as `[]`.
+  defp blank_for?(%{field_type: :key_value}, value) when is_list(value),
+    do: Enum.all?(value, &blank_pair?/1)
+
+  defp blank_for?(%{field_type: :key_value}, value) when is_map(value) and not is_struct(value),
+    do: map_size(value) == 0
+
   # Blankness, per field type. A **composite** type (one declaring
   # `input_parts/1`, e.g. `:geolocation`) submits a map of parts, and an
   # untouched widget submits a map of blanks — that is the field being empty.
@@ -863,12 +1205,19 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
        when type in [:media, :reference] and is_list(value),
        do: Enum.all?(value, &blank?/1)
 
-  # A multiple select's picker, and a list of phrases, post the same leading
-  # `""`, so the same rule — and a single one handed a list follows it too.
-  defp blank_for?(%{field_type: type}, value) when type in [:select, :string] and is_list(value),
-    do: Enum.all?(value, &blank?/1)
+  # A multiple select's picker, a list of phrases and every other scalar list
+  # post the same leading `""`, so the same rule — and a single one handed a
+  # list follows it too.
+  defp blank_for?(%{field_type: type}, value)
+       when type in @scalar_list_types and is_list(value),
+       do: Enum.all?(value, &blank?/1)
 
   defp blank_for?(_def, value), do: blank?(value)
+
+  defp blank_pair?(%{} = pair) when not is_struct(pair),
+    do: pair |> Map.values() |> Enum.all?(&blank?/1)
+
+  defp blank_pair?(other), do: blank?(other)
 
   defp composite?(%{field_type: type} = def) do
     case KilnCMS.CMS.FieldTypes.get(type) do
@@ -921,11 +1270,24 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     with {:ok, items} <- coerce_phrases(value), do: within_bounds(items, def)
   end
 
-  # A single select or string handed a list (stored while the field was
-  # multiple) keeps its first item, as a single media field does.
+  # A typed list (`ScalarLists.typed/0`: numbers, dates, links, …): each item
+  # coerced as the single field would coerce it, then counted.
+  defp coerce(value, %{field_type: type, multiple: true} = def, _read_opts)
+       when type in @typed_list_types do
+    with {:ok, items} <- coerce_items(value, def), do: within_bounds(items, def)
+  end
+
+  # A single scalar field handed a list (stored while the field was multiple —
+  # a working copy, a restored version — or an API client sending an array)
+  # keeps its first item, as a single media field does, rather than
+  # stringifying the whole list into one value.
   defp coerce(value, %{field_type: type} = def, _read_opts)
-       when type in [:select, :string] and is_list(value),
-       do: value |> Enum.reject(&blank?/1) |> List.first() |> coerce(def)
+       when type in @scalar_list_types and is_list(value) do
+    case value |> Enum.reject(&blank?/1) |> List.first() do
+      item when is_binary(item) or is_number(item) -> coerce(item, def)
+      other -> {:error, "must be a single value (got #{inspect(other)})"}
+    end
+  end
 
   defp coerce(value, def, _read_opts), do: coerce(value, def)
 
@@ -944,11 +1306,24 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
-  defp site_person?(id, tenant) do
+  @doc false
+  def site_person?(id, tenant) do
     tenant
     |> KilnCMS.Accounts.Scoping.users_with_tier([:admin, :editor, :viewer])
     |> Enum.any?(&(&1.id == id))
   end
+
+  @doc """
+  One item of a typed list (`KilnCMS.CMS.ScalarLists.typed/0`) as the list
+  would store it — `{:ok, value}` or `{:error, message}` — so the content
+  editor can tell that a date-time picked as `T10:00` repeats a stored
+  `T10:00:00` (#2289). Any other definition gets the item back unchanged.
+  """
+  @spec coerce_item(map(), term()) :: {:ok, term()} | {:error, String.t()}
+  def coerce_item(%{field_type: type} = definition, item) when type in @typed_list_types,
+    do: coerce(item, Map.put(definition, :multiple, false))
+
+  def coerce_item(_definition, item), do: {:ok, item}
 
   # --- coercion to JSON-native values ----------------------------------------
 
@@ -1080,6 +1455,61 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       |> then(&{:ok, &1})
     end
   end
+
+  # A typed list's items: blanks dropped, a string item holding several lines
+  # split into one item per line (as a list of phrases is), each coerced by
+  # the single field's own rules (`multiple: false` — a built-in such as
+  # `:email` goes through its module's `cast/2`), repeats dropped *after*
+  # coercion (so `#FFF` and `#ffffff` are one colour) unless the type keeps
+  # them (numbers), order kept. An item that is not a string or a number, or
+  # a string holding a JSON-encoded list, is refused rather than stored.
+  defp coerce_items(value, %{field_type: type} = def) do
+    raw = value |> List.wrap() |> Enum.reject(&blank?/1)
+    {_items, others} = Enum.split_with(raw, &(is_binary(&1) or is_number(&1)))
+
+    cond do
+      others != [] ->
+        {:error, "must be a list of values (got #{inspect(hd(others))})"}
+
+      Enum.any?(raw, &json_list?(trim_item(&1))) ->
+        {:error, "holds a JSON-encoded list — send the items as a list instead"}
+
+      true ->
+        with {:ok, items} <- coerce_each(raw, Map.put(def, :multiple, false)) do
+          {:ok, if(ScalarLists.distinct?(type), do: Enum.uniq(items), else: items)}
+        end
+    end
+  end
+
+  # Each item coerced as the single field (`single`) would coerce it, in
+  # order; the first refusal is named by its position.
+  defp coerce_each(raw, single) do
+    raw
+    |> Enum.flat_map(&split_item/1)
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {item, position}, {:ok, acc} ->
+      case coerce(item, single) do
+        {:ok, coerced} -> {:cont, {:ok, [coerced | acc]}}
+        {:error, message} -> {:halt, {:error, "item #{position} #{message}"}}
+      end
+    end)
+    |> case do
+      {:ok, items} -> {:ok, Enum.reverse(items)}
+      error -> error
+    end
+  end
+
+  defp split_item(item) when is_binary(item) do
+    item
+    |> String.split(~r/\R/u)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp split_item(item), do: [item]
+
+  defp trim_item(item) when is_binary(item), do: String.trim(item)
+  defp trim_item(item), do: item
 
   defp check_terms(terms, def) do
     line = KilnCMS.Limits.line()
@@ -1473,6 +1903,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # A problem inside a group, named in the message by its path rather than
   # the field's name. `value` stays the group's name: it is what the editor
   # files a custom-field error under.
+  defp path_error(def, {_path, _label, {:full, text}}) do
+    InvalidAttribute.exception(field: :custom_fields, message: text, value: def.name)
+  end
+
   defp path_error(def, {path, label, message}) do
     InvalidAttribute.exception(
       field: :custom_fields,

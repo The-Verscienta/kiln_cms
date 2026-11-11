@@ -19,7 +19,15 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     only: [blank_to_nil: 1, selected_tag_ids: 2, user_label: 1, with_counts: 2]
 
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.FieldWidgets
+  alias KilnCMSWeb.ContentEditor.Conditional
   alias KilnCMSWeb.ContentEditor.GroupRows
+
+  # The scalar lists that render one input per item (#2289); a multiple
+  # `:select` keeps its tag picker. Of those, a date, date-time, time or
+  # colour box holds one whole value and adds it by Enter or its Add button.
+  @list_input_types KilnCMS.CMS.ScalarLists.types() -- [:select]
+  @whole_value_types [:date, :datetime, :time, :color]
 
   require Logger
 
@@ -666,23 +674,40 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  # A list of phrases (`multiple` `:string` — symptoms, indications,
-  # synonyms): one text input per item, each editable in place, removable and
-  # dragged by its handle, plus an "add" box (`TermPicker` in lines mode) that
-  # adds an item on Enter and splits a pasted block into one item per line.
-  # No vocabulary and no suggestions: these lists run to hundreds of distinct
-  # phrases. The inputs post `name[]` in screen order behind the same blank
-  # sentinel as the tag picker. An item emptied in place keeps its row while
-  # the form holds it (`list_items/1`) — dropping it on the next patch would
-  # take the input out from under the author retyping it — and is dropped on
-  # save.
-  def custom_field_input(%{definition: %{field_type: :string, multiple: true}} = assigns) do
+  # A scalar list (`multiple` on a `:string` — symptoms, synonyms — or on a
+  # typed scalar: numbers, dates, times, links, addresses, phone numbers,
+  # colours, slugs; #2289): one input per item, each editable in place,
+  # removable and dragged by its handle, plus an "add" box (`TermPicker`).
+  # Each item's input is the one the single field of that type renders
+  # (`input_kind/1`: a date picker for a date, `step="any"` for a float),
+  # less `required` — the list's bounds are `min_items`/`max_items`.
+  #
+  # Text-like boxes (phrases, numbers, links, addresses, phone numbers,
+  # slugs) add on Enter and split a pasted block into one item per line
+  # (lines mode). A date, date-time, time or colour box holds one value and
+  # adds it on Enter or its Add button (`data-split="none"`), never on input
+  # or change: a picker fires those while the value is half chosen.
+  #
+  # No vocabulary and no suggestions — a multiple `:select` keeps its tag
+  # picker below. The inputs post `name[]` in screen order behind the same
+  # blank sentinel as the tag picker. An item emptied in place keeps its row
+  # while the form holds it (`list_items/1`) — dropping it on the next patch
+  # would take the input out from under the author retyping it — and is
+  # dropped on save.
+  def custom_field_input(%{definition: %{field_type: type, multiple: true}} = assigns)
+      when type in @list_input_types do
     items = list_items(assigns.value)
+    {input_type, extra} = input_kind(assigns.definition)
+    item_attrs = Map.drop(extra, [:placeholder, :required])
 
     assigns =
       assigns
       |> assign(:items, items)
       |> assign(:full?, full?(assigns.definition, length(items)))
+      |> assign(:input_type, input_type)
+      |> assign(:item_attrs, item_attrs)
+      |> assign(:whole?, type in @whole_value_types)
+      |> assign(:entry_placeholder, Map.get(extra, :placeholder))
 
     ~H"""
     <div
@@ -722,7 +747,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             <.icon name="hero-bars-2" class="size-3.5" />
           </span>
           <input
-            type="text"
+            type={@input_type}
             id={"#{cf_id(@definition)}-#{index}"}
             name={"#{@name}[]"}
             value={item}
@@ -730,6 +755,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
               gettext("%{field}, item %{position}", field: @definition.label, position: index + 1)
             }
             class="field-input min-w-0 flex-1 py-1 text-sm"
+            {@item_attrs}
           />
           <button
             type="button"
@@ -746,23 +772,37 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       <div :if={!@full?} class="flex items-center gap-1">
         <span class="p-1 text-base-content/30"><.icon name="hero-plus" class="size-3.5" /></span>
         <input
-          type="text"
+          type={@input_type}
           id={"#{cf_id(@definition)}-entry"}
           phx-hook="TermPicker"
           data-field={@definition.name}
           data-count={length(@items)}
-          data-split="lines"
+          data-split={if @whole?, do: "none", else: "lines"}
           autocomplete="off"
           enterkeyhint="enter"
-          placeholder={gettext("Add an item…")}
+          placeholder={@entry_placeholder || gettext("Add an item…")}
           aria-label={gettext("Add an item to %{field}", field: @definition.label)}
           class="field-input min-w-0 flex-1 border-dashed py-1 text-sm"
+          {@item_attrs}
         />
+        <button
+          :if={@whole?}
+          type="button"
+          id={"#{cf_id(@definition)}-add"}
+          data-list-add
+          aria-label={gettext("Add to %{field}", field: @definition.label)}
+          class="btn btn-ghost btn-sm shrink-0"
+        >
+          {gettext("Add")}
+        </button>
       </div>
       <p class="mt-1 text-xs text-base-content/60">
         <span :if={@definition.help_text}>{@definition.help_text}</span>
-        <span :if={!@full?}>
+        <span :if={!@full? and !@whole?}>
           {gettext("Press Enter to add. Paste several lines to add one item per line.")}
+        </span>
+        <span :if={!@full? and @whole?}>
+          {gettext("Press Enter to add.")}
         </span>
         <span :if={@full?}>
           {gettext("At the limit of %{max} items.", max: @definition.max_items)}
@@ -771,6 +811,211 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       <.custom_field_errors_list definition={@definition} errors={@errors} />
     </div>
     """
+  end
+
+  # A multiple select (several terms) renders as its widget says (#2284):
+  # tags, the default, or a box per option. A field listing more options than
+  # `FieldWidgets.option_cap/0` keeps the tags whatever is stored.
+  def custom_field_input(%{definition: %{field_type: :select, multiple: true}} = assigns) do
+    case FieldWidgets.effective(assigns.definition) do
+      "checkboxes" -> select_checkboxes_input(assigns)
+      _tags -> select_tags_input(assigns)
+    end
+  end
+
+  # A single select likewise: the dropdown, the default, or one radio per
+  # option, drawn as a list (`radios`) or a segmented row (`buttons`).
+  def custom_field_input(%{definition: %{field_type: :select}} = assigns) do
+    case FieldWidgets.effective(assigns.definition) do
+      widget when widget in ["radios", "buttons"] ->
+        select_choice_input(assign(assigns, :widget, widget))
+
+      _dropdown ->
+        select_dropdown_input(assigns)
+    end
+  end
+
+  # A console account (#2044): one of the site's people, by id. The field is
+  # always private, which the label says, so a writer knows the choice stays
+  # in the console. An id that is no longer on the roster (someone who left
+  # the site) is still shown, as itself, so saving without touching the
+  # field is what tells the writer.
+  def custom_field_input(%{definition: %{field_type: :user}} = assigns) do
+    assigns =
+      assign(
+        assigns,
+        :stray,
+        is_binary(assigns.value) and assigns.value != "" and
+          not Enum.any?(assigns.options, fn {_label, id} -> id == assigns.value end)
+      )
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 flex items-center gap-1.5 text-sm font-medium">
+        {@definition.label}
+        <span
+          title={gettext("Only editors and admins see this")}
+          class="inline-flex items-center gap-1 text-xs font-normal text-base-content/60"
+        >
+          <.icon name="hero-lock-closed" class="size-3" />{gettext("private")}
+        </span>
+      </label>
+      <select
+        id={cf_id(@definition)}
+        name={@name}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="field-select"
+      >
+        <option value="">{gettext("— None —")}</option>
+        <option :if={@stray} value={@value} selected>{@value}</option>
+        <option :for={{label, id} <- @options} value={id} selected={to_string(@value) == id}>
+          {label}
+        </option>
+      </select>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
+  # A rich `:text` field (the default `format`): the TipTap field editor over
+  # a hidden input holding the HTML (`RichTextField` hook, `mountField` in
+  # rich_text.js). The editor and its toolbar are the hook's, behind
+  # `phx-update="ignore"`; the hidden input stays outside it, so a patch from
+  # the server (a restore, a lock) still reaches it and the hook follows.
+  #
+  # A value that is JSON data (a list stored as text, awaiting
+  # `mix kiln.fields.convert`) keeps the plain textarea — TipTap would wrap it
+  # in a paragraph — as does a `:plain` field.
+  def custom_field_input(%{definition: %{field_type: :text} = definition} = assigns)
+      when not is_map_key(definition, :format) or definition.format == :rich do
+    if KilnCMS.CMS.TextFormat.json_data?(assigns.value),
+      do: plain_text_input(assigns),
+      else: rich_text_input(assigns)
+  end
+
+  # A plain `:text` field: the textarea, or one line when its widget says so
+  # (#2284). A value already holding a line break keeps the textarea — a
+  # one-line input would drop the breaks on the next save.
+  def custom_field_input(%{definition: %{field_type: :text}} = assigns) do
+    if FieldWidgets.effective(assigns.definition) == "single_line" and
+         not multi_line?(assigns.value),
+       do: single_line_input(assigns),
+       else: plain_text_input(assigns)
+  end
+
+  # A `:group` field (structured rows): its sub-fields' own inputs, one set
+  # for a single group and one per row for a repeating one. The wire shape —
+  # rows keyed by position, the blank `_` / `_row` markers — is
+  # `KilnCMSWeb.ContentEditor.GroupRows`'s, which folds it back into the list
+  # `ApplyCustomFields` coerces. Add, remove and move are server-side edits of
+  # the form params (`group_row_*`), as a gallery's are, so the rows never
+  # hold state the form doesn't; dragging a row by its handle sends the same
+  # reorder through the shared `Sortable` hook.
+  #
+  # `value` must be what was posted while the form holds it — not the cleaned
+  # value, which drops a blank row the moment it is added.
+  def custom_field_input(%{definition: %{field_type: :group}} = assigns) do
+    definition = assigns.definition
+
+    assigns =
+      assigns
+      |> assign(:subs, FieldDefinition.group_fields(definition))
+      |> assign(:problems, GroupRows.errors(assigns.errors, definition.name))
+
+    if definition.multiple,
+      do: group_rows_input(assign(assigns, :rows, GroupRows.rows(assigns.value))),
+      else: group_input(assign(assigns, :row, GroupRows.row(assigns.value)))
+  end
+
+  # A `:key_value` field (#2278): one `key=value` per line. The stored pairs
+  # are shown as lines; after a failed save, the text that was posted.
+  def custom_field_input(%{definition: %{field_type: :key_value}} = assigns) do
+    assigns = assign(assigns, :kv_text, key_value_text(assigns.value))
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
+      <textarea
+        id={cf_id(@definition)}
+        name={@name}
+        rows="5"
+        spellcheck="false"
+        placeholder={@placeholder || gettext("key=value, one per line")}
+        required={@definition.required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="field-input font-mono text-xs"
+      >{@kv_text}</textarea>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
+  # A `:json` field (#2278): a monospace textarea, with the stored structure
+  # pretty-printed. After a failed save the value is what was posted, so the
+  # editor sees their own text (and the parse error beside it), not a
+  # normalised copy.
+  def custom_field_input(%{definition: %{field_type: :json}} = assigns) do
+    assigns = assign(assigns, :json_text, json_text(assigns.value))
+
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
+      </label>
+      <textarea
+        id={cf_id(@definition)}
+        name={@name}
+        rows="8"
+        spellcheck="false"
+        placeholder={@placeholder}
+        required={@definition.required}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        class="field-input font-mono text-xs"
+      >{@json_text}</textarea>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
+  # Everything else is registry-driven. A composite field type
+  # (`Kiln.FieldType` declaring `input_parts/1`, e.g. `:geolocation`) renders a
+  # labelled input per part; anything else renders a single `<input>`.
+  #
+  # A type declaring `input_hook/1` (#1918) gets its widget wrapped in the
+  # hook's element, so the hook sees every part of a composite field.
+  def custom_field_input(assigns) do
+    case field_type_hook(assigns.definition) do
+      nil ->
+        bare_custom_field_input(assigns)
+
+      %{} = hook ->
+        assigns = assign(assigns, :hook, hook)
+
+        ~H"""
+        <div
+          id={cf_hook_id(@definition)}
+          phx-hook={@hook.hook}
+          data-field={@definition.name}
+          data-config={@hook.config}
+        >
+          {bare_custom_field_input(assigns)}
+        </div>
+        """
+    end
   end
 
   # A multiple select (several terms): the chosen terms as removable chips,
@@ -788,7 +1033,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # The leading blank `name[]` input makes an emptied field submit at all (see
   # the gallery above); `ApplyCustomFields` drops it. The text box has no
   # `name`, so what is half-typed in it is never submitted.
-  def custom_field_input(%{definition: %{field_type: :select, multiple: true}} = assigns) do
+  defp select_tags_input(assigns) do
     terms = select_terms(assigns.value)
 
     assigns =
@@ -905,7 +1150,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  def custom_field_input(%{definition: %{field_type: :select}} = assigns) do
+  defp select_dropdown_input(assigns) do
     ~H"""
     <div>
       <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
@@ -931,45 +1176,182 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  # A console account (#2044): one of the site's people, by id. The field is
-  # always private, which the label says, so a writer knows the choice stays
-  # in the console. An id that is no longer on the roster (someone who left
-  # the site) is still shown, as itself, so saving without touching the
-  # field is what tells the writer.
-  def custom_field_input(%{definition: %{field_type: :user}} = assigns) do
+  # A single select as one radio per option (#2284): a list (`radios`) or a
+  # segmented row (`buttons`), the same inputs either way. A fieldset, since
+  # the legend is what names every radio in it.
+  #
+  # The hidden blank input comes first, so a group with nothing checked still
+  # posts the field (an absent key would keep the stored value). "— None —"
+  # is offered while the field is optional; a required one carries `required`
+  # on its first radio, which is how a browser requires a radio group. A
+  # stored value that is no longer among the options is shown as its own
+  # radio, checked, so saving without touching the field keeps it.
+  defp select_choice_input(assigns) do
+    current = if is_nil(assigns.value), do: "", else: to_string(assigns.value)
+    options = assigns.definition.options || []
+    stray? = current != "" and current not in options
+
     assigns =
-      assign(
-        assigns,
-        :stray,
-        is_binary(assigns.value) and assigns.value != "" and
-          not Enum.any?(assigns.options, fn {_label, id} -> id == assigns.value end)
-      )
+      assigns
+      |> assign(:current, current)
+      |> assign(:choices, if(stray?, do: options ++ [current], else: options))
+      |> assign(:required?, assigns.definition.required == true)
 
     ~H"""
-    <div>
-      <label for={cf_id(@definition)} class="mb-1 flex items-center gap-1.5 text-sm font-medium">
+    <fieldset
+      id={cf_id(@definition)}
+      role="radiogroup"
+      aria-labelledby={"#{cf_id(@definition)}-label"}
+      aria-required={@required? && "true"}
+      aria-invalid={@errors != [] && "true"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+      data-widget={@widget}
+    >
+      <legend id={"#{cf_id(@definition)}-label"} class="mb-1 block text-sm font-medium">
         {@definition.label}
-        <span
-          title={gettext("Only editors and admins see this")}
-          class="inline-flex items-center gap-1 text-xs font-normal text-base-content/60"
+      </legend>
+      <input type="hidden" name={@name} value="" />
+      <div class={choice_group_class(@widget)}>
+        <label
+          :if={!@required?}
+          for={"#{cf_id(@definition)}-opt-none"}
+          class={choice_class(@widget)}
         >
-          <.icon name="hero-lock-closed" class="size-3" />{gettext("private")}
+          <input
+            type="radio"
+            id={"#{cf_id(@definition)}-opt-none"}
+            name={@name}
+            value=""
+            checked={@current == ""}
+            class={choice_input_class(@widget)}
+          />
+          <span>{gettext("— None —")}</span>
+        </label>
+        <label
+          :for={{option, index} <- Enum.with_index(@choices)}
+          for={"#{cf_id(@definition)}-opt-#{index}"}
+          class={choice_class(@widget)}
+        >
+          <input
+            type="radio"
+            id={"#{cf_id(@definition)}-opt-#{index}"}
+            name={@name}
+            value={option}
+            checked={@current == option}
+            required={@required? and index == 0}
+            class={choice_input_class(@widget)}
+          />
+          <span>{FieldDefinition.option_label(@definition, option)}</span>
+        </label>
+      </div>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </fieldset>
+    """
+  end
+
+  defp choice_group_class("buttons"),
+    do: "inline-flex max-w-full flex-wrap gap-0.5 rounded-md bg-base-200 p-0.5"
+
+  defp choice_group_class(_radios), do: "space-y-1"
+
+  # The buttons are labels over visually hidden radios: the checked one is
+  # the raised segment, and keyboard focus rings the label it sits in.
+  defp choice_class("buttons"),
+    do:
+      "cursor-pointer select-none rounded px-3 py-1 text-sm font-medium text-base-content/70 transition-colors hover:text-base-content has-[:checked]:bg-base-100 has-[:checked]:text-base-content has-[:checked]:shadow-sm has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary"
+
+  defp choice_class(_radios), do: "flex cursor-pointer items-center gap-2 text-sm"
+
+  defp choice_input_class("buttons"), do: "sr-only"
+  defp choice_input_class(_radios), do: "size-4 accent-primary"
+
+  # A multiple select as one checkbox per option (#2284). The boxes post
+  # `name[]` behind the same blank sentinel as the tag picker, so an emptied
+  # field still submits; they post in the order they are drawn, so the saved
+  # list is in option order whatever order they were ticked in. Stored terms
+  # no longer among the options (`options`: the field's options and the
+  # record's strays) keep a box of their own, checked, after the options.
+  defp select_checkboxes_input(assigns) do
+    terms = select_terms(assigns.value)
+
+    assigns =
+      assigns
+      |> assign(:terms, terms)
+      |> assign(
+        :choices,
+        Enum.uniq((assigns.definition.options || []) ++ assigns.options ++ terms)
+      )
+      |> assign(:full?, full?(assigns.definition, length(terms)))
+
+    ~H"""
+    <fieldset
+      id={cf_id(@definition)}
+      aria-labelledby={"#{cf_id(@definition)}-label"}
+      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+      data-widget="checkboxes"
+    >
+      <legend
+        id={"#{cf_id(@definition)}-label"}
+        class="mb-1 flex w-full items-baseline justify-between gap-2"
+      >
+        <span class="text-sm font-medium">{@definition.label}</span>
+        <span :if={@terms != []} class="text-xs font-normal tabular-nums text-base-content/70">
+          {ngettext("%{count} term", "%{count} terms", length(@terms))}
         </span>
+      </legend>
+      <input type="hidden" name={"#{@name}[]"} value="" />
+      <div class="grid gap-x-4 gap-y-1 sm:grid-cols-2">
+        <label
+          :for={{term, index} <- Enum.with_index(@choices)}
+          for={"#{cf_id(@definition)}-opt-#{index}"}
+          class="flex cursor-pointer items-center gap-2 text-sm"
+        >
+          <input
+            type="checkbox"
+            id={"#{cf_id(@definition)}-opt-#{index}"}
+            name={"#{@name}[]"}
+            value={term}
+            checked={term in @terms}
+            aria-invalid={@errors != [] && "true"}
+            class="field-checkbox"
+          />
+          <span>{FieldDefinition.option_label(@definition, term)}</span>
+        </label>
+      </div>
+      <p class="mt-1 text-xs text-base-content/70">
+        <span :if={@definition.help_text}>{@definition.help_text}</span>
+        <span :if={@full?}>
+          {gettext("At the limit of %{max} terms.", max: @definition.max_items)}
+        </span>
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </fieldset>
+    """
+  end
+
+  # A plain `:text` field on one line (#2284): the textarea's label,
+  # placeholder, `required` and error wiring on an `<input type="text">`.
+  defp single_line_input(assigns) do
+    ~H"""
+    <div>
+      <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
+        {@definition.label}
       </label>
-      <select
+      <input
+        type="text"
         id={cf_id(@definition)}
         name={@name}
+        value={@value}
+        placeholder={@placeholder}
+        required={@definition.required}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && cf_errors_id(@definition)}
-        class="field-select"
-      >
-        <option value="">{gettext("— None —")}</option>
-        <option :if={@stray} value={@value} selected>{@value}</option>
-        <option :for={{label, id} <- @options} value={id} selected={to_string(@value) == id}>
-          {label}
-        </option>
-      </select>
-      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/60">
+        class="field-input"
+      />
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
         {@definition.help_text}
       </p>
       <.custom_field_errors_list definition={@definition} errors={@errors} />
@@ -977,75 +1359,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  # A rich `:text` field (the default `format`): the TipTap field editor over
-  # a hidden input holding the HTML (`RichTextField` hook, `mountField` in
-  # rich_text.js). The editor and its toolbar are the hook's, behind
-  # `phx-update="ignore"`; the hidden input stays outside it, so a patch from
-  # the server (a restore, a lock) still reaches it and the hook follows.
-  #
-  # A value that is JSON data (a list stored as text, awaiting
-  # `mix kiln.fields.convert`) keeps the plain textarea — TipTap would wrap it
-  # in a paragraph — as does a `:plain` field.
-  def custom_field_input(%{definition: %{field_type: :text} = definition} = assigns)
-      when not is_map_key(definition, :format) or definition.format == :rich do
-    if KilnCMS.CMS.TextFormat.json_data?(assigns.value),
-      do: plain_text_input(assigns),
-      else: rich_text_input(assigns)
-  end
-
-  def custom_field_input(%{definition: %{field_type: :text}} = assigns),
-    do: plain_text_input(assigns)
-
-  # A `:group` field (structured rows): its sub-fields' own inputs, one set
-  # for a single group and one per row for a repeating one. The wire shape —
-  # rows keyed by position, the blank `_` / `_row` markers — is
-  # `KilnCMSWeb.ContentEditor.GroupRows`'s, which folds it back into the list
-  # `ApplyCustomFields` coerces. Add, remove and move are server-side edits of
-  # the form params (`group_row_*`), as a gallery's are, so the rows never
-  # hold state the form doesn't; dragging a row by its handle sends the same
-  # reorder through the shared `Sortable` hook.
-  #
-  # `value` must be what was posted while the form holds it — not the cleaned
-  # value, which drops a blank row the moment it is added.
-  def custom_field_input(%{definition: %{field_type: :group}} = assigns) do
-    definition = assigns.definition
-
-    assigns =
-      assigns
-      |> assign(:subs, FieldDefinition.group_fields(definition))
-      |> assign(:problems, GroupRows.errors(assigns.errors, definition.name))
-
-    if definition.multiple,
-      do: group_rows_input(assign(assigns, :rows, GroupRows.rows(assigns.value))),
-      else: group_input(assign(assigns, :row, GroupRows.row(assigns.value)))
-  end
-
-  # Everything else is registry-driven. A composite field type
-  # (`Kiln.FieldType` declaring `input_parts/1`, e.g. `:geolocation`) renders a
-  # labelled input per part; anything else renders a single `<input>`.
-  #
-  # A type declaring `input_hook/1` (#1918) gets its widget wrapped in the
-  # hook's element, so the hook sees every part of a composite field.
-  def custom_field_input(assigns) do
-    case field_type_hook(assigns.definition) do
-      nil ->
-        bare_custom_field_input(assigns)
-
-      %{} = hook ->
-        assigns = assign(assigns, :hook, hook)
-
-        ~H"""
-        <div
-          id={cf_hook_id(@definition)}
-          phx-hook={@hook.hook}
-          data-field={@definition.name}
-          data-config={@hook.config}
-        >
-          {bare_custom_field_input(assigns)}
-        </div>
-        """
-    end
-  end
+  defp multi_line?(value) when is_binary(value), do: String.contains?(value, ["\n", "\r"])
+  defp multi_line?(_value), do: false
 
   defp rich_text_input(assigns) do
     ~H"""
@@ -1121,6 +1436,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             :for={sub <- @subs}
             group={@definition}
             sub={sub}
+            subs={@subs}
+            row={@row}
             index={nil}
             name={"#{@name}[#{sub.name}]"}
             value={Map.get(@row, sub.name)}
@@ -1252,6 +1569,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
                 :for={sub <- @subs}
                 group={@definition}
                 sub={sub}
+                subs={@subs}
+                row={row}
                 index={index}
                 name={"#{@name}[#{index}][#{sub.name}]"}
                 value={Map.get(row, sub.name)}
@@ -1306,10 +1625,45 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
 
   attr :group, :map, required: true
   attr :sub, :map, required: true
+  # The group's sub-fields and this row's values, for `visible_when` (#2277).
+  attr :subs, :list, required: true
+  attr :row, :map, required: true
   attr :index, :any, required: true
   attr :name, :string, required: true
   attr :value, :any, required: true
   attr :errors, :list, required: true
+
+  # A sub-field with a `visible_when` rule sits in the conditional wrapper
+  # (its rule reads same-row siblings); `required_when` is left to the save,
+  # as `required` is.
+  defp group_cell(assigns) do
+    state = Conditional.effective(assigns.subs, &Map.get(assigns.row, &1))[assigns.sub.name]
+
+    assigns =
+      assigns
+      |> assign(:state, state)
+      |> assign(:cond_id, "cf-cond-" <> group_cell_key(assigns.group, assigns.index, assigns.sub))
+      |> assign(:prefix, String.replace_suffix(assigns.name, "[#{assigns.sub.name}]", ""))
+
+    ~H"""
+    <Conditional.conditional
+      id={@cond_id}
+      definition={@sub}
+      prefix={@prefix}
+      state={@state}
+      required={false}
+    >
+      <.group_cell_input
+        group={@group}
+        sub={@sub}
+        index={@index}
+        name={@name}
+        value={@value}
+        errors={@errors}
+      />
+    </Conditional.conditional>
+    """
+  end
 
   # One sub-field of one row, through the same inputs a top-level field gets,
   # under an id of its own (`custom-field-<group>-<row>-<sub>`). The browser's
@@ -1319,7 +1673,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # A checkbox posts nothing when cleared — no hidden `"false"` — because a
   # posted `"false"` is not blank, and would turn every untouched row into a
   # filled-in one that its other required sub-fields then refuse.
-  defp group_cell(%{sub: %{field_type: :boolean}} = assigns) do
+  defp group_cell_input(%{sub: %{field_type: :boolean}} = assigns) do
     assigns = assign(assigns, :id, group_cell_id(assigns.group, assigns.index, assigns.sub))
 
     ~H"""
@@ -1343,7 +1697,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  defp group_cell(assigns) do
+  defp group_cell_input(assigns) do
     definition = %{
       assigns.sub
       | name: group_cell_key(assigns.group, assigns.index, assigns.sub),
@@ -1498,6 +1852,32 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A select part (`type: "select"`, `options: [{value, label}]`, #2278): the
+  # first option should be the blank one, so an untouched widget submits a
+  # blank part and the field reads as empty.
+  defp composite_part(%{part: %{type: "select"}} = assigns) do
+    current = to_string(composite_part_value(assigns.value, assigns.part.key) || "")
+    assigns = assign(assigns, :current, current)
+
+    ~H"""
+    <label for={cf_part_id(@definition, @part)} class="mb-0.5 block text-xs text-base-content/70">
+      {@part.label}
+    </label>
+    <select
+      id={cf_part_id(@definition, @part)}
+      name={"#{@name}[#{@part.key}]"}
+      aria-invalid={@errors != [] && "true"}
+      aria-describedby={composite_part_describedby(@definition, @part, @errors)}
+      class="field-input"
+    >
+      <option :for={{value, text} <- @part.options} value={value} selected={value == @current}>
+        {text}
+      </option>
+    </select>
+    <.composite_part_help definition={@definition} part={@part} />
+    """
+  end
+
   defp composite_part(assigns) do
     ~H"""
     <label for={cf_part_id(@definition, @part)} class="mb-0.5 block text-xs text-base-content/70">
@@ -1510,11 +1890,40 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       value={composite_part_value(@value, @part.key)}
       required={@definition.required && Map.get(@part, :required?, true)}
       aria-invalid={@errors != [] && "true"}
-      aria-describedby={@errors != [] && cf_errors_id(@definition)}
+      aria-describedby={composite_part_describedby(@definition, @part, @errors)}
       class="field-input"
       {Map.get(@part, :attrs, %{})}
     />
+    <.composite_part_help definition={@definition} part={@part} />
     """
+  end
+
+  # A part's optional `:help` line (translatable, unlike a placeholder),
+  # linked to its control by `aria-describedby`.
+  attr :definition, :map, required: true
+  attr :part, :map, required: true
+
+  defp composite_part_help(assigns) do
+    ~H"""
+    <p
+      :if={Map.get(@part, :help)}
+      id={cf_part_help_id(@definition, @part)}
+      class="mt-0.5 text-xs text-base-content/70"
+    >
+      {@part.help}
+    </p>
+    """
+  end
+
+  defp composite_part_describedby(definition, part, errors) do
+    ids =
+      [
+        Map.get(part, :help) && cf_part_help_id(definition, part),
+        errors != [] && cf_errors_id(definition)
+      ]
+      |> Enum.filter(& &1)
+
+    if ids == [], do: nil, else: Enum.join(ids, " ")
   end
 
   # The same spellings `Kiln.FieldType` implementations accept, because a value
@@ -1532,19 +1941,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # their HTML input kind + extra attributes (min/max/step/readonly/…) via the
   # registry; core types map below.
   defp scalar_custom_field_input(assigns) do
-    definition = assigns.definition
-
-    {input_type, extra} =
-      case KilnCMS.CMS.FieldTypes.get(definition.field_type) do
-        nil -> {custom_input_type(definition.field_type), %{}}
-        module -> {module.input_type(), module.input_attrs(definition)}
-      end
-
-    extra =
-      if input_type == "number" and definition.field_type == :float,
-        do: Map.put_new(extra, :step, "any"),
-        else: extra
-
+    {input_type, extra} = input_kind(assigns.definition)
     assigns = assigns |> assign(:input_type, input_type) |> assign(:extra, extra)
 
     ~H"""
@@ -1572,6 +1969,21 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # The `<input>` a scalar field renders — its HTML type and extra attributes
+  # (min/max/step/pattern/placeholder/…) — whether it is the single field's
+  # one input or an item of its list.
+  defp input_kind(definition) do
+    {input_type, extra} =
+      case KilnCMS.CMS.FieldTypes.get(definition.field_type) do
+        nil -> {custom_input_type(definition.field_type), %{}}
+        module -> {module.input_type(), module.input_attrs(definition)}
+      end
+
+    if input_type == "number" and definition.field_type == :float,
+      do: {input_type, Map.put_new(extra, :step, "any")},
+      else: {input_type, extra}
+  end
+
   attr :definition, :map, required: true
   attr :errors, :list, required: true
 
@@ -1595,12 +2007,37 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   defp select_terms(value) when is_binary(value) and value != "", do: [value]
   defp select_terms(_value), do: []
 
-  # A list of phrases as the form holds it: the posted list less its leading
+  # A scalar list as the form holds it: the posted list less its leading
   # blank sentinel, blank items kept (see the input above); a stored list
-  # never holds a blank, and a stored single string is its one item.
-  defp list_items(["" | items]), do: Enum.map(items, &to_string/1)
-  defp list_items(items) when is_list(items), do: Enum.map(items, &to_string/1)
+  # never holds a blank, and a stored single value is its one item. A stored
+  # item that is no scalar at all (a snapshot left by a retype from a media or
+  # reference list) has no input to show it in, so it is left out — the same
+  # rule `ContentEditorLive` reads the items by, so indexes agree.
+  defp list_items(["" | items]), do: scalar_items(items)
+  defp list_items(items) when is_list(items), do: scalar_items(items)
+  defp list_items(value) when is_number(value), do: [to_string(value)]
   defp list_items(value), do: select_terms(value)
+
+  defp scalar_items(items),
+    do: for(item <- items, is_binary(item) or is_number(item), do: to_string(item))
+
+  defp key_value_text(value) when is_binary(value), do: value
+
+  defp key_value_text(pairs) when is_list(pairs) do
+    Enum.map_join(pairs, "\n", fn
+      %{"key" => key, "value" => value} -> "#{key}=#{value}"
+      _other -> ""
+    end)
+  end
+
+  defp key_value_text(_value), do: ""
+
+  defp json_text(value) when is_binary(value), do: value
+
+  defp json_text(value) when is_map(value) or is_list(value),
+    do: Jason.encode!(value, pretty: true)
+
+  defp json_text(_value), do: ""
 
   defp full?(%{max_items: max}, count) when is_integer(max), do: count >= max
   defp full?(_definition, _count), do: false
@@ -1610,6 +2047,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   defp cf_hook_id(definition), do: "cf-hook-#{definition.name}"
   defp cf_errors_id(definition), do: "custom-field-#{definition.name}-errors"
   defp cf_part_id(definition, part), do: "custom-field-#{definition.name}-#{part.key}"
+  defp cf_part_help_id(definition, part), do: "#{cf_part_id(definition, part)}-help"
 
   # One part of a composite value: the stored/mid-edit map's entry for that key.
   # The value may still be the raw param map during a validate round-trip, so

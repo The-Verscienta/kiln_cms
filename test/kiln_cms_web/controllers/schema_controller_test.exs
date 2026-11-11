@@ -126,4 +126,188 @@ defmodule KilnCMSWeb.SchemaControllerTest do
              "later"
            )
   end
+
+  # A section layout (#2280) is not a field or a type, so it has its own bust
+  # (`Changes.BustFieldLayout`); without it a tab layout would stay out of the
+  # cached document for the TTL.
+  test "a cached document is evicted by a section layout write", %{conn: conn} do
+    actor = admin()
+
+    CMS.create_field_definition!(
+      %{content_type: :page, name: "dosage", label: "Dosage", section: "Clinical"},
+      actor: actor
+    )
+
+    warm = conn |> get(~p"/api/schema") |> json_response(200)
+    dosage = warm["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]["dosage"]
+    refute Map.has_key?(dosage, "x-kiln-section-display")
+
+    section =
+      CMS.create_field_section!(%{content_type: :page, name: "Clinical", display: :tab},
+        actor: actor
+      )
+
+    body = build_conn() |> unique_ip() |> get(~p"/api/schema") |> json_response(200)
+    dosage = body["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]["dosage"]
+    assert dosage["x-kiln-section-display"] == "tab"
+
+    CMS.update_field_section!(section, %{display: :fieldset}, actor: actor)
+
+    body = build_conn() |> unique_ip() |> get(~p"/api/schema") |> json_response(200)
+    dosage = body["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]["dosage"]
+    assert dosage["x-kiln-section-display"] == "fieldset"
+
+    CMS.destroy_field_section!(section, actor: actor)
+
+    body = build_conn() |> unique_ip() |> get(~p"/api/schema") |> json_response(200)
+    dosage = body["$defs"]["content_page"]["properties"]["custom_fields"]["properties"]["dosage"]
+    refute Map.has_key?(dosage, "x-kiln-section-display")
+  end
+
+  describe "format" do
+    defp private_and_public_fields(suffix) do
+      actor = admin()
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "gql_price_#{suffix}", label: "Price", field_type: :float},
+        actor: actor
+      )
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "gql_secret_#{suffix}",
+          label: "Secret",
+          field_type: :string,
+          private: true
+        },
+        actor: actor
+      )
+    end
+
+    test "the unparameterized response is the JSON document, byte for byte", %{conn: conn} do
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      expected =
+        [org_id: org_id, base_url: KilnCMSWeb.Tenant.base_url(org_id)]
+        |> KilnCMS.SchemaExport.json_schema()
+        |> Jason.encode!()
+
+      plain = conn |> get(~p"/api/schema") |> response(200)
+      explicit = build_conn() |> unique_ip() |> get(~p"/api/schema?format=json") |> response(200)
+
+      assert plain == explicit
+      assert Jason.decode!(plain) == Jason.decode!(expected)
+      refute plain =~ "x-kiln-graphql"
+    end
+
+    test "typescript serves the .d.ts with its own content type", %{conn: conn} do
+      conn = get(conn, ~p"/api/schema?format=typescript")
+
+      assert ["application/typescript" <> _] = get_resp_header(conn, "content-type")
+      assert response(conn, 200) =~ "export type KilnBlock ="
+      refute conn.resp_body =~ "CustomFieldsFragment"
+    end
+
+    test "typescript-graphql adds fragments and keeps private fields out", %{conn: conn} do
+      private_and_public_fields("a")
+
+      conn = get(conn, ~p"/api/schema?format=typescript-graphql")
+      body = response(conn, 200)
+
+      assert ["application/typescript" <> _] = get_resp_header(conn, "content-type")
+      assert body =~ ~s|gqlPriceA: customFloat(name: "gql_price_a")|
+      assert body =~ "fragment PageCustomFields on Page {"
+      refute body =~ "gql_secret_a"
+    end
+
+    test "swift-graphql and kotlin-graphql serve the models with fragments", %{conn: conn} do
+      private_and_public_fields("n")
+
+      swift = conn |> get(~p"/api/schema?format=swift-graphql")
+      assert ["text/x-swift" <> _] = get_resp_header(swift, "content-type")
+      body = response(swift, 200)
+      assert body =~ "public indirect enum Block"
+      assert body =~ ~s|gqlPriceN: customFloat(name: "gql_price_n")|
+      assert body =~ "public struct PageCustomFields: Codable, Hashable, Sendable {"
+      refute body =~ "gql_secret_n"
+
+      kotlin = build_conn() |> unique_ip() |> get(~p"/api/schema?format=kotlin-graphql")
+      assert ["text/x-kotlin" <> _] = get_resp_header(kotlin, "content-type")
+      body = response(kotlin, 200)
+      assert body =~ "package kiln"
+      assert body =~ ~s|gqlPriceN: customFloat(name: "gql_price_n")|
+      assert body =~ "public data class PageCustomFields("
+      refute body =~ "gql_secret_n"
+    end
+
+    test "a cached swift-graphql document is evicted by a registry write", %{conn: conn} do
+      warm = conn |> get(~p"/api/schema?format=swift-graphql") |> response(200)
+      refute warm =~ "gql_price_m"
+
+      private_and_public_fields("m")
+
+      fresh =
+        build_conn() |> unique_ip() |> get(~p"/api/schema?format=swift-graphql") |> response(200)
+
+      assert fresh =~ "gql_price_m"
+    end
+
+    test "each format is cached under its own key", %{conn: conn} do
+      private_and_public_fields("c")
+      json = conn |> get(~p"/api/schema") |> response(200)
+      ts = build_conn() |> unique_ip() |> get(~p"/api/schema?format=typescript") |> response(200)
+
+      again =
+        build_conn() |> unique_ip() |> get(~p"/api/schema?format=typescript") |> response(200)
+
+      gql =
+        build_conn()
+        |> unique_ip()
+        |> get(~p"/api/schema?format=typescript-graphql")
+        |> response(200)
+
+      assert ts == again
+      refute ts == json
+      refute ts == gql
+      assert gql =~ "gql_price_c"
+      refute ts =~ "CustomFieldsFragment"
+      assert json == build_conn() |> unique_ip() |> get(~p"/api/schema") |> response(200)
+    end
+
+    test "a cached typescript-graphql document is evicted by a registry write", %{conn: conn} do
+      warm = conn |> get(~p"/api/schema?format=typescript-graphql") |> response(200)
+      refute warm =~ "gql_price_b"
+
+      private_and_public_fields("b")
+
+      fresh =
+        build_conn()
+        |> unique_ip()
+        |> get(~p"/api/schema?format=typescript-graphql")
+        |> response(200)
+
+      assert fresh =~ "gql_price_b"
+    end
+
+    test "an unknown format is a 400, not a silent JSON", %{conn: conn} do
+      body = conn |> get(~p"/api/schema?format=yaml") |> json_response(400)
+
+      assert body["errors"] |> List.first() |> Map.get("code") == "invalid_format"
+      assert inspect(body) =~ "typescript-graphql"
+      assert inspect(body) =~ "swift-graphql"
+      assert inspect(body) =~ "kotlin-graphql"
+    end
+
+    test "format combines with ?type= and 400s on an unknown type", %{conn: conn} do
+      body = conn |> get(~p"/api/schema?format=typescript&type=post") |> response(200)
+      assert body =~ "PostDocument"
+      refute body =~ "PageDocument"
+
+      assert build_conn()
+             |> unique_ip()
+             |> get(~p"/api/schema?format=typescript&type=nope")
+             |> json_response(400)
+    end
+  end
 end

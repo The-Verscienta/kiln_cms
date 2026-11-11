@@ -35,10 +35,24 @@ defmodule KilnCMS.CMS.VersionPolicies do
       # window" (`KilnCMS.Firing.Sync`). Without it that question is a scan of
       # every version the org has ever written, on every poll. (Tenant-scoped
       # like the first, so both lead with `org_id`.)
+      #
+      # The third is partial, for the change-severity read-back
+      # (`KilnCMS.CMS.LatestEdit`): it only ever wants rows that carry a
+      # `change_severity`, which is a small minority, so without it a document
+      # with none walks its whole version history. Postgres scans it backwards
+      # for the `desc` order. Built concurrently: the version tables are the
+      # largest in the schema, and a plain build blocks their writes.
       postgres do
         custom_indexes do
           index [:version_source_id, :version_inserted_at, :id]
           index [:version_inserted_at]
+
+          index [:version_source_id, :version_inserted_at, :id],
+            where: "change_severity IS NOT NULL",
+            concurrently: true,
+            # Named per resource: the default name is the plain composite's.
+            name:
+              "#{__MODULE__ |> Module.split() |> Enum.at(-2) |> Macro.underscore()}_change_severity_edits_index"
         end
       end
 
@@ -67,6 +81,12 @@ defmodule KilnCMS.CMS.VersionPolicies do
         change KilnCMS.Governance.Changes.SignVersion, on: [:create]
       end
 
+      # An editor's read restriction (#2281) hides private custom fields from
+      # a version's `changes` too.
+      preparations do
+        prepare KilnCMS.CMS.Preparations.MaskVersionFields
+      end
+
       policies do
         bypass KilnCMS.CMS.Checks.OrgAdmin do
           authorize_if always()
@@ -78,6 +98,10 @@ defmodule KilnCMS.CMS.VersionPolicies do
         # out-of-scope draft would leak through its history.
         policy action_type(:read) do
           authorize_if KilnCMS.CMS.Checks.ReadableContentType
+
+          # A `:draft_write` key (#2273) reads the history of its own drafts
+          # only (autosave coalescing reads it as the saving actor).
+          authorize_if KilnCMS.Accounts.Checks.DraftWriteOwnDrafts
         end
 
         # Version rows are created by AshPaperTrail (authorize?: false); manual

@@ -73,6 +73,7 @@ defmodule KilnCMS.Billing.Entitlements do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.AccountLock
   alias KilnCMS.Accounts.LegacyAffiliation
   alias KilnCMS.Billing
   alias KilnCMS.Billing.Membership
@@ -133,10 +134,12 @@ defmodule KilnCMS.Billing.Entitlements do
         }) :: :ok | {:error, term()}
   def persist(user, before, desired, managed, by_org) do
     KilnCMS.Repo.transaction(fn ->
-      with {:ok, _user} <- write_user(user, before, desired),
+      with :ok <- lock_account(user.id),
+           {:ok, _user} <- write_user(user, before, desired),
            :ok <- write_org_memberships(user, managed, by_org) do
         :ok
       else
+        :erased -> :ok
         {:error, reason} -> KilnCMS.Repo.rollback(reason)
       end
     end)
@@ -155,6 +158,25 @@ defmodule KilnCMS.Billing.Entitlements do
         )
 
         {:error, reason}
+    end
+  end
+
+  # The account's row before any membership row (#2514,
+  # `KilnCMS.Accounts.AccountLock`'s lock order): the memberships written below
+  # take it too, and taking it only there, after a membership row is already
+  # held, could deadlock with an erasure of a rejected registration, which
+  # takes the account first.
+  #
+  # An erased account writes nothing (`:erased`, answered `:ok` by `persist/5`):
+  # `desired` was computed before the lock, possibly before the erasure
+  # committed, and writing it would put audiences back on the tombstone and on
+  # its rejected membership. Not an error either, so a late webhook for an
+  # erased account settles instead of retrying forever.
+  defp lock_account(user_id) do
+    case AccountLock.share(user_id) do
+      :ok -> :ok
+      {:error, :erased} -> :erased
+      {:error, :not_found} -> {:error, :user_not_found}
     end
   end
 
@@ -339,32 +361,71 @@ defmodule KilnCMS.Billing.Entitlements do
   # transaction. The row comes back either way (`{:ok, _}`, not an error) and is
   # synced like an existing one. Any OTHER failure is an error: the reader paid
   # on this org and would be left without its audience.
+  #
+  # Not on a site that requires registration approval (#2251) for an account
+  # with no access there (`Scoping.effective_tier/2` is `:none`): there a
+  # membership is an admin's decision, so paying is no way in. An account
+  # already let in by another route — the membership-less legacy viewer on the
+  # default site — still gets its viewer row, as before approval existed. Checkout is
+  # already refused for such an account (`Validations.RegistrationApproved`);
+  # this covers an entitlement reached some other way (an admin's comp, a row
+  # that predates the setting). The row is skipped, and the next recompute —
+  # after an admin approves or adds the account — creates nothing either, but
+  # syncs the audiences onto the membership the admin made. An unreadable
+  # setting is an error, so the transition rolls back and Oban retries rather
+  # than granting unreviewed.
   defp create_missing(user_id, memberships, managed, by_org) do
     existing = MapSet.new(memberships, & &1.organization_id)
 
     by_org
     |> Enum.reject(fn {org_id, _audiences} -> MapSet.member?(existing, org_id) end)
     |> each_ok(fn {org_id, audiences} ->
-      # authorize?: false — same reason as `sync_existing/3`: always a
-      # `:viewer` row for `user_id`, and an upsert that changes nothing on
-      # conflict, so it can never overwrite a role.
-      case Accounts.create_org_membership(
-             %{
-               organization_id: org_id,
-               user_id: user_id,
-               # A paying reader is a reader, not an author.
-               role: :viewer,
-               audiences: audiences
-             },
-             authorize?: false,
-             upsert?: true,
-             upsert_identity: :unique_membership,
-             upsert_fields: []
-           ) do
-        {:ok, membership} -> sync_existing(membership, managed, by_org)
+      case may_create?(user_id, org_id) do
+        {:ok, true} -> create_viewer(user_id, org_id, audiences, managed, by_org)
+        {:ok, false} -> :ok
         {:error, reason} -> {:error, reason}
       end
     end)
+  end
+
+  # Asked at the time of the write, inside the recompute's transaction, so a
+  # legacy account `affiliate_legacy/3` has just carried onto the default site
+  # resolves through that row.
+  defp may_create?(user_id, org_id) do
+    case KilnCMS.Accounts.RegistrationPolicy.approval_required(org_id) do
+      {:ok, false} -> {:ok, true}
+      {:ok, true} -> {:ok, let_in?(user_id, org_id)}
+      {:error, :unavailable} -> {:error, :registration_settings_unavailable}
+    end
+  end
+
+  defp let_in?(user_id, org_id) do
+    case fetch_user(user_id) do
+      {:ok, user} -> KilnCMS.Accounts.Scoping.effective_tier(user, org_id) != :none
+      {:error, _reason} -> false
+    end
+  end
+
+  defp create_viewer(user_id, org_id, audiences, managed, by_org) do
+    # authorize?: false — same reason as `sync_existing/3`: always a
+    # `:viewer` row for `user_id`, and an upsert that changes nothing on
+    # conflict, so it can never overwrite a role.
+    case Accounts.create_org_membership(
+           %{
+             organization_id: org_id,
+             user_id: user_id,
+             # A paying reader is a reader, not an author.
+             role: :viewer,
+             audiences: audiences
+           },
+           authorize?: false,
+           upsert?: true,
+           upsert_identity: :unique_membership,
+           upsert_fields: []
+         ) do
+      {:ok, membership} -> sync_existing(membership, managed, by_org)
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp fetch_user(user_id) do

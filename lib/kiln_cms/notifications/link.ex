@@ -36,6 +36,27 @@ defmodule KilnCMS.Notifications.Link do
   the editor cannot open it. It links to the document's governance trail,
   which lists the failed delivery.
 
+  ## A registration notice links to the queue
+
+  `:registration_pending` (#2251) is about a site's registration queue, not a
+  document: its `content_id` is the site's id. It links to
+  `/editor/registrations`, and its URL opens on that site's own console host
+  when the subject carries the site (`:org`), as the email's does.
+
+  ## A security alert links to the security log
+
+  `:security_alert` and `:security_notice` (#2245) are not about a document:
+  their `content_id` is the alert's dispatch row, which nobody can open. An
+  alert links to `/editor/security-log`, where its event is; a notice that the
+  site's alerts were turned down links to `/editor/security-alerts`, where the
+  change can be seen and undone.
+
+  ## An unknown event links to the inbox
+
+  An event this release does not know (one a newer release created, loaded as
+  `KilnCMS.Types.UnknownAtom`, #2509) may not be about a document at all, so it
+  is not guessed at: it links to `/editor/inbox`, where the row is listed.
+
   ## Named `editor_path` / `editor_url`, not `path` / `url`
 
   `Phoenix.VerifiedRoutes` imports `path/2,3` and `url/2,3` as macros, and an
@@ -44,6 +65,8 @@ defmodule KilnCMS.Notifications.Link do
   also what the mail workers' own private helpers were already called.
   """
   use KilnCMSWeb, :verified_routes
+
+  alias KilnCMS.Types.UnknownAtom
 
   @typedoc """
   Anything carrying the anchor trio — a `Notification`, a `Task`, or a plain map.
@@ -73,6 +96,12 @@ defmodule KilnCMS.Notifications.Link do
       "/editor/content/recipe/r1?comment=b2"
   """
   @spec editor_path(subject()) :: String.t()
+  def editor_path(%{event: %UnknownAtom{}}), do: ~p"/editor/inbox"
+  def editor_path(%{event: :registration_pending}), do: ~p"/editor/registrations"
+
+  def editor_path(%{event: :security_alert}), do: ~p"/editor/security-log"
+  def editor_path(%{event: :security_notice}), do: ~p"/editor/security-alerts"
+
   def editor_path(%{event: :retraction_lost, content_type: content_type, content_id: content_id}),
     do: ~p"/editor/governance/#{to_string(content_type)}/#{content_id}"
 
@@ -91,8 +120,24 @@ defmodule KilnCMS.Notifications.Link do
 
   @doc "The absolute URL for the same link — what an email has to carry."
   @spec editor_url(subject()) :: String.t()
-  def editor_url(%{event: :retraction_lost} = subject),
+  def editor_url(%{event: %UnknownAtom{}} = subject),
     do: KilnCMSWeb.Endpoint.url() <> editor_path(subject)
+
+  # On the site's own host when the subject carries the site; a bare row (no
+  # `:org`) can only say the endpoint's.
+  def editor_url(%{event: :registration_pending} = subject) do
+    case Map.get(subject, :org) do
+      %KilnCMS.Accounts.Organization{} = org ->
+        KilnCMSWeb.Plugs.ConsoleHost.org_url(editor_path(subject), org)
+
+      _no_site ->
+        KilnCMSWeb.Endpoint.url() <> editor_path(subject)
+    end
+  end
+
+  def editor_url(%{event: event} = subject)
+      when event in [:retraction_lost, :security_alert, :security_notice],
+      do: KilnCMSWeb.Endpoint.url() <> editor_path(subject)
 
   def editor_url(%{content_type: content_type, content_id: content_id} = subject),
     do: editor_url(content_type, content_id, Map.get(subject, :block_id))

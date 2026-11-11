@@ -1,0 +1,1014 @@
+[
+  {
+    "name": "eq string match",
+    "rule": {
+      "field": "k",
+      "op": "eq",
+      "value": "a"
+    },
+    "values": {
+      "k": "a"
+    },
+    "expected": true
+  },
+  {
+    "name": "eq string mismatch",
+    "rule": {
+      "field": "k",
+      "op": "eq",
+      "value": "a"
+    },
+    "values": {
+      "k": "b"
+    },
+    "expected": false
+  },
+  {
+    "name": "eq trims whitespace",
+    "rule": {
+      "field": "k",
+      "op": "eq",
+      "value": "a"
+    },
+    "values": {
+      "k": " a "
+    },
+    "expected": true
+  },
+  {
+    "name": "eq is case sensitive",
+    "rule": {
+      "field": "k",
+      "op": "eq",
+      "value": "a"
+    },
+    "values": {
+      "k": "A"
+    },
+    "expected": false
+  },
+  {
+    "name": "eq number to numeric string",
+    "rule": {
+      "field": "n",
+      "op": "eq",
+      "value": 5
+    },
+    "values": {
+      "n": "5"
+    },
+    "expected": true
+  },
+  {
+    "name": "eq numeric string to number",
+    "rule": {
+      "field": "n",
+      "op": "eq",
+      "value": "5"
+    },
+    "values": {
+      "n": 5
+    },
+    "expected": true
+  },
+  {
+    "name": "eq int to float",
+    "rule": {
+      "field": "n",
+      "op": "eq",
+      "value": 5
+    },
+    "values": {
+      "n": 5.0
+    },
+    "expected": true
+  },
+  {
+    "name": "eq boolean true",
+    "rule": {
+      "field": "b",
+      "op": "eq",
+      "value": true
+    },
+    "values": {
+      "b": true
+    },
+    "expected": true
+  },
+  {
+    "name": "eq boolean false is a value",
+    "rule": {
+      "field": "b",
+      "op": "eq",
+      "value": false
+    },
+    "values": {
+      "b": false
+    },
+    "expected": true
+  },
+  {
+    "name": "eq boolean string",
+    "rule": {
+      "field": "b",
+      "op": "eq",
+      "value": true
+    },
+    "values": {
+      "b": "true"
+    },
+    "expected": true
+  },
+  {
+    "name": "eq boolean mismatch",
+    "rule": {
+      "field": "b",
+      "op": "eq",
+      "value": true
+    },
+    "values": {
+      "b": false
+    },
+    "expected": false
+  },
+  {
+    "name": "eq on empty is false",
+    "rule": {
+      "field": "k",
+      "op": "eq",
+      "value": "a"
+    },
+    "values": {
+      "k": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "eq on missing is false",
+    "rule": {
+      "field": "k",
+      "op": "eq",
+      "value": "a"
+    },
+    "values": {},
+    "expected": false
+  },
+  {
+    "name": "eq on list is membership",
+    "rule": {
+      "field": "t",
+      "op": "eq",
+      "value": "b"
+    },
+    "values": {
+      "t": [
+        "a",
+        "b"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "eq on list without member",
+    "rule": {
+      "field": "t",
+      "op": "eq",
+      "value": "z"
+    },
+    "values": {
+      "t": [
+        "a",
+        "b"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "neq mismatch",
+    "rule": {
+      "field": "k",
+      "op": "neq",
+      "value": "a"
+    },
+    "values": {
+      "k": "b"
+    },
+    "expected": true
+  },
+  {
+    "name": "neq match",
+    "rule": {
+      "field": "k",
+      "op": "neq",
+      "value": "a"
+    },
+    "values": {
+      "k": "a"
+    },
+    "expected": false
+  },
+  {
+    "name": "neq on empty is true",
+    "rule": {
+      "field": "k",
+      "op": "neq",
+      "value": "a"
+    },
+    "values": {
+      "k": ""
+    },
+    "expected": true
+  },
+  {
+    "name": "neq on missing is true",
+    "rule": {
+      "field": "k",
+      "op": "neq",
+      "value": "a"
+    },
+    "values": {},
+    "expected": true
+  },
+  {
+    "name": "neq on list without member",
+    "rule": {
+      "field": "t",
+      "op": "neq",
+      "value": "z"
+    },
+    "values": {
+      "t": [
+        "a"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "neq on list with member",
+    "rule": {
+      "field": "t",
+      "op": "neq",
+      "value": "a"
+    },
+    "values": {
+      "t": [
+        "a",
+        "b"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "in scalar match",
+    "rule": {
+      "field": "k",
+      "op": "in",
+      "value": [
+        "a",
+        "b"
+      ]
+    },
+    "values": {
+      "k": "b"
+    },
+    "expected": true
+  },
+  {
+    "name": "in scalar miss",
+    "rule": {
+      "field": "k",
+      "op": "in",
+      "value": [
+        "a",
+        "b"
+      ]
+    },
+    "values": {
+      "k": "c"
+    },
+    "expected": false
+  },
+  {
+    "name": "in list overlap",
+    "rule": {
+      "field": "t",
+      "op": "in",
+      "value": [
+        "x",
+        "b"
+      ]
+    },
+    "values": {
+      "t": [
+        "a",
+        "b"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "in list disjoint",
+    "rule": {
+      "field": "t",
+      "op": "in",
+      "value": [
+        "x",
+        "y"
+      ]
+    },
+    "values": {
+      "t": [
+        "a",
+        "b"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "in on empty",
+    "rule": {
+      "field": "k",
+      "op": "in",
+      "value": [
+        "a"
+      ]
+    },
+    "values": {
+      "k": null
+    },
+    "expected": false
+  },
+  {
+    "name": "in numbers vs numeric string",
+    "rule": {
+      "field": "n",
+      "op": "in",
+      "value": [
+        1,
+        2,
+        3
+      ]
+    },
+    "values": {
+      "n": "2"
+    },
+    "expected": true
+  },
+  {
+    "name": "empty missing",
+    "rule": {
+      "field": "k",
+      "op": "empty"
+    },
+    "values": {},
+    "expected": true
+  },
+  {
+    "name": "empty null",
+    "rule": {
+      "field": "k",
+      "op": "empty"
+    },
+    "values": {
+      "k": null
+    },
+    "expected": true
+  },
+  {
+    "name": "empty blank string",
+    "rule": {
+      "field": "k",
+      "op": "empty"
+    },
+    "values": {
+      "k": ""
+    },
+    "expected": true
+  },
+  {
+    "name": "empty whitespace",
+    "rule": {
+      "field": "k",
+      "op": "empty"
+    },
+    "values": {
+      "k": "   "
+    },
+    "expected": true
+  },
+  {
+    "name": "empty list",
+    "rule": {
+      "field": "t",
+      "op": "empty"
+    },
+    "values": {
+      "t": []
+    },
+    "expected": true
+  },
+  {
+    "name": "empty list of blanks",
+    "rule": {
+      "field": "t",
+      "op": "empty"
+    },
+    "values": {
+      "t": [
+        ""
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "empty false is not empty",
+    "rule": {
+      "field": "b",
+      "op": "empty"
+    },
+    "values": {
+      "b": false
+    },
+    "expected": false
+  },
+  {
+    "name": "empty zero is not empty",
+    "rule": {
+      "field": "n",
+      "op": "empty"
+    },
+    "values": {
+      "n": 0
+    },
+    "expected": false
+  },
+  {
+    "name": "empty text is not empty",
+    "rule": {
+      "field": "k",
+      "op": "empty"
+    },
+    "values": {
+      "k": "x"
+    },
+    "expected": false
+  },
+  {
+    "name": "not_empty text",
+    "rule": {
+      "field": "k",
+      "op": "not_empty"
+    },
+    "values": {
+      "k": "x"
+    },
+    "expected": true
+  },
+  {
+    "name": "not_empty missing",
+    "rule": {
+      "field": "k",
+      "op": "not_empty"
+    },
+    "values": {},
+    "expected": false
+  },
+  {
+    "name": "not_empty false",
+    "rule": {
+      "field": "b",
+      "op": "not_empty"
+    },
+    "values": {
+      "b": false
+    },
+    "expected": true
+  },
+  {
+    "name": "not_empty list",
+    "rule": {
+      "field": "t",
+      "op": "not_empty"
+    },
+    "values": {
+      "t": [
+        "a"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "not_empty list of blanks",
+    "rule": {
+      "field": "t",
+      "op": "not_empty"
+    },
+    "values": {
+      "t": [
+        "",
+        ""
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "gt numbers",
+    "rule": {
+      "field": "n",
+      "op": "gt",
+      "value": 5
+    },
+    "values": {
+      "n": 6
+    },
+    "expected": true
+  },
+  {
+    "name": "gt equal is false",
+    "rule": {
+      "field": "n",
+      "op": "gt",
+      "value": 5
+    },
+    "values": {
+      "n": 5
+    },
+    "expected": false
+  },
+  {
+    "name": "gt numeric string",
+    "rule": {
+      "field": "n",
+      "op": "gt",
+      "value": 5
+    },
+    "values": {
+      "n": "10"
+    },
+    "expected": true
+  },
+  {
+    "name": "gt compares numerically not as text",
+    "rule": {
+      "field": "n",
+      "op": "gt",
+      "value": 9
+    },
+    "values": {
+      "n": "10"
+    },
+    "expected": true
+  },
+  {
+    "name": "gt float",
+    "rule": {
+      "field": "n",
+      "op": "gt",
+      "value": 2.5
+    },
+    "values": {
+      "n": 2.75
+    },
+    "expected": true
+  },
+  {
+    "name": "lt numbers",
+    "rule": {
+      "field": "n",
+      "op": "lt",
+      "value": 5
+    },
+    "values": {
+      "n": 4
+    },
+    "expected": true
+  },
+  {
+    "name": "lt equal is false",
+    "rule": {
+      "field": "n",
+      "op": "lt",
+      "value": 5
+    },
+    "values": {
+      "n": 5
+    },
+    "expected": false
+  },
+  {
+    "name": "lt negative",
+    "rule": {
+      "field": "n",
+      "op": "lt",
+      "value": 0
+    },
+    "values": {
+      "n": -1
+    },
+    "expected": true
+  },
+  {
+    "name": "gt date",
+    "rule": {
+      "field": "d",
+      "op": "gt",
+      "value": "2026-01-01"
+    },
+    "values": {
+      "d": "2026-06-01"
+    },
+    "expected": true
+  },
+  {
+    "name": "gt date earlier",
+    "rule": {
+      "field": "d",
+      "op": "gt",
+      "value": "2026-01-01"
+    },
+    "values": {
+      "d": "2025-12-31"
+    },
+    "expected": false
+  },
+  {
+    "name": "lt date",
+    "rule": {
+      "field": "d",
+      "op": "lt",
+      "value": "2026-01-01"
+    },
+    "values": {
+      "d": "2025-12-31"
+    },
+    "expected": true
+  },
+  {
+    "name": "lt date equal",
+    "rule": {
+      "field": "d",
+      "op": "lt",
+      "value": "2026-01-01"
+    },
+    "values": {
+      "d": "2026-01-01"
+    },
+    "expected": false
+  },
+  {
+    "name": "gt datetime",
+    "rule": {
+      "field": "d",
+      "op": "gt",
+      "value": "2026-01-01T10:00:00Z"
+    },
+    "values": {
+      "d": "2026-01-01T11:00:00Z"
+    },
+    "expected": true
+  },
+  {
+    "name": "lt datetime with offset",
+    "rule": {
+      "field": "d",
+      "op": "lt",
+      "value": "2026-01-01T10:00:00Z"
+    },
+    "values": {
+      "d": "2026-01-01T10:30:00+01:00"
+    },
+    "expected": true
+  },
+  {
+    "name": "gt uncoercible actual is false",
+    "rule": {
+      "field": "n",
+      "op": "gt",
+      "value": 5
+    },
+    "values": {
+      "n": "abc"
+    },
+    "expected": false
+  },
+  {
+    "name": "lt uncoercible actual is false",
+    "rule": {
+      "field": "n",
+      "op": "lt",
+      "value": 5
+    },
+    "values": {
+      "n": "abc"
+    },
+    "expected": false
+  },
+  {
+    "name": "gt missing is false",
+    "rule": {
+      "field": "n",
+      "op": "gt",
+      "value": 5
+    },
+    "values": {},
+    "expected": false
+  },
+  {
+    "name": "lt empty string is false",
+    "rule": {
+      "field": "n",
+      "op": "lt",
+      "value": 5
+    },
+    "values": {
+      "n": ""
+    },
+    "expected": false
+  },
+  {
+    "name": "gt boolean is false",
+    "rule": {
+      "field": "b",
+      "op": "gt",
+      "value": 0
+    },
+    "values": {
+      "b": true
+    },
+    "expected": false
+  },
+  {
+    "name": "gt list is false",
+    "rule": {
+      "field": "t",
+      "op": "gt",
+      "value": 1
+    },
+    "values": {
+      "t": [
+        5
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "gt date vs number is false",
+    "rule": {
+      "field": "d",
+      "op": "gt",
+      "value": 5
+    },
+    "values": {
+      "d": "2026-01-01"
+    },
+    "expected": false
+  },
+  {
+    "name": "gt uncoercible rule value is false",
+    "rule": {
+      "field": "n",
+      "op": "gt",
+      "value": "abc"
+    },
+    "values": {
+      "n": 5
+    },
+    "expected": false
+  },
+  {
+    "name": "all both true",
+    "rule": {
+      "all": [
+        {
+          "field": "a",
+          "op": "eq",
+          "value": "x"
+        },
+        {
+          "field": "b",
+          "op": "eq",
+          "value": "y"
+        }
+      ]
+    },
+    "values": {
+      "a": "x",
+      "b": "y"
+    },
+    "expected": true
+  },
+  {
+    "name": "all one false",
+    "rule": {
+      "all": [
+        {
+          "field": "a",
+          "op": "eq",
+          "value": "x"
+        },
+        {
+          "field": "b",
+          "op": "eq",
+          "value": "y"
+        }
+      ]
+    },
+    "values": {
+      "a": "x",
+      "b": "z"
+    },
+    "expected": false
+  },
+  {
+    "name": "any one true",
+    "rule": {
+      "any": [
+        {
+          "field": "a",
+          "op": "eq",
+          "value": "x"
+        },
+        {
+          "field": "b",
+          "op": "eq",
+          "value": "y"
+        }
+      ]
+    },
+    "values": {
+      "a": "no",
+      "b": "y"
+    },
+    "expected": true
+  },
+  {
+    "name": "any none true",
+    "rule": {
+      "any": [
+        {
+          "field": "a",
+          "op": "eq",
+          "value": "x"
+        },
+        {
+          "field": "b",
+          "op": "eq",
+          "value": "y"
+        }
+      ]
+    },
+    "values": {
+      "a": "no",
+      "b": "no"
+    },
+    "expected": false
+  },
+  {
+    "name": "nested any in all",
+    "rule": {
+      "all": [
+        {
+          "field": "a",
+          "op": "not_empty"
+        },
+        {
+          "any": [
+            {
+              "field": "b",
+              "op": "eq",
+              "value": 1
+            },
+            {
+              "field": "c",
+              "op": "eq",
+              "value": 2
+            }
+          ]
+        }
+      ]
+    },
+    "values": {
+      "a": "x",
+      "c": 2
+    },
+    "expected": true
+  },
+  {
+    "name": "nested any in all fails",
+    "rule": {
+      "all": [
+        {
+          "field": "a",
+          "op": "not_empty"
+        },
+        {
+          "any": [
+            {
+              "field": "b",
+              "op": "eq",
+              "value": 1
+            },
+            {
+              "field": "c",
+              "op": "eq",
+              "value": 2
+            }
+          ]
+        }
+      ]
+    },
+    "values": {
+      "a": "",
+      "c": 2
+    },
+    "expected": false
+  },
+  {
+    "name": "two combinator levels",
+    "rule": {
+      "any": [
+        {
+          "all": [
+            {
+              "field": "a",
+              "op": "eq",
+              "value": 1
+            }
+          ]
+        }
+      ]
+    },
+    "values": {
+      "a": 1
+    },
+    "expected": true
+  },
+  {
+    "name": "combinator over missing fields",
+    "rule": {
+      "all": [
+        {
+          "field": "a",
+          "op": "empty"
+        },
+        {
+          "field": "b",
+          "op": "empty"
+        }
+      ]
+    },
+    "values": {},
+    "expected": true
+  },
+  {
+    "name": "hidden dependency is not treated as empty",
+    "rule": {
+      "field": "a",
+      "op": "eq",
+      "value": "x"
+    },
+    "values": {
+      "a": "x",
+      "b": "ignored"
+    },
+    "expected": true
+  },
+  {
+    "name": "unknown value type in values is not equal",
+    "rule": {
+      "field": "m",
+      "op": "eq",
+      "value": "x"
+    },
+    "values": {
+      "m": {
+        "id": "1"
+      }
+    },
+    "expected": false
+  },
+  {
+    "name": "deeper than three levels is false",
+    "rule": {
+      "any": [
+        {
+          "all": [
+            {
+              "any": [
+                {
+                  "field": "a",
+                  "op": "eq",
+                  "value": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "values": {
+      "a": 1
+    },
+    "expected": false
+  }
+]

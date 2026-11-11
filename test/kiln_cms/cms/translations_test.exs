@@ -232,6 +232,22 @@ defmodule KilnCMS.CMS.TranslationsTest do
                :member
     end
 
+    # Dropped, the flags fall back to `false` and the translation of a page
+    # hidden from search engines would be indexable (#2256).
+    test "noindex and nofollow survive a grant that does not name them" do
+      source =
+        CMS.create_post!(
+          %{title: "Hidden", slug: slug(), locale: "en", noindex: true, nofollow: true},
+          actor: admin()
+        )
+
+      editor = granted_editor(%{"post" => ["title", "blocks"]})
+      fr = Translations.create_translation!(:post, source, "fr", actor: editor)
+
+      assert fr.noindex
+      assert fr.nofollow
+    end
+
     # Refused rather than created empty, because a translation is not a
     # duplicate: it claims the `[slug, locale]` identity. An empty `fr` shell
     # would permanently occupy that locale — the one-click path then raises on

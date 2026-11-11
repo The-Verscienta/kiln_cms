@@ -107,6 +107,8 @@ IO.puts("""
   (reload #{Float.round(reload_ms, 3)} ms + authorize #{Float.round(authorize_ms, 3)} ms)
 """)
 
+# `:purge` takes only a trashed row (#2531), so trash it first.
+Ash.destroy!(page, actor: actor, tenant: org, authorize?: false)
 Ash.destroy!(page, action: :purge, actor: actor, tenant: org, authorize?: false)
 
 # `User` has no destroy action (accounts are anonymized, not deleted), so the

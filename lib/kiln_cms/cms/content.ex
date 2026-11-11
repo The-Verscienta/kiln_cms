@@ -69,11 +69,20 @@ defmodule KilnCMS.CMS.Content do
     :alias_pattern,
     :seo_title_pattern,
     :seo_description_pattern,
+    :noindex_default,
+    :nofollow_default,
     :localization
   ]
 
   @doc false
   def use_options, do: @use_options
+
+  # A `noindex_default:` / `nofollow_default:` option: a boolean, or absent
+  # (false). Anything else fails the build at the caller's `use` line.
+  defp robots_default!(value, _key) when is_boolean(value), do: value
+
+  defp robots_default!(other, key),
+    do: raise(ArgumentError, "#{inspect(key)} must be true or false, got: #{inspect(other)}")
 
   # Days trashed content is retained before the nightly auto-purge.
   @trash_retention_days Application.compile_env(:kiln_cms, [:trash, :retention_days], 30)
@@ -268,6 +277,16 @@ defmodule KilnCMS.CMS.Content do
     Ash.Expr.expr(fragment("kiln_han_runs(?) = (SELECT kiln_han_runs(?))", title, ^text))
   end
 
+  # The compound leg builds its variants as rows of `(qv, sq)` — each rewrite's
+  # tsvector and each span's phrase tsquery — in two scalar subselects that
+  # name nothing of the row, so Postgres runs each once per statement as an
+  # InitPlan. Written inline, `to_tsvector(variant)` and `phraseto_tsquery(span)`
+  # were rebuilt for every candidate name × variant (Verscienta's 1.6–4.0 s
+  # compound leg); a name's own tsvector and tsquery are now built once, in a
+  # `LATERAL ... OFFSET 0` that stops the planner pulling them back into the
+  # join. `WITH ORDINALITY` keeps the two arrays paired. The same text is in
+  # both fragments below because a fragment must be a literal string.
+
   @doc false
   # The `:search_compound` prepare: the title and alias legs' phrase match,
   # run against each rewrite of the query `KilnCMS.Search.NameTerms` made
@@ -296,15 +315,15 @@ defmodule KilnCMS.CMS.Content do
           ^locale
         ) and
           fragment(
-            "EXISTS (SELECT 1 FROM unnest(?::text[], ?::text[]) AS compound(query, span) WHERE to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), ?) AND to_tsvector(kiln_regconfig(?), ?) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+            "EXISTS (SELECT 1 FROM (SELECT to_tsvector(kiln_regconfig(?), ?) AS tv, phraseto_tsquery(kiln_regconfig(?), ?) AS tq OFFSET 0) AS t, unnest((SELECT array_agg(to_tsvector(kiln_regconfig(?), u.q) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(q, n)), (SELECT array_agg(phraseto_tsquery(kiln_regconfig(?), u.s) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(s, n))) AS compound(qv, sq) WHERE compound.qv @@ t.tq AND t.tv @@ compound.sq)",
+            ^locale,
+            title,
+            ^locale,
+            title,
+            ^locale,
             ^variants,
-            ^spans,
             ^locale,
-            ^locale,
-            title,
-            ^locale,
-            title,
-            ^locale
+            ^spans
           )
       )
 
@@ -327,19 +346,19 @@ defmodule KilnCMS.CMS.Content do
     |> Enum.map(fn name ->
       Ash.Expr.expr(
         fragment(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value), unnest(?::text[], ?::text[]) AS compound(query, span) WHERE name_alias.value <> '' AND to_tsvector(kiln_regconfig(?), compound.query) @@ phraseto_tsquery(kiln_regconfig(?), name_alias.value) AND to_tsvector(kiln_regconfig(?), name_alias.value) @@ phraseto_tsquery(kiln_regconfig(?), compound.span))",
+          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(? -> ?::text) = 'array' THEN ? -> ?::text ELSE jsonb_build_array(? ->> ?::text) END) AS name_alias(value), LATERAL (SELECT to_tsvector(kiln_regconfig(?), name_alias.value) AS nv, phraseto_tsquery(kiln_regconfig(?), name_alias.value) AS nq WHERE name_alias.value <> '' OFFSET 0) AS n, unnest((SELECT array_agg(to_tsvector(kiln_regconfig(?), u.q) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(q, n)), (SELECT array_agg(phraseto_tsquery(kiln_regconfig(?), u.s) ORDER BY u.n) FROM unnest(?::text[]) WITH ORDINALITY AS u(s, n))) AS compound(qv, sq) WHERE compound.qv @@ n.nq AND n.nv @@ compound.sq)",
           custom_fields,
           ^name,
           custom_fields,
           ^name,
           custom_fields,
           ^name,
+          ^locale,
+          ^locale,
+          ^locale,
           ^variants,
-          ^spans,
           ^locale,
-          ^locale,
-          ^locale,
-          ^locale
+          ^spans
         )
       )
     end)
@@ -567,6 +586,14 @@ defmodule KilnCMS.CMS.Content do
     seo_description_pattern =
       opts |> Keyword.get(:seo_description_pattern) |> KilnCMS.Seo.Pattern.validate!()
 
+    # Robots defaults for NEW documents of this type (#2256): what `noindex` /
+    # `nofollow` start as when the caller does not say. Not retroactive.
+    noindex_default =
+      opts |> Keyword.get(:noindex_default, false) |> robots_default!(:noindex_default)
+
+    nofollow_default =
+      opts |> Keyword.get(:nofollow_default, false) |> robots_default!(:nofollow_default)
+
     # Field-level localization of record attributes (#1327), e.g.
     # `[shared: [:seo_image], fallback: [:excerpt]]` — see
     # `KilnCMS.I18n.FieldLocalization`. Validated here, so a typo fails the
@@ -740,6 +767,8 @@ defmodule KilnCMS.CMS.Content do
           :seo_keywords,
           :seo_image,
           :canonical_url,
+          :noindex,
+          :nofollow,
           :locale,
           :audience,
           :custom_fields,
@@ -819,6 +848,7 @@ defmodule KilnCMS.CMS.Content do
           # see the preparation). Declared before the default-sort build so a
           # `custom_sort` outranks `published_at` but not an explicit `sort`.
           argument :custom_filter, :map
+          argument :custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition}
           argument :custom_sort, :string
           prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
@@ -844,7 +874,9 @@ defmodule KilnCMS.CMS.Content do
     # surface can't be asked to load every published row at once.
     published_query =
       quote do
-        list unquote(:"published_#{type}s"), :published, paginate_with: :offset
+        list unquote(:"published_#{type}s"), :published,
+          paginate_with: :offset,
+          complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
       end
 
     # JSON:API route for the published feed.
@@ -927,19 +959,30 @@ defmodule KilnCMS.CMS.Content do
 
               # The published index (newest first), across all dynamic types —
               # scope by the `type_name` filter like the plain list.
-              list :published_entries, :published, paginate_with: :offset
+              list :published_entries, :published,
+                paginate_with: :offset,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               # `paginate_with: nil` keeps these plain lists (the pre-pagination
               # schema shape); the actions' prepare caps unpaginated reads.
-              list :search_entries, :search, paginate_with: nil
-              list :semantic_search_entries, :search_semantic, paginate_with: nil
+              list :search_entries, :search,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
+              list :semantic_search_entries, :search_semantic,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
               list :autocomplete_entries, :autocomplete
 
               # Published-only delivery twins (#297) — state pinned server-side.
-              list :search_published_entries, :search_published, paginate_with: nil
+              list :search_published_entries, :search_published,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list :semantic_search_published_entries, :search_semantic_published,
-                paginate_with: nil
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list :autocomplete_published_entries, :autocomplete_published
             end
@@ -1080,15 +1123,24 @@ defmodule KilnCMS.CMS.Content do
               # title autocomplete, per content type. `paginate_with: nil` keeps
               # these plain lists (the pre-pagination schema shape); the actions'
               # prepare caps unpaginated reads instead.
-              list unquote(:"search_#{type}s"), :search, paginate_with: nil
-              list unquote(:"semantic_search_#{type}s"), :search_semantic, paginate_with: nil
+              list unquote(:"search_#{type}s"), :search,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
+              list unquote(:"semantic_search_#{type}s"), :search_semantic,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
+
               list unquote(:"autocomplete_#{type}s"), :autocomplete
 
               # Published-only delivery twins (#297) — state pinned server-side.
-              list unquote(:"search_published_#{type}s"), :search_published, paginate_with: nil
+              list unquote(:"search_published_#{type}s"), :search_published,
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list unquote(:"semantic_search_published_#{type}s"), :search_semantic_published,
-                paginate_with: nil
+                paginate_with: nil,
+                complexity: {KilnCMSWeb.GraphqlLimits, :custom_where_complexity}
 
               list unquote(:"autocomplete_published_#{type}s"), :autocomplete_published
             end
@@ -1232,6 +1284,8 @@ defmodule KilnCMS.CMS.Content do
         :seo_description,
         :seo_image,
         :canonical_url,
+        :noindex,
+        :nofollow,
         # `path_alias` so the canonical redirect still works on a teaser.
         :path_alias,
         :published_at,
@@ -1571,10 +1625,22 @@ defmodule KilnCMS.CMS.Content do
         if(published?, do: nil, else: quote(do: argument(:state, :atom))),
         quote(do: argument(:tag_ids, {:array, :uuid})),
         quote(do: argument(:custom_filter, :map)),
+        quote(do: argument(:custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition})),
         quote(do: prepare(KilnCMS.CMS.Preparations.CustomFieldQuery))
       ]
       |> Enum.reject(&is_nil/1)
     end
+
+    # `custom_sort` on the PUBLIC search actions only (`:search`, `:search_published`
+    # and the two semantic ones) — deliberately not in `facet_args`, which is
+    # also spliced into the internal legs (`:search_title`, `:search_alias`,
+    # `:search_han`, `:search_compound`, `:search_any*`): `read_named_ids/1`
+    # forwards a semantic request's arguments to those, so a custom sort there
+    # would change which rows count as "named". Order: explicit `sort` >
+    # `custom_sort` > relevance/distance > recency (the `CustomFieldQuery`
+    # prepare in `facet_args` runs before each action's own relevance sort,
+    # and `Ash.Query.sort/2` appends).
+    sort_arg = [quote(do: argument(:custom_sort, :string))]
 
     facet_clauses = fn published? ->
       [
@@ -1701,6 +1767,7 @@ defmodule KilnCMS.CMS.Content do
           unquote(search_pagination)
 
           unquote_splicing(facet_args.(published?))
+          unquote_splicing(if(terms == :all, do: sort_arg, else: []))
 
           filter expr(unquote(filter_ast))
 
@@ -1741,6 +1808,7 @@ defmodule KilnCMS.CMS.Content do
           unquote(search_pagination)
 
           unquote_splicing(facet_args.(published?))
+          unquote_splicing(sort_arg)
 
           filter expr(unquote(filter_ast))
 
@@ -2098,6 +2166,12 @@ defmodule KilnCMS.CMS.Content do
           def __kiln_seo_title_pattern__, do: unquote(seo_title_pattern)
 
           def __kiln_seo_description_pattern__, do: unquote(seo_description_pattern)
+
+          # Robots defaults for new documents (#2256); dynamic entries carry
+          # theirs on the TypeDefinition row.
+          def __kiln_noindex_default__, do: unquote(noindex_default)
+
+          def __kiln_nofollow_default__, do: unquote(nofollow_default)
         end
       end
 
@@ -2229,7 +2303,19 @@ defmodule KilnCMS.CMS.Content do
         # carrying it would show a redundant field in every diff of an event —
         # and one that moves on its own, since the sweep advances it without any
         # editorial change at all.
+        #
+        # The draft-write provenance (#2273) is ignored because the version
+        # read scope is wider than its field policy: a `:draft_write` key reads
+        # the history of every draft its OWNER authored (`DraftWriteOwnDrafts`,
+        # which autosave coalescing needs), but may see provenance only on the
+        # drafts IT created (`DraftWriteOwnProvenance`). In `changes` a second
+        # key on the same owner would read the first key's `on_behalf_of`. The
+        # columns are stamped once at create and no action writes them, so the
+        # row already holds the only value history could: nothing is lost.
         ignore_attributes([
+          :created_via_key_id,
+          :created_via_key_name,
+          :on_behalf_of,
           :inserted_at,
           :updated_at,
           :embedding,
@@ -2262,6 +2348,16 @@ defmodule KilnCMS.CMS.Content do
           domain: KilnCMS.Accounts,
           on_delete: :nilify
         )
+
+        # How much a published edit matters (`KilnCMS.CMS.Severity`): stored on
+        # the version row of the edit itself, filled from
+        # `changeset.context[:paper_trail_metadata]` by `Changes.RecordChangeSeverity`.
+        # Nullable and without a default: `nil` means "no safety field changed
+        # on this version" (and is what every version written before this
+        # column existed reads as).
+        metadata :change_severity, :atom,
+          constraints: [one_of: [:critical, :notable, :routine]],
+          allow_nil?: true
 
         mixin({KilnCMS.CMS.VersionPolicies, :policies, []})
         version_extensions(authorizers: [Ash.Policy.Authorizer])
@@ -2461,6 +2557,29 @@ defmodule KilnCMS.CMS.Content do
 
             down unquote("ALTER TABLE #{table} DROP COLUMN IF EXISTS name_lexemes")
           end
+
+          # The read-only SQL reporting views (#2295, `KilnCMS.Reporting.ViewSql`):
+          # the schema, then this table's two views. They read the live
+          # `field_definitions` and `type_definitions`, hence `after_tables`.
+          statement :reporting_schema do
+            up unquote(KilnCMS.Reporting.ViewSql.create_schema())
+            down unquote(KilnCMS.Reporting.ViewSql.keep_schema())
+          end
+
+          statement :reporting_view do
+            up unquote(KilnCMS.Reporting.ViewSql.records_view(table, to_string(type), dynamic?))
+            down unquote(KilnCMS.Reporting.ViewSql.drop_records_view(table))
+            after_tables ["field_definitions", "type_definitions"]
+          end
+
+          statement :reporting_field_values_view do
+            up unquote(
+                 KilnCMS.Reporting.ViewSql.field_values_view(table, to_string(type), dynamic?)
+               )
+
+            down unquote(KilnCMS.Reporting.ViewSql.drop_field_values_view(table))
+            after_tables ["field_definitions", "type_definitions"]
+          end
         end
 
         custom_indexes do
@@ -2516,6 +2635,20 @@ defmodule KilnCMS.CMS.Content do
           # taking writes while it runs.
           index ["tsvector_to_array(to_tsvector(kiln_regconfig(locale), title))"],
             name: unquote("#{table}_title_lexemes_index"),
+            using: "gin",
+            all_tenants?: true,
+            concurrently: true
+
+          # Custom-field equality, `in` and list-has (#2291). The filter is
+          # `custom_fields @> jsonb_build_object(name, value)`, so ONE index
+          # covers every field name on every dynamic type: the name sits inside
+          # the indexed value. `jsonb_path_ops` is the smaller, faster opclass
+          # and supports exactly `@>`. It does NOT serve range, sort, `not_eq`,
+          # `ilike` or `null` (see `CustomFieldQuery.contains/3`). Built
+          # CONCURRENTLY: `entries` is large. A failed build leaves an INVALID
+          # index; drop it and retry.
+          index ["custom_fields jsonb_path_ops"],
+            name: unquote("#{table}_custom_fields_gin_index"),
             using: "gin",
             all_tenants?: true,
             concurrently: true
@@ -2606,6 +2739,13 @@ defmodule KilnCMS.CMS.Content do
           index ["published_at DESC NULLS LAST", "id DESC"],
             name: unquote("#{table}_console_published_index"),
             concurrently: true
+
+          # Range/sort btrees for the custom fields a site lists in
+          # `config :kiln_cms, :indexed_custom_fields` (#2359, ADR 0025).
+          # Nothing by default. `org_id`-leading (codegen's default under
+          # multitenancy): the tenant filter is the equality, the field the
+          # order.
+          unquote_splicing(KilnCMS.CMS.IndexedCustomFields.index_entries(table))
         end
       end
 
@@ -2627,6 +2767,7 @@ defmodule KilnCMS.CMS.Content do
           # preparation turns these into typed `get_path` predicates/sort keys
           # validated against the FieldDefinition registry (docs/json-api.md).
           argument :custom_filter, :map
+          argument :custom_where, {:array, KilnCMS.CMS.Types.CustomFieldCondition}
           argument :custom_sort, :string
           prepare KilnCMS.CMS.Preparations.CustomFieldQuery
 
@@ -2651,6 +2792,10 @@ defmodule KilnCMS.CMS.Content do
           # read. A no-op without either.
           argument :expected_lock_version, :integer
           change KilnCMS.CMS.Changes.CheckExpectedVersion
+          # Compare-and-swap on the row (#2332): a second trash of a struct
+          # loaded before the first is refused (`StaleRecord`), so it neither
+          # re-runs `DeleteArtifacts` nor sends a second `deleted`.
+          change filter(expr(is_nil(^ref(:archived_at))))
           change KilnCMS.CMS.Changes.DeleteArtifacts
           # A mirror has to hear about a deletion or it keeps serving the
           # document. A tombstone, not the body: a trashed draft was never
@@ -2664,8 +2809,13 @@ defmodule KilnCMS.CMS.Content do
           # stripped), so a title alone is enough to create content.
           change KilnCMS.CMS.Changes.DeriveSlug
           change KilnCMS.CMS.Changes.DeriveAlias
+          # The type's robots defaults, only where the caller left a flag out (#2256).
+          change KilnCMS.CMS.Changes.ApplyRobotsDefaults
           # Stamp the acting user as the author (system/seed creates leave nil).
           change relate_actor(:author, allow_nil?: true)
+          # A draft a `:draft_write` API key creates records which key (and the
+          # service's opaque `X-Kiln-On-Behalf-Of`) it came from (#2273).
+          change KilnCMS.CMS.Changes.StampDraftWriteProvenance
           # Set the many-to-many links from lists of ids (nil/omitted = no change).
           # No merge verbs here: a create has no existing links to merge against,
           # so `tag_ids` is unambiguously the whole set (#521).
@@ -2681,6 +2831,9 @@ defmodule KilnCMS.CMS.Content do
           # leading indentation is a code block, not noise.
           argument :body_markdown, :string, constraints: [trim?: false, allow_empty?: true]
           change KilnCMS.CMS.Changes.ApplyBlocksInput
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           # AFTER `ApplyCustomFields`: the schedule this reads is the coerced
           # value that changeset writes, not the editor's raw parts (#766).
@@ -2719,6 +2872,11 @@ defmodule KilnCMS.CMS.Content do
         update :update do
           primary? true
           require_atomic? false
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
           # refused with a 412 unless the row is still the version the client
           # read. A no-op without either.
@@ -2743,6 +2901,9 @@ defmodule KilnCMS.CMS.Content do
           argument :block_tree, {:array, :map}
           argument :body_markdown, :string, constraints: [trim?: false, allow_empty?: true]
           change KilnCMS.CMS.Changes.ApplyBlocksInput
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           # AFTER `ApplyCustomFields` — see `:create` (#766).
           change KilnCMS.CMS.Changes.SetNextOccurrence
@@ -2848,7 +3009,9 @@ defmodule KilnCMS.CMS.Content do
         # publish landing between load and write would sail past it — which is
         # exactly the race, not a hypothetical. A miss raises `StaleRecord`,
         # which `ContentEditorLive` already turns into "this content changed
-        # elsewhere, reload" (#137).
+        # elsewhere, reload" (#137). The global `Changes.RefuseTrashed` adds
+        # the same kind of row filter for the trash (#2332): an editor still
+        # open on a record someone trashed cannot autosave into it.
         update :autosave do
           require_atomic? false
           change filter(expr(^ref(:state) == :draft))
@@ -2867,6 +3030,9 @@ defmodule KilnCMS.CMS.Content do
           unquote_splicing(merge_changes.())
           unquote_splicing(merge_validations.())
 
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           # AFTER `ApplyCustomFields` — see `:create` (#766).
           change KilnCMS.CMS.Changes.SetNextOccurrence
@@ -2947,6 +3113,9 @@ defmodule KilnCMS.CMS.Content do
           argument :fields, :map
           change filter(expr(^ref(:state) == :published))
           change optimistic_lock(:lock_version)
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.StageWorkingFields
           change KilnCMS.CMS.Changes.StampWorkingCopy
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
@@ -2968,10 +3137,18 @@ defmodule KilnCMS.CMS.Content do
         # (an autosave landed from another tab) fails the lock rather than
         # publishing an older draft. The gates are the `:update` pair
         # (`only_new: true`) rather than `:publish`'s, because this is an edit
-        # to a live page in every way that matters to them.
+        # to a live page in every way that matters to them. A held struct of a
+        # page someone has since trashed is refused by the global
+        # `Changes.RefuseTrashed` (#2332): no re-fire, no `updated` after the
+        # `deleted`.
         update :publish_changes do
           require_atomic? false
           accept []
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # The lost-update guard's decisions (#1815): `%{"seo_title" =>
           # "mine" | "theirs", ...}` or `%{"*" => ...}` for a key the live page
           # changed after the draft was saved. See `Changes.PromoteWorkingCopy`.
@@ -2980,6 +3157,9 @@ defmodule KilnCMS.CMS.Content do
 
           change filter(expr(^ref(:state) == :published and not is_nil(^ref(:working_copy_at))))
 
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.PromoteWorkingCopy
           # A held rename leaves its 301 now, when the new address goes live.
           change KilnCMS.CMS.Changes.RecordSlugRedirect
@@ -3091,6 +3271,11 @@ defmodule KilnCMS.CMS.Content do
 
         update :publish do
           require_atomic? false
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           # FIRST, so its `before_action` hook registers before the two
           # block-reading validations below defer themselves to the same phase:
           # an open collab session's prose rides in on this write or is lost
@@ -3120,6 +3305,10 @@ defmodule KilnCMS.CMS.Content do
           # advises on, so the gate can never disagree with the panel the
           # author has been reading.
           validate KilnCMS.CMS.Validations.ComplianceClaims, before_action?: true
+          # A required custom field may still be blank on a draft: the editor's
+          # scaffold create defers `required`, and a title-only write never
+          # checks it. Nothing publishes with one empty.
+          validate KilnCMS.CMS.Validations.RequiredCustomFields, before_action?: true
           change filter(expr(^ref(:state) == :draft or ^ref(:state) == :in_review))
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
@@ -3133,6 +3322,9 @@ defmodule KilnCMS.CMS.Content do
           # Wednesday must not store Monday's `days_between(today(), …)` while
           # its artifact says Wednesday's. Never touches an editable value —
           # this is `ApplyCustomFields`' computed-only refresh path.
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
@@ -3169,6 +3361,10 @@ defmodule KilnCMS.CMS.Content do
           # a publish, and a claim that must not go live at 09:00 by hand must
           # not go live at 09:00 by scheduler either.
           validate KilnCMS.CMS.Validations.ComplianceClaims, before_action?: true
+          # A required custom field may still be blank on a draft: the editor's
+          # scaffold create defers `required`, and a title-only write never
+          # checks it. Nothing publishes with one empty.
+          validate KilnCMS.CMS.Validations.RequiredCustomFields, before_action?: true
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
@@ -3182,6 +3378,9 @@ defmodule KilnCMS.CMS.Content do
           # Wednesday must not store Monday's `days_between(today(), …)` while
           # its artifact says Wednesday's. Never touches an editable value —
           # this is `ApplyCustomFields`' computed-only refresh path.
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.EnqueueEmbedding
           change KilnCMS.CMS.Changes.RecordPublishedVersion
@@ -3204,7 +3403,29 @@ defmodule KilnCMS.CMS.Content do
           # a new version itself). Workflow state is left unchanged.
           require_atomic? false
           accept []
+          # How much this edit matters, asked for only when it touches a field
+          # the site lists as safety-relevant (`KilnCMS.CMS.Severity`); stored on
+          # the edit's version row. Optional: omitted, a safety edit is recorded
+          # `:notable`. Ignored when no safety field changed.
+          argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
           argument :version_id, :uuid, allow_nil?: false
+          # The row must still be the struct the caller holds (#2532), checked
+          # FIRST. `RestoreVersion` writes from a `before_action` and judges
+          # the struct: its state picks the claim and alt-text gates, its slug
+          # the redirect, and a force-change equal to it is dropped. So the
+          # write is filtered on the held `lock_version` (and bumps it, which
+          # makes every pre-restore struct stale in turn) and on the held
+          # `state`, because the workflow writes (`:publish`, `:unpublish` and
+          # their scheduled twins, which fold a working copy into the text,
+          # `:archive`, `:unarchive`) keep `lock_version`. A miss on either is
+          # `StaleRecord`, and the trash is `Changes.RefuseTrashed`'s filter.
+          # Known gap: a write that keeps both still lets a held struct pass,
+          # with that write's columns stale: the computed-field refresh and
+          # field conversion and `:resnapshot_media` (`custom_fields`),
+          # `:set_oembed_metadata` (fetched embed data inside blocks), `:move`
+          # and `:reassign_author`. None of them moves the state, slug or text.
+          change optimistic_lock(:lock_version)
+          change KilnCMS.CMS.Changes.StateUnchangedSinceRead
           change KilnCMS.CMS.Changes.RestoreVersion
 
           # A restore is a content write, so everything derived from content has
@@ -3448,7 +3669,17 @@ defmodule KilnCMS.CMS.Content do
         update :restore do
           accept []
           require_atomic? false
+          # Exempt from `Changes.RefuseTrashed`, and its mirror image: the row
+          # must still be trashed (#2332), so a second restore of a held
+          # struct is refused rather than re-firing and sending `restored`
+          # twice.
+          change filter(expr(not is_nil(^ref(:archived_at))))
           change set_attribute(:archived_at, nil)
+
+          # While it sat in the trash another record may have taken a
+          # `unique` custom-field value (#2276): the lookup ignores trashed
+          # records, so the restore re-checks.
+          change KilnCMS.CMS.Changes.CheckUniqueFields
 
           # Trashing is a soft delete: `:destroy` runs `DeleteArtifacts`, which
           # purges the fired artifacts AND enqueues a Meilisearch removal — but
@@ -3475,6 +3706,12 @@ defmodule KilnCMS.CMS.Content do
         # nightly auto-purge; admin/system only via the destroy policy.
         destroy :purge do
           require_atomic? false
+          # Only a row still in the trash (#2531). AshArchival leaves `:purge`
+          # unfiltered (`exclude_destroy_actions`), so a held struct whose row
+          # someone restored meanwhile hard-deleted live content — no
+          # `deleted` webhook, no artifact cleanup. A miss is a `StaleRecord`,
+          # and the hooks below roll back with it. The mirror of `:restore`.
+          change filter(expr(not is_nil(^ref(:archived_at))))
           # No FK can reach the chunk table from every content table (#1940).
           change KilnCMS.CMS.Changes.DeleteChunkEmbeddings
           # Each connecting `:reference` field's `on_target_delete` rule (R5):
@@ -3502,8 +3739,17 @@ defmodule KilnCMS.CMS.Content do
           change optimistic_lock(:lock_version)
           change KilnCMS.CMS.Changes.ClearReferenceTarget
           change KilnCMS.CMS.Changes.SetSearchText
-          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
-          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published}
+          # Exempt from `Changes.RefuseTrashed`: a trashed referrer is cleared
+          # too, so it cannot come back naming the purged record. It is not
+          # re-fired or announced, though (#2332): its artifacts were purged
+          # when it was trashed and its subscribers already heard `deleted`.
+          # A struct check is safe here: `TargetDelete` read it inside the
+          # purge's transaction.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published},
+            where: [attribute_equals(:archived_at, nil)]
+
+          change {KilnCMS.CMS.Changes.NotifyWebhooks, event: "updated", only_when: :published},
+            where: [attribute_equals(:archived_at, nil)]
         end
 
         # Background-maintained semantic embedding, written by
@@ -3712,6 +3958,9 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           accept []
           change KilnCMS.CMS.Changes.UnchangedSinceRead
+          # The hidden custom fields' stored values go back under the record
+          # this write is built on (#2281). BEFORE the change that reads them.
+          change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.ApplyCustomFields
           change KilnCMS.CMS.Changes.KeepUpdatedAt
           # The fire carries the pinned date (`Changes.FireArtifacts`), so the
@@ -3731,13 +3980,20 @@ defmodule KilnCMS.CMS.Content do
         # (`UnchangedSinceRead`). Versioned, because what it writes is
         # delivered (`custom_fields` on every API surface) and the sync delta
         # API reads changes from version rows. A published record re-fires.
+        # A trashed row is written too, and not fired. Its version row is
+        # harmless: the sync API classifies a changed document by its current
+        # row, so a trashed one is at most a tombstone (`KilnCMS.Firing.Sync`).
         update :resnapshot_media do
           require_atomic? false
           accept []
           change KilnCMS.CMS.Changes.UnchangedSinceRead
           change {KilnCMS.CMS.Changes.ApplyCustomFields, resnapshot: :media}
           change KilnCMS.CMS.Changes.KeepUpdatedAt
-          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # Exempt from `Changes.RefuseTrashed` (#2533): a contract step must
+          # reach trashed rows too. Fired only when the row the write returned
+          # is out of the trash, not judged on the struct: a restore between
+          # the read and this write bumps no `lock_version`.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published, skip_trashed: true}
         end
 
         # Internal: move a JSON-in-text value into a `:group` field (written by
@@ -3751,7 +4007,8 @@ defmodule KilnCMS.CMS.Content do
         # keeps `updated_at` and `lock_version`, sends no webhook, and loses to
         # an editor's save in between. Versioned, because the group is
         # delivered content and the sync delta API reads version rows. A
-        # published record re-fires. A live record's pending working copy gets
+        # published record re-fires; a trashed one is written and not fired,
+        # as on `:resnapshot_media`. A live record's pending working copy gets
         # the same conversion of its own held value, or publishing the copy
         # would put back a map without the group.
         update :convert_custom_field do
@@ -3760,7 +4017,11 @@ defmodule KilnCMS.CMS.Content do
           change KilnCMS.CMS.Changes.UnchangedSinceRead
           change {KilnCMS.CMS.Changes.ApplyCustomFields, convert: true}
           change KilnCMS.CMS.Changes.KeepUpdatedAt
-          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published}
+          # Exempt from `Changes.RefuseTrashed` (#2533): a contract step must
+          # reach trashed rows too. Fired only when the row the write returned
+          # is out of the trash, not judged on the struct: a restore between
+          # the read and this write bumps no `lock_version`.
+          change {KilnCMS.CMS.Changes.FireArtifacts, only_when: :published, skip_trashed: true}
         end
 
         # Internal: advance the materialized "what's on" sort key once an
@@ -3817,6 +4078,15 @@ defmodule KilnCMS.CMS.Content do
       # (applies to every create/update/destroy action; no-ops for draft-only
       # writes — see the change module).
       changes do
+        # A trashed row takes no update (#2332): every update action gets a
+        # row filter `is_nil(archived_at)`, so a struct loaded before someone
+        # trashed the record can no longer write into it (an autosave, a
+        # *Publish changes* that re-fires and announces `updated` after
+        # `deleted`). `:restore`, `:clear_reference_target` and the two
+        # contract-step backfills (`:convert_custom_field`,
+        # `:resnapshot_media`) are exempt; see the change module.
+        change KilnCMS.CMS.Changes.RefuseTrashed, on: [:update]
+
         change KilnCMS.CMS.Changes.BustContentCache, on: [:create, :update, :destroy]
 
         # Per-field write scoping for editors (granular RBAC #332, slice 3):
@@ -3825,6 +4095,14 @@ defmodule KilnCMS.CMS.Content do
         # on every update action — transitions carry no content attributes and
         # pass untouched; admins are exempt (see the change module).
         change KilnCMS.CMS.Changes.EnforceFieldGrants, on: [:update]
+
+        # Per-custom-field grants and read restrictions (#2281). Global
+        # changes run AFTER an action's own, so this judges the coerced map
+        # `ApplyCustomFields` wrote, against the keys the editor supplied. On
+        # create too: a hidden key cannot be written, nor one outside a
+        # per-key grant. (`RestoreHiddenFields` is the action-level change
+        # that runs BEFORE `ApplyCustomFields` and `PromoteWorkingCopy`.)
+        change KilnCMS.CMS.Changes.EnforceCustomFieldGrants, on: [:create, :update]
 
         # A proposed publish date (#1812) is answered by a real one: setting
         # `scheduled_at`, or publishing, clears the proposal.
@@ -3861,6 +4139,19 @@ defmodule KilnCMS.CMS.Content do
         # the between-publish window. Off by default and skipped for publishes
         # (RecordPublishedVersion anchors those) — see the change module.
         change KilnCMS.CMS.Changes.AnchorVersion, on: [:create, :update, :destroy]
+
+        # Mandatory change severity: a published edit that touches a field the
+        # site lists as safety-relevant carries a severity on its version row
+        # (`KilnCMS.CMS.Severity`). LAST among the changes, so it sees what the
+        # others wrote — `PromoteWorkingCopy`'s promoted values included — and
+        # decides in a `before_action` hook, after `RestoreVersion`'s fold.
+        change KilnCMS.CMS.Changes.RecordChangeSeverity, on: [:update]
+
+        # What a read restriction hides from an editor (#2281) is left out of
+        # the record a write RETURNS too (JSON:API, GraphQL, MCP and the
+        # console all serialize it). After the commit, and registered last, so
+        # no other hook, version or notification sees the masked record.
+        change KilnCMS.CMS.Changes.MaskHiddenFields, on: [:create, :update]
       end
 
       validations do
@@ -3902,6 +4193,16 @@ defmodule KilnCMS.CMS.Content do
         # aren't short-circuited. Defense-in-depth: the JSON:API/GraphQL
         # delivery surface exposes only reads regardless (D7).
         policy action_type([:create, :update]) do
+          # The `:draft_write` scope (#2273): the one key that is neither
+          # read-only nor `:read_write`. A SEPARATE policy, ABOVE the admin
+          # bypass, so it holds whatever role the key owner has at request time
+          # — promoting the owner after the key was minted widens nothing. It
+          # forbids everything but the allowlist in `Checks.DraftWriteKey`
+          # (create; update/autosave of the owner's own `:draft` rows), and
+          # `ApiKeyWithoutWriteAccess` below is left alone: it still matches
+          # this key, so the allowlisted case is authorized HERE and skips it.
+          forbid_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :outside_allowlist}
+          authorize_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :any}
           forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
           authorize_if always()
         end
@@ -3920,6 +4221,7 @@ defmodule KilnCMS.CMS.Content do
         # delete; a `:read_write` key falls through to the owning user's role
         # (admin-only, per the destroy policy below), same model as `/mcp`.
         policy action(:destroy) do
+          forbid_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :any}
           forbid_if KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess
           authorize_if always()
         end
@@ -3958,6 +4260,10 @@ defmodule KilnCMS.CMS.Content do
           authorize_if expr(^ref(:state) == :published and ^ref(:audience) == :public)
           authorize_if KilnCMS.CMS.Checks.InAudience
           authorize_if KilnCMS.CMS.Checks.PreviewGrant
+
+          # A `:draft_write` key (#2273) also reads the drafts it authored, so a
+          # PATCH can load its row. Nothing else unpublished, no one else's.
+          authorize_if KilnCMS.Accounts.Checks.DraftWriteOwnDrafts
         end
 
         # Passphrase-locked content (#496) is invisible to every authorized
@@ -3995,6 +4301,12 @@ defmodule KilnCMS.CMS.Content do
         # unrestricted editors are unchanged.
         policy action_type([:create, :update]) do
           authorize_if KilnCMS.CMS.Checks.EditableContentType
+
+          # A `:draft_write` key (#2273) authors drafts regardless of its
+          # owner's tier (the owner is a viewer-tier service account). The
+          # allowlist and its row conditions live in `Checks.DraftWriteKey`;
+          # the forbid above, not this grant, is what bounds the key.
+          authorize_if {KilnCMS.Accounts.Checks.DraftWriteKey, mode: :within_allowlist}
 
           # The internal, system-only update actions (#1402). Admitted HERE
           # rather than through a `bypass action(...)` at the top of the stack,
@@ -4075,7 +4387,22 @@ defmodule KilnCMS.CMS.Content do
         # (`SiteEditorialSettings.editors_can_publish`, asked at `/setup`). The
         # `action_type([:create, :update])` policy above still applies, so an
         # editor scoped to some content types can publish only those.
-        policy action([:publish, :publish_scheduled]) do
+        #
+        # Taking content down is the same approval step as putting it up
+        # (#2134): unpublish and archive (from any state — archiving a draft
+        # also takes it out of an admin's review queue), and their scheduled
+        # twins, which only the AshOban scheduler runs, through the bypass.
+        # `:unarchive` lands on draft — nothing goes online or offline — so it
+        # stays with the editor-level policy above, as does `:publish_changes`
+        # (docs/working-copy.md).
+        policy action([
+                 :publish,
+                 :publish_scheduled,
+                 :unpublish,
+                 :unpublish_scheduled,
+                 :archive,
+                 :archive_scheduled
+               ]) do
           authorize_if KilnCMS.CMS.Checks.OrgAdmin
           authorize_if KilnCMS.CMS.Checks.EditorMayPublish
         end
@@ -4087,6 +4414,30 @@ defmodule KilnCMS.CMS.Content do
         # would be one date field away from meaning nothing. (Releases close
         # the same hole on `ContentRelease.:schedule`.)
         policy changing_attributes([:scheduled_at]) do
+          authorize_if KilnCMS.CMS.Checks.OrgAdmin
+          authorize_if KilnCMS.CMS.Checks.EditorMayPublish
+        end
+
+        # An unpublish date on a live record IS an unpublish, for the same
+        # reason (#2134): the scheduler retires whatever `unpublish_at` names,
+        # through the bypass, and `expiry_action` says whether that retirement
+        # unpublishes, archives or only flags. Only while the record is
+        # published or already scheduled to publish (`Checks.LiveOrScheduled`):
+        # a date on a scheduled draft would take it down after the scheduled
+        # publish with nobody approving it. On an unscheduled draft, or a
+        # create, the date does nothing until a publisher publishes (or
+        # schedules) the whole record.
+        #
+        # Two policies, not one: `changing_attributes([a, b])` matches only
+        # when BOTH change, so a combined list would let either change alone
+        # through — and must never be folded into the `scheduled_at` policy
+        # above for the same reason.
+        policy [changing_attributes([:unpublish_at]), KilnCMS.CMS.Checks.LiveOrScheduled] do
+          authorize_if KilnCMS.CMS.Checks.OrgAdmin
+          authorize_if KilnCMS.CMS.Checks.EditorMayPublish
+        end
+
+        policy [changing_attributes([:expiry_action]), KilnCMS.CMS.Checks.LiveOrScheduled] do
           authorize_if KilnCMS.CMS.Checks.OrgAdmin
           authorize_if KilnCMS.CMS.Checks.EditorMayPublish
         end
@@ -4104,6 +4455,32 @@ defmodule KilnCMS.CMS.Content do
         # Trash browsing and restore are admin-only too (mirrors delete).
         policy action([:trashed, :restore]) do
           forbid_if always()
+        end
+      end
+
+      # Who may SEE the three provenance fields (#2273); see ADR 0012. The
+      # catch-all below is what keeps every other field exactly as the resource
+      # policies above decide it: Ash requires a field policy for ALL fields once
+      # one exists, and `authorize_if always()` on `:*` adds no restriction.
+      # A forbidden field is `%Ash.ForbiddenField{}` in an actor-scoped result:
+      # JSON:API omits it; GraphQL returns null plus a `forbidden_field` error
+      # entry for that field only, the rest of the read intact. A filter or sort
+      # on it sees `nil`, so it is no oracle. Reads with `authorize?: false`
+      # (webhooks, the preview endpoint, sync, fired artifacts, search indexing)
+      # are not subject to field policies and never serialize these fields:
+      # their serializers name their fields.
+      field_policies do
+        field_policy [:created_via_key_id, :created_via_key_name, :on_behalf_of] do
+          # Editor and admin tiers, by the same editorial-read notion that lets
+          # them see unpublished content (an out-of-scope editor does not).
+          authorize_if KilnCMS.CMS.Checks.ReadableContentType
+          # A `:draft_write` key sees the provenance of its own drafts, not of
+          # another key's (even one on the same owner).
+          authorize_if KilnCMS.Accounts.Checks.DraftWriteOwnProvenance
+        end
+
+        field_policy :* do
+          authorize_if always()
         end
       end
 
@@ -4181,6 +4558,28 @@ defmodule KilnCMS.CMS.Content do
         # `Changes.TrackAliasDerivation`; no action accepts it.
         attribute :path_alias_derived, :boolean
 
+        # Provenance of a draft a headless service created with a
+        # `:draft_write` API key (#2273). Plain values, deliberately NOT a
+        # foreign key to `api_keys`: the record of how a draft arrived outlives
+        # the key being revoked, expired or deleted. Stamped only by
+        # `Changes.StampDraftWriteProvenance` (no action accepts them). Never
+        # read by a policy.
+        #
+        # Public so JSON:API and GraphQL can carry them, but ONLY through the
+        # field policies below: `on_behalf_of` is whatever opaque string the
+        # service sent, possibly an end-user identifier, and a published
+        # document is world-readable. An actor the policy refuses gets the field
+        # omitted (JSON:API) or null (GraphQL), never an error.
+        attribute :created_via_key_id, :uuid, public?: true
+
+        attribute :created_via_key_name, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.Limits.line()]
+
+        attribute :on_behalf_of, :string,
+          public?: true,
+          constraints: [max_length: KilnCMS.CMS.Changes.StampDraftWriteProvenance.max_length()]
+
         # og:image URL and rel=canonical for SEO/social.
         attribute :seo_image, :string,
           public?: true,
@@ -4189,6 +4588,20 @@ defmodule KilnCMS.CMS.Content do
         attribute :canonical_url, :string,
           public?: true,
           constraints: [max_length: KilnCMS.Limits.url()]
+
+        # Robots directives for this document (#2256). Document-level and shared
+        # across locales; a copy and a translation inherit them from the source.
+        # Rendered as `<meta name="robots">` / `x-robots-tag` and used to leave the
+        # document out of discovery surfaces — delivery (APIs, sync) is unaffected.
+        attribute :noindex, :boolean,
+          default: false,
+          allow_nil?: false,
+          public?: true
+
+        attribute :nofollow, :boolean,
+          default: false,
+          allow_nil?: false,
+          public?: true
 
         attribute :locale, :string,
           default: "en",
@@ -4751,6 +5164,33 @@ defmodule KilnCMS.CMS.Content do
           # No `expression/2`, so a filter or sort would raise out of AshSql as
           # a 500; declaring them unusable rejects at the query layer instead —
           # same reason `word_count` does.
+          filterable? false
+          sortable? false
+        end
+
+        # How much the document's latest safety edit mattered, and when it was
+        # made (`KilnCMS.CMS.LatestEdit`): read back from the version rows,
+        # `nil` unless the document is published. Public so a viewer-level key
+        # sees them on JSON:API and GraphQL, as on `/api/sync`.
+        calculate :latest_edit, :map, KilnCMS.CMS.Calculations.LatestEditLookup do
+          public? false
+          filterable? false
+          sortable? false
+        end
+
+        calculate :latest_edit_severity,
+                  :atom,
+                  KilnCMS.CMS.Calculations.LatestEditSeverity do
+          public? true
+          constraints one_of: [:critical, :notable, :routine]
+          filterable? false
+          sortable? false
+        end
+
+        calculate :latest_edit_at,
+                  :utc_datetime_usec,
+                  KilnCMS.CMS.Calculations.LatestEditAt do
+          public? true
           filterable? false
           sortable? false
         end

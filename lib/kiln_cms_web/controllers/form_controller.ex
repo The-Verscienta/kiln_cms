@@ -5,23 +5,59 @@ defmodule KilnCMSWeb.FormController do
     * `GET /api/forms/:slug` — the form's schema as JSON (fields, labels,
       types, options), so headless frontends can render `data-kiln-form`
       placeholders themselves;
+    * `GET /forms/:slug/embed` — the iframe document `/embed.js` frames;
     * `POST /forms/:slug` — the on-site browser submission (form-encoded),
       rendering a thank-you page;
     * `POST /api/forms/:slug` — the same pipeline for JSON submissions.
+
+  The form's own public page, `GET /forms/:slug` (#2138), is not served here:
+  it is the last fallback of `KilnCMSWeb.ContentController`'s miss funnel, so
+  a content type that owns the `forms` segment, a path alias or a redirect at
+  the same URL keeps precedence. It renders `KilnCMSWeb.FormHTML.show/1`.
 
   No CSRF (the endpoints are anonymous and fired artifacts couldn't carry a
   token); abuse is bounded by the honeypot (`KilnCMS.Forms`) and the tight
   per-IP `:form` rate bucket in the router pipeline. Submitted IPs feed the
   limiter transiently and are never stored.
+
+  ## Human verification (#2249)
+
+  A form set to `challenge: :always` (and a deployment where forms may ask —
+  `KilnCMS.Challenge.form_required?/2`) draws the provider's widget, and every
+  submission carries its token as `_kiln_challenge` (or the field the
+  provider's own markup posts, such as `g-recaptcha-response`). `KilnCMS.Forms.submit/3` decides; here that
+  becomes:
+
+    * the schema's `challenge` — `null`, or what a headless front end needs to
+      draw the widget itself;
+    * a JSON submission's `challenge` — `"verified"`, or `"held"` when the
+      submission was kept for review (no token, solved on a host this
+      deployment does not serve, or the provider could not answer). Present
+      only when the form asks for a check. A refused token is a 422 with
+      `errors._kiln_challenge` and `challenge: "failed"`;
+    * the Content-Security-Policy, widened with the provider's origins only on
+      a response that draws the widget (`Plugs.ChallengeCsp.widen_for_forms/2`,
+      `Embed.content_security_policy/2`).
+
+  A tripped honeypot is never verified, and answers in the same shape as a
+  real submission would — bots learn nothing from it either.
   """
   use KilnCMSWeb, :controller
 
+  alias KilnCMS.Challenge
   alias KilnCMS.Forms
   alias KilnCMS.Forms.EmbedPolicy
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Embed
   alias KilnCMSWeb.Params
+  alias KilnCMSWeb.Plugs.ChallengeCsp
+  alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.Tenant
+
+  # The embed document is `public` and shared-cacheable under its URL, so its
+  # language is the URL's, never the session's (#2595). Not the submissions:
+  # a POST is never cached, and its locale already comes from the pinned path.
+  plug UrlLocale when action in [:embed]
 
   # The embed page is public and changes only when an admin edits the form, so a
   # short shared-cache window is safe; a deactivated form disappears within it.
@@ -77,13 +113,14 @@ defmodule KilnCMSWeb.FormController do
       form ->
         conn
         |> put_resp_header("cache-control", "public, max-age=#{@embed_max_age_seconds}")
-        # The page is rendered through gettext, and the locale can come from
-        # `Accept-Language` rather than the path — without this a shared cache
-        # serves the first visitor's language to everyone for the window. Same
-        # rule published HTML already follows (docs/performance.md).
+        # The page is rendered through gettext in the URL's locale
+        # (`Plugs.UrlLocale`, #2595). It used to fall back to the session's on
+        # an unprefixed URL, which no `Vary` could key a shared cache on.
+        # `Vary` is kept as the rule published HTML follows
+        # (docs/performance.md).
         |> put_resp_header("vary", "accept-language")
         |> put_view(KilnCMSWeb.FormHTML)
-        |> render(:embed, form: form)
+        |> render(:embed, form: form, action: pinned_action(UrlLocale.locale(conn), form))
     end
   end
 
@@ -93,12 +130,26 @@ defmodule KilnCMSWeb.FormController do
   # `EmbedPolicy.effective/1` resolves the org rung (#1131) before `Embed` ever
   # sees the form — a form with no list of its own is handed to `Embed` already
   # carrying its org's configured default, so `Embed` itself needs no change.
+  #
+  # A form that draws the human-verification widget (#2249) gets the provider's
+  # origins on every one of its embed responses — the form, its thank-you page
+  # and a refused re-render — and no other form does.
   defp put_embed_csp(conn, form) do
     put_resp_header(
       conn,
       "content-security-policy",
-      Embed.content_security_policy(EmbedPolicy.effective(form))
+      Embed.content_security_policy(EmbedPolicy.effective(form), challenge_sources(form))
     )
+  end
+
+  defp challenge_sources(nil), do: %{}
+
+  defp challenge_sources(form) do
+    config = Challenge.config()
+
+    if Challenge.form_required?(config, form),
+      do: Challenge.csp_sources(config, :forms),
+      else: %{}
   end
 
   # An embedded form marks its submission so the thank-you page keeps a framing-
@@ -119,6 +170,7 @@ defmodule KilnCMSWeb.FormController do
           submit_label: form.submit_label,
           honeypot_field: Forms.honeypot_field(),
           submit_url: "/forms/#{form.slug}",
+          challenge: schema_challenge(form),
           fields:
             Enum.map(form.fields, fn field ->
               %{
@@ -159,6 +211,23 @@ defmodule KilnCMSWeb.FormController do
   defp whole_or_float(value) when is_float(value) and value == trunc(value), do: trunc(value)
   defp whole_or_float(value), do: value
 
+  # What a headless front end needs to draw the widget itself (#2249), or nil
+  # when the form asks for no check.
+  defp schema_challenge(form) do
+    config = Challenge.config()
+
+    with true <- Challenge.form_required?(config, form),
+         %{} = widget <- Challenge.widget(config, :form) do
+      Map.merge(Challenge.headless_widget(widget), %{
+        required: true,
+        field: Forms.challenge_field(),
+        without_token: "held"
+      })
+    else
+      _not_required -> nil
+    end
+  end
+
   # On-site (form-encoded) submission → a small thank-you page.
   #
   # The XSS.HTML warning is a false positive: `page/2` HTML-escapes every
@@ -190,7 +259,7 @@ defmodule KilnCMSWeb.FormController do
         |> put_status(404)
         |> html(page(gettext("Form not found."), nil, embed: embedded?, kind: :error))
 
-      {:ok, form} ->
+      {:ok, form, _submission} ->
         html(
           conn,
           page(
@@ -223,7 +292,8 @@ defmodule KilnCMSWeb.FormController do
       errors: errors,
       values: submitted_values(form, params),
       rendered_at: submitted_rendered_at(params),
-      variant: Params.string(params, Forms.variant_field())
+      variant: Params.string(params, Forms.variant_field()),
+      action: pinned_action(conn.assigns[:path_locale], form)
     ]
 
     conn = conn |> put_status(422) |> put_view(KilnCMSWeb.FormHTML)
@@ -232,6 +302,7 @@ defmodule KilnCMSWeb.FormController do
       render(conn, :embed, assigns)
     else
       conn
+      |> widen_for_challenge(form)
       |> put_root_layout(html: {KilnCMSWeb.Layouts, :root})
       |> put_layout(false)
       |> render(
@@ -244,6 +315,27 @@ defmodule KilnCMSWeb.FormController do
           ]
       )
     end
+  end
+
+  # Where a served form posts back to. Posted from `/fr/forms/<slug>` (#2138),
+  # or from a content page whose form is pinned to its language (#2465), the
+  # corrected re-submit keeps the prefix and so the visitor's language — the
+  # default locale's too, since an unprefixed path would take the session's.
+  #
+  # The embed passes the URL's locale, default included (#2595), so even an
+  # unprefixed embed posts under a prefix. A submission's re-render passes the
+  # prefix it was posted under, as before.
+  defp pinned_action(locale, form),
+    do: KilnCMS.I18n.pinned_path(locale, "/forms/" <> form.slug)
+
+  # The re-render draws a fresh widget when the form asks for one (#2249), so
+  # its policy must allow the provider; any other refusal keeps the strict one.
+  defp widen_for_challenge(conn, form) do
+    config = Challenge.config()
+
+    if Challenge.form_required?(config, form),
+      do: ChallengeCsp.widen_for_forms(conn, config),
+      else: conn
   end
 
   # What goes back into the re-rendered inputs: the form's OWN fields only, and
@@ -285,13 +377,41 @@ defmodule KilnCMSWeb.FormController do
       :not_found ->
         ApiError.send(conn, :not_found, "not_found", "Form not found.")
 
-      {:ok, form} ->
-        json(conn, %{ok: true, message: form.success_message})
+      {:ok, form, submission} ->
+        json(
+          conn,
+          put_challenge(
+            %{ok: true, message: form.success_message},
+            json_challenge(form, submission, params)
+          )
+        )
+
+      {:error, _form, %{} = errors} when is_map_key(errors, "_kiln_challenge") ->
+        conn
+        |> put_status(422)
+        |> json(%{ok: false, errors: errors, challenge: "failed"})
 
       {:error, _form, errors} ->
         conn |> put_status(422) |> json(%{ok: false, errors: errors})
     end
   end
+
+  # `challenge` in a JSON submission's answer (#2249): only when the form asks
+  # for a check. A tripped honeypot was never verified, and answers as the real
+  # thing would have — "verified" with a token, "held" without one.
+  defp json_challenge(_form, %{challenge: :passed}, _params), do: "verified"
+  defp json_challenge(_form, %{challenge: held}, _params) when not is_nil(held), do: "held"
+
+  defp json_challenge(form, :discarded, params) do
+    if Challenge.form_required?(Challenge.config(), form) do
+      if Forms.challenge_token(params) in [nil, ""], do: "held", else: "verified"
+    end
+  end
+
+  defp json_challenge(_form, _submission, _params), do: nil
+
+  defp put_challenge(body, nil), do: body
+  defp put_challenge(body, value), do: Map.put(body, :challenge, value)
 
   # The form a `run/3` result was about, if it found one — the thank-you page's
   # framing policy comes from it (#648).
@@ -299,7 +419,7 @@ defmodule KilnCMSWeb.FormController do
   # No catch-all: `run/3` is twenty lines below and returns exactly these three,
   # and a fourth one added later should fail loudly in the suite rather than
   # quietly fall back to the deployment policy on a public route.
-  defp submitted_form({:ok, form}), do: form
+  defp submitted_form({:ok, form, _submission}), do: form
   defp submitted_form({:error, form, _errors}), do: form
   defp submitted_form(:not_found), do: nil
 
@@ -309,13 +429,22 @@ defmodule KilnCMSWeb.FormController do
         :not_found
 
       form ->
-        case Forms.submit(form, params, locale: Params.string(params, "locale")) do
+        opts = [locale: Params.string(params, "locale"), remote_ip: client_ip(conn)]
+
+        case Forms.submit(form, params, opts) do
           # A tripped honeypot reports success too — bots learn nothing.
-          {:ok, _submission_or_discarded} -> {:ok, form}
+          {:ok, submission_or_discarded} -> {:ok, form, submission_or_discarded}
           {:error, errors} -> {:error, form, errors}
         end
     end
   end
+
+  # The client's address (behind trusted proxies, `Plugs.ClientIp`), for the
+  # verification provider only when the operator turned `send_remote_ip` on.
+  defp client_ip(%Plug.Conn{remote_ip: ip}) when is_tuple(ip),
+    do: ip |> :inet.ntoa() |> to_string()
+
+  defp client_ip(_conn), do: nil
 
   # Thank-you / error page. Loads `app.css` so success/error share the site kit
   # (ember tokens, `.btn`) with the embed form — previously a bare system-font

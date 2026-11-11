@@ -16,7 +16,12 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   import KilnCMSWeb.ContentEditor.BlockParams
 
   import KilnCMSWeb.ContentEditor.Preview,
-    only: [broadcast_preview: 1, broadcast_preview_and_refresh: 1, refresh_preview: 1]
+    only: [
+      broadcast_preview: 1,
+      broadcast_preview_and_refresh: 1,
+      form_params_with_blocks: 1,
+      refresh_preview: 1
+    ]
 
   import KilnCMSWeb.ContentEditor.Session, only: [mark_dirty: 1]
 
@@ -296,12 +301,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
     with [{id, children}] when is_map(children) <- Map.to_list(payload),
          [{child_id, fields}] when is_map(fields) <- Map.to_list(children),
          [{field, value}] when is_binary(value) <- Map.to_list(fields) do
-      bc =
-        update_columns(socket.assigns.block_children, id, fn blocks ->
-          Enum.map(blocks, &maybe_put_field(&1, child_id, field, value))
-        end)
-
-      {:halt, apply_children(socket, bc)}
+      {:halt, put_nested_field(socket, id, child_id, field, value)}
     else
       # Logged, not swallowed. This head matches before `MalformedEvent`'s
       # catch-all can, so a payload that fails the shape below would otherwise
@@ -319,14 +319,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
          socket
        )
        when is_binary(id) and is_binary(child_id) and is_binary(field) do
-    value = Map.get(p, "value", "")
-
-    bc =
-      update_columns(socket.assigns.block_children, id, fn blocks ->
-        Enum.map(blocks, &maybe_put_field(&1, child_id, field, value))
-      end)
-
-    {:halt, apply_children(socket, bc)}
+    {:halt, put_nested_field(socket, id, child_id, field, Map.get(p, "value", ""))}
   end
 
   # Nested SortableJS drop: `cols` is the new child-id order of every column of
@@ -567,7 +560,7 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   defp apply_children(socket, block_children) do
     params =
       socket.assigns.form
-      |> AshPhoenix.Form.params()
+      |> form_params_with_blocks()
       |> inject_children(block_children)
 
     socket
@@ -575,5 +568,45 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
     |> broadcast_preview_and_refresh()
     |> mark_dirty()
+  end
+
+  # Stage `value` into one field of a nested child — unless that field is
+  # shared across locales and this is a translation (#2270, #1896). The nested
+  # input renders read-only, but a readonly input is not a boundary: a crafted
+  # `col_update_child` would otherwise stage the edit and only the save-time
+  # refusal would stop it.
+  defp put_nested_field(socket, id, child_id, field, value) do
+    if nested_field_locked?(socket, id, child_id, field) do
+      socket
+    else
+      bc =
+        update_columns(socket.assigns.block_children, id, fn blocks ->
+          Enum.map(blocks, &maybe_put_field(&1, child_id, field, value))
+        end)
+
+      apply_children(socket, bc)
+    end
+  end
+
+  defp nested_field_locked?(socket, id, child_id, field) do
+    with %{} = loc <- socket.assigns[:localization],
+         %{} = child <- find_nested_child(socket.assigns.block_children, id, child_id),
+         module when not is_nil(module) <- KilnCMS.Blocks.module_for_tagged_map(child),
+         name when not is_nil(name) <-
+           Enum.find_value(
+             Kiln.Block.Info.fields(module),
+             &(to_string(&1.name) == field && &1.name)
+           ) do
+      KilnCMSWeb.ContentEditor.Localization.locked?(loc, {:block, module, name})
+    else
+      _none -> false
+    end
+  end
+
+  defp find_nested_child(block_children, id, child_id) do
+    block_children
+    |> Map.get(id, [])
+    |> Enum.flat_map(&List.wrap(&1["blocks"]))
+    |> Enum.find(&(&1["id"] == child_id))
   end
 end

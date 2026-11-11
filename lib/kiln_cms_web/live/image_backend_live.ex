@@ -47,10 +47,12 @@ defmodule KilnCMSWeb.ImageBackendLive do
        |> assign(:checked_at, nil)
        |> run_checks()}
     else
+      # Not redundant: the `:live_admin_required` hook admits any ADMIN of this
+      # site, and this page needs a PLATFORM admin (#419), so it refuses the rest
+      # itself, to the same access-denied page (#2143).
       {:ok,
        socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+       |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
   end
 
@@ -242,11 +244,21 @@ defmodule KilnCMSWeb.ImageBackendLive do
               <p class="text-xs font-semibold">
                 {gettext("From a release, such as Kiln's Docker image (in /app):")}
               </p>
-              <pre class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"><code id="adopt-release">{adopt_commands(:release, @current_org)}</code></pre>
+              <pre
+                class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"
+                tabindex="0"
+                role="group"
+                aria-label={gettext("Commands for a release")}
+              ><code id="adopt-release">{adopt_commands(:release, @current_org)}</code></pre>
               <p class="text-xs font-semibold">
                 {gettext("From a source checkout, with Mix:")}
               </p>
-              <pre class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"><code id="adopt-mix">{adopt_commands(:mix, @current_org)}</code></pre>
+              <pre
+                class="overflow-x-auto rounded-lg bg-base-200 p-3 text-xs"
+                tabindex="0"
+                role="group"
+                aria-label={gettext("Commands for Mix")}
+              ><code id="adopt-mix">{adopt_commands(:mix, @current_org)}</code></pre>
               <p :if={@state != :active} class="text-xs text-warning-ink">
                 {gettext("Adopting needs the backend's settings in place first.")}
               </p>

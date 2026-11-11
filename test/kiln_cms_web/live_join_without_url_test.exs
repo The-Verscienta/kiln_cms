@@ -149,7 +149,7 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
 
       # Something only TeamLive emits, not the console shell, which links
       # `/editor/team` from every editor page.
-      assert html =~ "Add member"
+      assert html =~ "Add or invite"
     end
   end
 

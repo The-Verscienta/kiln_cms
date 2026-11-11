@@ -31,6 +31,8 @@ defmodule KilnCMS.CMS.ContentTypes do
           alias_pattern: String.t() | nil,
           seo_title_pattern: String.t() | nil,
           seo_description_pattern: String.t() | nil,
+          noindex_default: boolean(),
+          nofollow_default: boolean(),
           published_feed?: boolean(),
           source: :compiled | :dynamic,
           definition: struct() | nil
@@ -48,7 +50,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   # its own type's feed — the silent-shadowing failure `Validations.SlugAvailable`
   # exists to prevent. `calendar.ics` (#480) and `index.json` (#766) are the same
   # shape: two-segment delivery routes declared ahead of `/:type/:slug`.
-  @reserved_path_segments ~w(account admin api auth billing blog calendar.ics
+  @reserved_path_segments ~w(access-denied account admin api auth billing blog calendar.ics
                              content dev editor feed.json feed.xml gql index.json
                              locale mailbox media membership playground preview
                              register reset search sign_in swaggerui up)
@@ -364,6 +366,16 @@ defmodule KilnCMS.CMS.ContentTypes do
         if(function_exported?(resource, :__kiln_seo_description_pattern__, 0),
           do: resource.__kiln_seo_description_pattern__()
         ),
+      noindex_default:
+        if(function_exported?(resource, :__kiln_noindex_default__, 0),
+          do: resource.__kiln_noindex_default__(),
+          else: false
+        ),
+      nofollow_default:
+        if(function_exported?(resource, :__kiln_nofollow_default__, 0),
+          do: resource.__kiln_nofollow_default__(),
+          else: false
+        ),
       # Compiled types (Page/Post) all have a public index of published records;
       # a dynamic type says so per type (#486 reads this to decide syndication).
       published_feed?: true,
@@ -387,6 +399,8 @@ defmodule KilnCMS.CMS.ContentTypes do
       alias_pattern: definition.alias_pattern,
       seo_title_pattern: definition.seo_title_pattern,
       seo_description_pattern: definition.seo_description_pattern,
+      noindex_default: definition.noindex_default,
+      nofollow_default: definition.nofollow_default,
       published_feed?: definition.has_published_feed,
       source: :dynamic,
       definition: definition
@@ -524,10 +538,30 @@ defmodule KilnCMS.CMS.ContentTypes do
   # collection reads (scoped by `type_definition_id`) and `create!` (which
   # must stamp the type) branch explicitly.
 
+  @doc """
+  Lists the records of `type` through its primary read.
+
+  Takes the `:tenant` / `:actor` / `:authorize?` opts, `query:` (for
+  `Ash.Query.build/2`) and `page:`, plus `arguments:`, a map of the read
+  action's own arguments. The content list passes `custom_filter` /
+  `custom_sort` that way (built by `KilnCMS.CMS.ListFieldQuery.arguments/3`);
+  with none, the call is the same as before the option existed.
+  """
   def list!(type, opts \\ []) do
-    case get!(type, org_from(opts)) do
-      %{source: :dynamic, definition: definition} -> CMS.list_entries!(scoped(opts, definition))
-      _compiled -> call(type, "list_#{plural(type, opts)}!", [opts], opts)
+    {arguments, opts} = Keyword.pop(opts, :arguments, %{})
+
+    case {get!(type, org_from(opts)), arguments == %{}} do
+      {%{source: :dynamic, definition: definition}, true} ->
+        CMS.list_entries!(scoped(opts, definition))
+
+      {%{source: :dynamic, definition: definition}, false} ->
+        CMS.list_entries!(arguments, scoped(opts, definition))
+
+      {_compiled, true} ->
+        call(type, "list_#{plural(type, opts)}!", [opts], opts)
+
+      {_compiled, false} ->
+        call(type, "list_#{plural(type, opts)}!", [arguments, opts], opts)
     end
   end
 
@@ -536,10 +570,16 @@ defmodule KilnCMS.CMS.ContentTypes do
   without the rows.
 
   Takes the same `:tenant` / `:actor` / `:authorize?` opts and the same
-  `query: [filter: …]`; `limit`, `sort` and `select` are meaningless here and a
-  `limit` would silently cap the answer, so pass neither. Counts through the
-  primary read, so AshArchival's soft-delete filter applies (trashed records are
-  not counted) exactly as it does for `list!/2`.
+  `query: [filter: …]` and `arguments:`; `sort` and `select` are meaningless
+  here. A `limit` caps the answer (`Ash.count/2` counts at most that many
+  rows), which is how a caller bounds a count it only wants to show as "N+";
+  leave it out for the exact figure. Counts through the primary read, so AshArchival's soft-delete
+  filter applies (trashed records are not counted) exactly as it does for
+  `list!/2`.
+
+  Read `arguments:` (custom-field conditions, see `KilnCMS.CMS.ListFieldQuery`)
+  are applied as the read action's own arguments, so a count with them runs
+  the same preparation as the list.
   """
   def count!(type, opts \\ []) do
     case get!(type, org_from(opts)) do
@@ -553,11 +593,26 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   defp count_query(resource, opts) do
     {query_opts, opts} = Keyword.pop(opts, :query, [])
+    {arguments, opts} = Keyword.pop(opts, :arguments, %{})
 
-    resource
-    |> Ash.Query.new()
-    |> Ash.Query.build(query_opts)
-    |> Ash.count!(opts)
+    query = resource |> Ash.Query.new() |> Ash.Query.build(query_opts)
+
+    # Arguments belong to a read action, and the preparation that reads them
+    # looks at the query's own filter (the entry tier's `type_definition_id`),
+    # so the action is applied AFTER the filter is built, not left to
+    # `Ash.count!/2` to apply to a bare query.
+    query =
+      if arguments == %{},
+        do: query,
+        else:
+          Ash.Query.for_read(
+            query,
+            :read,
+            arguments,
+            Keyword.take(opts, [:actor, :tenant, :authorize?])
+          )
+
+    Ash.count!(query, opts)
   end
 
   def get_record!(type, id, opts \\ []) do
@@ -744,7 +799,10 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   @doc "Run a workflow transition: publish, unpublish, submit, archive, or unarchive."
   def transition(type, verb, record, opts \\ []) do
-    call(type, transition_fun(atom(type, opts), verb), [record, %{}, opts], opts)
+    # `:params` carries an action argument (the editor's `change_severity`); it
+    # is not an option of the interface call itself.
+    {params, opts} = Keyword.pop(opts, :params, %{})
+    call(type, transition_fun(atom(type, opts), verb), [record, params, opts], opts)
   end
 
   def list_trashed!(type, opts \\ []) do
@@ -765,6 +823,31 @@ defmodule KilnCMS.CMS.ContentTypes do
 
   def destroy(type, record, opts \\ []),
     do: call(type, "destroy_#{atom(type, opts)}", [record, opts], opts)
+
+  @doc """
+  Whether `actor` may move `record` to the trash — the generated
+  `can_destroy_<type>?` helper behind `destroy/3` (`can_destroy_entry?` for a
+  dynamic type), so a control that offers the trash asks the policy the
+  destroy itself will run. `opts` takes `:tenant`.
+  """
+  def can_destroy?(type, record, actor, opts \\ []),
+    do: call(type, "can_destroy_#{atom(type, opts)}?", [actor, record, %{}, opts], opts)
+
+  @doc """
+  Whether `actor` may bring `record` back from the trash — the generated
+  `can_restore_<type>?` helper behind `restore/3` (`can_restore_entry?` for a
+  dynamic type). `opts` takes `:tenant`.
+  """
+  def can_restore?(type, record, actor, opts \\ []),
+    do: call(type, "can_restore_#{atom(type, opts)}?", [actor, record, %{}, opts], opts)
+
+  @doc """
+  Whether `actor` may permanently delete `record` from the trash — the
+  generated `can_purge_<type>?` helper behind `purge/3` (`can_purge_entry?`
+  for a dynamic type). `opts` takes `:tenant`.
+  """
+  def can_purge?(type, record, actor, opts \\ []),
+    do: call(type, "can_purge_#{atom(type, opts)}?", [actor, record, %{}, opts], opts)
 
   # --- internals -------------------------------------------------------------
 

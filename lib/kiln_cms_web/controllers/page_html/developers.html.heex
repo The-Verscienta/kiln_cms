@@ -33,7 +33,12 @@
         "Filterable lists, metadata, relationships, and search over every content type, following the JSON:API specification. Block bodies are not included on this surface — fetch rendered bodies from the artifact endpoint below."
       )}
     </p>
-    <pre class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"><code>curl -s "{@site_url}/api/json/posts?sort=-published_at&amp;page[limit]=5"</code></pre>
+    <pre
+      class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"
+      tabindex="0"
+      role="group"
+      aria-label={gettext("Code sample")}
+    ><code>curl -s "{@site_url}/api/json/posts?sort=-published_at&amp;page[limit]=5"</code></pre>
     <%!-- The explorer and spec follow `:api_docs` (off in prod unless
          `API_DOCS_ENABLED`); `ApiDocs` 404s both when it is off, so only link
          to them when they will actually answer. --%>
@@ -86,6 +91,9 @@
     <pre
       phx-no-curly-interpolation
       class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"
+      tabindex="0"
+      role="group"
+      aria-label={gettext("Code sample")}
     ><code>curl -s -X POST "<%= @site_url %>/gql" \
   -H "Content-Type: application/json" \
   -d '{"query": "{ health }"}'</code></pre>
@@ -128,6 +136,9 @@
     <pre
       phx-no-curly-interpolation
       class="mt-4 overflow-x-auto rounded-lg bg-base-200/60 p-4 text-xs leading-6"
+      tabindex="0"
+      role="group"
+      aria-label={gettext("Code sample")}
     ><code>curl -s -X POST "<%= @site_url %>/api/auth/sign_in" \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com", "password": "…"}'

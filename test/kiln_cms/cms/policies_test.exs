@@ -158,14 +158,19 @@ defmodule KilnCMS.CMS.PoliciesTest do
   end
 
   describe "Page lifecycle authorization by role" do
-    test "editors may unpublish and archive, viewers may not", %{
+    # Taking content down takes the publish permission (#2134): admins, and
+    # editors only where the site lets editors publish (off here).
+    test "admins may unpublish and archive; editors and viewers may not by default", %{
+      admin: admin,
       editor: editor,
       viewer: viewer,
       published: published,
       draft: draft
     } do
-      assert CMS.can_unpublish_page?(editor, published)
-      assert CMS.can_archive_page?(editor, draft)
+      assert CMS.can_unpublish_page?(admin, published)
+      assert CMS.can_archive_page?(admin, draft)
+      refute CMS.can_unpublish_page?(editor, published)
+      refute CMS.can_archive_page?(editor, draft)
       refute CMS.can_unpublish_page?(viewer, published)
       refute CMS.can_archive_page?(viewer, draft)
     end
@@ -260,13 +265,18 @@ defmodule KilnCMS.CMS.PoliciesTest do
       refute CMS.can_publish_post?(editor, draft)
     end
 
-    test "editors may unpublish, archive and restore post versions", %{
+    # Unpublish and archive take the publish permission (#2134); restoring a
+    # version stays an editor's.
+    test "editors may restore post versions, but not unpublish or archive by default", %{
+      admin: admin,
       editor: editor,
       draft_post: draft
     } do
       published = post(%{state: :published})
-      assert CMS.can_unpublish_post?(editor, published)
-      assert CMS.can_archive_post?(editor, draft)
+      assert CMS.can_unpublish_post?(admin, published)
+      assert CMS.can_archive_post?(admin, draft)
+      refute CMS.can_unpublish_post?(editor, published)
+      refute CMS.can_archive_post?(editor, draft)
       assert CMS.can_restore_post_version?(editor, draft)
     end
 
@@ -377,7 +387,22 @@ defmodule KilnCMS.CMS.PoliciesTest do
       assert CMS.can_update_webhook_endpoint?(admin, endpoint)
       assert CMS.can_destroy_webhook_endpoint?(admin, endpoint)
       refute CMS.can_update_webhook_endpoint?(editor, endpoint)
+      refute CMS.can_destroy_webhook_endpoint?(editor, endpoint)
       refute CMS.can_destroy_webhook_endpoint?(viewer, endpoint)
+    end
+
+    # The Webhooks page only mounts for admins, so a forged `delete` event
+    # from an editor never reaches the action; this pins the action itself.
+    test "an editor's destroy of an active endpoint is forbidden", %{
+      editor: editor,
+      endpoint: endpoint
+    } do
+      assert endpoint.active
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.destroy_webhook_endpoint(endpoint, actor: editor)
+
+      assert {:ok, _} = CMS.get_webhook_endpoint(endpoint.id, authorize?: false)
     end
   end
 end

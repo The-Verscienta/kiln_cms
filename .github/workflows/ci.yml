@@ -120,6 +120,12 @@ jobs:
       # the `ml` job below, which is the only leg with the full tree and
       # therefore the only one that can answer the question.
 
+      # The editor's JavaScript twin of `KilnCMS.CMS.Conditions` (#2277), held
+      # to the same fixture as the Elixir module. Dependency-free, so it needs
+      # no `npm ci`; Node is the runner's own (22+ runs `--test`).
+      - name: Test the conditions evaluator (JS parity)
+        run: npm test --prefix assets
+
       - name: Check the toolchain declarations agree
         # .tool-versions is the source of truth, and this job already reads it
         # via setup-beam. The two places that *cannot* read it — mix.exs's
@@ -1711,3 +1717,114 @@ jobs:
 
       - name: Run the qpdf-tagged tests
         run: mix test test/kiln_cms/document_processor_test.exs --only qpdf
+
+  # scripts/optimize_home_images.sh resizes with sips on macOS and with
+  # ImageMagick everywhere else, and until #2461 the ImageMagick branch had
+  # never run: `image_width` called `convert identify`, which ImageMagick 6
+  # reads as an input file named "identify". This job runs the script end to
+  # end on real screenshots in a scratch directory, once per ImageMagick
+  # major: Ubuntu 24.04 ships 6 (`convert` + `identify`), Debian trixie (the
+  # release image's base) ships 7 (`magick`). No BEAM, no database.
+  #
+  # NOT a required check, same posture as `qpdf_metadata_stripping`: it
+  # guards a developer script, not the app, and the trixie leg depends on what
+  # Debian's imagemagick package installs. Promote it by adding both contexts
+  # to the "Require CI on main" ruleset once its pass rate is known.
+  optimize_images_script:
+    name: Image script (ImageMagick ${{ matrix.im }}, ${{ matrix.os }})
+    runs-on: ubuntu-24.04
+    # An empty image runs the leg on the runner itself.
+    container: ${{ matrix.container }}
+    timeout-minutes: 20
+    # A container's default `run` shell is `sh`, which can't parse the bash
+    # arrays below (the first trixie run failed on exactly that). bash is
+    # essential in Debian, so both legs use it.
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            im: 6
+            container: ""
+            resizer: convert
+          - os: debian trixie
+            im: 7
+            container: debian:trixie-slim
+            resizer: magick
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Ubuntu leg: the same cached, wall-clock-bounded apt install as the
+      # test job's qpdf/ffmpeg step (see that step and the script's header).
+      - name: Compute the apt cache key
+        if: matrix.container == ''
+        id: apt-key
+        run: |
+          echo "prefix=apt-v1-${ImageOS:-unknown}-imagemagick-webp-" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached apt packages (imagemagick, webp)
+        if: matrix.container == ''
+        id: apt-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/kiln-apt
+          key: ${{ steps.apt-key.outputs.prefix }}${{ steps.apt-key.outputs.image }}-${{ hashFiles('scripts/ci/apt_install_cached.sh') }}
+          restore-keys: |
+            ${{ steps.apt-key.outputs.prefix }}
+
+      - name: Install ImageMagick 6 and webp (Ubuntu)
+        if: matrix.container == ''
+        timeout-minutes: 10
+        # A cold cache has to fetch the full package lists into the script's
+        # private lists dir; the 60 s default ceiling was too short for that
+        # here (three attempts each killed at 60 s on the first run). The test
+        # job's step almost always restores a warm cache, so it keeps the default.
+        env:
+          APT_UPDATE_TIMEOUT: 240
+          APT_DOWNLOAD_TIMEOUT: 240
+        run: scripts/ci/apt_install_cached.sh "$HOME/.cache/kiln-apt" imagemagick webp
+
+      - name: Save the apt package cache
+        if: matrix.container == '' && steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/kiln-apt
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
+
+      # Trixie leg: root in a bare container, so plain apt-get with the same
+      # fetch timeouts as `qpdf_metadata_stripping`. `actions/checkout` has no
+      # git here and falls back to the REST tarball, so the scripts below are
+      # run with `bash` rather than relying on their mode bits.
+      - name: Install ImageMagick 7 and webp (Debian trixie)
+        if: matrix.container != ''
+        timeout-minutes: 10
+        run: |
+          apt=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o DPkg::Lock::Timeout=120)
+          apt-get "${apt[@]}" update -qq
+          apt-get "${apt[@]}" install -y --no-install-recommends imagemagick webp
+
+      # The leg is only worth having if it runs the binary its name says. On
+      # trixie, a missing unversioned `magick` means the package layout
+      # changed; that is a finding to report, not something to paper over
+      # with a symlink.
+      - name: Show the ImageMagick binaries
+        run: |
+          for bin in magick convert identify cwebp dwebp; do
+            printf '%-9s %s\n' "$bin" "$(command -v "$bin" || echo '(not installed)')"
+          done
+          command -v "${{ matrix.resizer }}" >/dev/null || {
+            echo "::error::${{ matrix.resizer }} is not on PATH on ${{ matrix.os }}" \
+                 "after installing imagemagick; this leg cannot test ImageMagick ${{ matrix.im }}."
+            exit 1
+          }
+
+      - name: Run optimize_home_images.sh and check its output
+        timeout-minutes: 5
+        env:
+          OPTIMIZE_RESIZER: ${{ matrix.resizer }}
+        run: bash scripts/ci/check_optimize_images.sh

@@ -28,6 +28,8 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
   secret_key_base: "OluEpbxI8ouMfdhAmfUQ2mt0H/1ewFUIRNXmQeFLrFo8AxZGW+8wXiwDpKfV3mNF",
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:kiln_cms, ~w(--sourcemap=inline --watch)]},
+    challenge_embed:
+      {Esbuild, :install_and_run, [:kiln_challenge_embed, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:kiln_cms, ~w(--watch)]}
   ]
 

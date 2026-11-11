@@ -72,7 +72,8 @@ defmodule KilnCMSWeb.FormSettingsLive do
       {:ok, origins} ->
         case CMS.save_site_embed_settings(%{embed_origins: origins},
                actor: socket.assigns.current_user,
-               tenant: socket.assigns.current_org
+               tenant: socket.assigns.current_org,
+               context: socket.assigns.security_context
              ) do
           {:ok, _row} ->
             {:noreply,
@@ -107,7 +108,8 @@ defmodule KilnCMSWeb.FormSettingsLive do
 
     case CMS.save_form_spam_settings(%{keywords: parse_keywords(raw)},
            actor: socket.assigns.current_user,
-           tenant: socket.assigns.current_org
+           tenant: socket.assigns.current_org,
+           context: socket.assigns.security_context
          ) do
       {:ok, _row} ->
         {:noreply,
@@ -171,7 +173,11 @@ defmodule KilnCMSWeb.FormSettingsLive do
   # ── state ──────────────────────────────────────────────────────────────────
 
   defp load_settings(socket) do
-    opts = [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
+    opts = [
+      actor: socket.assigns.current_user,
+      tenant: socket.assigns.current_org,
+      context: socket.assigns.security_context
+    ]
 
     embed_row = first(CMS.list_site_embed_settings(opts))
     spam_row = first(CMS.list_form_spam_settings(opts))

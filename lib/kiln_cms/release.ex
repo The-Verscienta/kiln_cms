@@ -206,6 +206,28 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.reserved_paths` for a release (#2374): list the stored records
+  whose slug or path alias a router-owned URL shadows.
+
+      bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'
+
+  Returns `:ok` when there are none, `{:error, message}` otherwise; see
+  `KilnCMS.CMS.ReservedPathAudit`.
+  """
+  @spec reserved_paths() :: :ok | {:error, String.t()}
+  def reserved_paths do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(hd(repos()), fn _repo ->
+        KilnCMS.CMS.ReservedPathAudit.run_and_report(&IO.puts/1)
+      end)
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  @doc """
   Rewrite every block tree still stored in a legacy shape to the typed shape
   (#1537) — `mix kiln.blocks.backfill` for a release, which has no Mix:
 
@@ -292,6 +314,33 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  `mix kiln.fields.import` for a release (#2288): plan, or with `apply: true`
+  write, a custom-field definitions document in the **running** node.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.import_field_definitions("/data/fields.json")'
+      bin/kiln_cms rpc '{:ok, _} = KilnCMS.Release.import_field_definitions("/data/fields.json", apply: true)'
+
+  A dry run is the default. Options are the task's flags as a keyword list
+  (`apply:`, `prune:`, `allow_data_loss:`, `actor: "email"`, `org: "slug"`).
+  Runs through `rpc` for the reason `import_wordpress/2` does.
+  """
+  @spec import_field_definitions(Path.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def import_field_definitions(path, opts \\ []) do
+    run_import(&KilnCMS.CMS.FieldSync.import_file/3, path, opts)
+  end
+
+  @doc """
+  `mix kiln.fields.export` for a release (#2288): write the running node's
+  custom-field definitions to `path`.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.export_field_definitions("/data/fields.json")'
+  """
+  @spec export_field_definitions(Path.t(), keyword()) :: {:ok, map()} | {:error, String.t()}
+  def export_field_definitions(path, opts \\ []) do
+    run_import(&KilnCMS.CMS.FieldSync.export_file/3, path, opts)
+  end
+
+  @doc """
   `mix kiln.media.adopt_image_backend` for a release (#1955): hand the active
   image backend the imported rows whose images it already holds, in the
   **running** node.
@@ -351,6 +400,260 @@ defmodule KilnCMS.Release do
           {:ok, map()} | {:error, String.t()}
   def convert_field(type, source, target, opts \\ []),
     do: run_conversion(type, source, target, opts, serving?())
+
+  @doc """
+  List, or remove, a site's IP block rules (#2242) — the way back in when an
+  operator has blocked the address they work from.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks()'
+      bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(cidr: "203.0.113.0/24", remove: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(org: "acme", remove: true)'
+
+  Without `remove: true` it only lists. Options: `org: "<slug>"` for a site
+  other than the default one, `cidr: "<address or range>"` to act on one rule
+  (any spelling the console accepts; it is normalised the same way), and
+  `remove: true` to delete — every rule of the site, or just the `cidr:` one.
+  Prints what it found or removed and returns `{:ok, rules}` (the rules listed
+  or removed) or `{:error, message}`.
+
+  It goes through the resource's code interface as the `:operator` system actor
+  (granted `list` and `destroy` only), so validations and the tenant filter
+  still run, and busts the site's cache on every node.
+
+  Through `rpc`, not `eval`: the cluster-wide cache bust needs the running
+  application. `rpc` exits 0 whatever this returns; a script that must fail on
+  an error matches the result:
+
+      bin/kiln_cms rpc '{:ok, _} = KilnCMS.Release.ip_blocks(remove: true)'
+  """
+  @spec ip_blocks(keyword()) :: {:ok, [map()]} | {:error, String.t()}
+  def ip_blocks(opts \\ []), do: run_ip_blocks(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_ip_blocks(opts, serving?) do
+    result =
+      with true <- serving? || {:error, @needs_running_node},
+           {:ok, org_id} <- KilnCMS.CMS.FieldConversion.org_id(opts[:org]),
+           {:ok, cidr} <- ip_block_cidr(opts[:cidr]),
+           {:ok, rules} <- ip_block_rules(org_id, cidr) do
+        if opts[:remove] == true,
+          do: remove_ip_blocks(org_id, rules),
+          else: list_ip_blocks(rules)
+      end
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  defp ip_block_cidr(nil), do: {:ok, nil}
+
+  defp ip_block_cidr(text) do
+    case KilnCMS.Security.Cidr.normalise(text) do
+      {:ok, cidr} -> {:ok, cidr}
+      {:error, _} -> {:error, "#{inspect(text)} is not an IP address or range."}
+    end
+  end
+
+  defp ip_block_rules(org_id, cidr) do
+    case KilnCMS.CMS.list_ip_block_rules(
+           actor: KilnCMS.SystemActor.new(:operator),
+           tenant: org_id,
+           authorize_with: :error
+         ) do
+      {:ok, rules} ->
+        case Enum.filter(rules, &(is_nil(cidr) or &1.cidr == cidr)) do
+          [] when not is_nil(cidr) -> {:error, "No block rule for #{cidr} on this site."}
+          rules -> {:ok, rules}
+        end
+
+      {:error, error} ->
+        {:error, "Could not read the block rules: #{Exception.message(error)}"}
+    end
+  end
+
+  defp list_ip_blocks([]) do
+    IO.puts("No block rules on this site.")
+    {:ok, []}
+  end
+
+  defp list_ip_blocks(rules) do
+    IO.puts("#{length(rules)} block rule(s):")
+    Enum.each(rules, &IO.puts("  " <> describe_ip_block(&1)))
+    IO.puts("Nothing removed. Add remove: true (and cidr: \"...\" for one rule) to delete.")
+    {:ok, rules}
+  end
+
+  defp remove_ip_blocks(_org_id, []) do
+    IO.puts("No block rules on this site; nothing to remove.")
+    {:ok, []}
+  end
+
+  defp remove_ip_blocks(org_id, rules) do
+    actor = KilnCMS.SystemActor.new(:operator)
+
+    failed =
+      for rule <- rules,
+          {:error, error} <- [
+            KilnCMS.CMS.destroy_ip_block_rule(rule, actor: actor, tenant: org_id)
+          ],
+          do: "#{rule.cidr}: #{Exception.message(error)}"
+
+    # The resource busts after each commit; once more for the whole set.
+    KilnCMS.Security.IpBlocklist.bust(org_id)
+
+    if failed == [] do
+      Enum.each(rules, &IO.puts("  removed " <> describe_ip_block(&1)))
+      IO.puts("Removed #{length(rules)} block rule(s); the change reaches every node now.")
+      {:ok, rules}
+    else
+      {:error, "Could not remove #{length(failed)} rule(s):\n  " <> Enum.join(failed, "\n  ")}
+    end
+  end
+
+  defp describe_ip_block(rule) do
+    expiry =
+      case rule.expires_at do
+        nil -> ""
+        at -> " expires #{DateTime.to_iso8601(at)}"
+      end
+
+    note = if rule.note, do: " — #{rule.note}", else: ""
+    rule.cidr <> expiry <> note
+  end
+
+  @doc """
+  Show, widen or turn off a site's admin allowlist (#2248) — the way back in
+  when the list has locked a site's admins out.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist()'
+      bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(add: "198.51.100.7")'
+      bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(org: "acme", clear: true)'
+
+  With neither `add:` nor `clear:` it only lists. `add: "<address or range>"`
+  adds one entry to a list that is on (any spelling the console accepts); it
+  refuses a list that is off, because adding would turn it on and lock out
+  every admin not on that network. `clear: true` empties the list, turning it
+  off. `org: "<slug>"` acts on a site other than the default one. Prints what
+  it found or did and returns `{:ok, entries}` (the list after) or
+  `{:error, message}`.
+
+  It can only widen or empty a list, so it cannot lock anyone out. It runs the
+  resource's `operator_override` action as the `:operator` system actor, which
+  records "Admin allowlist changed from the server" in the site's security log
+  in the same transaction, and the change reaches every node at once.
+
+  Through `rpc`, not `eval`: the cluster-wide cache bust and the message to
+  open pages need the running application. `rpc` exits 0 whatever this
+  returns; a script that must fail on an error matches the result:
+
+      bin/kiln_cms rpc '{:ok, _} = KilnCMS.Release.admin_allowlist(clear: true)'
+  """
+  @spec admin_allowlist(keyword()) :: {:ok, [String.t()]} | {:error, String.t()}
+  def admin_allowlist(opts \\ []), do: run_admin_allowlist(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_admin_allowlist(opts, serving?) do
+    result =
+      with true <- serving? || {:error, @needs_running_node},
+           {:ok, org_id} <- KilnCMS.CMS.FieldConversion.org_id(opts[:org]),
+           {:ok, row} <- admin_allowlist_row(org_id) do
+        cond do
+          opts[:clear] == true and is_binary(opts[:add]) ->
+            {:error, "Give add: or clear: true, not both."}
+
+          opts[:clear] == true ->
+            clear_admin_allowlist(org_id, row)
+
+          is_binary(opts[:add]) ->
+            add_admin_allowlist(org_id, row, opts[:add])
+
+          true ->
+            list_admin_allowlist(row)
+        end
+      end
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  defp admin_allowlist_row(org_id) do
+    case KilnCMS.CMS.list_site_admin_allowlist(
+           actor: KilnCMS.SystemActor.new(:operator),
+           tenant: org_id,
+           authorize_with: :error
+         ) do
+      {:ok, rows} ->
+        {:ok, List.first(rows)}
+
+      {:error, error} ->
+        {:error, "Could not read the admin allowlist: #{Exception.message(error)}"}
+    end
+  end
+
+  defp list_admin_allowlist(row) do
+    case admin_allowlist_entries(row) do
+      [] ->
+        IO.puts("The admin allowlist is off on this site: sign-in is open to every network.")
+        {:ok, []}
+
+      entries ->
+        IO.puts("The admin allowlist is on, with #{length(entries)} entr(y/ies):")
+        Enum.each(entries, &IO.puts("  " <> &1))
+
+        IO.puts(
+          "Nothing changed. Add add: \"<address>\" to widen it, or clear: true to turn it off."
+        )
+
+        {:ok, entries}
+    end
+  end
+
+  defp clear_admin_allowlist(_org_id, row) when is_nil(row) or row.cidrs == [] do
+    IO.puts("The admin allowlist is already off on this site; nothing to clear.")
+    {:ok, []}
+  end
+
+  defp clear_admin_allowlist(org_id, row) do
+    with {:ok, row} <- override_admin_allowlist(org_id, row, %{clear: true}) do
+      IO.puts("Cleared the admin allowlist: sign-in is open to every network again.")
+      IO.puts("The change reaches every node now, and is in the site's security log.")
+      {:ok, row.cidrs}
+    end
+  end
+
+  defp add_admin_allowlist(_org_id, row, _add) when is_nil(row) or row.cidrs == [] do
+    {:error,
+     "The admin allowlist is off on this site; adding would turn it on and lock out every " <>
+       "admin on another network. Use the console to turn it on."}
+  end
+
+  defp add_admin_allowlist(org_id, row, add) do
+    with {:ok, row} <- override_admin_allowlist(org_id, row, %{add: add}) do
+      IO.puts("Added #{List.last(row.cidrs)}. The admin allowlist now has:")
+      Enum.each(row.cidrs, &IO.puts("  " <> &1))
+      IO.puts("The change reaches every node now, and is in the site's security log.")
+      {:ok, row.cidrs}
+    end
+  end
+
+  defp override_admin_allowlist(org_id, row, args) do
+    case KilnCMS.CMS.override_site_admin_allowlist(row, args,
+           actor: KilnCMS.SystemActor.new(:operator),
+           tenant: org_id
+         ) do
+      {:ok, row} ->
+        {:ok, row}
+
+      {:error, error} ->
+        {:error, "Could not change the admin allowlist: #{Exception.message(error)}"}
+    end
+  end
+
+  defp admin_allowlist_entries(nil), do: []
+  defp admin_allowlist_entries(row), do: row.cidrs
 
   # `serving?` is an argument only so the test can take the `eval` branch.
   @doc false

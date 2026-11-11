@@ -308,6 +308,12 @@ cover:
   backups. See [backups.md](backups.md#what-must-be-backed-up).
 - **Media on a volume.** The in-app backup (Backups in the console) archives
   `KILN_MEDIA_ROOT`, but it writes the archive to `BACKUP_DIR` on the
-  container's own disk, which the platform wipes, unless
-  `BACKUP_RCLONE_REMOTE` copies it off-site. Set that, or snapshot the volume
-  with the platform's tools.
+  container's own disk, which the platform wipes. Snapshot the volume with the
+  platform's tools, or set `BACKUP_RCLONE_REMOTE`: the official image ships
+  `rclone`, so each in-app backup is then copied off-site, and a copy that
+  fails fails the backup. Configure the remote with `RCLONE_CONFIG_<NAME>_*`
+  variables (the platform's secrets), not a connection-string remote, whose
+  credentials would reach `rclone` as an argument. An image of your
+  own that leaves `rclone` out fails every in-app backup while the variable
+  is set. See
+  [backups.md](backups.md#it-needs-the-client-tools-in-the-image).

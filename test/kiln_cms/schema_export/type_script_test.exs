@@ -246,10 +246,147 @@ defmodule KilnCMS.SchemaExport.TypeScriptTest do
     end
   end
 
+  test "the header names both entry points, since either can serve the file" do
+    [first | _] = JsonSchema.defs(KilnCMS.Blocks.modules()) |> emit() |> String.split("\n")
+
+    assert first =~ "mix kiln.export.schema --format ts"
+    assert first =~ "GET /api/schema"
+  end
+
   test "a document with no content types still emits the block half" do
     ts = emit(JsonSchema.defs(KilnCMS.Blocks.modules()))
 
     assert ts =~ "export type KilnBlock ="
     refute ts =~ "export type KilnDocument ="
+  end
+
+  describe "emit_graphql/1" do
+    defp content(type, graphql, custom) do
+      %{
+        "type" => "object",
+        "x-kiln-graphql" => graphql,
+        "properties" => %{
+          "type" => %{"const" => type},
+          "custom_fields" => %{
+            "type" => "object",
+            "properties" => custom,
+            "additionalProperties" => true
+          }
+        }
+      }
+    end
+
+    defp field(kind, type \\ ["string", "null"]),
+      do: %{"type" => type, "x-kiln-graphql-kind" => kind}
+
+    test "scalar kinds read through their accessor, typed" do
+      ts =
+        TypeScript.emit_graphql(
+          document(%{
+            "content_post" =>
+              content("post", %{"type" => "Post"}, %{
+                "price" => field("float", ["number", "null"]),
+                "seats" => field("int", ["integer", "null"]),
+                "title_tag" => field("string"),
+                "on_sale" => field("boolean", ["boolean", "null"]),
+                "opens" => field("date"),
+                "starts_at" => field("datetime")
+              })
+          })
+        )
+
+      assert ts =~ ~s|price: customFloat(name: "price")|
+      assert ts =~ ~s|seats: customInt(name: "seats")|
+      assert ts =~ ~s|titleTag: customString(name: "title_tag")|
+      assert ts =~ ~s|onSale: customBoolean(name: "on_sale")|
+      assert ts =~ ~s|opens: customDate(name: "opens")|
+      assert ts =~ ~s|startsAt: customDateTime(name: "starts_at")|
+      assert ts =~ "fragment PostCustomFields on Post {"
+      assert ts =~ "  price: number | null;"
+      assert ts =~ "  onSale: boolean | null;"
+      refute ts =~ "  fields(names: [\""
+      refute ts =~ "  fields: KilnCustomFieldValue[];"
+    end
+
+    test "kinds without a scalar accessor go through fields(names:)" do
+      ts =
+        TypeScript.emit_graphql(
+          document(%{
+            "content_post" =>
+              content("post", %{"type" => "Post"}, %{
+                "gallery" => field("list", ["array", "null"]),
+                "seo" => field("group", ["object", "null"]),
+                "venue" => field("geolocation", ["object", "null"]),
+                "price" => field("float", ["number", "null"])
+              })
+          })
+        )
+
+      assert ts =~ ~s|fields(names: ["gallery", "seo", "venue"]) {|
+      assert ts =~ "... on GeolocationValue { lat lng label zoom }"
+      assert ts =~ ~s|__typename: "GeolocationValue";|
+      assert ts =~ "  fields: KilnCustomFieldValue[];"
+      assert ts =~ "... on ListValue {"
+      assert ts =~ ~s|price: customFloat(name: "price")|
+    end
+
+    test "a dynamic type is an Entry fragment that names its typeName" do
+      ts =
+        TypeScript.emit_graphql(
+          document(%{
+            "content_recipe" =>
+              content("recipe", %{"type" => "Entry", "type_name" => "recipe"}, %{
+                "serves" => field("int", ["integer", "null"])
+              })
+          })
+        )
+
+      assert ts =~ "fragment RecipeCustomFields on Entry {"
+      assert ts =~ ~s(On `Entry` with `typeName: "recipe"`)
+    end
+
+    test "an alias that would shadow a document field is prefixed" do
+      ts =
+        TypeScript.emit_graphql(
+          document(%{
+            "content_post" => content("post", %{"type" => "Post"}, %{"title" => field("string")})
+          })
+        )
+
+      assert ts =~ ~s|customTitle: customString(name: "title")|
+    end
+
+    test "aliases that collide or shadow a native field stay unique" do
+      ts =
+        TypeScript.emit_graphql(
+          document(%{
+            "content_post" =>
+              content("post", %{"type" => "Post"}, %{
+                "state" => field("string"),
+                "foo_bar" => field("string"),
+                "foo__bar" => field("string")
+              })
+          })
+        )
+
+      assert ts =~ ~s|customState: customString(name: "state")|
+      assert ts =~ ~s|fooBar: customString(name: "foo__bar")|
+      assert ts =~ ~s|fooBar2: customString(name: "foo_bar")|
+    end
+
+    test "a type with no custom fields gets no fragment" do
+      ts =
+        TypeScript.emit_graphql(
+          document(%{"content_post" => content("post", %{"type" => "Post"}, %{})})
+        )
+
+      refute ts =~ "CustomFieldsFragment"
+    end
+
+    test "a document without the annotations is the plain emit" do
+      doc = document(%{"content_post" => content("post", nil, %{"a" => %{"type" => "string"}})})
+
+      assert TypeScript.emit_graphql(doc) == TypeScript.emit(doc)
+    end
   end
 end

@@ -63,6 +63,9 @@ defmodule KilnCMSWeb.PresentationLive do
        |> assign(:scalar_changes, %{})
        |> assign(:save_state, :saved)
        |> assign(:conflict, false)
+       # Set, with `:conflict`, when the record was trashed or deleted while
+       # open (#2332): nothing to reload, so saving stays paused.
+       |> assign(:gone, false)
        |> assign(:region_version, 0)
        |> assign_record(record)}
     else
@@ -142,12 +145,18 @@ defmodule KilnCMSWeb.PresentationLive do
          |> push_event("presentation:refresh", %{})
          |> put_flash(:info, gettext("Saved."))}
 
+      # Also what a record trashed or purged since load gets (#2332), where a
+      # reload cannot help; so look for it first.
       :conflict ->
-        {:noreply,
-         socket
-         |> assign(:conflict, true)
-         |> assign(:save_state, :unsaved)
-         |> put_flash(:error, gettext("This content changed elsewhere. Reload before saving."))}
+        if fetch(socket) == :gone do
+          {:noreply, flag_gone(socket)}
+        else
+          {:noreply,
+           socket
+           |> assign(:conflict, true)
+           |> assign(:save_state, :unsaved)
+           |> put_flash(:error, gettext("This content changed elsewhere. Reload before saving."))}
+        end
 
       {:error, _error} ->
         {:noreply,
@@ -238,19 +247,49 @@ defmodule KilnCMSWeb.PresentationLive do
 
   def handle_event("close_panel", _params, socket), do: {:noreply, assign(socket, :editing, nil)}
 
+  # A record trashed or deleted meanwhile (#2332) has no latest version: the
+  # pane keeps the edits and says what happened.
   def handle_event("reload", _params, socket) do
-    record =
-      ContentTypes.get_record!(socket.assigns.kind, socket.assigns.record.id,
-        actor: socket.assigns.actor
-      )
+    case fetch(socket) do
+      {:ok, record} ->
+        {:noreply,
+         socket
+         |> assign_record(record)
+         |> update(:region_version, &(&1 + 1))
+         |> assign(:conflict, false)
+         |> assign(:save_state, :saved)
+         |> assign(:editing, nil)}
 
-    {:noreply,
-     socket
-     |> assign_record(record)
-     |> update(:region_version, &(&1 + 1))
-     |> assign(:conflict, false)
-     |> assign(:save_state, :saved)
-     |> assign(:editing, nil)}
+      :gone ->
+        {:noreply, flag_gone(socket)}
+
+      {:error, error} ->
+        raise Ash.Error.to_error_class(error)
+    end
+  end
+
+  # This session's record, re-read: `:gone` when the read finds nothing
+  # (#2332), any other failure returned. Scoped to the current site's org as
+  # the mount's read is.
+  defp fetch(socket) do
+    case ContentTypes.get_record(socket.assigns.kind, socket.assigns.record.id,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, record} -> {:ok, record}
+      {:error, error} -> if InlineEditing.not_found?(error), do: :gone, else: {:error, error}
+    end
+  end
+
+  # The record was moved to the trash or deleted while open (#2332). The pane
+  # keeps the edits to copy; `@gone` disables Save and swaps "Reload" for a
+  # way back to the content list.
+  defp flag_gone(socket) do
+    socket
+    |> assign(:conflict, true)
+    |> assign(:gone, true)
+    |> assign(:save_state, :unsaved)
+    |> put_flash(:error, gettext("This content was moved to the trash or deleted."))
   end
 
   defp open_edit_field(%{"block" => block_id} = payload, socket) when is_binary(block_id) do
@@ -423,7 +462,7 @@ defmodule KilnCMSWeb.PresentationLive do
                 />
               </form>
             </div>
-            <.save_footer conflict={@conflict} save_state={@save_state} />
+            <.save_footer conflict={@conflict} gone={@gone} save_state={@save_state} />
           </div>
 
           <div :if={is_map(@editing)} class="flex min-h-0 flex-1 flex-col">
@@ -445,7 +484,7 @@ defmodule KilnCMSWeb.PresentationLive do
               <.edit_region block={@editing} version={@region_version} />
             </div>
 
-            <.save_footer conflict={@conflict} save_state={@save_state} />
+            <.save_footer conflict={@conflict} gone={@gone} save_state={@save_state} />
           </div>
         </aside>
       </div>
@@ -456,14 +495,32 @@ defmodule KilnCMSWeb.PresentationLive do
   # Shared Save/Reload footer for the edit pane.
   defp save_footer(assigns) do
     ~H"""
+    <div
+      :if={@gone}
+      id="presentation-gone"
+      role="alert"
+      class="border-t border-warning/50 bg-warning/10 px-4 py-3 text-sm"
+    >
+      {gettext(
+        "This content was moved to the trash or deleted, so your changes can't be saved. Copy anything you need before leaving."
+      )}
+      <.link navigate={~p"/editor"} class="btn-link ml-1 font-medium underline">
+        {gettext("Back to content")}
+      </.link>
+    </div>
     <div class="flex items-center justify-between gap-2 border-t border-base-300 px-4 py-3">
-      <button :if={@conflict} type="button" phx-click="reload" class="btn btn-sm btn-ghost">
+      <button
+        :if={@conflict and not @gone}
+        type="button"
+        phx-click="reload"
+        class="btn btn-sm btn-ghost"
+      >
         {gettext("Reload")}
       </button>
       <button
         type="button"
         phx-click="save"
-        disabled={@save_state == :saved}
+        disabled={@save_state == :saved or @gone}
         class="btn btn-sm btn-primary ml-auto"
       >
         {gettext("Save")}

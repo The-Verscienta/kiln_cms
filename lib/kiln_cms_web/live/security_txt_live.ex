@@ -37,7 +37,8 @@ defmodule KilnCMSWeb.SecurityTxtLive do
   def handle_event("save", %{"security_txt" => params}, socket) when is_map(params) do
     case CMS.save_site_security_txt(attrs(params),
            actor: socket.assigns.current_user,
-           tenant: socket.assigns.current_org
+           tenant: socket.assigns.current_org,
+           context: socket.assigns.security_context
          ) do
       {:ok, _row} ->
         {:noreply,
@@ -66,7 +67,8 @@ defmodule KilnCMSWeb.SecurityTxtLive do
       row ->
         case CMS.reset_site_security_txt(row,
                actor: socket.assigns.current_user,
-               tenant: socket.assigns.current_org
+               tenant: socket.assigns.current_org,
+               context: socket.assigns.security_context
              ) do
           {:error, error} ->
             {:noreply, socket |> put_flash(:error, error_message(error)) |> load_settings()}
@@ -299,6 +301,9 @@ defmodule KilnCMSWeb.SecurityTxtLive do
         </p>
         <pre
           id="security-txt-preview"
+          tabindex="0"
+          role="group"
+          aria-label={gettext("security.txt as served")}
           class="mt-3 overflow-x-auto rounded-lg bg-base-200 p-4 font-mono text-xs"
         >{@preview}</pre>
       </section>

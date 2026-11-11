@@ -128,7 +128,9 @@ defmodule KilnCMSWeb.AccountsLiveTest do
 
     test "editors are turned away", %{conn: conn} do
       conn = log_in(conn, authed_user(:editor))
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/accounts")
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/accounts")
     end
   end
 
@@ -505,7 +507,9 @@ defmodule KilnCMSWeb.AccountsLiveTest do
       member_of(editor, Accounts.default_org_id(), :editor)
 
       conn = log_in(Phoenix.ConnTest.build_conn(), editor)
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/accounts")
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/accounts")
     end
 
     test "an admin of another site cannot reach this site's page" do
@@ -513,7 +517,9 @@ defmodule KilnCMSWeb.AccountsLiveTest do
       member_of(other_admin, seed_org().id, :admin)
 
       conn = log_in(Phoenix.ConnTest.build_conn(), other_admin)
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/editor/accounts")
+
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, ~p"/editor/accounts")
     end
   end
 
@@ -557,6 +563,146 @@ defmodule KilnCMSWeb.AccountsLiveTest do
 
       assert html =~ "was erased on"
       refute html =~ "Delete account…"
+    end
+  end
+
+  # #2142: the role that applies now, once, up front; a live grant explained
+  # under it; account status apart from the role.
+  describe "role display" do
+    setup %{conn: conn} do
+      %{conn: log_in(conn, authed_user(:admin))}
+    end
+
+    defp badge_text(view, selector) do
+      view
+      |> element("#{selector}-tier")
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.text()
+      |> String.trim()
+    end
+
+    test "the register leads with the effective platform role and explains a live grant",
+         %{conn: conn} do
+      granted =
+        seeded(:viewer, %{granted_role: :admin, granted_role_expires_at: in_hours(5)})
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts")
+      row = "#account-#{granted.id}-role"
+
+      assert badge_text(view, row) == "Admin"
+      assert has_element?(view, row, "Platform:")
+
+      line = view |> element("#{row}-grant") |> render()
+      assert line =~ "Admin is temporary: until"
+      assert line =~ "5 hours left"
+      assert line =~ "then Viewer."
+    end
+
+    test "an expired grant shows the standing role alone", %{conn: conn} do
+      expired =
+        seeded(:viewer, %{granted_role: :admin, granted_role_expires_at: in_hours(-1)})
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts")
+      row = "#account-#{expired.id}-role"
+
+      assert badge_text(view, row) == "Viewer"
+      refute has_element?(view, "#{row}-grant")
+      refute has_element?(view, row, "temporary")
+    end
+
+    test "the account header shows the role, then status with what confirmation means",
+         %{conn: conn} do
+      subject =
+        seeded(:editor, %{
+          confirmed_at: nil,
+          granted_role: :admin,
+          granted_role_expires_at: in_hours(5)
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{subject.id}")
+
+      assert badge_text(view, "#account-role") == "Admin"
+      assert has_element?(view, "#account-role-grant", "then Editor.")
+      assert has_element?(view, "#account-status", "Email not confirmed")
+      assert has_element?(view, "#account-status", "password sign-in")
+      refute has_element?(view, "#account-role", "Email not confirmed")
+    end
+
+    test "a confirmed account carries no confirmation note", %{conn: conn} do
+      subject = seeded(:viewer)
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{subject.id}")
+
+      refute has_element?(view, "#account-status", "Email not confirmed")
+      refute render(view) =~ "Single sign-on won"
+    end
+
+    test "the filters name what they filter", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts")
+
+      assert has_element?(view, "#account-filters label", "Standing role")
+      assert has_element?(view, "#account-filters option", "Any standing role")
+
+      assert has_element?(
+               view,
+               ~s(#account-filters option[value="unconfirmed"]),
+               "Email not confirmed"
+             )
+
+      assert has_element?(view, ~s(#account-filters option[value="viewer"]), "Viewer")
+    end
+
+    test "a site row explains a live membership grant", %{conn: conn} do
+      subject = seeded(:viewer)
+
+      membership =
+        member_of(subject, Accounts.default_org_id())
+        |> Ash.Seed.update!(%{granted_role: :editor, granted_role_expires_at: in_hours(5)})
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{subject.id}")
+      row = "#site-#{membership.id}-role"
+
+      assert badge_text(view, row) == "Editor"
+      assert has_element?(view, row, "On this site:")
+      assert has_element?(view, "#{row}-grant", "Editor is temporary: until")
+      assert has_element?(view, "#{row}-grant", "then Viewer.")
+    end
+
+    test "a platform admin's site row shows admin, overriding the site tier", %{conn: conn} do
+      subject = seeded(:admin)
+      membership = member_of(subject, Accounts.default_org_id(), :viewer)
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{subject.id}")
+      row = "#site-#{membership.id}-role"
+
+      assert badge_text(view, row) == "Admin"
+      assert has_element?(view, row, "Site tier Viewer, overridden by the platform admin role.")
+      refute has_element?(view, "#{row}-grant")
+    end
+
+    # The overridden tier is the one the membership grants now, grant included.
+    test "the overridden site tier counts a live membership grant", %{conn: conn} do
+      subject = seeded(:admin)
+
+      membership =
+        subject
+        |> member_of(Accounts.default_org_id(), :viewer)
+        |> Ash.Seed.update!(%{granted_role: :editor, granted_role_expires_at: in_hours(5)})
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{subject.id}")
+
+      assert has_element?(
+               view,
+               "#site-#{membership.id}-role",
+               "Site tier Editor, overridden by the platform admin role."
+             )
+    end
+
+    test "the confirmation note names only the single sign-on that refuses", %{conn: conn} do
+      subject = seeded(:viewer, %{confirmed_at: nil})
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{subject.id}")
+
+      assert has_element?(view, "#account-status", "A site's own single sign-on won't sign in")
     end
   end
 end

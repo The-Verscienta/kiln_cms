@@ -25,6 +25,9 @@ defmodule KilnCMS.Application do
     warn_if_ask_egresses()
     warn_if_semantic_without_ml()
     warn_if_media_unwritable()
+    warn_if_admin_allowlist_disabled()
+    filter_challenge_response_fields()
+    warn_if_challenge_provider_unusable()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
     # loaded so they register with the protocol and prevent unhandled errors.
@@ -39,6 +42,10 @@ defmodule KilnCMS.Application do
     # definitions before anything had touched the registry raised
     # `cannot load "money"` (the v1.8.0 upgrade rehearsal).
     {:module, _} = Code.ensure_loaded(KilnCMS.CMS.FieldTypes)
+
+    # This boot's id, before any backup step can run (#2218): a step stamps it
+    # on the backup lock, so a restarted node is told apart from a live one.
+    _ = KilnCMS.Backups.init_boot_id()
 
     children = [
       KilnCMSWeb.Telemetry,
@@ -77,9 +84,27 @@ defmodule KilnCMS.Application do
       KilnCMS.Media.TransformGate,
       # Bounded LRW content cache (see `KilnCMS.Cache.child_spec/1`).
       KilnCMS.Cache,
+      # Generation tokens and last-known admin allowlists (#2502): unbounded
+      # (a few keys per site) and never cleared, so a delivery flush or the
+      # content cache's eviction cannot move one back. Explicit id for the
+      # reason the WebAuthn store below gives.
+      Supervisor.child_spec(
+        {Cachex, [name: KilnCMS.Cache.generation_cache_name(), transactions: true]},
+        id: KilnCMS.Cache.generation_cache_name()
+      ),
       # Host→org resolution, on its own eviction schedule and the only cache
       # that remembers a miss (#659).
       KilnCMS.Cache.Hosts,
+      # Per-org IP block rules, compiled, for the edge check (#2242). Its own
+      # instance so a content bust never empties it and a flood of orgs cannot
+      # evict published pages.
+      KilnCMS.Security.IpBlocklist,
+      # Search-engine claims checked against DNS (#2254): the per-address
+      # result cache, the single-flight table and a capped lookup supervisor.
+      # Before the Endpoint, so the first request can already start a lookup;
+      # a lookup that cannot start (busy, restarting) goes unchecked rather
+      # than failing the request.
+      KilnCMS.CrawlerVerification.Supervisor,
       # Content-addressed embedding vectors for the compute-on-demand path
       # (#852). Its OWN instance so an editing session cannot evict the
       # published records `Firing.Delivery` serves from during a DB outage
@@ -93,6 +118,12 @@ defmodule KilnCMS.Application do
       Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.WebAuthn.challenge_cache()]},
         id: KilnCMS.Accounts.WebAuthn.challenge_cache()
       ),
+      # One-shot "breached password" notes between setting a password and the
+      # sign-in that follows it (#2240) — TTL-only, node-local, best-effort, and
+      # apart from the content cache so eviction pressure cannot drop one.
+      Supervisor.child_spec({Cachex, [name: KilnCMS.Accounts.PasswordNotice.cache()]},
+        id: KilnCMS.Accounts.PasswordNotice.cache()
+      ),
       # Bounded LRW cache of remote ActivityPub actor documents (#966), so an
       # inbound activity that needs one does not re-fetch it per request. Its
       # own instance: the keys are URLs from unauthenticated callers, and a
@@ -102,16 +133,29 @@ defmodule KilnCMS.Application do
       KilnCMS.Firing.Cache,
       KilnCMS.Repo,
       {DNSCluster, query: Application.get_env(:kiln_cms, :dns_cluster_query) || :ignore},
+      # Running backup steps, by chain (#2218), before Oban so a step can
+      # register. `:duplicate`: the heartbeat's self-fence kills every one.
+      {Registry, keys: :duplicate, name: KilnCMS.Backups.StepRegistry},
       {Oban,
        AshOban.config(
          Application.fetch_env!(:kiln_cms, :ash_domains),
          oban_config()
        )},
+      # This node's backup heartbeat (#2218): beats, sweeps the backup lock
+      # and fences its own steps. After Oban, whose node name it beats under.
+      backup_heartbeat(),
       {Phoenix.PubSub, name: KilnCMS.PubSub},
       # Subscribes this node to cluster-wide cache invalidations (#739), so a
       # deleted code-injection snippet stops executing everywhere rather than
       # on whichever node served the delete. After PubSub, which it needs.
       KilnCMS.Cache.ClusterBust,
+      # The change feed's local fan-out (#2083): one relay per scheduler,
+      # keyed by org, so a publish hands its feed event off in one send
+      # instead of delivering to every subscriber itself. After PubSub, which
+      # it broadcasts on, and before the Endpoint, so it outlives the
+      # subscribers on shutdown.
+      {PartitionSupervisor,
+       child_spec: KilnCMS.Delivery.Feed.Relay, name: KilnCMS.Delivery.Feed.Relays},
       # Whether more than one organization exists — what an unset
       # TENANT_STRICT_HOST decides strict host matching by (#1547). Counts
       # once in `init/1`, before the endpoint starts, so the first request
@@ -134,6 +178,19 @@ defmodule KilnCMS.Application do
       # arrival rate. Revisit this number if a deployment enables the flag and
       # sees view/day-bucket undercounting increase.
       {Task.Supervisor, name: KilnCMS.TaskSupervisor, max_children: 100},
+      # The sign-in unlock request's hand-off (#2250), apart from the shared
+      # supervisor above so a burst of unlock requests cannot crowd out the
+      # challenge gate or analytics, and they cannot crowd it out. A full
+      # supervisor drops the request (`KilnCMS.Accounts.SignInUnlock`).
+      {Task.Supervisor, name: KilnCMS.Accounts.SignInUnlock.TaskSupervisor, max_children: 20},
+      # Security posture checks (#2252), one task per check per page load, each
+      # under its own deadline. Apart from the shared supervisor so a page of
+      # slow plugin checks cannot crowd out analytics or the challenge gate; a
+      # full supervisor shows the check as busy (`Posture.Runner`).
+      {Task.Supervisor, name: KilnCMS.Security.Posture.TaskSupervisor, max_children: 50},
+      # Which posture reports are running, per site, so one site's pages can
+      # hold only a few of the slots above at once (`Posture.with_slot/2`).
+      {Registry, keys: :duplicate, name: KilnCMS.Security.Posture.Slots},
       KilnCMSWeb.Presence,
       KilnCMS.Collab.Locks,
       # Advisory field locks for the content editor (KilnCMS.Collab.FieldLock):
@@ -160,12 +217,20 @@ defmodule KilnCMS.Application do
       # {KilnCMS.Worker, arg},
       # Start to serve requests, typically the last entry
       KilnCMSWeb.Endpoint,
+      # The build fingerprint the HTML ETag names (#2463), computed off the
+      # boot path so the first pages find it ready. Temporary: a request
+      # computes it itself if this has not finished, or did not.
+      Supervisor.child_spec({Task, &KilnCMSWeb.BuildFingerprint.warm/0},
+        id: KilnCMSWeb.BuildFingerprint
+      ),
       {Absinthe.Subscription, KilnCMSWeb.Endpoint},
       {AshAuthentication.Supervisor, [otp_app: :kiln_cms]},
       # Dev only: warns (log + console banner) when the watchers leave a stale
       # or missing asset build behind (#1761). Starts nothing in other builds.
       KilnCMSWeb.DevAssets
     ]
+
+    children = Enum.reject(children, &is_nil/1)
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
@@ -254,6 +319,13 @@ defmodule KilnCMS.Application do
     |> with_demo_queue()
   end
 
+  # `config :kiln_cms, KilnCMS.Backups, heartbeat?: false` (the test build)
+  # starts none; tests drive `KilnCMS.Backups.Heartbeat.tick/1` directly.
+  defp backup_heartbeat do
+    if KilnCMS.Backups.Chain.heartbeat?(),
+      do: KilnCMS.Backups.Heartbeat
+  end
+
   # Rescue jobs orphaned in `executing` (#1718). A node stopped mid-deploy
   # gives its running jobs `shutdown_grace_period` (15 s) and then kills them;
   # the row stays `executing` for ever — never retried, never discarded, and
@@ -264,7 +336,7 @@ defmodule KilnCMS.Application do
   # The rescuer is purely time-based: it cannot tell an orphan from a job that
   # is genuinely still running, so `rescue_after` must exceed the longest
   # legitimate run or a live job executes twice. The ceiling today is
-  # `KilnCMS.Backups.Worker.timeout/1` (2 h); the default is 3 h, and
+  # `KilnCMS.Backups.StepWorker.timeout/1` (2 h); the default is 3 h, and
   # `test/kiln_cms/oban_lifeline_test.exs` fails if any worker's `timeout/1`
   # grows past it. See docs/deploy.md ("Jobs interrupted by a deploy").
   #
@@ -376,6 +448,8 @@ defmodule KilnCMS.Application do
     {:health_sweep_cron, KilnCMS.CMS.Workers.HealthSweepWorker, "KILN_HEALTH_SWEEP_CRON",
      "content that has gone past its review cadence will NOT raise automation " <>
        "events. See docs/content-lifecycles.md."},
+    {:security_log_prune_cron, KilnCMS.Security.PruneWorker, "KILN_SECURITY_LOG_PRUNE_CRON",
+     "security events will NOT be deleted at the end of their retention window. See #2241."},
     # Only ever set when KILN_DEMO_RESET=confirm (config/runtime.exs).
     {:demo_reset_cron, KilnCMS.Demo.ResetWorker, "KILN_DEMO_RESET_CRON",
      "the demo will NOT reset on a schedule. See docs/demo-mode.md."}
@@ -715,6 +789,67 @@ defmodule KilnCMS.Application do
 
       :ok
     end
+  end
+
+  # A human-verification provider's own markup can post its token under a field
+  # of its choosing (`response_field`, #2249). The built-ins' are in the list
+  # in config.exs; a plugin provider's is only known once the plugins are
+  # loaded. In a real boot Phoenix has already compiled the list by now, so
+  # this almost always only names the fields the filter misses (a warning the
+  # operator acts on in config); only a plain list, which tests set, is
+  # appended to. `{:keep, _}` is never touched. Sentry's scrubber reads the
+  # registry either way.
+  defp filter_challenge_response_fields do
+    current = Application.get_env(:phoenix, :filter_parameters, [])
+
+    case KilnCMS.Challenge.Registry.merge_filter_parameters(
+           current,
+           KilnCMS.Challenge.Registry.response_fields()
+         ) do
+      :unchanged ->
+        :ok
+
+      {:ok, filters} ->
+        Application.put_env(:phoenix, :filter_parameters, filters)
+
+      {:unfiltered, fields} ->
+        KilnCMS.Config.Report.warn(
+          "challenge_response_fields",
+          "A human-verification provider posts its token as #{Enum.join(fields, ", ")}, " <>
+            "which the request log does not filter: add it to config :phoenix, " <>
+            ":filter_parameters."
+        )
+    end
+
+    :ok
+  end
+
+  # CHALLENGE_PROVIDER names an id no installed provider answers to, or one
+  # that fails the provider contract (#2249). Human verification is then off —
+  # the safe direction, but the operator asked for it on — so say so at boot
+  # rather than only when a page first asks.
+  defp warn_if_challenge_provider_unusable do
+    if message = KilnCMS.Challenge.provider_problem() do
+      KilnCMS.Config.Report.warn("CHALLENGE_PROVIDER", message)
+    end
+
+    :ok
+  end
+
+  # The kill switch is a recovery step, not a setting to leave on: while it is
+  # set, no site's admin allowlist is enforced on this node (#2248).
+  defp warn_if_admin_allowlist_disabled do
+    if KilnCMS.Security.AdminAllowlist.disabled?() do
+      KilnCMS.Config.Report.warn(
+        "admin_allowlist_disabled",
+        "KILN_ADMIN_ALLOWLIST_DISABLED is set, so this server is not enforcing any site's " <>
+          "admin allowlist: the console and sign-in are open to every network. Unset it and " <>
+          "restart once the lock-out is fixed (bin/kiln_cms rpc " <>
+          "'KilnCMS.Release.admin_allowlist()' shows a site's list)."
+      )
+    end
+
+    :ok
   end
 
   # The Local storage adapter's directories must be writable by the release's

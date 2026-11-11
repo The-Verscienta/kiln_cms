@@ -50,47 +50,56 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # and plugin types take a shape a single box can't give.
   @default_types ~w(string text url integer float boolean date datetime select)
 
+  # The types `multiple_field/1` asks "one or a list" of (a reference asks it
+  # in `relationship_counts/1`), the list-capable types by the name a form
+  # posts — looked up, never `String.to_atom/1` — and the typed scalar lists
+  # (#2289: numbers, dates, links, …).
+  @holds_types [:media, :group] ++ KilnCMS.CMS.ScalarLists.types()
+  @list_type_names Map.new(KilnCMS.CMS.Changes.ClearMultiple.list_types(), &{to_string(&1), &1})
+  @typed_list_types KilnCMS.CMS.ScalarLists.typed()
+
   import KilnCMSWeb.ComputedBuilderComponents, only: [compute_builder: 1]
+  import KilnCMSWeb.ConditionsBuilderComponents, only: [conditions_field: 1]
 
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Changes.ClearMultiple
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.DynamicDefaults
+  alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.FieldSection
+  alias KilnCMS.CMS.FieldTypes
+  alias KilnCMS.CMS.FieldWidgets
+  alias KilnCMS.CMS.SectionLayouts
+  alias KilnCMS.CMS.Validations.FieldCondition
   alias KilnCMSWeb.ComputedBuilder
+  alias KilnCMSWeb.ConditionsBuilder
 
   @impl true
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:page_title, gettext("Custom fields"))
-       |> assign(:content_types, ContentTypes.all())
-       |> assign(:dynamic_types, ContentTypes.dynamic_all(org))
-       |> assign(:field_types, FieldDefinition.field_types())
-       |> assign(:target_types, ContentTypes.options(org))
-       |> assign(:edit, nil)
-       |> assign(:link_form, nil)
-       |> assign(:default_scopes, [])
-       |> assign(:samples, %{})
-       # The builder's static lists, built once: each is a page of gettext
-       # calls, and rebuilding them per keystroke is wasted work.
-       |> assign(:recipes, Computed.Recipes.all())
-       |> assign(:function_categories, KilnCMSWeb.ComputedBuilderComponents.categories())
-       |> reset_create_form()
-       |> load_definitions()
-       |> assign_create_builder()}
-    else
-      # Defense-in-depth: the `:live_admin_required` on_mount guard already
-      # redirects non-admins before mount; mirror its flash here for consistency.
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Custom fields"))
+     |> assign(:content_types, ContentTypes.all())
+     |> assign(:dynamic_types, ContentTypes.dynamic_all(org))
+     |> assign(:field_types, FieldDefinition.field_types())
+     |> assign(:target_types, ContentTypes.options(org))
+     |> assign(:edit, nil)
+     |> assign(:link_form, nil)
+     |> assign(:default_scopes, [])
+     |> assign(:samples, %{})
+     # The builder's static lists, built once: each is a page of gettext
+     # calls, and rebuilding them per keystroke is wasted work.
+     |> assign(:recipes, Computed.Recipes.all())
+     |> assign(:function_categories, KilnCMSWeb.ComputedBuilderComponents.categories())
+     |> reset_create_form()
+     |> load_definitions()
+     |> assign_create_builder()}
   end
 
   # `?type=<scope>` arrives from the content-types screen right after a type is
@@ -106,6 +115,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
      socket
      |> assign(:default_scopes, default_scopes)
      |> assign(:scopes, default_scopes)
+     |> assign(:cond_siblings, create_siblings(socket.assigns, default_scopes))
      |> assign_create_builder()}
   end
 
@@ -122,10 +132,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     params = if name_edited?, do: params, else: suggest_name(params)
     params = drop_default_on_type_change(params, socket.assigns.form)
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.builder)
+    {socket, conds} = apply_create_conditions(socket, params, scopes)
 
     form =
       socket.assigns.form
-      |> AshPhoenix.Form.validate(normalize(params, List.first(scopes)))
+      |> AshPhoenix.Form.validate(
+        params
+        |> normalize(List.first(scopes))
+        |> put_rules(conds, params["field_type"], socket.assigns.cond_siblings)
+      )
       |> refuse_duplicates(params, scopes, socket.assigns)
 
     {:noreply,
@@ -145,6 +160,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     # still gets the name its label suggests.
     params = if blank?(params["name"]), do: suggest_name(params), else: params
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.builder)
+    {socket, conds} = apply_create_conditions(socket, params, scopes)
     assigns = socket.assigns
     socket = socket |> assign(:scopes, scopes) |> assign(:builder, builder)
 
@@ -155,6 +171,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         params =
           params
           |> normalize(scope)
+          |> put_rules(conds, params["field_type"], assigns.cond_siblings)
           |> Map.put("position", next_position(assigns.definitions, scope))
 
         assigns.actor
@@ -184,17 +201,28 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # --- inline edit -----------------------------------------------------------
 
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
-    form = edit_form(id, socket.assigns.actor, socket.assigns.current_org)
+    case edit_form(id, socket.assigns.actor, socket.assigns.current_org) do
+      {:ok, form} ->
+        {:noreply,
+         socket
+         |> assign(:edit, %{
+           id: id,
+           form: form,
+           builder: ComputedBuilder.new(form[:compute].value),
+           ctx: nil,
+           conds: edit_conds(socket.assigns, id),
+           cond_siblings: edit_siblings(socket.assigns, id)
+         })
+         |> assign_edit_builder()}
 
-    {:noreply,
-     socket
-     |> assign(:edit, %{
-       id: id,
-       form: form,
-       builder: ComputedBuilder.new(form[:compute].value),
-       ctx: nil
-     })
-     |> assign_edit_builder()}
+      # Gone since the page loaded, or a field of an unknown type (#2605),
+      # which no read but the list's returns: nothing to edit.
+      :error ->
+        {:noreply,
+         socket
+         |> load_definitions()
+         |> put_flash(:error, gettext("That field can't be edited."))}
+    end
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -203,11 +231,21 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       when is_map(params) do
     params = params |> apply_kind() |> drop_default_on_type_change(socket.assigns.edit.form)
     {params, builder} = ComputedBuilder.apply_params(params, socket.assigns.edit.builder)
+    old = socket.assigns.edit
+
+    conds = ConditionsBuilder.apply_params(old.conds, params["conditions"], old.cond_siblings)
 
     edit = %{
-      socket.assigns.edit
-      | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize(params)),
-        builder: builder
+      old
+      | form:
+          AshPhoenix.Form.validate(
+            old.form,
+            params
+            |> normalize(nil, old.form.source.data)
+            |> put_rules(conds, params["field_type"], old.cond_siblings)
+          ),
+        builder: builder,
+        conds: conds
     }
 
     {:noreply, socket |> assign(:edit, edit) |> assign_edit_builder()}
@@ -217,15 +255,30 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {params, builder} =
       params |> apply_kind() |> ComputedBuilder.apply_params(socket.assigns.edit.builder)
 
-    case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize(params)) do
-      {:ok, _definition} ->
+    old = socket.assigns.edit
+
+    conds = ConditionsBuilder.apply_params(old.conds, params["conditions"], old.cond_siblings)
+
+    submitted =
+      params
+      |> normalize(nil, old.form.source.data)
+      |> put_rules(conds, params["field_type"], old.cond_siblings)
+
+    case AshPhoenix.Form.submit(old.form, params: submitted) do
+      {:ok, definition} ->
+        before = Enum.find(socket.assigns.definitions, &(&1.id == definition.id))
+
         {:noreply,
-         socket |> assign(:edit, nil) |> load_definitions() |> put_flash(:info, gettext("Saved."))}
+         socket
+         |> carry_section_layout(before, definition)
+         |> assign(:edit, nil)
+         |> load_definitions()
+         |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
         {:noreply,
          socket
-         |> assign(:edit, %{socket.assigns.edit | form: form, builder: builder})
+         |> assign(:edit, %{old | form: form, builder: builder, conds: conds})
          |> assign_edit_builder()}
     end
   end
@@ -234,15 +287,71 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
+    # Unknown-type rows (#2605) included: deleting one is all this page
+    # offers for it.
     socket =
-      with {:ok, definition} <- CMS.get_field_definition(id, actor: actor, tenant: org),
+      with {:ok, definition} <-
+             CMS.get_field_definition(id,
+               actor: actor,
+               tenant: org,
+               context: FieldDefinition.all_types_context()
+             ),
+           :ok <- refuse_if_read(definition, org),
            :ok <- CMS.destroy_field_definition(definition, actor: actor, tenant: org) do
-        socket |> load_definitions() |> put_flash(:info, gettext("Field deleted."))
+        socket
+        |> drop_section_layout(definition)
+        |> load_definitions()
+        |> put_flash(:info, gettext("Field deleted."))
       else
-        _ -> put_flash(socket, :error, gettext("Couldn't delete that field."))
+        {:read_by, labels} ->
+          put_flash(
+            socket,
+            :error,
+            gettext("%{fields} reads this field in a condition: remove that condition first.",
+              fields: labels
+            )
+          )
+
+        _ ->
+          put_flash(socket, :error, gettext("Couldn't delete that field."))
       end
 
     {:noreply, assign(socket, :edit, nil)}
+  end
+
+  # --- conditions (#2277) ----------------------------------------------------
+
+  # "Add a condition", the trash button, "Remove condition": the rows live in
+  # the live view (the form posts them on every change), so these only edit
+  # that state. Nothing is read or written here, but they are admin-only like
+  # the rest of the page, so each re-checks.
+  def handle_event("cond_add", %{"ctx" => ctx, "rule" => rule}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] do
+    {:noreply,
+     with_conds(socket, ctx, fn state, siblings ->
+       ConditionsBuilder.add(state, rule, siblings)
+     end)}
+  end
+
+  def handle_event("cond_remove", %{"ctx" => ctx, "rule" => rule, "index" => index}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] and
+             is_binary(index) do
+    case Integer.parse(index) do
+      {index, ""} ->
+        {:noreply,
+         with_conds(socket, ctx, fn state, _siblings ->
+           ConditionsBuilder.remove(state, rule, index)
+         end)}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("cond_clear", %{"ctx" => ctx, "rule" => rule}, socket)
+      when ctx in ["create", "edit", "link"] and rule in ["visible_when", "required_when"] do
+    {:noreply,
+     with_conds(socket, ctx, fn state, _siblings -> ConditionsBuilder.clear(state, rule) end)}
   end
 
   # --- link fields (R3) -----------------------------------------------------
@@ -261,7 +370,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
            kind: child_kind(type),
            id: nil,
            form: form,
-           name_edited?: false
+           name_edited?: false,
+           conds: ConditionsBuilder.new(),
+           cond_siblings: link_siblings(socket.assigns, parent_id, nil, child_kind(type))
          })}
 
       _other ->
@@ -283,7 +394,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
            kind: if(link.group_of_id, do: :group, else: :link),
            id: id,
            form: form,
-           name_edited?: true
+           name_edited?: true,
+           conds: ConditionsBuilder.new(link),
+           cond_siblings:
+             link_siblings(
+               socket.assigns,
+               FieldDefinition.parent_id(link),
+               id,
+               if(link.group_of_id, do: :group, else: :link)
+             )
          })}
     end
   end
@@ -302,9 +421,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     params = if name_edited?, do: params, else: suggest_name(params)
     params = drop_default_on_type_change(params, lf.form)
-    form = AshPhoenix.Form.validate(lf.form, link_params(params, lf))
+    conds = ConditionsBuilder.apply_params(lf.conds, params["conditions"], lf.cond_siblings)
 
-    {:noreply, assign(socket, :link_form, %{lf | form: form, name_edited?: name_edited?})}
+    form =
+      AshPhoenix.Form.validate(
+        lf.form,
+        params |> link_params(lf) |> put_link_rules(lf, conds, params["field_type"])
+      )
+
+    {:noreply,
+     assign(socket, :link_form, %{lf | form: form, name_edited?: name_edited?, conds: conds})}
   end
 
   def handle_event(
@@ -315,7 +441,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       when is_map(params) do
     params = if lf.id == nil and blank?(params["name"]), do: suggest_name(params), else: params
 
-    case AshPhoenix.Form.submit(lf.form, params: link_params(params, lf, socket.assigns)) do
+    conds = ConditionsBuilder.apply_params(lf.conds, params["conditions"], lf.cond_siblings)
+
+    submitted =
+      params
+      |> link_params(lf, socket.assigns)
+      |> put_link_rules(lf, conds, params["field_type"])
+
+    case AshPhoenix.Form.submit(lf.form, params: submitted) do
       {:ok, _link} ->
         {:noreply,
          socket
@@ -324,7 +457,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
          |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
-        {:noreply, assign(socket, :link_form, %{lf | form: form})}
+        {:noreply, assign(socket, :link_form, %{lf | form: form, conds: conds})}
     end
   end
 
@@ -374,6 +507,311 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {:noreply, socket}
     end
   end
+
+  # --- section layout (#2280) ------------------------------------------------
+
+  # One row of a type's Sections panel, saved as its selects change. The type
+  # and the section must be ones this page lists for this site: a stale page
+  # or a hand-made event naming another site's type, or a section no field of
+  # the type carries, writes nothing.
+  def handle_event("section_layout", %{"scope" => scope, "name" => name} = params, socket)
+      when is_binary(scope) and is_binary(name) do
+    assigns = socket.assigns
+
+    if CMS.can_create_field_section?(assigns.actor, %{}, tenant: assigns.current_org) do
+      layout = if is_map(params["section"]), do: params["section"], else: %{}
+      {:noreply, apply_section_layout(socket, scope, name, layout)}
+    else
+      {:noreply, put_flash(socket, :error, gettext("You can't change custom fields."))}
+    end
+  end
+
+  # A forged scope, a section the type doesn't carry or a value outside the
+  # closed sets writes nothing.
+  defp apply_section_layout(socket, scope, name, layout) do
+    assigns = socket.assigns
+
+    with {owner, definitions} <-
+           Enum.find(assigns.grouped, fn {owner, _} -> owner_param(owner) == scope end),
+         true <- name in section_names(definitions),
+         {:ok, display} <- layout_value(layout["display"], FieldSection.displays()),
+         {:ok, initially} <- initially_value(layout["initially"], assigns, owner, name) do
+      save_section_layout(socket, owner, name, display, initially)
+    else
+      _ -> socket
+    end
+  end
+
+  # --- section layout helpers (#2280) ----------------------------------------
+
+  # A section back at the default (an accordion opening by the panel's own
+  # heuristic) keeps no row: no row renders exactly that, and the field
+  # sync export then carries only the sections that differ. Every save also
+  # prunes the type's rows that no field names any more. Both read the type's
+  # rows and fields now, not from this page: another admin may have added a
+  # section (and set its layout) since it loaded.
+  defp save_section_layout(socket, owner, name, display, initially) do
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    result =
+      with {:ok, rows} <- SectionLayouts.layouts(owner, opts),
+           true <- written?(write_section_layout(rows, owner, name, display, initially, opts)) do
+        SectionLayouts.prune(owner, opts)
+      end
+
+    socket = load_definitions(socket)
+
+    if written?(result),
+      do: socket,
+      else: put_flash(socket, :error, gettext("Couldn't save the section layout."))
+  end
+
+  defp write_section_layout(rows, owner, name, display, initially, opts) do
+    case {Enum.find(rows, &(&1.name == name)), display, initially} do
+      {nil, :accordion, :auto} ->
+        :ok
+
+      {nil, display, initially} ->
+        owner
+        |> owner_attrs()
+        |> Map.merge(%{name: name, display: display, initially: initially})
+        |> CMS.create_field_section(opts)
+
+      {row, :accordion, :auto} ->
+        CMS.destroy_field_section(row, opts)
+
+      {row, display, initially} ->
+        CMS.update_field_section(row, %{display: display, initially: initially}, opts)
+    end
+  end
+
+  # A field renamed out of a section it was the last field of takes the
+  # section's layout to its new name, unless that name already has one: the
+  # admin renamed the section, one field at a time.
+  defp carry_section_layout(socket, %{section: old} = before, %{section: new})
+       when is_binary(old) and is_binary(new) and old != new do
+    owner = scope_key(before)
+    rows = Map.get(socket.assigns.field_sections, owner, [])
+    row = Enum.find(rows, &(&1.name == old))
+
+    left_behind? =
+      Enum.any?(
+        socket.assigns.definitions,
+        &(&1.id != before.id and scope_key(&1) == owner and &1.section == old)
+      )
+
+    if row && !left_behind? && !Enum.any?(rows, &(&1.name == new)) do
+      opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+      carried =
+        with {:ok, _} <-
+               owner
+               |> owner_attrs()
+               |> Map.merge(%{name: new, display: row.display, initially: row.initially})
+               |> CMS.create_field_section(opts) do
+          CMS.destroy_field_section(row, opts)
+        end
+
+      if written?(carried),
+        do: socket,
+        else: put_flash(socket, :error, gettext("Couldn't save the section layout."))
+    else
+      socket
+    end
+  end
+
+  defp carry_section_layout(socket, _before, _after), do: socket
+
+  # The last field of a section takes the section's layout with it: nothing
+  # is left for it to lay out, and the export would otherwise carry it.
+  defp drop_section_layout(socket, %{section: section} = definition) when is_binary(section) do
+    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
+
+    with owner when not is_nil(owner) <- SectionLayouts.owner_of(definition),
+         {:error, _error} <- SectionLayouts.prune(owner, [only: [section]] ++ opts) do
+      put_flash(socket, :error, gettext("Couldn't save the section layout."))
+    else
+      _pruned -> socket
+    end
+  end
+
+  defp drop_section_layout(socket, _definition), do: socket
+
+  defp written?(:ok), do: true
+  defp written?({:ok, _}), do: true
+  defp written?(_error), do: false
+
+  # The sections in use on one type, in the order the editor shows them:
+  # each at the place of its first field.
+  defp section_names(definitions) do
+    definitions
+    |> Enum.map(& &1.section)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp layout_value(value, allowed) when is_binary(value) do
+    case Enum.find(allowed, &(Atom.to_string(&1) == value)) do
+      nil -> :error
+      atom -> {:ok, atom}
+    end
+  end
+
+  defp layout_value(_value, _allowed), do: :error
+
+  # The "Opens" select is disabled unless the section is an accordion, and a
+  # disabled select posts nothing: the stored choice then stands, so it is
+  # still there when the section is an accordion again.
+  defp initially_value(nil, assigns, owner, name),
+    do: {:ok, section_layout(assigns.field_sections, owner, name).initially}
+
+  defp initially_value(value, _assigns, _owner, _name),
+    do: layout_value(value, FieldSection.initial_states())
+
+  # A section's stored layout, or the default a section without a row has.
+  defp section_layout(field_sections, owner, name) do
+    field_sections
+    |> Map.get(owner, [])
+    |> Enum.find(%{display: :accordion, initially: :auto}, &(&1.name == name))
+  end
+
+  defp owner_attrs({:compiled, type}), do: %{content_type: type}
+  defp owner_attrs({:dynamic, id}), do: %{type_definition_id: id}
+
+  defp owner_param({:compiled, type}), do: to_string(type)
+  defp owner_param({:dynamic, id}), do: "def:#{id}"
+
+  defp field_section_owner(%{type_definition_id: nil, content_type: type}), do: {:compiled, type}
+  defp field_section_owner(%{type_definition_id: id}), do: {:dynamic, id}
+
+  defp display_options do
+    [
+      {gettext("Accordion: a heading that opens and closes"), "accordion"},
+      {gettext("Fieldset: always open, under its heading"), "fieldset"},
+      {gettext("Tab: one tab of the type's tab set"), "tab"}
+    ]
+  end
+
+  defp initially_options do
+    [
+      {gettext("Automatically (open when it holds a value)"), "auto"},
+      {gettext("Open (expanded)"), "expanded"},
+      {gettext("Closed (collapsed)"), "collapsed"}
+    ]
+  end
+
+  # --- conditions helpers (#2277) ---------------------------------------------
+
+  defp with_conds(socket, ctx, fun) do
+    assigns = socket.assigns
+
+    if CMS.can_create_field_definition?(assigns.actor, %{}, tenant: assigns.current_org) do
+      case conds_for(assigns, ctx) do
+        {state, siblings} -> put_conds(socket, ctx, fun.(state, siblings))
+        nil -> socket
+      end
+    else
+      put_flash(socket, :error, gettext("You can't change custom fields."))
+    end
+  end
+
+  defp conds_for(assigns, "create"), do: {assigns.conds, assigns.cond_siblings}
+  defp conds_for(%{edit: %{} = edit}, "edit"), do: {edit.conds, edit.cond_siblings}
+  defp conds_for(%{link_form: %{} = lf}, "link"), do: {lf.conds, lf.cond_siblings}
+  defp conds_for(_assigns, _ctx), do: nil
+
+  defp put_conds(socket, "create", state), do: assign(socket, :conds, state)
+
+  defp put_conds(%{assigns: %{edit: %{} = edit}} = socket, "edit", state),
+    do: assign(socket, :edit, %{edit | conds: state})
+
+  defp put_conds(%{assigns: %{link_form: %{} = lf}} = socket, "link", state),
+    do: assign(socket, :link_form, %{lf | conds: state})
+
+  defp put_conds(socket, _ctx, _state), do: socket
+
+  # The create form's rows follow the ticked types: the fields a rule may read
+  # are the ones every ticked type has by that name and type.
+  defp apply_create_conditions(socket, params, scopes) do
+    socket =
+      if scopes == socket.assigns.scopes and Map.has_key?(socket.assigns, :cond_siblings),
+        do: socket,
+        else: assign(socket, :cond_siblings, create_siblings(socket.assigns, scopes))
+
+    conds =
+      ConditionsBuilder.apply_params(
+        socket.assigns.conds,
+        params["conditions"],
+        socket.assigns.cond_siblings
+      )
+
+    {assign(socket, :conds, conds), conds}
+  end
+
+  defp create_siblings(_assigns, []), do: []
+
+  defp create_siblings(assigns, scopes) do
+    [first | rest] = Enum.map(scopes, &scope_siblings(&1, assigns.current_org))
+
+    Enum.filter(first, fn s ->
+      Enum.all?(rest, fn other ->
+        Enum.any?(other, &(&1.name == s.name and &1.field_type == s.field_type))
+      end)
+    end)
+  end
+
+  defp scope_siblings("def:" <> id, org),
+    do: cond_siblings(%{id: nil, type_definition_id: id}, org, nil)
+
+  defp scope_siblings(type, org),
+    do: cond_siblings(%{id: nil, content_type: String.to_existing_atom(type)}, org, nil)
+
+  defp edit_siblings(assigns, id) do
+    case Enum.find(assigns.definitions, &(&1.id == id)) do
+      nil -> []
+      definition -> cond_siblings(definition, assigns.current_org, definition.name)
+    end
+  end
+
+  # A group's sub-fields read each other; a reference's link fields carry no
+  # conditions.
+  defp link_siblings(assigns, parent_id, id, :group),
+    do: cond_siblings(%{id: id, group_of_id: parent_id}, assigns.current_org, nil)
+
+  defp link_siblings(_assigns, _parent_id, _id, _kind), do: []
+
+  defp cond_siblings(scope, org, own_name) do
+    scope =
+      Map.merge(
+        %{
+          id: nil,
+          content_type: nil,
+          type_definition_id: nil,
+          group_of_id: nil,
+          link_of_id: nil
+        },
+        Map.take(scope, [:id, :content_type, :type_definition_id, :group_of_id, :link_of_id])
+      )
+
+    scope
+    |> FieldCondition.siblings(org)
+    |> Enum.filter(&(&1.field_type in FieldDefinition.link_field_types() and not &1.private))
+    |> Enum.reject(&(&1.name == own_name))
+    |> Enum.sort_by(& &1.position)
+  end
+
+  # The rules for the params the resource validates. A type that carries none
+  # (a group or computed field) sends both as nil so a stale row can't fail it.
+  defp put_rules(params, _conds, type, _siblings) when type in ["group", "computed"],
+    do: Map.merge(params, %{"visible_when" => nil, "required_when" => nil})
+
+  defp put_rules(params, conds, _type, siblings),
+    do: Map.merge(params, ConditionsBuilder.rule_params(conds, siblings))
+
+  defp put_link_rules(params, %{kind: :group, cond_siblings: siblings}, conds, type),
+    do: put_rules(params, conds, type, siblings)
+
+  defp put_link_rules(params, _lf, _conds, _type), do: params
 
   # --- create helpers --------------------------------------------------------
 
@@ -426,6 +864,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> assign(:scope_error, nil)
     |> assign(:name_edited?, false)
     |> assign(:builder, ComputedBuilder.new())
+    |> assign(:conds, ConditionsBuilder.new())
+    |> assign(
+      :cond_siblings,
+      create_siblings(socket.assigns, socket.assigns.default_scopes)
+    )
   end
 
   # The machine name tracks the label until the admin types into the name
@@ -712,7 +1155,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   defp link_params(params, %{id: nil, parent: parent_id, kind: kind}, assigns) do
     column = if kind == :group, do: "group_of_id", else: "link_of_id"
-    params = params |> normalize() |> Map.put(column, parent_id)
+    params = params |> normalize() |> without_unique() |> Map.put(column, parent_id)
 
     case assigns do
       nil -> params
@@ -721,7 +1164,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   defp link_params(params, _link_form, _assigns),
-    do: params |> normalize() |> Map.drop(["link_of_id", "group_of_id"])
+    do: params |> normalize() |> without_unique() |> Map.drop(["link_of_id", "group_of_id"])
 
   defp reorder_links(socket, parent_id, order) do
     by_id = socket.assigns.link_fields |> Map.get(parent_id, []) |> Map.new(&{&1.id, &1})
@@ -812,8 +1255,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp refuse_duplicates(form, params, scopes, assigns) do
     name = params["name"]
 
+    # A field of an unknown type (#2605) still holds its name on its type.
     taken_on =
-      assigns.definitions
+      (assigns.definitions ++ assigns.unknown_type)
       |> Enum.filter(&(&1.name == name and scope_param(&1) in scopes))
       |> Enum.map(&group_heading(scope_key(&1), assigns.dynamic_types))
 
@@ -833,21 +1277,58 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # --- data ------------------------------------------------------------------
 
+  # The edit form's condition rows. A rule naming a sibling of an unknown
+  # type (#2605) can't be shown as rows (the field picker offers no such
+  # field, and re-posting would rewrite it), so it is kept as stored.
+  defp edit_conds(assigns, id) do
+    definition = Enum.find(assigns.definitions, &(&1.id == id))
+
+    held =
+      for unknown <- assigns.unknown_type,
+          definition,
+          is_nil(FieldDefinition.parent_id(unknown)),
+          scope_key(unknown) == scope_key(definition),
+          do: unknown.name
+
+    definition |> ConditionsBuilder.new() |> ConditionsBuilder.hold(held)
+  end
+
+  # The resource refuses to delete a field another field's condition reads
+  # (`Validations.FieldCondition`); asked first, so the flash can say which.
+  defp refuse_if_read(definition, org) do
+    case FieldCondition.dependents(definition, org) do
+      [] -> :ok
+      dependents -> {:read_by, Enum.map_join(dependents, ", ", & &1.label)}
+    end
+  end
+
   defp load_definitions(socket) do
     {links, definitions} =
       CMS.list_field_definitions!(
         actor: socket.assigns.actor,
         tenant: socket.assigns.current_org,
-        query: [sort: [position: :asc, name: :asc]]
+        query: [sort: [position: :asc, name: :asc]],
+        context: FieldDefinition.all_types_context()
       )
       # Link fields (R3) are listed under their reference field, and a
       # group's sub-fields under their group — not as fields of a type.
       |> Enum.split_with(&(not is_nil(FieldDefinition.parent_id(&1))))
 
+    # A link field or sub-field of an unknown type (#2605) is listed with the
+    # other unknown-type fields, under its parent's name: its parent's editor
+    # offers only the plain types.
+    {unknown_links, links} = Enum.split_with(links, &FieldDefinition.unknown_type?/1)
+
     # A definition whose content type no longer exists (#1770) is listed on
     # its own, with only a delete: nothing renders, validates or delivers it,
     # and it cannot be saved back while it points at nothing.
-    {orphaned, owned} = Enum.split_with(definitions, &FieldDefinition.orphaned?/1)
+    {orphaned, definitions} = Enum.split_with(definitions, &FieldDefinition.orphaned?/1)
+
+    # So is one whose field type this release does not know (#2605): the
+    # editor and delivery skip it, its values are kept, and it cannot be
+    # edited or reordered — only deleted.
+    {unknown_type, owned} = Enum.split_with(definitions, &FieldDefinition.unknown_type?/1)
+    definitions = orphaned ++ owned
 
     grouped =
       owned
@@ -870,7 +1351,29 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     )
     |> assign(:link_fields, Enum.group_by(links, &FieldDefinition.parent_id/1))
     |> assign(:grouped, grouped)
+    # Each type's section layouts (#2280), by owner, for its Sections panel.
+    |> assign(
+      :field_sections,
+      CMS.list_field_sections!(actor: socket.assigns.actor, tenant: socket.assigns.current_org)
+      |> Enum.group_by(&field_section_owner/1)
+    )
     |> assign(:orphaned, Enum.sort_by(orphaned, &{to_string(&1.content_type), &1.name}))
+    |> assign(:unknown_type, unknown_type ++ unknown_links)
+  end
+
+  # Where a field of an unknown type (#2605) sits: its type, or for a link
+  # field or sub-field, its parent field.
+  defp unknown_owner(definition, definitions, dynamic_types) do
+    case FieldDefinition.parent_id(definition) do
+      nil ->
+        group_heading(scope_key(definition), dynamic_types)
+
+      parent_id ->
+        case Enum.find(definitions, &(&1.id == parent_id)) do
+          %{label: label} -> label
+          nil -> gettext("a field that is gone")
+        end
+    end
   end
 
   # A definition's owner: a compiled content type XOR a dynamic one — or, for
@@ -910,7 +1413,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> to_form()
 
   defp edit_form(id, actor, org) do
-    CMS.get_field_definition!(id, actor: actor, tenant: org)
+    case CMS.get_field_definition(id, actor: actor, tenant: org) do
+      {:ok, definition} -> {:ok, update_form(definition, id, actor, org)}
+      {:error, _not_found} -> :error
+    end
+  end
+
+  defp update_form(definition, id, actor, org) do
+    definition
     |> AshPhoenix.Form.for_update(:update,
       actor: actor,
       tenant: org,
@@ -935,7 +1445,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # picked, so whatever they held is dropped here rather than saved unseen: a
   # field that is no longer a select keeps no options, and a type with no
   # default keeps none. A select's default must still be one of its options.
-  defp normalize(params, scope \\ nil) do
+  # The editor input (#2284) is held to what the posted settings offer, read
+  # over `record` — the stored definition being edited, nil for a new one.
+  defp normalize(params, scope \\ nil, record \\ nil) do
     type = params["field_type"]
     pairs = if type in [nil, "select"], do: parse_option_pairs(params["options"]), else: []
     options = Enum.map(pairs, &elem(&1, 0))
@@ -951,14 +1463,159 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     params
     |> Map.delete("scopes")
+    |> Map.delete("conditions")
     |> Map.put("options", options)
     |> Map.put("option_labels", labels)
     |> Map.put("default", default)
+    |> blank_source()
+    |> unpack_validation()
     |> unpack_targets()
     |> unpack_sources_limit()
     |> unpack_inverse()
+    |> unpack_widget(record)
     |> unpack_scope(scope)
   end
+
+  # The widget cards (#2284) are only those the posted settings offer, and
+  # change with them: a card checked before a retype, a `multiple` flip or a
+  # switch to rich text leaves the page, so a widget the field no longer
+  # offers is dropped here rather than refused on save. Worked out as the
+  # save's `Validations.FieldWidget` will: the posted settings over the
+  # stored ones. The default's card posts `""`, which is no widget stored.
+  defp unpack_widget(%{"widget" => widget} = params, record) do
+    widget = if widget in [nil, ""], do: nil, else: widget
+    offered = params |> widget_subject(record) |> FieldWidgets.allowed()
+
+    Map.put(params, "widget", if(widget in offered, do: widget))
+  end
+
+  defp unpack_widget(params, _record), do: params
+
+  # The definition the widget allow-list is asked about: the posted settings
+  # it reads (options already split) over the stored definition, or a new
+  # one's. A setting the form didn't post keeps its stored value, as the
+  # save's changeset does.
+  defp widget_subject(params, record) do
+    base = record || %FieldDefinition{}
+
+    struct(base,
+      field_type: posted_type(params["field_type"], base.field_type),
+      multiple: posted_bool(params, "multiple", base.multiple),
+      allow_custom: posted_bool(params, "allow_custom", base.allow_custom),
+      format: posted_format(params["format"], base.format),
+      options: if(is_list(params["options"]), do: params["options"], else: base.options),
+      widget: posted_widget(params, base.widget)
+    )
+  end
+
+  # A registered type's atom for a posted name; never a new atom.
+  defp posted_type(type, fallback) when is_binary(type),
+    do: Enum.find(FieldTypes.names(), fallback, &(Atom.to_string(&1) == type))
+
+  defp posted_type(type, _fallback) when is_atom(type) and not is_nil(type), do: type
+  defp posted_type(_type, fallback), do: fallback
+
+  defp posted_bool(params, key, fallback) do
+    case params[key] do
+      value when value in [true, "true"] -> true
+      value when value in [false, "false"] -> false
+      _absent -> fallback
+    end
+  end
+
+  defp posted_format(format, _fallback) when format in ["plain", :plain], do: :plain
+  defp posted_format(format, _fallback) when format in ["rich", :rich], do: :rich
+  defp posted_format(_format, fallback), do: fallback
+
+  defp posted_widget(params, fallback) do
+    case Map.fetch(params, "widget") do
+      {:ok, widget} when widget in [nil, ""] -> nil
+      {:ok, widget} -> widget
+      :error -> fallback
+    end
+  end
+
+  # The widget subject for a rendered form: what it last validated over the
+  # definition it edits.
+  defp form_widget_subject(%Phoenix.HTML.Form{source: %AshPhoenix.Form{} = source}),
+    do: widget_subject(source.params || %{}, source.data)
+
+  # The Validation fieldset posts every constraint as text (#2276). Blank
+  # ones are dropped, numbers parsed, and the keys that mean nothing for the
+  # chosen type left out — its inputs leave the page on a type change, and
+  # `Validations.FieldConstraints` refuses what is stale. A value that is no
+  # number stays text, so the save names the input it is wrong in. Without a
+  # type in the params the constraints are left as they were.
+  defp unpack_validation(%{"field_type" => type} = params) when is_binary(type) do
+    allowed = FieldConstraints.allowed_keys(type_atom(type), format_atom(params["format"]))
+
+    allowed =
+      if params["multiple"] in [true, "true"], do: allowed -- ["unique"], else: allowed
+
+    posted = if is_map(params["validation"]), do: params["validation"], else: %{}
+
+    validation =
+      for key <- allowed,
+          {:ok, value} <- [constraint_value(key, type, posted[key])],
+          into: %{},
+          do: {key, value}
+
+    validation =
+      if Map.has_key?(validation, "pattern"),
+        do: validation,
+        else: Map.delete(validation, "pattern_message")
+
+    Map.put(params, "validation", validation)
+  end
+
+  defp unpack_validation(params), do: params
+
+  defp constraint_value("unique", _type, value),
+    do: if(value in [true, "true"], do: {:ok, true}, else: :error)
+
+  defp constraint_value(key, type, value) when key in ["min", "max"] and is_binary(value) do
+    value = String.trim(value)
+
+    cond do
+      value == "" -> :error
+      type == "integer" -> {:ok, number(Integer.parse(value), value)}
+      true -> {:ok, number(Float.parse(value), value)}
+    end
+  end
+
+  defp constraint_value(key, _type, value)
+       when key in ["min_length", "max_length"] and is_binary(value) do
+    value = String.trim(value)
+    if value == "", do: :error, else: {:ok, number(Integer.parse(value), value)}
+  end
+
+  defp constraint_value(key, _type, value) when key in ["pattern", "pattern_message"] do
+    if is_binary(value) and String.trim(value) != "", do: {:ok, value}, else: :error
+  end
+
+  defp constraint_value(_key, _type, value) when is_number(value), do: {:ok, value}
+  defp constraint_value(_key, _type, _value), do: :error
+
+  defp number({number, ""}, _text), do: number
+  defp number(_unparsed, text), do: text
+
+  defp type_atom("integer"), do: :integer
+  defp type_atom("float"), do: :float
+  defp type_atom("string"), do: :string
+  defp type_atom("url"), do: :url
+  defp type_atom("text"), do: :text
+  defp type_atom("date"), do: :date
+  defp type_atom("datetime"), do: :datetime
+  defp type_atom(_other), do: :other
+
+  defp format_atom("plain"), do: :plain
+  defp format_atom(_other), do: :rich
+
+  # A detail on a connection or a field in a group is never unique.
+  defp without_unique(%{"validation" => %{} = validation} = params),
+    do: Map.put(params, "validation", Map.delete(validation, "unique"))
+
+  defp without_unique(params), do: params
 
   # Emptying the other side's name removes the reverse list (R4), so its
   # machine name goes with it rather than standing alone.
@@ -1024,6 +1681,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # Whether the reference-target select applies to the form's current type.
   defp reference?(form), do: to_string(form[:field_type].value) == "reference"
+
+  # Whether the Conditions disclosure applies: not to a group as a whole or a
+  # computed field (`Validations.FieldCondition`).
+  defp conditions?(form), do: to_string(form[:field_type].value) not in ["group", "computed"]
 
   # Whether the compute-formula textarea applies (a `:computed` field, #429).
   defp computed?(form), do: to_string(form[:field_type].value) == "computed"
@@ -1288,11 +1949,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :stored, :any, default: nil
   # `{label, name}` pairs, to name a reference's target type in the choices.
   attr :target_types, :list, default: []
+  # The labels of the computed fields whose formula reads this one: a formula
+  # skips a list, so making the field a list is worth a warning (#2289).
+  attr :formula_readers, :list, default: []
 
   # Single image or a gallery, for a `:media` field — or one row or repeating
   # rows, for a `:group`, or one line or a list, for a `:string`, or one term
   # or several, for a `:select` (which then
-  # also asks whether editors may add terms of their own, `allow_custom`) —
+  # also asks whether editors may add terms of their own, `allow_custom`), or
+  # one value or a list, for a typed scalar (a number, a date, a link, #2289) —
   # with the list's optional item bounds. A `:reference` field asks the same question from
   # both sides in `relationship_counts/1`; this keeps only the warning, shown
   # whenever a stored list is about to become a single item or another type.
@@ -1302,22 +1967,36 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     stored_type = list_type(assigns.stored)
     target = target_label(assigns.form, assigns.target_types)
 
+    holds? = type in @holds_types
+
+    {narrowing, retyped_list} = list_change(stored_type, type, holds?, multiple?)
+
     assigns =
       assigns
       |> assign(:type, type)
+      |> assign(:holds?, holds?)
       |> assign(:multiple?, multiple?)
       |> assign(:target, target)
       |> assign(:choices, multiple_choices(type, target))
+      # Checkboxes draw only the options (#2284): while they are the chosen
+      # input, the open vocabulary is off and says why.
       |> assign(
-        :narrowing,
-        if(stored_type && (type != stored_type or not multiple?), do: stored_type)
+        :checkboxes?,
+        type == :select and multiple? and
+          FieldWidgets.resolve(form_widget_subject(assigns.form)) == "checkboxes"
+      )
+      |> assign(:narrowing, narrowing)
+      |> assign(:retyped_list, retyped_list)
+      |> assign(
+        :formula_warning?,
+        holds? and multiple? and is_nil(stored_type) and assigns.formula_readers != []
       )
 
     # The warning outlives the toggle: retyping a list field to another type
     # narrows it just the same (`SyncFieldValues`), so it shows then too.
     ~H"""
-    <div :if={@type in [:media, :group, :select, :string] || @narrowing} class="sm:col-span-2">
-      <fieldset :if={@type in [:media, :group, :select, :string]}>
+    <div :if={@holds? || @narrowing || @retyped_list} class="sm:col-span-2">
+      <fieldset :if={@holds?}>
         <legend class="mb-1 block text-sm font-medium">{gettext("Holds")}</legend>
         <div class="grid gap-2 sm:grid-cols-2">
           <label
@@ -1355,7 +2034,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         >
           <legend class="px-1 text-sm font-medium">
             {bounds_legend(@type, @target)}
-            <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+            <span class="font-normal text-base-content/70">{gettext("(optional)")}</span>
           </legend>
           <div class="grid gap-3 sm:grid-cols-2">
             <.input
@@ -1394,14 +2073,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             id={"#{@id}-allow-custom"}
             name={@form[:allow_custom].name}
             value="true"
-            checked={@form[:allow_custom].value in [true, "true"]}
-            class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+            checked={@form[:allow_custom].value in [true, "true"] and not @checkboxes?}
+            disabled={@checkboxes?}
+            aria-describedby={if @checkboxes?, do: "#{@id}-allow-custom-conflict"}
+            class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary disabled:cursor-not-allowed disabled:opacity-60"
           />
           <span>
             {gettext("Editors can add new terms")}
-            <span class="block text-xs text-base-content/60">
+            <span class="block text-xs text-base-content/70">
               {gettext(
                 "For a vocabulary that grows, like properties or keywords. The options become suggestions, and terms already used on this type are suggested too. A new term does not join the options."
+              )}
+            </span>
+            <span
+              :if={@checkboxes?}
+              id={"#{@id}-allow-custom-conflict"}
+              class="mt-0.5 block text-xs text-base-content/70"
+            >
+              {gettext(
+                "Checkboxes show only the options. Pick Tags as the editor input to allow new terms."
               )}
             </span>
           </span>
@@ -1425,8 +2115,44 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
         {narrowing_warning(@narrowing)}
       </p>
+      <p
+        :if={@retyped_list}
+        id={"#{@id}-retyped"}
+        role="status"
+        class="mt-2 flex items-start gap-1.5 text-xs text-warning-ink"
+      >
+        <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+        {gettext(
+          "Lists already filled in keep their items as they are, not converted to the new type. An item the new type cannot hold is reported when that content is next saved; copy them into a new list field with mix kiln.fields.convert."
+        )}
+      </p>
+      <p
+        :if={@formula_warning?}
+        id={"#{@id}-formulas"}
+        role="status"
+        class="mt-2 flex items-start gap-1.5 text-xs text-warning-ink"
+      >
+        <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+        {gettext(
+          "Read by a formula in %{fields}. A formula skips a list: sum, min, max and text leave this field out once it holds one.",
+          fields: Enum.join(@formula_readers, ", ")
+        )}
+      </p>
     </div>
     """
+  end
+
+  # A list of phrases or a typed list (#2289) — what the field list badges
+  # "list"; a multiple select is badged by its own words.
+  defp scalar_list?(type), do: type == :string or type in @typed_list_types
+
+  # The labels of the computed fields among `definitions` whose formula reads
+  # `definition` (`Computed.references/1`).
+  defp formula_readers(definitions, definition) do
+    for %{field_type: :computed} = reader <- definitions,
+        reader.id != definition.id,
+        definition.name in Computed.references(reader.compute),
+        do: reader.label
   end
 
   attr :form, :any, required: true
@@ -1518,6 +2244,36 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {min, max} -> gettext("Between %{min} and %{max} rows.", min: min, max: max)
     end
   end
+
+  # A field's value constraints in the list (#2276), when it has any.
+  defp constraints_summary(%{validation: validation}) do
+    validation = FieldConstraints.normalize(validation)
+
+    [
+      range_summary(validation["min"], validation["max"]),
+      length_summary(validation["min_length"], validation["max_length"]),
+      if(validation["pattern"], do: gettext("Must match a pattern.")),
+      if(validation["unique"] == true, do: gettext("Each value used once."))
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+  end
+
+  defp range_summary(nil, nil), do: nil
+  defp range_summary(min, nil), do: gettext("At least %{min}.", min: min)
+  defp range_summary(nil, max), do: gettext("At most %{max}.", max: max)
+  defp range_summary(min, max), do: gettext("From %{min} to %{max}.", min: min, max: max)
+
+  defp length_summary(nil, nil), do: nil
+
+  defp length_summary(min, nil),
+    do: ngettext("At least %{count} character.", "At least %{count} characters.", min)
+
+  defp length_summary(nil, max),
+    do: ngettext("At most %{count} character.", "At most %{count} characters.", max)
+
+  defp length_summary(min, max),
+    do: gettext("%{min} to %{max} characters.", min: min, max: max)
 
   # The structured-data meaning in the list (#2044), when it has one.
   defp schema_org_summary(%{schema_org_property: :author}),
@@ -2161,23 +2917,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp item_bounds_label(same, same), do: gettext("exactly %{count}", count: same)
   defp item_bounds_label(min, max), do: gettext("%{min} to %{max}", min: min, max: max)
 
+  # What becomes of a stored list (`stored_type`, nil when the stored field
+  # holds no list) as the form now stands: `{narrowing, retyped_list}`.
+  # Retyping a list into another type that is still a list leaves the saved
+  # items as they are (`SyncFieldValues`); anything else narrows them.
+  defp list_change(nil, _type, _holds?, _multiple?), do: {nil, nil}
+  defp list_change(stored, type, true, true) when type != stored, do: {nil, stored}
+  defp list_change(stored, type, _holds?, _multiple?) when type != stored, do: {stored, nil}
+  defp list_change(stored, _type, _holds?, false), do: {stored, nil}
+  defp list_change(_stored, _type, _holds?, true), do: {nil, nil}
+
   # The list-capable type a form or a stored definition is, or nil.
   defp list_type(nil), do: nil
 
-  defp list_type(%Phoenix.HTML.Form{} = form) do
-    case to_string(form[:field_type].value) do
-      "media" -> :media
-      "reference" -> :reference
-      "group" -> :group
-      "select" -> :select
-      "string" -> :string
-      _other -> nil
-    end
-  end
+  defp list_type(%Phoenix.HTML.Form{} = form),
+    do: Map.get(@list_type_names, to_string(form[:field_type].value))
 
-  defp list_type(%{field_type: type, multiple: true})
-       when type in [:media, :reference, :group, :select, :string],
-       do: type
+  defp list_type(%{field_type: type, multiple: true}) do
+    if type in ClearMultiple.list_types(), do: type
+  end
 
   defp list_type(_stored), do: nil
 
@@ -2256,6 +3014,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     ]
   end
 
+  defp multiple_choices(type, _target) when type in @typed_list_types do
+    [
+      {"false", gettext("One value"), gettext("A single value."), "hero-minus"},
+      {"true", gettext("A list"),
+       gettext(
+         "As many values as the editor adds, each checked as a single one would be, in their order — dates, links, numbers."
+       ), "hero-list-bullet"}
+    ]
+  end
+
   # Named after what the field connects, as a relationship ("One Page",
   # "Several Pages") rather than as a data shape, once the target is picked.
   defp multiple_choices(_reference, target) when is_binary(target) do
@@ -2290,7 +3058,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         "Saving keeps only the first row of each list already filled in. The other rows are removed from the content."
       )
 
-  defp narrowing_warning(:string),
+  defp narrowing_warning(type) when type == :string or type in @typed_list_types,
     do:
       gettext(
         "Saving keeps only the first item of each list already filled in. The other items are removed from the content."
@@ -2391,6 +3159,173 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :form, :any, required: true
   attr :id, :string, required: true
 
+  # Which editor input the field uses (`widget`, #2284): a card per input its
+  # settings offer (`FieldWidgets.allowed/1`), the type's default first and
+  # posting `""`. Shown only when there is a choice, so it follows the type,
+  # `multiple` and `format` above it. Checkboxes stay listed, disabled, while
+  # editors may add terms of their own; a card drawing one input per option
+  # says when the field lists too many for it.
+  defp widget_field(assigns) do
+    subject = form_widget_subject(assigns.form)
+    allowed = FieldWidgets.allowed(subject)
+    # The cards a choice of `allow_custom` would offer: checkboxes stay on
+    # view, disabled, so the conflict is named rather than hidden.
+    listed = FieldWidgets.allowed(%{subject | allow_custom: false})
+    default = List.first(listed)
+
+    assigns =
+      assigns
+      |> assign(:selected, FieldWidgets.resolve(subject) || default)
+      |> assign(:default, default)
+      # A refused widget (a plugin's list changed between render and save)
+      # must say why, even when the field no longer offers a choice at all.
+      |> assign(:errors, Enum.map(assigns.form[:widget].errors, &translate_error/1))
+      |> assign(:cap_hint, if(FieldWidgets.too_many_options?(subject), do: cap_hint(subject)))
+      |> assign(
+        :choices,
+        for name <- listed do
+          {title, hint, icon} = widget_choice(subject, name)
+          {name, title, hint, icon, name not in allowed}
+        end
+      )
+
+    ~H"""
+    <fieldset :if={length(@choices) > 1 or @errors != []} id={@id} class="sm:col-span-2">
+      <legend class="mb-1 block text-sm font-medium">{gettext("Editor input")}</legend>
+      <div :if={length(@choices) > 1} class="grid gap-2 sm:grid-cols-3">
+        <label
+          :for={{name, title, hint, icon, disabled?} <- @choices}
+          for={"#{@id}-#{name}"}
+          class={[
+            "flex items-start gap-3 rounded-lg border p-3 transition-colors",
+            cond do
+              disabled? -> "cursor-not-allowed border-base-content/10 opacity-70"
+              @selected == name -> "cursor-pointer border-primary bg-primary/5"
+              true -> "cursor-pointer border-base-content/15 hover:border-base-content/30"
+            end
+          ]}
+        >
+          <input
+            type="radio"
+            id={"#{@id}-#{name}"}
+            name={@form[:widget].name}
+            value={if name == @default, do: "", else: name}
+            checked={@selected == name and not disabled?}
+            disabled={disabled?}
+            class="mt-0.5 size-4 accent-primary"
+          />
+          <span class="min-w-0">
+            <span class="flex items-center gap-1.5 text-sm font-medium">
+              <.icon name={icon} class="size-4 text-base-content/70" />
+              {title}
+            </span>
+            <span :if={hint} class="mt-0.5 block text-xs text-base-content/70">{hint}</span>
+            <span
+              :if={disabled?}
+              id={"#{@id}-#{name}-conflict"}
+              class="mt-0.5 block text-xs text-base-content/70"
+            >
+              {gettext("Not while editors can add new terms.")}
+            </span>
+            <span
+              :if={@cap_hint && FieldWidgets.per_option?(name) && not disabled?}
+              id={"#{@id}-#{name}-cap"}
+              class="mt-0.5 flex items-start gap-1 text-xs text-warning-ink"
+            >
+              <.icon name="hero-exclamation-triangle" class="mt-px size-3.5 shrink-0" />
+              {@cap_hint}
+            </span>
+          </span>
+        </label>
+      </div>
+      <p :for={error <- @errors} class="mt-1 flex items-center gap-1.5 text-sm text-error">
+        <.icon name="hero-exclamation-circle" class="size-4 shrink-0" />{error}
+      </p>
+    </fieldset>
+    """
+  end
+
+  # What a radios, buttons or checkboxes card says on a field listing more
+  # options than the editor draws one input each for (`FieldWidgets.effective/1`).
+  defp cap_hint(%{multiple: true}),
+    do:
+      gettext("Over %{count} options — the editor shows tags instead.",
+        count: FieldWidgets.option_cap()
+      )
+
+  defp cap_hint(_subject),
+    do:
+      gettext("Over %{count} options — the editor shows a dropdown instead.",
+        count: FieldWidgets.option_cap()
+      )
+
+  # The card for one widget: its title, a line on when to pick it, an icon.
+  # Core widgets are named here (translated); a plugin's by its own label,
+  # or its machine name humanized.
+  defp widget_choice(%{field_type: :select, multiple: true}, "tags"),
+    do: {gettext("Tags"), gettext("Picked terms as chips, with a search box."), "hero-tag"}
+
+  defp widget_choice(%{field_type: :select, multiple: true}, "checkboxes"),
+    do:
+      {gettext("Checkboxes"), gettext("A box to tick beside every option."), "hero-check-circle"}
+
+  defp widget_choice(%{field_type: :select}, "dropdown"),
+    do:
+      {gettext("Dropdown"),
+       gettext("A menu that opens on click — compact for any number of options."),
+       "hero-chevron-up-down"}
+
+  defp widget_choice(%{field_type: :select}, "radios"),
+    do:
+      {gettext("Radio buttons"), gettext("Every option on view, one per line."),
+       "hero-list-bullet"}
+
+  defp widget_choice(%{field_type: :select}, "buttons"),
+    do:
+      {gettext("Buttons"),
+       gettext("Every option on view as a row of buttons — for a few short ones."),
+       "hero-squares-2x2"}
+
+  defp widget_choice(%{field_type: :text}, "textarea"),
+    do:
+      {gettext("Several lines"), gettext("A box that grows with the text."),
+       "hero-bars-3-bottom-left"}
+
+  defp widget_choice(%{field_type: :text}, "single_line"),
+    do:
+      {gettext("One line"),
+       gettext("A single-line box. Text that already has line breaks still opens on several."),
+       "hero-minus"}
+
+  defp widget_choice(%{field_type: :reference}, "autocomplete"),
+    do:
+      {gettext("Search as you type"), gettext("A search box that finds the record by its title."),
+       "hero-magnifying-glass"}
+
+  defp widget_choice(%{field_type: :reference}, "dropdown"),
+    do:
+      {gettext("Dropdown list"),
+       gettext(
+         "Every record to link to in one list — for a short one. Past 100, the editor searches instead."
+       ), "hero-chevron-up-down"}
+
+  defp widget_choice(subject, name) do
+    label = Map.get(FieldWidgets.plugin_labels(subject), name) || Phoenix.Naming.humanize(name)
+    {label, nil, "hero-puzzle-piece"}
+  end
+
+  # The label of the widget a stored definition uses, for its row in the list
+  # of fields — only when it isn't the type's default.
+  defp widget_badge(definition) do
+    widget = FieldWidgets.resolve(definition)
+
+    if widget && widget != FieldWidgets.default(definition),
+      do: definition |> widget_choice(widget) |> elem(0)
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
   # Whether delivery carries a plain-text rendition beside a `:text` field's
   # value (`deliver_plain`). Shown only for that type: on any other, nothing
   # is submitted and `Changes.ClearDeliverPlain` drops a stored `true`.
@@ -2479,6 +3414,159 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       </span>
     </label>
     """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  attr :nested?, :boolean, default: false
+
+  # The value constraints of a field (#2276), as a fieldset of the inputs its
+  # type takes: bounds for a number, length and pattern for text, and whether
+  # every value must be unique. The server stays the authority; a constraint
+  # the type doesn't take is not offered (and `unpack_validation/1` drops it).
+  defp validation_field(assigns) do
+    type = to_string(assigns.form[:field_type].value)
+    format = assigns.form[:format].value |> to_string() |> format_atom()
+    keys = FieldConstraints.allowed_keys(type_atom(type), format)
+    multiple? = assigns.form[:multiple].value in [true, "true"]
+    validation = FieldConstraints.normalize(assigns.form[:validation].value)
+
+    errors =
+      if Phoenix.Component.used_input?(assigns.form[:validation]),
+        do: Enum.map(assigns.form[:validation].errors, fn {message, _opts} -> message end),
+        else: []
+
+    assigns =
+      assigns
+      |> assign(:type, type)
+      |> assign(:keys, keys)
+      |> assign(:unique?, "unique" in keys and not assigns.nested? and not multiple?)
+      |> assign(:validation, validation)
+      |> assign(:errors, errors)
+      |> assign(:name, assigns.form[:validation].name)
+
+    ~H"""
+    <fieldset
+      :if={@keys != []}
+      id={@id}
+      class="rounded-lg border border-base-content/10 bg-base-200/40 p-3 sm:col-span-2"
+    >
+      <legend class="px-1 text-sm font-medium">
+        {gettext("Validation")}
+        <span class="font-normal text-base-content/60">{gettext("(optional)")}</span>
+      </legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <.input
+          :if={"min" in @keys}
+          id={"#{@id}-min"}
+          name={"#{@name}[min]"}
+          value={@validation["min"]}
+          type="number"
+          step={if @type == "integer", do: "1", else: "any"}
+          label={gettext("Minimum value")}
+          placeholder={gettext("No minimum")}
+          errors={key_errors(@errors, "min")}
+        />
+        <.input
+          :if={"max" in @keys}
+          id={"#{@id}-max"}
+          name={"#{@name}[max]"}
+          value={@validation["max"]}
+          type="number"
+          step={if @type == "integer", do: "1", else: "any"}
+          label={gettext("Maximum value")}
+          placeholder={gettext("No limit")}
+          errors={key_errors(@errors, "max")}
+        />
+        <.input
+          :if={"min_length" in @keys}
+          id={"#{@id}-min-length"}
+          name={"#{@name}[min_length]"}
+          value={@validation["min_length"]}
+          type="number"
+          min="0"
+          step="1"
+          inputmode="numeric"
+          label={gettext("Minimum length")}
+          placeholder={gettext("No minimum")}
+          errors={key_errors(@errors, "min_length")}
+        />
+        <.input
+          :if={"max_length" in @keys}
+          id={"#{@id}-max-length"}
+          name={"#{@name}[max_length]"}
+          value={@validation["max_length"]}
+          type="number"
+          min="0"
+          step="1"
+          inputmode="numeric"
+          label={gettext("Maximum length")}
+          placeholder={gettext("No limit")}
+          errors={key_errors(@errors, "max_length")}
+        />
+        <.input
+          :if={"pattern" in @keys}
+          id={"#{@id}-pattern"}
+          name={"#{@name}[pattern]"}
+          value={@validation["pattern"]}
+          label={gettext("Pattern")}
+          placeholder="[A-Z]{3}-[0-9]+"
+          hint={gettext("A regular expression the whole value must match.")}
+          errors={key_errors(@errors, "pattern")}
+        />
+        <.input
+          :if={"pattern_message" in @keys}
+          id={"#{@id}-pattern-message"}
+          name={"#{@name}[pattern_message]"}
+          value={@validation["pattern_message"]}
+          label={gettext("Message when it doesn't match")}
+          hint={gettext("Shown to editors. Leave empty for the standard message.")}
+          errors={key_errors(@errors, "pattern_message")}
+        />
+        <label :if={@unique?} for={"#{@id}-unique"} class="flex items-start gap-2 text-sm">
+          <input type="hidden" name={"#{@name}[unique]"} value="false" />
+          <input
+            type="checkbox"
+            id={"#{@id}-unique"}
+            name={"#{@name}[unique]"}
+            value="true"
+            checked={@validation["unique"] == true}
+            class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+          />
+          <span>
+            {gettext("Unique")}
+            <span class="block text-xs text-base-content/60">
+              {gettext("No two documents of this type and language may hold the same value.")}
+            </span>
+          </span>
+        </label>
+      </div>
+      <p
+        :for={message <- other_errors(@errors, @keys)}
+        class="mt-2 text-sm text-error"
+        role="alert"
+      >
+        {message}
+      </p>
+    </fieldset>
+    """
+  end
+
+  # A validation error belongs to the input of the constraint it opens with
+  # ("pattern is not a valid regular expression: ...").
+  defp key_errors(errors, key) do
+    Enum.filter(errors, &(constraint_of(&1) == key))
+  end
+
+  defp other_errors(errors, keys) do
+    Enum.reject(errors, &(constraint_of(&1) in keys))
+  end
+
+  defp constraint_of(message) do
+    message
+    |> String.split(" ", parts: 2)
+    |> List.first()
+    |> then(&if &1 in FieldConstraints.keys(), do: &1)
   end
 
   attr :form, :any, required: true
@@ -2573,6 +3661,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   attr :form, :any, required: true
+  attr :siblings, :list, default: []
+  attr :dynamic, :boolean, default: false
 
   # The default value, for the types that take one (#1820), in the input that
   # fits the type: a checkbox for yes-or-no, a number box for numbers, a date
@@ -2584,7 +3674,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> assign(:hint, gettext("Used when an editor leaves this field empty."))
 
     ~H"""
-    <div :if={default?(@form)} class={@type == "boolean" && "self-end"}>
+    <.default_source_field
+      :if={@dynamic and source_choices(@type) != []}
+      form={@form}
+      type={@type}
+      siblings={@siblings}
+    />
+    <div
+      :if={default?(@form) and not dynamic_default?(@form)}
+      class={@type == "boolean" && "self-end"}
+    >
       <label :if={@type == "boolean"} class="flex items-center gap-2 text-sm">
         <input type="hidden" name={@form[:default].name} value="" />
         <input
@@ -2616,6 +3715,73 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       />
     </div>
     """
+  end
+
+  attr :form, :any, required: true
+  attr :type, :string, required: true
+  attr :siblings, :list, required: true
+
+  # Where a new record's value comes from (#2286): a fixed value (the input
+  # below), or one of the closed set of dynamic sources the type can take.
+  defp default_source_field(assigns) do
+    assigns =
+      assigns
+      |> assign(:choices, source_choices(assigns.type))
+      |> assign(:copyable, copyable(assigns.siblings, assigns.type, assigns.form))
+
+    ~H"""
+    <div class="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+      <.input
+        field={@form[:default_source]}
+        type="select"
+        label={gettext("Default comes from")}
+        options={[{gettext("A fixed value"), ""} | @choices]}
+        hint={gettext("Applied when a new record leaves this field empty — never on later edits.")}
+      />
+      <.input
+        :if={to_string(@form[:default_source].value) == "copy_of"}
+        field={@form[:default_field]}
+        type="select"
+        label={gettext("Field to copy")}
+        options={@copyable}
+        prompt={gettext("— Choose a field —")}
+      />
+    </div>
+    """
+  end
+
+  defp blank_source(%{"default_source" => ""} = params),
+    do: Map.put(params, "default_source", nil)
+
+  defp blank_source(params), do: params
+
+  defp dynamic_default?(form), do: to_string(form[:default_source].value) not in ["", "nil"]
+
+  defp source_choices(type) do
+    type
+    |> safe_type()
+    |> DynamicDefaults.sources_for()
+    |> Enum.map(&{source_label(&1), to_string(&1)})
+  end
+
+  defp safe_type(type) do
+    Enum.find(DynamicDefaults.copy_types(), &(to_string(&1) == type))
+  end
+
+  defp source_label(:today), do: gettext("Today's date")
+  defp source_label(:now), do: gettext("The current date and time")
+  defp source_label(:current_user), do: gettext("The user creating the record")
+  defp source_label(:site_locale), do: gettext("The site's default language")
+  defp source_label(:copy_of), do: gettext("A copy of another field")
+
+  # The siblings a `:copy_of` may name: the same single-valued type, not
+  # itself a copy.
+  defp copyable(siblings, type, _form) do
+    for s <- siblings,
+        to_string(s.field_type) == type,
+        not s.multiple,
+        s.default_source != :copy_of,
+        do: {s.label, s.name}
   end
 
   defp default_input_type("integer"), do: "number"
@@ -2790,12 +3956,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <% end %>
             <.input field={@form[:help_text]} label={gettext("Help text")} />
             <.section_input field={@form[:section]} names={@section_names} />
+            <.width_input field={@form[:width]} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
-            <.default_field form={@form} />
+            <.default_field form={@form} siblings={@cond_siblings} dynamic />
             <.text_format_field form={@form} id="new-field-format" />
+            <.widget_field form={@form} id="new-field-widget" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
             <.deliver_portable_field form={@form} id="new-field-deliver-portable" />
+            <.validation_field form={@form} id="new-field-validation" />
             <.private_field form={@form} id="new-field-private" />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[required]" value="false" />
@@ -2808,6 +3977,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               />
               {gettext("Required")}
             </label>
+            <.conditions_field
+              :if={conditions?(@form)}
+              id="new-field-conditions"
+              form={@form}
+              state={@conds}
+              siblings={@cond_siblings}
+              ctx="create"
+            />
             <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[names_record]" value="false" />
               <input
@@ -2859,7 +4036,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             )}
           </p>
 
-          <div :for={{scope, definitions} <- @grouped} class="space-y-3">
+          <div
+            :for={{scope, definitions} <- @grouped}
+            data-field-group={group_heading(scope, @dynamic_types)}
+            class="space-y-3"
+          >
             <h3
               id={"fields-heading-#{group_dom_id(scope)}"}
               class="text-sm font-semibold text-base-content/80"
@@ -2917,7 +4098,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         {gettext("repeating")}
                       </span>
                       <span
-                        :if={definition.field_type == :string and definition.multiple}
+                        :if={definition.multiple and scalar_list?(definition.field_type)}
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("list")}
@@ -2935,6 +4116,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("unformatted")}
+                      </span>
+                      <span
+                        :if={widget_badge(definition)}
+                        id={"field-#{definition.id}-widget"}
+                        title={gettext("The editor input it uses")}
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {widget_badge(definition)}
                       </span>
                       <span
                         :if={definition.field_type == :text and definition.deliver_plain}
@@ -2979,14 +4168,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     </p>
                     <p
                       :if={definition.field_type == :select and definition.options != []}
-                      class="text-xs text-base-content/60"
+                      class="text-xs text-base-content/70"
                     >
                       {gettext("Options")}: {options_summary(definition)}
                     </p>
                     <p
                       :if={definition.field_type == :reference}
                       id={"field-#{definition.id}-links"}
-                      class="text-xs text-base-content/60"
+                      class="text-xs text-base-content/70"
                     >
                       {reference_summary(definition, @target_types, @dynamic_types)}
                     </p>
@@ -3011,6 +4200,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     </p>
                     <p :if={definition.compute} class="text-xs text-base-content/60">
                       {gettext("Formula")}: <code>{definition.compute}</code>
+                    </p>
+                    <p
+                      :if={constraints_summary(definition) != ""}
+                      id={"field-#{definition.id}-validation"}
+                      class="text-xs text-base-content/60"
+                    >
+                      {constraints_summary(definition)}
                     </p>
                     <p
                       :if={definition.field_type == :group and definition.multiple}
@@ -3149,14 +4345,17 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       id={"edit-field-multiple-#{@edit.id}"}
                       stored={definition}
                       target_types={@target_types}
+                      formula_readers={formula_readers(definitions, definition)}
                     />
                   <% end %>
                   <.input field={@edit.form[:help_text]} label={gettext("Help text")} />
                   <.section_input field={@edit.form[:section]} names={@section_names} />
+                  <.width_input field={@edit.form[:width]} />
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
-                  <.default_field form={@edit.form} />
+                  <.default_field form={@edit.form} siblings={@edit.cond_siblings} dynamic />
                   <.text_format_field form={@edit.form} id={"edit-field-format-#{@edit.id}"} />
+                  <.widget_field form={@edit.form} id={"edit-field-widget-#{@edit.id}"} />
                   <.deliver_plain_field
                     form={@edit.form}
                     id={"edit-field-deliver-plain-#{@edit.id}"}
@@ -3164,6 +4363,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.deliver_portable_field
                     form={@edit.form}
                     id={"edit-field-deliver-portable-#{@edit.id}"}
+                  />
+                  <.validation_field
+                    form={@edit.form}
+                    id={"edit-field-validation-#{@edit.id}"}
                   />
                   <.private_field form={@edit.form} id={"edit-field-private-#{@edit.id}"} />
                   <label class="flex items-center gap-2 self-end text-sm">
@@ -3177,6 +4380,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     />
                     {gettext("Required")}
                   </label>
+                  <.conditions_field
+                    :if={conditions?(@edit.form)}
+                    id={"edit-field-conditions-#{@edit.id}"}
+                    form={@edit.form}
+                    state={@edit.conds}
+                    siblings={@edit.cond_siblings}
+                    ctx="edit"
+                  />
                   <.relationship_summary
                     form={@edit.form}
                     id={"edit-field-summary-#{@edit.id}"}
@@ -3196,6 +4407,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 </.form>
               </li>
             </ul>
+            <.section_layouts
+              :if={section_names(definitions) != []}
+              id={"sections-#{group_dom_id(scope)}"}
+              scope={owner_param(scope)}
+              heading={group_heading(scope, @dynamic_types)}
+              names={section_names(definitions)}
+              layouts={Map.get(@field_sections, scope, [])}
+            />
           </div>
         </section>
 
@@ -3239,6 +4458,61 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   phx-value-id={definition.id}
                   data-confirm={gettext("Delete this orphaned field?")}
                   aria-label={gettext("Delete orphaned field %{name}", name: definition.name)}
+                  class="btn btn-sm btn-default shrink-0 hover:text-error"
+                >
+                  <.icon name="hero-trash" class="size-4" />
+                  {gettext("Delete")}
+                </button>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section
+          :if={@unknown_type != []}
+          id="unknown-type-fields"
+          class="space-y-3"
+          aria-labelledby="unknown-type-fields-heading"
+        >
+          <div>
+            <h2 id="unknown-type-fields-heading" class="flex items-center gap-2 text-lg font-medium">
+              <.icon name="hero-exclamation-triangle" class="size-5 text-warning" />
+              {gettext("Fields of an unknown type")}
+            </h2>
+            <p class="text-sm text-base-content/70">
+              {gettext(
+                "These fields use a field type this version of Kiln doesn't know — one added by a newer version, or by a plugin that is no longer installed. The editor doesn't show them and published pages leave them out, but records keep their values, and the content API still returns a value unless the field is private. Upgrade Kiln or reinstall the plugin to use them again, or delete them to withdraw their values for good."
+              )}
+            </p>
+          </div>
+          <ul class="card divide-y divide-base-content/10 border-warning/40">
+            <li :for={definition <- @unknown_type} id={"field-#{definition.id}"} class="p-4">
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0 space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-medium">{definition.label}</span>
+                    <code class="text-xs text-base-content/70">{definition.name}</code>
+                    <span class="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning">
+                      {gettext("unknown type")}
+                    </span>
+                  </div>
+                  <p class="text-xs text-base-content/70">
+                    {gettext("On %{owner}, of type %{type}.",
+                      owner: unknown_owner(definition, @definitions, @dynamic_types),
+                      type: to_string(definition.field_type)
+                    )}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  phx-click="delete"
+                  phx-value-id={definition.id}
+                  data-confirm={
+                    gettext(
+                      "Delete this field and the values records hold in it? This can't be undone."
+                    )
+                  }
+                  aria-label={gettext("Delete field %{name}", name: definition.name)}
                   class="btn btn-sm btn-default shrink-0 hover:text-error"
                 >
                   <.icon name="hero-trash" class="size-4" />
@@ -3351,6 +4625,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               >
                 {options_summary(link)}
               </span>
+              <span
+                :if={constraints_summary(link) != ""}
+                id={"field-#{link.id}-validation"}
+                class="text-xs text-base-content/60"
+              >
+                {constraints_summary(link)}
+              </span>
             </div>
             <div class="flex shrink-0 items-center gap-1">
               <button
@@ -3408,6 +4689,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             form={@open.form}
             id={"link-field-form-#{link.id}"}
             group?={@group?}
+            open={@open}
           />
         </li>
       </ol>
@@ -3421,6 +4703,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         form={@open.form}
         id={"link-field-form-new-#{@definition.id}"}
         group?={@group?}
+        open={@open}
       />
     </div>
     """
@@ -3429,6 +4712,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :form, :any, required: true
   attr :id, :string, required: true
   attr :group?, :boolean, default: false
+  attr :open, :map, required: true
 
   defp link_field_form(assigns) do
     ~H"""
@@ -3459,6 +4743,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       <.input field={@form[:help_text]} label={gettext("Help text")} />
       <.options_field form={@form} id={"#{@id}-options"} />
       <.default_field form={@form} />
+      <.validation_field form={@form} id={"#{@id}-validation"} nested? />
       <label class="flex items-center gap-2 self-end text-sm">
         <input type="hidden" name={@form[:required].name} value="false" />
         <input
@@ -3472,6 +4757,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           do: gettext("Required on every row"),
           else: gettext("Required on every connection")}
       </label>
+      <.conditions_field
+        :if={@group? and conditions?(@form)}
+        id={"#{@id}-conditions"}
+        form={@form}
+        state={@open.conds}
+        siblings={@open.cond_siblings}
+        ctx="link"
+      />
       <div class="flex gap-2 sm:col-span-2">
         <.button type="submit" variant="primary">
           {if @group?, do: gettext("Save field"), else: gettext("Save detail")}
@@ -3502,6 +4795,105 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       hint={
         gettext(
           "Shared values are copied to every translation when the default-locale version publishes."
+        )
+      }
+    />
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :scope, :string, required: true, doc: "the type's owner, as its checkbox value"
+  attr :heading, :string, required: true, doc: "the type's name, for the panel's label"
+  attr :names, :list, required: true, doc: "the sections in use, in editor order"
+  attr :layouts, :list, required: true, doc: "the type's stored `FieldSection` rows"
+
+  # A type's Sections panel (#2280): how each section in use is laid out in
+  # the content editor. Each row saves as its selects change.
+  defp section_layouts(assigns) do
+    rows =
+      for {name, index} <- Enum.with_index(assigns.names) do
+        layout =
+          Enum.find(assigns.layouts, %{display: :accordion, initially: :auto}, &(&1.name == name))
+
+        %{name: name, index: index, display: layout.display, initially: layout.initially}
+      end
+
+    assigns = assign(assigns, :rows, rows)
+
+    ~H"""
+    <section id={@id} aria-labelledby={"#{@id}-heading"} class="card card-pad space-y-3">
+      <div class="space-y-1">
+        <h4 id={"#{@id}-heading"} class="text-sm font-semibold">
+          {gettext("Sections of %{type}", type: @heading)}
+        </h4>
+        <p class="text-xs text-base-content/70">
+          {gettext(
+            "An accordion is a heading editors open and close; a fieldset is always open; tabs show one section at a time, and every tab section of the type joins one tab set at the place of the first. Sections keep the order of their first field."
+          )}
+        </p>
+      </div>
+      <ul class="divide-y divide-base-content/10">
+        <li
+          :for={row <- @rows}
+          id={"#{@id}-#{row.index}"}
+          data-field-section={row.name}
+          class="py-3 first:pt-0 last:pb-0"
+        >
+          <form
+            id={"#{@id}-#{row.index}-form"}
+            phx-change="section_layout"
+            class="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_14rem_14rem]"
+          >
+            <input type="hidden" name="scope" value={@scope} />
+            <input type="hidden" name="name" value={row.name} />
+            <p class="self-center font-medium break-words">{row.name}</p>
+            <.input
+              type="select"
+              id={"#{@id}-#{row.index}-display"}
+              name="section[display]"
+              label={gettext("Shown as")}
+              value={to_string(row.display)}
+              options={display_options()}
+            />
+            <.input
+              type="select"
+              id={"#{@id}-#{row.index}-initially"}
+              name="section[initially]"
+              label={gettext("Starts")}
+              value={to_string(row.initially)}
+              options={initially_options()}
+              disabled={row.display != :accordion}
+              title={
+                row.display != :accordion &&
+                  gettext("Only an accordion opens and closes.")
+              }
+            />
+          </form>
+        </li>
+      </ul>
+    </section>
+    """
+  end
+
+  attr :field, Phoenix.HTML.FormField, required: true
+
+  # How much of its section's row the field's input takes in the content
+  # editor (`width`). Only on these forms: a link field or a group sub-field
+  # sits inside its parent's input and keeps the whole of it.
+  defp width_input(assigns) do
+    ~H"""
+    <.input
+      field={@field}
+      type="select"
+      label={gettext("Width")}
+      options={[
+        {gettext("Full row"), "full"},
+        {gettext("Half a row"), "half"},
+        {gettext("A third of a row"), "third"}
+      ]}
+      hint={
+        gettext(
+          "Narrow fields of the same section sit side by side in the editor; on a small screen each takes the full row."
         )
       }
     />

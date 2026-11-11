@@ -43,10 +43,14 @@ defmodule KilnCMS.SchemaExport do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldTypes
+  alias KilnCMS.CMS.FieldWidgets
   alias KilnCMS.CMS.ReverseFields
+  alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.Media
 
   @dialect "https://json-schema.org/draft/2020-12/schema"
+
+  @typed_lists ScalarLists.typed()
 
   # See `with_actor/2`.
   @actor_override {__MODULE__, :actor_override}
@@ -100,6 +104,7 @@ defmodule KilnCMS.SchemaExport do
           | {:types, [atom() | String.t()]}
           | {:base_url, String.t() | nil}
           | {:blocks_only, boolean()}
+          | {:graphql, boolean()}
 
   @doc """
   The full JSON Schema document.
@@ -108,13 +113,24 @@ defmodule KilnCMS.SchemaExport do
   validates against the document as-is; individual pieces are addressable under
   `$defs` (`#/$defs/block`, `#/$defs/content_post`) for a consumer that wants
   one of them.
+
+  With `graphql: true` each content definition also carries `x-kiln-graphql`
+  (the GraphQL object it is read through and, for a dynamic type, its
+  `typeName`) and each public custom field carries `x-kiln-graphql-kind` (its
+  `KilnCMS.CMS.FieldKind`, #2290). Both are annotations a validator ignores;
+  they are absent by default, so the plain document is unchanged. The
+  TypeScript GraphQL emitter reads them, which keeps the accessor it picks the
+  one `KilnCMS.CMS.FieldKind` decides rather than a second inference from the
+  JSON type.
   """
   @spec json_schema([option()]) :: map()
   def json_schema(opts \\ []) do
     model = model(opts)
 
     content_defs =
-      Map.new(model.content_types, fn ct -> {content_def_name(ct.type), content_schema(ct)} end)
+      Map.new(model.content_types, fn ct ->
+        {content_def_name(ct.type), content_schema(ct, opts)}
+      end)
 
     root_refs =
       Enum.map(model.content_types, &%{"$ref" => "#/$defs/#{content_def_name(&1.type)}"})
@@ -287,6 +303,13 @@ defmodule KilnCMS.SchemaExport do
         tenant: org_id
       )
     )
+    |> put_section_displays(
+      CMS.field_sections_for_definition!(definition.id,
+        actor: system(),
+        authorize_with: :error,
+        tenant: org_id
+      )
+    )
     |> put_reverse(org_id)
   end
 
@@ -296,7 +319,21 @@ defmodule KilnCMS.SchemaExport do
       :field_definitions,
       CMS.field_definitions_for!(type, actor: system(), authorize_with: :error, tenant: org_id)
     )
+    |> put_section_displays(
+      CMS.field_sections_for!(type, actor: system(), authorize_with: :error, tenant: org_id)
+    )
     |> put_reverse(org_id)
+  end
+
+  # How each section of the type is laid out (#2280), by name — only the ones
+  # that are not the default accordion, which is all the export reports.
+  defp put_section_displays(ct, sections) do
+    displays =
+      for %{display: display, name: name} <- sections, display != :accordion, into: %{} do
+        {name, to_string(display)}
+      end
+
+    Map.put(ct, :section_displays, displays)
   end
 
   # The reverse fields records of this type show (R4): the other side of
@@ -304,13 +341,50 @@ defmodule KilnCMS.SchemaExport do
   defp put_reverse(ct, org_id),
     do: Map.put(ct, :reverse_fields, ReverseFields.for_type(ct.type, org_id))
 
-  defp content_schema(ct) do
+  defp content_schema(ct, opts) do
+    graphql? = Keyword.get(opts, :graphql, false)
+
     ct
     |> base_content_schema()
+    |> put_graphql_kinds(ct, graphql?)
     |> put_inherited_fields(ct)
     |> put_plain_fields(ct)
     |> put_portable_fields(ct)
     |> put_reverse_fields(Map.get(ct, :reverse_fields, []))
+  end
+
+  # Annotations for the GraphQL emitter (#2290), only on request so the default
+  # document stays byte-identical. A private field is not in `properties`, so it
+  # cannot gain a kind here either.
+  defp put_graphql_kinds(schema, _ct, false), do: schema
+
+  defp put_graphql_kinds(schema, ct, true) do
+    kinds =
+      ct.field_definitions
+      |> Enum.reject(&(Map.get(&1, :private) == true))
+      |> Map.new(&{&1.name, &1})
+
+    schema
+    |> update_in(["properties", "custom_fields", "properties"], fn properties ->
+      Map.new(properties, fn {name, property} ->
+        {name,
+         Map.put(property, "x-kiln-graphql-kind", kinds |> Map.fetch!(name) |> graphql_kind())}
+      end)
+    end)
+    |> Map.put("x-kiln-graphql", graphql_target(ct))
+  end
+
+  defp graphql_kind(definition),
+    do: definition |> KilnCMS.CMS.FieldKind.kind_for() |> Atom.to_string()
+
+  defp graphql_target(%{source: :dynamic} = ct),
+    do: %{"type" => "Entry", "type_name" => to_string(ct.type)}
+
+  defp graphql_target(%{resource: resource}) do
+    %{
+      "type" =>
+        resource |> AshGraphql.Resource.Info.type() |> Atom.to_string() |> Macro.camelize()
+    }
   end
 
   # Reverse fields (R4) are not part of the fired document — the connection
@@ -432,8 +506,39 @@ defmodule KilnCMS.SchemaExport do
         "title" => %{"type" => ["string", "null"]},
         "slug" => %{"type" => ["string", "null"]},
         "locale" => %{"type" => ["string", "null"]},
-        "custom_fields" => custom_fields_schema(ct.field_definitions),
-        "blocks" => %{"type" => "array", "items" => JsonSchema.block_ref()}
+        "custom_fields" =>
+          custom_fields_schema(ct.field_definitions, Map.get(ct, :section_displays, %{})),
+        "blocks" => %{"type" => "array", "items" => JsonSchema.block_ref()},
+        # Optional: present only when the document sets a robots flag (#2256).
+        "robots" => %{
+          "type" => "object",
+          "description" =>
+            "The document's robots flags. Absent when neither is set; absent means both false.",
+          "properties" => %{
+            "noindex" => %{"type" => "boolean"},
+            "nofollow" => %{"type" => "boolean"}
+          },
+          "required" => ["noindex", "nofollow"],
+          "additionalProperties" => false
+        },
+        # Optional (#2258): an artifact fired before format_version 4 lacks it
+        # until it is re-fired, so a consumer must not count on it.
+        "social" => %{
+          "type" => "object",
+          "description" =>
+            "The document's link-preview fields, for Open Graph and X (Twitter) card " <>
+              "tags: the effective SEO title (else the title), the effective SEO " <>
+              "description and the SEO image as an absolute URL. `description` and " <>
+              "`image` are absent when there is none. Site-level values (card type, " <>
+              "the site's X account, the brand's fallback image) are not included.",
+          "properties" => %{
+            "title" => %{"type" => ["string", "null"]},
+            "description" => %{"type" => "string"},
+            "image" => %{"type" => "string"}
+          },
+          "required" => ["title"],
+          "additionalProperties" => false
+        }
       },
       "required" => ["blocks", "custom_fields", "id", "locale", "slug", "title", "type"],
       "additionalProperties" => false
@@ -454,7 +559,7 @@ defmodule KilnCMS.SchemaExport do
   #
   # A private field (#2044) is not described at all: it is never in a
   # delivered payload (`KilnCMS.CMS.PrivateFields`), and this schema is public.
-  defp custom_fields_schema(definitions) do
+  defp custom_fields_schema(definitions, section_displays) do
     definitions = Enum.reject(definitions, &(Map.get(&1, :private) == true))
 
     %{
@@ -463,20 +568,51 @@ defmodule KilnCMS.SchemaExport do
         "Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a " <>
           "point-in-time read (`?as_of=`) serves the values stored at that " <>
           "instant, which may include fields since removed from the registry.",
-      "properties" => Map.new(definitions, &{&1.name, custom_field_schema(&1)}),
+      "properties" => Map.new(definitions, &{&1.name, custom_field_schema(&1, section_displays)}),
       "additionalProperties" => true
     }
   end
 
-  defp custom_field_schema(definition) do
+  # A link field or group sub-field has no section, so it reads no layout.
+  defp custom_field_schema(definition, section_displays \\ %{}) do
     definition.field_type
     |> base_custom_field_schema(definition)
+    |> put_constraints(definition)
     |> put_target_types(definition)
     |> put_target_rules(definition)
     |> put_inverse(definition)
     |> put_link_fields(definition)
     |> put_localization(Map.get(definition, :localization))
-    |> put_section(Map.get(definition, :section))
+    |> put_section(Map.get(definition, :section), section_displays)
+    |> put_width(Map.get(definition, :width))
+    |> put_widget(definition)
+  end
+
+  # A field's value constraints (#2276) as annotations, not as JSON Schema's
+  # `minimum`/`maxLength`/`pattern` — for the reason the item bounds are: they
+  # govern what a *write* accepts, and a value stored before a constraint was
+  # added or tightened may fall outside it, so as assertions they would fail
+  # legitimately-published documents. `x-kiln-unique` is the flag as set; the
+  # check runs on write only. On a `multiple` string field the text
+  # constraints apply to each item. The editor-facing `pattern_message` is
+  # not exported.
+  @constraint_annotations [
+    {"min", "x-kiln-minimum"},
+    {"max", "x-kiln-maximum"},
+    {"min_length", "x-kiln-min-length"},
+    {"max_length", "x-kiln-max-length"},
+    {"pattern", "x-kiln-pattern"}
+  ]
+
+  defp put_constraints(schema, definition) do
+    validation = KilnCMS.CMS.FieldConstraints.normalize(Map.get(definition, :validation))
+
+    schema =
+      Enum.reduce(@constraint_annotations, schema, fn {key, annotation}, acc ->
+        put_bound(acc, annotation, validation[key])
+      end)
+
+    if validation["unique"] == true, do: Map.put(schema, "x-kiln-unique", true), else: schema
   end
 
   # A reference's link fields (R3): each connection's snapshot carries their
@@ -565,10 +701,62 @@ defmodule KilnCMS.SchemaExport do
 
   # The editor heading a field is filed under, for a client that builds its
   # own form from the schema (absent when the field has none).
-  defp put_section(schema, section) when is_binary(section),
-    do: Map.put(schema, "x-kiln-section", section)
+  # With `x-kiln-section-display` beside it when that section is laid out as
+  # a `fieldset` or a `tab` (#2280); absent for the default accordion.
+  defp put_section(schema, section, displays) when is_binary(section) do
+    schema = Map.put(schema, "x-kiln-section", section)
 
-  defp put_section(schema, _none), do: schema
+    case Map.fetch(displays, section) do
+      {:ok, display} -> Map.put(schema, "x-kiln-section-display", display)
+      :error -> schema
+    end
+  end
+
+  defp put_section(schema, _none, _displays), do: schema
+
+  # How much of its section's row the field's input takes in the editor
+  # (#2280): absent for the default, the whole row.
+  defp put_width(schema, width) when width in [:half, :third],
+    do: Map.put(schema, "x-kiln-width", to_string(width))
+
+  defp put_width(schema, _full), do: schema
+
+  # The editor input a field was set to (#2284), for a client building its
+  # own form: absent while the field uses its type's default. Only while the
+  # field still offers it (`FieldWidgets.resolve/1`): a stored name a plugin
+  # has since dropped is never advertised, and the editor falls back to the
+  # default, which absence already says.
+  defp put_widget(schema, definition) do
+    case Map.get(definition, :widget) do
+      widget when is_binary(widget) ->
+        if FieldWidgets.resolve(definition) == widget,
+          do: Map.put(schema, "x-kiln-widget", widget),
+          else: schema
+
+      _default ->
+        schema
+    end
+  end
+
+  # A typed list (`multiple` `:integer`, `:date`, `:email`, … — #2289): an
+  # array whose items are the single field's schema without its `null`, so
+  # an item keeps the `format`/`pattern` the single value carries. Numbers
+  # keep repeats; every other type drops them, hence `uniqueItems` only there.
+  defp base_custom_field_schema(type, %{multiple: true} = d) when type in @typed_lists do
+    item =
+      type
+      |> base_custom_field_schema(Map.put(d, :multiple, false))
+      |> Map.update!("type", &List.delete(&1, "null"))
+      |> Map.update!("type", fn [only] -> only end)
+
+    %{
+      "type" => ["array", "null"],
+      "items" => item,
+      "description" => "The items, in the order the editor arranged them."
+    }
+    |> put_unique_items(ScalarLists.distinct?(type))
+    |> put_item_bounds(d)
+  end
 
   defp base_custom_field_schema(:integer, _d), do: %{"type" => ["integer", "null"]}
   defp base_custom_field_schema(:float, _d), do: %{"type" => ["number", "null"]}
@@ -738,6 +926,9 @@ defmodule KilnCMS.SchemaExport do
     |> put_bound("x-kiln-min-items", Map.get(d, :min_items))
     |> put_bound("x-kiln-max-items", Map.get(d, :max_items))
   end
+
+  defp put_unique_items(schema, true), do: Map.put(schema, "uniqueItems", true)
+  defp put_unique_items(schema, false), do: schema
 
   defp put_bound(schema, _key, nil), do: schema
   defp put_bound(schema, key, value), do: Map.put(schema, key, value)

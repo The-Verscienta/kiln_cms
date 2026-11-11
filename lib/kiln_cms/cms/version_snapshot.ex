@@ -155,6 +155,51 @@ defmodule KilnCMS.CMS.VersionSnapshot do
   end
 
   @doc """
+  The names of the custom fields `version` changed, sorted (#2353).
+
+  `custom_fields` is one JSONB map, so a write that edits one key stores the
+  whole map in `changes`. The keys that write changed are found by diffing that
+  map against the one in the **previous version that carried a `custom_fields`
+  entry** (history is `:changes_only`, so the adjacent row is usually silent
+  about them) — an empty map when there is none, so a first version names every
+  key it set. A version whose `changes` has no `custom_fields` entry changed
+  none.
+
+  `history` is the ascending list from `history/4`. "Previous" is
+  `before?/2` order, so for versions written in one transaction (same instant,
+  random UUIDs) which one counts as the predecessor is arbitrary — the same
+  coin flip the module doc describes. A key counts as changed when its value
+  differs or it was added or removed.
+  """
+  @spec changed_custom_fields([struct()], struct()) :: [String.t()]
+  def changed_custom_fields(history, version) do
+    case Map.fetch(changes(version), "custom_fields") do
+      {:ok, new} when is_map(new) ->
+        old = previous_custom_fields(history, version)
+
+        (Map.keys(new) ++ Map.keys(old))
+        |> Enum.uniq()
+        |> Enum.reject(&(Map.fetch(new, &1) == Map.fetch(old, &1)))
+        |> Enum.sort()
+
+      _none ->
+        []
+    end
+  end
+
+  defp previous_custom_fields(history, version) do
+    history
+    |> Enum.filter(&(&1.id != version.id and before?(&1, version)))
+    |> Enum.reduce(%{}, fn earlier, acc ->
+      case Map.fetch(changes(earlier), "custom_fields") do
+        {:ok, map} when is_map(map) -> map
+        {:ok, _other} -> %{}
+        :error -> acc
+      end
+    end)
+  end
+
+  @doc """
   Merges an ascending run of versions' `changes` onto `acc`.
 
   The fold itself, without the read. Exposed for

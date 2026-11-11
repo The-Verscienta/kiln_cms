@@ -80,6 +80,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :alias_pattern,
         :seo_title_pattern,
         :seo_description_pattern,
+        :noindex_default,
+        :nofollow_default,
         :has_excerpt,
         :has_published_feed,
         :icon,
@@ -107,6 +109,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :alias_pattern,
         :seo_title_pattern,
         :seo_description_pattern,
+        :noindex_default,
+        :nofollow_default,
         :has_excerpt,
         :has_published_feed,
         :icon,
@@ -288,6 +292,11 @@ defmodule KilnCMS.CMS.TypeDefinition do
     attribute :seo_description_pattern, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
+
+    # Robots defaults for NEW entries of this type (#2256): what `noindex` /
+    # `nofollow` start as when the caller does not say. Not retroactive.
+    attribute :noindex_default, :boolean, allow_nil?: false, default: false, public?: true
+    attribute :nofollow_default, :boolean, allow_nil?: false, default: false, public?: true
 
     # `has_excerpt` mirrors the Content macro's `:excerpt?` option; `has_published_feed` is
     # informational (every type has the `:published` read).

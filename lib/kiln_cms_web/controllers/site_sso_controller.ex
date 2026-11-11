@@ -70,7 +70,8 @@ defmodule KilnCMSWeb.SiteSsoController do
              org.id,
              callback_url(org),
              Map.take(params, @callback_params),
-             session_params
+             session_params,
+             KilnCMS.Security.AuthEvents.context(conn, org)
            ) do
       KilnCMSWeb.AuthController.success(
         conn,
@@ -130,7 +131,12 @@ defmodule KilnCMSWeb.SiteSsoController do
     do: gettext("That sign-in link has expired. Start again.")
 
   defp message(reason)
-       when reason in [:not_configured, :unavailable, :credentials_unreadable],
+       when reason in [
+              :not_configured,
+              :unavailable,
+              :credentials_unreadable,
+              :registration_settings_unavailable
+            ],
        do: gettext("Single sign-on isn't available on this site right now. Sign in another way.")
 
   defp message(_reason),

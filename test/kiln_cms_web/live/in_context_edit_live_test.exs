@@ -246,7 +246,7 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       page = elem(page_with_blocks(authed_user(:editor)), 0)
 
       # The editor live_session gate bounces a non-editor to the site root.
-      assert {:error, {:redirect, %{to: "/"}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} =
                conn |> log_in(viewer) |> live(~p"/editor/site/page/#{page.slug}")
     end
   end
@@ -612,7 +612,7 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       viewer = authed_user(:viewer)
       page = elem(page_with_blocks(authed_user(:editor)), 0)
 
-      assert {:error, {:redirect, %{to: "/"}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} =
                conn |> log_in(viewer) |> live(~p"/editor/site/page/#{page.slug}")
     end
 
@@ -664,6 +664,81 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
 
       reloaded = lv |> element("#in-context-conflict button", "Reload latest") |> render_click()
       refute reloaded =~ "Someone else saved changes"
+    end
+  end
+
+  # #2332: a write from a page someone moved to the trash while it was open is
+  # refused, and the bar says the content is gone rather than offering a
+  # Reload that has nothing to load.
+  describe "the record is moved to the trash while open" do
+    @gone "This content was moved to the trash or deleted"
+
+    # Raw, so the trash's read filter does not hide the row.
+    defp row(page) do
+      %{rows: [row]} =
+        KilnCMS.Repo.query!(
+          "SELECT title, blocks, lock_version, updated_at, archived_at FROM pages WHERE id = $1",
+          [Ecto.UUID.dump!(page.id)]
+        )
+
+      row
+    end
+
+    defp trash!(page) do
+      admin = authed_user(:admin)
+      CMS.destroy_page!(CMS.get_page!(page.id, actor: admin), actor: admin)
+    end
+
+    defp assert_gone_bar(lv) do
+      assert has_element?(lv, ~s(#in-context-conflict[role="alert"]), @gone)
+      assert has_element?(lv, ~s(#in-context-conflict a[href="/editor"]), "Back to content")
+      refute has_element?(lv, "#in-context-conflict button", "Reload latest")
+      assert has_element?(lv, ~s(#in-context-edit-bar button[phx-click="save"][disabled]))
+    end
+
+    # Before the fix the autosave wrote the edit into the trashed row.
+    test "an autosave is refused and the bar says the content is gone", %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      render_hook(lv, "update_block", %{"id" => ids.heading, "value" => "After the trash"})
+      trash!(page)
+      before = row(page)
+
+      send(lv.pid, :autosave)
+      render(lv)
+
+      assert_gone_bar(lv)
+      assert row(page) == before
+
+      # Further edits schedule no autosave against a row that is not there.
+      render_hook(lv, "update_block", %{"id" => ids.heading, "value" => "Still typing"})
+      assert :sys.get_state(lv.pid).socket.assigns.autosave_timer == nil
+      assert row(page) == before
+    end
+
+    # Before the fix Reload raised on the trashed record and killed the page.
+    test "Reload after the trash keeps the page and says the content is gone",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      {page, ids} = page_with_blocks(editor)
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      render_hook(lv, "update_block", %{"id" => ids.heading, "value" => "Mine"})
+      {:ok, _} = CMS.update_page(page, %{title: "Changed elsewhere"}, actor: editor)
+      lv |> element("#in-context-edit-bar button", "Save") |> render_click()
+      assert has_element?(lv, "#in-context-conflict button", "Reload latest")
+
+      trash!(page)
+
+      html = lv |> element("#in-context-conflict button", "Reload latest") |> render_click()
+
+      assert Process.alive?(lv.pid)
+      assert_gone_bar(lv)
+      refute html =~ "Reloaded the latest version."
     end
   end
 

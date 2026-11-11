@@ -90,7 +90,10 @@ variant. So:
 
 - **Always read back which locale you got.** `x-kiln-locale` /
   `Content-Language` on HTTP responses, `locale` on the JSON:API resource and
-  the GraphQL result, `locale` in `/api/resolve` and `/api/menus` bodies. A
+  the GraphQL result, `locale` in `/api/resolve` and `/api/menus` bodies. On
+  the built-in site's HTML pages read `x-kiln-locale` only: there
+  `Content-Language` names the URL's language, which the page's chrome is in,
+  not the served document's. A
   static build that generates `/fr-ca/…` pages should decide whether an
   English answer there is a page it wants (and whether it canonicalises to the
   English URL) — the API tells you, it does not decide for you.
@@ -213,6 +216,158 @@ published page.
 See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
 who may mint.
 
+## Code blocks in rendered HTML
+
+A code block with a line wider than your column scrolls sideways, and a
+keyboard user can scroll it only if the block itself takes focus
+([#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164)). Kiln marks
+up its code blocks for that on the `web` surface. On the `json` surface you
+add the markup yourself.
+
+### On the `web` surface
+
+Every code block in a rich-text block carries `tabindex="0"`, `role="group"`
+and an `aria-label`:
+
+```bash
+curl 'http://localhost:4000/api/content/page/install?surface=web'
+```
+
+```json
+{
+  "html": "<p>Run:</p><pre class=\"highlight\" tabindex=\"0\" role=\"group\" aria-label=\"Code sample\"><code class=\"language-elixir\">…</code></pre>"
+}
+```
+
+- A block Kiln highlighted is `<pre class="highlight" …>`; one with no
+  language, or a language Kiln has no highlighter for, is a plain
+  `<pre tabindex="0" …>`.
+- The label is translated into the document's locale: "Code sample",
+  "Exemple de code" (`fr`), "Ejemplo de código" (`es`). It follows the
+  document, not the request, so an English document served as a fallback for
+  `?locale=fr` keeps "Code sample".
+- Authors cannot set these attributes. The sanitizer strips them from stored
+  HTML and Kiln adds them afterwards, so the values above are the only ones
+  you will see.
+- Code inside a plugin's own block is whatever the plugin renders, and may
+  not carry them.
+
+Kiln's stylesheet does not travel with the HTML, so **style the focus ring
+yourself**. Without one, a keyboard reader can't see which block has focus.
+Kiln's own pages use:
+
+```css
+pre[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--your-accent);
+  outline-offset: -2px; /* inside the block, so an overflow: hidden parent can't trim it */
+}
+```
+
+Pick a colour with 3:1 contrast against the code block's background (WCAG
+1.4.11). Keep the attributes if you post-process the HTML: a sanitizer on
+your side that drops `tabindex` or `aria-label` undoes this.
+
+### On the `json` surface
+
+The `json` surface is data, and its rich-text blocks are the stored prose
+unchanged: a Portable Text block with `"style": "code"` in `body`, or sanitized
+HTML in `legacy_html` (a plain `<pre>` or `<pre class="highlight">`, with no
+`tabindex`). The guides at kilncms.dev `/docs` are stored as `legacy_html`.
+If you render either one, add `tabindex="0"`, `role="group"` and a translated
+`aria-label` to each `<pre>` and the focus ring above.
+
+### After a Kiln upgrade
+
+The attributes arrived in a release without a `format_version` change, so an
+artifact fired before that release keeps its old markup until the document is
+next published, edited or re-fired. A read does not re-fire it. An operator
+re-fires every artifact at once after the upgrade
+([Re-render published content after an upgrade](releasing.md#re-render-published-content-after-an-upgrade)).
+What you see depends on how you cache:
+
+- **You revalidate with `If-None-Match`** (a CDN, a browser, `URLCache`,
+  OkHttp): you get the new markup on your next revalidation once the
+  re-fire has run. A fired artifact's `ETag` is a digest of the body it
+  serves, so it moves when the markup does
+  ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
+- **You keep a copy until a webhook says otherwise** (a static build, ISR, a
+  mirror): you hear about it only if the operator ran the sweep with
+  `notify: true` (`mix kiln.refire_all --notify`). Each document then
+  arrives as `<type>.updated` with `"reason": "refire"` in `data` and an
+  unchanged `updated_at`, so refetch it rather than drop it as a duplicate
+  ([Webhooks](webhooks.md)). A silent sweep sends
+  nothing; ask the operator which they ran.
+- **You mirror with `/api/sync`**: a re-fire does not move a document's
+  `updated_at`, so a delta does not report it. Run a full resync
+  (`initial=true`) after an upgrade that re-renders.
+
+If you can't wait for the re-fire, add the attributes on your side as you
+would for the `json` surface, skipping any `<pre>` that already has
+`tabindex`.
+
+## Tables in rendered HTML
+
+A table wider than your column scrolls sideways inside its wrapper, and a
+keyboard user can scroll it only if the wrapper takes focus
+([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)). It works
+like [code blocks](#code-blocks-in-rendered-html): Kiln adds the markup on the
+`web` surface, and on the `json` surface you add it yourself.
+
+### Tables on the `web` surface
+
+Every table in a rich-text block arrives inside a `div.kiln-table-wrap` that
+carries `tabindex="0"`, `role="group"` and an `aria-label`:
+
+```json
+{
+  "html": "<div class=\"kiln-table-wrap\" tabindex=\"0\" role=\"group\" aria-label=\"Scrollable table\"><table><tbody><tr><td>Flour</td></tr></tbody></table></div>"
+}
+```
+
+- **A `legacy_html` table is wrapped too.** Before this, a table stored as
+  HTML reached the `web` surface as a bare `<table>` with no wrapper. It now
+  arrives in the same `div.kiln-table-wrap`. If your stylesheet targets
+  tables as direct children (`.kiln-block > table`), switch to a descendant
+  selector (`.kiln-block table`) or style `.kiln-table-wrap > table`.
+- The label is translated into the document's locale, like the code-block
+  label: "Scrollable table", "Tableau défilant" (`fr`), "Tabla desplazable"
+  (`es`).
+- Authors cannot set these attributes; the sanitizer strips them and Kiln
+  adds them afterwards.
+- A table nested inside another table's cell gets no wrapper of its own; it
+  scrolls with the outer one.
+
+Give the wrapper a horizontal scroll and a focus ring. Kiln's stylesheet does
+not travel with the HTML. Kiln's own rules, minus its `.kiln-block` scope:
+
+```css
+.kiln-table-wrap {
+  overflow-x: auto;
+}
+.kiln-table-wrap[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--your-accent);
+  outline-offset: 2px; /* outside the wrapper, clear of the cell borders */
+}
+```
+
+Pick a color with 3:1 contrast against the page background around the table
+(WCAG 1.4.11). Keep the wrapper and its attributes if you post-process the
+HTML.
+
+### Tables on the `json` surface
+
+The `json` surface carries the stored prose unchanged: a Portable Text
+`"_type": "table"` block in `body`, or sanitized HTML in `legacy_html`, where a
+table is either bare or in a `div.kiln-table-wrap` with no other attributes.
+If you render either one, put each top-level table in a scrolling wrapper with
+`tabindex="0"`, `role="group"` and a translated `aria-label`, and add the
+focus ring above.
+
+An artifact fired before the release that added this keeps its old table
+markup until it is re-fired; [After a Kiln upgrade](#after-a-kiln-upgrade)
+covers how that reaches you. If you add the wrapper on your side meanwhile,
+skip any `.kiln-table-wrap` that already has `tabindex`.
+
 ## Images: sizes, crops and formats on request
 
 A `media_item` (JSON:API `/api/json/media-items`, GraphQL `featuredImage`)
@@ -266,6 +421,78 @@ must not hold your API key. Mint on the server, redeem in the page:
 See [api.md → Preview tokens](api.md#preview-tokens) for the response shape and
 who may mint.
 
+## Link previews: the `social` object
+
+A front end that renders its own pages needs Open Graph and X (Twitter) card
+tags that agree with Kiln's. The `json` surface carries the document's part of
+them in `social` (#2258):
+
+```bash
+curl -s 'https://cms.example.com/api/content/post/hello-world?fields=social'
+```
+
+```json
+{"id": "…", "type": "post",
+ "social": {"title": "Hello, world",
+            "description": "Our first post.",
+            "image": "https://cms.example.com/uploads/hello.png"}}
+```
+
+| Key | Value |
+|---|---|
+| `title` | The effective SEO title (the author's, else the type's pattern), else the document's title. Always present; `null` only when the document has no title. |
+| `description` | The effective SEO description. Absent when there is none. |
+| `image` | The SEO image as an absolute URL. A site-relative image is put on the document's own site: its custom domain, else its subdomain, else `PUBLIC_BASE_URL` for the default site. Absent when there is none. |
+
+These are the values Kiln's own pages use for `og:title` / `twitter:title`,
+`og:description` / `twitter:description` and the page's own `og:image` /
+`twitter:image` ([seo.md](seo.md#link-previews-open-graph-and-x-twitter-cards)).
+`?fields=social` returns just this object, as above. Under an experiment
+(`?variant_key=`), `title` at the top level is the variant's while
+`social.title` stays the canonical one: a link preview is read by a machine,
+and a variant never changes what a machine reads.
+
+**What you supply yourself.** `social` is per document, so it leaves out the
+three values that belong to the site rather than the document:
+
+- **The card type.** Use `summary_large_image` when you have an image
+  (`social.image`, or your own default) and `summary` when you don't. That is
+  Kiln's own rule.
+- **`twitter:site`.** The site's X username is set in Kiln's Branding settings,
+  but branding is not on any API yet, so put your handle in your front end's
+  config.
+- **A fallback image.** Kiln's pages fall back to Branding's Default social
+  image; the artifact does not, so `image` is absent on a document without one.
+  Use your own default.
+
+Not provided: `twitter:creator` and image alt text (`og:image:alt`).
+
+**`image` is fixed when the document is fired.** It names the host the site
+had at that moment. After a site's custom domain or slug, or the
+deployment's `PUBLIC_BASE_URL`, changes, artifacts keep the old host until they
+are re-fired (`mix kiln.refire_all`); Kiln's own pages resolve the host on
+every request and are not affected.
+
+**Older artifacts.** `social` arrived with `format_version` 4, so the schema
+from `GET /api/schema` marks it optional, and an artifact fired by an earlier
+release lacks it until it is re-fired. Kiln re-fires such an artifact in the
+background after the first read that misses its cache; that read, and cached
+reads for up to an hour after it, still get the old body. An operator can
+re-fire everything at once with `mix kiln.refire_all`. Even after the re-fire,
+two kinds of consumer keep the old body until the document is next edited:
+
+- **A `/api/sync` mirror** gets a document again only when it changes
+  editorially, and a re-fire is not an edit. To refresh a mirror, wait until
+  the operator's `mix kiln.refire_all` has finished, then run a fresh
+  `?initial=true` sync.
+- **A client or CDN that revalidates with `If-None-Match`.** The artifact's
+  `ETag` names the document's last edit, not the body, so it gets `304` for the
+  old body ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)).
+  Re-read without the validator, or use `?fields=`, whose `ETag` is a digest
+  of the body.
+
+Read `social` as optional and fall back to `title` when it is missing.
+
 ## Author / PII
 
 No surface exposes author email or role. Content carries only the opaque
@@ -312,6 +539,25 @@ Treat "what can this credential see" as part of its blast radius: a leaked
 editor-keyed delivery config exposes drafts, and an admin-keyed one exposes
 every paying member's content as well — not just rate-limit headroom.
 
+### A bad bearer token is a `401`
+
+A malformed, expired or foreign JWT in `Authorization: Bearer …` is answered
+`401` with an `invalid_token` error envelope and
+`WWW-Authenticate: Bearer error="invalid_token"`, on `/api/json` and the other
+`/api` routes. On `/gql` the body is GraphQL-shaped:
+`{"errors":[{"message":…,"code":"invalid_token","extensions":{"code":"unauthenticated"}}]}`.
+The response is `Cache-Control: private, no-store` with `Vary: Authorization`.
+Send the scheme exactly as `Bearer`: `bearer …` and a bare `Bearer` are refused
+too, because the token loader reads only that spelling. It used to be served as anonymous, so a client with a
+stale token read public content and took it for success; treat this `401` as
+"re-authenticate", not as "forbidden". A request with no `Authorization` header
+is still anonymous, and a bad `kiln_` key was always a `401`.
+
+An operator who needs time to fix a client can set
+`KILN_API_REJECT_INVALID_BEARER=false` to restore the anonymous fallback. That
+escape hatch lasts one release and is then removed
+([ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)).
+
 ## Mirroring: sync instead of re-reading everything
 
 A static build or search index that polls JSON:API with
@@ -339,6 +585,95 @@ left, or names one you were never sent.
 
 For an app on a phone, see [native-apps.md](native-apps.md#mirroring-with-sync)
 for where to keep the cursor and when (not) to start over.
+
+## Submitting drafts from your app: the `draft_write` key
+
+If your app needs to **send content to Kiln for a human to review** (a
+user-submitted article, an imported listing), give its service a
+`draft_write` API key rather than a `read_write` one. It can create content and
+edit **its own drafts** and nothing else, whatever the account behind it can do
+([ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)).
+
+* **Minting is admin-only**, at `/editor/api-keys`. Pick the `draft_write`
+  access; the key must expire within `:draft_write_key_max_ttl_days` (default
+  30 days), and its owner must be a viewer-tier service account, not an editor
+  or admin. An admin can also give it a **self-rotation window** (below), so
+  the service renews it without a person re-minting it every month.
+* **It may:** `create` (JSON:API `POST`, GraphQL `create…`, `/mcp` `create_*`),
+  and `update`/autosave a document that is still a **draft** and that the key's
+  account **authored**. Nothing in review, archived or live.
+* **It may not:** publish, unpublish, schedule, archive, delete, submit for
+  review (a person moves a draft into the queue), restore a version, edit a
+  live document or someone else's draft, or touch media. Each is refused
+  (`403`; a row it may not read is a `404`).
+* **Drafts cannot set tags, a category or related links.** Those links are
+  separate writes the key is refused, so a human files the draft when they
+  review it. Custom fields, blocks, title and the like are fine.
+* **Media is refused** on every route: `/api/media*`, the media `PATCH` and
+  GraphQL `updateMediaItem`. Upload through a `read_write` key on an editor
+  account, or ask an editor to attach images.
+* **It reads as its account does:** published content (audience permitting)
+  plus the drafts it authored. It cannot read other authors' unpublished
+  content and has no revision history.
+
+### Keeping the key alive: self-rotation
+
+If the admin minted the key with a self-rotation window ("Self-rotation" at
+`/editor/api-keys`; up to a year), the service can exchange it for a fresh one
+before it expires:
+
+```bash
+curl -X POST https://kiln.example.com/api/keys/rotate \
+  -H "Authorization: Bearer $KILN_DRAFT_KEY"
+```
+
+```json
+{"data": {"id": "…", "api_key": "kiln_…", "expires_at": "2026-12-06T…",
+          "rotatable_until": "2027-05-05T…", "rotated_from_id": "…"}}
+```
+
+* The new key has the same account, scope and name. It expires 30 days out
+  (`:draft_write_key_max_ttl_days`), or at `rotatable_until` if that is sooner.
+  After `rotatable_until`, ask an admin for a new key.
+* **The old key is revoked the moment this answers.** Write the new key to
+  your secret store first, then switch to it. Workers still using the old key
+  get `401` until they reload; that is expected.
+* **Rotate from one place**, on a schedule (for example when fewer than 7 days
+  are left), not from every worker on a 401.
+* **Never present a rotated-away key to this endpoint again.** Kiln reads that
+  as a stolen key: more than 120 seconds after the rotation it revokes the
+  whole chain, including your current key, and alerts the platform admins. If you lose
+  the `201` (a network failure mid-request), do not retry with the old key;
+  ask an admin to mint a new one.
+* `401` (`invalid_api_key`): no key, or it is revoked/expired. `403`
+  (`forbidden`): not a drafts-only key, or it has no rotation window or the
+  window has closed. `409` (`not_rotatable`): it was rotated by a concurrent
+  request, or its account was given an editor or admin role. `500`: a server
+  failure; the old key still works, so retry later. This endpoint
+  never treats a request as anonymous, with or without
+  `KILN_API_REJECT_INVALID_BEARER`.
+
+### Telling reviewers who it was for: `X-Kiln-On-Behalf-Of`
+
+Send `X-Kiln-On-Behalf-Of: <your user id>` on the **create** (`POST`) and Kiln
+stores it on the draft, with the key's id and name, so a reviewer can see
+"submitted by Verscienta for user 42". It is an opaque label of your choosing,
+trimmed of control characters and capped in length. It is **stored only, never
+authorization**: Kiln does not check it, trust it or act on it, and sending it
+with any other key is ignored. These **provenance fields**
+(`created_via_key_id`, `created_via_key_name`, `on_behalf_of`) are readable on
+JSON:API, GraphQL and `/mcp` by **authenticated callers only**: an editor or
+admin, and your own `draft_write` key for the drafts *it* created (not another
+key's). Anonymous callers, preview-link holders and viewer-tier accounts never
+get them, on a published row or a draft: the label may identify an end user
+and a published document is world-readable. For them the field is **absent**
+from a JSON:API `attributes` object (also with `?fields[post]=on_behalf_of`),
+and `null` in GraphQL, where a query that selects the field also receives a
+`forbidden_field` entry in `errors` beside the data. They are deliberately not
+in webhook payloads, the preview endpoint or `/api/sync`. They show in the
+editor, read from the draft itself; they are **not** recorded in version
+history, whose read scope (every draft of the key's owner) is wider than theirs
+(the drafts this key created).
 
 ## Editorial tooling: version history and releases
 
@@ -390,9 +725,15 @@ What that means for a front end:
   which age out). Static builds and ISR should still
   rebuild from [webhooks](webhooks.md); the purge only covers the CDN in front of
   Kiln.
-* **Don't build your own ETag from fields.** Kiln's is a digest of the response
-  body, so it already changes whenever anything in the body does — keying on
-  `updatedAt` or an id misses changes that do not touch them.
+* **Don't build your own ETag from fields.** On JSON:API, GraphQL, search
+  and fired artifacts, Kiln's is a digest of the response body, so it already
+  changes whenever anything in the body does, and only then: keying on
+  `updatedAt` or an id misses a re-render after a Kiln upgrade, which changes
+  the body without touching either ([After a Kiln upgrade](#after-a-kiln-upgrade)).
+  A page rendered by Kiln itself has an `ETag` that also names the build
+  serving it, so it moves on every deploy that changes Kiln's code, dependencies or
+  assets.
+
 ## Analytics: your fetches are what get counted
 
 A successful `GET /api/content/:type/:slug` records a view against that

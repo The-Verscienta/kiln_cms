@@ -68,6 +68,7 @@ sends mail, fires a webhook, or contacts a subprocessor.
 | **Auth tokens** | purged | Session / reset / magic-link tokens are stale in a clone and are pseudonymous PII. |
 | **Webhook endpoints** | de-activated | A clone must **never** fire deliveries at production consumers' URLs on the next publish. De-activation is data-only (no SSRF DNS re-check). |
 | **Mail settings** | purged (singleton row) | Drops the **encrypted DKIM private key** and server IP so staging can't sign mail as your production domain. Recreated blank on next read (`KilnCMS.Mail.ensure_settings!/0`). |
+| **Site invitations** | purged | Each names a production address, and its link would set up an account on the clone for whoever holds the mail. |
 | **Recorded search queries** | purged | Query text can contain names, emails, or confidential titles ([#213/#220](data-flows.md)). |
 | **Payment credentials** | purged (singleton row) | Live provider API and webhook-signing keys. Removed **first**, before anything else touches billing rows, so a clone can never act on a real payment account. |
 | **Recorded payment webhooks** | purged | The provider's raw event payloads carry customer emails and amounts. |

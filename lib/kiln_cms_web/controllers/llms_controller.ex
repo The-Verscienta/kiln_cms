@@ -8,7 +8,8 @@ defmodule KilnCMSWeb.LlmsController do
 
   Lists only **published, default-locale** records at their public URLs,
   discovered through `KilnCMS.CMS.ContentTypes` — the same authorization and
-  type discovery as the sitemap, so drafts and gated content never appear.
+  type discovery as the sitemap, so drafts and gated content never appear. Documents flagged `noindex` (#2256)
+  are left out too.
   """
   use KilnCMSWeb, :controller
 
@@ -54,6 +55,8 @@ defmodule KilnCMSWeb.LlmsController do
               tenant: org.id,
               query: [
                 select: [:title, :slug, :locale, :seo_description],
+                # `noindex` documents (#2256) are not listed; `nofollow` ones are.
+                filter: [noindex: false],
                 # The type's #805 default where the record has no description of
                 # its own (#1102). The calculation's `load/3` folds the tokens'
                 # own dependencies into the pinned `select:` above.

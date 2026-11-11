@@ -11,6 +11,8 @@ defmodule KilnCMS.ExternalCommandTest do
   use ExUnit.Case, async: true
 
   alias KilnCMS.ExternalCommand
+  alias KilnCMS.Test.Eventually
+  alias KilnCMS.Test.OsProcess
 
   @sh System.find_executable("sh")
 
@@ -81,5 +83,87 @@ defmodule KilnCMS.ExternalCommandTest do
       refute Enum.any?(messages, &match?({p, _} when is_port(p), &1)),
              "port messages were left behind: #{inspect(messages)}"
     end
+  end
+
+  describe "run/4 options" do
+    test "passes :env to the child" do
+      assert {"s3cret-value", 0} =
+               ExternalCommand.run(@sh, ["-c", "printf %s \"$KILN_TEST_VAR\""], 5_000,
+                 env: [{"KILN_TEST_VAR", "s3cret-value"}]
+               )
+    end
+
+    test ":tail keeps only the last bytes of the output" do
+      assert {output, 0} =
+               ExternalCommand.run(@sh, ["-c", "printf 'abcdefghij'; printf 'XYZ'"], 5_000,
+                 tail: 5
+               )
+
+      assert output == "ijXYZ"
+    end
+
+    test "accepts :infinity as the timeout" do
+      assert {"ok", 0} = ExternalCommand.run(@sh, ["-c", "printf ok"], :infinity)
+    end
+  end
+
+  describe "run/4 when the caller dies" do
+    @tag :tmp_dir
+    test "kills the child OS process", %{tmp_dir: dir} do
+      # The child records its own pid, then `exec`s so that pid is the long
+      # sleeper: killing the caller must take that exact process down.
+      pid_file = Path.join(dir, "pid")
+
+      caller =
+        spawn(fn ->
+          receive do
+            :go -> :ok
+          end
+
+          ExternalCommand.run(@sh, ["-c", "echo $$ > #{pid_file}; exec sleep 30"], :infinity)
+        end)
+
+      # `run/4`'s one spawned process is the watcher that kills the child when
+      # the caller dies. Waiting on its exit rather than a clock is what makes
+      # this hold on a loaded host (#2564): the watcher exits only once its
+      # `kill -9` has returned, after which only the kernel's signal delivery
+      # is left to poll for.
+      :erlang.trace(caller, true, [:procs])
+      send(caller, :go)
+      assert_receive {:trace, ^caller, :spawn, watcher, _mfa}, 10_000
+      :erlang.trace(caller, false, [:procs])
+
+      os_pid = wait_for_pid(pid_file)
+      assert OsProcess.alive?(os_pid)
+
+      watcher_ref = Process.monitor(watcher)
+      caller_ref = Process.monitor(caller)
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+      assert_receive {:DOWN, ^watcher_ref, :process, ^watcher, :normal}, 10_000
+
+      # A killed child is a zombie until it is reaped; `gone?/1` counts that.
+      Eventually.eventually(fn -> OsProcess.gone?(os_pid) end,
+        message: fn ->
+          "the child (pid #{os_pid}) outlived its killed caller: " <>
+            "ps state #{inspect(OsProcess.state(os_pid))}"
+        end
+      )
+    end
+  end
+
+  defp wait_for_pid(file) do
+    Eventually.eventually(
+      fn ->
+        with {:ok, text} <- File.read(file),
+             {pid, ""} <- text |> String.trim() |> Integer.parse() do
+          pid
+        else
+          _not_yet -> nil
+        end
+      end,
+      timeout_ms: 10_000,
+      message: "the child never wrote its pid to #{file}"
+    )
   end
 end

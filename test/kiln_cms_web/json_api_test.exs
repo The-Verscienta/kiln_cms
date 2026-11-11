@@ -1031,11 +1031,475 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert {400, _} = api_get("/api/json/posts?custom_filter[#{refs}][count][gt]=x")
     end
 
+    test "a list of numbers: has / has_all / count from the query string (#2289)" do
+      admin = user(:admin)
+      scores = "scores#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: scores,
+          label: "Scores",
+          field_type: :integer,
+          multiple: true
+        },
+        actor: admin
+      )
+
+      three = published_post(%{title: "3", custom_fields: %{scores => [3, 5]}}, admin)
+      _seven = published_post(%{title: "7", custom_fields: %{scores => [7]}}, admin)
+
+      q = fn params ->
+        assert {200, body} = api_get("/api/json/posts?" <> params)
+        Enum.sort(ids(body))
+      end
+
+      assert q.("custom_filter[#{scores}][has][]=3") == [three.id]
+      assert q.("custom_filter[#{scores}]=5") == [three.id]
+
+      assert q.("custom_filter[#{scores}][has_all][]=3&custom_filter[#{scores}][has_all][]=5") ==
+               [three.id]
+
+      assert q.("custom_filter[#{scores}][count]=2") == [three.id]
+
+      assert {400, body} = api_get("/api/json/posts?custom_filter[#{scores}][gt]=4")
+      assert inspect(body) =~ "eq/not_eq/in/has/has_all/has_none/count/null"
+
+      assert {400, _} = api_get("/api/json/posts?custom_sort=#{scores}")
+    end
+
     test "an unknown custom field name is a 400" do
       assert {400, _body} =
                api_get(
                  "/api/json/posts?custom_filter[ghost#{System.unique_integer([:positive])}]=x"
                )
+    end
+  end
+
+  # #2292: a custom field named like a column, `filter[price]` / `sort=-price`.
+  describe "custom-field names in filter[...] and sort (#2292)" do
+    defp raw_get(path, opts \\ []) do
+      conn = put_req_header(build_conn(), "accept", @accept)
+
+      conn =
+        case opts[:token] do
+          nil -> conn
+          tok -> put_req_header(conn, "authorization", "Bearer #{tok}")
+        end
+
+      get(conn, path)
+    end
+
+    # The error members that are stable across requests (`id` is random).
+    defp error_shape(%{"errors" => errors}) do
+      Enum.map(errors, &Map.take(&1, ["code", "source", "detail", "status"]))
+    end
+
+    defp priced_posts do
+      admin = user(:admin)
+      price = "price#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: price, label: "Price", field_type: :integer},
+        actor: admin
+      )
+
+      posts =
+        for {title, p} <- [{"Bb cheap", 9}, {"Aa mid", 10}, {"Cc dear", 30}] do
+          {p, published_post(%{title: title, custom_fields: %{price => p}}, admin)}
+        end
+        |> Map.new()
+
+      {admin, price, posts}
+    end
+
+    test "filter[x] and sort=x mean custom_filter[x] and custom_sort=x" do
+      {_admin, price, %{9 => cheap, 10 => mid, 30 => dear}} = priced_posts()
+      scope = "filter[#{price}][null]=false"
+
+      assert {200, body} = api_get("/api/json/posts?filter[#{price}][gt]=10")
+      assert ids(body) == [dear.id]
+
+      assert {200, body} = api_get("/api/json/posts?filter[#{price}]=10")
+      assert ids(body) == [mid.id]
+
+      assert {200, body} =
+               api_get("/api/json/posts?filter[#{price}][in][]=9&filter[#{price}][in][]=30")
+
+      assert Enum.sort(ids(body)) == Enum.sort([cheap.id, dear.id])
+
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=-#{price}")
+      assert ids(body) == [dear.id, mid.id, cheap.id]
+
+      # is_nil is the native spelling of null.
+      assert {200, body} = api_get("/api/json/posts?filter[#{price}][is_nil]=false&sort=#{price}")
+      assert ids(body) == [cheap.id, mid.id, dear.id]
+
+      # built-ins then custom
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=-state,#{price}")
+      assert ids(body) == [cheap.id, mid.id, dear.id]
+    end
+
+    test "success bodies are byte-identical to the custom_* spelling; errors keep code/source/detail" do
+      {_admin, price, _posts} = priced_posts()
+
+      pairs = [
+        {"filter[#{price}][gt]=9&filter[#{price}][null]=false&sort=-#{price}",
+         "custom_filter[#{price}][gt]=9&custom_filter[#{price}][null]=false&custom_sort=-#{price}"},
+        {"filter[title]=Aa%20mid&custom_filter[#{price}]=10",
+         "filter[title]=Aa%20mid&custom_filter[#{price}]=10"},
+        {"sort=title&custom_sort=#{price}&custom_filter[#{price}][null]=false",
+         "sort=title&custom_sort=#{price}&custom_filter[#{price}][null]=false"}
+      ]
+
+      for {alias_query, canonical} <- pairs do
+        a = raw_get("/api/json/posts/published?" <> alias_query)
+        c = raw_get("/api/json/posts/published?" <> canonical)
+        assert a.status == 200 and c.status == 200
+
+        # `links.self` echoes the request URL, which is the one member that
+        # may differ.
+        strip = fn conn -> conn.resp_body |> Jason.decode!() |> Map.delete("links") end
+        assert strip.(a) == strip.(c)
+
+        assert a.resp_body |> Jason.decode!() |> Map.get("data") ==
+                 c.resp_body |> Jason.decode!() |> Map.get("data")
+      end
+
+      # Same error either way.
+      a = raw_get("/api/json/posts?filter[#{price}][gt]=zz")
+      c = raw_get("/api/json/posts?custom_filter[#{price}][gt]=zz")
+      assert a.status == 400 and c.status == 400
+      assert error_shape(Jason.decode!(a.resp_body)) == error_shape(Jason.decode!(c.resp_body))
+    end
+
+    test "a built-in name wins; custom_filter[x] reaches a custom field of the same name" do
+      admin = user(:admin)
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: "title", label: "Title", field_type: :string},
+        actor: admin
+      )
+
+      native = "Native#{System.unique_integer([:positive])}"
+      other = "Other#{System.unique_integer([:positive])}"
+      a = published_post(%{title: native, custom_fields: %{"title" => "custom-a"}}, admin)
+      _b = published_post(%{title: other, custom_fields: %{"title" => "custom-b"}}, admin)
+
+      assert {200, body} = api_get("/api/json/posts?filter[title]=#{native}")
+      assert ids(body) == [a.id]
+
+      assert {200, body} = api_get("/api/json/posts?custom_filter[title]=custom-a")
+      assert ids(body) == [a.id]
+
+      # both present, both apply
+      assert {200, body} =
+               api_get("/api/json/posts?filter[title]=#{native}&custom_filter[title]=custom-a")
+
+      assert ids(body) == [a.id]
+
+      assert {200, body} =
+               api_get("/api/json/posts?filter[title]=#{native}&custom_filter[title]=custom-b")
+
+      assert ids(body) == []
+
+      # built-in filters keep their own meaning for slug/state/category/tags
+      assert {200, _} = api_get("/api/json/posts?filter[state]=published")
+      assert {200, _} = api_get("/api/json/posts?filter[category][slug]=nope")
+      assert {200, _} = api_get("/api/json/posts?filter[tags][slug]=nope")
+      assert {200, _} = api_get("/api/json/posts?filter[or][0][title]=a&filter[or][1][title]=b")
+    end
+
+    test "both forms of a custom field merge; a clashing operator is a native 400, answered once" do
+      {_admin, price, %{10 => mid}} = priced_posts()
+
+      assert {200, body} =
+               api_get("/api/json/posts?filter[#{price}][gt]=9&custom_filter[#{price}][lt]=30")
+
+      assert ids(body) == [mid.id]
+
+      assert {400, body} =
+               api_get("/api/json/posts?filter[#{price}][gt]=9&custom_filter[#{price}][gt]=1")
+
+      assert [%{} | _] = body["errors"]
+    end
+
+    test "a custom sort before a built-in one is one combined order (#2356)" do
+      {_admin, price, %{9 => cheap, 10 => mid, 30 => dear}} = priced_posts()
+      scope = "filter[#{price}][null]=false"
+
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=#{price},title")
+      assert ids(body) == [cheap.id, mid.id, dear.id]
+
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=-#{price},-title")
+      assert ids(body) == [dear.id, mid.id, cheap.id]
+
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=title,#{price}")
+      assert ids(body) == [mid.id, cheap.id, dear.id]
+
+      # sort=title&custom_sort=… keeps today's meaning
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=title&custom_sort=#{price}")
+      assert ids(body) == [mid.id, cheap.id, dear.id]
+
+      # sort and custom_sort together: moved tokens first
+      assert {200, body} = api_get("/api/json/posts?#{scope}&sort=-#{price}&custom_sort=#{price}")
+      assert ids(body) == [dear.id, mid.id, cheap.id]
+    end
+
+    test "filter[or]/[and]/[not] may name custom fields and built-ins together (#2355)" do
+      {_admin, price, %{9 => cheap, 10 => mid, 30 => dear}} = priced_posts()
+
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts?filter[or][0][#{price}][gt]=20&filter[or][1][title]=Aa mid&sort=title"
+               )
+
+      assert ids(body) == [mid.id, dear.id]
+
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts?filter[#{price}][null]=false&filter[not][#{price}][lt]=10&sort=#{price}"
+               )
+
+      assert ids(body) == [mid.id, dear.id]
+
+      assert {200, body} =
+               api_get(
+                 "/api/json/posts?filter[#{price}][null]=false&filter[and][0][#{price}][lt]=30&filter[and][1][title]=Bb cheap"
+               )
+
+      assert ids(body) == [cheap.id]
+
+      # an unknown name inside a group is the same 400 as outside one
+      assert {400, body} = api_get("/api/json/posts?filter[or][0][nope#{price}]=1")
+      assert [%{"detail" => "unknown custom field" <> _}] = body["errors"]
+    end
+
+    test "names that are neither built-in nor custom fail like an unknown custom field" do
+      ghost = "ghost#{System.unique_integer([:positive])}"
+
+      assert {400, body} = api_get("/api/json/posts?filter[#{ghost}]=x")
+
+      assert [%{"code" => "invalid_argument", "detail" => "unknown custom field" <> _}] =
+               body["errors"]
+
+      assert {400, body} = api_get("/api/json/posts?sort=#{ghost}")
+
+      assert [%{"code" => "invalid_argument", "detail" => "unknown custom field" <> _}] =
+               body["errors"]
+
+      # built-in but unfilterable / unsortable: unchanged
+      assert {400, _} = api_get("/api/json/posts?filter[path]=x")
+      assert {400, body} = api_get("/api/json/posts?sort=word_count")
+      assert [%{"code" => "invalid_sort"}] = body["errors"]
+
+      # a non-map filter
+      assert {400, _} = api_get("/api/json/posts?filter[]=x")
+      assert {400, _} = api_get("/api/json/posts?filter=#{ghost}")
+    end
+
+    test "a private field answers an anonymous caller exactly as an unknown one" do
+      admin = user(:admin)
+      secret = "secret#{System.unique_integer([:positive])}"
+      ghost = "ghost#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: secret, label: "S", field_type: :string, private: true},
+        actor: admin
+      )
+
+      post = make_post(%{title: "Priv", custom_fields: %{secret => "x"}}, admin)
+
+      shape = fn name, opts ->
+        conn = raw_get("/api/json/posts?filter[#{name}]=x", opts)
+
+        {conn.status,
+         conn.resp_body
+         |> Jason.decode!()
+         |> error_shape()
+         |> inspect()
+         |> String.replace(name, "NAME")}
+      end
+
+      assert shape.(secret, []) == shape.(ghost, [])
+      assert {400, _} = shape.(secret, [])
+
+      editor = token(user(:editor))
+      assert {200, body} = api_get("/api/json/posts?filter[#{secret}]=x", token: editor)
+      assert ids(body) == [post.id]
+    end
+
+    test "relationship operators and reference counts through the alias" do
+      admin = user(:admin)
+      refs = "refs#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: refs,
+          label: "Refs",
+          field_type: :reference,
+          target_type: "page",
+          multiple: true
+        },
+        actor: admin
+      )
+
+      a = published_post_page(%{title: "A"}, admin)
+      b = published_post_page(%{title: "B"}, admin)
+      tag = CMS.create_tag!(%{name: "atag-#{slug()}", slug: slug()}, actor: admin)
+
+      ab =
+        published_post(
+          %{title: "AB", custom_fields: %{refs => [a.id, b.id]}, tag_ids: [tag.id]},
+          admin
+        )
+
+      _b_only = published_post(%{title: "B", custom_fields: %{refs => [b.id]}}, admin)
+
+      assert {200, body} = api_get("/api/json/posts?filter[#{refs}][has]=#{a.id}")
+      assert ids(body) == [ab.id]
+
+      assert {200, body} = api_get("/api/json/posts?filter[#{refs}][count][gte]=2")
+      assert ids(body) == [ab.id]
+
+      assert {200, body} = api_get("/api/json/posts?filter[tags][has][]=#{tag.id}")
+      assert ids(body) == [ab.id]
+
+      assert {200, body} = api_get("/api/json/posts?filter[tags][slug]=#{tag.slug}")
+      assert ab.id in ids(body)
+    end
+
+    test "keyset page 2 with a custom sort through the alias, on :read and :published" do
+      {_admin, price, %{9 => cheap, 10 => mid, 30 => dear}} = priced_posts()
+
+      for base <- ["/api/json/posts", "/api/json/posts/published"] do
+        query = "filter[#{price}][null]=false&sort=#{price}&page[limit]=2"
+        assert {200, page1} = api_get("#{base}?#{query}")
+        assert ids(page1) == [cheap.id, mid.id]
+
+        %URI{path: path, query: next_query} = URI.parse(page1["links"]["next"])
+        assert {200, page2} = api_get("#{path}?#{next_query}")
+        assert ids(page2) == [dear.id]
+      end
+    end
+
+    test "search routes: explicit sort > sort=<custom> > relevance" do
+      admin = user(:admin)
+      price = "price#{System.unique_integer([:positive])}"
+      term = "aliassearch#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: price, label: "Price", field_type: :integer},
+        actor: admin
+      )
+
+      pricey = published_post(%{title: "Aaa #{term}", custom_fields: %{price => 30}}, admin)
+      cheap = published_post(%{title: "Zzz #{term}", custom_fields: %{price => 10}}, admin)
+      mid = published_post(%{title: "Mmm #{term}", custom_fields: %{price => 20}}, admin)
+
+      for route <- ["search", "search/published"] do
+        base = "/api/json/posts/#{route}?query=#{term}&locale=en"
+
+        assert {200, body} = api_get(base)
+        assert ids(body) == [mid.id, cheap.id, pricey.id]
+
+        assert {200, body} = api_get(base <> "&sort=#{price}")
+        assert ids(body) == [cheap.id, mid.id, pricey.id]
+
+        assert {200, body} = api_get(base <> "&sort=title,-#{price}")
+        assert ids(body) == [pricey.id, mid.id, cheap.id]
+
+        assert {200, body} = api_get(base <> "&sort=title&custom_sort=#{price}")
+        assert ids(body) == [pricey.id, mid.id, cheap.id]
+
+        # a custom token before a built-in one (#2356): one combined order,
+        # and its keyset page 2 walks on from page 1
+        assert {200, body} = api_get(base <> "&sort=#{price},title")
+        assert ids(body) == [cheap.id, mid.id, pricey.id]
+
+        assert {200, page1} = api_get(base <> "&sort=#{price},-title&page[limit]=2")
+        assert ids(page1) == [cheap.id, mid.id]
+        %URI{path: path, query: next_query} = URI.parse(page1["links"]["next"])
+        assert {200, page2} = api_get("#{path}?#{next_query}")
+        assert ids(page2) == [pricey.id]
+
+        # keyset page 2 with a jsonb sort key
+        assert {200, page1} = api_get(base <> "&sort=#{price}&page[limit]=2")
+        assert ids(page1) == [cheap.id, mid.id]
+        %URI{path: path, query: next_query} = URI.parse(page1["links"]["next"])
+        assert {200, page2} = api_get("#{path}?#{next_query}")
+        assert ids(page2) == [pricey.id]
+      end
+    end
+
+    test "other routes are not rewritten: a lookup by id and writes" do
+      {admin, price, %{10 => mid}} = priced_posts()
+
+      conn = raw_get("/api/json/posts/#{mid.id}?filter[#{price}]=10")
+      refute conn.resp_body =~ "custom field"
+
+      conn =
+        build_conn()
+        |> put_req_header("accept", @accept)
+        |> put_req_header("content-type", @accept)
+        |> put_req_header("authorization", "Bearer #{token(admin)}")
+        |> post(
+          "/api/json/posts?filter[#{price}]=1",
+          ~s({"data":{"type":"post","attributes":{}}})
+        )
+
+      refute conn.resp_body =~ "unknown custom field"
+    end
+
+    test "entries: filter[type_name] scopes the alias; unscoped divergent types are refused" do
+      admin = user(:admin)
+      rating = "rating#{System.unique_integer([:positive])}"
+
+      mk_type = fn ->
+        CMS.create_type_definition!(
+          %{name: "aliasdyn#{System.unique_integer([:positive])}", label: "Dyn"},
+          actor: admin
+        )
+      end
+
+      recipes = mk_type.()
+      guides = mk_type.()
+
+      for {type, field_type} <- [{recipes, :integer}, {guides, :string}] do
+        CMS.create_field_definition!(
+          %{type_definition_id: type.id, name: rating, label: "R", field_type: field_type},
+          actor: admin
+        )
+      end
+
+      high =
+        KilnCMS.CMS.ContentTypes.create!(
+          recipes.name,
+          %{title: "E", slug: slug(), custom_fields: %{rating => 5}},
+          actor: admin
+        )
+
+      _low =
+        KilnCMS.CMS.ContentTypes.create!(
+          recipes.name,
+          %{title: "E2", slug: slug(), custom_fields: %{rating => 2}},
+          actor: admin
+        )
+
+      tok = token(admin)
+
+      assert {200, body} =
+               api_get(
+                 "/api/json/entries?filter[type_name]=#{recipes.name}&filter[#{rating}][gte]=3",
+                 token: tok
+               )
+
+      assert ids(body) == [high.id]
+
+      assert {400, body} = api_get("/api/json/entries?filter[#{rating}][gt]=3", token: tok)
+      assert [%{"detail" => detail}] = body["errors"]
+      assert detail =~ "different type per content type"
     end
   end
 

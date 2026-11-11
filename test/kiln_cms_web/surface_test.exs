@@ -22,21 +22,22 @@ defmodule KilnCMSWeb.SurfaceTest do
 
   @console ~w(
     /editor /editor/account/export.json /editor/accounts /editor/accounts/:id
-    /editor/analytics /editor/analytics/export.csv
+    /editor/admin-allowlist /editor/analytics /editor/analytics/export.csv
     /editor/analytics/export.json /editor/api-keys /editor/automation /editor/backups
-    /editor/billing /editor/branding /editor/calendar /editor/code-injection
+    /editor/billing /editor/bot-budgets /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/configure /editor/content/:type/:id /editor/content/:type/new
+    /editor/content/export.csv /editor/content/export.json
     /editor/experiments
     /editor/experiments/:id
-    /editor/federation /editor/feeds /editor/fields /editor/forms
+    /editor/federation /editor/feeds /editor/fields /editor/fields/export.json /editor/forms
     /editor/forms/:id /editor/forms/:id/entries/export.csv /editor/forms/settings
     /editor/funnels /editor/funnels/:id /editor/governance /editor/governance/:type/:id
     /editor/governance/:type/:id/export.csv /editor/governance/:type/:id/export.json
-    /editor/governance/health.csv /editor/inbox
+    /editor/governance/health.csv /editor/inbox /editor/ip-blocks
     /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter /editor/organize
-    /editor/overview /editor/pages/:id /editor/posts/:id /editor/presentation/:type/:slug
-    /editor/preview/:kind/:id /editor/redirects /editor/releases /editor/releases/:id
-    /editor/search /editor/search-synonyms /editor/security-txt /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
+    /editor/overview /editor/pages/:id /editor/password-policy /editor/posts/:id /editor/presentation/:type/:slug
+    /editor/preview/:kind/:id /editor/redirects /editor/registrations /editor/releases /editor/releases/:id /editor/safety-fields
+    /editor/search /editor/search-synonyms /editor/security-alerts /editor/security-log /editor/security-log/export.csv /editor/security-posture /editor/security-txt /editor/sessions /editor/settings /editor/site-ai /editor/site-mail /editor/site-push
     /editor/site-search /editor/site-sso /editor/site/:type/:slug /editor/slugs
     /editor/social /editor/structure/:type
     /editor/site-storage /editor/system /editor/system/image-backend /editor/tasks
@@ -51,16 +52,17 @@ defmodule KilnCMSWeb.SurfaceTest do
     /api/content/:type/:id/revisions/:version_id
     /api/content/:type/:id/revisions/:version_id/restore /api/content/:type/:slug
     /api/content/:type/:slug/related /api/content/:type/:slug/unlock /api/forms/:slug
-    /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/locales /api/media
+    /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/keys/rotate /api/locales /api/media
     /api/media/import-url /api/media/uploads /api/media/uploads/complete /api/menus
     /api/menus/:key /api/provenance/:type/:slug /api/provenance/:type/:slug/verify
-    /api/provenance/public-key /api/provenance/verify/:type/:slug /api/resolve /api/schema /api/search /api/sync
+    /api/provenance/public-key /api/provenance/verify/:type/:slug /api/resolve /api/schema /api/search
+    /api/security/posture /api/sync
     /api/visual-editing/:type/:slug /auth /auth/passkey/options /auth/passkey/verify
-    /auth/site-sso /auth/site-sso/callback
+    /auth/invite/:invite_token /auth/site-sso /auth/site-sso/callback /auth/unlock/:unlock_token
     /confirm_new_user/:token /gql /locale/:locale /magic_link/:token /manifest.webmanifest /mcp
     /media/:id/download /media/:id/stream /offline.html /password-reset/:token /preview/:token
-    /preview/:token/live /preview/release/:token /ready /register /reset /sign-in /sign-in/verify
-    /sign-out /up
+    /preview/:token/live /preview/release/:token /ready /register /reset /sign-in /sign-in/unlock
+    /sign-in/verify /sign-out /up
   )
 
   test "the console list is exactly these routes, plus every plugin panel" do

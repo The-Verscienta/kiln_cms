@@ -45,6 +45,7 @@ defmodule KilnCMS.Limits do
   @line 1_000
   @paragraph 4_000
   @url 2_048
+  @pattern 200
 
   @doc "Filenames, slugs, handles, locales, keys — 255."
   @spec identifier() :: pos_integer()
@@ -61,6 +62,15 @@ defmodule KilnCMS.Limits do
   @doc "URLs — 2,048, the de-facto browser ceiling."
   @spec url() :: pos_integer()
   def url, do: @url
+
+  @doc """
+  A field constraint's regular expression and its message — 200. Not a text
+  ceiling like the above: it bounds what an admin writes into a
+  `FieldDefinition`'s `validation`, so the pattern stays cheap to run and to
+  read (#2276).
+  """
+  @spec pattern() :: pos_integer()
+  def pattern, do: @pattern
 
   @doc "Every ceiling, for the test that enumerates them."
   @spec all() :: [pos_integer()]

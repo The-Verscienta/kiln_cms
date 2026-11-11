@@ -11,8 +11,13 @@
   <article class="kiln-locked space-y-6">
     <header class="space-y-3">
       <.badge variant="neutral">{gettext("Protected")}</.badge>
-      <h1 class="public-title text-3xl font-semibold text-balance">{@teaser.title}</h1>
-      <p :if={@teaser.summary} class="text-lg text-base-content/70">{@teaser.summary}</p>
+      <%!-- The document's words, in its language; the chrome is the reader's (#2595). --%>
+      <h1 class="public-title text-3xl font-semibold text-balance" lang={@content_locale}>
+        {@teaser.title}
+      </h1>
+      <p :if={@teaser.summary} class="text-lg text-base-content/70" lang={@content_locale}>
+        {@teaser.summary}
+      </p>
     </header>
 
     <section class="card card-pad mx-auto w-full max-w-md space-y-4">
@@ -27,7 +32,7 @@
         {gettext("That passphrase didn't work. Try again.")}
       </p>
 
-      <form action={~p"/_unlock"} method="post" class="space-y-3">
+      <form action={@unlock_action} method="post" class="space-y-3">
         <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
         <input type="hidden" name="path" value={@unlock_path} />
         <input type="hidden" name="type" value={@unlock_type} />

@@ -3,7 +3,7 @@
 // The `:json` fired-artifact shape served by
 // `GET /api/content/:type/:slug?surface=json`.
 //
-// Artifact format version: 3
+// Artifact format version: 4
 //
 // Needs the kotlinx.serialization compiler plugin and
 // `org.jetbrains.kotlinx:kotlinx-serialization-json`. Decode with `KilnJson`.
@@ -497,12 +497,29 @@ public data class PageDocument(
     /** Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited. */
     @SerialName("inherited_fields") public val inheritedFields: JsonObject? = null,
     public val locale: String? = null,
+    /** The document's robots flags. Absent when neither is set; absent means both false. */
+    public val robots: Robots? = null,
     public val slug: String? = null,
+    /** The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included. */
+    public val social: Social? = null,
     public val title: String? = null,
     public val type: String,
 ) : Document {
     @Serializable
     public data object CustomFields
+
+    @Serializable
+    public data class Robots(
+        public val nofollow: Boolean,
+        public val noindex: Boolean,
+    )
+
+    @Serializable
+    public data class Social(
+        public val description: String? = null,
+        public val image: String? = null,
+        public val title: String? = null,
+    )
 }
 
 /** A published `Post` as fired to the `:json` surface. */
@@ -517,28 +534,43 @@ public data class PostDocument(
     /** Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited. */
     @SerialName("inherited_fields") public val inheritedFields: JsonObject? = null,
     public val locale: String? = null,
+    /** The document's robots flags. Absent when neither is set; absent means both false. */
+    public val robots: Robots? = null,
     public val slug: String? = null,
+    /** The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included. */
+    public val social: Social? = null,
     public val title: String? = null,
     public val type: String,
 ) : Document {
     @Serializable
     public data class CustomFields(
+        public val accent: String? = null,
         @SerialName("code_sample") public val codeSample: String? = null,
+        @SerialName("contact_email") public val contactEmail: String? = null,
+        /** The items, in the order the editor arranged them. */
+        public val contacts: List<String>? = null,
         /** Rows of this group, in the order the editor arranged them. */
         public val dosages: List<DosagesItem>? = null,
+        /** The items, in the order the editor arranged them. */
+        @SerialName("event_dates") public val eventDates: List<String>? = null,
+        public val extra: JsonElement? = null,
         public val featured: Boolean? = null,
         /** Snapshots of the picked media items, in gallery order. */
         public val gallery: List<MediaSnapshot>? = null,
+        public val handle: String? = null,
         /** Snapshot of the picked media item. */
         public val hero: MediaSnapshot? = null,
         public val homepage: String? = null,
         @SerialName("launch_date") public val launchDate: String? = null,
+        @SerialName("opens_at") public val opensAt: String? = null,
         /**
          * Write-time snapshot of a referenced record.
          *
          * Links to: `post`.
          */
         public val parent: JsonObject? = null,
+        public val phone: String? = null,
+        @SerialName("price_band") public val priceBand: PriceBand? = null,
         /** The chosen terms, in the order the editor arranged them. */
         public val properties: List<String>? = null,
         @SerialName("published_at") public val publishedAt: String? = null,
@@ -550,7 +582,11 @@ public data class PostDocument(
          * Links to: `post`.
          */
         public val related: List<RelatedItem>? = null,
+        /** The items, in the order the editor arranged them. */
+        public val scores: List<Long>? = null,
         public val seo: Seo? = null,
+        public val source: Source? = null,
+        public val specs: List<SpecsItem>? = null,
         public val subtitle: String? = null,
         public val summary: String? = null,
         /** The items, in the order the editor arranged them. */
@@ -563,6 +599,14 @@ public data class PostDocument(
             public val amount: Double? = null,
             public val form: String? = null,
             public val unit: String? = null,
+        )
+
+        @Serializable
+        public data class PriceBand(
+            /** A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind. */
+            public val max: JsonElement? = null,
+            /** A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind. */
+            public val min: JsonElement? = null,
         )
 
         @Serializable
@@ -580,6 +624,37 @@ public data class PostDocument(
         )
 
         @Serializable
+        public data class Source(
+            public val label: String? = null,
+            public val rel: String? = null,
+            public val target: Target? = null,
+            public val url: String,
+        ) {
+            @Serializable
+            @JvmInline
+            public value class Target(public val value: String) {
+                public companion object {
+                    public val Blank: Target = Target("_blank")
+                    public val Self: Target = Target("_self")
+
+                    /** Every value the schema lists. */
+                    public val entries: List<Target> = listOf(Blank, Self)
+                }
+
+                /** False for a value the schema does not list — an option added since it was generated. */
+                public val isKnown: Boolean get() = this in entries
+
+                override fun toString(): String = value
+            }
+        }
+
+        @Serializable
+        public data class SpecsItem(
+            public val key: String,
+            public val value: String,
+        )
+
+        @Serializable
         public data class Where(
             public val label: String? = null,
             public val lat: Double? = null,
@@ -591,6 +666,19 @@ public data class PostDocument(
     @Serializable
     public data class CustomFieldsPlain(
         public val summary: String? = null,
+    )
+
+    @Serializable
+    public data class Robots(
+        public val nofollow: Boolean,
+        public val noindex: Boolean,
+    )
+
+    @Serializable
+    public data class Social(
+        public val description: String? = null,
+        public val image: String? = null,
+        public val title: String? = null,
     )
 }
 

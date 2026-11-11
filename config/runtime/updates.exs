@@ -27,11 +27,11 @@ end
 # comparison, 15 minutes for a failure), so an outage cannot turn page loads
 # into a request stream.
 #
-# This is the only outbound integration that is on by default — the others all
-# need a credential, so leaving it unset implicitly disables them. Set
-# KILN_UPDATE_CHECK=false for an instance that must make no third-party
-# requests at all; the page then reports the running version and the update
-# command without the comparison. See `Kiln.Updates`.
+# This and the plugin health check below are the outbound integrations on by
+# default — the others all need a credential. KILN_UPDATE_CHECK=false turns off
+# both (unless KILN_PLUGIN_HEALTH_CHECK says otherwise) for an instance that
+# must make no third-party requests; the page then reports the running version
+# and the update command without the comparison. See `Kiln.Updates`.
 #
 # Accepted spellings are the shared ones (see the header): an operator who set
 # this because they need *no* egress must not be defeated by `Off` or `FALSE`.
@@ -100,4 +100,45 @@ cond do
 
   true ->
     config :kiln_cms, Kiln.Updates, feed_url: feed_url
+end
+
+# ## Plugin health check (#2244)
+#
+# When a platform admin opens System or Security posture, each plugin that
+# comes from Hex is checked against hex.pm (its locked checksum, retirement and
+# release dates, and Hex's advisories for that release) and every Hex, git or
+# path plugin against the security notices feed. The hex.pm requests name the
+# plugin's package and version; the feed request names nothing. Cached 24h (15
+# minutes after a failure). No request at all when every plugin is built from
+# this project. See `Kiln.Plugins.Health`.
+#
+# Unset, it follows KILN_UPDATE_CHECK, so "no outbound requests" stays one
+# switch. An explicit value wins either way.
+with {:ok, enabled?} <- Env.fetch("KILN_PLUGIN_HEALTH_CHECK") do
+  config :kiln_cms, Kiln.Plugins.Health, enabled: enabled?
+end
+
+# The security notices feed: a Kiln site's published-entries endpoint, read
+# for its `security_notice` entries. Unset, kilncms.dev's — but only while the
+# update check's release feed is kilncms.dev's too, so a fork, a mirror or
+# KILN_UPDATE_FEED_URL=false keeps kilncms.dev out of this check as well. An
+# off-spelling turns the notices leg off; blank is unset. The feed is fetched
+# and cached once for everything that reads it; each reader gates on its own
+# switch above. See `Kiln.SecurityNotices.url/0`.
+notices_url = "KILN_SECURITY_NOTICES_URL" |> System.get_env("") |> String.trim()
+
+cond do
+  notices_url == "" ->
+    :ok
+
+  String.downcase(notices_url) in Env.false_values() ->
+    config :kiln_cms, Kiln.SecurityNotices, url: false
+
+  true ->
+    config :kiln_cms, Kiln.SecurityNotices, url: notices_url
+end
+
+# Months without a release on Hex after which a plugin reads as stale.
+with {:ok, months} <- Env.positive_integer("KILN_PLUGIN_STALE_MONTHS") do
+  config :kiln_cms, Kiln.Plugins.Health, stale_after_months: months
 end

@@ -20,7 +20,19 @@ defmodule KilnCMS.SchemaExport.TypeScript do
   worse than one that is merely loose about it.
   """
 
+  alias KilnCMS.SchemaExport.GraphQL
   alias KilnCMS.SchemaExport.Walk
+
+  # The TypeScript spelling of each scalar GraphQL kind
+  # (`KilnCMS.SchemaExport.GraphQL.accessor/1` names the accessor).
+  @scalar_ts %{
+    "string" => "string",
+    "int" => "number",
+    "float" => "number",
+    "boolean" => "boolean",
+    "date" => "string",
+    "datetime" => "string"
+  }
 
   @doc """
   Emit TypeScript declarations for a schema document from
@@ -42,9 +54,132 @@ defmodule KilnCMS.SchemaExport.TypeScript do
     |> Enum.join("\n")
   end
 
+  @doc """
+  `emit/1` plus a GraphQL section (#2290): per content type, a `Fields` type and
+  a ready GraphQL fragment for the site's custom fields.
+
+  The document must come from `KilnCMS.SchemaExport.json_schema(graphql: true)`:
+  the accessor chosen for a field is the `x-kiln-graphql-kind` annotation, i.e.
+  what `KilnCMS.CMS.FieldKind` decides, not an inference from the JSON type. A
+  document without the annotations gets no GraphQL section.
+
+  The output is a `.ts` module, not a `.d.ts`: the fragments are values.
+  """
+  @spec emit_graphql(map()) :: String.t()
+  def emit_graphql(document) do
+    model = Walk.model(document)
+
+    sections =
+      model
+      |> GraphQL.types(&(&1 |> String.replace_prefix("content_", "") |> pascal()))
+      |> Enum.map(&graphql_type/1)
+
+    if sections == [] do
+      emit(document)
+    else
+      emit(document) <> "\n" <> graphql_prelude() <> "\n" <> Enum.join(sections, "\n")
+    end
+  end
+
+  defp graphql_prelude do
+    """
+    // -- GraphQL custom fields #{String.duplicate("-", 40)}
+    //
+    // The GraphQL schema is the same for every site; a custom field cannot be a
+    // GraphQL field of its own, so it is read through an *accessor* typed by
+    // the field's kind. For each content type this section has:
+    //
+    //   * `<Type>CustomFields`         the shape of the fragment's result;
+    //   * `<Type>CustomFieldsFragment` a named GraphQL fragment to spread.
+    //
+    // A string, integer, float, boolean, date or datetime field is read as an
+    // alias of its accessor (`price: customFloat(name: "price")`) and is typed
+    // here. Every other kind (list, group, reference, media, geolocation, json) has no scalar
+    // accessor, so those names are read together through
+    // `fields(names: [...])`, which returns `CustomFieldValue`s; narrow them on
+    // `__typename`. Values arrive under per-kind aliases (`asString`, `asInt`,
+    // ...) because GraphQL forbids one response key with several types. The
+    // fragment goes one level into lists and groups.
+    //
+    // A field that is unknown, deleted, private to the reader or of another
+    // kind than the accessor is `null` (or absent from `fields`), so the
+    // server never rejects a stale fragment. A dynamic content type is an
+    // `Entry`: select its fragment on `publishedEntries(filter: {typeName: ...})`.
+    // The names here are the site's definitions *now*: regenerate after an admin
+    // changes them. Filtering and sorting still use `customFilter`/`customSort`.
+
+    /** A custom-field value as `fields(names:)` returns it. */
+    export type KilnCustomFieldValue =
+      | { __typename: "StringValue"; name: string; asString: string }
+      | { __typename: "IntValue"; name: string; asInt: number }
+      | { __typename: "FloatValue"; name: string; asFloat: number }
+      | { __typename: "BooleanValue"; name: string; asBoolean: boolean }
+      | { __typename: "DateValue"; name: string; asDate: string }
+      | { __typename: "DateTimeValue"; name: string; asDateTime: string }
+      | {
+          __typename: "GeolocationValue";
+          name: string;
+          lat: number;
+          lng: number;
+          label: string | null;
+          zoom: number | null;
+        }
+      | { __typename: "JsonValue"; name: string; asJson: string | null }
+      | { __typename: "ReferenceValue"; name: string; ids: string[] }
+      | {
+          __typename: "MediaValue";
+          name: string;
+          id: string;
+          url: string | null;
+          alt: string | null;
+          width: number | null;
+          height: number | null;
+          mimeType: string | null;
+          focal: { x: number; y: number } | null;
+          variants: Array<{
+            label: string | null;
+            width: number | null;
+            height: number | null;
+            format: string | null;
+            url: string | null;
+            bytes: number | null;
+            cropped: boolean | null;
+          }>;
+        }
+      | { __typename: "ListValue"; name: string; items: KilnCustomFieldValue[] }
+      | { __typename: "GroupValue"; name: string; fields: KilnCustomFieldValue[] };
+    """
+  end
+
+  defp graphql_type(%{decl: decl, scalars: scalars, others: others} = type) do
+    on = type.on
+    name = type.base <> "CustomFields"
+
+    members =
+      Enum.map(scalars, fn field ->
+        "  #{property_key(field.alias)}: #{Map.fetch!(@scalar_ts, field.graphql_kind)} | null;"
+      end) ++
+        if others == [], do: [], else: ["  fields: KilnCustomFieldValue[];"]
+
+    """
+    #{graphql_comment(decl, on)}export interface #{name} {
+    #{Enum.join(members, "\n")}
+    }
+
+    export const #{name}Fragment = `
+    #{GraphQL.fragment(name, type)}
+    `;
+    """
+  end
+
+  defp graphql_comment(%{graphql: %{"type_name" => type_name}}, on),
+    do: "/** On `#{on}` with `typeName: #{literal(type_name)}`. */\n"
+
+  defp graphql_comment(_decl, on), do: "/** On `#{on}`. */\n"
+
   defp header(model) do
     """
-    // Generated by `mix kiln.export.schema --format ts`. Do not edit.
+    // Generated by KilnCMS (`mix kiln.export.schema --format ts` or `GET /api/schema`). Do not edit.
     //
     // The `:json` fired-artifact shape served by
     // `GET /api/content/:type/:slug?surface=json`.

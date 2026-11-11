@@ -56,12 +56,15 @@ defmodule KilnCMSWeb.AccountLive do
   @impl true
   def mount(_params, _session, socket) do
     tier = KilnCMSWeb.LiveUserAuth.effective_tier(socket)
+    registrations = registrations(socket)
 
     {:ok,
      socket
      |> assign(:page_title, gettext("Your account"))
      |> assign(:reconciling?, false)
      |> assign(:editorial_tier, tier)
+     |> assign(:registrations, registrations)
+     |> assign(:confirm_first?, confirm_first?(socket.assigns.current_user, registrations))
      |> load_memberships()
      |> load_subscriber()}
   end
@@ -229,6 +232,35 @@ defmodule KilnCMSWeb.AccountLive do
 
   defp org_id(socket), do: socket.assigns.current_org && socket.assigns.current_org.id
 
+  # The account's registrations that have not been let in (#2251), on any
+  # site — not only this host's: a sign-up on an open site is queued on the
+  # default site when that one requires approval. `[{status, site_name}]`,
+  # `:pending` first. Read as the user: their own rows, which the membership's
+  # self-read admits.
+  defp registrations(socket) do
+    user = socket.assigns.current_user
+
+    case KilnCMS.Accounts.list_memberships_for_user(user.id, actor: user) do
+      {:ok, memberships} ->
+        memberships
+        |> Enum.filter(&(&1.status in [:pending, :rejected]))
+        |> Enum.sort_by(&(&1.status != :pending))
+        |> Enum.map(&{&1.status, KilnCMS.Branding.for_org(&1.organization_id).site_name})
+
+      _unreadable ->
+        []
+    end
+  end
+
+  # A pending registration waits on the applicant, not on an administrator,
+  # while the address is unconfirmed: approving one is refused (#2516).
+  # `confirmed_at` is not public, but it is selected on the session's user like
+  # every other attribute.
+  defp confirm_first?(%{confirmed_at: nil}, registrations),
+    do: Enum.any?(registrations, &match?({:pending, _site}, &1))
+
+  defp confirm_first?(_user, _registrations), do: false
+
   defp status_variant(:active), do: "success"
   defp status_variant(:comped), do: "info"
   defp status_variant(:past_due), do: "warning"
@@ -266,6 +298,48 @@ defmodule KilnCMSWeb.AccountLive do
           <h1 class="text-3xl font-semibold">{gettext("Your account")}</h1>
           <p class="text-base-content/70">{@current_user.email}</p>
         </header>
+
+        <%!-- Registrations an administrator has not let in (#2251), on any
+              site. Rejected is said neutrally, with no reason. --%>
+        <div
+          :if={@registrations != []}
+          id="registration-status"
+          role="status"
+          class="flex gap-3 rounded-lg border border-base-300 bg-base-200/60 p-4 text-sm"
+        >
+          <.icon name="hero-clock" class="mt-0.5 size-5 shrink-0" />
+          <div class="space-y-1">
+            <p :for={{status, site} <- @registrations}>
+              <%= if status == :pending do %>
+                {gettext(
+                  "Waiting for approval on %{site}. You can sign in, but you can only read what's public here until an administrator approves your registration.",
+                  site: site
+                )}
+              <% else %>
+                {gettext("Your registration on %{site} wasn't approved.", site: site)}
+              <% end %>
+            </p>
+            <%!-- An administrator can't approve an unconfirmed account
+                  (`KilnCMS.Accounts.Changes.DecideRegistration`), and a
+                  magic-link sign-in doesn't confirm one (#2516). A password
+                  reset always does: every unconfirmed account registered with
+                  a password. The confirmation link expires and can't be
+                  resent, so it comes second. --%>
+            <div :if={@confirm_first?} id="confirm-first" class="space-y-1 pt-1">
+              <p class="font-medium">
+                {gettext(
+                  "Confirm your email address first: an administrator can't approve your registration until you do."
+                )}
+              </p>
+              <p>
+                <.link href={~p"/reset"} class="link font-medium">
+                  {gettext("Reset your password to confirm it.")}
+                </.link>
+                {gettext("Or use the link in the confirmation email we sent, if it's still valid.")}
+              </p>
+            </div>
+          </div>
+        </div>
 
         <%!-- Editors and admins only. Nothing is said to anyone else: this is
               the page every self-registered reader, member and newsletter

@@ -71,6 +71,114 @@ link, in-content links) are darkened for AA on light surfaces. Retune by editing
 the `@theme` / `[data-theme="dark"]` blocks — do **not** introduce new raw colors
 in components.
 
+### Muted text
+
+Secondary text is `text-base-content` at reduced opacity. Nothing looks wrong
+when the opacity is too low, so the floor is a rule: **`text-base-content/70`
+for any text**. Measured from the tokens above, `/70` is about 5.1:1 or better on
+`base-100`, `base-200` and `base-300` in both themes; `/60` is 4.12:1 on light
+`base-100` and `/50` is 3.09:1, both under the 4.5:1 AA line. Go lower only
+for non-text: an icon glyph, a decorative empty-state mark, a disabled
+control. Mark each such use with a `contrast-ok: <why>` comment on the same
+line or the line above (`<%!-- contrast-ok: decorative glyph --%>`). Opacity
+on an icon that carries meaning (the flash close button) is still `/70`.
+
+`test/kiln_cms_web/muted_text_contrast_test.exs` enforces this by scanning
+`lib/kiln_cms_web` for `text-base-content/N` and bare `opacity-N` below 70:
+
+- Public paths (controller templates, block components, and the live views
+  that render before sign-in) must have **zero** hits.
+- The console is a **ratchet** against
+  `test/kiln_cms_web/muted_text_console_baseline.txt`: a file may not gain
+  hits. When you lower a count, regenerate the baseline with
+  `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`
+  and commit it.
+
+Limits: the guard reads class names, not rendered contrast. It does not run
+axe (the repo has none), it cannot see text colours set another way (a custom
+class, an inline style, a different token), and it does not cover templates
+authored outside this repo, such as a plugin's. Check those by eye in both
+themes.
+
+### Scrolling code blocks
+
+A `<pre>` that scrolls sideways (`overflow-x-auto`) must take keyboard focus.
+A scroll container with nothing focusable inside can only be scrolled with a
+mouse or touch, so without it a keyboard user cannot read the end of a long
+line (axe's `scrollable-region-focusable`,
+[#2164](https://github.com/The-Verscienta/kiln_cms/issues/2164)). Give it
+three attributes:
+
+```heex
+<pre
+  class="mt-2 rounded bg-base-200 p-3 text-xs overflow-x-auto"
+  tabindex="0"
+  role="group"
+  aria-label={gettext("Update command")}
+><code>{@update_command}</code></pre>
+```
+
+- `tabindex="0"` puts it in the Tab order, and the arrow keys then scroll it.
+- `role="group"`, because ARIA does not allow `aria-label` on a bare `pre`. Not
+  `region`: that is a landmark, and a page of code samples would bury the
+  page's real landmarks under a row of same-named ones.
+- An `aria-label` that says what the block holds ("Update command",
+  "security.txt as served"), or "Code sample" when nothing more specific fits.
+  Translate it with `gettext`, and leave the language name out.
+
+Content code blocks get the same attributes from the rich-text renderer, so
+there is nothing to add in a block template.
+
+The focus ring is shared: `pre[tabindex="0"]:focus-visible` in `app.css`
+draws a 2px solid `--color-primary-ink` outline with `outline-offset: -2px`.
+It is inset so that a parent's `overflow-x: clip` (the `monograph` preset's)
+cannot cut it off. That puts it on the block's own `base-200` fill, where
+plain `primary` falls under WCAG 1.4.11's 3:1 in the light theme, so it uses
+the ink token. Don't add another outline to a `<pre>`, and don't set
+`outline: none` on one.
+
+`test/kiln_cms_web/scrollable_code_focus_test.exs` enforces this. It reads
+every `<pre>` start tag in `lib/**/*.ex` and `lib/**/*.heex`, including tags
+split over several lines, and fails on one whose classes include
+`overflow-x-auto` without `tabindex="0"`, `role="group"` and an `aria-label`.
+A `<pre>` that also has `whitespace-pre-wrap` never overflows and is exempt.
+Limits: the scan reads source, not rendered pages, so it misses a scrolling
+`<pre>` styled another way (a custom class, an inline style), and it does not
+see templates outside this repo, such as a plugin's.
+
+### Scrolling tables
+
+A content table scrolls sideways inside its `.kiln-table-wrap`
+(`.kiln-block .kiln-table-wrap { overflow-x: auto }`), and the wrapper takes
+keyboard focus for the same reason a code block does
+([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)). The
+rich-text renderer adds it, through `KilnCMS.ScrollableTables`, so there is
+nothing to add in a block template:
+
+```html
+<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">
+  <table>…</table>
+</div>
+```
+
+- The wrapper, not the table, takes focus and the name. The table keeps its
+  native `display` and so its own table semantics; `display: block` on a
+  `<table>` would strip them.
+- `role="group"` and not `region`, as for code blocks.
+- A bare `<table>` in `legacy_html` is wrapped by the same pass, so every
+  content table on a page has the wrapper.
+
+The ring is `.kiln-table-wrap[tabindex="0"]:focus-visible` in `app.css`: 2px
+solid `--color-primary-ink`, with `outline-offset: 2px`. It is outset, unlike
+the code block's, because inset it would sit on the cells' `base-300` borders
+and the header's `base-200` fill; outside, it sits on the page background,
+where the ink token clears WCAG 1.4.11's 3:1 in both themes. Don't add
+another outline to the wrapper, and don't set `outline: none` on it.
+
+This covers content tables only. The console's own wide tables sit in
+`overflow-x-auto` wrappers without these attributes, and no test scans for
+them the way `scrollable_code_focus_test.exs` scans `<pre>`s.
+
 ## Component kit (`@layer components` in `app.css`)
 
 These are plain, token-driven CSS classes so a control looks identical whether
@@ -107,6 +215,10 @@ written as a function component or a raw `class="…"` in a template.
   `popovertarget` (Escape and click-outside close it, no JS), anchored under
   the button where CSS anchor positioning exists. An item that fires a
   `phx-click` also carries `popovertargetaction="hide"` so the menu closes.
+  An item that takes the row away goes last, after an `<hr>` divider, as a
+  labelled `row-menu-item text-error` with its icon and a `data-confirm`: the
+  content list's **Move to trash**, drawn only where the destroy policy allows
+  it ([#2137](https://github.com/The-Verscienta/kiln_cms/issues/2137)).
 - **Fields** — `.field-input`, `.field-select` (full-width, token border, focus
   ring), and `.field-label` for the label above one. The `<.input>` component is the richer, label+error-aware form control;
   these bare classes are for inline filters/toolbars and for markup Kiln does
@@ -120,7 +232,10 @@ written as a function component or a raw `class="…"` in a template.
   `Layouts.auth_brand/1`, over every sign-in page and the first-run wizard).
   The library's sign-in pages take these through `AuthOverrides`; Kiln's own
   `/sign-in/verify` template uses them directly, so the two steps of a sign-in
-  look like one flow.
+  look like one flow. `Layouts.auth/1` wraps the brand row in a `<header>`,
+  puts the page in `<main id="main">` and draws the page's one `h1`, visually
+  hidden (`sr-only`) and taken from the page title; every view's visible
+  heading is therefore an `h2`, including the `/sign-in/verify` template.
 - **Tabs** — `.tabs` (segmented-control container) + `.tab`; drive the active
   segment with `aria-selected="true"` (accessible, no extra class). Used for the
   media Library/Trash switch. When the tabs switch panels on the same page (the
@@ -231,6 +346,15 @@ written as a function component or a raw `class="…"` in a template.
 - **Destructive actions confirm** — a `phx-click` that deletes, removes, revokes
   or purges carries `data-confirm={gettext("…?")}`; name the thing and the
   consequence ("Stop sending notifications to this device?").
+- **Label the destructive action beside text actions** — when a delete sits
+  in a row with two or more text buttons, it is a labelled `btn btn-sm
+  btn-danger` with its icon and a word ("Delete"), not an icon on its own. An
+  unlabelled trash icon among "Ping", "Disable" and "Edit" is easy to miss: the
+  webhooks row had one, and an admin looking for Delete didn't find it
+  ([#2136](https://github.com/The-Verscienta/kiln_cms/issues/2136)). An
+  icon-only `btn-ghost` + `hover:text-error` delete is still fine where it is
+  the row's only action, or where every action in the row is an icon. Either
+  way it carries an `aria-label` and a confirm.
 
 ## Layout
 
@@ -269,7 +393,10 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
   (`User.nav_preset`, saved server-side so it follows them across devices and
   the first paint is already right). Essentials draws Home, Content, Media,
   Calendar, Tasks and Inbox, then the Configure hub (admins) and Your settings;
-  Everything is the full map above. Only the sidebar filters
+  Everything is the full map above. Under the Configure hub, Essentials adds a
+  one-line hint (`#nav-essentials-hint`) naming Forms, Webhooks, API keys and
+  Trash, whichever of those this admin can open, and pointing at Show all
+  tools; Everything and non-admins get none. Only the sidebar filters
   (`ConsoleNav.sidebar/3`) — the hub and ⌘K read `nav/2`, so a preset hides a
   link, never a screen — and the page you are on is drawn even when the preset
   would hide it, marked current. The switch sits at the foot of the sidebar
@@ -342,7 +469,10 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
    `.table`. Defining `.table` also revived the previously dead `<.table>` /
    `.table-zebra` references (leftover DaisyUI class names).
    Still deliberately bespoke: **icon-only / subtle destructive** buttons (kept
-   as `btn-ghost` + `hover:text-error` rather than a solid `btn-danger`) and the
+   as `btn-ghost` + `hover:text-error` rather than `btn-danger`, where the
+   delete is the row's only action or the row is all icons; beside text
+   actions it is labelled, see
+   [Label the destructive action](#ux-patterns)) and the
    translation locale **chips** (a matched link/button pair, not tabs).
 4. **Done:** the `/` marketing landing (`page_html/home.html.heex`) moved to
    `Layouts.public`. It is a public-facing page, not an authoring tool, and

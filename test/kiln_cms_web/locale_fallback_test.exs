@@ -473,7 +473,9 @@ defmodule KilnCMSWeb.LocaleFallbackTest do
   end
 
   describe "the built-in site" do
-    test "serves the chain's answer with the served locale on the page and the response", %{
+    # The chrome is the reader's, the URL's; the article and `x-kiln-locale`
+    # are the record's (#2595).
+    test "serves the chain's answer, naming the reader's locale and the served one", %{
       conn: conn
     } do
       chains!(%{"es" => ["fr"]})
@@ -492,8 +494,14 @@ defmodule KilnCMSWeb.LocaleFallbackTest do
       html = html_response(conn, 200)
 
       assert html =~ "fr page"
-      assert html =~ ~s(lang="fr")
-      assert get_resp_header(conn, "content-language") == ["fr"]
+      doc = LazyHTML.from_document(html)
+      assert doc |> LazyHTML.query("html") |> LazyHTML.attribute("lang") == ["es"]
+
+      assert doc |> LazyHTML.query("article.public-article") |> LazyHTML.attribute("lang") ==
+               ["fr"]
+
+      assert get_resp_header(conn, "content-language") == ["es"]
+      assert get_resp_header(conn, "x-kiln-locale") == ["fr"]
     end
 
     test "honours a chain that refuses to fall back", %{conn: conn} do

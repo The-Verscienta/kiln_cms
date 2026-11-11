@@ -242,19 +242,28 @@ defmodule KilnCMS.Webhooks do
   ledger write the policies refuse is logged as an error, and the other
   consumers of the event below still run.
 
-  Options: `:withdraws` (default `true`) — whether the document was published
-  before the action. `archived` and `deleted` also fire for drafts, which no
-  consumer ever had, so `KilnCMS.CMS.Changes.NotifyWebhooks` passes `false`
-  for those and the delivery is not a retraction (#1926).
+  Options:
+
+    * `:withdraws` (default `true`) — whether the document was published
+      before the action. `archived` and `deleted` also fire for drafts, which
+      no consumer ever had, so `KilnCMS.CMS.Changes.NotifyWebhooks` passes
+      `false` for those and the delivery is not a retraction (#1926).
+    * `:announce` (default `:full`) — who hears. `:full` is every consumer
+      below. `:delivery` is the webhook endpoints and the change feed only,
+      for a notifying re-fire sweep (`KilnCMS.Firing.Sweep.run/1`, #2463):
+      the whole published corpus re-rendered is not an edit for automation
+      or federation, and a CDN purge per document would empty the cache for
+      the length of the sweep.
   """
   @spec dispatch(String.t(), map(), Ash.ToTenant.t() | nil, keyword()) :: :ok
   def dispatch(event, payload, org \\ KilnCMS.Accounts.default_org_id(), opts \\ []) do
     fan_out(event, payload, org, Keyword.get(opts, :withdraws, true))
+    full? = Keyword.get(opts, :announce, :full) == :full
 
     # A taxonomy event (#1965) is for webhook receivers and the CDN only: its
     # verbs read like content verbs, so automation would match "any type, on
     # updated" rules against a tag, and federation would try to announce one.
-    unless CMS.WebhookEndpoint.taxonomy_event?(event) do
+    if full? and not CMS.WebhookEndpoint.taxonomy_event?(event) do
       editorial_consumers(event, payload, org)
     end
 
@@ -262,7 +271,7 @@ defmodule KilnCMS.Webhooks do
     # publish changes what the site's cached API responses should say, and so
     # does a taxonomy write (`KilnCMS.CDN.purges?/1`). Enqueue-only and
     # non-raising, like the two below.
-    KilnCMS.CDN.handle_event(event, payload, org)
+    if full?, do: KilnCMS.CDN.handle_event(event, payload, org)
 
     # The public change feed (#2050) is the fifth: open pages hear about the
     # same transitions webhook receivers do, as identifiers only. It decides
@@ -311,6 +320,25 @@ defmodule KilnCMS.Webhooks do
   # A retraction-verb row that is not a retraction was a draft's tombstone.
   defp retraction_withdraws(delivery),
     do: delivery.retraction or not retraction?(delivery.event)
+
+  @doc """
+  Record + enqueue one security alert delivery (#2245) to `endpoint`: the
+  ledger row and the job `dispatch/4` would write, signed and enveloped the
+  same way (`{"event", "data", "delivery_id"}`), but for this one endpoint,
+  and without `dispatch/4`'s other consumers — a security event is not an
+  edit for automation, federation, the CDN or the change feed, and opens no
+  propagation record.
+
+  Called by `KilnCMS.Security.AlertDispatch`'s delivery, inside its
+  transaction, which has already chosen the endpoints (active, subscribed to
+  `event`). Raises on a refused or failed write, so the delivery rolls back
+  and is retried rather than stamped as sent.
+  """
+  @spec enqueue_security!(struct(), String.t(), map(), Ash.UUID.t()) :: struct()
+  def enqueue_security!(endpoint, "security." <> _ = event, data, org_id)
+      when is_map(data) and is_binary(org_id) do
+    enqueue(endpoint, event, data, org_id, true)
+  end
 
   @doc """
   Send a test `"ping"` event to one endpoint (delivers even when inactive, so

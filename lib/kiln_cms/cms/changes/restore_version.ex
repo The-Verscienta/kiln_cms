@@ -69,6 +69,18 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   empty snapshot and restore every field to its default, and a filtered
   reference would read as "no longer exists".
 
+  ## Planning and previewing
+
+  `plan/3` is the whole of what a restore does to the changeset, as a function
+  of the changeset and the target version, so the real action's `before_action`
+  and `preview/3` run the very same code. A `%Plan{}` carries the planned
+  changeset, the value each restorable attribute will be set to, the final
+  `custom_fields` map, the stored custom keys the restore will DROP (no
+  definition declares them any more) and the errors the restore would fail
+  with. `preview/3` builds the changeset without running the action: it reads
+  history and references as the caller and writes nothing, fires no
+  notification and records no severity, because none of those hooks run.
+
   ## Re-validation
 
   Ash validations run while the changeset is built, and these writes land in a
@@ -82,6 +94,7 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   use Ash.Resource.Change
   require Ash.Query
 
+  alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.Validations
   alias KilnCMS.CMS.VersionFields
   alias KilnCMS.CMS.VersionSnapshot
@@ -101,7 +114,73 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
     # binding (#954), keyed on the action name `:restore_version` rather than
     # any flag we set — the action is `accept []` with only a `version_id`, so
     # the tree it writes is wholly our own vetted history. Nothing to mark here.
-    Ash.Changeset.before_action(changeset, &apply_version(&1, version_id, context))
+    Ash.Changeset.before_action(changeset, &plan(&1, version_id, context).changeset)
+  end
+
+  defmodule Plan do
+    @moduledoc """
+    What restoring a version will do: see `KilnCMS.CMS.Changes.RestoreVersion.plan/3`.
+
+      * `:changeset` - the changeset with every restored value force-changed;
+      * `:values` - the value each restorable attribute will hold afterwards;
+      * `:custom_fields` - the final `custom_fields` map, after the registry
+        pass (`nil` when the resource has no restorable `custom_fields`);
+      * `:dropped` - stored custom-field keys with a non-blank value that no
+        definition declares any more, so the restore discards them (sorted);
+      * `:errors` - what the restore would fail with (empty when it would land).
+    """
+    defstruct [:changeset, values: %{}, custom_fields: nil, dropped: [], errors: []]
+
+    @type t :: %__MODULE__{
+            changeset: Ash.Changeset.t(),
+            values: %{atom() => term()},
+            custom_fields: map() | nil,
+            dropped: [String.t()],
+            errors: [term()]
+          }
+  end
+
+  @doc """
+  Plans the restore of `version_id` onto `changeset`: the restore itself, up to
+  but not including the write. Used by the action's `before_action` and by
+  `preview/3`, so a preview cannot disagree with the restore it previews.
+  """
+  @spec plan(Ash.Changeset.t(), Ash.UUID.t(), Ash.Resource.Change.Context.t()) :: Plan.t()
+  def plan(changeset, version_id, context) do
+    planned = apply_version(changeset, version_id, context)
+    restorable = VersionFields.restorable_fields(changeset.resource)
+
+    %Plan{
+      changeset: planned,
+      values: Map.new(restorable, &{&1, Ash.Changeset.get_attribute(planned, &1)}),
+      custom_fields:
+        if(:custom_fields in restorable,
+          do: Ash.Changeset.get_attribute(planned, :custom_fields)
+        ),
+      dropped: planned.context[:kiln_restore_dropped] || [],
+      errors: planned.errors
+    }
+  end
+
+  @doc """
+  The plan for restoring `version_id` onto `record`, without running the action.
+
+  `opts` are the action's: `:actor` and `:tenant`. Policies are not evaluated
+  here (that is the action's job); the history and reference reads inside the
+  plan are, as the caller. Nothing is written.
+  """
+  @spec preview(struct(), Ash.UUID.t(), keyword()) :: Plan.t()
+  def preview(record, version_id, opts) do
+    changeset =
+      Ash.Changeset.for_update(record, :restore_version, %{version_id: version_id}, opts)
+
+    context = %Ash.Resource.Change.Context{
+      actor: opts[:actor],
+      tenant: opts[:tenant],
+      authorize?: Keyword.get(opts, :authorize?, true)
+    }
+
+    plan(changeset, version_id, context)
   end
 
   defp apply_version(changeset, version_id, context) do
@@ -160,20 +239,72 @@ defmodule KilnCMS.CMS.Changes.RestoreVersion do
   # actually restorable for this resource.
   defp apply_custom_field_registry(changeset, restorable, context) do
     if :custom_fields in restorable do
-      KilnCMS.CMS.Changes.ApplyCustomFields.apply_restored(changeset, context)
+      stored = Ash.Changeset.get_attribute(changeset, :custom_fields) || %{}
+      restored = ApplyCustomFields.apply_restored(changeset, context)
+      note_dropped_keys(restored, stored)
     else
       changeset
     end
   end
 
+  # Robots flags (#2256) added after most history was written. A version from
+  # before them has no key, and "what the record carried then" (`false`) would
+  # make a page that has since been hidden from search engines indexable again
+  # as a side effect of restoring its text. Absent means: leave the current
+  # value alone. A snapshot that does carry the key restores it like any field.
+  @keep_current_when_absent [:noindex, :nofollow]
+
+  # The stored keys the registry pass just discarded: no definition declares
+  # them (retired since the version was written). A blank value is not news.
+  defp note_dropped_keys(changeset, stored) do
+    declared =
+      case ApplyCustomFields.stashed_definitions(changeset) do
+        nil ->
+          nil
+
+        # A held field (#2605) is declared too: its value was kept.
+        definitions ->
+          MapSet.new(
+            Enum.map(definitions, &to_string(&1.name)) ++
+              ApplyCustomFields.held_names(changeset)
+          )
+      end
+
+    dropped =
+      if declared do
+        stored
+        |> Enum.reject(fn {key, value} ->
+          MapSet.member?(declared, to_string(key)) or blank?(value)
+        end)
+        |> Enum.map(fn {key, _value} -> to_string(key) end)
+        |> Enum.sort()
+      else
+        []
+      end
+
+    Ash.Changeset.set_context(changeset, %{kiln_restore_dropped: dropped})
+  end
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?([]), do: true
+  defp blank?(value) when is_map(value), do: map_size(value) == 0
+  defp blank?(_value), do: false
+
   defp restore_fields(changeset, state, restorable) do
-    Enum.reduce(restorable, changeset, fn name, acc ->
+    Enum.reduce(restorable, changeset, &restore_field(&2, &1, state))
+  end
+
+  defp restore_field(changeset, name, state) do
+    if name in @keep_current_when_absent and not Map.has_key?(state, to_string(name)) do
+      changeset
+    else
       # Values arrive in the shape PaperTrail stored (JSON), which
       # `force_change_attribute/3` casts back.
-      value = Map.get_lazy(state, to_string(name), fn -> default(acc.resource, name) end)
-      value = acc |> restorable_value(name, value) |> upcast_blocks(name)
-      Ash.Changeset.force_change_attribute(acc, name, value)
-    end)
+      value = Map.get_lazy(state, to_string(name), fn -> default(changeset.resource, name) end)
+      value = changeset |> restorable_value(name, value) |> upcast_blocks(name)
+      Ash.Changeset.force_change_attribute(changeset, name, value)
+    end
   end
 
   # A working copy is only meaningful beside a published text

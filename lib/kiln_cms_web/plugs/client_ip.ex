@@ -165,6 +165,97 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
     end
   end
 
+  @doc """
+  The client address a socket can vouch for, or `nil` when the socket cannot
+  see the client at all (#2248).
+
+  `resolve/2` always answers, falling back to the peer: right for a rate-limit
+  bucket (too coarse is safe), wrong for an access check, where the proxy's
+  address is not the visitor's. This answers `nil` instead in the two cases
+  where the socket is looking at the proxy:
+
+    * `CLIENT_IP_HEADER` names a header a socket never receives
+      (`Fly-Client-IP`, `do-connecting-ip`: `:x_headers` carries only `x-`
+      headers);
+    * `TRUSTED_PROXIES` is set, no `x-` forwarding header named a client, and
+      the peer is itself one of the trusted proxies (one that sets only the
+      RFC 7239 `Forwarded:` header).
+
+  Otherwise it is `resolve/2`'s answer: the same trust rule as HTTP.
+  """
+  @spec socket_client([{String.t(), String.t()}], :inet.ip_address() | nil) ::
+          :inet.ip_address() | nil
+  def socket_client(x_headers, peer_address) do
+    case from_platform_header(x_headers) do
+      nil -> socket_client_fallback(x_headers, peer_address)
+      client -> client
+    end
+  end
+
+  defp socket_client_fallback(x_headers, peer_address) do
+    case Application.get_env(:kiln_cms, :client_ip_header) do
+      {:header, "x-" <> _} -> socket_client_proxies(x_headers, peer_address)
+      {:header, _invisible_to_sockets} -> nil
+      _none -> socket_client_proxies(x_headers, peer_address)
+    end
+  end
+
+  defp socket_client_proxies(x_headers, peer_address) do
+    case proxies() do
+      [] ->
+        peer_address
+
+      list ->
+        from_headers(x_headers, list) ||
+          if trusted_proxy?(peer_address, list), do: nil, else: peer_address
+    end
+  end
+
+  defp trusted_proxy?(nil, _list), do: false
+
+  defp trusted_proxy?(address, list),
+    do: Enum.any?(list, &KilnCMS.Security.Cidr.contains?(to_string(&1), address))
+
+  @doc """
+  The client address of a LiveView's handshake, and whether it arrived with a
+  forwarding header nothing trusts (`untrusted_forwarding?/1`): `{ip, untrusted?}`,
+  by `resolve/2`. Only a connected root mount has a handshake to read; anywhere
+  else the answer is `{nil, false}`.
+  """
+  @spec from_socket(Phoenix.LiveView.Socket.t()) :: {:inet.ip_address() | nil, boolean()}
+  def from_socket(socket) do
+    case handshake(socket) do
+      {x_headers, peer} -> {resolve(x_headers, peer), untrusted_forwarding?(x_headers)}
+      nil -> {nil, false}
+    end
+  end
+
+  @doc """
+  `socket_client/2` for a LiveView's handshake: `nil` off a connected root
+  mount, or when the socket cannot see the client.
+  """
+  @spec socket_client_from(Phoenix.LiveView.Socket.t()) :: :inet.ip_address() | nil
+  def socket_client_from(socket) do
+    case handshake(socket) do
+      {x_headers, peer} -> socket_client(x_headers, peer)
+      nil -> nil
+    end
+  end
+
+  defp handshake(socket) do
+    if Phoenix.LiveView.connected?(socket) and is_nil(socket.parent_pid) do
+      x_headers = Phoenix.LiveView.get_connect_info(socket, :x_headers) || []
+
+      peer =
+        case Phoenix.LiveView.get_connect_info(socket, :peer_data) do
+          %{address: address} -> address
+          _none -> nil
+        end
+
+      {x_headers, peer}
+    end
+  end
+
   defp resolve_proxies(x_headers, peer_address) do
     case proxies() do
       [] ->
@@ -188,6 +279,20 @@ defmodule KilnCMSWeb.Plugs.ClientIp do
       {:ok, _cached} -> RemoteIp.from(x_headers, proxies: list)
       :error -> nil
     end
+  end
+
+  @doc """
+  Is this connection in the state `warn_once_if_forwarded/1` warns about: it carries
+  a forwarding header while neither `TRUSTED_PROXIES` nor a platform
+  `CLIENT_IP_HEADER` is configured? Then the resolved address is the proxy's, not
+  the visitor's. A pure read, no latch — the IP block list screen (#2242) uses it
+  to say its own-address check cannot be trusted.
+  """
+  @spec untrusted_forwarding?([{String.t(), String.t()}]) :: boolean()
+  def untrusted_forwarding?(x_headers) do
+    proxies() == [] and
+      not match?({:header, _}, Application.get_env(:kiln_cms, :client_ip_header)) and
+      forwarded?(x_headers)
   end
 
   @doc false

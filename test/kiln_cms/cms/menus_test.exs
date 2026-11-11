@@ -249,6 +249,35 @@ defmodule KilnCMS.CMS.MenusTest do
     end
   end
 
+  # #2502: the navigation tree is cached under a key carrying the site's
+  # menus-generation token. That token used to live in the delivery cache with
+  # a fixed fallback, so when the size cap evicted it the site went back to the
+  # token its PRE-edit tree was cached under, and that tree was served again.
+  describe "the public delivery cache" do
+    test "an edited menu is not served stale after the delivery cache evicts its token" do
+      actor = user(:editor)
+      menu = menu(actor)
+      entry = item(actor, menu, %{label: "Old", link_type: :none})
+
+      # What the size cap's eviction does to a token kept in the delivery cache:
+      # the token is written once per save, the trees on every miss, so the
+      # token is the least recently written. Evicted before the tree is first
+      # cached, then again after the edit.
+      evict_token = fn ->
+        Cachex.del(KilnCMS.Cache.cache_name(), KilnCMS.Cache.menus_generation_key(org_id()))
+      end
+
+      evict_token.()
+      assert [%{label: "Old"}] = Menus.public_tree(menu.key, "en", org_id())
+
+      CMS.update_menu_item!(entry, %{label: "New"}, actor: actor)
+      assert [%{label: "New"}] = Menus.public_tree(menu.key, "en", org_id())
+
+      evict_token.()
+      assert [%{label: "New"}] = Menus.public_tree(menu.key, "en", org_id())
+    end
+  end
+
   describe "the tree" do
     test "children nest under their parent, in position order" do
       actor = user(:editor)

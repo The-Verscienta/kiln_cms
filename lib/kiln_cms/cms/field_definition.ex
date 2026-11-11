@@ -44,6 +44,26 @@ defmodule KilnCMS.CMS.FieldDefinition do
   Not every field is editor-filled: a `:computed` definition carries a
   `compute` formula (`KilnCMS.CMS.Computed`) and derives its value from the
   rest of the document instead (#429).
+
+  How a field is edited can be chosen per field too (#2284): `widget` picks
+  the editor input — a select's radio buttons, plain text on one line, a
+  plugin type's own — from what `KilnCMS.CMS.FieldWidgets` offers for the
+  field's settings. It never changes what is stored or delivered.
+
+  ## A field type this release does not know
+
+  A row can hold a `field_type` this release does not register (#2605): one a
+  newer release added, read after a rollback, or a type whose plugin was
+  removed. Every read leaves such a row out
+  (`KilnCMS.CMS.Preparations.RegisteredFieldTypes`), so the editor, coercion,
+  filters, the schema export and freshly computed delivery skip the field as
+  if it were not defined. Its stored values are kept, not erased, by every
+  write (`KilnCMS.CMS.Changes.ApplyCustomFields`), and they are still what a
+  record holds: the content API's raw `custom_fields` and an as-stored replay
+  (a point-in-time read) return them, unless the field is private, which
+  stays masked. Deleting the field is what withdraws them; the Fields screen
+  lists such rows apart with a delete. See `unknown_type?/1` and
+  `all_types_context/0`.
   """
   use Ash.Resource,
     domain: KilnCMS.CMS,
@@ -210,6 +230,41 @@ defmodule KilnCMS.CMS.FieldDefinition do
   def orphaned?(_definition), do: false
 
   @doc """
+  Whether `definition`'s `field_type` is one this release does not register
+  (#2605): stored text with no atom (it loads as a `KilnCMS.Types.UnknownAtom`),
+  or an atom `KilnCMS.CMS.FieldTypes.names/0` no longer lists.
+
+  A newer release's type read after a rollback, or a type whose plugin was
+  removed. Such a row is left out of every ordinary read
+  (`Preparations.RegisteredFieldTypes`); a read that passes
+  `all_types_context/0` sees it, and must handle it.
+
+      iex> KilnCMS.CMS.FieldDefinition.unknown_type?(%{field_type: :string})
+      false
+
+      iex> KilnCMS.CMS.FieldDefinition.unknown_type?(%{field_type: %KilnCMS.Types.UnknownAtom{value: "x"}})
+      true
+  """
+  @spec unknown_type?(t() | map()) :: boolean()
+  def unknown_type?(%{field_type: %KilnCMS.Types.UnknownAtom{}}), do: true
+
+  def unknown_type?(%{field_type: type}) when is_atom(type) and not is_nil(type),
+    do: type not in KilnCMS.CMS.FieldTypes.names()
+
+  def unknown_type?(_definition), do: false
+
+  @doc """
+  The read `context` that includes rows of an unknown field type
+  (`unknown_type?/1`), which every read leaves out otherwise
+  (`Preparations.RegisteredFieldTypes`). Top-level only: a relationship the
+  read loads (`link_fields`, `group_fields`) stays filtered.
+
+      CMS.list_field_definitions!(actor: actor, context: FieldDefinition.all_types_context())
+  """
+  @spec all_types_context() :: map()
+  def all_types_context, do: %{field_types: :all}
+
+  @doc """
   The content type names a `:reference` definition may point at: its
   `target_types` when it lists any (a polymorphic field, R2), else its single
   `target_type`, else none. Every reader of "which types does this field
@@ -295,6 +350,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :option_labels,
       :allow_custom,
       :format,
+      :widget,
       :target_type,
       :target_types,
       :multiple,
@@ -305,7 +361,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :help_text,
       :position,
       :section,
+      :width,
       :default,
+      :default_source,
+      :default_field,
       :compute,
       :names_record,
       :searchable,
@@ -316,7 +375,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :inverse_label,
       :inverse_name,
       :private,
-      :schema_org_property
+      :schema_org_property,
+      :validation,
+      :visible_when,
+      :required_when
     ]
 
     create :create, primary?: true
@@ -420,14 +482,27 @@ defmodule KilnCMS.CMS.FieldDefinition do
     end
   end
 
+  preparations do
+    # A row whose `field_type` this release does not register (#2605) — a
+    # newer release's type after a rollback, a removed plugin's — is left out
+    # of every read, in SQL, unless the read passes `all_types_context/0`.
+    # Nothing downstream has a clause for such a type.
+    prepare KilnCMS.CMS.Preparations.RegisteredFieldTypes
+  end
+
   changes do
     # A formula belongs to a `:computed` field only — drop it on any other type
     # so switching an existing computed field away isn't a dead end (#429).
     change KilnCMS.CMS.Changes.ClearCompute
 
+    # A dynamic default (#2286) must fit the field's type, replaces the static
+    # `default`, and names a sibling only for `:copy_of`.
+    change KilnCMS.CMS.Changes.ClearDefaultSource
+
     # Same for `multiple`: only a `:media` field (a gallery), a `:reference`
     # field (a list of references), a `:group` (repeating rows) or a
-    # top-level `:select` (several terms) can hold a list, so the flag — and
+    # top-level scalar list type (`ScalarLists.types/0`: terms, phrases,
+    # numbers, dates, links, …) can hold a list, so the flag — and
     # `allow_custom` with it — and the
     # `min_items`/`max_items` bounds that go with it — drop on any other type
     # rather than lingering on a field they mean nothing to.
@@ -455,6 +530,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `deliver_portable` converts a rich `:text` field's HTML, so it drops on
     # any other type, on a `:plain` one, and on a link or group sub-field.
     change KilnCMS.CMS.Changes.ClearDeliverPortable
+
+    # The editor input (#2284) is picked from what the field's settings offer
+    # (`KilnCMS.CMS.FieldWidgets`), so one those settings no longer offer —
+    # after a type change, a `multiple` flip, rich text — drops, unless this
+    # write names the widget itself (then `Validations.FieldWidget` refuses).
+    # After `ClearMultiple`, which settles `multiple` and `allow_custom`.
+    change KilnCMS.CMS.Changes.ClearWidget
 
     # The other side's name (R4) belongs to a top-level `:reference` field,
     # and a label alone suggests its machine name, as a field's label does.
@@ -507,6 +589,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A :select field is meaningless without choices.
     validate KilnCMS.CMS.Validations.SelectOptions
 
+    # A widget the write names must be one the field offers (#2284).
+    validate KilnCMS.CMS.Validations.FieldWidget
+
     # A :reference field must target known content types (compiled or
     # dynamic): one through `target_type`, or several through `target_types`.
     validate KilnCMS.CMS.Validations.ReferenceTarget
@@ -522,9 +607,24 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # other type may carry one.
     validate KilnCMS.CMS.Validations.ComputeExpression
 
+    # `copy_of` names a sibling of the same type (#2286).
+    validate KilnCMS.CMS.Validations.DefaultSource
+
     # A private field (#2044) is a plain top-level type, and nothing copies
     # its value somewhere public.
     validate KilnCMS.CMS.Validations.PrivateField
+    validate KilnCMS.CMS.Validations.ReadGrantedStaysPrivate, on: :update
+
+    # Value constraints (#2276) are well-formed, fit the field's type, and
+    # its default satisfies them.
+    validate KilnCMS.CMS.Validations.FieldConstraints
+
+    # Switching `unique` on over values that already repeat is refused (#2276).
+    validate KilnCMS.CMS.Validations.UniqueFieldClean
+    # `visible_when` / `required_when` are well-formed rules over this
+    # field's siblings, with no cycle (#2277). On destroy it refuses to
+    # remove a field other rules read.
+    validate KilnCMS.CMS.Validations.FieldCondition, on: [:create, :update, :destroy]
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as the content
@@ -571,10 +671,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
 
-    # No `one_of` constraint: the allowed set includes plugin-registered types
-    # (`KilnCMS.CMS.FieldTypes.names/0`), enforced by `Validations.KnownFieldType`
-    # so the check reads the registry rather than a compile-baked constraint.
-    attribute :field_type, :atom do
+    # The value type: a built-in or a plugin `Kiln.FieldType`
+    # (`KilnCMS.CMS.FieldTypes.names/0`), checked on write by
+    # `Validations.KnownFieldType`.
+    #
+    # `KnownAtom`, so a row whose type this release does not know (written by
+    # a newer release before a rollback, or by a plugin since removed) loads
+    # as a `KilnCMS.Types.UnknownAtom` instead of failing every read that
+    # meets it (#2605). Ordinary reads never see such a row:
+    # `Preparations.RegisteredFieldTypes` leaves it out. See
+    # `unknown_type?/1`.
+    #
+    # No `one_of`: the registry is compile-time too, but as a constraint it
+    # would put the installed plugin set into the JSON:API schema's enum (a
+    # spec diff per plugin), and make this resource compile through
+    # `FieldTypes` into every plugin module (a compile-cycle risk).
+    attribute :field_type, KilnCMS.Types.KnownAtom do
       default :string
       allow_nil? false
       public? true
@@ -617,6 +729,17 @@ defmodule KilnCMS.CMS.FieldDefinition do
       public? true
     end
 
+    # Which editor input the field uses (#2284): `"radios"` for a select,
+    # `"single_line"` for plain text, a plugin type's own (`"stars"`). `nil`
+    # is the type's default, today's input. Editor-only — storage, coercion
+    # and delivery never read it. Chosen from `KilnCMS.CMS.FieldWidgets.allowed/1`
+    # (`Validations.FieldWidget`), cleared when the field's settings stop
+    # offering it (`Changes.ClearWidget`); read it through
+    # `FieldWidgets.resolve/1`, never directly. A string, not an atom: a
+    # plugin's widget names are the registry's today, and a name a plugin
+    # later drops must not fail every read of the definitions that stored it.
+    attribute :widget, :string, public?: true, constraints: [max_length: 64]
+
     # The content type a `:reference` field points at — a type name string
     # ("page", "recipe", …), compiled or dynamic (ignored otherwise).
     attribute :target_type, :string, public?: true
@@ -633,7 +756,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # snapshots — or a `:reference` field a **list of references** (ordered
     # `{id, type, slug, title}` snapshots), or a `:group` **repeating rows**
     # (a list of objects), or a `:select` **several terms** (a list of
-    # strings), rather than a single one. Off by default, so every
+    # strings), or a top-level scalar field a **list of its values** (phrases,
+    # numbers, dates, links…, `KilnCMS.CMS.ScalarLists`), rather than a
+    # single one. Off by default, so every
     # existing field keeps its single-value shape. Ignored
     # (and cleared, see `Changes.ClearMultiple`) on every other type. Flipping
     # it on an existing field reshapes the stored values
@@ -712,6 +837,23 @@ defmodule KilnCMS.CMS.FieldDefinition do
       public? true
     end
 
+    # Value constraints an editor's input must satisfy (#2276), as string keys:
+    # `min`/`max` (numbers), `min_length`/`max_length`/`pattern`/
+    # `pattern_message` (text) and `unique`. A plain map, not an embedded
+    # resource: each new constraint is then a validation rule, not a schema
+    # change. Shape, type fit and regex safety are checked on save by
+    # `Validations.FieldConstraints`; the value rules live in
+    # `KilnCMS.CMS.FieldConstraints`, applied by `Changes.ApplyCustomFields`.
+    attribute :validation, :map, allow_nil?: false, default: %{}, public?: true
+    # Conditional rules (#2277), `KilnCMS.CMS.Conditions` JSON: the field is
+    # hidden in the editor while `visible_when` is false, and required while
+    # `required_when` is true. Both nil — always shown, `required` alone —
+    # by default. Judged by `Validations.FieldCondition`, enforced on write by
+    # `Changes.ApplyCustomFields`. Hidden is an editor concept, not a privacy
+    # control: a hidden field's stored value stays in every read.
+    attribute :visible_when, :map, public?: true
+    attribute :required_when, :map, public?: true
+
     # Optional helper text rendered under the input.
     attribute :help_text, :string,
       public?: true,
@@ -733,6 +875,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
     attribute :section, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
+
+    # How much of its section's row the field's input takes in the content
+    # editor (#2280): the whole row (the default), half or a third — so short
+    # inputs can sit side by side. Below the small breakpoint every field is
+    # full width. Editor-only, like `section`; record-level fields only
+    # (`Changes.ClearLinkFieldOptions`).
+    #
+    # Not `public?`, as `localization`: the JSON:API and GraphQL field schemas
+    # stay what they were, and `KilnCMS.SchemaExport` reports a non-default
+    # width as `x-kiln-width` instead.
+    attribute :width, :atom do
+      allow_nil? false
+      default :full
+      constraints one_of: [:full, :half, :third]
+      public? false
+    end
 
     # Whether this field's value is another *name* for the record — a Latin
     # name, a pinyin spelling, a trade name — so that a query containing it
@@ -807,6 +965,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # Optional default value (stored as a string, coerced to the field type when
     # an editor leaves the input blank).
     attribute :default, :string, public?: true, constraints: [max_length: KilnCMS.Limits.line()]
+
+    # A dynamic default (#2286): where a new record's value comes from when
+    # the writer leaves the field blank, instead of the static `default`.
+    # A closed set — `:today`, `:now`, `:current_user`, `:site_locale` and
+    # `:copy_of` (another field of the same record, named by `default_field`);
+    # no expression strings. Create-only (`Changes.ApplyCustomFields`); nil —
+    # the static `default`, if any — is what every field had before.
+    # `Changes.ClearDefaultSource` keeps it consistent with the type and with
+    # `default`; `Validations.DefaultSource` judges `default_field`.
+    attribute :default_source, :atom,
+      public?: true,
+      constraints: [one_of: [:today, :now, :current_user, :site_locale, :copy_of]]
+
+    attribute :default_field, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.Limits.line()]
 
     # The formula behind a `:computed` field (#429) — a `KilnCMS.CMS.Computed`
     # template like `"{{ reading_time(body) }} min read"`, parsed and validated

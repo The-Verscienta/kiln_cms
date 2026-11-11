@@ -30,15 +30,19 @@ defmodule KilnCMS.CMS.ContentCopy do
   `KilnCMS.CMS.Duplication` clones the `ContentLink` rows themselves.
   """
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldAccess
+  alias KilnCMS.CMS.HiddenFields
   alias KilnCMS.CMS.Tag
 
   # The authored content attributes shared by every clone. Deliberately absent:
   # `slug`/`locale` (each caller decides — they're what identifies the copy),
   # `canonical_url` (points at the *source*'s canonical URL, never the copy's),
   # `path_alias` (re-derived from the type's alias pattern), and every workflow
-  # / scheduling column.
+  # / scheduling column. `noindex` / `nofollow` ARE copied (#2256): a copy of a
+  # document that asked not to be indexed is not meant to be indexed either.
   @content_attrs [
     :title,
     :excerpt,
@@ -46,6 +50,8 @@ defmodule KilnCMS.CMS.ContentCopy do
     :seo_description,
     :seo_keywords,
     :seo_image,
+    :noindex,
+    :nofollow,
     :audience,
     :custom_fields,
     :category_id,
@@ -75,14 +81,22 @@ defmodule KilnCMS.CMS.ContentCopy do
   duplicate takes a fresh slug, so it has no source to differ from. Neither is
   a caller choosing a value the copy would overwrite
   (`KilnCMS.I18n.Validations.SharedFieldsReadOnly`, #1860).
+
+  `custom_fields_constraints: :skip` — a copy carries values the source
+  already holds, so a constraint tightened since (a minimum, a pattern, #2276)
+  is not litigated over them; it applies on the copy's next edit.
   """
   @spec create_opts(keyword()) :: keyword()
   def create_opts(opts) do
     Keyword.update(
       opts,
       :context,
-      %{custom_fields: :drop, shared_fields_check: :skip},
-      &Map.merge(&1, %{custom_fields: :drop, shared_fields_check: :skip})
+      %{custom_fields: :drop, shared_fields_check: :skip, custom_fields_constraints: :skip},
+      &Map.merge(&1, %{
+        custom_fields: :drop,
+        shared_fields_check: :skip,
+        custom_fields_constraints: :skip
+      })
     )
   end
 
@@ -131,6 +145,119 @@ defmodule KilnCMS.CMS.ContentCopy do
 
     {kept, Enum.map(dropped, &to_string/1)}
   end
+
+  @doc """
+  The `custom_fields` a copy of `source` carries, and what it withheld (#2281).
+
+  The acting editor's copy holds only keys they could write themselves: those
+  their `grant` (`field_grant/2`) allows, and not the private ones their read
+  restriction hides. `{nil, ["custom_fields"]}` for a whole-attribute grant
+  that does not name `custom_fields` (the original rule: nothing carried, the
+  copy takes the field defaults); `{map, withheld}` otherwise, `withheld` being
+  `custom_fields.<name>` entries.
+
+  The source is read as the actor, so a hidden key is already absent from it;
+  it is reported anyway, since the copy does not carry it.
+  """
+  @spec custom_fields(struct(), [String.t()] | nil, keyword()) ::
+          {map() | nil, [String.t()]}
+  def custom_fields(source, grant, opts) do
+    values =
+      case Map.get(source, :custom_fields) do
+        %{} = map when not is_struct(map) -> map
+        _other -> %{}
+      end
+
+    hidden = hidden_custom_fields(source, opts)
+
+    if is_list(grant) and not FieldAccess.per_key?(grant) and "custom_fields" not in grant do
+      {nil, ["custom_fields"]}
+    else
+      {kept, withheld} = filter_custom_fields(values, grant, hidden)
+      {kept, Enum.uniq(withheld ++ Enum.map(hidden, &FieldAccess.key([&1])))}
+    end
+  end
+
+  @doc """
+  `values` (a `custom_fields` map) split by what an editor holding write
+  `grant` and a read restriction hiding `hidden` may write: `{kept, withheld}`,
+  `withheld` the `custom_fields.<name>` entries of the non-blank values left
+  out. A top-level key only — a group is carried whole or not at all.
+  """
+  @spec filter_custom_fields(map(), [String.t()] | nil, [String.t()]) ::
+          {map(), [String.t()]}
+  def filter_custom_fields(values, grant, hidden) do
+    per_key? = FieldAccess.per_key?(grant)
+
+    {kept, dropped} =
+      Enum.split_with(values, fn {key, _value} ->
+        key = to_string(key)
+        key not in hidden and (not per_key? or FieldAccess.writable?(grant, [key]))
+      end)
+
+    withheld =
+      for {key, value} <- dropped, not blank?(value), do: FieldAccess.key([to_string(key)])
+
+    {Map.new(kept), Enum.sort(withheld)}
+  end
+
+  @doc """
+  The private custom fields the acting editor's read restriction hides on
+  `source`'s type (`[]` for an admin, an actor-less caller, or no restriction).
+  """
+  @spec hidden_custom_fields(struct(), keyword()) :: [String.t()]
+  def hidden_custom_fields(source, opts) do
+    actor = Keyword.get(opts, :actor)
+    tenant = Keyword.get(opts, :tenant)
+
+    with %{} <- actor,
+         :editor <- Scoping.effective_tier(actor, tenant) do
+      HiddenFields.names(actor, source, tenant)
+    else
+      _ -> []
+    end
+  end
+
+  @doc """
+  An import's `attrs` for a new `kind` record, with its `custom_fields`
+  filtered to what the acting editor may write (#2281): the keys their grant
+  names, none of the private ones their read restriction hides. Returns
+  `{attrs, withheld}`; an admin, an actor-less run and an editor with neither a
+  per-key grant nor a read restriction pass through untouched (an import is
+  not held to the original whole-attribute grants, as before).
+  """
+  @spec import_attrs(map(), atom() | String.t(), keyword()) :: {map(), [String.t()]}
+  def import_attrs(%{custom_fields: %{} = values} = attrs, kind, opts) do
+    actor = Keyword.get(opts, :actor)
+    tenant = Keyword.get(opts, :tenant)
+
+    with %{} <- actor,
+         :editor <- Scoping.effective_tier(actor, tenant),
+         %{type: type} = descriptor <- ContentTypes.get(kind, tenant) do
+      org_id = Accounts.org_id(tenant)
+      type_name = to_string(type)
+      scope = if match?(%{source: :dynamic}, descriptor), do: descriptor.definition.id, else: type
+      grant = Scoping.field_grant(actor, org_id, type_name)
+      hidden = HiddenFields.names_for_scope(actor, org_id, scope, type_name)
+
+      if FieldAccess.per_key?(grant) or hidden != [] do
+        {kept, withheld} = filter_custom_fields(values, grant, hidden)
+        {Map.put(attrs, :custom_fields, kept), withheld}
+      else
+        {attrs, []}
+      end
+    else
+      _ -> {attrs, []}
+    end
+  end
+
+  def import_attrs(attrs, _kind, _opts), do: {attrs, []}
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?([]), do: true
+  defp blank?(%{} = map), do: map_size(map) == 0
+  defp blank?(_value), do: false
 
   @doc """
   The load a caller must request so `tag_ids/1` sees a real list rather than

@@ -141,9 +141,11 @@ Measured on 2026-10-24 against `main` at `c4946b059` (the feed's server side,
   with up to 1,000 feed subscribers. The firing queue never held more than
   one job.
 - **10,000 feed subscribers slow the publish itself**: publish p95
-  went from 36 ms to 357 ms, and p99 from 81 ms to 1.5 s. The feed broadcasts
-  from the publisher's own process, so the editor's request pays for the
-  fan-out. Filed as #2083, for 2.2.
+  went from 36 ms to 357 ms, and p99 from 81 ms to 1.5 s. The feed broadcast
+  from the publisher's own process, so the editor's request paid for the
+  fan-out. #2083 moved the local fan-out to a relay: p99 is now 143 ms, but
+  p95 is still about four times the 0-subscriber leg (see
+  [With the feed relay](#with-the-feed-relay)).
 - **The fan-out goes the other way.** One live edit of the story re-fires
   every update that references it: 486–513 re-fires, drained in 1.4–1.7 s,
   at about 30 queries and 20 commits each. Its single feed event lists all
@@ -169,7 +171,7 @@ Measured on 2026-10-24 against `main` at `c4946b059` (the feed's server side,
 Milliseconds. "Fire" runs from publish start to the update's `{:fired, …}`
 broadcast, which is sent once its artifacts are persisted. "Feed event" runs
 from publish start to the feed's `published` event (its telemetry, which
-fires once the broadcast has been sent). "Last subscriber" is when the last
+fires once the broadcast had been sent, before #2083). "Last subscriber" is when the last
 of the N subscribers received that event. Query and commit figures are per
 update, net of an idle baseline taken over 300 s after the legs (13.1
 queries/s, 9.7 commits/s).
@@ -234,10 +236,52 @@ update.
   content.
 - **Fan-out to many subscribers belongs off the publish path** (#2083).
   With 1,000 in-BEAM subscribers the cost is lost in the noise. With
-  10,000 it multiplies publish latency by ten. A bare `Phoenix.PubSub`
+  10,000 it multiplied publish latency by ten. A bare `Phoenix.PubSub`
   broadcast to 10,000 idle processes takes about 20 ms, and about 90 ms when
   each does a little work per event. Real transports do more per event than
-  these subscribers do.
+  these subscribers do. Moving the sends to a relay removed the tail but not
+  the whole cost; see below.
+
+### With the feed relay
+
+`KilnCMS.Delivery.Feed.publish/4` no longer delivers to this node's
+subscribers itself: it hands the event to the site's relay
+(`KilnCMS.Delivery.Feed.Relay`) in one cast, and the relay broadcasts it
+locally. Remote nodes still get one send each from the publisher.
+
+Measured on 2026-11-06/07 on the `feat/2083-feed-relay` branch, same machine,
+with `BENCH_DURATION=600 BENCH_SUBSCRIBERS=0,10000
+scripts/benchmarks/live_blog.sh`. Both legs ran in the same session.
+**These are 10-minute legs**, against 30 minutes for the table above, so
+compare them with each other first and with the `main` figures only roughly.
+
+Milliseconds. "Feed event" now runs from publish start to the hand-off to
+the relay, not to the broadcast.
+
+| Feed subscribers | Updates | Publish p50 / p95 / p99 | Fire p95 | Feed event p95 | Last subscriber p50 / p95 |
+|---|---|---|---|---|---|
+| 0 | 171 | 24.8 / 32.9 / 36.9 | 60.8 | 52.9 | – |
+| 10,000 | 170 | 108.6 / 123.5 / 143.1 | 152.7 | 49.5 | 138.3 / 149.2 |
+
+On `main` (the table above) the 10,000-subscriber leg had publish p95
+356.8 ms and p99 1,473.8 ms, and the 0-subscriber leg p95 35.9 ms.
+
+- **The send loop is off the publisher.** The hand-off happens about the
+  same time into the publish at both sizes (feed event p95 52.9 and 49.5 ms),
+  so the publisher no longer pays per subscriber to deliver.
+- **The tail is gone.** 10,000-subscriber publish p99 fell from 1,473.8 ms
+  to 143.1 ms.
+- **The goal of #2083 is not met.** It asked for 10,000-subscriber publish
+  p95 within noise of the 0-subscriber leg; it is 123.5 ms against 32.9 ms.
+  After the hand-off, the rest of the publish (the other `after_transaction`
+  hooks, the reply) waits in the scheduler run queues behind 10,000
+  subscribers made runnable at once, each of which updates one shared ETS
+  counter. Fire p50 rises the same way, from 47 to 141 ms: the whole node
+  is busy for about 140 ms per event, not just the publisher.
+- **What could close the gap.** Pacing the relay's local fan-out in chunks
+  (which needs `Registry.dispatch` on PubSub's internals, or its deprecated
+  custom dispatcher API), or having the 2.2 transports pace or batch
+  delivery. Neither is done.
 
 ### Rerunning
 
@@ -553,6 +597,116 @@ lists every knob. A laptop is not a production server: read these numbers as
 an order of magnitude and as a regression baseline, not as capacity.
 Compare with the delivery baseline in [`performance.md`](performance.md#baseline),
 which measured a single hot document.
+
+## Custom-field filters at 100k rows
+
+**Measured for #2291; not a v1.0 metric.** Does a GIN index on `custom_fields`
+speed up `custom_filter` / `custom_sort`, and what does it cost? Measured on
+2026-11-06 against the work tree of #2291 (not yet released).
+
+### What was found
+
+- With the old `(custom_fields -> name) = value` predicate the index is
+  **never used** (variant b below: every plan is a sequential scan or the
+  published-feed index). The predicate is now `custom_fields @>
+  jsonb_build_object(name, value)` for positive `eq` / `in` (and the list and
+  media/reference equivalents), which a GIN `jsonb_path_ops` index serves.
+- With both, a selective filter drops from about 40 ms to about 3 ms (page of
+  20, 100,000 rows in the big tenant). The planner still picks the index at 30%
+  and 50% selectivity, at about the cost of the sequential scan it replaces: no
+  regression showed up there, within the noise of this run.
+- A forced generic plan (`plan_cache_mode = force_generic_plan`) keeps using
+  the index, so the bound field name does not defeat it after the fifth
+  execution.
+- Not accelerated, and not meant to be: `not_eq`, `gt`/`gte`/`lt`/`lte`,
+  `ilike`, `null`, `custom_sort` (all sequential scans in every variant).
+  `not_eq` is deliberately left on the old `->` form: an absent key must stay
+  excluded from it.
+- The index is 13.6 MB per 52 MB of heap, per content table. Bulk insert and
+  bulk `custom_fields` updates of 20,000 rows ran roughly 25% slower with it
+  (medians of three rounds); 200 saves through `update_page` were 10-35%
+  slower, inside the run-to-run noise. `custom_fields` is rewritten on every
+  save, so no update is a heap-only tuple once it is indexed.
+
+### How it was measured
+
+| | |
+|---|---|
+| Machine | Apple M5 Pro, macOS; client and PostgreSQL 17 on the same machine |
+| Other load | **Heavy.** Load average 70+ from other sessions during the run; absolute times are inflated and p95 has outliers. Read the ratios, and rerun on a quiet host |
+| Build | `MIX_ENV=test`, plain connection pool of 10, 4 schedulers, lean build |
+| Database | Its own, `kiln_cms_test_bench_cf`, dropped after the run |
+| Corpus | 100,000 pages and 100,000 entries cloned in SQL from one published row; 5 tenants (80% in the big one); 5% of rows with wrong types and most keys absent; string, boolean, integer, date, multiple select and media fields |
+| Queries | Each through `list_published_pages` / `list_published_entries` with `custom_filter` / `custom_sort`, a page of 20, 200 timed runs. The plan is `EXPLAIN (ANALYZE)` of the SQL the read ran, once as planned and once with a forced generic plan |
+| Variants | a: no index. b: GIN `jsonb_path_ops`. Each on the old and on the containment predicate. The index exists only in the bench database |
+
+### Results
+
+Pages, big tenant, p50 / p95 ms:
+
+| Query | a, `->` | b, `->` + GIN | a, `@>` | c, `@>` + GIN |
+|---|---|---|---|---|
+| eq, 1 row | 40.7 / 62.0 | 43.5 / 63.6 | 46.8 / 62.3 | **2.6 / 3.4** |
+| eq, 30% (grade) | 43.3 / 60.9 | 49.4 / 63.7 | 63.7 / 77.9 | 32.1 / 174.8 |
+| eq, boolean 50% | 50.7 / 203.3 | 50.5 / 61.5 | 73.8 / 184.9 | 44.2 / 53.3 |
+| `in` of 3 (15%) | 76.9 / 102.2 | 69.6 / 86.3 | 88.1 / 167.9 | **20.3 / 27.7** |
+| list contains, rare | 30.7 / 52.3 | 34.2 / 104.8 | 58.5 / 81.6 | **2.7 / 4.1** |
+| list contains, 16% | 32.3 / 94.7 | 41.8 / 59.2 | 63.6 / 148.1 | 25.3 / 31.1 |
+| media id, 1 row | 25.8 / 31.9 | 30.6 / 46.3 | 72.4 / 92.6 | **2.6 / 3.2** |
+| range, 1% | 30.8 / 45.4 | 23.8 / 35.5 | 28.9 / 36.4 | 20.8 / 24.4 |
+| `not_eq` | 64.8 / 80.5 | 36.2 / 65.9 | 53.1 / 58.5 | 30.3 / 43.3 |
+| sort, limit 20 | 43.6 / 112.7 | 45.0 / 79.7 | 44.7 / 68.5 | 53.7 / 116.2 |
+
+The entries tier and the small tenant follow the same shape; the full tables
+are what the script prints. The small tenant is already fast without the
+index (5-11 ms), because the planner seeks by slug or tenant there.
+
+### Rerunning
+
+```bash
+MIX_ENV=test MIX_TEST_PARTITION=_bench_cf mix ash.setup
+CF_VARIANT=a MIX_ENV=test MIX_TEST_PARTITION=_bench_cf mix run --no-start scripts/benchmarks/custom_fields_index.exs
+CF_VARIANT=b MIX_ENV=test MIX_TEST_PARTITION=_bench_cf mix run --no-start scripts/benchmarks/custom_fields_index.exs
+dropdb kiln_cms_test_bench_cf
+```
+
+The first run seeds (about a minute); each run takes about ten minutes, most
+of it the write section. Knobs (`CF_ROWS`, `CF_RUNS`, `CF_WRITE_ROWS`,
+`CF_WRITE_UPDATES`) are listed at the top of the script. Use `--no-start`: the
+test config's sandbox pool drops a connection held for 120 s.
+
+## Range and sort indexes for custom fields
+
+**Measured for #2359; not a v1.0 metric.** What do the optional btrees of
+`config :kiln_cms, :indexed_custom_fields` buy, and what do they cost?
+Measured on 2026-11-10, PostgreSQL 17 on an Apple laptop with other sessions
+running, so read the ratios.
+
+| | |
+|---|---|
+| Table | A stand-in with the columns the queries touch (`id`, `org_id`, `title`, `custom_fields`, `archived_at`), not the real `pages`: 100,000 rows, 80% in the big tenant, `price` (0-100,000) and `rating` (0-50) integers, a GIN `jsonb_path_ops` index. The real table is wider, so a scan there costs more |
+| Indexes | `(org_id, <CASE expression> ASC NULLS LAST)` and `DESC NULLS LAST` for `price` and `rating`: four btrees |
+| Queries | The SQL Kiln issues for `custom_filter[price][gt]=99000` (849 rows) and `custom_sort=-price` with a page of 20, in the big tenant, `EXPLAIN (ANALYZE)` |
+
+| | Without | With |
+|---|---|---|
+| range, 849 rows | 17.4 ms (Seq Scan) | 0.6 ms (Bitmap Index Scan) |
+| sort, limit 21 | 16.9 ms (parallel Seq Scan, top-N sort) | 1.2 ms (Index Scan, Incremental Sort) |
+| size | heap 16 MB, GIN 6.2 MB | each btree 5.8 MB (about 36% of the heap) |
+| 20,000 saves leaving the field alone | 115 ms (GIN only) | 683 ms (GIN + 4 btrees) |
+| 100,000 inserts | 941 ms (GIN only, empty table) | 1,613 ms (GIN + 4 btrees, 100,000 rows present) |
+
+The Kiln test (`test/kiln_cms/cms/custom_field_range_index_test.exs`, tag
+`table_lock`) asserts the same plans on 20,000 real rows of `pages` and
+`entries` at default planner settings, replaying the issued SQL as a prepared
+statement ten times and, for the sort, as a forced generic plan. With a bound
+field name instead of the literal, the forced generic plan of the sort falls
+back to a sequential scan; the five-then-ten replay alone did not show it, so
+the test does both. A range under a forced generic plan is not asserted: its
+bound value is what a generic plan cannot see, and the name is not the cause.
+
+Not measured: the 1,000,000-row case, and a published-only sort on a table with
+many drafts (the second filter is not in the index).
 
 ## Test coverage over 80%
 

@@ -185,7 +185,8 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
   A plugin-contributed custom field type (test fixture, D18): a 1–5 star
   rating. Exercises the field-type registry end to end — the fields admin
   offers it, `ApplyCustomFields` dispatches writes to `cast/2`, and the
-  content editor renders a number input with the declared min/max.
+  content editor renders a number input with the declared min/max. It also
+  offers a choice of editor input (`c:Kiln.FieldType.widgets/1`, #2284).
   """
   use Kiln.FieldType
 
@@ -210,8 +211,19 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Rating do
   @impl Kiln.FieldType
   def input_type, do: "number"
 
+  # A choice of editor input (#2284): the plain number box (the default) or
+  # stars. Only the stars widget changes the markup, so a field that never
+  # picked one renders exactly as before the type offered a choice.
   @impl Kiln.FieldType
-  def input_attrs(_definition), do: %{min: 1, max: 5}
+  def widgets(_definition), do: [:number, {:stars, "Stars"}]
+
+  @impl Kiln.FieldType
+  def input_attrs(definition) do
+    case Kiln.FieldType.widget(definition, __MODULE__) do
+      "stars" -> %{min: 1, max: 5, "data-widget": "stars"}
+      _number -> %{min: 1, max: 5}
+    end
+  end
 
   @doc """
   A word form of the rating, for slug/alias patterns (#804).

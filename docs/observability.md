@@ -64,6 +64,304 @@ not on this event: they read the stored analytics tables, not the telemetry
 stream. Referrer attribution is off by default (`KILN_ANALYTICS_REFERRERS`).
 See [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
 
+## Blocked addresses
+
+`kiln_cms.ip_block.refused.count` counts requests and socket connects refused by
+a site's IP block list ([ip-blocking.md](ip-blocking.md), #2242). It is tagged by
+`surface`: `http`, `live`, `gql`, `collab` or `bridge`. The address is deliberately
+not a tag, a metadata field or a log line, so the counter says that blocking is
+happening and where, not who. The underlying telemetry event is
+`[:kiln_cms, :ip_block, :refused]` (measurement `count`, metadata `surface`).
+
+Useful Grafana panel: `sum(rate(kiln_cms_ip_block_refused_count[5m])) by (surface)`.
+`kiln_cms.scanner_guard.blocked.count` counts addresses the scanner guard
+blocked by itself ([ip-blocking.md](ip-blocking.md#block-scanners-automatically),
+#2253), tagged `reason`: `miss_threshold` or `bait_path`. The underlying event is
+`[:kiln_cms, :scanner_guard, :blocked]` (measurement `count`, metadata `reason`).
+The address is not a tag. A block that is skipped (rule cap, database fault) logs a
+warning, `ScannerGuard: block skipped, ...`, without an address.
+
+A rise in the refused counter right after you add a rule is expected. A rise on `http` with no rule
+change, or a rule that suddenly matches everyone (a proxy not declared in
+`TRUSTED_PROXIES`), is worth a look.
+
+## Admin allowlist refusals
+
+`kiln_cms.admin_allowlist.refused.count` counts requests, LiveView joins and
+collaboration connects refused by a site's
+[admin allowlist](admin-allowlist.md) (#2248). It is tagged `surface` (`http`,
+`api`, `live` or `collab`) and `reason`: `not_listed` (the address is not on
+the list) or `unavailable` (the list could not be read, so the gate failed
+closed). The address is not a tag. The underlying telemetry event is
+`[:kiln_cms, :admin_allowlist, :refused]` (measurement `count`, metadata
+`surface` and `reason`).
+
+Useful Grafana panel:
+`sum(rate(kiln_cms_admin_allowlist_refused_count[5m])) by (surface, reason)`.
+
+Any sustained `reason="unavailable"` is worth an alert: the console and sign-in
+are answering `503` on that site. A burst of `not_listed` right after a save is
+someone on a network the list no longer covers; one with no change to the list
+can be an admin whose address changed, or a proxy that stopped being trusted.
+
+## Sign-in unlock requests
+
+A request for a [sign-in unlock link](account-administration.md#lift-a-sign-in-pause-by-email)
+(#2250) is answered at once and handed to a task under its own supervisor,
+`KilnCMS.Accounts.SignInUnlock.TaskSupervisor`, which runs at most 20 at a
+time. When it is full, or restarting, the request is dropped: the person was
+already shown the usual answer and can ask again. Each drop emits
+`[:kiln_cms, :accounts, :sign_in_unlock_shed]` (measurement `count`, always
+`1`; no metadata, so no address) and, at most once a minute, logs a warning:
+
+```text
+Dropped a sign-in unlock request: the unlock task supervisor is full. Further drops are not logged for a minute.
+```
+
+The event is not in `KilnCMSWeb.Telemetry.metrics/0`, so it is not exported
+to Prometheus; attach a `:telemetry` handler to count it. Each task looks up
+one account and sends at most one mail, so the supervisor fills only under a
+flood of requests to `/sign-in/unlock`, which the per-IP `:auth` limit (40 a
+minute) already slows. Sustained drops mean a flood from many addresses, or
+tasks running slowly because the database is; check both before anything
+else.
+
+A request whose task fails logs `Sign-in unlock request failed: <error
+module>` or `Sign-in unlock request exited`, at `warning`, and never the
+address. A mailed link, a redeemed one and a refused one are recorded in the
+site's [security log](security-events.md#what-is-recorded), not as telemetry.
+
+## Delivery client classes
+
+Every request on the `:delivery` rate limit (public pages, `/search`, media
+downloads and streams) emits `[:kiln_cms, :delivery, :client_class]` from
+`KilnCMSWeb.Plugs.RateLimit`, with measurement `count` (always `1`) and two
+metadata fields ([bot-budgets.md](bot-budgets.md), #2243):
+
+- `:class` -- the class the request was **charged** as: `:browser`,
+  `:search_engine`, `:ai_crawler`, `:declared_bot` or `:empty`. This is what the
+  `User-Agent` claims, except that since #2254 a search-engine claim that DNS
+  has proven false is charged, and reported, as `:empty` (see
+  [Crawler verification](#crawler-verification)).
+- `:result` -- `:allowed`, or `:throttled` when that class's ceiling refused it.
+
+The user agent, the address and the org are deliberately not in the event. It is
+exported as the counter `kiln_cms.delivery.client_class.count` (Prometheus:
+`kiln_cms_delivery_client_class_count`), tagged `class` and `result`: at most ten
+series.
+
+Useful Grafana panel: `sum(rate(kiln_cms_delivery_client_class_count[5m])) by (class, result)`.
+It shows the traffic mix, and which classes are being refused. A steady
+`declared_bot` or `empty` throttle rate is the feature working. A `search_engine`
+throttle rate after a site lowered that class can slow indexing. A sudden
+`browser` throttle rate is ordinary flood limiting, as before. Apart from
+search-engine claims proven false, the class is only a claim, so read the split
+as "what clients say they are". An `empty` series that grows after upgrading to
+#2254 may be spoofed search-engine claims; the
+`kiln_cms_delivery_unverified_crawler_count{reason="failed"}` series below
+separates them.
+
+## Crawler verification
+
+A `:delivery` request whose user agent names a search engine is checked against
+DNS (#2254, `KilnCMS.CrawlerVerification`; see
+[bot-budgets.md](bot-budgets.md#verified-search-engines)). Three events cover
+it. None carries an address, a hostname, a user agent or an org.
+
+| Event | Emitted | Measurements | Metadata |
+|---|---|---|---|
+| `[:kiln_cms, :delivery, :unverified_crawler]` | by `KilnCMSWeb.Plugs.RateLimit`, once per search-engine request whose claim is not verified | `count` (always `1`) | `engine`, `reason` |
+| `[:kiln_cms, :crawler_verification, :lookup]` | once per finished background lookup | `duration` (native units) | `engine`, `result`, `reason` |
+| `[:kiln_cms, :crawler_verification, :skipped]` | once per lookup that was not started | `count` (always `1`) | `engine`, `reason` |
+
+- `engine` -- `:google`, `:bing`, `:duckduckgo`, `:baidu`, `:yandex` or
+  `:apple`: what the user agent claims.
+- `reason` on `unverified_crawler` -- `:failed` (proven false: charged as
+  `empty`), `:pending` (a lookup is running or was just started), `:error` (the
+  last lookup got no DNS answer), `:skipped` (no lookup could start),
+  `:unverifiable` (DuckDuckBot) or `:not_public` (a private or
+  `TRUSTED_PROXIES` address, or a forwarding header nothing trusts). Every
+  reason but `:failed` keeps the search-engine class, held to the browser
+  limit. A verified claim, and every claim while `KILN_CRAWLER_VERIFICATION` is
+  off, emits nothing here.
+- `result` on `lookup` -- `:verified`, `:rejected`, `:timeout` (the 3-second
+  deadline, or the resolver's own timeout) or `:error`. Its `reason` is `nil`,
+  the rejection (`:no_ptr`, `:wrong_domain`, `:forward_mismatch`) or the error
+  (`:timeout`, `:servfail`, `:refused`, `:formerr`, `:notimp`,
+  `:econnrefused`, `:nxdomain`, or `:other`).
+- `reason` on `skipped` -- `:busy` (16 lookups already running on this node)
+  or `:rate_limited` (the address's network, or the node, used its lookup
+  budget for the minute).
+
+Exported metrics (Prometheus names in brackets):
+
+- `kiln_cms.delivery.unverified_crawler.count`, tagged `engine` and `reason`
+  (`kiln_cms_delivery_unverified_crawler_count`).
+- `kiln_cms.crawler_verification.lookup.count`, tagged `engine` and `result`
+  (`kiln_cms_crawler_verification_lookup_count`).
+- `kiln_cms.crawler_verification.lookup.duration`, a distribution in
+  milliseconds tagged `result`
+  (`kiln_cms_crawler_verification_lookup_duration_bucket` / `_sum` / `_count`).
+- `kiln_cms.crawler_verification.skipped.count`, tagged `reason`
+  (`kiln_cms_crawler_verification_skipped_count`).
+
+Useful panels:
+
+- `sum(rate(kiln_cms_crawler_verification_lookup_count[5m])) by (result)`:
+  a real crawler's lookups end `verified`, a spoofer's `rejected`. A steady
+  `timeout` or `error` share means the node cannot reach its resolver.
+- `sum(rate(kiln_cms_delivery_unverified_crawler_count[5m])) by (reason)`:
+  `failed` is spoofed claims being charged as `empty`; a large `not_public`
+  share means the node sees a proxy's address (set `TRUSTED_PROXIES`).
+- `sum(rate(kiln_cms_crawler_verification_skipped_count[5m])) by (reason)`:
+  should be near zero. A steady `busy` rate means lookups are slow.
+
+Two warnings are also logged, each once per node: the first time the
+concurrency limit turns a lookup away, and after 20 lookups in a row got no DNS
+answer (that one names `KILN_CRAWLER_VERIFICATION=false`).
+
+## Breached-password checks
+
+Every lookup the breached-password check makes (#2240) emits one event,
+`[:kiln_cms, :password, :breach_check]`, from
+`KilnCMS.Accounts.Changes.CheckBreachedPassword`. Nothing is emitted when the
+policy resolves to off (including `BREACHED_PASSWORD_CHECK=false`), and nothing
+identifying the password, its hash, the account or the org is ever in the event.
+
+| Event | Fired by | Metadata |
+|-------|----------|----------|
+| `[:kiln_cms, :password, :breach_check]` | a register, change-password, reset or first-run-setup action, once per lookup | `result`, `action`, `policy`, `enforcement`, `reason` |
+
+- **Measurements:** `:duration` (native units) and `:count` (always `1`).
+- `:result` -- `:clean`, `:breached`, or `:error` (could not tell).
+- `:action` -- `:register`, `:change`, `:reset` or `:bootstrap`.
+- `:policy` -- the policy applied to this account: `:warn` or `:block`.
+- `:enforcement` -- `:blocked`, `:warned`, or `:allowed` (clean, or an error: the check fails open).
+- `:reason` -- on `:error` only: `:timeout`, `:http_status`, `:transport`,
+  `:blocked` or `:malformed`; otherwise `nil`.
+
+A rising share of `result: :error` means the node cannot reach
+`api.pwnedpasswords.com` (egress firewall, outage) and passwords are being
+accepted unchecked. The counter `kiln_cms.password.breach_check.count`
+(tags `result`, `action`, `enforcement`) is defined in
+[`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex); alert on
+the `result="error"` share.
+
+## Human verification
+
+The adaptive sign-in and registration check and the check on public forms
+([human-verification.md](human-verification.md), #2249) emit two events. No
+address, account, token or anything the provider echoed is ever in either.
+
+| Event | Fired by | Measurements | Metadata |
+|-------|----------|--------------|----------|
+| `[:kiln_cms, :challenge, :decision]` | `KilnCMS.Challenge.Gate`, once per password sign-in or registration that the check applies to, and once per submission to a form that asks for a check | `count` (always `1`) | `action`, `decision` |
+| `[:kiln_cms, :challenge, :verify, :stop]` | `KilnCMS.Challenge.verify/4`, once per token check (only when a check is required) | `duration` (native units) | `provider`, `action`, `result` |
+
+- `:action` -- `:sign_in`, `:register` or `:form`.
+- `:decision` -- `:not_required` (under both thresholds), `:passed`,
+  `:missing` (a check was required and no token came), `:failed` (the provider
+  refused the token), `:fail_open` (the provider could not be asked and the
+  attempt was let through) or `:fail_closed` (could not be asked, and this
+  sign-in was refused because its address is past `ip_closed_after`).
+  Registration is never `:fail_closed`. A `POST /api/auth/sign_in` with
+  `CHALLENGE_API_SIGN_IN` off, or anything with the feature off, emits nothing.
+- For `action: :form` the decision is what happened to the submission:
+  `:passed`; `:failed` (refused, the visitor got the form back); or one of
+  the three *held* outcomes, stored in Spam and not acted on: `:missing` (no
+  token), `:wrong_host` (solved on a host this deployment does not serve) or
+  `:unavailable` (the provider could not be asked). A form never fails open
+  or closed. A form that does not ask, a submission with a field error and a
+  tripped honeypot emit nothing.
+- `:provider` -- the id the operator chose: `"turnstile"`, `"recaptcha"`,
+  or a plugin provider's id.
+- `:result` -- `:passed`; a refusal: `:missing` and `:malformed` (Kiln's own
+  check before the provider is asked), `:invalid`, `:expired`,
+  `:hostname_mismatch`, `:action_mismatch`; or why the provider could not be
+  asked: `:timeout`, `:transport`, `:http_status`, `:malformed_response`,
+  `:not_configured` (the secret is unreadable or the provider rejected it),
+  `:crashed`. A provider answering outside its contract is counted
+  conservatively: a refusal Kiln does not know is `:invalid`, and any other
+  unexpected answer is `:crashed`. With reCAPTCHA a wrong secret shows as
+  `:invalid`, not `:not_configured`: Google answers it with the code for a
+  bad token.
+
+Metrics, in [`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex):
+
+- `kiln_cms.challenge.decision.count`, tagged `action` and `decision`;
+- `kiln_cms.challenge.verify.stop.count`, tagged `provider`, `action` and
+  `result`;
+- `kiln_cms.challenge.verify.stop.duration`, a distribution in milliseconds,
+  tagged `provider`.
+
+Useful Grafana panel:
+`sum(rate(kiln_cms_challenge_decision_count[5m])) by (action, decision)`.
+
+Alert on a sustained `decision="fail_open"` share: tokens are not being
+checked, and sign-ins that needed a check are getting through without one.
+On forms, watch `action="form"`: a rise in `unavailable` is the provider
+path again (submissions are being held, not admitted), and a steady
+`wrong_host` is almost always a headless site whose host is not in
+`CHALLENGE_HOSTNAMES`. The log then says "A form submission's
+human-verification token was solved on "www.example.org", which this
+deployment does not serve; it was held as spam. If that is your own site,
+add it to CHALLENGE_HOSTNAMES." at most once a minute per node, naming the
+host the provider reported. A high `missing` share on a form usually means a
+headless front end is not sending `_kiln_challenge`.
+`result="not_configured"` in the verify counter is the secret (wrong or
+unreadable); `timeout` or `transport` is the network path to the provider
+(`challenges.cloudflare.com` for Turnstile, `www.recaptcha.net` for
+reCAPTCHA). With reCAPTCHA, `result="invalid"` on nearly every check, with
+no `passed`, points at a wrong secret first. Any `fail_closed` means password sign-in is being
+refused for some addresses, and the log says "Human verification is
+unavailable (...); refusing password sign-ins from client addresses past the
+failure threshold until the provider answers." at most once a minute per node.
+
+Configuration problems are reported at boot through `KilnCMS.Config.Report`
+(a log warning and a Sentry message, grouped by source), so a misnamed
+provider is visible before anyone signs in:
+
+| Sentry source | When |
+|---|---|
+| `CHALLENGE_PROVIDER` | `CHALLENGE_PROVIDER` is not a provider id ("CHALLENGE_PROVIDER is set to an unrecognized value ..."), names an id no installed provider answers to ("... but names no installed provider (installed: turnstile, recaptcha) ..."), or names a plugin provider that fails the provider contract ("... does not meet the provider contract: ..."). Human verification is off in all three. |
+| `challenge_response_fields` | An installed plugin's provider posts its token under a field the request log does not filter ("A human-verification provider posts its token as ..., which the request log does not filter: add it to config :phoenix, :filter_parameters."). Add it; see [Privacy](human-verification.md#privacy). |
+
+A missing site key or secret is not a boot warning: it is logged ("... has no
+site key (CHALLENGE_SITE_KEY) ...") at most once a minute per node, when a
+page first asks.
+
+## Security posture checks
+
+Each check on the [Security posture](security-posture.md) page (#2252) emits
+an event when it finishes, from `KilnCMS.Security.Posture.Runner`. The events
+carry the check's id and outcome, never what it found.
+
+| Event | Fired by | Measurements | Metadata |
+|-------|----------|--------------|----------|
+| `[:kiln_cms, :security_posture, :check, :stop]` | every check, once per report | `duration` (native units) | `id`, `status`, `error` |
+| `[:kiln_cms, :security_posture, :check, :exception]` | a check that raised, threw or exited, in addition to `:stop` | `duration` (native units) | `id`, `kind` |
+
+- `:status` -- `:pass`, `:warn`, `:fail`, `:unknown`, `:n_a`, or `:error`
+  when the check produced no result.
+- `:error` -- with `status: :error`: `:crashed`, `:timeout`,
+  `:invalid_result` or `:busy` (no room under the checks' task supervisor);
+  otherwise `nil`.
+- `:kind` -- `:error`, `:throw` or `:exit`.
+
+No metric is defined for these by default. A crashed check is also logged,
+with its stack trace: "Security posture check `<id>` (`<module>`) failed
+with ...". A plugin check the core skips is logged at warning level when the
+page runs ("Security posture: ... is not a usable check and is skipped", "...
+takes the reserved id ...", "... repeats the id ...").
+
+These events say how the checks ran, not what the site's settings are. To
+alert on the posture itself (a line turning **Fix now**), poll
+`GET /api/security/posture` with a site administrator's read-only API key:
+see [Monitor the posture from a script](security-posture.md#monitor-the-posture-from-a-script)
+and the [API guide](api.md#security-posture-monitoring). A run for that
+endpoint emits the same events, at most once per site and scope set every
+30 seconds on each node.
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in
@@ -156,7 +454,7 @@ Every label is bounded:
 - **`route`** is the router pattern (`/api/content/:type/:slug`), never the
   request path.
 - **`queue` and `worker`** are Oban's.
-- **`result`, `status`, `surface`, `mode`, `action` and `event`** are small
+- **`result`, `status`, `surface`, `mode`, `action`, `event` and `class`** are small
   enumerations.
 - **The content-type label (`type`, `kind`)** keeps a compiled type's name but
   folds every admin-defined type into `dynamic`. Admin-defined types are

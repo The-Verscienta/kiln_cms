@@ -148,8 +148,15 @@ defmodule KilnCMSWeb.Plugs.PublicCacheTest do
         |> put_req_header("authorization", "Bearer not-a-jwt")
         |> jsonapi("/api/json/posts?filter[slug]=#{post.slug}")
 
-      assert conn.status == 200
-      assert header(conn, "cache-control") == ["private, no-store"]
+      # A 401 by default since #2161's flip; it must still not be a cacheable
+      # public answer. The escape hatch (`reject_invalid_bearer: false`, served
+      # as anonymous but `private, no-store`) is pinned in
+      # `KilnCMSWeb.RejectInvalidBearerTest`, which may flip global env.
+      assert conn.status == 401
+      assert [cache_control] = header(conn, "cache-control")
+      assert cache_control =~ "private"
+      assert header(conn, "etag") == []
+      assert header(conn, "surrogate-key") == []
     end
 
     test "an unlock grant, x-api-key or cookie is not anonymous either" do

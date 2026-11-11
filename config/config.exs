@@ -58,6 +58,10 @@ config :kiln_cms, Oban,
     # that runs for minutes can't leave a publish or a password-reset email
     # queued behind it.
     backups: 1,
+    # A backup's step chain (#2218), one step at a time per node; the backup
+    # lock makes it one per cluster. The `backups` queue above only runs
+    # legacy jobs enqueued before the upgrade and goes next minor.
+    backup_steps: 1,
     default: 10
   ],
   repo: KilnCMS.Repo,
@@ -86,7 +90,8 @@ config :kiln_cms, Oban,
 # shutdown stays `executing` for ever and, if `unique`, blocks every later
 # enqueue of itself. MUST exceed the longest legitimate job: the rescue is
 # purely time-based, so a live job older than this runs twice. The longest
-# bounded job is a backup (`KilnCMS.Backups.Worker.timeout/1`, 2 h), hence 3 h.
+# bounded job is a backup step (`KilnCMS.Backups.StepWorker.timeout/1`, 2 h),
+# hence 3 h.
 # `false` switches rescuing off (e.g. for Oban Pro's DynamicLifeline).
 # Runtime override: KILN_OBAN_RESCUE_AFTER_MINUTES.
 config :kiln_cms, :oban_rescue_after_minutes, 180
@@ -104,9 +109,11 @@ config :kiln_cms,
     KilnCMS.Newsletter,
     KilnCMS.Automation,
     KilnCMS.Billing,
+    KilnCMS.Backups,
     KilnCMS.Federation,
     KilnCMS.Experiments,
-    KilnCMS.Social
+    KilnCMS.Social,
+    KilnCMS.Security
     # The core stays project-agnostic. A downstream project registers its own
     # content domain (e.g. `MyApp.Catalog`) by appending to this list in its
     # OWN config — it must NOT be listed here, since it isn't compiled into the
@@ -162,7 +169,14 @@ config :kiln_cms, KilnCMS.Backups,
   dir: "/var/backups/kiln",
   media_dir: nil,
   keep_days: 14,
-  stale_after_hours: 36
+  stale_after_hours: 36,
+  # Target ceiling on one media part's input bytes (400 MB) and the exclusion
+  # globs (#2218). Overridden by BACKUP_MEDIA_PART_MB / BACKUP_MEDIA_EXCLUDE.
+  media_part_bytes: 400 * 1_048_576,
+  media_exclude: [],
+  # Each node's backup heartbeat (#2218, `KilnCMS.Backups.Heartbeat`): beats
+  # every 30 s, frees the backup lock from a node that stopped. Off in test.
+  heartbeat?: true
 
 # Media blob storage. Swap the adapter for S3/MinIO in production (configure
 # the bucket/endpoint/credentials in runtime.exs).
@@ -307,6 +321,7 @@ config :kiln_cms, Kiln.Advisory,
   checks: [
     KilnCMS.Seo.Checks.Meta,
     KilnCMS.Seo.Checks.Keyphrase,
+    KilnCMS.Seo.Checks.Indexability,
     KilnCMS.Seo.Checks.Readability,
     # #551 parity gaps. Both are `:info`-only and English-gated: a pixel width
     # is a model of a font Google can change, and a regex-grade passive
@@ -619,6 +634,11 @@ config :kiln_cms, :federation_nonce_sweep_cron, "40 * * * *"
 # `KilnCMS.CMS.HealthSweep.run/0` itself.
 config :kiln_cms, :health_sweep_cron, "30 7 * * *"
 
+# When the security audit log is pruned to each org's retention window (#2241).
+# Daily, off-peak. `false` disables the schedule for a deployment driving
+# `KilnCMS.Security.prune/1` itself.
+config :kiln_cms, :security_log_prune_cron, "20 3 * * *"
+
 # Whether booting enqueues the one-off occurrence backfill (#766). On, because
 # the alternative is an upgrade step a human has to remember, and the feature
 # silently does nothing until they do — the migration cannot fill
@@ -893,7 +913,45 @@ config :phoenix, :json_library, Jason
 # Kept out of the request log: a passphrase, and the bearer grants that ride in
 # a query string for a caller that cannot set headers — a preview token
 # (`?preview_token=`, #1887) and a passphrase grant (`?unlock=`, #496).
-config :phoenix, :filter_parameters, ["password", "passphrase", "preview_token", "unlock"]
+# `invite_token` (#2135): the site-invitation link's path parameter, which
+# accepts the invitation for whoever holds it. This filters the logged params
+# map only; Phoenix.Logger still logs the request path, token included, as it
+# does for `/magic_link` and `/password-reset` tokens.
+# Human verification (#2249). Off until the operator names a provider and its
+# keys (config/runtime/console.exs); the secret defaults to CHALLENGE_SECRET_KEY.
+config :kiln_cms, KilnCMS.Challenge, secret_key: {:env, %{"var" => "CHALLENGE_SECRET_KEY"}}
+
+config :phoenix, :filter_parameters, [
+  "password",
+  "passphrase",
+  "preview_token",
+  "unlock",
+  "invite_token",
+  # A sign-in unlock link's path parameter (#2250); `"unlock"` above already
+  # matches it as a substring, named here so removing that one cannot drop it.
+  "unlock_token",
+  # Human-verification tokens (#2249): ours, and the fields the built-in
+  # providers' own markup posts (reCAPTCHA's always, Turnstile's if it were
+  # ever rendered with its default input). A plugin provider's field is added
+  # at boot when it can be (`KilnCMS.Application`).
+  "challenge_token",
+  "cf-turnstile-response",
+  "g-recaptcha-response",
+  # The same token on a public form submission.
+  "_kiln_challenge"
+]
+
+# The embedded form's human-verification mount (#2249): an esbuild profile of
+# its own, with no splitting, since the embed iframe loads this one file and
+# never app.js. Declared here rather than beside `kiln_cms` above so the line
+# anchors in docs/environment-variables.md stay put; `config` merges the two.
+config :esbuild,
+  kiln_challenge_embed: [
+    args:
+      ~w(js/challenge_static.js --bundle --format=esm --target=es2022 --outdir=../priv/static/assets/js),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
 
 # Error tracking (Sentry). The DSN is only set in config/runtime.exs from the
 # SENTRY_DSN env var, so with no DSN every capture is a no-op — dev, test, and

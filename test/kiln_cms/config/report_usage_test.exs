@@ -47,6 +47,8 @@ defmodule KilnCMS.Config.ReportUsageTest do
       warn_if_ask_egresses
       warn_if_semantic_without_ml
       warn_if_media_unwritable
+      warn_if_admin_allowlist_disabled
+      warn_if_challenge_provider_unusable
     )
 
     assert Enum.sort(Map.keys(functions)) == Enum.sort(expected),

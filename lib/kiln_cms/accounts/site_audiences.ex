@@ -52,7 +52,7 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   Where the account's audiences on a site come from — the three affiliation branches of
   `KilnCMS.Accounts.Scoping.audiences/2`.
   """
-  @type source :: :membership | :legacy | :none
+  @type source :: :membership | :legacy | :none | :pending | :rejected
 
   @doc """
   The audiences `user` reads on `org_id`, and which branch they come from, given
@@ -65,11 +65,17 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   `User.audiences` column: what a save — or the post-deploy
   `KilnCMS.Accounts.LegacyAudiencesWorker` — will carry onto a membership. Until
   then `Scoping` grants such an account nothing (1.0 removed the fallback, #1543).
+
+  A membership that is not `:active` — a registration awaiting approval or
+  rejected (#2251) — answers `{:pending, []}` or `{:rejected, []}`: `Scoping`
+  grants nothing through it, whatever audiences the row holds.
   """
   @spec for_site(map(), [map()], String.t()) :: {source(), [atom()]}
   def for_site(user, memberships, org_id) when is_list(memberships) do
     case Enum.find(memberships, &(&1.organization_id == org_id)) do
-      %{} = membership -> {:membership, list(membership.audiences)}
+      %{status: :active} = membership -> {:membership, list(membership.audiences)}
+      %{status: :rejected} -> {:rejected, []}
+      %{} -> {:pending, []}
       nil when memberships == [] -> {:legacy, list(Map.get(user, :audiences))}
       nil -> {:none, []}
     end
@@ -85,55 +91,63 @@ defmodule KilnCMS.Accounts.SiteAudiences do
   @spec set(map(), String.t(), [atom()], keyword()) ::
           {:ok, :updated | :created} | {:error, term()}
   def set(%{id: user_id} = user, org_id, audiences, opts) when is_binary(org_id) do
-    actor = Keyword.fetch!(opts, :actor)
+    # `:actor`, plus the Ash `:context` (the audit log's request context, #2241).
+    _actor = Keyword.fetch!(opts, :actor)
+    write_opts = Keyword.take(opts, [:actor, :context])
     audiences = normalize(audiences)
 
-    with {:ok, memberships} <- Accounts.list_memberships_for_user(user_id, actor: actor) do
+    with {:ok, memberships} <- Accounts.list_memberships_for_user(user_id, write_opts) do
       case Enum.find(memberships, &(&1.organization_id == org_id)) do
         %{} = membership ->
-          update(membership, audiences, actor)
+          update(membership, audiences, write_opts)
 
         nil ->
-          create(user, org_id, audiences, LegacyAffiliation.unaffiliated?(memberships), actor)
+          create(
+            user,
+            org_id,
+            audiences,
+            LegacyAffiliation.unaffiliated?(memberships),
+            write_opts
+          )
       end
     end
   end
 
-  defp update(membership, audiences, actor) do
+  defp update(membership, audiences, write_opts) do
     with {:ok, _membership} <-
-           Accounts.update_org_membership(membership, %{audiences: audiences}, actor: actor),
+           Accounts.update_org_membership(membership, %{audiences: audiences}, write_opts),
          do: {:ok, :updated}
   end
 
   # A membership-less account on the default org: its standing role and any live
   # grant move onto the membership, so its tier there is what it was.
-  defp create(user, org_id, audiences, true = _legacy?, actor) do
+  defp create(user, org_id, audiences, true = _legacy?, write_opts) do
     if org_id == Accounts.default_org_id() do
       with {:ok, _membership} <-
-             LegacyAffiliation.ensure_default_membership(user,
-               audiences: audiences,
-               actor: actor
+             LegacyAffiliation.ensure_default_membership(
+               user,
+               [audiences: audiences] ++ write_opts
              ),
            do: {:ok, :created}
     else
       # Carry the account onto the default org first — see "A membership-less
       # account edited from another site" in the moduledoc.
-      with {:ok, _carried} <- LegacyAffiliation.ensure_default_membership(user, actor: actor),
-           {:ok, _membership} <- create_viewer(user, org_id, audiences, actor),
+      with {:ok, _carried} <- LegacyAffiliation.ensure_default_membership(user, write_opts),
+           {:ok, _membership} <- create_viewer(user, org_id, audiences, write_opts),
            do: {:ok, :created}
     end
   end
 
   # Already a member elsewhere: it holds no tier here, so the least one.
-  defp create(user, org_id, audiences, false = _legacy?, actor) do
-    with {:ok, _membership} <- create_viewer(user, org_id, audiences, actor),
+  defp create(user, org_id, audiences, false = _legacy?, write_opts) do
+    with {:ok, _membership} <- create_viewer(user, org_id, audiences, write_opts),
          do: {:ok, :created}
   end
 
-  defp create_viewer(user, org_id, audiences, actor) do
+  defp create_viewer(user, org_id, audiences, write_opts) do
     Accounts.create_org_membership(
       %{organization_id: org_id, user_id: user.id, role: :viewer, audiences: audiences},
-      actor: actor
+      write_opts
     )
   end
 

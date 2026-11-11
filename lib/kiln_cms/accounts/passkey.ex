@@ -48,7 +48,34 @@ defmodule KilnCMS.Accounts.Passkey do
     # (docs/demo-mode.md). Admins pass.
     destroy :destroy do
       primary? true
+      # The audit change below reads the destroyed record.
+      require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
+
+      # Audit log (#2241), in the transaction. Whoever removes it is the actor
+      # (the owner, or a platform admin); the owner is the target.
+      change {KilnCMS.Security.Changes.Record,
+              type: :passkey_removed,
+              target: fn record, _changeset -> {"user", record.user_id} end,
+              metadata: fn record, _changeset -> %{"name" => record.name} end}
+    end
+
+    # Accepting a site invitation over an unconfirmed account (#2453): a
+    # passkey whoever registered the address first enrolled must not survive
+    # the invitee setting the account up. System-only, as
+    # `SystemActor.new(:invitations)` from `Changes.ForgetPriorCredentials`,
+    # inside the accept's transaction. Recorded with no actor (the invitee did
+    # not remove it; the system did, because of what the invitee proved).
+    destroy :forget_on_takeover do
+      description "Remove a passkey when an invitation takes over an unconfirmed account (system-only)."
+      require_atomic? false
+
+      change {KilnCMS.Security.Changes.Record,
+              type: :passkey_removed,
+              target: fn record, _changeset -> {"user", record.user_id} end,
+              metadata: fn record, _changeset ->
+                %{"name" => record.name, "via" => "invitation"}
+              end}
     end
 
     # Called by KilnCMS.Accounts.WebAuthn after Wax verified the attestation —
@@ -57,6 +84,18 @@ defmodule KilnCMS.Accounts.Passkey do
     create :register do
       accept [:user_id, :name, :credential_id, :public_key, :sign_count]
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
+
+      # The account's row first, and refused when an invitation took the
+      # account over after the enrolling request loaded it (#2453): the
+      # stranger's session must not land a passkey on the invitee's account.
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover, lock: :share}
+
+      # Audit log (#2241), in the transaction: the credential and its event
+      # commit together. The enrolling user is the actor.
+      change {KilnCMS.Security.Changes.Record,
+              type: :passkey_added,
+              target: fn record, _changeset -> {"user", record.user_id} end,
+              metadata: fn record, _changeset -> %{"name" => record.name} end}
     end
 
     # Post-authentication bookkeeping (clone-detection counter + last use).
@@ -67,13 +106,25 @@ defmodule KilnCMS.Accounts.Passkey do
   end
 
   policies do
+    # System-only, and above the admin bypass: a passing bypass skips every
+    # policy after it, so below it a platform admin would be admitted. Only the
+    # invitations system actor may run it; an admin removes a passkey with
+    # `:destroy` (#2453).
+    policy action(:forget_on_takeover) do
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :invitations, action: :forget_on_takeover}
+    end
+
     bypass KilnCMS.Accounts.Checks.PlatformAdmin do
       authorize_if always()
     end
 
-    # Owners see and manage their own credentials.
+    # Owners see and manage their own credentials. The invitations system
+    # actor lists an unconfirmed account's passkeys to forget them when an
+    # invitation takes the account over (#2453).
     policy action_type(:read) do
       authorize_if expr(user_id == ^actor(:id))
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :invitations, action: :for_user}
     end
 
     policy action(:destroy) do

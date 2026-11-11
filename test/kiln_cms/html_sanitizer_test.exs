@@ -107,6 +107,17 @@ defmodule KilnCMS.HTMLSanitizerTest do
                "<pre><code>a</code><span>b</span></pre>"
     end
 
+    # The renderer adds these after this pass (#2164); an author never sets
+    # them, so a stored `tabindex="-1"` can't take a code block out of reach.
+    test "strips focus and labelling attributes an author puts on a <pre>" do
+      html =
+        ~s(<pre class="highlight" tabindex="-1" role="presentation" aria-label="x">) <>
+          "<code>a</code></pre>"
+
+      assert HTMLSanitizer.sanitize_rich_text(html) ==
+               ~s(<pre class="highlight"><code>a</code></pre>)
+    end
+
     test "preserves safe https / mailto / relative hyperlinks (#148)" do
       https = "https" <> @colon <> "//example.com/read-more"
       mailto = "mailto" <> @colon <> "hi@example.com"

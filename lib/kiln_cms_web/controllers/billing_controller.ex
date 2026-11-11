@@ -27,6 +27,7 @@ defmodule KilnCMSWeb.BillingController do
 
   require Logger
 
+  alias KilnCMS.Accounts.Errors.RegistrationRefused
   alias KilnCMS.Billing
 
   # Start a subscription checkout for the signed-in member.
@@ -125,9 +126,23 @@ defmodule KilnCMSWeb.BillingController do
         {:ok, membership}
 
       {:error, reason} ->
-        Logger.error("billing checkout: could not start membership: #{inspect(reason)}")
-        {:halted, fail(conn)}
+        if RegistrationRefused.reason(reason) == :not_approved do
+          {:halted, awaiting_approval(conn)}
+        else
+          Logger.error("billing checkout: could not start membership: #{inspect(reason)}")
+          {:halted, fail(conn)}
+        end
     end
+  end
+
+  # The account's registration here awaits approval or was rejected (#2251).
+  defp awaiting_approval(conn) do
+    conn
+    |> put_flash(
+      :error,
+      gettext("Your registration on this site hasn't been approved, so you can't join yet.")
+    )
+    |> redirect(to: ~p"/account")
   end
 
   defp create_session(user, tier, membership, conn) do

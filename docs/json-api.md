@@ -231,19 +231,24 @@ GET /api/json/posts/search?query=tea&sort=title  # A → Z, relevance breaks tie
 
 `/…/semantic-search` behaves the same way with cosine distance as the default
 order (overriding it usually defeats the point — but it is not an error).
-`custom_sort` is not accepted on the search routes.
+A custom field can lead the order instead: `custom_sort=-price` on a search
+route, see "Sorting" under "Custom fields" below.
 
 ## Custom fields (`custom_filter` / `custom_sort`)
 
 A **private** custom field (`private: true`, see
 [extending-content.md](extending-content.md)) is not in `custom_fields` for a
 caller below editor, and naming it in `custom_filter` or `custom_sort` is a
-`400` for them, as for a field that does not exist.
+`400` for them, as for a field that does not exist. The same holds for an
+editor whose role hides that private field from them (a read restriction,
+see [granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions)),
+and a create or update response omits it too.
 
 Admin-defined custom fields (see
 [extending-content.md](extending-content.md)) live in one `custom_fields`
 JSONB map, so the derived `filter[...]`/`sort=` machinery above can't reach
-them. Two dedicated params close the gap:
+them. Two dedicated params close the gap (and a field's bare name works in
+`filter[...]` / `sort=` too, see "Naming a custom field like a column" below):
 
 ```
 # Equality (bare value) and operators
@@ -256,7 +261,7 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
 
 **Filtering** — `custom_filter[<name>]=<value>` (equality) or
 `custom_filter[<name>][<op>]=<value>` with `eq`, `not_eq`, `gt`, `gte`, `lt`,
-`lte`, `in`, `ilike`, `null`. Conditions are ANDed (with each other and with
+`lte`, `in`, `ilike`, `contains`, `starts_with`, `null` (`is_nil` is a synonym). Conditions are ANDed (with each other and with
 `filter[...]`). Semantics:
 
 - Field names are validated against the `FieldDefinition` registry — an
@@ -267,14 +272,22 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
 - `in` matches any of a list: `custom_filter[color][in][]=red&custom_filter[color][in][]=blue`.
 - `ilike` (text-like fields only) takes the usual `%` wildcards:
   `custom_filter[subtitle][ilike]=%leather%`.
+- `contains` / `starts_with` (text-like fields only) match case-insensitively
+  and take the value literally: `%`, `_` and `\` are escaped, unlike `ilike`.
+  GraphQL's typed `customWhere` uses them too
+  ([headless-graphql-api.md](headless-graphql-api.md)).
 - `null` takes `true`/`false` and tests whether the record has the field at
-  all.
+  all. `is_nil` is accepted as the same operator, so `filter[x][is_nil]=true`
+  reads the same on a column and on a custom field.
 - `media`/`reference` fields match on their snapshot's stable `id`
   (`custom_filter[hero_image]=<media uuid>`) and support `eq`/`not_eq`/`in`/`null`
   (references also take the relationship operators below).
   On a media **gallery** or a **list of references** (`multiple: true`) they
   test membership: `eq` matches a list holding that id, `not_eq` one that
   doesn't, `in` one holding any of the listed ids.
+- A **list of values** (`multiple` on a string, select, number, date, link,
+  … field) reads the same way for its items and also takes `has`,
+  `has_all`, `has_none` and `count`; see [Lists of values](#lists-of-values).
 - Records without the field are excluded by every comparison (they're SQL
   `NULL`), and a record whose stored value has another JSON type simply
   doesn't match — it can't error the query.
@@ -367,22 +380,202 @@ In the response a reference's snapshot carries its link values as an added
 `metadata`. A connection with no link value has no `"link"` key.
 
 **Sorting** — `custom_sort=<name>` (ascending) or `custom_sort=-<name>`,
-comma-separated for multi-key. Records lacking the field always sort last.
+comma-separated for multi-key. Records lacking the field always sort last, as do those storing a JSON
+`null`, array or object under it (read as no value).
 `custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but
 `custom_sort` outranks an action's *default* order (e.g. `/posts/published`'s
-`-published_at`). `media`/`reference` fields are not sortable.
+`-published_at`). `media`/`reference` fields are not sortable: the `400` says
+why. Their stored label can lag the target's current title (a read relabels it
+from the target as it is now), and an order over targets the caller may not read
+would reveal where they sit, so a reference or media sort is refused rather than
+ordered by a stale or leaky key. Sort by a built-in or a text custom field instead.
+
+A built-in column can follow a custom one in the same order by spelling it
+`_native:<name>` in `custom_sort`: `custom_sort=price,_native:title` or
+`custom_sort=-price,-_native:title`. You rarely write this by hand: `sort=price,title`
+is rewritten to it (see below). It takes any public attribute, calculation or
+aggregate that `sort=` takes.
+
+**Boolean groups** — `custom_filter` conditions are ANDed. To OR them, negate
+them or mix them with built-in columns, use the group keys `_or`, `_and` and
+`_not` (they start with `_`, so no field name can collide with them):
+
+```
+GET /api/json/posts?custom_filter[_or][0][price][gt]=100&custom_filter[_or][1][color]=red
+GET /api/json/posts?custom_filter[_not][color]=red
+GET /api/json/posts?custom_filter[_or][0][price][lt]=10&custom_filter[_or][1][_native][title]=Sale
+```
+
+`_or` / `_and` hold a list of conditions (a map keyed `0`, `1`, … in a query
+string); `_not` holds one condition. A condition is a map of custom field names
+to the operators above, may itself hold `_or` / `_and` / `_not`, and may hold
+`_native`: a map of built-in `filter[...]` conditions (`title`, `state`,
+`tags[slug]`, …) parsed exactly as `filter[...]` is. Keys of one condition are
+ANDed. Groups nest at most 4 deep and hold at most 50 conditions in all.
+Everything else is unchanged inside a group: an unknown or private field is the
+same `400` as outside one, definitions are read for the requesting site only,
+and `not` follows SQL, so `_not` of a comparison leaves out records lacking the
+field. GraphQL takes the same keys in `customFilter` (built-in names there are
+snake_case); `customWhere` has no groups.
+
+Custom sorts are always **nulls last**, ascending or descending. A native
+`sort=-x` is plain `desc`, which in Postgres puts nulls first.
+
+### Lists of values
+
+A custom field with `multiple: true` of a scalar type holds a JSON array: a
+list of strings or select terms, or a typed list of integers, floats, dates,
+date-times, times, URLs, emails, phone numbers, colours or slugs
+([extending-content.md](extending-content.md#make-a-field-hold-a-list-of-values)).
+Write it as an array; read it back as the array the field stored, tidied and
+in order:
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/json/posts/$ID \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{"data": {"type": "post", "id": "'$ID'", "attributes": {
+        "custom_fields": {"scores": ["3", 5, 5], "event_dates": ["2026-03-08", "2026-03-01"]}}}}'
+```
+
+```json
+"custom_fields": {"scores": [3, 5, 5], "event_dates": ["2026-03-08", "2026-03-01"]}
+```
+
+On such a field `custom_filter` asks about the items:
+
+```
+GET /api/json/posts?custom_filter[scores]=5
+GET /api/json/posts?custom_filter[scores][has][]=3&custom_filter[scores][has][]=7
+GET /api/json/posts?custom_filter[event_dates][has_all][]=2026-03-01&custom_filter[event_dates][has_all][]=2026-03-08
+GET /api/json/posts?custom_filter[scores][count][gte]=2
+```
+
+| Operator | Matches a record whose list… | A record with no value |
+|---|---|---|
+| `eq` (or a bare value) | contains the value | no match |
+| `not_eq` | does not contain the value | no match |
+| `in` | contains any of the values | no match |
+| `has` | contains any of the values (one, or a list of at most 100) | no match |
+| `has_all` | contains every one of them | no match |
+| `has_none` | contains none of them | **matches** |
+| `count` | has that many items: a whole number (`eq`) or `eq` / `gt` / `gte` / `lt` / `lte` | counts as 0 |
+| `null` | has no value (`true`) or has one (`false`) | per the operand |
+
+- **`has_none` and `not_eq` differ on purpose.** `has_none` asks "is none of
+  these in the list", which an empty field answers yes, as a reference's
+  `has_none` does. `not_eq` compares against a value, and like every
+  comparison it leaves out a record without one.
+- **Operands are tidied as the items were.** On a typed list each operand is
+  checked and tidied as a stored item is, so `#FFF` finds `#ffffff`, `9:30`
+  finds `09:30`, `a@Example.com` finds `a@example.com`, `"10"` finds the
+  number `10` on an integer list, and `10` finds `10.0` on a float list. An
+  operand the field could never hold is a `400` (`invalid date value`).
+  (Single email, colour and time fields do not tidy their operands yet.)
+- **A value stored before the field was a list** (a field retyped, or
+  switched to a list while a reshape did not finish) is read as a one-item
+  list by every operator: `eq` matches it, `count` counts it as 1, and it
+  never makes the query fail.
+- **Not supported yet:** comparing items (`gt`, `gte`, `lt`, `lte`) and
+  matching text in them (`contains`, `starts_with`, `ilike`). They answer
+  `400`: `gt is not supported on custom field "scores" (a list): it supports
+  eq/not_eq/in/has/has_all/has_none/count/null`.
+- **Not sortable.** `custom_sort=scores` is a `400`: `custom field "scores"
+  (a list) is not sortable`.
+- **`has` / `has_all` / `has_none`** take one value or a non-empty list of at
+  most 100 (`has_all for "scores" needs at least one value`, `has for
+  "scores" takes at most 100 values`). `count` takes a whole number ≥ 0.
+- **Entries.** On `/api/json/entries` without `filter[type_name]`, a field
+  name that is a typed list on one dynamic type and a single value on another
+  is the same `400` as a type mismatch (`has a different type per content
+  type`); scope the query.
+- **A single field sent an array** keeps the array's first non-blank item,
+  so send one value. An object item there is refused (`must be a single
+  value`).
+
+### Naming a custom field like a column
+
+In `filter[...]` and `sort=` on the
+index routes you can drop the `custom_` prefix. A name that is not a public
+attribute, calculation, aggregate or relationship of the type is looked up as a
+custom field:
+
+```
+GET /api/json/posts?filter[price][gt]=10&sort=title,price
+GET /api/json/posts?filter[tags][has_none][]=<tag id>
+```
+
+- **A built-in name always wins.** `filter[title]` is the column. Use
+  `custom_filter[title]` / `custom_sort=title` for a custom field that shares a
+  column's name. They always mean a custom field.
+- **`custom_filter` / `custom_sort` are the stable form.** If a later release
+  adds a built-in with your field's name, `filter[x]` silently starts meaning
+  the built-in. Programmatic consumers should keep sending `custom_*`; the
+  official clients do.
+- **Tokens keep the order you wrote.** `sort=title,price`, `sort=price,title`
+  and `sort=title&custom_sort=price` all work. Built-in tokens that lead stay in
+  `sort`; from the first custom token on, every token moves to `custom_sort`, a
+  built-in one as `_native:<name>`. Tokens found in `sort` run before an explicit
+  `custom_sort`. (Before, `sort=price,title` was a `400` `invalid_sort`.)
+- **Groups in `filter[or]` / `[and]` / `[not]`.** While every name inside is a
+  built-in the group is native. When any condition inside names a custom field
+  (`filter[or][0][price][gt]=100&filter[or][1][title]=Sale`) the whole group moves
+  to `custom_filter[_or]` with its built-ins under `_native`, so the two spellings
+  mean the same. If `custom_filter` already holds that group key, `filter` is left
+  as written (a native `400`).
+- **Both spellings together.** `filter[x]` and `custom_filter[x]` for the same
+  custom field merge into one condition. A built-in `x` applies both (ANDed). The same
+  operator on both is a `400`.
+- **Unknown names.** `filter[ttile]=x` and `sort=ttile` are `400`
+  `invalid_argument`, detail `unknown custom field "ttile"`, with no `source`
+  member. Before this, `filter[ttile]` got ash_json_api's own "No such field".
+  A private field answers the same way for a caller below editor, so the
+  message does not reveal it exists. An anonymous typo costs one uncached
+  registry read before the `400`.
+- **Built-in relations.** `filter[tags][has][]=…`, `has_all`, `has_none` and
+  `count` work natively on `tags` and `related_<type>s`
+  (`filter[related_posts][has_none]=<id>`). `filter[tags][slug]=x` stays the
+  derived relationship filter.
+- **Only index routes.** Get-by-id, relationship routes and writes are not
+  rewritten.
+- **OpenAPI.** The `sort` parameter's `format` lists built-in fields only. A
+  client that validates `sort` strictly against it rejects `sort=price`; use
+  `custom_sort` there.
+- **`links.self`** echoes the URL as you sent it, with the original
+  `filter[price]` / `sort=price`.
+
+What differs between a custom field and a column, in one table:
+
+| | Custom field | Column |
+|---|---|---|
+| Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike` (text only), `null` / `is_nil` | the derived ash_json_api set |
+| Value typing | cast to the field's declared type, compared as jsonb | the attribute's type |
+| Records without the field | excluded by every comparison | per the column's nulls |
+| Unknown name | `400` `invalid_argument`, `unknown custom field "x"` | native `400` |
+| Sort | nulls last in both directions; after built-in keys | plain `asc` / `desc` |
+| Sort on `media` / `reference` | not supported | n/a |
+| Relationship operators (`has`, `has_all`, `has_none`, `count`) | on `reference` fields and on `tags` / `related_<type>s`; the same names on [lists of values](#lists-of-values) | not available |
+| Index | none (unindexed jsonb) | per column |
+
+### Entries and search facets
 
 **Entries (dynamic types)** — the same params work on `/api/json/entries`,
 where the field's type is resolved through the query's
 `filter[type_name]=<name>` (or `filter[type_definition_id]=<uuid>`) scope.
 Unscoped queries still work when every dynamic type declaring the field agrees
 on its type; if declarations diverge, the API asks you to scope rather than
-guessing a cast.
+guessing a cast ("has a different type per content type"). That includes a bare
+`filter[x]` / `sort=x` without `filter[type_name]`.
 
 **Search facets** — `/…/search` and `/…/semantic-search` accept
-`custom_filter` too (not `custom_sort`; relevance/distance is the default
-order, and only an explicit `sort=` overrides it — see "Sorting search
-results" above).
+`custom_filter`, and, on `/search`, `/search/published`, `/semantic-search` and
+`/semantic-search/published`, `custom_sort` (GraphQL `customSort`). Precedence
+is explicit `sort` > `custom_sort` > relevance (distance on semantic search) >
+recency. On semantic search a leading custom sort replaces the distance order
+(the vector index cannot serve it) and the rule that a record whose name
+matches the query comes first no longer holds. `/autocomplete` does not take
+`custom_sort`.
 
 > **Performance.** These predicates run on unindexed JSONB extractions. They're
 > built for the long tail of editor-owned fields; a field you filter or sort by
@@ -390,6 +583,83 @@ results" above).
 > column, D4). GraphQL exposes the same capability as `customFilter` /
 > `customSort` arguments — see
 > [headless-graphql-api.md](headless-graphql-api.md).
+
+### Which custom filters use an index
+
+Since #2291 a GIN index (`jsonb_path_ops`) on each content table's
+`custom_fields` serves the filters that ask "does this record hold exactly
+this value": `eq` (a bare value), `in`, membership in a media or reference
+field (`eq`, `in`) or in a [list of values](#lists-of-values) (`eq`, `in`,
+`has`, `has_all`), and a single media or reference field matched by id. One index covers every field name of every
+dynamic type. The rows returned are the same as before; only the speed
+changes, and the planner still prefers a scan when a filter matches a large
+share of the table.
+
+These are **not** accelerated by default: `not_eq`, `gt`, `gte`, `lt`, `lte`,
+`ilike`, `contains`, `starts_with`, `null`, `has_none` and `count` on a list
+of values, and `custom_sort`. `not_eq` stays on the older `->` form on
+purpose, because a record without the field must stay excluded from it.
+
+The index costs about 26% of the table's size, slows bulk inserts by about
+25% and single saves by 10-35%; see
+[Custom-field filters at 100k rows](benchmarks.md#custom-field-filters-at-100k-rows)
+for the method and the caveats.
+
+#### Range filters and sort for a hot field (`indexed_custom_fields`)
+
+If a field is range-filtered or sorted on, and promoting it to a compiled
+attribute (the D4 answer in
+[dynamic-content-types-plan.md](dynamic-content-types-plan.md)) is more than
+you want, list its name in the config of the build that runs `mix ash.codegen`
+(an overlay keeps it in its own `config/config.exs`). It is read at compile
+time:
+
+```elixir
+config :kiln_cms, :indexed_custom_fields, ["price", "rating"]
+# or, to index only one table's rows:
+config :kiln_cms, :indexed_custom_fields, %{"entries" => ["price"]}
+```
+
+Then `mix ash.codegen indexed_custom_fields` and `mix ash.migrate`. Each name
+gets two btrees per content table (`pages`, `posts`, `entries`, and an
+overlay's own), `org_id` first: one `ASC NULLS LAST` and one `DESC NULLS
+LAST`, built concurrently. Nothing is indexed unless you list it, and Kiln
+never runs DDL itself.
+
+What is accelerated, for a listed field:
+
+| Request | Index |
+|---|---|
+| `custom_filter[price][gt]` / `gte` / `lt` / `lte` | yes |
+| `custom_sort=price` and `custom_sort=-price`, with a page limit (also the keyset page after the first) | yes |
+| `custom_filter[price]` (`eq`), `in` | the GIN index above |
+| `not_eq`, `ilike`, `contains`, `starts_with`, `null` | no |
+
+Rules to know:
+
+- **Use it for integer, float, date and datetime fields.** A string btree can
+  exceed the index row limit (about 2.7 KB); a boolean index is nearly useless.
+  Values that are not the field's type (a string in an integer field) sort and
+  compare by JSON type order, as before.
+- **A range never matches a stored JSON `null`, array or object**, listed or
+  not: they read as "no value", the way `custom_sort` has always read them.
+- **Each btree costs writes.** `custom_fields` is rewritten on every save, so
+  every listed name adds two index updates to each save of a record, whether
+  or not that save changes the field. At 100,000 rows two fields (four btrees)
+  next to the GIN index made 20,000 unrelated saves about 6x slower and 100,000
+  inserts about 1.7x slower. See
+  [the measurements](benchmarks.md#range-and-sort-indexes-for-custom-fields).
+  List what you sort or range-filter on, per table where you can.
+- **Adding a name, removing one, or renaming a field is a migration.** Add the
+  name, generate, apply: queries answer correctly (from the table) until the
+  concurrent build finishes. A failed build leaves an invalid index; drop it and
+  rebuild.
+- **Check for drift** with `mix kiln.custom_fields.index --check` (read-only,
+  exits non-zero): a listed name with no or an invalid index, an index no name
+  asks for, a name no field definition carries, an ineligible type.
+
+The reasoning is in
+[ADR 0025](decisions/0025-a-site-declares-which-custom-fields-get-range-and-sort-indexes-in-config.md).
 
 ## Pagination
 
@@ -586,6 +856,8 @@ default. `GET /api/json/open_api` describes each of them on the resource's
 | `effective_seo_description` | string | No — same as above, for `seo_description` |
 | `related_links` | array | No — curated related links, projected to `[{id, title, slug}]`, in the order the editor set |
 | `inherited_fields` | object | No — what this locale variant inherits along the site's fallback chain for its `:fallback` fields, with the source locale: `{"excerpt": {"value", "locale"}, "custom_fields": {…}}` (#1327). Served only when asked for with `fields[<type>]=…` |
+| `latest_edit_severity` | string \| null | No — `critical` / `notable` / `routine`: how much the document's latest safety-field edit mattered. `null` when unpublished or none; see *Change severity* under Writing. Readable with a viewer key |
+| `latest_edit_at` | datetime \| null | No — when that edit was made (the version's time, not `published_at`) |
 | `custom_fields_plain` | object | No — the plain-text rendition of the `:text` custom fields marked "Also deliver as plain text" (`deliver_plain`): `{"<name>": "text without tags" \| null}`, `null` when the type marks none — one line, or with `"\n\n"` between paragraphs and `"\n"` per line break for a field marked "Keep paragraph breaks" (`plain_breaks`). `custom_fields` keeps the stored HTML. Served only when asked for with `fields[<type>]=…`; the fired artifact (`/api/content`, `/api/sync`) carries it whenever the type marks a field |
 | `custom_fields_portable` | object | No — the Portable Text rendition of the rich `:text` custom fields marked "Also deliver as Portable Text" (`deliver_portable`): `{"<name>": [<Portable Text block>, …] \| null}`, the shape a `rich_text` block's `body` holds; `null` when the type marks none. `custom_fields` keeps the stored HTML. Served only when asked for with `fields[<type>]=…`; the fired artifact (`/api/content`, `/api/sync`) carries it whenever the type marks a field |
 
@@ -657,8 +929,8 @@ Use the JSON:API media type on both `Accept` and `Content-Type`:
 | `PATCH /api/json/posts/:id` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if already published |
 | `PATCH /api/json/posts/:id/submit-for-review` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
 | `PATCH /api/json/posts/:id/return-to-draft` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft — the return half of the approve/return pair |
-| `PATCH /api/json/posts/:id/publish` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
-| `PATCH /api/json/posts/:id/unpublish` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
+| `PATCH /api/json/posts/:id/publish` | `:publish` | `:read_write` key, **admin** (or editor where editors may publish) | Publishes and fires artifacts |
+| `PATCH /api/json/posts/:id/unpublish` | `:unpublish` | `:read_write` key, **admin** (or editor where editors may publish) | Takes content down, purges artifacts |
 | `DELETE /api/json/posts/:id` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
 
 Pages expose the identical set; the dynamic tier is `/api/json/entries` (a
@@ -669,10 +941,22 @@ Pages expose the identical set; the dynamic tier is `/api/json/entries` (a
 
 **Authorization** mirrors `/mcp`: a **read-only key** can run none of these; a
 **`:read_write` key on a `:viewer`** account can run none; a **`:read_write` key
-on an `:editor`** can create/update/submit; **return-to-draft, publish, unpublish
-and delete require an `:admin`** account. An editor submits for review; deciding
-the outcome — approve or return — is the admin's half. Hard delete (`:purge`) is **never** routed and is
+on an `:editor`** can create/update/submit; **return-to-draft and delete
+require an `:admin`** account, and so do **publish and unpublish** unless the
+site lets editors publish (Team → Publishing; see `scheduled_at` below). An
+editor submits for review; deciding the outcome — approve or return — is the
+admin's half, and so is taking content down (#2134). A refused route answers
+`403` and changes nothing. Hard delete (`:purge`) is **never** routed and is
 API-key-banned regardless of scope — `DELETE` is the reversible soft-delete.
+
+A **`:draft_write` key** (#2273) may `POST` a create and `PATCH` a draft its
+account authored while it is still a draft, whatever the owner's role; every
+other route in the table is refused, as are tag, category, link and media
+writes. A create may send `X-Kiln-On-Behalf-Of: <your user id>`, which Kiln
+stores on the draft (`on_behalf_of`, beside `created_via_key_id` /
+`created_via_key_name`) for reviewers; those three attributes are returned only
+to editors, admins and the creating key. See
+[headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 
 ### Creating and editing
 
@@ -706,6 +990,15 @@ body's `blocks`, it is write-only on the APIs: no read returns it. It is an
 editorial request, not something a reader of the content should see
 ([content lifecycles](content-lifecycles.md#proposed-publish-dates)).
 
+`unpublish_at` and `expiry_action` take the same rights on a `PATCH` of a
+record that is published or has `scheduled_at` set (#2134): there the
+scheduler takes the record down on that date with nobody checked, so moving
+it is an unpublish. Without the rights, a `PATCH` that changes either one on
+such a record is refused as a whole (`403`); leave them out, or send the value
+the record already has. On a draft nobody has scheduled, and on a create, any
+editor may set them
+([content lifecycles](content-lifecycles.md#authorization)).
+
 ### Discovering dynamic types
 
 An entry of an admin-defined type is created on `/api/json/entries` with the
@@ -723,7 +1016,18 @@ Each row carries `name` (the permanent machine key), `label`, `plural_label`,
 `default_review_after_days`. Add `?include=field_definitions` to get the type's
 custom-field schema (`name`, `label`, `field_type`, `required`, `options`,
 `default`, `help_text`, `position`, …) — the keys an entry's `custom_fields`
-map takes. `?include=field_definitions.group_fields` adds the sub-fields of
+map takes, `validation`: the field's value constraints (`min`, `max`,
+`min_length`, `max_length`, `pattern`, `pattern_message`, `unique`; `{}` when
+none), which a write to `custom_fields` is checked against — see
+[Constrain the values of a field](extending-content.md#constrain-the-values-of-a-field) —
+and `visible_when` / `required_when`, the field's conditional rules (or `null`); see
+[extending-content.md](extending-content.md#make-a-field-conditional). A hidden
+field is an editor concept: its value is still in every read. `widget` is the
+editor input an admin chose for the field (`"radios"`, `"single_line"`, a
+plugin's own), or `null` for the type's default; it changes nothing about the
+value (see
+[Choose how editors fill in a field](extending-content.md#choose-how-editors-fill-in-a-field)).
+`?include=field_definitions.group_fields` adds the sub-fields of
 each `:group` field — the keys each of its rows takes; a sub-field names its
 group in `group_of_id`.
 
@@ -977,6 +1281,42 @@ rather track versions yourself. The write routes accept it as an optional
 `expected_lock_version` attribute, which compares `lock_version` alone, like
 the GraphQL argument. Browsers can read `ETag` and send `If-Match` cross-origin:
 both are allowed in the CORS headers.
+
+### Change severity: how much an edit matters
+
+An edit to a **published** document that touches a field the site lists as
+safety-relevant (`/editor/safety-fields`, per content type, or "every field")
+is recorded with a *severity* on the version it creates: `critical`, `notable`
+or `routine`. Sites that mirror the content use it to decide how loudly to
+surface the change. The answer belongs to that one edit; it is never a field of
+the record and never carries over to the next edit.
+
+`PATCH` (`update`) and the `publish` route accept an optional
+`change_severity` attribute (so do the GraphQL `update*` / `publish*` mutations;
+`publish_changes` and `restore_version` have no public route, and the editor and
+internal callers of those actions default to `notable`):
+
+```json
+{"data": {"type": "post", "id": "…",
+          "attributes": {"title": "…", "change_severity": "critical"}}}
+```
+
+* **Omitted:** a safety edit is recorded `notable`. Never `routine`, and never
+  empty. (The admin editor is the one surface that asks: it will not publish a
+  safety edit until a severity is chosen.)
+* **Sent without a safety edit:** ignored. The version records none.
+* **Per request only.** There is no batch write endpoint, so each write names
+  its own severity; MCP's `update_page` / `update_post` / `update_entry` take the
+  same `change_severity` argument.
+* **Computed fields:** don't list them as safety fields. The daily refresh
+  rewrites them, and each new value would be recorded as a `notable` edit.
+
+Read the latest one back with the `latest_edit_severity` and `latest_edit_at`
+[calculated fields](#calculated-fields) (and on every `/api/sync` upsert item).
+They describe the document's last **safety** edit, not its last edit of any
+kind, and are `null` for a document that is not published or has none. A first
+publish counts as an edit when a listed field is non-empty. Webhooks and the
+change feed do not carry the severity yet.
 
 ### Retrying a write safely
 

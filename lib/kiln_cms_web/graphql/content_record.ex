@@ -39,6 +39,7 @@ defmodule KilnCMSWeb.Graphql.ContentRecord do
     field :custom_fields, non_null(:json_string)
 
     Notation.reference_fields()
+    Notation.custom_field_accessors()
 
     resolve_type &References.resolve_type/2
   end

@@ -177,6 +177,7 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
   # validate, including the ones that only touched the title. `AllCaps` reads
   # `Kiln.Advisory.Walk`'s capitalised runs for exactly this reason (#495).
   defp refresh_seo_report(socket) do
+    socket = assign_nav_linked(socket)
     form = socket.assigns.form
 
     fields = %{
@@ -187,7 +188,9 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
       seo_keywords: form[:seo_keywords].value,
       seo_image: form[:seo_image].value,
       featured_image_id: form[:featured_image_id].value,
-      locale: form[:locale].value
+      locale: form[:locale].value,
+      state: socket.assigns.record.state,
+      noindex: truthy?(form[:noindex].value)
     }
 
     # One registry run, three views (#495, #377). SEO and accessibility overlap
@@ -200,6 +203,7 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
       KilnCMS.Seo.Analyzer.run(fields, socket.assigns.seo_body_stats,
         facts: %{
           link_targets: socket.assigns[:link_targets] || %{},
+          nav_linked?: nav_linked?(socket),
           # Both compliance facts come from the one resolve in
           # `refresh_body_stats/2`: matches computed under this site's
           # vocabulary have to be graded under the same one (#857).
@@ -220,6 +224,40 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
       :compliance_report,
       outcomes |> Registry.by_lens(:compliance) |> Report.from_outcomes(body)
     )
+  end
+
+  defp truthy?(value), do: value in [true, "true", "on", "1"]
+
+  # Whether an enabled menu links to this document (#2256): one read of the
+  # org's menu items, and only for a published record, since the advisory it
+  # feeds is `:n_a` for a draft. Memoized per record and state so a keystroke
+  # never costs a query; a menu edited while the editor is open is picked up
+  # on the next mount or after a publish changes the state.
+  defp assign_nav_linked(%{assigns: %{record: %{state: :published} = record}} = socket) do
+    key = {record.id, record.state}
+
+    case socket.assigns[:nav_linked_cache] do
+      {^key, _value} ->
+        socket
+
+      _stale ->
+        linked? =
+          socket.assigns.current_org
+          |> Accounts.org_id()
+          |> KilnCMS.CMS.Menus.linked_content_ids()
+          |> MapSet.member?(record.id)
+
+        assign(socket, :nav_linked_cache, {key, linked?})
+    end
+  end
+
+  defp assign_nav_linked(socket), do: assign(socket, :nav_linked_cache, nil)
+
+  defp nav_linked?(socket) do
+    case socket.assigns[:nav_linked_cache] do
+      {_key, value} -> value
+      nil -> false
+    end
   end
 
   # The scalar fields that get published as text (#377). Scanned here rather
@@ -314,6 +352,21 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
     Enum.map(typed, fn block ->
       {Map.get(block, :id), Phoenix.HTML.raw(KilnCMS.Blocks.render(block, :web))}
     end)
+  end
+
+  # `AshPhoenix.Form.params/1` plus a guaranteed `"blocks"` list. Params only
+  # carry *touched* nested forms, so a freshly loaded record (no `phx-change`
+  # yet) has no `"blocks"` key (or a nil one). Injecting children or a rich body into that
+  # leaves the nil in place, and `Form.validate/2` then crashes in
+  # `AshPhoenix.Form.condense/2` — so synthesize the list from the form's
+  # current values (full typed maps) instead. Use this wherever a handler
+  # re-validates the form from its own params.
+  def form_params_with_blocks(form) do
+    params = AshPhoenix.Form.params(form)
+
+    if is_nil(params["blocks"]),
+      do: Map.put(params, "blocks", preview_block_maps(form)),
+      else: params
   end
 
   def preview_block_maps(form) do

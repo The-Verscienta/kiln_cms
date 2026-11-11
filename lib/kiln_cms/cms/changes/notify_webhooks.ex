@@ -89,18 +89,29 @@ defmodule KilnCMS.CMS.Changes.NotifyWebhooks do
   @doc """
   Dispatch `<type>.<event>` for a published `record` with the full payload,
   from outside an action — for `KilnCMS.Firing.FireWorker` announcing a
-  requested re-fire (`KilnCMS.Firing.refire/3`) the way an edit of live content
-  announces itself.
+  re-fire (`KilnCMS.Firing.refire/3`, a notifying `KilnCMS.Firing.Sweep`) the
+  way an edit of live content announces itself.
+
+  Options:
+
+    * `:reason` — added to the payload as `reason` when given (#2463), so a
+      receiver can tell a re-render (`"refire"`) from an edit. An action's
+      own dispatch carries no `reason` key, so its payload is unchanged.
+    * `:announce` — passed to `KilnCMS.Webhooks.dispatch/4` (default `:full`).
   """
-  @spec notify(struct(), String.t()) :: :ok
-  def notify(%{state: :published} = record, event) do
+  @spec notify(struct(), String.t(), keyword()) :: :ok
+  def notify(%{state: :published} = record, event, opts \\ []) do
     Webhooks.dispatch(
       "#{event_prefix(record)}.#{event}",
-      payload(:full, record),
+      :full |> payload(record) |> put_reason(Keyword.get(opts, :reason)),
       record.org_id,
-      withdraws: true
+      withdraws: true,
+      announce: Keyword.get(opts, :announce, :full)
     )
   end
+
+  defp put_reason(payload, nil), do: payload
+  defp put_reason(payload, reason), do: Map.put(payload, :reason, reason)
 
   defp payload(:tombstone, record), do: ContentSerializer.tombstone(record)
 

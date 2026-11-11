@@ -13,6 +13,14 @@ defmodule KilnCMS.CMS.Validations.FormAutoresponderTokens do
   fields look like *right now* — and a template written against a field an
   admin has since deleted would then block that unrelated save with an error
   about a field the admin isn't even looking at.
+
+  A write carrying `autoresponder_token_rename: true` in its changeset context
+  skips the token check (the blank check still runs). That is
+  `KilnCMS.CMS.Changes.RewriteAutoresponderTokens` following a `FormField`
+  rename (#2343): it only maps a token the template already held to the
+  field's new name, so it cannot add an unknown one — and checking the whole
+  template there would let a stale token left by an earlier delete refuse
+  the rename of a different field.
   """
   use Ash.Resource.Validation
 
@@ -26,18 +34,9 @@ defmodule KilnCMS.CMS.Validations.FormAutoresponderTokens do
       subject = Ash.Changeset.get_attribute(changeset, :autoresponder_subject)
       body = Ash.Changeset.get_attribute(changeset, :autoresponder_body)
 
-      definitions =
-        Autoresponder.definitions_for_form(
-          changeset.data.id,
-          Ash.Changeset.get_attribute(changeset, :name) || "",
-          false,
-          changeset.tenant
-        )
-
       with :ok <- check_blank(:autoresponder_subject, subject, enabled?),
-           :ok <- check_blank(:autoresponder_body, body, enabled?),
-           :ok <- check_tokens(:autoresponder_subject, subject, definitions, enabled?) do
-        check_tokens(:autoresponder_body, body, definitions, enabled?)
+           :ok <- check_blank(:autoresponder_body, body, enabled?) do
+        check_templates(changeset, subject, body, enabled? == true and !token_rename?(changeset))
       end
     else
       :ok
@@ -57,10 +56,28 @@ defmodule KilnCMS.CMS.Validations.FormAutoresponderTokens do
 
   defp check_blank(_field, _value, _enabled?), do: :ok
 
-  defp check_tokens(_field, _value, _definitions, false), do: :ok
-  defp check_tokens(_field, nil, _definitions, true), do: :ok
+  defp token_rename?(changeset),
+    do: Map.get(changeset.context, :autoresponder_token_rename) == true
 
-  defp check_tokens(field, value, definitions, true) do
+  defp check_templates(_changeset, _subject, _body, false), do: :ok
+
+  defp check_templates(changeset, subject, body, true) do
+    definitions =
+      Autoresponder.definitions_for_form(
+        changeset.data.id,
+        Ash.Changeset.get_attribute(changeset, :name) || "",
+        false,
+        changeset.tenant
+      )
+
+    with :ok <- check_tokens(:autoresponder_subject, subject, definitions) do
+      check_tokens(:autoresponder_body, body, definitions)
+    end
+  end
+
+  defp check_tokens(_field, nil, _definitions), do: :ok
+
+  defp check_tokens(field, value, definitions) do
     case Tokens.validate(value, definitions) do
       :ok ->
         :ok

@@ -11,6 +11,15 @@ defmodule KilnCMS.Forms do
     * **coercion + validation** per `FormField` (required, type coercion to
       JSON-native values, select membership, email shape), unknown keys
       dropped;
+    * **human verification** (#2249) — only for a form that asks for it
+      (`KilnCMS.Challenge.form_required?/2`), and only once the fields are
+      valid, so a typo never spends the visitor's token. The token rides in
+      `challenge_field/0` (or the field the configured provider's own markup
+      posts, such as `g-recaptcha-response`). `KilnCMS.Challenge.Gate.form/3` decides: a refused
+      token returns the form with an error, and a missing token, one solved
+      on another host or one the provider could not check is *held* — stored
+      as spam, so nothing below runs for it. The outcome is kept on the
+      submission (`FormSubmission.challenge`);
     * **storage** as a `FormSubmission` (privacy-first: no IP/user agent),
       scored against the `Kiln.Forms.SpamCheck` registry (#477);
     * **notification** — when the form has a `notify_email` and the
@@ -36,6 +45,7 @@ defmodule KilnCMS.Forms do
   form, or read a submission back.
   """
 
+  alias KilnCMS.Challenge.Gate
   alias KilnCMS.CMS
   alias KilnCMS.Forms.Autoresponder
 
@@ -44,6 +54,14 @@ defmodule KilnCMS.Forms do
 
   @honeypot_field "website"
   @rendered_at_field "_kiln_rendered_at"
+  # The human-verification token (#2249), and the name Turnstile's own markup
+  # would post it under — accepted when ours is absent, so a headless front
+  # end that dropped in the stock widget is not held for the name. The
+  # configured provider's own field (`response_field`) is accepted the same
+  # way, before this one.
+  @challenge_field "_kiln_challenge"
+  @challenge_alias "cf-turnstile-response"
+  @challenge_refused "did not pass the human-verification check"
   # Carries the experiment variant the page was rendered with (#499).
   @variant_field "_kiln_variant"
   @rendered_at_salt "form_rendered_at"
@@ -91,6 +109,43 @@ defmodule KilnCMS.Forms do
   @doc "The honeypot input name rendered into public forms."
   @spec honeypot_field() :: String.t()
   def honeypot_field, do: @honeypot_field
+
+  @doc "The human-verification token's input name on public forms (#2249)."
+  @spec challenge_field() :: String.t()
+  def challenge_field, do: @challenge_field
+
+  @doc """
+  The human-verification token `params` carry: `challenge_field/0`; when that
+  is absent or blank, the configured provider's own field (reCAPTCHA's
+  `g-recaptcha-response`, which its widget adds inside the form); and last
+  Turnstile's `cf-turnstile-response`.
+  """
+  @spec challenge_token(map()) :: term()
+  def challenge_token(params) when is_map(params) do
+    [@challenge_field, provider_field(), @challenge_alias]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.find_value(fn field ->
+      case Map.get(params, field) do
+        blank when blank in [nil, ""] -> nil
+        token -> token
+      end
+    end)
+  end
+
+  defp provider_field do
+    case KilnCMS.Challenge.config().descriptor do
+      %{response_field: field} when is_binary(field) -> field
+      _none -> nil
+    end
+  end
+
+  @doc """
+  The error `submit/3` reports under `challenge_field/0` when the provider
+  refused the token. Short English, like every other refusal here: the JSON
+  API returns it verbatim, and the HTML form translates it.
+  """
+  @spec challenge_refused_message() :: String.t()
+  def challenge_refused_message, do: @challenge_refused
 
   @doc "The fill-time token's hidden input name, rendered into public forms."
   @spec rendered_at_field() :: String.t()
@@ -160,9 +215,13 @@ defmodule KilnCMS.Forms do
     * `{:ok, submission}` — stored (and notifications queued);
     * `{:ok, :discarded}` — the honeypot tripped: report success upstream,
       store nothing;
-    * `{:error, errors}` — a `%{"field" => "message"}` map for re-rendering.
+    * `{:error, errors}` — a `%{"field" => "message"}` map for re-rendering;
+      a refused human-verification token is reported under
+      `challenge_field/0`.
 
-  `opts`: `:locale` (recorded on the submission).
+  `opts`: `:locale` (recorded on the submission) and `:remote_ip` (handed to
+  the verification provider only when the operator turned `send_remote_ip`
+  on; never stored).
 
   The fill-time spam signal (#477) is read straight from `params` here
   (`rendered_at_field/0`), not from `opts` — unlike `:locale`, which the
@@ -183,9 +242,9 @@ defmodule KilnCMS.Forms do
       true ->
         form_fields = fields(form)
 
-        case coerce(form_fields, params) do
-          {:ok, data} -> {:ok, record(form, form_fields, data, params, opts)}
-          {:error, errors} -> {:error, errors}
+        with {:ok, data} <- coerce(form_fields, params),
+             {:ok, challenge} <- verify(form, params, opts) do
+          {:ok, record(form, form_fields, data, params, Keyword.put(opts, :challenge, challenge))}
         end
     end
   end
@@ -218,6 +277,15 @@ defmodule KilnCMS.Forms do
     end
   end
 
+  # `nil` when the form asks for no check; the outcome to store otherwise.
+  defp verify(form, params, opts) do
+    case Gate.form(form, challenge_token(params), remote_ip: Keyword.get(opts, :remote_ip)) do
+      :not_required -> {:ok, nil}
+      {:accept, outcome} -> {:ok, outcome}
+      {:refuse, :failed} -> {:error, %{@challenge_field => @challenge_refused}}
+    end
+  end
+
   defp fields(%{fields: fields}) when is_list(fields), do: fields
 
   # `authorize_with: :error` (#1659): the field list is what the submission is
@@ -237,7 +305,8 @@ defmodule KilnCMS.Forms do
           form_id: form.id,
           data: data,
           locale: Keyword.get(opts, :locale),
-          fill_time_ms: fill_time_ms(Map.get(params, @rendered_at_field))
+          fill_time_ms: fill_time_ms(Map.get(params, @rendered_at_field)),
+          challenge: Keyword.get(opts, :challenge)
         },
         actor: system(),
         tenant: form.org_id
@@ -245,7 +314,8 @@ defmodule KilnCMS.Forms do
 
     # #477: a submission the scorer flagged never reaches the autoresponder or
     # the webhook — mailing a spammer back (sender-reputation risk) or firing
-    # an integration on payload that was never worth acting on.
+    # an integration on payload that was never worth acting on. A submission
+    # held by human verification (#2249) is scored as spam for this reason.
     unless submission.status == :spam do
       notify(form, data)
       autorespond(form, form_fields, data)

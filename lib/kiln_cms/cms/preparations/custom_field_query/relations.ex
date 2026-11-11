@@ -334,14 +334,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
     end
   end
 
-  # A bare number is `eq`; a map holds `eq`/`gt`/`gte`/`lt`/`lte`.
-  defp count_comparisons(raw, name) when not is_map(raw),
+  # A bare number is `eq`; a map holds `eq`/`gt`/`gte`/`lt`/`lte`. Public for
+  # the `count` of a scalar list (`CustomFieldQuery.Lists`).
+  @doc false
+  def count_comparisons(raw, name) when not is_map(raw),
     do: count_comparisons(%{"eq" => raw}, name)
 
-  defp count_comparisons(raw, name) when map_size(raw) == 0,
+  def count_comparisons(raw, name) when map_size(raw) == 0,
     do: {:error, "count for #{inspect(name)} needs a comparison (eq/gt/gte/lt/lte)"}
 
-  defp count_comparisons(raw, name) do
+  def count_comparisons(raw, name) do
     Enum.reduce_while(raw, {:ok, []}, fn {cmp, value}, {:ok, acc} ->
       case count_comparison(to_string(cmp), value, name) do
         {:ok, comparison} -> {:cont, {:ok, [comparison | acc]}}

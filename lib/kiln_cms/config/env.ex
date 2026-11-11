@@ -155,6 +155,7 @@ defmodule KilnCMS.Config.Env do
           | :positive_integer
           | {:one_of, [String.t()]}
           | {:float_in, number(), number(), boolean()}
+          | {:integer_in, integer(), integer()}
           | {:list_of, [String.t()], [String.t()]}
           | {:expected, String.t()}
 
@@ -409,6 +410,47 @@ defmodule KilnCMS.Config.Env do
 
       _other ->
         if String.trim(raw) == "", do: :unset, else: unusable(var, raw, expected)
+    end
+  end
+
+  @doc """
+  Reads `var` as an **integer within `min`..`max`** (#2218).
+
+  The whole-number counterpart of `float_in/4`, with the same three-way
+  contract: `{:ok, n}` only for a usable value, `:unset` for blank, and
+  `:unrecognized` (warned about and recorded) for anything else, including a
+  number outside the range. A digit slip is refused rather than clamped,
+  because clamping is interpreting: `BACKUP_MEDIA_PART_MB=4` is not obviously
+  a request for 16.
+
+      iex> System.put_env("KILN_INT_IN_DOCTEST", " 400 ")
+      iex> KilnCMS.Config.Env.integer_in("KILN_INT_IN_DOCTEST", 16, 10_240)
+      {:ok, 400}
+
+      iex> System.put_env("KILN_INT_IN_DOCTEST", "5")
+      iex> KilnCMS.Config.Env.integer_in("KILN_INT_IN_DOCTEST", 16, 10_240)
+      :unrecognized
+
+      iex> System.put_env("KILN_INT_IN_DOCTEST", "3.5")
+      iex> KilnCMS.Config.Env.integer_in("KILN_INT_IN_DOCTEST", 1, 10)
+      :unrecognized
+
+      iex> System.delete_env("KILN_INT_IN_DOCTEST")
+      iex> KilnCMS.Config.Env.integer_in("KILN_INT_IN_DOCTEST", 16, 10_240)
+      :unset
+  """
+  @spec integer_in(String.t(), integer(), integer()) ::
+          {:ok, integer()} | :unset | :unrecognized
+  def integer_in(var, min, max)
+      when is_binary(var) and is_integer(min) and is_integer(max) and min <= max do
+    raw = System.get_env(var, "")
+
+    case raw |> String.trim() |> Integer.parse() do
+      {parsed, ""} when parsed >= min and parsed <= max ->
+        {:ok, parsed}
+
+      _other ->
+        if String.trim(raw) == "", do: :unset, else: unusable(var, raw, {:integer_in, min, max})
     end
   end
 
@@ -676,6 +718,8 @@ defmodule KilnCMS.Config.Env do
     do: "Use a number greater than #{min} and at most #{max}."
 
   defp advice({:float_in, min, max, false}), do: "Use a number from #{min} to #{max}."
+
+  defp advice({:integer_in, min, max}), do: "Use a whole number from #{min} to #{max}."
 
   defp advice({:list_of, allowed, []}),
     do: "Use a comma-separated list of: #{Enum.join(allowed, ", ")}."

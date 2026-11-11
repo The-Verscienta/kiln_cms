@@ -218,6 +218,21 @@ defmodule KilnCMS.Beta.RoundTest do
       assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 1_000
     end
 
+    test "an adopted account's role change is audited in the default org (#2245)" do
+      round = label()
+      [tester] = Round.run(round: round, testers: 1, seed?: false).testers
+      id = user(tester.email).id
+
+      Round.run(shape: :operator, round: round, emails: [tester.email], seed?: false)
+
+      # authorize?: false — the test reads the log back, as the round has no admin.
+      events = KilnCMS.Security.list_events!(tenant: tenant(), authorize?: false)
+
+      assert [event] = Enum.filter(events, &(&1.type == :role_granted and &1.target_id == id))
+      assert event.metadata["role"] == "admin"
+      assert event.metadata["level"] == "platform"
+    end
+
     test "seeded content is not duplicated" do
       round = label()
 

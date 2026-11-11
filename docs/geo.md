@@ -41,6 +41,10 @@ Behaviour:
 - **Bounded** to 10,000 entries so the per-request scan stays cheap.
 - Served on the rate-limited `:probe` pipeline alongside `sitemap.xml` /
   `robots.txt`.
+- AI crawlers (`GPTBot`, `ClaudeBot`, `PerplexityBot`, …) fetching the public
+  pages themselves are rate-limited as their own class, at the browser limit by
+  default; `llms.txt` and the `:probe` files are never charged by class. A site
+  admin can lower the AI crawler share; see [bot-budgets.md](bot-budgets.md).
 
 Implementation: `KilnCMSWeb.LlmsController`, route in `router.ex`, cache helpers
 in `KilnCMS.Cache` (`llms_key/0`, `bust_llms/0`).

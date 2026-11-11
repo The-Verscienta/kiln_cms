@@ -100,6 +100,85 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
     end
   end
 
+  describe "grantable_fields/1 (#2141)" do
+    alias KilnCMS.CMS.Changes.EnforceFieldGrants
+    alias KilnCMS.CMS.ContentTypes
+
+    # Update actions whose accepted attributes are system bookkeeping, not
+    # anything an editor changes from the editor — the picker does not offer
+    # them, and a new one landing here must be a decision, not drift.
+    @internal ~w(published_version_id published_at author_id type_definition_id)
+
+    defp descriptor(type), do: Enum.find(ContentTypes.all(), &(&1.type == type))
+
+    defp dynamic_descriptor(excerpt?) do
+      %{resource: nil, source: :dynamic, excerpt?: excerpt?}
+    end
+
+    test "a post's grantable fields lead with title and blocks and hide the working copy" do
+      fields = EnforceFieldGrants.grantable_fields(descriptor(:post))
+
+      assert ["title", "blocks" | _] = fields
+      assert "custom_fields" in fields
+      assert "excerpt" in fields
+      assert "parent_id" in fields
+      refute "working_title" in fields
+      refute "working_blocks" in fields
+      assert fields == Enum.uniq(fields)
+    end
+
+    test "a dynamic type drops type_definition_id, and excerpt unless it has one" do
+      without = EnforceFieldGrants.grantable_fields(dynamic_descriptor(false))
+      with_excerpt = EnforceFieldGrants.grantable_fields(dynamic_descriptor(true))
+
+      refute "type_definition_id" in without
+      refute "excerpt" in without
+      assert "excerpt" in with_excerpt
+      assert ["title", "blocks" | _] = without
+    end
+
+    test "every field an update action accepts is offered or deliberately internal" do
+      for {resource, descriptor} <- [
+            {KilnCMS.CMS.Post, descriptor(:post)},
+            {KilnCMS.CMS.Page, descriptor(:page)},
+            {KilnCMS.CMS.Entry, dynamic_descriptor(true)}
+          ],
+          action <- Ash.Resource.Info.actions(resource),
+          action.type == :update,
+          attr <- action.accept do
+        name =
+          case attr do
+            :working_title -> "title"
+            :working_blocks -> "blocks"
+            attr -> to_string(attr)
+          end
+
+        assert name in EnforceFieldGrants.grantable_fields(descriptor) or name in @internal,
+               "#{inspect(resource)}.#{action.name} accepts #{name}, which is neither " <>
+                 "offered by grantable_fields/1 nor listed as internal"
+      end
+    end
+
+    test "an offered name, granted alone, lets the editor change that field" do
+      admin = user(:admin)
+      offered = EnforceFieldGrants.grantable_fields(descriptor(:post))
+
+      for {field, attrs} <- [
+            {"title", %{title: "Renamed"}},
+            {"slug", %{slug: slug()}},
+            {"excerpt", %{excerpt: "Changed"}},
+            {"seo_title", %{seo_title: "Changed"}}
+          ] do
+        assert field in offered
+        post = post!(admin)
+        editor = user(:editor, %{field_grants: %{"post" => [field]}})
+
+        assert {:ok, _} = CMS.update_post(post, attrs, actor: editor),
+               "granting #{field} alone did not allow changing it"
+      end
+    end
+  end
+
   describe "review fixes" do
     test "a field-granted editor cannot bypass the grant via restore_version" do
       admin = user(:admin)

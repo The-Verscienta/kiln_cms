@@ -147,15 +147,15 @@ defmodule KilnCMS.Accounts.SiteSso do
   to `KilnCMS.Accounts.SiteSso.Admission`. `{:ok, user}` carries a freshly
   minted session token in `user.__metadata__.token`.
   """
-  @spec sign_in(Ash.UUID.t(), String.t(), map(), map()) ::
+  @spec sign_in(Ash.UUID.t(), String.t(), map(), map(), map()) ::
           {:ok, Accounts.User.t()} | {:error, error()}
-  def sign_in(org_id, redirect_uri, params, session_params)
+  def sign_in(org_id, redirect_uri, params, session_params, context \\ %{})
       when is_binary(org_id) and is_binary(redirect_uri) and is_map(params) and
-             is_map(session_params) do
+             is_map(session_params) and is_map(context) do
     with {:ok, provider} <- require_provider(org_id),
          {:ok, discovery} <- discover(provider.issuer),
          {:ok, claims} <- exchange(provider, discovery, redirect_uri, params, session_params) do
-      Admission.admit(org_id, claims)
+      Admission.admit(org_id, claims, context)
     end
   end
 

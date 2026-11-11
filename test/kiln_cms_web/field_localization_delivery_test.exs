@@ -291,9 +291,10 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
   # Golden key sets: what each surface returned before field-level
   # localization existed. A document whose type opts nothing in must come back
   # with exactly these keys — `inherited_fields` appears nowhere unless asked
-  # for, and only on a type that can inherit.
+  # for, and only on a type that can inherit. `social` (#2258) is on every
+  # artifact since format_version 4, so it belongs to the golden set.
   describe "a document that opts nothing in" do
-    @artifact_keys ~w(blocks custom_fields id locale slug title type)
+    @artifact_keys ~w(blocks custom_fields id locale slug social title type)
 
     setup %{actor: actor} do
       {en, fr} =
@@ -313,12 +314,14 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
       conn = json_api("/api/json/pages/by-slug/#{fr.slug}?locale=fr")
       attributes = Jason.decode!(conn.resp_body)["data"]["attributes"]
 
-      # `id` is the resource object's own member, not an attribute.
+      # `id` is the resource object's own member, not an attribute. The three
+      # draft-write provenance fields (#2273) are public attributes behind field
+      # policies, so an anonymous read never carries them.
       public =
         CMS.Page
         |> Ash.Resource.Info.public_attributes()
         |> Enum.map(&to_string(&1.name))
-        |> Kernel.--(["id"])
+        |> Kernel.--(["id", "created_via_key_id", "created_via_key_name", "on_behalf_of"])
         |> Enum.sort()
 
       assert attributes |> Map.keys() |> Enum.sort() == public

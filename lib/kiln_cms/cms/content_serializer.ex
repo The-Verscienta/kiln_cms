@@ -80,6 +80,8 @@ defmodule KilnCMS.CMS.ContentSerializer do
     :seo_keywords,
     :seo_image,
     :canonical_url,
+    :noindex,
+    :nofollow,
     :locale,
     :state,
     # Not decoration: a subscriber cannot tell a members-only document from a

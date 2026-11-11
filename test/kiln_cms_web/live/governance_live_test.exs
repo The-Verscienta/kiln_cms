@@ -127,6 +127,13 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
       )
     end
 
+    defp delete_endpoint!(admin, id) do
+      :ok =
+        id
+        |> CMS.get_webhook_endpoint!(actor: admin)
+        |> CMS.destroy_webhook_endpoint(actor: admin)
+    end
+
     test "the detail shows a lost retraction, and only when there is one", %{conn: conn} do
       admin = authed_user(:admin)
       post = CMS.create_post!(%{title: "Withdrawn Advice", slug: slug()}, actor: admin)
@@ -166,6 +173,44 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
       assert replay.retraction
       assert replay.document_id == post.id
+    end
+
+    # #2330: the row keeps its URL copy once the endpoint is deleted, says
+    # the endpoint is gone, and offers no redelivery.
+    test "a lost retraction whose endpoint was deleted says so", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = CMS.create_post!(%{title: "Orphaned Advice", slug: slug()}, actor: admin)
+      lost = lost_retraction!(admin, post)
+      delete_endpoint!(admin, lost.endpoint_id)
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+
+      row = "#lost-retraction-#{lost.id}"
+      assert has_element?(view, row, "https://mirror.test/hook")
+      assert has_element?(view, ~s(#{row} [data-role="deleted-endpoint"]), "(deleted endpoint)")
+      refute has_element?(view, "#{row} button", "Redeliver")
+    end
+
+    # Another admin deletes the endpoint after the trail rendered.
+    test "redelivering on a stale trail says the endpoint was deleted", %{conn: conn} do
+      admin = authed_user(:admin)
+      post = CMS.create_post!(%{title: "Stale Advice", slug: slug()}, actor: admin)
+      lost = lost_retraction!(admin, post)
+
+      {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
+      button = element(view, "#lost-retraction-#{lost.id} button", "Redeliver")
+
+      delete_endpoint!(admin, lost.endpoint_id)
+
+      html = render_click(button)
+
+      assert html =~ "That delivery&#39;s endpoint was deleted, so it can&#39;t be redelivered."
+      refute has_element?(view, "#lost-retraction-#{lost.id} button", "Redeliver")
+
+      assert has_element?(
+               view,
+               ~s(#lost-retraction-#{lost.id} [data-role="deleted-endpoint"])
+             )
     end
 
     test "the exports carry it", %{conn: conn} do

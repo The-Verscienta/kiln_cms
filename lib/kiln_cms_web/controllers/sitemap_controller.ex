@@ -57,7 +57,13 @@ defmodule KilnCMSWeb.SitemapController do
             # Only the three fields the XML uses — at the 50k ceiling, full
             # rows (blocks + embeddings) would be a large memory spike per
             # rebuild.
-            query: [select: [:slug, :path_alias, :locale, :updated_at], limit: remaining]
+            query: [
+              select: [:slug, :path_alias, :locale, :updated_at],
+              # `noindex` documents (#2256) stay out of the sitemap; filtered in
+              # the query so the per-type cap counts only listed rows.
+              filter: [noindex: false],
+              limit: remaining
+            ]
           )
           |> page_entries(ContentTypes.public_prefix(ct), org)
 

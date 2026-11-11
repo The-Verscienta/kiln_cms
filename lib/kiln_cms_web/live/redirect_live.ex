@@ -39,23 +39,16 @@ defmodule KilnCMSWeb.RedirectLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, socket.assigns.current_user)
-       |> assign(:page_title, gettext("Redirects"))
-       |> assign(:search, "")
-       |> assign(:tab, "redirects")
-       |> assign(:missed_retention_days, MissedPath.retention_days())
-       |> assign(:new, to_form(empty_new(), as: :redirect))
-       |> load_redirects()
-       |> load_missed()}
-    else
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, socket.assigns.current_user)
+     |> assign(:page_title, gettext("Redirects"))
+     |> assign(:search, "")
+     |> assign(:tab, "redirects")
+     |> assign(:missed_retention_days, MissedPath.retention_days())
+     |> assign(:new, to_form(empty_new(), as: :redirect))
+     |> load_redirects()
+     |> load_missed()}
   end
 
   # The active tab lives in the URL so a "here's what's 404ing" link is

@@ -50,7 +50,11 @@ defmodule KilnCMSWeb.SlugRegenLiveTest do
 
     conn = log_in(conn, authed_user(:editor))
 
-    assert {:error, {:redirect, %{to: "/", flash: %{"error" => "You need admin access" <> _}}}} =
+    assert {:error,
+            {:redirect,
+             %{
+               to: "/access-denied?needs=admin"
+             }}} =
              live(conn, ~p"/editor/slugs")
   end
 

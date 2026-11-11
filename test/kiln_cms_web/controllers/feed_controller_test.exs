@@ -814,4 +814,36 @@ defmodule KilnCMSWeb.FeedControllerTest do
       refute forged =~ "category/collide#{n}/locale/fr/feed.xml"
     end
   end
+
+  describe "noindex documents (#2256)" do
+    test "every feed path leaves a noindex document out; nofollow-only stays", %{conn: conn} do
+      cat = category("Robots")
+      hidden = published_post(%{noindex: true, title: "Hidden one"})
+      nofollow = published_post(%{nofollow: true, title: "Nofollow one"})
+      plain = published_post(%{title: "Plain one"})
+
+      for post <- [hidden, nofollow, plain],
+          do: CMS.update_post!(post, %{category_id: cat.id}, actor: admin())
+
+      Cache.bust_published()
+
+      for path <- [
+            "/feed.xml",
+            "/feed.json",
+            "/blog/feed.xml",
+            "/blog/feed.json",
+            "/blog/category/#{cat.slug}/feed.xml"
+          ] do
+        body = conn |> get(path) |> response(200)
+
+        refute body =~ "Hidden one", "noindex document in #{path}"
+        assert body =~ "Nofollow one", "nofollow-only document missing from #{path}"
+        assert body =~ "Plain one"
+      end
+    end
+
+    test "the filter excludes noindex for every scope" do
+      assert KilnCMSWeb.FeedController.filter(%{locale: "en", taxonomy: nil})[:noindex] == false
+    end
+  end
 end

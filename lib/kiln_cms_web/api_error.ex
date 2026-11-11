@@ -91,6 +91,10 @@ defmodule KilnCMSWeb.ApiError do
   `source_parameter: "page[limit]"` adds JSON:API's `source.parameter`, naming
   the query parameter a 400 is about — the same member `ash_json_api` sets on
   its own query errors (`invalid_sort`), so a client reads both the same way.
+
+  `meta: %{...}` adds JSON:API's `meta` member to the error object, for facts a
+  client needs to act on it — the human-verification widget's site key on a
+  `challenge_required` (#2249). An empty map adds nothing.
   """
   @spec send(Plug.Conn.t(), atom() | 100..999, String.t(), String.t(), keyword()) ::
           Plug.Conn.t()
@@ -109,6 +113,12 @@ defmodule KilnCMSWeb.ApiError do
       case Keyword.fetch(opts, :source_parameter) do
         {:ok, parameter} -> Map.put(error, :source, %{parameter: parameter})
         :error -> error
+      end
+
+    error =
+      case Keyword.fetch(opts, :meta) do
+        {:ok, meta} when is_map(meta) and map_size(meta) > 0 -> Map.put(error, :meta, meta)
+        _none -> error
       end
 
     %{errors: [error]}

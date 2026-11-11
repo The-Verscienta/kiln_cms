@@ -1,10 +1,11 @@
 // @ts-check
 // Captures the product screenshots shown on the signed-out home page
-// (`page_html/home.html.heex`) into `priv/static/images/home/`. Not a test:
+// (`page_html/home.html.heex`) into `e2e/screenshots/raw/`. Not a test:
 // it lives outside `./tests`, so neither `npx playwright test` nor CI picks it
 // up. Re-run after a visible console change:
 //
 //     cd e2e && npx playwright test -c screenshots.config.js
+//     scripts/optimize_home_images.sh   # then derive the shipped variants
 //
 // It reuses the journey config (same server, same seeds, same sign-in
 // fixtures) and only swaps the test directory and the viewport.

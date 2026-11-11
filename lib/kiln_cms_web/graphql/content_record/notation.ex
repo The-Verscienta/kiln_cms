@@ -61,6 +61,72 @@ defmodule KilnCMSWeb.Graphql.ContentRecord.Notation do
   end
 
   @doc """
+  The typed readers of admin-defined custom fields (#2290), shared by the
+  interface and every object that implements it.
+
+  The schema is compiled and the same for every site, so these take the field's
+  `name` and type the *accessor*: `customFloat(name: "price")` is a `Float` or
+  `null`, whatever the site names its fields. A name that is unknown, deleted,
+  renamed, of another kind, or private to the reader is `null` (never an
+  error), because a client cannot know the site's current definitions.
+  `fields(names:)` lists the named fields as `CustomFieldValue`s, up to 50.
+
+  `KilnCMSWeb.Graphql.CustomFields` resolves them, one definitions read per
+  type per document.
+  """
+  defmacro custom_field_accessors do
+    quote do
+      @desc "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+      field :custom_string, :string do
+        arg :name, non_null(:string)
+        resolve &KilnCMSWeb.Graphql.CustomFields.custom_string/3
+      end
+
+      @desc "The `integer` custom field `name`, or null."
+      field :custom_int, :integer do
+        arg :name, non_null(:string)
+        resolve &KilnCMSWeb.Graphql.CustomFields.custom_int/3
+      end
+
+      @desc "The `float` custom field `name`, or null."
+      field :custom_float, :float do
+        arg :name, non_null(:string)
+        resolve &KilnCMSWeb.Graphql.CustomFields.custom_float/3
+      end
+
+      @desc "The `boolean` custom field `name`, or null."
+      field :custom_boolean, :boolean do
+        arg :name, non_null(:string)
+        resolve &KilnCMSWeb.Graphql.CustomFields.custom_boolean/3
+      end
+
+      @desc "The `date` custom field `name`, or null."
+      field :custom_date, :date do
+        arg :name, non_null(:string)
+        resolve &KilnCMSWeb.Graphql.CustomFields.custom_date/3
+      end
+
+      @desc "The `datetime` custom field `name`, or null."
+      field :custom_date_time, :datetime do
+        arg :name, non_null(:string)
+        resolve &KilnCMSWeb.Graphql.CustomFields.custom_date_time/3
+      end
+
+      @desc """
+      The custom fields `names` (at most 50), each as a `CustomFieldValue`
+      narrowed with `... on FloatValue { value }`. A name that is unknown,
+      empty, private to the reader or of no value is left out. Priced at one
+      plus the child's price per name.
+      """
+      field :fields, non_null(list_of(non_null(:custom_field_value))) do
+        arg :names, non_null(list_of(non_null(:string)))
+        complexity &KilnCMSWeb.GraphqlLimits.custom_fields_complexity/3
+        resolve &KilnCMSWeb.Graphql.CustomFields.fields/3
+      end
+    end
+  end
+
+  @doc """
   One `extend object` per content type in `domains` (the schema's
   `:content_domains`, the list it hands AshGraphql). See the moduledoc.
   """
@@ -74,6 +140,7 @@ defmodule KilnCMSWeb.Graphql.ContentRecord.Notation do
         extend object(unquote(type)) do
           interface :content_record
           KilnCMSWeb.Graphql.ContentRecord.Notation.reference_fields()
+          KilnCMSWeb.Graphql.ContentRecord.Notation.custom_field_accessors()
         end
       end
     end)

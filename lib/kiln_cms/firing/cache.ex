@@ -19,6 +19,13 @@ defmodule KilnCMS.Firing.Cache do
   the encoding of the body beside it. Nothing writes the JSON on its own: a
   reader that encoded lazily and cached the result could put back the
   encoding of a body that a concurrent fire had already replaced.
+
+  `put/5` stores the body as the artifact table gives it back: decoded from
+  its own JSON, so string keys and no structs. A body cached straight from a
+  fire and the same body cached from a table read are then the same term with
+  the same encoding, which the artifact API's body-digest `ETag` relies on
+  (#2463): a fire's map may carry atom keys or `DateTime`s, and a map of more
+  than 32 keys encodes in an order that depends on what its keys are.
   """
   import Cachex.Spec, only: [hook: 1]
 
@@ -73,13 +80,7 @@ defmodule KilnCMS.Firing.Cache do
 
   @spec put(Ash.UUID.t(), atom(), Ash.UUID.t(), atom(), map()) :: :ok
   def put(org_id, document_type, document_id, surface, body) do
-    # A body that cannot be encoded stores `nil` beside it, which `get_json/4`
-    # reads as a miss, so an older encoding is overwritten, never left behind.
-    json =
-      case Jason.encode(body) do
-        {:ok, json} -> json
-        {:error, _} -> nil
-      end
+    {body, json} = normalize(body)
 
     # One insert for both, so no reader finds a body beside another body's
     # JSON. Cachex honors `:expire`, not `:ttl` — the latter is silently
@@ -120,6 +121,20 @@ defmodule KilnCMS.Firing.Cache do
     end)
 
     :ok
+  end
+
+  # The body as a JSON round trip gives it back, and its encoding. A body that
+  # cannot be encoded is kept as it is with `nil` beside it, which
+  # `get_json/4` reads as a miss, so an older encoding is overwritten, never
+  # left behind.
+  defp normalize(body) do
+    with {:ok, json} <- Jason.encode(body),
+         {:ok, decoded} <- Jason.decode(json),
+         {:ok, json} <- Jason.encode(decoded) do
+      {decoded, json}
+    else
+      {:error, _} -> {body, nil}
+    end
   end
 
   defp key(org_id, document_type, document_id, surface),

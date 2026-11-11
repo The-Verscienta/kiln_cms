@@ -128,6 +128,18 @@ to `/newsletter/subscribe` with the honeypot below, so everything in the next
 section applies: double opt-in, and the same page for every outcome. A
 subscriber joins the site that served the page.
 
+The block's own labels (**Name**, **Email**, the honeypot's hint) are in the
+article's language, the one its `<article lang>` declares, even when that
+differs from the reader's `<html lang>`. On a multilingual site the form also posts under that
+language's prefix, the default language's included: an English page posts to
+`/en/newsletter/subscribe`, a French one to `/fr/newsletter/subscribe`, so the
+"check your inbox" page answers in the language the visitor was reading. An
+unprefixed post would take its language from the visitor's session instead. A
+single-language site, the editor previews and the fired `web` HTML keep the
+bare `/newsletter/subscribe`. If a theme stylesheet or an analytics rule
+matches the form by its `action`, match the `.kiln-newsletter-signup` class
+instead.
+
 Use this block, not a *Form* block, for a sign-up. A form built under Forms
 stores its submissions in the forms inbox, and they never reach the
 subscriber list.
@@ -141,7 +153,8 @@ Kiln.
 
 ### Signing up
 
-Post `email` (and optionally `name`) to `/newsletter/subscribe`. Include the
+Post `email` (and optionally `name`) to `/newsletter/subscribe`, or to
+`/<locale>/newsletter/subscribe` for the result page in that language. Include the
 shared honeypot input (`KilnCMS.Forms.honeypot_field/0` — `website`), which
 public form submissions already use; filling it yields a fake success.
 

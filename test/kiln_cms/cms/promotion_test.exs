@@ -39,8 +39,15 @@ defmodule KilnCMS.CMS.PromotionTest do
         type_definition_id: definition.id,
         name: "servings",
         label: "Servings",
-        field_type: :integer
+        field_type: :integer,
+        section: "Kitchen"
       },
+      actor: actor
+    )
+
+    # Its section layout (#2280) is keyed by the same owner as the field.
+    CMS.create_field_section!(
+      %{type_definition_id: definition.id, name: "Kitchen", display: :tab},
       actor: actor
     )
 
@@ -111,6 +118,12 @@ defmodule KilnCMS.CMS.PromotionTest do
              CMS.field_definitions_for!(:page, authorize?: false),
              &(&1.name == "servings")
            )
+
+    # ...and so does the section layout, not left on the archived definition.
+    assert [%{name: "Kitchen", display: :tab, type_definition_id: nil}] =
+             CMS.field_sections_for!(:page, authorize?: false)
+
+    assert CMS.field_sections_for_definition!(definition.id, authorize?: false) == []
 
     # The TypeDefinition is archived: gone from the registry, present in trash.
     assert is_nil(ContentTypes.get_dynamic(definition.name))

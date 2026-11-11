@@ -1,5 +1,13 @@
 defmodule KilnCMS.AskTest do
-  @moduledoc "RAG retrieval + generation seam (issue #339)."
+  @moduledoc """
+  RAG retrieval + generation seam (issue #339).
+
+  Retrieval is `KilnCMS.Search.global/2`, which runs inside the search query
+  budget. A test here that gets no sources, with no error, may be a sweep the
+  budget cut short on a loaded host (#2337): run the same query through
+  `KilnCMS.Search.global_report/2` and check `:partial`. `config/test.exs` sets
+  the budget high for exactly this reason.
+  """
   use KilnCMS.DataCase, async: true
 
   import KilnCMS.TypedFixtures

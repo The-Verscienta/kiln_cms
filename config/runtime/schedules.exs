@@ -54,6 +54,14 @@ if cron = System.get_env("KILN_HEALTH_SWEEP_CRON") do
   config :kiln_cms, :health_sweep_cron, cron
 end
 
+# ## Security audit log retention (#2241)
+#
+# When events past each org's retention window are deleted. Daily. `false`
+# turns it off (events are then kept until erasure).
+if cron = System.get_env("KILN_SECURITY_LOG_PRUNE_CRON") do
+  config :kiln_cms, :security_log_prune_cron, cron
+end
+
 # And whether booting queues the one-off backfill that gives pre-existing
 # content its first value. On by default because the alternative is an upgrade
 # step someone has to remember, and the index is simply empty until they do.

@@ -352,6 +352,50 @@ defmodule KilnCMS.Accounts.ThrottleStorePeerTest do
     assert {:deny, _} = call(b, KilnCMSWeb.RateLimit, :check, [:auth, ip])
   end
 
+  # A sign-in unlock (#2250) is a `forget/2` of the `signin` bucket in the
+  # shared table, so it reaches every node. Not the node-local fallback: a node
+  # that counted attempts in its own ETS while the database was unreachable
+  # keeps those counts through an unlock elsewhere, until its window rolls.
+  # That is the fallback's documented bound (`ThrottleStore`), not a new one.
+  test "an unlock on one node lifts the pause on the other", %{nodes: [a, b] = nodes} do
+    identifier = "peer-unlock-#{System.unique_integer([:positive])}@example.com"
+    on_exit(fn -> forget(nodes, "signin", AccountThrottle.digest(identifier)) end)
+
+    budget = AccountThrottle.defaults()[:budget]
+    for _ <- 1..budget, do: assert(call(a, AccountThrottle, :consume, [identifier]) == :allow)
+    assert {:deny, _} = call(a, AccountThrottle, :consume, [identifier])
+    assert call(b, AccountThrottle, :sign_in_paused?, [identifier])
+
+    assert :ok = call(b, AccountThrottle, :unlock, [identifier])
+
+    refute call(a, AccountThrottle, :sign_in_paused?, [identifier])
+    assert :allow = call(a, AccountThrottle, :consume, [identifier])
+  end
+
+  test "the unlock mail budget holds across two nodes", %{nodes: [a, b] = nodes} do
+    identifier = "peer-unlock-mail-#{System.unique_integer([:positive])}@example.com"
+    on_exit(fn -> forget(nodes, "mail:sign_in_unlock", AccountThrottle.digest(identifier)) end)
+
+    assert AccountThrottle.defaults()[:unlock_mail_budget] == 3
+    assert call(a, AccountThrottle, :allow_mail?, [:sign_in_unlock, identifier])
+    assert call(b, AccountThrottle, :allow_mail?, [:sign_in_unlock, identifier])
+    assert call(a, AccountThrottle, :allow_mail?, [:sign_in_unlock, identifier])
+    refute call(b, AccountThrottle, :allow_mail?, [:sign_in_unlock, identifier])
+    refute call(a, AccountThrottle, :allow_mail?, [:sign_in_unlock, identifier])
+  end
+
+  test "an unlock leaves the per-IP :auth bucket alone", %{nodes: [a, b] = nodes} do
+    identifier = "peer-unlock-ip-#{System.unique_integer([:positive])}@example.com"
+    ip = "peer-unlock-ip-#{System.unique_integer([:positive])}"
+    on_exit(fn -> forget(nodes, "ip:auth", ip) end)
+
+    {limit, _scale} = KilnCMSWeb.RateLimit.default_limits()[:auth]
+    for _ <- 1..limit, do: assert(call(a, KilnCMSWeb.RateLimit, :check, [:auth, ip]) == :allow)
+
+    assert :ok = call(b, AccountThrottle, :unlock, [identifier])
+    assert {:deny, _} = call(a, KilnCMSWeb.RateLimit, :check, [:auth, ip])
+  end
+
   # ---------------------------------------------------------------------------
 
   defp start_node(repo_config) do

@@ -78,8 +78,9 @@ injection, Redirects, Slugs, Backups, Mail, Newsletter, Billing, API keys and
 System. For a tester on the `editor` tier the sidebar's configuration sections
 collapse to a single **Your settings** link under **Account** — the nav is built
 from `KilnCMS.Accounts.Scoping.effective_tier/2` in `KilnCMSWeb.ConsoleNav` — so those
-pages read as *missing*. Typing the URL directly is clearer: it bounces to `/`
-with "You need admin access to view that page."
+pages read as *missing*. Typing the URL directly is clearer: it lands on a
+`403` `/access-denied` page that says which role the page needs and which role
+you hold.
 
 ### Gate 2 — Ash policy decides which *actions* run
 
@@ -89,15 +90,20 @@ Per [`docs/policy-matrix.md`](policy-matrix.md), on `Page`/`Post`/`Entry`:
 | Action | admin | editor |
 |---|:-:|:-:|
 | `create`, `update`, `submit_for_review` | ✅ | ✅ |
-| `unpublish`, `archive`, `restore_version` | ✅ | ✅ |
+| `unarchive`, `restore_version` | ✅ | ✅ |
 | **`publish`, `publish_scheduled`** | ✅ | ❌ |
+| **`unpublish`, `archive`** | ✅ | ❌ |
 | **`return_to_draft`** | ✅ | ❌ |
 | `destroy` (soft-delete), `trashed`, `restore` | ✅ | ❌ |
 
 **An editor cannot publish.** Publishing is an admin approval step by design —
 editors submit for review. So an authoring round cannot be one person alone at a
 keyboard: the draft → in_review → published loop *needs two roles*, which is
-exactly the workflow under test.
+exactly the workflow under test. Taking content down is the same approval
+step, so an editor cannot unpublish or archive either. The table assumes the
+site's **Team → Publishing** switch is off (an admin approves); with it on,
+editors may publish, unpublish and archive too
+([The editorial workflow](editorial-workflow.md#who-can-do-what)).
 
 ### Round shapes
 
@@ -118,7 +124,7 @@ Paths verified against `lib/kiln_cms_web/router.ex`. Note `/media`, which is
 | Area | Where | Tier | What testers exercise |
 |---|---|---|---|
 | Overview | `/editor/overview` | editor | the landing dashboard — what's mine, what's due |
-| Content list | `/editor` | editor | browse content, status + title filter, bulk actions, inline unpublish (publish is admin) |
+| Content list | `/editor` | editor | browse content, status + title filter, bulk actions (publish, unpublish and archive are admin) |
 | Block editor | `/editor/content/:type/:id` | editor | edit the block tree (rich text, heading, image, quote, embed, gallery, accordion, columns), links, autosave, save |
 | Media library | `/media` | editor | upload media, browse, insert into content, alt text |
 | Taxonomy | `/editor/taxonomy` | editor | create terms/tag groups, assign to content |
@@ -189,7 +195,7 @@ handoff itself was clear. Leave admin-only rows blank on an authoring round.
 | Create a new page or post | editor | | |
 | Edit content in the block editor (add/reorder blocks, add a link) | editor | | |
 | Submit content for review | editor | | |
-| Get that content published, and later unpublish it | editor+ | | |
+| Get that content published, and later taken down | editor+ | | |
 | Upload media and insert it into content | editor | | |
 | Create a taxonomy term and assign it to content | editor | | |
 | Find a specific item via the search palette | editor | | |
@@ -246,9 +252,11 @@ E and G need `admin`.
 5. Add a link inside the rich-text block.
 6. Let it **autosave**, then hit **Save** explicitly.
 7. **Submit it for review.**
-8. Ask for it to be published, then — once it is — **unpublish** it.
-   *Steps 7–8 are the handoff; watch whether the tester can tell that publishing
-   isn't theirs to do, and whether they can find the state afterwards.*
+8. Ask for it to be published, then — once it is — ask for it to be
+   **taken down**.
+   *Steps 7–8 are the handoff; watch whether the tester can tell that
+   publishing and unpublishing aren't theirs to do, and whether they can find
+   the state afterwards.*
 
 ### Scenario B — Media (editor)
 1. Open the **media library** (`/media`).
@@ -277,7 +285,8 @@ does each side learn the ball is in their court without being told out of band?
 1. Add another **user**, or change a user's role to `editor` (`/editor/team`).
 2. Register a **webhook** for a content event (`/editor/webhooks`) and inspect a
    delivery.
-3. Delete a draft, then recover it from **trash** (`/editor/trash`).
+3. Move a draft to the trash (the row's **⋯** menu → **Move to trash**), then
+   recover it from **trash** (`/editor/trash`).
 
 ### Scenario F — Plan a release (editor)
 1. Open **releases** (`/editor/releases`) and create one.
@@ -414,7 +423,7 @@ round can hand somebody `:admin`; put the role back when the round ends.
       against uncommitted changes isn't frozen.
 - [x] Seed each tester with content they can safely break — an empty CMS tests
       nothing but the empty states. Each tester gets a published post (so the
-      edit/unpublish steps have a live record they couldn't have published
+      edit steps have a live record they couldn't have published
       themselves) and a draft page with history (so `restore_version`, one of
       the few workflow actions an editor *may* run, has a target). Skip with
       `--no-seed`.

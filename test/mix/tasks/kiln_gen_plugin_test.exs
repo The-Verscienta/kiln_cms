@@ -1,6 +1,13 @@
 defmodule Mix.Tasks.Kiln.Gen.PluginTest do
   @moduledoc false
-  use ExUnit.Case, async: true
+
+  # Not async (#2380). The generator writes `config :kiln_cms, plugins: [...]`
+  # into the test project, and Igniter evaluates that config while formatting:
+  # it puts the generated plugin list into the real `:kiln_cms` app env, then
+  # restores a snapshot of the WHOLE app env taken before. Concurrently, that
+  # swaps `:plugins` under other tests and can put back a value another test
+  # had already restored, leaking it for the rest of the run.
+  use ExUnit.Case, async: false
 
   import Igniter.Test
 
@@ -82,9 +89,9 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
         end)
       end
 
-      # The bundled SDK's minor: 1.3.0 → "~> 1.3".
+      # The bundled SDK's minor: 1.4.0 → "~> 1.4".
       sdk = Plugin.sdk_requirement()
-      assert sdk == "~> 1.3"
+      assert sdk == "~> 1.4"
 
       assert deps.(Plugin.dep_mix_source("Ratings", "ratings", nil)) ==
                [{:kiln_plugin, sdk}]

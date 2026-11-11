@@ -21,7 +21,7 @@
 // origin — a real, reachable Kiln socket on the other host name — is refused
 // by the browser with a `connect-src` violation. Under the old policy it
 // opened.
-const { test, expect, signInAsAdmin, waitForLiveConnected } = require("./fixtures");
+const { test, expect, signInAsAdmin, waitForLiveConnected, firstEditHref } = require("./fixtures");
 
 // Recorded from the first byte of every document, before app.js runs.
 async function recordViolations(page) {
@@ -101,10 +101,9 @@ test.describe("CSP connect-src 'self' (#1615)", () => {
     // re-join `/live`.
     await page.goto("/editor");
     await expect(page.locator("[data-phx-main].phx-connected")).toHaveCount(1);
-    const editLink = page.locator('a[href^="/editor/content/"]').first();
-    const href = await editLink.getAttribute("href");
-    expect(href).toBeTruthy();
-    await page.goto(/** @type {string} */ (href));
+    // By the edit page's shape, not a prefix: the list also links the
+    // CSV/JSON exports, and `page.goto` on a download aborts (#2293, #2391).
+    await page.goto(await firstEditHref(page));
     await expect(page.locator("[data-phx-main].phx-connected")).toHaveCount(1);
     await expect(page.locator('form[id$="-editor"]')).toBeVisible();
 

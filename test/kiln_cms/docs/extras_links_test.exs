@@ -82,6 +82,69 @@ defmodule KilnCMS.Docs.ExtrasLinksTest do
 
   @extras Mix.Project.config()[:docs][:extras] |> Enum.map(fn {path, _} -> to_string(path) end)
 
+  # #2167: `[\`KilnCMS.Keys\`](KilnCMS.Keys.html)` is an ExDoc *output* page. It
+  # resolves in the generated hexdocs and nowhere else — github.com and the
+  # kilncms.dev docs render the Markdown source, where that path is a 404. Link
+  # the file by its absolute
+  # `https://github.com/The-Verscienta/kiln_cms/blob/main/…` URL, the form
+  # `mix.exs` prescribes (a relative `../lib/…` link is passed through by ExDoc
+  # untouched and 404s on hexdocs). Both inline `[x](page.html)` links and
+  # reference definitions `[x]: page.html` are scanned.
+  @reference_definition ~r/^[ ]{0,3}\[[^\]]+\]:[ ]*<?([^\s>]+)/m
+
+  test "no extra links to a generated .html page by a relative path" do
+    html_links =
+      for extra <- @extras,
+          {line, number} <-
+            extra |> File.read!() |> prose() |> String.split("\n") |> Enum.with_index(1),
+          href <- inline_hrefs(line) ++ definition_hrefs(line),
+          relative_html?(href) do
+        "  #{extra}:#{number}  #{href}"
+      end
+
+    assert html_links == [],
+           """
+           These links point at a generated `.html` page by a relative path, which
+           404s on github.com and on the kilncms.dev docs:
+
+           #{Enum.join(html_links, "\n")}
+
+           Link the file by its absolute
+           https://github.com/The-Verscienta/kiln_cms/blob/main/<path> URL instead.
+           """
+  end
+
+  test "the .html link check sees inline and reference-style links, and only relative ones" do
+    assert for(
+             line <- [
+               "see [`K`](KilnCMS.Keys.html) here",
+               "[keys]: KilnCMS.Keys.html",
+               "[keys]: <../x/Mod.html#fun>",
+               "[ok](https://hexdocs.pm/kiln_cms/KilnCMS.Keys.html)",
+               "[ok]: https://example.com/page.html",
+               "[ok](../lib/kiln_cms/keys.ex)"
+             ],
+             href <- inline_hrefs(line) ++ definition_hrefs(line),
+             relative_html?(href),
+             do: href
+           ) == ["KilnCMS.Keys.html", "KilnCMS.Keys.html", "../x/Mod.html#fun"]
+  end
+
+  defp inline_hrefs(line), do: for([_, href] <- Regex.scan(@link, line), do: href)
+
+  defp definition_hrefs(line) do
+    case Regex.run(@reference_definition, line) do
+      [_, href] -> [href]
+      _ -> []
+    end
+  end
+
+  defp relative_html?(href) do
+    uri = URI.parse(href)
+
+    is_nil(uri.scheme) and is_nil(uri.host) and Path.extname(uri.path || "") == ".html"
+  end
+
   test "every relative link between extras resolves to the file it names" do
     links = for extra <- @extras, link <- relative_links(extra), do: link
 

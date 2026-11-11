@@ -66,6 +66,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
                :delivery,
                :outbound,
                :integrations,
+               :access,
                :organization,
                :account,
                :operations
@@ -99,6 +100,22 @@ defmodule KilnCMSWeb.ConsoleNavTest do
 
         assert is_list(item.keywords), "#{item.key} has no keyword list"
       end
+    end
+
+    test "the security screens sit together in Organization, alerts after the log" do
+      keys = Enum.map(group(authed_user(:admin), :organization).items, & &1.key)
+
+      assert keys == [
+               :governance,
+               :security_posture,
+               :security_txt,
+               :security_log,
+               :security_alerts,
+               :trash
+             ]
+
+      assert :security_alerts in found("alert", authed_user(:admin))
+      refute :security_alerts in found("alert", authed_user(:editor))
     end
 
     test "every path is a route the router actually serves" do
@@ -181,6 +198,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
                :delivery,
                :outbound,
                :integrations,
+               :access,
                :organization,
                :account
              ]
@@ -325,7 +343,8 @@ defmodule KilnCMSWeb.ConsoleNavTest do
         user = with_preset(authed_user(role), :everything)
         nav = ConsoleNav.nav(user, nil)
 
-        assert ConsoleNav.sidebar(user, nil) == Map.put(nav, :pinned, [])
+        assert ConsoleNav.sidebar(user, nil) ==
+                 nav |> Map.put(:pinned, []) |> Map.put(:hidden_screens, [])
       end
     end
 
@@ -342,6 +361,50 @@ defmodule KilnCMSWeb.ConsoleNavTest do
       # …and one the actor may not open is still not conjured up.
       assert %{pinned: [:settings]} = sidebar_keys(authed_user(:editor), :redirects)
       assert %{pinned: [:settings]} = sidebar_keys(admin, :settings)
+    end
+
+    test "essentials names the hidden screens this actor can open (#2144)", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      assert ConsoleNav.sidebar(admin, nil).hidden_screens ==
+               ["Forms", "Webhooks", "API keys", "Trash"]
+
+      assert ConsoleNav.sidebar(with_preset(authed_user(:admin), :everything), nil).hidden_screens ==
+               []
+
+      assert ConsoleNav.sidebar(authed_user(:editor), nil).hidden_screens == []
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor")
+
+      assert lv |> element("#nav-essentials-hint") |> render() =~
+               "Forms, Webhooks, API keys and Trash are under Configure"
+    end
+
+    test "an org admin's hint leaves out API keys, which their Configure does not have (#2144)",
+         %{conn: conn} do
+      user = authed_user(:editor)
+
+      {:ok, _membership} =
+        Accounts.create_org_membership(
+          %{user_id: user.id, organization_id: Accounts.default_org_id(), role: :admin},
+          authorize?: false
+        )
+
+      user = with_preset(user, :essentials)
+
+      assert ConsoleNav.sidebar(user, nil).hidden_screens == ["Forms", "Webhooks", "Trash"]
+
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor")
+      html = lv |> element("#nav-essentials-hint") |> render()
+
+      assert html =~ "Forms, Webhooks and Trash are under Configure"
+      refute html =~ "API keys"
+    end
+
+    test "an editor has no Configure hub, so essentials shows no hint (#2144)", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+
+      refute has_element?(lv, "aside #nav-essentials-hint")
     end
 
     test "the hub and ⌘K read the whole map whatever the preset" do
@@ -403,6 +466,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
             :capture,
             :delivery,
             :integrations,
+            :access,
             :organization,
             :account,
             :operations
@@ -487,12 +551,15 @@ defmodule KilnCMSWeb.ConsoleNavTest do
       {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor")
 
       refute has_element?(lv, ~s(aside a.side-link[href="/editor/menus"]))
+      # #2144: essentials tells an admin where Forms, Webhooks, API keys and Trash went.
+      assert has_element?(lv, "aside #nav-essentials-hint", "are under Configure")
 
       lv |> element("#nav-preset-switch") |> render_click()
 
       assert has_element?(lv, ~s(aside a.side-link[href="/editor/menus"]))
       assert has_element?(lv, ~s(aside .side-group[data-nav-group="operations"]))
       assert has_element?(lv, "aside #nav-preset-switch", "Show essentials")
+      refute has_element?(lv, "aside #nav-essentials-hint")
       assert {:ok, %{nav_preset: :everything}} = Accounts.get_user(user.id, actor: user)
 
       lv |> element("#nav-preset-switch") |> render_click()

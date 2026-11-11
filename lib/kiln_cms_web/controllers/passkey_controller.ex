@@ -44,6 +44,7 @@ defmodule KilnCMSWeb.PasskeyController do
     with %Wax.Challenge{} = challenge <- WebAuthn.take_challenge(nonce),
          {:ok, user} <- WebAuthn.authenticate(challenge, params) do
       return_to = KilnCMSWeb.AuthController.sign_in_destination(conn, user)
+      KilnCMS.Security.AuthEvents.signed_in(conn, user, "passkey")
 
       conn
       |> delete_session(:return_to)

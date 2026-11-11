@@ -29,7 +29,7 @@ summary, and the README carries the same table word for word.
 
 | Label | What it means | Surfaces |
 |---|---|---|
-| **Covered** | A rename, a removal or a change of meaning needs a major release and goes through the deprecation path. Additions are not breaking | The overlay contract: the `KilnCMS.CMS.Content` options and the two `*_pattern` token vocabularies; the `__kiln_*__/0` functions; the workflow action names on a content resource; the merge-argument convention; `Kiln.Plugin` callbacks; `Kiln.Block` and its DSL, the `_type` and `_version` attributes, `Kiln.Block.Renderer` and `Kiln.Block.Info`; `Kiln.FieldType`; `Kiln.Advisory` and `Kiln.Forms.SpamCheck`; `Kiln.SafeFetch`; `Kiln.Plugins`, `Kiln.Version`, `Kiln.Updates` and `Kiln.Tokens`; `KilnCMS.Blocks`, `KilnCMS.Blocks.Upcaster` and `KilnCMS.CMS.ContentTypes`; `KilnCMS.Firing.refire/3` and `refire!/3`; `KilnCMS.Migrations`; `KilnCMS.SchemaExport` and `KilnCMS.Branding`; `KilnCMSWeb.PluginRouter` and `KilnCMSWeb.AshJsonApiRouter`; the config keys; the build conventions; the `public-*` CSS hook classes; the documented environment variables; `mix kiln.update` with its documented flags, `mix kiln.plugins.doctor` and `mix kiln.search.check`. Over HTTP, under the [API guide](api.md)'s own, stricter policy: `/api/json` and `/gql`, reads and documented writes; `/api/auth/sign_in`; `/api/content/:type/:slug` and `/api/content/:type/:id/revisions`; `/api/sync`; `/api/search` (the request and the response, not the order); `/api/resolve`; `/api/menus` and `/api/menus/:key`; `/api/ask`; `/api/locales`; `/api/schema`; `/api/provenance/verify/:type/:slug`, `/api/provenance/:type/:slug` and `/api/provenance/public-key` (provenance is on by default since 1.7); `/api/media`, `/api/media/import-url` and `/api/media/uploads[/complete]`; `/api/forms/:slug` and `embed.js`; `/mcp`; `bridge.js`; `/sitemap.xml`, `/news-sitemap.xml`, `/feed.xml` and `/feed.json`; `/preview/:token`; image transform URLs, `/media/:id/t/:ops`; and webhook deliveries: event names, payloads, and the `x-kilncms-webhook-signature` scheme |
+| **Covered** | A rename, a removal or a change of meaning needs a major release and goes through the deprecation path. Additions are not breaking | The overlay contract: the `KilnCMS.CMS.Content` options and the two `*_pattern` token vocabularies; the `__kiln_*__/0` functions; the workflow action names on a content resource; the merge-argument convention; `Kiln.Plugin` callbacks; `Kiln.Block` and its DSL, the `_type` and `_version` attributes, `Kiln.Block.Renderer` and `Kiln.Block.Info`; `Kiln.FieldType`; `Kiln.Advisory` and `Kiln.Forms.SpamCheck`; `Kiln.SafeFetch`; `Kiln.Plugins`, `Kiln.Version`, `Kiln.Updates` and `Kiln.Tokens`; `KilnCMS.Blocks`, `KilnCMS.Blocks.Upcaster` and `KilnCMS.CMS.ContentTypes`; `KilnCMS.Firing.refire/3` and `refire!/3`; `KilnCMS.Migrations`; `KilnCMS.SchemaExport` and `KilnCMS.Branding`; `KilnCMSWeb.PluginRouter` and `KilnCMSWeb.AshJsonApiRouter`; the config keys; the build conventions; the `public-*` CSS hook classes; the documented environment variables; `mix kiln.update` with its documented flags, `mix kiln.plugins.doctor` and `mix kiln.search.check`. Over HTTP, under the [API guide](api.md)'s own, stricter policy: `/api/json` and `/gql`, reads and documented writes; `/api/auth/sign_in`; `/api/keys/rotate`; `/api/security/posture` (additive only, under its own `version`); `/api/content/:type/:slug` and `/api/content/:type/:id/revisions`; `/api/sync`; `/api/search` (the request and the response, not the order); `/api/resolve`; `/api/menus` and `/api/menus/:key`; `/api/ask`; `/api/locales`; `/api/schema`; `/api/provenance/verify/:type/:slug`, `/api/provenance/:type/:slug` and `/api/provenance/public-key` (provenance is on by default since 1.7); `/api/media`, `/api/media/import-url` and `/api/media/uploads[/complete]`; `/api/forms/:slug` and `embed.js`; `/mcp`; `bridge.js`; `/sitemap.xml`, `/news-sitemap.xml`, `/feed.xml` and `/feed.json`; `/preview/:token`; image transform URLs, `/media/:id/t/:ops`; and webhook deliveries: event names, payloads, and the `x-kilncms-webhook-signature` scheme |
 | **Covered, off by default** | Not a fourth label. These ship switched off and are **supported when enabled**: bugs in them are fixed like any other, and "off" is a default, not a stability rating. Each one's switch is a covered environment variable or config key, its console screens are internal like every other admin path, and its HTTP surface, where it has one, is covered | AI block assist; the SEO generator; content experiments; oEmbed cards; demo mode; the compliance gates; referrer analytics; SSO (OIDC) and two-factor authentication, both compile-gated; the per-site integrations for AI, search, storage, push, SSO and mail |
 | **Internal** | May change in any release, including a patch, without a deprecation | Everything under `KilnCMSWeb.*` except the two routers above: LiveViews, components, the component kit's class names, and the `/editor/...` admin paths, including the per-site integration screens; AshAdmin at `/admin`; `KilnCMS.*` internals not named above (changes, calculations, workers, and anything `@doc false`); the internal write actions a content resource carries for its own bookkeeping; the console's `side-*` classes and admin design tokens; core Oban queue names; search ranking behaviour and its tuning defaults; the generated GraphQL schema module itself, as distinct from the schema it produces; seeds, fixtures, `projects/example/` and `test/support/`; `to_markdown/1` on a block module; a hand-rolled `@behaviour` when a callback is added; every other `mix kiln.*` task, and the code `mix kiln.gen.content` and `mix kiln.gen.plugin` write |
 | **Experimental** | Incomplete, or resting on a dependency that is not stable yet. May change or be withdrawn in a minor | Semantic and hybrid search and the Meilisearch backend (both feature-flagged off, and the models need a `KILN_ML=1` build); `/api/content/:type/:slug/related`, which is empty without semantic search; the Bumblebee cross-encoder reranker (`rerank: false`; its model path is not exercised in CI); the CRDT collaborative-editing prototype (`:collab_prototype`, dev and test only); GraphQL subscriptions over `/ws/gql` (on, but built on `ash_graphql`'s subscription DSL, which is still beta) |
@@ -51,7 +51,7 @@ you*).
 | The `__kiln_*__/0` functions the macro injects | The seam between a resource and every core registry. The double underscores read private; they are contract |
 | Workflow action names on a content resource | `:read`, `:published`, `:public_by_slug`, `:trashed`, `:create`, `:update`, `:autosave`, `:submit_for_review`, `:return_to_draft`, `:publish`, `:unpublish`, `:archive`, `:unarchive`, `:restore`, `:destroy`. Note `:restore` undoes trashing and `:unarchive` undoes `:archive` — they are not the same inverse |
 | The merge-argument convention | `tag_ids` / `add_tag_ids` / `remove_tag_ids`, and `related_<type>_ids` with the same three forms; `remove_*` stays idempotent |
-| `Kiln.Plugin` callbacks | All fifteen, their arities and their return shapes, plus the `nav_item` and `admin_route` types |
+| `Kiln.Plugin` callbacks | All seventeen (`plug_routes/0` since `kiln_plugin` 1.4), their arities and their return shapes, plus the `nav_item`, `admin_route` and `plug_route` types |
 | `Kiln.Block` and its DSL | The `block`, `field` and `migrate` entities, their options, the declared field-type vocabulary, and the Kiln-to-Ash type mapping |
 | The `_type` and `_version` attributes | Injected on every block, and the discriminator a stored block map is resolved by |
 | `Kiln.Block.Renderer` | The `:web`, `:json` and `:json_ld` surfaces, and that an implementation returning `nil` for an unhandled surface is correct |
@@ -61,7 +61,7 @@ you*).
 | `Kiln.Plugins`, `Kiln.Version`, `Kiln.Updates`, `Kiln.Tokens` | Their documented functions and return shapes |
 | `Kiln.SafeFetch` | Since KilnCMS 1.6 (`kiln_plugin` 1.3, #2047): `get/2`, `head/2`, `post/3` and `request/3`, their documented options and `{:ok, %{status, headers, body}}` / `{:error, reason}` shapes, and the guarantees in its moduledoc — the address checked and pinned, redirects followed only on request and re-checked per hop, the body capped. The wording of `reason` is not covered. This is how a plugin fetches a URL it didn't write; `KilnCMS.SafeFetch`, the core implementation behind it, is not itself covered |
 | `KilnCMS.Blocks`, `KilnCMS.Blocks.Upcaster`, `KilnCMS.CMS.ContentTypes` | The registry and dispatch functions an overlay calls |
-| `KilnCMS.Firing.refire/3` and `refire!/3` | Re-firing named documents from an overlay (#2048): its arguments, the `:overlay` system actor it admits, its return value, and that each fire cascades to dependents and is announced as `<type>.updated` (webhooks and the CDN purge), as an edit of live content is. The job it queues and the queue it runs on are not promised |
+| `KilnCMS.Firing.refire/3` and `refire!/3` | Re-firing named documents from an overlay (#2048): its arguments, the `:overlay` system actor it admits, its return value, and that each fire cascades to dependents and is announced as `<type>.updated` (webhooks and the CDN purge), as an edit of live content is, with `"reason": "refire"` in the payload (#2463). The job it queues and the queue it runs on are not promised |
 | `KilnCMS.Migrations` | The search-vector helpers every content type's hand-written migration calls |
 | `KilnCMS.SchemaExport`, `KilnCMS.Branding` | The exported schema shape, and the theme list a preset is selected from |
 | `KilnCMSWeb.PluginRouter` | The three route macros |
@@ -100,6 +100,14 @@ that counting as a major.
   class names, and the `/editor/...` admin paths themselves.
 - **`KilnCMS.*` internals not named above** — changes, calculations, workers,
   firing internals, and anything marked `@doc false`.
+- **Which image the built-in logo and the home page screenshots are served
+  as.** Core renders the stock logo through `KilnCMSWeb.Layouts.brand_mark/1`
+  as a right-sized WebP/PNG pair, and the home page screenshots as WebP
+  `srcset`s (#2165). A custom `logo_url` is rendered as given. An overlay that
+  overrides `home.html.heex`, or renders `brand.logo_url` in its own `<img>`,
+  keeps its own markup and does not get these; call `brand_mark/1` to opt in
+  (it is `KilnCMSWeb.*`, so its shape is not promised). The `logo_url` value
+  in the branding API is unchanged.
 - **The console's own `side-*` classes and admin design tokens.** Those are the
   admin skin, and they are re-cut whenever the console is redesigned. Only the
   `public-*` classes on delivery pages are contract.
@@ -131,7 +139,9 @@ that counting as a major.
   compiled by the core's `:test` env; your overlay is not, and has its own
   test suite. What does transfer is the mechanic: `:plugins` replaces, exactly
   as `:ash_domains` and `:content_domains` do, so every core entry you want
-  kept has to be restated — and re-synced when you bump the pin.
+  kept has to be restated — and re-synced when you bump the pin. A core module that becomes a domain
+  (`KilnCMS.Backups`, #2217; `KilnCMS.Security`, #2241) must be added to your
+  list on that bump, or `mix ash.codegen` offers to drop its table.
 - **`to_markdown/1` on a block module.** `KilnCMS.Blocks.to_markdown/1` calls
   it for the `llm` fired surface when a block module exports it, and falls
   back to the block's `search_text/1` otherwise. It is probed with
@@ -303,6 +313,15 @@ Stated rather than discovered later.
   declares `@behaviour` instead of using the `use` form gets missing-callback
   warnings when a callback is added, which `--warnings-as-errors` turns into a
   failed build. The `use` form is what makes additions safe; prefer it.
+- **An update action you add to a content resource refuses a trashed row.**
+  `use KilnCMS.CMS.Content` registers `KilnCMS.CMS.Changes.RefuseTrashed` on
+  every update action (#2332), yours included, so a write to a record in the
+  trash fails with `Ash.Error.Changes.StaleRecord`. Only the actions in
+  `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0` (`:restore`,
+  `:clear_reference_target`, `:convert_custom_field`, `:resnapshot_media`)
+  may write one, and an overlay cannot add to that list today. The last two
+  mean `mix kiln.fields.convert` and `mix kiln.media.resnapshot` also write
+  your content types' trashed records (#2533).
 
 ## Status of this document
 

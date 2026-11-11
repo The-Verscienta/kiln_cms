@@ -75,7 +75,10 @@ defmodule KilnCMS.Accounts.UserPoliciesTest do
             :role,
             :notify_on_review_request,
             :notify_on_publish,
-            :notify_on_return_to_draft
+            :notify_on_return_to_draft,
+            :notify_on_comment,
+            :notify_on_registration,
+            :notify_on_security_alert
           ] do
         assert MapSet.member?(guarded, field),
                "expected User.#{field} to be guarded by a field policy (admin/self only)"

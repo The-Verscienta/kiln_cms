@@ -66,9 +66,56 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   require Logger
 
   @impl true
-  def change(changeset, _opts, _context) do
-    Ash.Changeset.after_transaction(changeset, &sync(&1, &2))
+  def change(changeset, _opts, context) do
+    changeset
+    |> Ash.Changeset.after_action(&rewrite_conditions(&1, &2, context))
+    |> Ash.Changeset.after_transaction(&sync(&1, &2))
   end
+
+  # A rename moves the field every conditional rule (#2277) of its siblings
+  # reads, so those rules follow it — in the rename's own transaction, so no
+  # reader sees a rule naming a field that no longer exists.
+  defp rewrite_conditions(%{action_type: :update} = changeset, definition, context) do
+    from = changeset.data.name
+
+    if from == definition.name do
+      {:ok, definition}
+    else
+      # Inside the rename's own transaction, on purpose (see above).
+      opts =
+        context
+        |> Ash.Context.to_opts()
+        |> Keyword.put(:tenant, changeset.to_tenant)
+        # A dependent of a type this release does not know (#2605) has its
+        # rule rewritten too: `KnownFieldType` admits this one write to it.
+        |> Keyword.put(:context, %{
+          warn_on_transaction_hooks?: false,
+          kiln_condition_rename: true
+        })
+
+      definition
+      |> Map.put(:name, from)
+      |> KilnCMS.CMS.Validations.FieldCondition.dependents(changeset.to_tenant)
+      |> Enum.reduce_while({:ok, definition}, &rewrite_dependent(&1, &2, from, opts))
+    end
+  end
+
+  defp rewrite_conditions(_changeset, definition, _context), do: {:ok, definition}
+
+  defp rewrite_dependent(dependent, {:ok, definition} = acc, from, opts) do
+    rewritten = %{
+      visible_when: rename_rule(dependent.visible_when, from, definition.name),
+      required_when: rename_rule(dependent.required_when, from, definition.name)
+    }
+
+    case KilnCMS.CMS.update_field_definition(dependent, rewritten, opts) do
+      {:ok, _dependent} -> {:cont, acc}
+      {:error, error} -> {:halt, {:error, error}}
+    end
+  end
+
+  defp rename_rule(nil, _from, _to), do: nil
+  defp rename_rule(rule, from, to), do: KilnCMS.CMS.Conditions.rename(rule, from, to)
 
   defp sync(changeset, {:ok, %{link_of_id: parent_id} = definition} = result)
        when not is_nil(parent_id) do
@@ -120,7 +167,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
         do: [],
         else: [{:rename, previous.name, definition.name}]
 
-    # A list field is a media or reference field with `multiple`; retyping
+    # A list field is any `ClearMultiple.list_types/0` field with `multiple`; retyping
     # one to another type narrows it too (ClearMultiple drops the flag), so it
     # keeps its first item like any other narrowing rather than leaving lists
     # under a key that cannot hold one.
@@ -132,12 +179,13 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
         was_list? == list? ->
           []
 
-        # Retyping a field *into* a multiple select or list of phrases (a `:text` holding JSON
-        # strings, say) is not a flip of the same values: wrapping each string
-        # in a list would store `["[\"a\",\"b\"]"]`. The values stay as they
-        # are — the next write of each reports them — and
+        # Retyping a field *into* a scalar list (a `:text` holding JSON
+        # strings made a multiple select, a `:string` made a list of dates) is
+        # not a flip of the same values: wrapping each string in a list would
+        # store `["[\"a\",\"b\"]"]`, or a phrase as a date. The values stay as
+        # they are — the next write of each reports them — and
         # `mix kiln.fields.convert` is the tool that moves them.
-        list? and definition.field_type in [:select, :string] and
+        list? and definition.field_type in KilnCMS.CMS.ScalarLists.types() and
             previous.field_type != definition.field_type ->
           []
 
@@ -244,8 +292,8 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     |> query([from, to | params], "moved #{inspect(from)} to #{inspect(to)} on")
   end
 
-  # Single → list wraps each stored snapshot (or select term) in a one-item
-  # list — lossless.
+  # Single → list wraps each stored snapshot (or select term, phrase, number,
+  # date, …) in a one-item list — lossless.
   # List → single keeps each list's first snapshot and clears an empty one;
   # the rest of a list has nowhere to go, which the fields admin says before
   # the admin saves. Only values already in the other shape are touched.
@@ -255,7 +303,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     UPDATE #{table}
        SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
                                      jsonb_build_array(custom_fields -> $1::text))
-     WHERE jsonb_typeof(custom_fields -> $1::text) IN ('object', 'string')#{filter.(1)}
+     WHERE jsonb_typeof(custom_fields -> $1::text) IN ('object', 'string', 'number')#{filter.(1)}
     """
     |> query([name | params], "made #{inspect(name)} a list on")
   end

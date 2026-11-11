@@ -28,6 +28,9 @@ defmodule KilnCMS.Notifications do
       (`KilnCMS.CMS.Mentions`). Sent *instead of* the thread notification for
       that person, not as well: being named is the stronger signal and two
       emails for one comment is how people mute a feature.
+    * `:registration_pending` — someone confirmed their address and waits for
+      approval on a site (#2251); that site's admins hear, through
+      `KilnCMS.Notifications.Registrations`, which also mails them.
 
   Each recipient is honoured against their per-user notification preferences
   (`User.notify_on_*`, issue #46) before a job is enqueued: a user who has
@@ -242,6 +245,46 @@ defmodule KilnCMS.Notifications do
   end
 
   @doc """
+  Mark `user`'s unread `event` notifications about `content_id` on `org` as
+  read — what visiting the thing a notification points at does to it (#2251:
+  opening the registration queue reads its notice).
+
+  `{:ok, count}` or `{:error, errors}`, like `mark_all_read/2`, and authorized
+  the same way: the rows are read as `user` from `user`'s own unread list, and
+  each is marked by the recipient-only `:mark_read`, so nobody else's notice
+  can be touched. Announced once, when anything moved.
+  """
+  @spec mark_read_about(struct(), term(), atom(), String.t()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def mark_read_about(%{id: user_id} = user, org, event, content_id)
+      when is_atom(event) and is_binary(content_id) do
+    result =
+      Notification
+      |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id}, actor: user, tenant: org)
+      |> Ash.Query.filter(event == ^event and content_id == ^content_id)
+      |> Ash.bulk_update(:mark_read, %{},
+        actor: user,
+        tenant: org,
+        context: %{announce?: false},
+        strategy: [:stream],
+        allow_stream_with: :full_read,
+        return_records?: true,
+        return_errors?: true
+      )
+
+    moved = length(result.records || [])
+
+    if moved > 0 do
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic(user_id), :notifications_changed)
+    end
+
+    case result do
+      %Ash.BulkResult{status: :success} -> {:ok, moved}
+      %Ash.BulkResult{errors: errors} -> {:error, errors}
+    end
+  end
+
+  @doc """
   Blank `actor_id`'s name on every notification that account caused, on every
   org — the in-app step of erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`).
 
@@ -286,6 +329,50 @@ defmodule KilnCMS.Notifications do
 
     if failed != [] do
       raise "notification anonymize_actor failed for orgs: #{Enum.join(failed, ", ")}"
+    end
+
+    :ok
+  end
+
+  @doc """
+  Delete every notification addressed to `user_id`, on every org — the
+  recipient's side of erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`,
+  #2514), where `anonymize_actor/1` is the actor's.
+
+  Same shape and failure handling as `anonymize_actor/1`: one org at a time
+  (notifications are tenant-scoped and have no tenant-bypassing action, so a
+  delete per site is the cost of an erasure),
+  the query not authorized as a read (it is self-only), the destroy's own
+  system-only policy deciding, and any failed org raising at the end.
+  """
+  @spec forget_recipient(String.t()) :: :ok
+  def forget_recipient(user_id) when is_binary(user_id) do
+    failed =
+      Enum.reject(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+        try do
+          Notification
+          |> Ash.Query.filter(user_id == ^user_id)
+          |> Ash.bulk_destroy!(:forget_recipient, %{},
+            tenant: org_id,
+            authorize_query?: false,
+            strategy: [:atomic, :atomic_batches, :stream],
+            return_records?: false,
+            return_errors?: true
+          )
+
+          true
+        rescue
+          error ->
+            Logger.error(
+              "notification forget_recipient failed for org #{org_id}: #{inspect(error)}"
+            )
+
+            false
+        end
+      end)
+
+    if failed != [] do
+      raise "notification forget_recipient failed for orgs: #{Enum.join(failed, ", ")}"
     end
 
     :ok
@@ -632,26 +719,59 @@ defmodule KilnCMS.Notifications do
   A document-level lifecycle event (review requested, published, returned to
   draft) that is already waiting **unread** for the same recipient and
   document is not recorded again (#1785) — see the resource's moduledoc.
+  `record_in_app_result/1` says which of those happened.
   """
   @spec record_in_app(map()) :: :ok
-  def record_in_app(%{user_id: _user_id, org_id: _org_id} = attrs) do
-    if collapses?(attrs), do: record_once(attrs), else: insert_notification(attrs)
+  def record_in_app(attrs) do
+    _outcome = record_in_app_result(attrs)
+    :ok
+  end
+
+  @doc """
+  `record_in_app/1`, saying what became of the row: `:recorded`,
+  `:already_waiting` (a collapsing event was still unread, so nothing was
+  written), or `:not_recorded` (the write failed, and was logged).
+
+  For a caller whose other channels follow the row — the registration notice
+  (`KilnCMS.Notifications.Registrations`) mails an admin only when a new row
+  was written, so a second applicant while the first notice is unread is
+  neither a second row nor a second email. Never raises.
+  """
+  @spec record_in_app_result(map()) :: :recorded | :already_waiting | :not_recorded
+  def record_in_app_result(%{user_id: _user_id, org_id: _org_id} = attrs) do
+    outcome =
+      if collapses?(attrs) do
+        case record_once(attrs) do
+          {:ok, :already_waiting} -> :already_waiting
+          {:ok, _notification} -> :recorded
+        end
+      else
+        insert_notification(attrs)
+        :recorded
+      end
 
     # Only after the row exists — see `topic/1` for why the message carries
     # nothing and every subscriber re-reads for itself.
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic(attrs.user_id), :notifications_changed)
 
-    :ok
+    outcome
   rescue
     error ->
       Logger.error("in-app notification not recorded: #{Exception.message(error)}")
-      :ok
+      :not_recorded
   end
 
   # The events that describe a document's state rather than a message about it
   # (#1785). A second one while the first is still unread tells the recipient
-  # nothing new; a second comment, mention or task does.
-  @collapsing_events [:submitted_for_review, :published, :returned_to_draft]
+  # nothing new; a second comment, mention or task does. A registration
+  # notice is about a site's queue, not one applicant (#2251): a second
+  # sign-up while the first notice is unread changes nothing an admin does.
+  @collapsing_events [
+    :submitted_for_review,
+    :published,
+    :returned_to_draft,
+    :registration_pending
+  ]
 
   defp collapses?(%{event: event} = attrs),
     do: event in @collapsing_events and is_nil(Map.get(attrs, :block_id))

@@ -94,7 +94,7 @@ defmodule KilnCMSWeb.CoreComponents do
         </div>
         <div class="flex-1" />
         <button type="button" class="group self-start cursor-pointer" aria-label={gettext("close")}>
-          <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
+          <.icon name="hero-x-mark" class="size-5 opacity-70 group-hover:opacity-100" />
         </button>
       </div>
     </div>
@@ -608,10 +608,11 @@ defmodule KilnCMSWeb.CoreComponents do
       ]}
       {@rest}
     >
+      <%!-- contrast-ok: decorative empty-state glyph, no information carried --%>
       <.icon name={@icon} class="size-8 text-base-content/30" />
       <div class="space-y-1">
         <p class="text-sm font-medium text-base-content">{@title}</p>
-        <p :if={@inner_block != []} class="mx-auto max-w-sm text-sm text-base-content/55">
+        <p :if={@inner_block != []} class="mx-auto max-w-sm text-sm text-base-content/70">
           {render_slot(@inner_block)}
         </p>
       </div>
@@ -932,7 +933,7 @@ defmodule KilnCMSWeb.CoreComponents do
 
   defp field_hint(assigns) do
     ~H"""
-    <p :if={@hint} class="mt-1 text-xs text-base-content/60">{@hint}</p>
+    <p :if={@hint} class="mt-1 text-xs text-base-content/70">{@hint}</p>
     """
   end
 
@@ -1176,7 +1177,7 @@ defmodule KilnCMSWeb.CoreComponents do
       }
       class={[
         "group absolute inset-y-0 right-0 flex w-10 cursor-pointer items-center justify-center",
-        "rounded-r-lg text-base-content/60 transition-colors hover:text-base-content",
+        "rounded-r-lg text-base-content/70 transition-colors hover:text-base-content",
         "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
       ]}
     >

@@ -357,9 +357,23 @@ leaks.
 
 ## Authorization
 
-`review_after_days`, `expiry_action` and `unpublish_at` are ordinary accepted
-attributes on `:update`, so they are editor+admin writable exactly like
-`scheduled_at`. `mark_reviewed` is an update action and follows the same policy.
+`review_after_days`, `expiry_action` and `unpublish_at` are accepted
+attributes on `:create` and `:update`. `review_after_days` is editor+admin
+writable, and `mark_reviewed` is an update action that follows the same
+policy.
+
+`unpublish_at` and `expiry_action` take the same permission as publishing (an
+admin, or an editor on a site that lets editors publish) on an update of a
+record that is **published, or has `scheduled_at` set** (#2134). There the
+expiry scheduler carries them out through its bypass with nobody checked, so
+changing them decides when, and whether, the record comes down. An editor without publish
+rights who sends a different value gets a forbidden error, and nothing in the
+update is saved. On a draft nobody has scheduled, or on a create, they do
+nothing until someone publishes or schedules the record, so any editor may set,
+move or clear them there. Resending the value the record already has is not a
+change and is allowed. In the editor, **Scheduled unpublish at** is locked on a
+live or scheduled page for someone who may not publish. The
+[policy matrix](policy-matrix.md) has the rows.
 
 ### Proposed publish dates
 

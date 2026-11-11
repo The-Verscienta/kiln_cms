@@ -143,7 +143,7 @@ old site.
 | Tiers, offers, benefits | Recreate them as [membership tiers](../memberships.md). |
 | Code injection | Not imported. Kiln has [site-wide code injection](../code-injection.md). |
 | Navigation, theme | Rebuild with [navigation menus](../navigation-menus.md) and [public theming](../public-theming.md). |
-| Staff users | Not imported. Invite your team at `/editor/team` first, so authors match by email. |
+| Staff users | Not imported. [Invite your team](../account-administration.md#invite-someone-to-a-site) at `/editor/team` first, so authors match by email. An invitation creates the account only when it is accepted, so wait for people to accept. |
 | Post history | Not imported. History starts at the import. |
 
 ## Related

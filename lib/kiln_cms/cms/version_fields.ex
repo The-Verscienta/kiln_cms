@@ -64,7 +64,8 @@ defmodule KilnCMS.CMS.VersionFields do
   # the editor actually came to read; restoring them would rewrite tenancy.
   # `path_alias_derived` (#1890) records who wrote `path_alias`; a restore
   # writes the alias back as an edit, which `Changes.TrackAliasDerivation`
-  # records as a person's.
+  # records as a person's. (`created_via_key_*` / `on_behalf_of`, #2273, are
+  # not here: PaperTrail ignores them, so no version carries them at all.)
   @bookkeeping ~w(
     org_id type_definition_id published_version_id
     archived_at deleted_at search_text path_alias_derived
@@ -103,7 +104,7 @@ defmodule KilnCMS.CMS.VersionFields do
   # Spanish UI.
   @field_order ~w(
     title working_title slug path_alias excerpt state audience locale
-    seo_title seo_description seo_keywords seo_image canonical_url
+    seo_title seo_description seo_keywords seo_image canonical_url noindex nofollow
     published_at scheduled_at proposed_publish_at unpublish_at expiry_action
     review_after_days last_reviewed_at
     author_id category_id featured_image_id custom_fields

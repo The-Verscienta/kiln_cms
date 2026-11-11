@@ -1,0 +1,116 @@
+<Layouts.app
+  flash={@flash}
+  current_scope={@current_scope}
+  current_user={@current_user}
+  current_org={@current_org}
+  container_class="mx-auto max-w-2xl"
+>
+  <section
+    id="access-denied"
+    role="alert"
+    class="rounded-2xl border border-base-content/10 bg-base-200/40 p-6 sm:p-10"
+  >
+    <p class="text-sm font-medium uppercase tracking-[0.2em] text-base-content/70">
+      {gettext("Access denied")}
+    </p>
+    <h1 id="access-denied-heading" class="mt-3 text-2xl font-semibold tracking-tight text-balance">
+      {denied_heading(@needs)}
+    </h1>
+    <p class="mt-3 text-base leading-7 text-base-content/70">
+      {denied_intro(@needs)}
+    </p>
+
+    <div
+      :if={@viewer_role == :none}
+      id="access-denied-no-role"
+      class="mt-6 rounded-lg border border-base-content/10 p-4"
+    >
+      <p class="text-sm font-semibold">
+        {gettext("You are signed in, but your account has no role on %{site}.", site: @site_name)}
+      </p>
+      <p class="mt-1 text-sm leading-6 text-base-content/70">
+        {gettext(
+          "It may belong to a different site, or your registration here may still be waiting for approval. If you meant to use another account, sign out and sign in with that one."
+        )}
+      </p>
+    </div>
+
+    <div
+      :if={@viewer_role && @viewer_role != :none}
+      id="access-denied-role"
+      class="mt-6 rounded-lg border border-base-content/10 p-4"
+    >
+      <p class="text-sm font-semibold">
+        {gettext("You are signed in as %{role} on %{site}.",
+          role: role_name(@viewer_role),
+          site: @site_name
+        )}
+      </p>
+      <p class="mt-1 text-sm leading-6 text-base-content/70">{role_can(@viewer_role)}</p>
+    </div>
+
+    <p :if={is_nil(@viewer_role)} id="access-denied-signed-out" class="mt-6 text-sm leading-6">
+      {gettext(
+        "You are not signed in. If you have an account with the right role, sign in first."
+      )}
+    </p>
+
+    <p id="access-denied-ask" class="mt-6 text-sm leading-6 text-base-content/70">
+      <%= if @needs == :platform do %>
+        {gettext("To get access, ask the person who administers this installation.")}
+      <% else %>
+        <%= if @viewer_role == :none do %>
+          {gettext("To get access, ask an admin of %{site} to give your account a role.",
+            site: @site_name
+          )}
+        <% else %>
+          {gettext("To get access, ask an admin of %{site} to change your role.",
+            site: @site_name
+          )}
+        <% end %>
+      <% end %>
+    </p>
+
+    <div class="mt-8 flex flex-wrap items-center gap-3">
+      <.link
+        :if={is_nil(@viewer_role)}
+        id="access-denied-sign-in"
+        href={~p"/sign-in"}
+        class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
+      >
+        {gettext("Sign in")}
+      </.link>
+      <.link
+        :if={@viewer_role in [:editor, :admin, :platform]}
+        id="access-denied-console"
+        href={~p"/editor"}
+        class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
+      >
+        {gettext("Back to the console")}
+      </.link>
+      <.link
+        :if={@viewer_role == :viewer}
+        id="access-denied-account"
+        href={~p"/account"}
+        class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
+      >
+        {gettext("Go to your account")}
+      </.link>
+      <.link
+        :if={@viewer_role == :none}
+        id="access-denied-sign-out"
+        href={~p"/sign-out"}
+        class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
+      >
+        {gettext("Sign out")}
+      </.link>
+      <.link
+        id="access-denied-home"
+        href={~p"/"}
+        class="text-sm font-medium text-primary-ink hover:underline"
+      >
+        {gettext("Home")}
+      </.link>
+    </div>
+  </section>
+</Layouts.app>

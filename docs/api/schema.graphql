@@ -4,6 +4,18 @@ schema {
   query: RootQueryType
 }
 
+"Operators for a `boolean` custom field."
+input BooleanFilter {
+  eq: Boolean
+  isNull: Boolean
+}
+
+"A `boolean` field."
+type BooleanValue implements CustomFieldValue {
+  name: String!
+  value: Boolean!
+}
+
 type Category {
   id: ID!
   name: String!
@@ -17,6 +29,8 @@ type Category {
     filter: PageFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -34,6 +48,8 @@ type Category {
     filter: PostFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -212,6 +228,32 @@ interface ContentRecord {
   defaults to, and is capped at, 100.
   """
   referencedBy(field: String, sourceType: String, inverse: String, limit: Int, offset: Int): [ContentReferrer!]!
+
+  "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+  customString(name: String!): String
+
+  "The `integer` custom field `name`, or null."
+  customInt(name: String!): Int
+
+  "The `float` custom field `name`, or null."
+  customFloat(name: String!): Float
+
+  "The `boolean` custom field `name`, or null."
+  customBoolean(name: String!): Boolean
+
+  "The `date` custom field `name`, or null."
+  customDate(name: String!): Date
+
+  "The `datetime` custom field `name`, or null."
+  customDateTime(name: String!): DateTime
+
+  """
+  The custom fields `names` (at most 50), each as a `CustomFieldValue`
+  narrowed with `... on FloatValue { value }`. A name that is unknown,
+  empty, private to the reader or of no value is left out. Priced at one
+  plus the child's price per name.
+  """
+  fields(names: [String!]!): [CustomFieldValue!]!
 }
 
 """
@@ -255,6 +297,8 @@ input CreateEntryInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -292,6 +336,8 @@ input CreatePageInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -329,6 +375,8 @@ input CreatePostInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -357,12 +405,81 @@ type CreatePostResult {
 }
 
 """
+A condition on one custom field. Give `name` and exactly one of `string`,
+`int`, `float`, `boolean`, `date` or `dateTime`, which must be the kind of
+the field (`customString`, `customInt`, ...). Conditions in a list are ANDed.
+A list of values (a `multiple` field of numbers, dates, text, ...) takes the
+kind of its items with `eq` (contains), `notEq` (does not contain), `in`
+(contains any) and `isNull`; `customFilter` also takes `has`, `has_all`,
+`has_none` and `count` on it.
+"""
+input CustomFieldCondition {
+  name: String!
+  string: StringFilter
+  int: IntFilter
+  float: FloatFilter
+  boolean: BooleanFilter
+  date: DateFilter
+  dateTime: DateTimeFilter
+}
+
+"""
+The value of one admin-defined custom field, by the kind its definition has.
+`name` is the field's name. Narrow with `... on FloatValue { value }`.
+"""
+interface CustomFieldValue {
+  name: String!
+}
+
+"""
+The `Date` scalar type represents a date. The Date appears in a JSON
+response as an ISO8601 formatted string, without a time component.
+"""
+scalar Date
+
+"Operators for a `date` custom field."
+input DateFilter {
+  eq: Date
+  notEq: Date
+  in: [Date!]
+  gt: Date
+  gte: Date
+  lt: Date
+  lte: Date
+  isNull: Boolean
+}
+
+"""
 The `DateTime` scalar type represents a date and time in the UTC
 timezone. The DateTime appears in a JSON response as an ISO8601 formatted
 string, including UTC timezone ("Z"). The parsed date and time string will
 be converted to UTC if there is an offset.
 """
 scalar DateTime
+
+"Operators for a `datetime` custom field."
+input DateTimeFilter {
+  eq: DateTime
+  notEq: DateTime
+  in: [DateTime!]
+  gt: DateTime
+  gte: DateTime
+  lt: DateTime
+  lte: DateTime
+  isNull: Boolean
+}
+
+"A `datetime` field."
+type DateTimeValue implements CustomFieldValue {
+  name: String!
+  value: DateTime!
+}
+
+"A `date` field."
+type DateValue implements CustomFieldValue {
+  name: String!
+  value: Date!
+}
 
 input DeleteEntryInput {
   title: String!
@@ -374,6 +491,8 @@ input DeleteEntryInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -406,6 +525,8 @@ input DeletePageInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -438,6 +559,8 @@ input DeletePostInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -477,9 +600,19 @@ type Entry implements ContentRecord {
 
   pathAlias: String
 
+  createdViaKeyId: ID
+
+  createdViaKeyName: String
+
+  onBehalfOf: String
+
   seoImage: String
 
   canonicalUrl: String
+
+  noindex: Boolean!
+
+  nofollow: Boolean!
 
   locale: String
 
@@ -542,6 +675,8 @@ type Entry implements ContentRecord {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
 
     "The number of records to return."
@@ -581,7 +716,37 @@ type Entry implements ContentRecord {
 
   blockIds: [JsonString!]
 
+  latestEditSeverity: String
+
+  latestEditAt: DateTime
+
   highlight(locale: String!, query: String!): String
+
+  """
+  The custom fields `names` (at most 50), each as a `CustomFieldValue`
+  narrowed with `... on FloatValue { value }`. A name that is unknown,
+  empty, private to the reader or of no value is left out. Priced at one
+  plus the child's price per name.
+  """
+  fields(names: [String!]!): [CustomFieldValue!]!
+
+  "The `datetime` custom field `name`, or null."
+  customDateTime(name: String!): DateTime
+
+  "The `date` custom field `name`, or null."
+  customDate(name: String!): Date
+
+  "The `boolean` custom field `name`, or null."
+  customBoolean(name: String!): Boolean
+
+  "The `float` custom field `name`, or null."
+  customFloat(name: String!): Float
+
+  "The `integer` custom field `name`, or null."
+  customInt(name: String!): Int
+
+  "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+  customString(name: String!): String
 
   """
   The records that link to this one through a `:reference` custom field,
@@ -659,6 +824,37 @@ input EntryFilterCategoryId {
   greaterThanOrEqual: ID
   isDistinctFrom: ID
   isNotDistinctFrom: ID
+}
+
+input EntryFilterCreatedViaKeyId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input EntryFilterCreatedViaKeyName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input EntryFilterCustomFields {
@@ -801,8 +997,13 @@ input EntryFilterInput {
   seoDescription: EntryFilterSeoDescription
   seoKeywords: EntryFilterSeoKeywords
   pathAlias: EntryFilterPathAlias
+  createdViaKeyId: EntryFilterCreatedViaKeyId
+  createdViaKeyName: EntryFilterCreatedViaKeyName
+  onBehalfOf: EntryFilterOnBehalfOf
   seoImage: EntryFilterSeoImage
   canonicalUrl: EntryFilterCanonicalUrl
+  noindex: EntryFilterNoindex
+  nofollow: EntryFilterNofollow
   locale: EntryFilterLocale
   audience: EntryFilterAudience
   customFields: EntryFilterCustomFields
@@ -887,6 +1088,50 @@ input EntryFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input EntryFilterNofollow {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input EntryFilterNoindex {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input EntryFilterOnBehalfOf {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input EntryFilterPathAlias {
@@ -1160,8 +1405,13 @@ enum EntrySortField {
   SEO_DESCRIPTION
   SEO_KEYWORDS
   PATH_ALIAS
+  CREATED_VIA_KEY_ID
+  CREATED_VIA_KEY_NAME
+  ON_BEHALF_OF
   SEO_IMAGE
   CANONICAL_URL
+  NOINDEX
+  NOFOLLOW
   LOCALE
   AUDIENCE
   CUSTOM_FIELDS
@@ -1193,6 +1443,60 @@ input EntrySortInput {
   highlightInput: EntryHighlightFieldInput
 }
 
+"Operators for a `float` custom field."
+input FloatFilter {
+  eq: Float
+  notEq: Float
+  in: [Float!]
+  gt: Float
+  gte: Float
+  lt: Float
+  lte: Float
+  isNull: Boolean
+}
+
+"A `float` field."
+type FloatValue implements CustomFieldValue {
+  name: String!
+  value: Float!
+}
+
+"A `geolocation` field: a coordinate, with its optional place name and map zoom."
+type GeolocationValue implements CustomFieldValue {
+  name: String!
+  lat: Float!
+  lng: Float!
+  label: String
+  zoom: Int
+}
+
+"""
+A `group` field: one object (or, in a `ListValue`, each row) of its
+sub-fields, as values.
+"""
+type GroupValue implements CustomFieldValue {
+  name: String!
+  fields: [CustomFieldValue!]!
+}
+
+"Operators for an `integer` custom field."
+input IntFilter {
+  eq: Int
+  notEq: Int
+  in: [Int!]
+  gt: Int
+  gte: Int
+  lt: Int
+  lte: Int
+  isNull: Boolean
+}
+
+"An `integer` field."
+type IntValue implements CustomFieldValue {
+  name: String!
+  value: Int!
+}
+
 """
 The `Json` scalar type represents arbitrary json string data, represented as UTF-8
 character sequences. The Json type is most often used to represent a free-form
@@ -1206,6 +1510,31 @@ character sequences. The Json type is most often used to represent a free-form
 human-readable json string.
 """
 scalar JsonString
+
+"""
+Anything that does not fit one scalar: a `computed` field, the other
+composite built-ins (`datetime_range`, `recurrence`) and a plugin type
+that does not name a GraphQL kind. `value` is the stored value as JSON.
+"""
+type JsonValue implements CustomFieldValue {
+  name: String!
+  value: JsonString
+}
+
+"""
+A `multiple` field: its items, in order, each a value of the field's item
+type. An item that does not match the definition is left out.
+"""
+type ListValue implements CustomFieldValue {
+  name: String!
+  items: [CustomFieldValue!]!
+}
+
+"A media item's focal point, as fractions of its width and height."
+type MediaFocal {
+  x: Float!
+  y: Float!
+}
 
 type MediaItem {
   id: ID!
@@ -1247,6 +1576,8 @@ type MediaItem {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
 
     "The number of records to return."
@@ -1263,6 +1594,8 @@ type MediaItem {
     filter: PostFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -1587,6 +1920,30 @@ input MediaItemSortInput {
   field: MediaItemSortField!
 }
 
+"A `media` field, in the shape every delivery surface serves a media item."
+type MediaValue implements CustomFieldValue {
+  name: String!
+  id: ID!
+  url: String
+  alt: String
+  width: Int
+  height: Int
+  mimeType: String
+  focal: MediaFocal
+  variants: [MediaVariant!]!
+}
+
+"One derived rendition of a media item."
+type MediaVariant {
+  label: String
+  width: Int
+  height: Int
+  format: String
+  url: String
+  bytes: Int
+  cropped: Boolean
+}
+
 "A resolved navigation menu (#466)."
 type Menu {
   key: String!
@@ -1650,9 +2007,19 @@ type Page implements ContentRecord {
 
   pathAlias: String
 
+  createdViaKeyId: ID
+
+  createdViaKeyName: String
+
+  onBehalfOf: String
+
   seoImage: String
 
   canonicalUrl: String
+
+  noindex: Boolean!
+
+  nofollow: Boolean!
 
   locale: String
 
@@ -1713,6 +2080,8 @@ type Page implements ContentRecord {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
 
     "The number of records to return."
@@ -1750,7 +2119,37 @@ type Page implements ContentRecord {
 
   blockIds: [JsonString!]
 
+  latestEditSeverity: String
+
+  latestEditAt: DateTime
+
   highlight(locale: String!, query: String!): String
+
+  """
+  The custom fields `names` (at most 50), each as a `CustomFieldValue`
+  narrowed with `... on FloatValue { value }`. A name that is unknown,
+  empty, private to the reader or of no value is left out. Priced at one
+  plus the child's price per name.
+  """
+  fields(names: [String!]!): [CustomFieldValue!]!
+
+  "The `datetime` custom field `name`, or null."
+  customDateTime(name: String!): DateTime
+
+  "The `date` custom field `name`, or null."
+  customDate(name: String!): Date
+
+  "The `boolean` custom field `name`, or null."
+  customBoolean(name: String!): Boolean
+
+  "The `float` custom field `name`, or null."
+  customFloat(name: String!): Float
+
+  "The `integer` custom field `name`, or null."
+  customInt(name: String!): Int
+
+  "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+  customString(name: String!): String
 
   """
   The records that link to this one through a `:reference` custom field,
@@ -1828,6 +2227,37 @@ input PageFilterCategoryId {
   greaterThanOrEqual: ID
   isDistinctFrom: ID
   isNotDistinctFrom: ID
+}
+
+input PageFilterCreatedViaKeyId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PageFilterCreatedViaKeyName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input PageFilterCustomFields {
@@ -1951,8 +2381,13 @@ input PageFilterInput {
   seoDescription: PageFilterSeoDescription
   seoKeywords: PageFilterSeoKeywords
   pathAlias: PageFilterPathAlias
+  createdViaKeyId: PageFilterCreatedViaKeyId
+  createdViaKeyName: PageFilterCreatedViaKeyName
+  onBehalfOf: PageFilterOnBehalfOf
   seoImage: PageFilterSeoImage
   canonicalUrl: PageFilterCanonicalUrl
+  noindex: PageFilterNoindex
+  nofollow: PageFilterNofollow
   locale: PageFilterLocale
   audience: PageFilterAudience
   customFields: PageFilterCustomFields
@@ -2035,6 +2470,50 @@ input PageFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input PageFilterNofollow {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input PageFilterNoindex {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input PageFilterOnBehalfOf {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input PageFilterPathAlias {
@@ -2348,8 +2827,13 @@ enum PageSortField {
   SEO_DESCRIPTION
   SEO_KEYWORDS
   PATH_ALIAS
+  CREATED_VIA_KEY_ID
+  CREATED_VIA_KEY_NAME
+  ON_BEHALF_OF
   SEO_IMAGE
   CANONICAL_URL
+  NOINDEX
+  NOFOLLOW
   LOCALE
   AUDIENCE
   CUSTOM_FIELDS
@@ -2403,9 +2887,19 @@ type Post implements ContentRecord {
 
   pathAlias: String
 
+  createdViaKeyId: ID
+
+  createdViaKeyName: String
+
+  onBehalfOf: String
+
   seoImage: String
 
   canonicalUrl: String
+
+  noindex: Boolean!
+
+  nofollow: Boolean!
 
   locale: String
 
@@ -2466,6 +2960,8 @@ type Post implements ContentRecord {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
 
     "The number of records to return."
@@ -2503,7 +2999,37 @@ type Post implements ContentRecord {
 
   blockIds: [JsonString!]
 
+  latestEditSeverity: String
+
+  latestEditAt: DateTime
+
   highlight(locale: String!, query: String!): String
+
+  """
+  The custom fields `names` (at most 50), each as a `CustomFieldValue`
+  narrowed with `... on FloatValue { value }`. A name that is unknown,
+  empty, private to the reader or of no value is left out. Priced at one
+  plus the child's price per name.
+  """
+  fields(names: [String!]!): [CustomFieldValue!]!
+
+  "The `datetime` custom field `name`, or null."
+  customDateTime(name: String!): DateTime
+
+  "The `date` custom field `name`, or null."
+  customDate(name: String!): Date
+
+  "The `boolean` custom field `name`, or null."
+  customBoolean(name: String!): Boolean
+
+  "The `float` custom field `name`, or null."
+  customFloat(name: String!): Float
+
+  "The `integer` custom field `name`, or null."
+  customInt(name: String!): Int
+
+  "The `string`, `text`, `url`, `select` or `user` custom field `name`, or null."
+  customString(name: String!): String
 
   """
   The records that link to this one through a `:reference` custom field,
@@ -2581,6 +3107,37 @@ input PostFilterCategoryId {
   greaterThanOrEqual: ID
   isDistinctFrom: ID
   isNotDistinctFrom: ID
+}
+
+input PostFilterCreatedViaKeyId {
+  isNil: Boolean
+  eq: ID
+  notEq: ID
+  in: [ID]
+  lessThan: ID
+  greaterThan: ID
+  lessThanOrEqual: ID
+  greaterThanOrEqual: ID
+  isDistinctFrom: ID
+  isNotDistinctFrom: ID
+}
+
+input PostFilterCreatedViaKeyName {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input PostFilterCustomFields {
@@ -2723,8 +3280,13 @@ input PostFilterInput {
   seoDescription: PostFilterSeoDescription
   seoKeywords: PostFilterSeoKeywords
   pathAlias: PostFilterPathAlias
+  createdViaKeyId: PostFilterCreatedViaKeyId
+  createdViaKeyName: PostFilterCreatedViaKeyName
+  onBehalfOf: PostFilterOnBehalfOf
   seoImage: PostFilterSeoImage
   canonicalUrl: PostFilterCanonicalUrl
+  noindex: PostFilterNoindex
+  nofollow: PostFilterNofollow
   locale: PostFilterLocale
   audience: PostFilterAudience
   customFields: PostFilterCustomFields
@@ -2807,6 +3369,50 @@ input PostFilterLockVersion {
   greaterThanOrEqual: Int
   isDistinctFrom: Int
   isNotDistinctFrom: Int
+}
+
+input PostFilterNofollow {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input PostFilterNoindex {
+  isNil: Boolean
+  eq: Boolean
+  notEq: Boolean
+  in: [Boolean!]
+  lessThan: Boolean
+  greaterThan: Boolean
+  lessThanOrEqual: Boolean
+  greaterThanOrEqual: Boolean
+  isDistinctFrom: Boolean
+  isNotDistinctFrom: Boolean
+}
+
+input PostFilterOnBehalfOf {
+  isNil: Boolean
+  eq: String
+  notEq: String
+  in: [String]
+  lessThan: String
+  greaterThan: String
+  lessThanOrEqual: String
+  greaterThanOrEqual: String
+  contains: String
+  isDistinctFrom: String
+  isNotDistinctFrom: String
+  stringEndsWith: String
+  stringStartsWith: String
+  like: String
+  ilike: String
 }
 
 input PostFilterPathAlias {
@@ -3049,8 +3655,13 @@ enum PostSortField {
   SEO_DESCRIPTION
   SEO_KEYWORDS
   PATH_ALIAS
+  CREATED_VIA_KEY_ID
+  CREATED_VIA_KEY_NAME
+  ON_BEHALF_OF
   SEO_IMAGE
   CANONICAL_URL
+  NOINDEX
+  NOFOLLOW
   LOCALE
   AUDIENCE
   CUSTOM_FIELDS
@@ -3081,6 +3692,7 @@ input PostSortInput {
 }
 
 input PublishEntryInput {
+  changeSeverity: String
   expectedLockVersion: Int
 }
 
@@ -3094,6 +3706,7 @@ type PublishEntryResult {
 }
 
 input PublishPageInput {
+  changeSeverity: String
   expectedLockVersion: Int
 }
 
@@ -3107,6 +3720,7 @@ type PublishPageResult {
 }
 
 input PublishPostInput {
+  changeSeverity: String
   expectedLockVersion: Int
 }
 
@@ -3149,6 +3763,15 @@ input ReferenceTargetInput {
   keeps what the connection stored.
   """
   link: JsonString
+}
+
+"""
+A `reference` field: the ids of the records it points at, in order. Only ids
+the reader may see are listed. Read the records through `references(field:)`.
+"""
+type ReferenceValue implements CustomFieldValue {
+  name: String!
+  ids: [ID!]!
 }
 
 input ReturnEntryToDraftInput {
@@ -3259,45 +3882,81 @@ type RootMutationType {
 
   createPage(input: CreatePageInput!): CreatePageResult!
 
-  updatePage(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePageInput): UpdatePageResult!
+  updatePage(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UpdatePageInput
+  ): UpdatePageResult!
 
-  submitPageForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitPageForReviewInput): SubmitPageForReviewResult!
+  submitPageForReview(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: SubmitPageForReviewInput
+  ): SubmitPageForReviewResult!
 
-  returnPageToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnPageToDraftInput): ReturnPageToDraftResult!
+  returnPageToDraft(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: ReturnPageToDraftInput
+  ): ReturnPageToDraftResult!
 
-  publishPage(id: ID!, customFilter: JsonString, customSort: String, input: PublishPageInput): PublishPageResult!
+  publishPage(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: PublishPageInput
+  ): PublishPageResult!
 
-  unpublishPage(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishPageInput): UnpublishPageResult!
+  unpublishPage(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UnpublishPageInput
+  ): UnpublishPageResult!
 
-  deletePage(id: ID!, customFilter: JsonString, customSort: String, input: DeletePageInput!): DeletePageResult!
+  deletePage(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: DeletePageInput!
+  ): DeletePageResult!
 
   createPost(input: CreatePostInput!): CreatePostResult!
 
-  updatePost(id: ID!, customFilter: JsonString, customSort: String, input: UpdatePostInput): UpdatePostResult!
+  updatePost(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UpdatePostInput
+  ): UpdatePostResult!
 
-  submitPostForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitPostForReviewInput): SubmitPostForReviewResult!
+  submitPostForReview(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: SubmitPostForReviewInput
+  ): SubmitPostForReviewResult!
 
-  returnPostToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnPostToDraftInput): ReturnPostToDraftResult!
+  returnPostToDraft(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: ReturnPostToDraftInput
+  ): ReturnPostToDraftResult!
 
-  publishPost(id: ID!, customFilter: JsonString, customSort: String, input: PublishPostInput): PublishPostResult!
+  publishPost(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: PublishPostInput
+  ): PublishPostResult!
 
-  unpublishPost(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishPostInput): UnpublishPostResult!
+  unpublishPost(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UnpublishPostInput
+  ): UnpublishPostResult!
 
-  deletePost(id: ID!, customFilter: JsonString, customSort: String, input: DeletePostInput!): DeletePostResult!
+  deletePost(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: DeletePostInput!
+  ): DeletePostResult!
 
   createEntry(input: CreateEntryInput!): CreateEntryResult!
 
-  updateEntry(id: ID!, customFilter: JsonString, customSort: String, input: UpdateEntryInput): UpdateEntryResult!
+  updateEntry(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UpdateEntryInput
+  ): UpdateEntryResult!
 
-  submitEntryForReview(id: ID!, customFilter: JsonString, customSort: String, input: SubmitEntryForReviewInput): SubmitEntryForReviewResult!
+  submitEntryForReview(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: SubmitEntryForReviewInput
+  ): SubmitEntryForReviewResult!
 
-  returnEntryToDraft(id: ID!, customFilter: JsonString, customSort: String, input: ReturnEntryToDraftInput): ReturnEntryToDraftResult!
+  returnEntryToDraft(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: ReturnEntryToDraftInput
+  ): ReturnEntryToDraftResult!
 
-  publishEntry(id: ID!, customFilter: JsonString, customSort: String, input: PublishEntryInput): PublishEntryResult!
+  publishEntry(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: PublishEntryInput
+  ): PublishEntryResult!
 
-  unpublishEntry(id: ID!, customFilter: JsonString, customSort: String, input: UnpublishEntryInput): UnpublishEntryResult!
+  unpublishEntry(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: UnpublishEntryInput
+  ): UnpublishEntryResult!
 
-  deleteEntry(id: ID!, customFilter: JsonString, customSort: String, input: DeleteEntryInput!): DeleteEntryResult!
+  deleteEntry(
+    id: ID!, customFilter: JsonString, customWhere: [CustomFieldCondition!], customSort: String, input: DeleteEntryInput!
+  ): DeleteEntryResult!
 
   updateMediaItem(id: ID!, input: UpdateMediaItemInput): UpdateMediaItemResult!
 }
@@ -3362,6 +4021,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): PageOfPage
 
@@ -3385,6 +4046,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Page!]!
 
   semanticSearchPages(
@@ -3407,6 +4072,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Page!]!
 
   autocompletePages(
@@ -3439,6 +4108,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Page!]!
 
   semanticSearchPublishedPages(
@@ -3459,6 +4132,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Page!]!
 
   autocompletePublishedPages(
@@ -3500,6 +4177,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): PageOfPost
 
@@ -3523,6 +4202,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Post!]!
 
   semanticSearchPosts(
@@ -3545,6 +4228,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Post!]!
 
   autocompletePosts(
@@ -3577,6 +4264,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Post!]!
 
   semanticSearchPublishedPosts(
@@ -3597,6 +4288,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Post!]!
 
   autocompletePublishedPosts(
@@ -3640,6 +4335,8 @@ type RootQueryType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): PageOfEntry
 
@@ -3663,6 +4360,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Entry!]!
 
   semanticSearchEntries(
@@ -3685,6 +4386,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Entry!]!
 
   autocompleteEntries(
@@ -3717,6 +4422,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Entry!]!
 
   semanticSearchPublishedEntries(
@@ -3737,6 +4446,10 @@ type RootQueryType {
     tagIds: [ID!]
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
+
+    customSort: String
   ): [Entry!]!
 
   autocompletePublishedEntries(
@@ -3789,6 +4502,8 @@ type RootSubscriptionType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): page_changed_result
   postChanged(
@@ -3797,6 +4512,8 @@ type RootSubscriptionType {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
   ): post_changed_result
   entryChanged(
@@ -3804,6 +4521,8 @@ type RootSubscriptionType {
     filter: EntryFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
   ): entry_changed_result
@@ -3816,6 +4535,22 @@ enum SortOrder {
   ASC
   ASC_NULLS_FIRST
   ASC_NULLS_LAST
+}
+
+"Operators for a text-like custom field. `contains` and `startsWith` ignore case and match text, not patterns."
+input StringFilter {
+  eq: String
+  notEq: String
+  in: [String!]
+  contains: String
+  startsWith: String
+  isNull: Boolean
+}
+
+"A text-like field: `string`, `text`, `url`, `select` or `user`."
+type StringValue implements CustomFieldValue {
+  name: String!
+  value: String!
 }
 
 input SubmitEntryForReviewInput {
@@ -3872,6 +4607,8 @@ type Tag {
 
     customFilter: JsonString
 
+    customWhere: [CustomFieldCondition!]
+
     customSort: String
 
     "The number of records to return."
@@ -3888,6 +4625,8 @@ type Tag {
     filter: PostFilterInput
 
     customFilter: JsonString
+
+    customWhere: [CustomFieldCondition!]
 
     customSort: String
 
@@ -4240,6 +4979,8 @@ input UpdateEntryInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -4251,6 +4992,7 @@ input UpdateEntryInput {
   typeDefinitionId: ID
   categoryId: ID
   featuredImageId: ID
+  changeSeverity: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
@@ -4302,6 +5044,8 @@ input UpdatePageInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -4312,6 +5056,7 @@ input UpdatePageInput {
   reviewAfterDays: Int
   categoryId: ID
   featuredImageId: ID
+  changeSeverity: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
@@ -4344,6 +5089,8 @@ input UpdatePostInput {
   pathAlias: String
   seoImage: String
   canonicalUrl: String
+  noindex: Boolean
+  nofollow: Boolean
   locale: String
   audience: String
   customFields: JsonString
@@ -4354,6 +5101,7 @@ input UpdatePostInput {
   reviewAfterDays: Int
   categoryId: ID
   featuredImageId: ID
+  changeSeverity: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]

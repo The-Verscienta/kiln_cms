@@ -99,7 +99,8 @@ defmodule KilnCMSWeb.BridgeSocket do
     # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
     # deployment is about to refuse anyway still cost a handshake, so it
     # still has to count.
-    with :ok <- KilnCMSWeb.SocketJoinBudget.charge(:bridge_join, info[:connect_info] || %{}),
+    with :ok <- KilnCMSWeb.IpBlock.check_connect(:bridge, info[:connect_info] || %{}),
+         :ok <- KilnCMSWeb.SocketJoinBudget.charge(:bridge_join, info[:connect_info] || %{}),
          true <- KilnCMS.VisualEditing.enabled?(),
          {:ok, ct, id} <- fetch_target(params),
          {:ok, org} <- fetch_org(info),

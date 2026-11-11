@@ -303,7 +303,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     gallery_radio = "#new-field-form input[name='field_definition[multiple]'][value=true]"
 
-    lv |> form("#new-field-form", field_definition: %{field_type: "url"}) |> render_change()
+    lv |> form("#new-field-form", field_definition: %{field_type: "boolean"}) |> render_change()
     refute has_element?(lv, gallery_radio)
 
     lv |> form("#new-field-form", field_definition: %{field_type: "media"}) |> render_change()
@@ -703,7 +703,9 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
   test "non-admins are redirected away", %{conn: conn} do
     editor = authed_user(:editor)
-    assert {:error, {:redirect, %{to: "/"}}} = conn |> log_in(editor) |> live(~p"/editor/fields")
+
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+             conn |> log_in(editor) |> live(~p"/editor/fields")
   end
 
   test "the content editor renders an input per defined field", %{conn: conn} do
@@ -1235,6 +1237,41 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert has_element?(lv, ~s|#new-field-form select#{default_attr()}|)
     end
 
+    test "a date field can take today's date instead of a fixed value (#2286)", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      type_change(lv, "date")
+
+      source = ~s|#new-field-form select[name="field_definition[default_source]"]|
+      assert has_element?(lv, source <> " option[value=today]")
+      refute has_element?(lv, source <> " option[value=now]")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{scopes: ["page"], label: "Opened on", field_type: "date"}
+      )
+      |> render_change(%{"field_definition" => %{"default_source" => "today"}})
+
+      # The fixed-value input steps aside for the source.
+      refute has_element?(lv, ~s|#new-field-form input[type=date]#{default_attr()}|)
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          label: "Opened on",
+          field_type: "date",
+          default_source: "today"
+        }
+      )
+      |> render_submit()
+
+      assert [%{default_source: :today, default: nil}] =
+               :page
+               |> CMS.field_definitions_for!(authorize?: false)
+               |> Enum.filter(&(&1.name == "opened_on"))
+    end
+
     test "a select's default is picked from its options", %{conn: conn} do
       admin = authed_user(:admin)
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
@@ -1534,6 +1571,161 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       refute has_element?(lv, "#orphaned-fields")
       assert render(lv) =~ "Field deleted."
       assert {:error, _} = CMS.get_field_definition(id, actor: admin)
+    end
+  end
+
+  # A field of a type this release does not know (#2605): a newer release's,
+  # after a rollback, or a removed plugin's.
+  describe "a field of an unknown type" do
+    setup do
+      admin = authed_user(:admin)
+      recipe = type_definition!(admin, "Recipe")
+      a = create_dynamic_field!(admin, recipe, "a", 0)
+      b = create_dynamic_field!(admin, recipe, "b", 1)
+
+      held =
+        KilnCMS.NewerReleaseRows.field_definition!(%{
+          content_type: nil,
+          type_definition_id: recipe.id,
+          name: "specs",
+          position: 1
+        })
+
+      %{admin: admin, recipe: recipe, a: a, b: b, held: held}
+    end
+
+    test "the screen lists it apart, with only a delete", %{conn: conn} = ctx do
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      assert has_element?(lv, "#unknown-type-fields #field-#{ctx.held}", "specs")
+
+      assert has_element?(
+               lv,
+               "#unknown-type-fields #field-#{ctx.held}",
+               KilnCMS.NewerReleaseRows.unknown_field_type()
+             )
+
+      assert has_element?(lv, "#unknown-type-fields", "Fields of an unknown type")
+      refute has_element?(lv, "#field-#{ctx.held} button[phx-click=edit]")
+      refute has_element?(lv, "#fields-def-#{ctx.recipe.id} li[data-sort-id='#{ctx.held}']")
+
+      # A hand-made edit event for it changes nothing.
+      render_click(lv, "edit", %{"id" => ctx.held})
+      assert render(lv) =~ "That field can&#39;t be edited."
+    end
+
+    test "an admin deletes it from the screen", %{conn: conn} = ctx do
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#unknown-type-fields #field-#{ctx.held} button[phx-click=delete]")
+      |> render_click()
+
+      refute has_element?(lv, "#unknown-type-fields")
+      assert render(lv) =~ "Field deleted."
+
+      assert {:error, _} =
+               CMS.get_field_definition(ctx.held,
+                 actor: ctx.admin,
+                 context: FieldDefinition.all_types_context()
+               )
+    end
+
+    test "editing a field whose condition reads it keeps that condition",
+         %{conn: conn} = ctx do
+      rule = %{"field" => "specs", "op" => "not_empty"}
+
+      KilnCMS.Repo.query!(
+        "UPDATE field_definitions SET visible_when = $1 WHERE id = $2",
+        [rule, Ecto.UUID.dump!(ctx.a.id)]
+      )
+
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      lv |> element("#field-#{ctx.a.id} button[phx-click=edit]") |> render_click()
+      assert render(lv) =~ "reads a field of a type this version of Kiln"
+
+      lv
+      |> form("#edit-field-#{ctx.a.id}", field_definition: %{label: "Renamed"})
+      |> render_submit()
+
+      saved = CMS.get_field_definition!(ctx.a.id, actor: ctx.admin)
+      assert saved.label == "Renamed"
+      assert saved.visible_when == rule
+    end
+
+    test "a sub-field of an unknown type is listed under its group, with a delete",
+         %{conn: conn} = ctx do
+      group =
+        CMS.create_field_definition!(
+          %{
+            type_definition_id: ctx.recipe.id,
+            name: "dosages",
+            label: "Dosages",
+            field_type: :group
+          },
+          actor: ctx.admin
+        )
+
+      sub =
+        KilnCMS.NewerReleaseRows.field_definition!(%{
+          content_type: nil,
+          group_of_id: group.id,
+          name: "rated"
+        })
+
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      assert has_element?(lv, "#unknown-type-fields #field-#{sub}", "rated")
+      assert has_element?(lv, "#unknown-type-fields #field-#{sub}", "On Dosages")
+
+      lv
+      |> element("#unknown-type-fields #field-#{sub} button[phx-click=delete]")
+      |> render_click()
+
+      assert render(lv) =~ "Field deleted."
+
+      assert {:error, _} =
+               CMS.get_field_definition(sub,
+                 actor: ctx.admin,
+                 context: FieldDefinition.all_types_context()
+               )
+    end
+
+    test "a delete another field's condition refuses says which field", %{conn: conn} = ctx do
+      KilnCMS.Repo.query!(
+        "UPDATE field_definitions SET visible_when = $1 WHERE id = $2",
+        [%{"field" => "specs", "op" => "not_empty"}, Ecto.UUID.dump!(ctx.a.id)]
+      )
+
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#unknown-type-fields #field-#{ctx.held} button[phx-click=delete]")
+      |> render_click()
+
+      assert render(lv) =~ "a reads this field in a condition: remove that condition first."
+      assert has_element?(lv, "#unknown-type-fields #field-#{ctx.held}")
+    end
+
+    test "a drag on its type reorders the known fields and leaves it alone",
+         %{conn: conn} = ctx do
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#fields-def-#{ctx.recipe.id}")
+      |> render_hook("reorder", %{"order" => [ctx.b.id, ctx.a.id]})
+
+      assert recipe_order(ctx.recipe) == ["b", "a"]
+      assert list_order(lv, ctx.recipe) == [ctx.b.id, ctx.a.id]
+
+      held =
+        CMS.get_field_definition!(ctx.held,
+          actor: ctx.admin,
+          context: FieldDefinition.all_types_context()
+        )
+
+      assert held.position == 1
     end
   end
 
@@ -1890,5 +2082,611 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
                ~s|#edit-field-#{hand.id}-compute[value="{{ upcase(slugify(title)) }}"]|
              )
     end
+  end
+
+  describe "value constraints (#2276)" do
+    defp validation_input(name),
+      do: ~s|#new-field-validation [name="field_definition[validation][#{name}]"]|
+
+    test "the Validation fieldset offers the inputs the type takes", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      # String, the starting type.
+      for key <- ~w(min_length max_length pattern pattern_message unique) do
+        assert has_element?(lv, validation_input(key)), "#{key} missing on a string"
+      end
+
+      refute has_element?(lv, validation_input("min"))
+
+      type_change(lv, "integer")
+      for key <- ~w(min max unique), do: assert(has_element?(lv, validation_input(key)))
+      refute has_element?(lv, validation_input("pattern"))
+      assert has_element?(lv, ~s|#new-field-validation input[type=number][step="1"]|)
+
+      type_change(lv, "float")
+      assert has_element?(lv, ~s|#new-field-validation input[type=number][step=any]|)
+
+      type_change(lv, "date")
+      assert has_element?(lv, validation_input("unique"))
+      refute has_element?(lv, validation_input("min"))
+
+      type_change(lv, "boolean")
+      refute has_element?(lv, "#new-field-validation")
+
+      # Rich text is HTML: no length. Plain text takes the text constraints,
+      # but not unique.
+      type_change(lv, "text")
+      refute has_element?(lv, "#new-field-validation")
+
+      lv
+      |> element("#new-field-form")
+      |> render_change(%{"field_definition" => %{"field_type" => "text", "format" => "plain"}})
+
+      assert has_element?(lv, validation_input("max_length"))
+      refute has_element?(lv, validation_input("unique"))
+    end
+
+    test "an admin saves constraints and sees them in the list", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "sku",
+          label: "SKU",
+          field_type: "string",
+          validation: %{
+            min_length: "3",
+            max_length: "12",
+            pattern: "[A-Z]+-[0-9]+",
+            pattern_message: "Use LETTERS-123",
+            unique: "true"
+          }
+        }
+      )
+      |> render_submit()
+
+      field =
+        :page |> CMS.field_definitions_for!(authorize?: false) |> Enum.find(&(&1.name == "sku"))
+
+      assert field.validation == %{
+               "min_length" => 3,
+               "max_length" => 12,
+               "pattern" => "[A-Z]+-[0-9]+",
+               "pattern_message" => "Use LETTERS-123",
+               "unique" => true
+             }
+
+      summary = lv |> element("#field-#{field.id}-validation") |> render()
+      assert summary =~ "3 to 12 characters."
+      assert summary =~ "Must match a pattern."
+      assert summary =~ "Each value used once."
+
+      # Blank inputs clear a constraint.
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{field.id}",
+        field_definition: %{validation: %{min_length: "", max_length: "", pattern: ""}}
+      )
+      |> render_submit()
+
+      field = CMS.get_field_definition!(field.id, authorize?: false)
+      assert field.validation == %{"unique" => true}
+    end
+
+    test "numeric bounds are stored as numbers", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+      type_change(lv, "integer")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "rating",
+          label: "Rating",
+          field_type: "integer",
+          validation: %{min: "1", max: "5"}
+        }
+      )
+      |> render_submit()
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "rating"))
+
+      assert field.validation == %{"min" => 1, "max" => 5}
+    end
+
+    test "changing the type drops the constraints it doesn't take", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "code",
+            label: "Code",
+            field_type: :string,
+            validation: %{"max_length" => 8, "pattern" => "[a-z]+", "unique" => true}
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      # The text constraints are posted by the string form; picking a number
+      # type must not send them on.
+      lv
+      |> form("#edit-field-#{field.id}",
+        field_definition: %{
+          field_type: "integer",
+          validation: %{max_length: "8", pattern: "[a-z]+", unique: "true"}
+        }
+      )
+      |> render_submit()
+
+      field = CMS.get_field_definition!(field.id, authorize?: false)
+      assert field.field_type == :integer
+      assert field.validation == %{"unique" => true}
+
+      # To a type with no constraints at all.
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{field_type: "boolean"})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(field.id, authorize?: false).validation == %{}
+    end
+
+    test "a bad pattern is reported under the Pattern input", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{
+            scopes: ["page"],
+            name: "broken",
+            label: "Broken",
+            field_type: "string",
+            validation: %{pattern: "([a-z"}
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "pattern is not a valid regular expression"
+
+      refute CMS.field_definitions_for!(:page, authorize?: false)
+             |> Enum.any?(&(&1.name == "broken"))
+
+      assert lv |> element("#new-field-validation") |> render() =~
+               "pattern is not a valid regular expression"
+
+      # The message sits with the pattern, not under the fieldset.
+      refute has_element?(lv, "#new-field-validation > p[role=alert]")
+    end
+
+    test "min above max is reported as a general validation error", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "integer")
+
+      html =
+        lv
+        |> form("#new-field-form",
+          field_definition: %{
+            scopes: ["page"],
+            name: "inverted",
+            label: "Inverted",
+            field_type: "integer",
+            validation: %{min: "9", max: "2"}
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "min can&#39;t be more than max"
+    end
+
+    test "a group's sub-field form takes constraints, but not unique", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      group =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "dosages", label: "Dosages", field_type: :group},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{group.id}-sub-fields-add") |> render_click()
+
+      form_id = "#link-field-form-new-#{group.id}"
+      assert has_element?(lv, form_id)
+      assert has_element?(lv, ~s|#{form_id} [name="link_field[validation][max_length]"]|)
+      refute has_element?(lv, ~s|#{form_id} [name="link_field[validation][unique]"]|)
+
+      # A posted `unique` is dropped, as the form never offers it.
+      lv
+      |> element(form_id)
+      |> render_submit(%{
+        "link_field" => %{
+          "label" => "Unit",
+          "name" => "unit",
+          "field_type" => "string",
+          "validation" => %{"max_length" => "4", "unique" => "true"}
+        }
+      })
+
+      assert [sub_id] = link_ids(group)
+
+      assert CMS.get_field_definition!(sub_id, authorize?: false).validation == %{
+               "max_length" => 4
+             }
+    end
+  end
+
+  # #2284: a choice of editor input, from what the field's settings offer.
+  describe "the editor input" do
+    defp widget_cards(lv, id \\ "new-field-widget") do
+      lv
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("##{id} input[type=radio]")
+      |> Enum.map(&LazyHTML.attribute(&1, "id"))
+      |> List.flatten()
+      |> Enum.map(&String.replace_prefix(&1, id <> "-", ""))
+    end
+
+    # Straight to the event: the inputs a change posts depend on the change.
+    defp create_change(lv, params),
+      do: lv |> element("#new-field-form") |> render_change(%{"field_definition" => params})
+
+    test "offers the inputs each type takes, and none where there is no choice", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "select")
+      assert widget_cards(lv) == ~w(dropdown radios buttons)
+      assert lv |> element("label[for=new-field-widget-radios]") |> render() =~ "Radio buttons"
+      # The default's card posts no widget: nil is "the type's default".
+      assert has_element?(lv, "#new-field-widget-dropdown[value=''][checked]")
+
+      create_change(lv, %{field_type: "select", multiple: "true"})
+      assert widget_cards(lv) == ~w(tags checkboxes)
+
+      create_change(lv, %{field_type: "text", format: "plain"})
+      assert widget_cards(lv) == ~w(textarea single_line)
+      assert lv |> element("label[for=new-field-widget-single_line]") |> render() =~ "One line"
+
+      create_change(lv, %{field_type: "text", format: "rich"})
+      refute has_element?(lv, "#new-field-widget")
+
+      create_change(lv, %{kind: "relationship", field_type: "reference", multiple: "false"})
+      assert widget_cards(lv) == ~w(autocomplete dropdown)
+
+      assert lv |> element("label[for=new-field-widget-autocomplete]") |> render() =~
+               "Search as you type"
+
+      assert lv |> element("label[for=new-field-widget-dropdown]") |> render() =~ "Dropdown list"
+
+      create_change(lv, %{kind: "relationship", field_type: "reference", multiple: "true"})
+      refute has_element?(lv, "#new-field-widget")
+
+      for type <- ~w(string integer boolean media date) do
+        type_change(lv, type)
+        refute has_element?(lv, "#new-field-widget"), "editor input offered for #{type}"
+      end
+    end
+
+    test "a plugin type offers its own inputs, by its own labels", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "rating")
+      assert widget_cards(lv) == ~w(number stars)
+      assert lv |> element("label[for=new-field-widget-stars]") |> render() =~ "Stars"
+      assert lv |> element("label[for=new-field-widget-number]") |> render() =~ "Number"
+    end
+
+    test "a chosen input is saved, badged in the list, and reset by the default's card", %{
+      conn: conn
+    } do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#new-field-form")
+      |> render_submit(%{
+        "field_definition" => %{
+          "scopes" => ["page"],
+          "name" => "mood",
+          "label" => "Mood",
+          "field_type" => "select",
+          "options" => "calm\nbright",
+          "widget" => "radios"
+        }
+      })
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "mood"))
+
+      assert field.widget == "radios"
+      assert lv |> element("#field-#{field.id}-widget") |> render() =~ "Radio buttons"
+
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      assert has_element?(lv, "#edit-field-widget-#{field.id}-radios[checked]")
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{widget: ""})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(field.id, authorize?: false).widget == nil
+      refute has_element?(lv, "#field-#{field.id}-widget")
+    end
+
+    test "a retype drops the cards and the stored input with them", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "mood",
+            label: "Mood",
+            field_type: :select,
+            options: ["calm", "bright"],
+            widget: "buttons"
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      id = "edit-field-widget-#{field.id}"
+      assert widget_cards(lv, id) == ~w(dropdown radios buttons)
+
+      lv
+      |> element("#edit-field-#{field.id}")
+      |> render_change(%{"field_definition" => %{"field_type" => "text", "format" => "plain"}})
+
+      assert widget_cards(lv, id) == ~w(textarea single_line)
+      # The stored widget isn't one of these: the default's card is checked.
+      assert has_element?(lv, "##{id}-textarea[checked]")
+
+      # A card from before the retype, still posted, is dropped, not refused.
+      lv
+      |> element("#edit-field-#{field.id}")
+      |> render_submit(%{
+        "field_definition" => %{
+          "field_type" => "text",
+          "format" => "plain",
+          "widget" => "buttons"
+        }
+      })
+
+      saved = CMS.get_field_definition!(field.id, authorize?: false)
+      assert saved.field_type == :text
+      assert saved.widget == nil
+    end
+
+    test "checkboxes and editors' own terms exclude each other, saying why", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      create_change(lv, %{field_type: "select", multiple: "true", allow_custom: "true"})
+      assert has_element?(lv, "#new-field-widget-checkboxes[disabled]")
+      assert lv |> element("#new-field-widget-checkboxes-conflict") |> render() =~ "new terms"
+
+      create_change(lv, %{
+        field_type: "select",
+        multiple: "true",
+        allow_custom: "false",
+        widget: "checkboxes"
+      })
+
+      refute has_element?(lv, "#new-field-widget-checkboxes[disabled]")
+      assert has_element?(lv, "#new-field-widget-checkboxes[checked]")
+      assert has_element?(lv, "#new-field-multiple-allow-custom[disabled]")
+      assert lv |> element("#new-field-multiple-allow-custom-conflict") |> render() =~ "Tags"
+    end
+
+    test "a per-option input warns when the field lists too many options", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+      cap = KilnCMS.CMS.FieldWidgets.option_cap()
+
+      create_change(lv, %{field_type: "select", options: Enum.map_join(1..cap, "\n", &"o#{&1}")})
+      refute has_element?(lv, "#new-field-widget-radios-cap")
+
+      options = Enum.map_join(1..(cap + 1), "\n", &"o#{&1}")
+      create_change(lv, %{field_type: "select", options: options})
+      assert lv |> element("#new-field-widget-radios-cap") |> render() =~ "dropdown instead"
+      assert has_element?(lv, "#new-field-widget-buttons-cap")
+      refute has_element?(lv, "#new-field-widget-dropdown-cap")
+
+      create_change(lv, %{field_type: "select", multiple: "true", options: options})
+      assert lv |> element("#new-field-widget-checkboxes-cap") |> render() =~ "tags instead"
+    end
+  end
+
+  describe "scalar lists (#2289)" do
+    @list_radio "#new-field-form input[name='field_definition[multiple]'][value=true]"
+
+    test "a number, date, link or address asks one value or a list; a boolean or JSON does not",
+         %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      for type <- ~w(integer date url email) do
+        html = type_change(lv, type)
+        assert has_element?(lv, @list_radio), type
+        assert html =~ "One value"
+        assert html =~ "As many values as the editor adds"
+      end
+
+      for type <- ~w(boolean json) do
+        type_change(lv, type)
+        refute has_element?(lv, @list_radio), type
+      end
+    end
+
+    test "a list of dates keeps its bounds, is badged, and warns before narrowing back", %{
+      conn: conn
+    } do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "date")
+
+      lv
+      |> form("#new-field-form", field_definition: %{multiple: "true"})
+      |> render_change()
+
+      assert has_element?(lv, "#new-field-multiple-bounds")
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "event_dates",
+          label: "Event dates",
+          field_type: "date",
+          multiple: "true",
+          min_items: "1",
+          max_items: "10"
+        }
+      )
+      |> render_submit()
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "event_dates"))
+
+      assert {field.multiple, field.min_items, field.max_items} == {true, 1, 10}
+      assert lv |> element("#field-#{field.id}") |> render() =~ "list"
+
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      refute has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{multiple: "false"})
+      |> render_change()
+
+      assert lv |> element("#edit-field-multiple-#{field.id}-narrowing") |> render() =~
+               "Saving keeps only the first item of each list already filled in."
+    end
+
+    test "retyping a list into another list says the items are kept, not narrowed", %{
+      conn: conn
+    } do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "codes",
+            label: "Codes",
+            field_type: :string,
+            multiple: true
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{field_type: "date"})
+      |> render_change()
+
+      assert has_element?(lv, "#edit-field-multiple-#{field.id}-retyped")
+      refute has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+
+      # Retyped to a type that holds no list, the list narrows.
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{field_type: "boolean"})
+      |> render_change()
+
+      assert has_element?(lv, "#edit-field-multiple-#{field.id}-narrowing")
+      refute has_element?(lv, "#edit-field-multiple-#{field.id}-retyped")
+    end
+
+    test "making a field a list warns when a formula reads it", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      doses =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "doses", label: "Doses", field_type: :integer},
+          actor: admin
+        )
+
+      plain =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "steps", label: "Steps", field_type: :integer},
+          actor: admin
+        )
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "total_dose",
+          label: "Total dose",
+          field_type: :computed,
+          compute: "{{ sum(field.doses, 1) }}"
+        },
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      lv |> element("#field-#{doses.id} button[phx-click=edit]") |> render_click()
+      refute has_element?(lv, "#edit-field-multiple-#{doses.id}-formulas")
+
+      lv
+      |> form("#edit-field-#{doses.id}", field_definition: %{multiple: "true"})
+      |> render_change()
+
+      assert lv |> element("#edit-field-multiple-#{doses.id}-formulas") |> render() =~
+               "Total dose"
+
+      lv |> element("#edit-field-#{doses.id} button", "Cancel") |> render_click()
+      lv |> element("#field-#{plain.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{plain.id}", field_definition: %{multiple: "true"})
+      |> render_change()
+
+      refute has_element?(lv, "#edit-field-multiple-#{plain.id}-formulas")
+    end
+
+    test "a group's sub-field form never asks for a list", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      group =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "sessions", label: "Sessions", field_type: :group},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{group.id}-sub-fields-add") |> render_click()
+
+      form_id = "#link-field-form-new-#{group.id}"
+
+      lv
+      |> element(form_id)
+      |> render_change(%{"link_field" => %{"field_type" => "date"}})
+
+      refute has_element?(lv, ~s|#{form_id} [name="link_field[multiple]"]|)
+    end
+  end
+
+  defp link_ids(group) do
+    group
+    |> Ash.load!(:group_fields, authorize?: false)
+    |> Map.fetch!(:group_fields)
+    |> Enum.map(& &1.id)
   end
 end

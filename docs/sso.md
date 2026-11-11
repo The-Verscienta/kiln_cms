@@ -55,6 +55,13 @@ The sign-in page then offers "Sign in with Sso" alongside password/magic-link.
   afterwards.
 - **Invite-only respected.** With `:registration_enabled` false, SSO signs in
   existing accounts only; unknown emails are refused, not auto-provisioned.
+  To let a new person in, a platform admin invites their address from **Team**
+  (`/editor/team`, see
+  [Invite someone to a site](account-administration.md#invite-someone-to-a-site)).
+  A pending invitation does not admit anyone through SSO: the invitee accepts
+  it first, by setting a password on the invitation page. The account that
+  creates is confirmed, so from then on SSO signs it in as an existing
+  account, under the verified-email rule above.
 - **No password backdoor.** SSO-provisioned accounts store an unguessable
   random hash; password sign-in works only after an explicit password reset.
 - **2FA still applies.** SSO completes through the same
@@ -66,7 +73,7 @@ The sign-in page then offers "Sign in with Sso" alongside password/magic-link.
 ## Per-site providers
 
 On a deployment with several sites, a site admin can give their site its own
-OpenID Connect provider at **Configure → Integrations → Single sign-on**
+OpenID Connect provider at **Configure → Sign-in & access → Single sign-on**
 (`/editor/site-sso`, #1561). It sits *beside* the operator's provider above —
 which is unchanged and still offered where it was — and needs no rebuild and no
 environment variables.
@@ -103,7 +110,23 @@ not trusted for everything it asserts:
   is refused rather than handed to the provider's user.
 - **New people** get an account (`:viewer`) and a `:viewer` membership on this
   site only — unless open registration is off, in which case only existing
-  accounts can sign in.
+  accounts can sign in. On an invite-only site, invite new people from **Team**
+  instead. A pending invitation does not admit its address through the site's
+  provider: the invitee accepts it with a password first. With open
+  registration on, someone who signs in through the provider *before*
+  accepting is already a `:viewer` member when they accept; accepting raises
+  that membership to the invited tier
+  ([If the invitee is already a member](account-administration.md#if-the-invitee-is-already-a-member)).
+- **New people can be made to wait for approval.** A site admin ticks **New
+  accounts from this site's single sign-on wait for approval too** on
+  **Registrations** (`/editor/registrations`; off by default, separate from
+  the password sign-up setting). A new account is then created and signed in
+  with no access on any site, and its registration waits for an admin to
+  approve it; existing accounts sign in as before. Someone who was invited
+  and is waiting this way gets the invited tier when they accept the
+  invitation. If the setting can't be read, a first sign-in is refused with
+  the "unavailable" message below and creates nothing. Details:
+  [Hold new single sign-on accounts too](account-administration.md#hold-new-single-sign-on-accounts-too).
 - **A second factor still applies.**
 - **`RS256` ID tokens only**, from the keys at the provider's `jwks_uri`. Every
   request Kiln makes to the provider goes through the same SSRF guard as
@@ -111,7 +134,9 @@ not trusted for everything it asserts:
 
 If the settings can't be read, or the client secret can't be decrypted (after
 a `SECRET_KEY_BASE` rotation — see [secrets-rotation.md](secrets-rotation.md)),
-the sign-in page says the site's single sign-on is unavailable. It never sends
+or a new account would be created and the site's registration setting can't be
+read, the sign-in page says "Single sign-on isn't available on this site right
+now. Sign in another way." It never sends
 people to the operator's provider instead.
 
 Not yet: turning password sign-in off for a site, SAML, and more than one

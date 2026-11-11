@@ -21,14 +21,14 @@ defmodule KilnCMSWeb.TrashLiveTest do
 
   @password "password123456"
 
-  defp authed_admin do
+  defp authed_admin(role \\ :admin) do
     email = "trash-#{System.unique_integer([:positive])}@example.com"
 
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: email,
       hashed_password: Bcrypt.hash_pwd_salt(@password),
       confirmed_at: DateTime.utc_now(),
-      role: :admin
+      role: role
     })
 
     strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
@@ -88,6 +88,66 @@ defmodule KilnCMSWeb.TrashLiveTest do
     refute artifacts == [], "restored from the trash UI with no artifacts"
   end
 
+  # #2612: on main before #2609, Restore crashed for a type with a `unique`
+  # field — `UniqueValues` read `custom_fields`, which the narrow
+  # `@list_fields` projection leaves `%Ash.NotLoaded{}`. The conflict-free
+  # restore must succeed, and the value must count again once it is back.
+  test "restoring an item with a unique custom field brings its value back into use",
+       %{conn: conn} do
+    actor = authed_admin()
+
+    CMS.create_field_definition!(
+      %{
+        content_type: :post,
+        name: "sku",
+        label: "SKU",
+        field_type: :string,
+        validation: %{"unique" => true}
+      },
+      actor: actor
+    )
+
+    post =
+      CMS.create_post!(
+        %{
+          title: "Unique restore",
+          slug: "trash-#{System.unique_integer([:positive])}",
+          custom_fields: %{"sku" => "R-1"}
+        },
+        actor: actor
+      )
+
+    :ok = CMS.destroy_post!(post, actor: actor)
+
+    {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+    html =
+      lv
+      |> element(~s(button[phx-click="restore"][phx-value-id="#{post.id}"]))
+      |> render_click()
+
+    refute html =~ "Couldn&#39;t restore that item."
+    refute has_element?(lv, "#trash-post-#{post.id}")
+
+    restored = CMS.get_post!(post.id, actor: actor)
+    refute restored.archived_at
+    assert restored.custom_fields["sku"] == "R-1"
+
+    # Trashed rows are out of scope for the check, so this is what proves the
+    # restored row holds the value again.
+    assert {:error, error} =
+             CMS.create_post(
+               %{
+                 title: "Duplicate",
+                 slug: "trash-#{System.unique_integer([:positive])}",
+                 custom_fields: %{"sku" => "R-1"}
+               },
+               actor: actor
+             )
+
+    assert Exception.message(error) =~ "SKU (sku) is already in use"
+  end
+
   # R5: a field set to "Don't allow it" keeps a linked record from being
   # deleted for good, and the trash says why in plain words.
   test "a purge refused by a reference field's delete rule is explained", %{conn: conn} do
@@ -134,5 +194,170 @@ defmodule KilnCMSWeb.TrashLiveTest do
              "“Linked page” can&#39;t be deleted for good: 1 record still links to it through “Lead story”"
 
     assert CMS.list_trashed_pages!(actor: actor) |> Enum.any?(&(&1.id == page.id))
+  end
+
+  # #2531: the list was rendered before someone else restored or purged the
+  # row. Both actions take only a row still in the trash, so the click is a
+  # `StaleRecord`; the page says which of the two happened and drops the row.
+  describe "a row someone else already handled" do
+    defp trashed_page(actor) do
+      page =
+        CMS.create_page!(
+          %{title: "Contested", slug: "trash-#{System.unique_integer([:positive])}"},
+          actor: actor
+        )
+
+      :ok = CMS.destroy_page!(page, actor: actor)
+      page
+    end
+
+    defp held(page, actor),
+      do: CMS.list_trashed_pages!(actor: actor) |> Enum.find(&(&1.id == page.id))
+
+    defp click(lv, action, page) do
+      lv
+      |> element(~s(button[phx-click="#{action}"][phx-value-id="#{page.id}"]))
+      |> render_click()
+    end
+
+    defp listed?(lv, page), do: has_element?(lv, "#trash-page-#{page.id}")
+
+    test "restore after someone restored it says so and drops the row", %{conn: conn} do
+      actor = authed_admin()
+      page = trashed_page(actor)
+      {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+      {:ok, _} = CMS.restore_page(held(page, actor), actor: authed_admin())
+
+      assert click(lv, "restore", page) =~ "Someone else already restored that item."
+      refute listed?(lv, page)
+    end
+
+    test "purge after someone restored it leaves the page live", %{conn: conn} do
+      actor = authed_admin()
+      page = trashed_page(actor)
+      {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+      {:ok, _} = CMS.restore_page(held(page, actor), actor: authed_admin())
+
+      assert click(lv, "purge", page) =~ "Someone else already restored that item."
+      refute listed?(lv, page)
+      assert %{archived_at: nil} = CMS.get_page!(page.id, actor: actor)
+    end
+
+    test "purge after someone purged it says it is gone", %{conn: conn} do
+      actor = authed_admin()
+      page = trashed_page(actor)
+      {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+      :ok = CMS.purge_page(held(page, actor), actor: authed_admin())
+
+      assert click(lv, "purge", page) =~
+               "That item is no longer in the trash — someone permanently deleted it."
+
+      refute listed?(lv, page)
+    end
+
+    test "restore after someone purged it says it is gone", %{conn: conn} do
+      actor = authed_admin()
+      page = trashed_page(actor)
+      {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+      :ok = CMS.purge_page(held(page, actor), actor: authed_admin())
+
+      assert click(lv, "restore", page) =~
+               "That item is no longer in the trash — someone permanently deleted it."
+
+      refute listed?(lv, page)
+    end
+
+    test "empty trash counts a row someone restored mid-walk as neither", %{conn: conn} do
+      actor = authed_admin()
+      kept = trashed_page(actor)
+      gone = trashed_page(actor)
+      {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+      {:ok, _} = CMS.restore_page(held(kept, actor), actor: authed_admin())
+
+      lv |> element(~s(button[phx-click="request_empty"])) |> render_click()
+      html = lv |> element(~s(button[phx-click="confirm_empty"])) |> render_click()
+
+      # The walk reads the trash afresh, so the restored row is not even
+      # tried; the guard is what keeps a racing restore from being purged.
+      refute html =~ "skipped"
+      assert %{archived_at: nil} = CMS.get_page!(kept.id, actor: actor)
+      refute Enum.any?(CMS.list_trashed_pages!(actor: actor), &(&1.id == gone.id))
+    end
+  end
+
+  describe "a failure that is not a race" do
+    test "a restore refused by a unique field keeps the generic message and the row",
+         %{conn: conn} do
+      actor = authed_admin()
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: "sku",
+          label: "SKU",
+          field_type: :string,
+          validation: %{"unique" => true}
+        },
+        actor: actor
+      )
+
+      post =
+        CMS.create_post!(
+          %{
+            title: "First",
+            slug: "trash-#{System.unique_integer([:positive])}",
+            custom_fields: %{"sku" => "T-1"}
+          },
+          actor: actor
+        )
+
+      :ok = CMS.destroy_post!(post, actor: actor)
+
+      CMS.create_post!(
+        %{
+          title: "Second",
+          slug: "trash-#{System.unique_integer([:positive])}",
+          custom_fields: %{"sku" => "T-1"}
+        },
+        actor: actor
+      )
+
+      {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+      html =
+        lv
+        |> element(~s(button[phx-click="restore"][phx-value-id="#{post.id}"]))
+        |> render_click()
+
+      assert html =~ "Couldn&#39;t restore that item."
+      assert has_element?(lv, "#trash-post-#{post.id}")
+    end
+
+    test "a refused actor keeps the generic message and the row", %{conn: conn} do
+      # A site admin by membership, not a platform admin, so demoting the
+      # membership after mount takes the trash away mid-session.
+      actor = authed_admin(:editor)
+
+      {:ok, membership} =
+        KilnCMS.Accounts.create_org_membership(
+          %{user_id: actor.id, organization_id: KilnCMS.Accounts.default_org_id(), role: :admin},
+          authorize?: false
+        )
+
+      page = trashed_page(actor)
+      {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/editor/trash")
+
+      {:ok, _} =
+        KilnCMS.Accounts.update_org_membership(membership, %{role: :viewer}, authorize?: false)
+
+      assert click(lv, "restore", page) =~ "Couldn&#39;t restore that item."
+      assert click(lv, "purge", page) =~ "Couldn&#39;t delete that item."
+      assert listed?(lv, page)
+    end
   end
 end

@@ -15,6 +15,19 @@ defmodule KilnCMSWeb.SchemaController do
       GET /api/schema                 # every content type on this site
       GET /api/schema?type=post,page  # just these
       GET /api/schema?blocks=only     # the block union alone, no DB read
+      GET /api/schema?format=typescript          # the same types as a .d.ts
+      GET /api/schema?format=typescript-graphql  # + GraphQL custom-field fragments
+      GET /api/schema?format=swift-graphql       # Swift models + the same fragments
+      GET /api/schema?format=kotlin-graphql      # Kotlin models + the same fragments
+
+  `format` is a closed set: `json` (the default, and what every request without
+  it gets), `typescript` (`KilnCMS.SchemaExport.TypeScript.emit/1`) and
+  `typescript-graphql` (`emit_graphql/1`, a `.ts` module: per content type a
+  `Fields` type and a ready GraphQL fragment for the typed custom-field readers,
+  #2290), and `swift-graphql` / `kotlin-graphql` (`KilnCMS.SchemaExport.Swift` /
+  `Kotlin` `emit_graphql/1`: the native-app models of the `json` artifact plus
+  the same per-type result type and fragment, in package `kiln` for Kotlin).
+  Anything else is a 400. Each format is cached under its own key.
 
   ## What this discloses, and what it withholds
 
@@ -52,12 +65,20 @@ defmodule KilnCMSWeb.SchemaController do
   # TTL is a backstop, not the freshness signal.
   @cache_ttl :timer.minutes(5)
   @max_age_seconds 300
+  @text_formats ["typescript", "typescript-graphql", "swift-graphql", "kotlin-graphql"]
 
   # Rebuilding costs a registry scan plus one `field_definitions` read per
   # content type, so only the unparameterized document — the one a build step
   # actually fetches — is cached. A filtered request is rarer and cheaper, and
   # caching every `?type=` combination would be an attacker-chosen key space.
   def show(conn, params) do
+    case format(params) do
+      {:ok, format} -> show(conn, params, format)
+      :error -> ApiError.send(conn, :bad_request, "invalid_format", invalid_format_message())
+    end
+  end
+
+  defp show(conn, params, format) do
     org = Tenant.current_org(conn)
     types = types_param(params)
     blocks_only? = Params.string(params, "blocks", "") == "only"
@@ -66,28 +87,74 @@ defmodule KilnCMSWeb.SchemaController do
       [org_id: org.id, base_url: Tenant.base_url(org)]
       |> put_unless_empty(:types, types)
       |> put_if(:blocks_only, blocks_only?)
+      |> put_if(:graphql, String.ends_with?(format, "-graphql"))
 
-    case build(opts, types, blocks_only?, org.id) do
-      {:ok, document} ->
-        conn
-        |> put_resp_header("cache-control", "public, max-age=#{@max_age_seconds}")
-        |> json(document)
+    case build(opts, types, blocks_only?, org.id, format) do
+      {:ok, body} ->
+        conn = put_resp_header(conn, "cache-control", "public, max-age=#{@max_age_seconds}")
+        send_body(conn, format, body)
 
       {:error, message} ->
         ApiError.send(conn, :bad_request, "invalid_type", message)
     end
   end
 
+  defp send_body(conn, "json", document), do: json(conn, document)
+
+  # A literal content type per clause: a variable one reads to Sobelow as a
+  # response whose type a request could choose.
+  defp send_body(conn, "swift-graphql", body) do
+    conn |> put_resp_content_type("text/x-swift") |> send_resp(200, body)
+  end
+
+  defp send_body(conn, "kotlin-graphql", body) do
+    conn |> put_resp_content_type("text/x-kotlin") |> send_resp(200, body)
+  end
+
+  defp send_body(conn, _typescript, body) do
+    conn |> put_resp_content_type("application/typescript") |> send_resp(200, body)
+  end
+
+  # Absent or empty is JSON, so the unparameterized request is unchanged.
+  defp format(params) do
+    case Params.string(params, "format", "") do
+      format when format in ["", "json"] -> {:ok, "json"}
+      format when format in @text_formats -> {:ok, format}
+      _unknown -> :error
+    end
+  end
+
+  defp invalid_format_message,
+    do: "unknown format. Known: " <> Enum.join(["json" | @text_formats], ", ")
+
   # The unparameterized document takes no caller input that can be rejected, so
   # it needs no rescue — and only successes ever reach the cache.
-  defp build(opts, [], false, org_id) do
+  defp build(opts, [], false, org_id, "json") do
     {:ok,
      Cache.fetch(Cache.delivery_schema_key(org_id), @cache_ttl, fn ->
        SchemaExport.json_schema(opts)
      end)}
   end
 
-  defp build(opts, _types, _blocks_only?, _org_id), do: export(opts)
+  defp build(opts, [], false, org_id, format) do
+    {:ok,
+     Cache.fetch(Cache.delivery_schema_key(org_id, format), @cache_ttl, fn ->
+       format_document(SchemaExport.json_schema(opts), format)
+     end)}
+  end
+
+  defp build(opts, _types, _blocks_only?, _org_id, format) do
+    with {:ok, document} <- export(opts), do: {:ok, format_document(document, format)}
+  end
+
+  defp format_document(document, "json"), do: document
+  defp format_document(document, "typescript"), do: SchemaExport.TypeScript.emit(document)
+
+  defp format_document(document, "typescript-graphql"),
+    do: SchemaExport.TypeScript.emit_graphql(document)
+
+  defp format_document(document, "swift-graphql"), do: SchemaExport.Swift.emit_graphql(document)
+  defp format_document(document, "kotlin-graphql"), do: SchemaExport.Kotlin.emit_graphql(document)
 
   # The rescue is around this call alone, not the action body. `Tenant.current_org/1`
   # raises `ArgumentError` **by design** (#563) when the tenant did not resolve,

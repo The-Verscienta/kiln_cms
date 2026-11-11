@@ -31,6 +31,8 @@ defmodule KilnCMS.Accounts.Bootstrap do
 
   require Ash.Query
 
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Changes.CheckBreachedPassword
   alias KilnCMS.Accounts.User
   alias KilnCMS.Repo
 
@@ -61,37 +63,96 @@ defmodule KilnCMS.Accounts.Bootstrap do
   end
 
   @doc """
-  Create the first admin from the wizard's typed credentials — `{:ok, user}`,
-  `{:error, :already_bootstrapped}`, or `{:error, changeset_error}` for
-  invalid input.
+  Create the first admin from the wizard's typed credentials —
+  `{:ok, user, notices}`, `{:error, :already_bootstrapped}`, or
+  `{:error, changeset_error}` for invalid input.
+
+  `notices` is a list the caller may turn into messages for the operator:
+  `[:password_breach]` when the password is in a known breach and the site's
+  policy allowed it with a warning (#2240), `[]` otherwise. (It cannot ride on
+  the user: the post-create reload below drops the action's metadata.)
 
   Runs the `:bootstrap_admin` action **with authorization on** (the policy is
   the outer gate), inside an advisory-locked transaction that re-checks the
   condition (the race gate). The lock is transaction-scoped, so it cannot leak
   on a crashed caller.
+
+  The breached-password lookup (a call to a third party, up to
+  `BreachedPassword.deadline/0`) happens **before** the transaction, so the
+  advisory lock and a database connection are never held while waiting on it.
+  The changeset is built first — an invalid one is never looked up — and the
+  verdict travels into the action in its context.
   """
   @spec create_first_admin(map()) ::
-          {:ok, User.t()} | {:error, :already_bootstrapped | term()}
+          {:ok, User.t(), [:password_breach]} | {:error, :already_bootstrapped | term()}
   def create_first_admin(attrs) when is_map(attrs) do
-    case Repo.transaction(fn -> locked_create(attrs) end) do
-      {:ok, user} -> {:ok, user |> reload!() |> ensure_provenance_key()}
-      {:error, :already_bootstrapped} -> {:error, :already_bootstrapped}
-      {:error, error} -> {:error, error}
+    changeset = attrs |> build_changeset() |> with_breach_verdict()
+
+    case Repo.transaction(fn -> locked_create(changeset) end) do
+      {:ok, user} ->
+        {:ok, user |> reload!() |> ensure_provenance_key(), notices(user)}
+
+      {:error, :already_bootstrapped} ->
+        {:error, :already_bootstrapped}
+
+      {:error, error} ->
+        {:error, error}
     end
   end
 
-  defp locked_create(attrs) do
+  # `warn_on_transaction_hooks?: false`: the action runs inside the advisory-
+  # locked transaction below on purpose, and its `before_transaction` hook only
+  # applies the verdict taken before it (it makes no call from in there).
+  defp build_changeset(attrs) do
+    User
+    |> Ash.Changeset.for_create(:bootstrap_admin, attrs)
+    |> Ash.Changeset.set_context(%{warn_on_transaction_hooks?: false})
+  end
+
+  # Only a changeset that passed its own validations is looked up. The first
+  # admin lands on the default org.
+  defp with_breach_verdict(%{valid?: true} = changeset) do
+    case Ash.Changeset.get_argument(changeset, :password) do
+      password when is_binary(password) and password != "" ->
+        verdict =
+          CheckBreachedPassword.lookup(
+            password,
+            :bootstrap,
+            Accounts.default_org_id(),
+            :admin
+          )
+
+        if verdict,
+          do:
+            Ash.Changeset.set_context(changeset, %{CheckBreachedPassword.verdict_key() => verdict}),
+          else: changeset
+
+      _none ->
+        changeset
+    end
+  end
+
+  defp with_breach_verdict(changeset), do: changeset
+
+  defp notices(user) do
+    case user.__metadata__ do
+      %{password_breach: %{status: :breached}} -> [:password_breach]
+      _none -> []
+    end
+  end
+
+  defp locked_create(changeset) do
     Repo.query!("SELECT pg_advisory_xact_lock($1)", [@lock_key])
 
     if bootstrapped?() do
       Repo.rollback(:already_bootstrapped)
     else
-      create_admin!(attrs)
+      create_admin!(changeset)
     end
   end
 
-  defp create_admin!(attrs) do
-    case User |> Ash.Changeset.for_create(:bootstrap_admin, attrs) |> Ash.create() do
+  defp create_admin!(changeset) do
+    case Ash.create(changeset) do
       {:ok, user} -> user
       {:error, error} -> Repo.rollback(error)
     end

@@ -58,6 +58,10 @@ defmodule KilnCMS.CMS.FieldTypes.DatetimeRange do
   @impl Kiln.FieldType
   def label, do: "Date & time range"
 
+  # A map (or list) value, not a scalar: served through the generic JSON value.
+  @impl Kiln.FieldType
+  def graphql_kind(_definition), do: :json
+
   @impl Kiln.FieldType
   def cast(value, _definition) do
     with {:ok, parts} <- parts(value),

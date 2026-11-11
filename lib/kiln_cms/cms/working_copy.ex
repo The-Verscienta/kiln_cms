@@ -66,6 +66,8 @@ defmodule KilnCMS.CMS.WorkingCopy do
 
   require Ash.Query
 
+  alias KilnCMS.CMS.VersionDiff
+
   @typedoc "Any content record — `KilnCMS.CMS.Page`, `Post`, `Entry` or a project type."
   @type content :: struct()
 
@@ -81,6 +83,8 @@ defmodule KilnCMS.CMS.WorkingCopy do
     :seo_keywords,
     :seo_image,
     :canonical_url,
+    :noindex,
+    :nofollow,
     :custom_fields,
     :category_id,
     :featured_image_id
@@ -321,6 +325,40 @@ defmodule KilnCMS.CMS.WorkingCopy do
   @spec held_fields(content()) :: map()
   def held_fields(%{working_fields: %{} = fields}), do: fields
   def held_fields(_record), do: %{}
+
+  @doc """
+  The per-key difference between the held `custom_fields` map and the live
+  column (#2294), for the publish-conflict panel to show beneath its one
+  "Custom fields" row. Draft against live only.
+
+  The conflict itself stays whole-map (`fingerprint/3` hashes the map, and
+  `Changes.PromoteWorkingCopy` resolves it as one key); this is display. Both
+  sides go to `KilnCMS.CMS.VersionDiff` as snapshots, so the entries have the
+  version compare's shape: `%{key, status, old, new}` with `old` the live value
+  and `new` the draft's, sorted by key. `[]` when the copy holds no
+  `custom_fields` or the maps agree key by key.
+  """
+  @spec custom_field_changes(content()) :: [map()]
+  def custom_field_changes(%resource{} = record) do
+    case held_fields(record) do
+      %{"custom_fields" => %{} = draft} ->
+        live = stringify(Map.get(record, :custom_fields))
+
+        %{"custom_fields" => live}
+        |> VersionDiff.between(%{"custom_fields" => draft}, resource)
+        |> Map.get(:fields)
+        |> Enum.find_value([], fn
+          %VersionDiff.Field{name: :custom_fields, entries: entries} -> entries
+          _other -> nil
+        end)
+
+      _none ->
+        []
+    end
+  end
+
+  defp stringify(%{} = map), do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
+  defp stringify(_other), do: %{}
 
   @doc """
   Whether a held relationship key's order is part of its value: the curated

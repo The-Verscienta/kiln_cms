@@ -50,9 +50,7 @@ defmodule KilnCMSWeb.ApiKeyLiveTest do
     test "editors are redirected away", %{conn: conn} do
       conn = log_in(conn, authed_user(:editor))
 
-      assert {:error,
-              {:redirect,
-               %{to: "/", flash: %{"error" => "You need admin access to view that page."}}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                live(conn, ~p"/editor/api-keys")
     end
 
@@ -143,6 +141,77 @@ defmodule KilnCMSWeb.ApiKeyLiveTest do
       assert html =~ "Choose which user the key acts as"
     end
 
+    test "a drafts-only key can be minted with a self-rotation window", %{conn: conn} do
+      admin = authed_user(:admin)
+      service = authed_user(:viewer)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      html =
+        lv
+        |> form("#new-api-key-form", %{
+          name: "rotating",
+          user_id: service.id,
+          days: "30",
+          access: "draft_write",
+          rotate_days: "180"
+        })
+        |> render_submit()
+
+      assert html =~ "Rotates itself until"
+
+      [key] =
+        Enum.filter(KilnCMS.Accounts.list_all_api_keys!(actor: admin), &(&1.name == "rotating"))
+
+      assert DateTime.diff(key.rotatable_until, DateTime.utc_now(), :day) in 179..180
+    end
+
+    test "other scopes ignore the self-rotation field", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      lv
+      |> form("#new-api-key-form", %{
+        name: "plain",
+        user_id: admin.id,
+        days: "30",
+        access: "read",
+        rotate_days: "180"
+      })
+      |> render_submit()
+
+      [key] =
+        Enum.filter(KilnCMS.Accounts.list_all_api_keys!(actor: admin), &(&1.name == "plain"))
+
+      assert is_nil(key.rotatable_until)
+    end
+
+    test "a key retired by rotation reads Rotated and its successor names it", %{conn: conn} do
+      admin = authed_user(:admin)
+      service = authed_user(:viewer)
+
+      key =
+        KilnCMS.Accounts.mint_api_key!(
+          service.id,
+          "svc",
+          DateTime.add(DateTime.utc_now(), 7, :day),
+          %{access: :draft_write, rotatable_until: DateTime.add(DateTime.utc_now(), 90, :day)},
+          actor: admin
+        )
+
+      {:ok, actor} =
+        KilnCMS.Accounts.actor_from_api_key(Ash.Resource.get_metadata(key, :plaintext_api_key))
+
+      {:ok, successor} = KilnCMS.Accounts.rotate_api_key(actor: actor)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      assert lv |> element("#api-key-#{key.id}") |> render() =~ "Rotated"
+      refute lv |> element("#api-key-#{key.id}") |> render() =~ "Revoke<"
+
+      assert lv |> element("#api-key-#{successor.id}") |> render() =~
+               "Rotated from #{String.slice(key.id, 0, 8)}"
+    end
+
     test "admin revokes a key", %{conn: conn} do
       admin = authed_user(:admin)
 
@@ -166,5 +235,33 @@ defmodule KilnCMSWeb.ApiKeyLiveTest do
       reloaded = KilnCMS.Accounts.get_api_key!(key.id, actor: admin)
       assert reloaded.revoked_at
     end
+  end
+
+  describe "audit log (#2241)" do
+    test "minting and revoking from the console records both, in this site's log", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      lv
+      |> form("#new-api-key-form", %{name: "audited", user_id: admin.id, days: "30"})
+      |> render_submit()
+
+      org = KilnCMS.Accounts.default_org_id()
+      list = fn -> KilnCMS.Security.list_events!(actor: admin, tenant: org) end
+
+      assert [event] = Enum.filter(page(list.()), &(&1.type == :api_key_created))
+      assert event.actor_id == admin.id
+      assert event.org_id == org
+      assert event.metadata == %{"name" => "audited", "scope" => "read"}
+
+      key = hd(KilnCMS.Accounts.list_api_keys!(admin.id, actor: admin))
+      render_click(lv, "revoke", %{"id" => key.id})
+
+      assert [%{metadata: %{"name" => "audited"}}] =
+               Enum.filter(page(list.()), &(&1.type == :api_key_revoked))
+    end
+
+    defp page(%{results: results}), do: results
+    defp page(list) when is_list(list), do: list
   end
 end

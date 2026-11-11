@@ -13,16 +13,24 @@ defmodule KilnCMSWeb.AuthOverridesTest do
   to work starts failing here instead of quietly doing nothing.
 
   The second pins the one thing the file could not say on its own — see
-  `KilnCMSWeb.AuthResetForm`. The third holds the other two forms Kiln renders
+  `KilnCMSWeb.AuthResetForm`. The third holds the other forms Kiln renders
   from a copy — sign-in and register, copied to put an eye button beside their
-  password boxes (#1806) — to the same standard.
+  password boxes (#1806), and the `/reset` request form, copied to put
+  `autocomplete` on its email box (#2162) — to the same standard.
   """
   use KilnCMSWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
   alias AshAuthentication.Phoenix.Components
-  alias KilnCMSWeb.{AuthOverrides, AuthRegisterForm, AuthResetForm, AuthSignInForm}
+
+  alias KilnCMSWeb.{
+    AuthOverrides,
+    AuthRegisterForm,
+    AuthResetForm,
+    AuthResetRequestForm,
+    AuthSignInForm
+  }
 
   # What `Components.Reset.Form` labelled its submit button before it declared
   # `button_text` (ash_authentication_phoenix 3.0): `Phoenix.Naming.humanize/1`
@@ -93,7 +101,7 @@ defmodule KilnCMSWeb.AuthOverridesTest do
     end
   end
 
-  describe "Kiln's copies of the sign-in and register forms" do
+  describe "Kiln's copies of the sign-in, register and reset request forms" do
     # Both renders are upstream's with the password boxes swapped for
     # `KilnCMSWeb.AuthPasswordInput`'s, which with the eye button off render
     # upstream's markup byte for byte. So with it off, the whole form must too:
@@ -111,6 +119,16 @@ defmodule KilnCMSWeb.AuthOverridesTest do
       end
     end
 
+    # The `/reset` request form ("email me a reset link") has no password box
+    # and so no eye button to switch off: its one change is the email box's
+    # `autocomplete` (#2162), which `squash/1` drops. So it must match too (#2389).
+    test "include the reset request form, which renders exactly what upstream's does" do
+      assigns = password_form_assigns("user-password-reset-request-form")
+
+      assert squash(render_component(AuthResetRequestForm, assigns)) ==
+               squash(render_component(Components.Password.ResetForm, assigns))
+    end
+
     test "are what the pages render, with the eye buttons on", %{conn: conn} do
       assert AuthOverrides.override_for(
                [AuthOverrides],
@@ -123,6 +141,12 @@ defmodule KilnCMSWeb.AuthOverridesTest do
                Components.Password,
                :register_form_module
              ) == AuthRegisterForm
+
+      assert AuthOverrides.override_for(
+               [AuthOverrides],
+               Components.Password,
+               :reset_form_module
+             ) == AuthResetRequestForm
 
       {:ok, _view, html} = live(conn, ~p"/sign-in")
       assert html =~ "data-password-reveal"
@@ -143,7 +167,14 @@ defmodule KilnCMSWeb.AuthOverridesTest do
 
   # Whitespace between tags is template layout, not markup: the copied field
   # branches on the eye button, so its indentation cannot match upstream's.
-  defp squash(html), do: String.replace(html, ~r/>\s+</, "><")
+  #
+  # `autocomplete` is the one attribute Kiln adds on purpose (#2162), so it is
+  # dropped here and pinned by `KilnCMSWeb.AuthLandmarksTest` instead.
+  defp squash(html) do
+    html
+    |> String.replace(~r/>\s+</, "><")
+    |> String.replace(~r/ autocomplete="[^"]*"/, "")
+  end
 
   defp undeclared(overrides) do
     overrides

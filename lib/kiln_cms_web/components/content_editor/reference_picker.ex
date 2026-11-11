@@ -59,6 +59,28 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   its id (or `"type:id"` token), so moving or removing a row carries its
   values with it.
 
+  ## A dropdown instead of the search (#2284)
+
+  A single reference whose widget is `"dropdown"`
+  (`KilnCMS.CMS.FieldWidgets.effective/1`) lists its candidates in a
+  `<select>` in place of the search box. Everything else stays as above: the
+  hidden input still holds the value, the picked row (and its link inputs)
+  still shows under it, and choosing an option is a pick — the same `:put`
+  (or, for "— None —", `:remove`) message to the editor. The `<select>` is
+  named under `_kiln_ref_pick`, outside the editor form's own params, so it
+  never posts a value of its own.
+
+  The candidates are read once per picker, as the editor's actor in the
+  editor's tenant, title-sorted and grouped by type on a field that allows
+  several. At most 100 across all the target types: past that the
+  picker keeps the search and says why. The current pick is always an
+  option, even one the list doesn't hold (a record just made with "Add new",
+  or one the editor can't read, which shows as unavailable). A target full
+  under `max_sources` is listed, disabled.
+
+  A list of references, the reverse field's add control and the related
+  content picker (none of which offer a widget) always search.
+
   ## Seams for later workstreams
 
     * `row/1` is public and takes `readonly`, so the reverse list (R4) can
@@ -94,9 +116,14 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.FieldWidgets
   alias KilnCMSWeb.ContentEditor.ReferenceValues
 
   @page_size 20
+
+  # The most candidates the dropdown widget lists, across every target type;
+  # past it the picker searches instead.
+  @select_limit 100
 
   # The field types the "Add new" form can render. A required field of any
   # other type (and no default) keeps its content type out of the menu.
@@ -125,6 +152,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
      |> assign(:known, %{})
      |> assign(:ids, nil)
      |> assign(:creatable, nil)
+     |> assign(:candidates, nil)
      |> assign(:creating, nil)
      |> assign(:announcement, "")}
   end
@@ -162,6 +190,12 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     socket =
       if socket.assigns.creatable == nil,
         do: assign(socket, :creatable, creatable(socket.assigns)),
+        else: socket
+
+    # The dropdown widget's options: read once, like `creatable` (#2284).
+    socket =
+      if socket.assigns.candidates == nil,
+        do: assign(socket, :candidates, candidates(socket)),
         else: socket
 
     {:ok, socket |> assign(:items, items(socket.assigns)) |> assign_capacity()}
@@ -244,6 +278,21 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     end
   end
 
+  # The dropdown widget's choice (#2284): an id among the candidates it was
+  # offered, or blank for "— None —". Sent on as a pick or a removal, as the
+  # search's are; a full target, an id it never offered, or a locked field
+  # changes nothing.
+  def handle_event("ref_select", %{"_kiln_ref_pick" => picks}, socket) when is_map(picks) do
+    id = picks |> Map.get(socket.assigns.definition.name, "") |> to_string()
+    current = List.first(socket.assigns.ids || [])
+
+    if socket.assigns.locked or not is_list(socket.assigns.candidates),
+      do: {:noreply, socket},
+      else: {:noreply, select_pick(socket, id, current)}
+  end
+
+  def handle_event("ref_select", _params, socket), do: {:noreply, socket}
+
   def handle_event("ref_remove", %{"id" => id}, socket) when is_binary(id) do
     notify(socket, :remove, id)
     {:noreply, socket}
@@ -306,6 +355,29 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   end
 
   def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  defp select_pick(socket, "", nil), do: socket
+
+  defp select_pick(socket, "", current) do
+    notify(socket, :remove, current)
+    socket
+  end
+
+  defp select_pick(socket, current, current), do: socket
+
+  defp select_pick(socket, id, _current) do
+    case Enum.find(socket.assigns.candidates, &(&1.id == id)) do
+      %{full?: true} ->
+        socket
+
+      %{} = candidate ->
+        notify(socket, :put, id)
+        update(socket, :known, &Map.put(&1, id, candidate))
+
+      nil ->
+        socket
+    end
+  end
 
   defp creatable_type(%{assigns: assigns}, type), do: creatable_type(assigns, type)
   defp creatable_type(assigns, type), do: Enum.find(assigns.creatable || [], &(&1.key == type))
@@ -397,6 +469,57 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         _not_here -> []
       end
     end)
+  end
+
+  # The dropdown widget's candidates (#2284): `:off` unless this picker is a
+  # single reference whose widget is the dropdown, `:too_many` past
+  # `@select_limit` records across the target types, else every readable
+  # record of them, title-sorted, each marked full under `max_sources`. Read
+  # as the editor's actor in the editor's tenant, so the list holds what the
+  # search could find and nothing else. Each type reads one past the limit,
+  # so no read is ever unbounded.
+  defp candidates(%{assigns: assigns} = socket) do
+    if dropdown?(assigns) do
+      assigns.definition
+      |> target_types(assigns.tenant)
+      |> Enum.flat_map(&read_candidates(socket, &1, @select_limit + 1))
+      |> listed_candidates(socket)
+    else
+      :off
+    end
+  end
+
+  defp listed_candidates(rows, _socket) when length(rows) > @select_limit, do: :too_many
+
+  defp listed_candidates(rows, socket) do
+    rows
+    |> Enum.sort_by(fn {record, _ct} -> {record.title || "", record.id} end)
+    |> Enum.map(fn {record, ct} -> to_item(record, ct, socket.assigns.definition) end)
+    |> with_capacity(socket)
+  end
+
+  defp dropdown?(assigns) do
+    assigns.rows and is_nil(assigns.notify) and assigns.definition.multiple != true and
+      FieldWidgets.effective(assigns.definition) == "dropdown"
+  end
+
+  # `{record, ct}` for up to `limit` records of `ct`, by title.
+  defp read_candidates(socket, ct, limit) do
+    %{definition: definition, tenant: tenant, actor: actor, exclude: exclude} = socket.assigns
+
+    ct
+    |> ContentTypes.list!(
+      actor: actor,
+      tenant: tenant,
+      query:
+        search_filters("", excluded_ids(exclude, ct, definition)) ++
+          [
+            select: [:id, :title, :state, :slug, :updated_at],
+            sort: [title: :asc, id: :asc],
+            limit: limit
+          ]
+    )
+    |> Enum.map(&{&1, ct})
   end
 
   # The required fields with no default — what a create would refuse without —
@@ -672,6 +795,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign(:multiple?, assigns.definition.multiple == true)
       |> assign(:root, "custom-field-#{assigns.definition.name}")
       |> assign(:last, length(assigns.items) - 1)
+      |> assign(:dropdown?, is_list(assigns.candidates))
 
     ~H"""
     <div
@@ -737,8 +861,26 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         {gettext("Nothing connected yet.")}
       </p>
 
+      <.candidate_select
+        :if={@dropdown? and not @locked}
+        root={@root}
+        definition={@definition}
+        candidates={@candidates}
+        current={List.first(@items)}
+        errors={@errors}
+        target={@myself}
+      />
+
+      <p
+        :if={@candidates == :too_many and @searchable?}
+        id={"#{@root}-too-many"}
+        class="mb-1 text-xs text-base-content/70"
+      >
+        {gettext("Too many to list — search instead.")}
+      </p>
+
       <div
-        :if={@searchable?}
+        :if={@searchable? and not @dropdown?}
         class={["relative", (@rows and @items != []) && "mt-2"]}
         phx-click-away={@open? && JS.push("ref_close", target: @myself)}
       >
@@ -872,6 +1014,104 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       </div>
     </div>
     """
+  end
+
+  attr :root, :string, required: true
+  attr :definition, :map, required: true
+  attr :candidates, :list, required: true
+  attr :current, :map, default: nil
+  attr :errors, :list, required: true
+  attr :target, :any, required: true
+
+  # The dropdown widget (#2284): the candidates as options, grouped by type
+  # on a field that allows several, under the field's own label. Its name is
+  # outside the editor form's params; a change is a pick (`ref_select`). The
+  # current pick leads when the list doesn't hold it, so the select always
+  # shows what the hidden input holds.
+  defp candidate_select(assigns) do
+    current = assigns.current
+    listed? = current && Enum.any?(assigns.candidates, &(&1.id == current.id))
+
+    assigns =
+      assigns
+      |> assign(:current_id, current && current.id)
+      |> assign(:stray, if(current && !listed?, do: current))
+      |> assign(:groups, candidate_groups(assigns.candidates, assigns.definition))
+
+    ~H"""
+    <div class="mb-1.5">
+      <select
+        id={"#{@root}-select"}
+        name={"_kiln_ref_pick[#{@definition.name}]"}
+        aria-labelledby={"#{@root}-label"}
+        aria-invalid={@errors != [] && "true"}
+        aria-describedby={@errors != [] && "#{@root}-errors"}
+        phx-change="ref_select"
+        phx-target={@target}
+        class="field-select"
+      >
+        <option value="">{gettext("— None —")}</option>
+        <option :if={@stray} value={@stray.id} selected>
+          {if @stray.state, do: @stray.title || gettext("Untitled"), else: gettext("Unavailable")}
+        </option>
+        <%= for {label, candidates} <- @groups do %>
+          <%= if label do %>
+            <optgroup label={label}>
+              <.candidate_option
+                :for={candidate <- candidates}
+                candidate={candidate}
+                current={@current_id}
+                max={@definition.max_sources}
+              />
+            </optgroup>
+          <% else %>
+            <.candidate_option
+              :for={candidate <- candidates}
+              candidate={candidate}
+              current={@current_id}
+              max={@definition.max_sources}
+            />
+          <% end %>
+        <% end %>
+      </select>
+    </div>
+    """
+  end
+
+  attr :candidate, :map, required: true
+  attr :current, :string, default: nil
+  attr :max, :integer, default: nil
+
+  # A target full under `max_sources` is listed, disabled, and says so —
+  # unless it is the current pick, which a re-save doesn't add to.
+  defp candidate_option(assigns) do
+    ~H"""
+    <option
+      value={@candidate.id}
+      selected={@candidate.id == @current}
+      disabled={Map.get(@candidate, :full?, false) and @candidate.id != @current}
+    >
+      {@candidate.title || gettext("Untitled")}
+      <%= if Map.get(@candidate, :full?) do %>
+        · {gettext("Full — %{count} of %{max} connected", count: @candidate.connected, max: @max)}
+      <% end %>
+    </option>
+    """
+  end
+
+  # `[{type label | nil, candidates}]`: one unlabelled run on a field of one
+  # type; one group per type, in the field's own type order, on several.
+  defp candidate_groups(candidates, definition) do
+    if ReferenceValues.polymorphic?(definition) do
+      order = definition |> FieldDefinition.reference_targets() |> Enum.with_index() |> Map.new()
+
+      candidates
+      |> Enum.group_by(&{&1.type, &1.type_label})
+      |> Enum.sort_by(fn {{type, _label}, _cs} -> Map.get(order, to_string(type), 0) end)
+      |> Enum.map(fn {{_type, label}, cs} -> {label, cs} end)
+    else
+      [{nil, candidates}]
+    end
   end
 
   attr :root, :string, required: true

@@ -31,25 +31,18 @@ defmodule KilnCMSWeb.AutomationLive do
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:page_title, gettext("Automation"))
-       |> assign(:type_options, type_options(org))
-       |> assign(:config_options, config_options(socket, actor, org))
-       |> assign_names()
-       |> assign(:edit, nil)
-       |> assign(:recipe, nil)
-       |> assign(:preview, @no_preview)
-       |> assign(:form, create_form(actor, org))
-       |> load_rules()}
-    else
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Automation"))
+     |> assign(:type_options, type_options(org))
+     |> assign(:config_options, config_options(socket, actor, org))
+     |> assign_names()
+     |> assign(:edit, nil)
+     |> assign(:recipe, nil)
+     |> assign(:preview, @no_preview)
+     |> assign(:form, create_form(actor, org))
+     |> load_rules()}
   end
 
   @impl true

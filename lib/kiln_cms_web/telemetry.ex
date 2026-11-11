@@ -167,6 +167,16 @@ defmodule KilnCMSWeb.Telemetry do
         tag_values: kind,
         description: "Number of non-publish workflow transitions"
       ),
+      # Breached-password lookups (#2240). Every tag is a small closed set
+      # (`result` clean|breached|error, `action` register|change|reset|
+      # bootstrap, `enforcement` allowed|warned|blocked); the event carries no
+      # org, account, password or hash, so none can become a label.
+      counter("kiln_cms.password.breach_check.count",
+        tags: [:result, :action, :enforcement],
+        description:
+          "Breached-password lookups by outcome; a rising result=error share means " <>
+            "api.pwnedpasswords.com is unreachable and passwords are accepted unchecked"
+      ),
       # Untagged on purpose: the event's `org_id` is metadata for
       # KilnCMS.CMS.CalendarRequeryMonitor's per-org log line, not a label.
       distribution("kiln_cms.calendar.requery.messages",
@@ -225,6 +235,79 @@ defmodule KilnCMSWeb.Telemetry do
             "metadata is deliberately not a tag (it would be an unbounded " <>
             "series); `surface` is safe because KilnCMSWeb.ViewTracking bounds " <>
             "it to the known surface names."
+      ),
+      counter("kiln_cms.ip_block.refused.count",
+        tags: [:surface],
+        description:
+          "Requests and socket connects refused by an operator's IP block list " <>
+            "(#2242), tagged http / live / gql / collab / bridge. The address is " <>
+            "deliberately not a tag or a log field."
+      ),
+      counter("kiln_cms.admin_allowlist.refused.count",
+        tags: [:surface, :reason],
+        description:
+          "Requests, LiveView joins and collab connects refused by a site's admin " <>
+            "allowlist (#2248), tagged surface (http / api / live / collab) and reason " <>
+            "(not_listed / unavailable). The address is deliberately not a tag."
+      ),
+      # Human verification (#2249). `decision` is not_required | passed |
+      # missing | failed | fail_open | fail_closed and `action` sign_in |
+      # register; `result` is the verification's class (passed, invalid,
+      # expired, timeout, …). No address, account or token is ever a tag.
+      counter("kiln_cms.challenge.decision.count",
+        tags: [:action, :decision],
+        description:
+          "Sign-ins and registrations by human-verification decision; a rising " <>
+            "fail_open share means the provider is unreachable and challenges are being waived"
+      ),
+      counter("kiln_cms.challenge.verify.stop.count",
+        tags: [:provider, :action, :result],
+        description: "Human-verification token checks by provider and result"
+      ),
+      distribution("kiln_cms.challenge.verify.stop.duration",
+        unit: {:native, :millisecond},
+        tags: [:provider],
+        description: "Time to verify a human-verification token, deadline included"
+      ),
+      counter("kiln_cms.scanner_guard.blocked.count",
+        tags: [:reason],
+        description:
+          "Addresses temporarily blocked by the scanner guard (#2253), tagged " <>
+            "miss_threshold / bait_path. The address is deliberately not a tag."
+      ),
+      counter("kiln_cms.delivery.client_class.count",
+        tags: [:class, :result],
+        description:
+          "Public delivery requests by the client class their user agent claims " <>
+            "(#2243: browser / search_engine / ai_crawler / declared_bot / empty) " <>
+            "and whether the class's ceiling allowed or throttled them. At most " <>
+            "ten series; the user agent, address and org are deliberately not tags. " <>
+            "The class is the one charged: since #2254 a search-engine claim proven " <>
+            "false by DNS is counted as empty."
+      ),
+      counter("kiln_cms.delivery.unverified_crawler.count",
+        tags: [:engine, :reason],
+        description:
+          "Delivery requests naming a search engine whose address was not verified " <>
+            "by DNS (#2254), by engine and reason (failed / pending / error / skipped / " <>
+            "unverifiable / not_public). Only failed is charged as empty."
+      ),
+      counter("kiln_cms.crawler_verification.lookup.count",
+        tags: [:engine, :result],
+        description:
+          "Reverse-DNS crawler verification lookups (#2254) by the engine claimed " <>
+            "and result (verified / rejected / timeout / error)"
+      ),
+      distribution("kiln_cms.crawler_verification.lookup.duration",
+        unit: {:native, :millisecond},
+        tags: [:result],
+        description: "Time for one crawler verification lookup, deadline included"
+      ),
+      counter("kiln_cms.crawler_verification.skipped.count",
+        tags: [:reason],
+        description:
+          "Crawler verification lookups not started (#2254): busy (concurrency " <>
+            "limit) or rate_limited (per-network or per-node budget)"
       ),
 
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures

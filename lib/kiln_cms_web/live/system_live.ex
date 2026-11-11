@@ -34,15 +34,41 @@ defmodule KilnCMSWeb.SystemLive do
   plugin does. It
   completes the answer this page exists to give — the version stamp says which
   Kiln is running, and this says what was built into it.
+
+  Each row carries the plugin's health (#2244, `Kiln.Plugins.Health`): whether
+  the package changed on Hex since this build, a security notice, a retired
+  or long-unreleased package, an SDK this Kiln does not bundle. The page reads
+  the cached answer and, on a cold cache, runs the check via `start_async`, so
+  it never waits on hex.pm. A check that could not finish reads as unknown,
+  never OK. "Check plugins now" re-checks platform admin in its handler for
+  the same reason `flush-cache` does: it makes outbound requests on the
+  server's behalf.
+
+  ## Security notices for the core
+
+  The Updates card also says whether a security notice kilncms.dev publishes
+  covers the running Kiln (#2522, `Kiln.SecurityNotices.Core`), in the words
+  of the `core.security_notices` posture check. It is read through
+  `Kiln.SecurityNotices`, the fetch and cache the plugin health check shares,
+  so the two make one request between them, and only while update checks are
+  on. "Check now" asks again past the cache (at most once a minute), and
+  re-checks platform admin for the same reason.
   """
   use KilnCMSWeb, :live_view
 
   require Logger
 
   alias Kiln.Plugins
+  alias Kiln.Plugins.Health
+  alias Kiln.Plugins.Health.PluginStatus
+  alias Kiln.Plugins.Health.Report
+  alias Kiln.SecurityNotices
+  alias Kiln.SecurityNotices.Core
   alias Kiln.Updates
   alias Kiln.Version, as: Build
   alias KilnCMS.HTMLSanitizer
+  alias KilnCMS.Security.Posture.Checks.CoreSecurityNotices
+  alias KilnCMS.Security.Posture.Checks.PluginHealth
   alias KilnCMSWeb.Tenant
 
   @impl true
@@ -58,12 +84,16 @@ defmodule KilnCMSWeb.SystemLive do
        |> assign(:image_backends?, Kiln.ImageBackend.Registry.installed() != [])
        |> assign(:update, :loading)
        |> assign(:flushed, nil)
-       |> check_for_updates()}
+       |> check_for_updates()
+       |> assign_core_notices()
+       |> assign_plugin_health()}
     else
+      # Not redundant: the `:live_admin_required` hook admits any ADMIN of this
+      # site, and this page needs a PLATFORM admin (#419), so it refuses the rest
+      # itself, to the same access-denied page (#2143).
       {:ok,
        socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+       |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
   end
 
@@ -106,7 +136,86 @@ defmodule KilnCMSWeb.SystemLive do
     end
   end
 
+  # Only while update checks are on: `KILN_UPDATE_CHECK=false` asks nothing,
+  # and the card already says checks are off. The cached answer when there is
+  # one (a feed that is off always has one); otherwise it is fetched in the
+  # background, like the update check.
+  defp assign_core_notices(socket) do
+    cond do
+      not Updates.enabled?() -> assign(socket, :core_notices, :off)
+      answer = SecurityNotices.cached() -> assign(socket, :core_notices, place(answer))
+      true -> check_core_notices(socket, [])
+    end
+  end
+
+  # Run directly in `start_async`, unlike `isolated_plugin_check/1` below:
+  # `Kiln.SecurityNotices.fetch/1` runs its request in one task whose body
+  # rescues and catches everything (a crash is stored as an answer), and
+  # shuts that task down itself on a timeout, so no linked process can send
+  # this one an exit signal. Anything raised here still arrives as
+  # `{:exit, _}`.
+  defp check_core_notices(socket, opts) do
+    socket
+    |> assign(:core_notices, :loading)
+    |> start_async(:core_notices, fn -> place(SecurityNotices.fetch(opts)) end)
+  end
+
+  defp place({:ok, notices}), do: Core.status(notices, Build.version())
+  defp place(other), do: other
+
+  # The cached answer when there is one (a disabled check and a deployment
+  # with nothing to check always have one); otherwise the check runs in the
+  # background so a slow hex.pm never delays the page.
+  defp assign_plugin_health(socket) do
+    case Health.cached() do
+      nil -> check_plugins(socket, [])
+      %Report{} = report -> assign(socket, :plugin_health, report)
+    end
+  end
+
+  defp check_plugins(socket, opts) do
+    socket
+    |> assign(:plugin_health, :loading)
+    |> start_async(:plugin_health, fn -> isolated_plugin_check(opts) end)
+  end
+
+  # The check fans out into linked tasks (one per Hex package, one for the
+  # notices feed). Run unlinked, a crash in any of them reaches this task as
+  # an exit `start_async` turns into `{:exit, _}` (rendered unknown), instead
+  # of an exit signal that would take the whole page down with it.
+  @plugin_check_timeout_ms 90_000
+
+  defp isolated_plugin_check(opts) do
+    task = Task.Supervisor.async_nolink(KilnCMS.TaskSupervisor, fn -> Health.check(opts) end)
+
+    case Task.yield(task, @plugin_check_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, report} -> report
+      {:exit, reason} -> exit(reason)
+      nil -> exit(:timeout)
+    end
+  end
+
   @impl true
+  def handle_async(:plugin_health, {:ok, %Report{} = report}, socket) do
+    {:noreply, assign(socket, :plugin_health, report)}
+  end
+
+  # A crashed check must not read as a clean one: every row shows unknown.
+  def handle_async(:plugin_health, {:exit, reason}, socket) do
+    Logger.warning("Plugin health check crashed: #{inspect(reason)}")
+    {:noreply, assign(socket, :plugin_health, :failed)}
+  end
+
+  def handle_async(:core_notices, {:ok, answer}, socket) do
+    {:noreply, assign(socket, :core_notices, answer)}
+  end
+
+  # Unknown, never "no notice": the same line as a feed that did not answer.
+  def handle_async(:core_notices, {:exit, reason}, socket) do
+    Logger.warning("Security notices check crashed: #{inspect(reason)}")
+    {:noreply, assign(socket, :core_notices, {:error, :crashed})}
+  end
+
   def handle_async(:update_check, {:ok, result}, socket) do
     {:noreply, assign(socket, :update, result)}
   end
@@ -117,17 +226,35 @@ defmodule KilnCMSWeb.SystemLive do
     {:noreply, assign(socket, :update, {:error, reason})}
   end
 
+  # Re-checked here, not just in `mount/3`, for the reason `check-plugins-now`
+  # gives below: it asks GitHub (or kilncms.dev) and the notices feed on the
+  # server's behalf, and takes no actor that a policy could refuse.
   @impl true
   def handle_event("check-now", _params, socket) do
-    # The button's `disabled` attribute is client-side only, and start_async
-    # does not cancel an in-flight task — without this guard a scripted client
-    # could stack unbounded concurrent requests, and a late-finishing orphan
-    # would still write the cache after its result was discarded for display.
-    # `Kiln.Updates` also floors forced checks at one per minute.
-    if socket.assigns.update == :loading do
-      {:noreply, socket}
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      {:noreply, socket |> recheck_updates() |> recheck_core_notices()}
     else
-      {:noreply, check_for_updates(socket, force: true)}
+      {:noreply, put_flash(socket, :error, gettext("You need admin access to do that."))}
+    end
+  end
+
+  # Re-checked here, not just in `mount/3`, for the reason `flush-cache` gives
+  # below: this handler makes outbound requests to hex.pm and the notices feed
+  # on the server's behalf, and takes no actor that a policy could refuse. A
+  # platform admin whose temporary grant expired after mount is refused too
+  # (`platform_admin?/1` re-reads the grant's expiry). While a check is in
+  # flight a second press is a no-op, as for "Check now"; `Kiln.Plugins.Health`
+  # also floors forced checks at one round a minute.
+  def handle_event("check-plugins-now", _params, socket) do
+    cond do
+      not KilnCMSWeb.LiveUserAuth.platform_admin?(socket) ->
+        {:noreply, put_flash(socket, :error, gettext("You need admin access to do that."))}
+
+      socket.assigns.plugin_health == :loading or not Health.enabled?() ->
+        {:noreply, socket}
+
+      true ->
+        {:noreply, check_plugins(socket, force: true)}
     end
   end
 
@@ -164,6 +291,25 @@ defmodule KilnCMSWeb.SystemLive do
     else
       {:noreply, put_flash(socket, :error, gettext("You need admin access to do that."))}
     end
+  end
+
+  # The button's `disabled` attribute is client-side only, and start_async
+  # does not cancel an in-flight task — without these guards a scripted client
+  # could stack unbounded concurrent requests, and a late-finishing orphan
+  # would still write the cache after its result was discarded for display.
+  # Each check has its own guard, so one still in flight does not stop the
+  # other. `Kiln.Updates` and `Kiln.SecurityNotices` also floor forced checks
+  # at one per minute.
+  defp recheck_updates(socket) do
+    if socket.assigns.update == :loading,
+      do: socket,
+      else: check_for_updates(socket, force: true)
+  end
+
+  defp recheck_core_notices(socket) do
+    if socket.assigns.core_notices in [:loading, :off] or not Updates.enabled?(),
+      do: socket,
+      else: check_core_notices(socket, force: true)
   end
 
   @impl true
@@ -319,7 +465,19 @@ defmodule KilnCMSWeb.SystemLive do
         </section>
 
         <section id="plugins" class="card card-pad max-w-2xl">
-          <h2 class="text-lg font-semibold">{gettext("Plugins")}</h2>
+          <div class="flex items-start justify-between gap-4">
+            <h2 class="text-lg font-semibold">{gettext("Plugins")}</h2>
+            <button
+              :if={plugin_checks_offered?(@plugin_health)}
+              id="check-plugins-now"
+              type="button"
+              phx-click="check-plugins-now"
+              class="btn btn-sm btn-ghost"
+              disabled={@plugin_health == :loading}
+            >
+              {gettext("Check plugins now")}
+            </button>
+          </div>
 
           <p class="mt-2 text-sm text-base-content/70">
             {gettext(
@@ -327,8 +485,16 @@ defmodule KilnCMSWeb.SystemLive do
             )}
           </p>
 
+          <p :if={@plugins != []} id="plugin-health-state" class="mt-2 text-xs text-base-content/70">
+            {health_state_text(@plugin_health)}
+          </p>
+
           <ul :if={@plugins != []} class="mt-4 divide-y divide-base-content/10">
-            <.plugin_row :for={plugin <- @plugins} plugin={plugin} />
+            <.plugin_row
+              :for={plugin <- @plugins}
+              plugin={plugin}
+              status={plugin_status(@plugin_health, plugin.module)}
+            />
           </ul>
 
           <p :if={@plugins == []} class="mt-4 text-sm text-base-content/70">
@@ -370,6 +536,15 @@ defmodule KilnCMSWeb.SystemLive do
 
           <div class="mt-4">
             <.update_status update={@update} />
+          </div>
+
+          <div
+            :if={@core_notices != :off}
+            id="core-security-notices"
+            class="mt-4 border-t border-base-content/10 pt-4"
+          >
+            <h3 class="text-sm font-medium">{gettext("Security notices")}</h3>
+            <.core_notices_status answer={@core_notices} />
           </div>
         </section>
 
@@ -419,10 +594,15 @@ defmodule KilnCMSWeb.SystemLive do
   end
 
   attr :plugin, :map, required: true
+  attr :status, :any, required: true, doc: "a PluginStatus, :loading or :unknown"
 
   defp plugin_row(assigns) do
     assigns =
       assigns
+      |> assign(:badge, plugin_badge(assigns.status))
+      |> assign(:reasons, health_reasons(assigns.status))
+      |> assign(:notices, health_notices(assigns.status))
+      |> assign(:mismatch, health_mismatch(assigns.status))
       |> assign(:contributions, contributions(assigns.plugin))
       |> assign(:features, features(assigns.plugin))
       # A plugin's `homepage/0` is compile-time code, as trusted as core — but
@@ -437,7 +617,43 @@ defmodule KilnCMSWeb.SystemLive do
           v{@plugin.version}
         </span>
         <span class="text-xs text-base-content/50">{inspect(@plugin.module)}</span>
+        <span :if={@badge} class="plugin-health self-center" data-health={elem(@badge, 2)}>
+          <.badge variant={elem(@badge, 0)}>{elem(@badge, 1)}</.badge>
+        </span>
       </div>
+
+      <ul :if={@reasons != []} class="plugin-health-reasons mt-1 space-y-0.5 text-sm">
+        <li :for={reason <- @reasons} class="flex items-baseline gap-1.5">
+          <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0 text-warning-ink" />
+          <span>{reason}</span>
+        </li>
+      </ul>
+
+      <p :if={@mismatch} class="mt-1 text-xs text-base-content/70">
+        {gettext("Locked %{locked}, Hex has %{registry}.",
+          locked: @mismatch.locked,
+          registry: @mismatch.registry
+        )}
+      </p>
+
+      <p :if={@notices != []} class="mt-1 flex flex-wrap gap-x-3 text-xs">
+        <.link
+          :for={{id, href} <- @notices}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-base-content/70 hover:underline"
+        >
+          {gettext("Advisory %{id}", id: id)}
+        </.link>
+      </p>
+
+      <p
+        :if={match?(%PluginStatus{latest_version: v} when is_binary(v), @status)}
+        class="mt-1 text-xs text-base-content/70"
+      >
+        {gettext("Latest on Hex: %{version}", version: @status.latest_version)}
+      </p>
 
       <p :if={@plugin.summary} class="mt-1 text-sm text-base-content/70">{@plugin.summary}</p>
 
@@ -494,6 +710,103 @@ defmodule KilnCMSWeb.SystemLive do
     """
   end
 
+  # The button is offered only when pressing it could ask something: checks
+  # on, and some plugin from Hex, git or a path.
+  defp plugin_checks_offered?(:loading), do: Health.enabled?()
+  defp plugin_checks_offered?(:failed), do: Health.enabled?()
+  defp plugin_checks_offered?(%Report{state: state}), do: state in [:fresh, :partial]
+
+  defp health_state_text(:loading), do: gettext("Checking plugins...")
+
+  defp health_state_text(:failed),
+    do:
+      gettext("Hex or the notices feed could not be reached; these results are unknown, not OK.")
+
+  defp health_state_text(%Report{state: :disabled}), do: gettext("Plugin checks are off.")
+
+  defp health_state_text(%Report{state: :nothing_to_check}),
+    do: gettext("No dependency plugins to check.")
+
+  defp health_state_text(%Report{state: :partial}),
+    do:
+      gettext("Hex or the notices feed could not be reached; these results are unknown, not OK.")
+
+  defp health_state_text(%Report{state: :fresh, checked_at: at, notices: notices}) do
+    checked =
+      gettext("Checked %{time}.", time: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC"))
+
+    if notices == :disabled,
+      do:
+        checked <>
+          " " <>
+          gettext(
+            "The security notices feed is turned off; only Hex's own advisories were checked."
+          ),
+      else: checked
+  end
+
+  # A row's status: its PluginStatus, `:loading` while the check runs, or
+  # `:unknown` when it crashed or the report has no entry for the module.
+  defp plugin_status(:loading, _module), do: :loading
+  defp plugin_status(:failed, _module), do: :unknown
+
+  defp plugin_status(%Report{plugins: plugins}, module),
+    do: Enum.find(plugins, :unknown, &(&1.plugin == module))
+
+  # `{variant, label, key}` — the key is a stable hook for tests and styling.
+  defp plugin_badge(:loading), do: nil
+  defp plugin_badge(:unknown), do: {"outline", gettext("Unknown"), "unknown"}
+
+  defp plugin_badge(%PluginStatus{overall: :not_applicable}),
+    do: {"neutral", gettext("Built from this project"), "not_applicable"}
+
+  defp plugin_badge(%PluginStatus{overall: :ok}), do: {"success", gettext("OK"), "ok"}
+
+  defp plugin_badge(%PluginStatus{overall: :unverifiable}),
+    do: {"neutral", gettext("Can't verify"), "unverifiable"}
+
+  defp plugin_badge(%PluginStatus{overall: overall} = status) when overall in [:fail, :warn] do
+    variant = if overall == :fail, do: "error", else: "warning"
+    {variant, problem_label(status), Atom.to_string(overall)}
+  end
+
+  defp plugin_badge(%PluginStatus{}), do: {"outline", gettext("Unknown"), "unknown"}
+
+  # The first reason, in the order the rollup weighs them.
+  defp problem_label(%PluginStatus{integrity: {:mismatch, _}}),
+    do: gettext("Changed on Hex since this build")
+
+  defp problem_label(%PluginStatus{advisories: {_state, [_ | _]}}), do: gettext("Security notice")
+
+  defp problem_label(%PluginStatus{integrity: :not_found}), do: gettext("Not on Hex")
+
+  defp problem_label(%PluginStatus{abandonment: [reason | _]}) do
+    case reason do
+      {:retired, _reason, _message} -> gettext("Retired")
+      {:stale, _at} -> gettext("No recent release")
+      _sdk -> gettext("Incompatible with this Kiln")
+    end
+  end
+
+  defp problem_label(_status), do: gettext("Unknown")
+
+  defp health_reasons(%PluginStatus{} = status), do: PluginHealth.reasons(status)
+  defp health_reasons(_status), do: []
+
+  defp health_notices(%PluginStatus{advisories: {_state, notices}}), do: notice_links(notices)
+
+  defp health_notices(_status), do: []
+
+  defp health_mismatch(%PluginStatus{
+         integrity: {:mismatch, %{locked: locked, registry: registry}}
+       }),
+       do: %{locked: short_checksum(locked), registry: short_checksum(registry)}
+
+  defp health_mismatch(_status), do: nil
+
+  defp short_checksum(checksum) when is_binary(checksum), do: String.slice(checksum, 0, 12)
+  defp short_checksum(_checksum), do: "?"
+
   # The kinds a plugin actually contributes, as {label, count} pairs. The same
   # data `mix kiln.plugins.list` prints as a sentence; laid out as label/count
   # here so the labels translate without a plural rule per kind.
@@ -505,10 +818,12 @@ defmodule KilnCMSWeb.SystemLive do
       {gettext("Advisories"), length(manifest.advisories)},
       {gettext("Spam checks"), length(manifest.spam_checks)},
       {gettext("Image backends"), length(manifest.image_backends)},
+      {gettext("Human-verification providers"), length(manifest.challenge_providers)},
       {gettext("Nav items"), manifest.nav_items},
       {gettext("Admin routes"), manifest.admin_routes},
       {gettext("Editor routes"), manifest.editor_routes},
       {gettext("Public routes"), manifest.public_routes},
+      {gettext("Plug routes"), manifest.plug_routes},
       {gettext("Background queues"), length(manifest.oban_queues)},
       {gettext("Supervised children"), manifest.children}
     ]
@@ -531,8 +846,11 @@ defmodule KilnCMSWeb.SystemLive do
       {gettext("Editor checks"), Enum.map(manifest.advisories, &{module_title(&1), nil})},
       {gettext("Spam checks"), Enum.map(manifest.spam_checks, &{module_title(&1), nil})},
       {gettext("Image backends"), Enum.map(manifest.image_backends, &image_backend_feature/1)},
+      {gettext("Human-verification providers"),
+       Enum.map(manifest.challenge_providers, &challenge_provider_feature/1)},
       {gettext("Console pages"), console_pages(plugin)},
       {gettext("Public pages"), Enum.map(plugin.public_routes(), &route_feature/1)},
+      {gettext("Endpoints"), Enum.map(Kiln.Plugins.PlugRoute.of(plugin), &endpoint_feature/1)},
       {gettext("Background queues"),
        Enum.map(manifest.oban_queues, fn {queue, limit} ->
          {to_string(queue), ngettext("%{count} worker", "%{count} workers", limit)}
@@ -576,6 +894,9 @@ defmodule KilnCMSWeb.SystemLive do
 
   defp route_feature({path, _live_view, _action}), do: {path, nil}
 
+  defp endpoint_feature({verb, path, _plug, _opts}),
+    do: {path, verb |> to_string() |> String.upcase()}
+
   # Installed is not in use: say which backend new uploads actually go to, so
   # an operator who installed one and forgot its credentials can tell.
   defp image_backend_feature(backend) do
@@ -592,6 +913,28 @@ defmodule KilnCMSWeb.SystemLive do
       end
 
     {module_title(backend), detail}
+  end
+
+  # Installed is not in use either: say which provider the operator named, by
+  # the id they would name it with. Read from the memoised configuration, so
+  # a provider whose callbacks raise shows as its module name instead.
+  defp challenge_provider_feature(provider) do
+    id = KilnCMS.Challenge.Registry.id_of(provider)
+    config = KilnCMS.Challenge.config()
+
+    detail =
+      cond do
+        is_nil(id) ->
+          gettext("Not a usable provider")
+
+        config.provider == provider ->
+          gettext("In use (CHALLENGE_PROVIDER=%{id})", id: id)
+
+        true ->
+          gettext("Installed as %{id}, not selected", id: id)
+      end
+
+    {module_title(provider), detail}
   end
 
   # `Example.Catalog.TeamMember` → "Team member".
@@ -614,6 +957,100 @@ defmodule KilnCMSWeb.SystemLive do
       nil -> @update_command
       path -> "cd #{path}\n#{@update_command}"
     end
+  end
+
+  attr :answer, :any, required: true
+
+  defp core_notices_status(%{answer: :loading} = assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">{gettext("Checking security notices...")}</p>
+    """
+  end
+
+  defp core_notices_status(%{answer: :disabled} = assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">
+      {gettext(
+        "The security notices feed is turned off (KILN_SECURITY_NOTICES_URL=false, or a fork or mirror of the update feed)."
+      )}
+    </p>
+    """
+  end
+
+  defp core_notices_status(%{answer: {:error, :invalid_notices_url}} = assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">
+      {gettext("KILN_SECURITY_NOTICES_URL is not an absolute http(s) URL, so no notice was checked.")}
+    </p>
+    """
+  end
+
+  # Placed: in the posture check's words, with each notice that covers this
+  # version linked through the one href policy this project keeps.
+  defp core_notices_status(%{answer: {:ok, status}} = assigns) do
+    result = CoreSecurityNotices.result({:ok, status})
+
+    assigns =
+      assigns
+      |> assign(:result, result)
+      |> assign(:badge, core_notices_badge(result.status))
+      |> assign(:links, notice_links(status.affected ++ status.unplaceable))
+
+    ~H"""
+    <p class="mt-1 text-sm">
+      <.badge :if={@badge} variant={elem(@badge, 0)} class="mr-2">{elem(@badge, 1)}</.badge>
+      {@result.summary}
+    </p>
+
+    <ul :if={@result.details != []} class="mt-1 space-y-0.5 text-sm">
+      <li :for={detail <- @result.details} class="flex items-baseline gap-1.5">
+        <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0 text-warning-ink" />
+        <span>{detail}</span>
+      </li>
+    </ul>
+
+    <p :if={@links != []} class="mt-1 flex flex-wrap gap-x-3 text-xs">
+      <.link
+        :for={{id, href} <- @links}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-base-content/70 hover:underline"
+      >
+        {gettext("Advisory %{id}", id: id)}
+      </.link>
+    </p>
+    """
+  end
+
+  defp core_notices_status(%{answer: {:error, :unknown_version}} = assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">{gettext("Could not read this Kiln's version.")}</p>
+    """
+  end
+
+  defp core_notices_status(assigns) do
+    ~H"""
+    <p class="mt-1 text-sm text-base-content/70">
+      {gettext(
+        "Couldn't reach the security notices feed. This says nothing about whether a notice covers this version."
+      )}
+    </p>
+    """
+  end
+
+  defp core_notices_badge(:fail), do: {"error", gettext("Security notice")}
+  defp core_notices_badge(:unknown), do: {"outline", gettext("Unknown")}
+  defp core_notices_badge(_pass), do: nil
+
+  # Advisory links, each through the one href policy this project keeps.
+  defp notice_links(notices) do
+    Enum.flat_map(notices, fn notice ->
+      case HTMLSanitizer.safe_href(notice.url) do
+        nil -> []
+        href -> [{notice.id, href}]
+      end
+    end)
   end
 
   attr :update, :any, required: true
@@ -665,7 +1102,12 @@ defmodule KilnCMSWeb.SystemLive do
         <p class="text-sm text-base-content/70">
           {gettext("Apply it from your project's Kiln checkout, then rebuild and redeploy:")}
         </p>
-        <pre class="mt-2 rounded bg-base-200 p-3 text-xs overflow-x-auto"><code>{@update_command}</code></pre>
+        <pre
+          class="mt-2 rounded bg-base-200 p-3 text-xs overflow-x-auto"
+          tabindex="0"
+          role="group"
+          aria-label={gettext("Update command")}
+        ><code>{@update_command}</code></pre>
         <p class="mt-2 text-xs text-base-content/60">
           {gettext(
             "The command reports new migrations and any required upgrade steps before it changes the pin. It does not deploy."

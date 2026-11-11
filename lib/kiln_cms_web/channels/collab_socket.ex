@@ -40,14 +40,19 @@ defmodule KilnCMSWeb.CollabSocket do
     # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
     # deployment is about to refuse anyway still cost a handshake, so it
     # still has to count.
-    with :ok <- KilnCMSWeb.SocketJoinBudget.charge(:collab_join, connect_info),
+    with :ok <- KilnCMSWeb.IpBlock.check_connect(:collab, connect_info),
+         :ok <- KilnCMSWeb.SocketJoinBudget.charge(:collab_join, connect_info),
          {:ok, user_id} <-
            Phoenix.Token.verify(KilnCMSWeb.Endpoint, "collab", token, max_age: @max_age),
          # The struct match matters: a `not_found_error?: false` interface would
          # return `{:ok, nil}`, and an anonymous actor reads published content.
          {:ok, %{} = actor} <- fetch_actor(user_id),
-         {:ok, org} <- fetch_org(connect_info) do
-      {:ok, socket |> assign(:actor, actor) |> assign(:org, org)}
+         {:ok, org} <- fetch_org(connect_info),
+         # The admin allowlist (#2248): the console's own socket. After the
+         # site is resolved, so an unserved host is refused (and alerted) there
+         # first; the address is kept for the channel's periodic re-check.
+         {:ok, client_ip} <- KilnCMSWeb.AdminAllowlist.check_connect(:collab, connect_info) do
+      {:ok, socket |> assign(:actor, actor) |> assign(:org, org) |> assign(:client_ip, client_ip)}
     else
       _refused -> :error
     end

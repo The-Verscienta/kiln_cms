@@ -18,7 +18,9 @@ defmodule KilnCMS.I18n.FieldLocalization do
   The modes are declared in three places, one per kind of field:
 
     * **block fields** — `field :image_url, :string, localized: :shared` on a
-      `Kiln.Block` (`Kiln.Block.Info.localization/1`);
+      `Kiln.Block` (`Kiln.Block.Info.localization/1`), or, for a block the site
+      cannot edit (the core ones), the `block_fields:` entry of
+      `config :kiln_cms, :i18n` (#2270, see `block_fields/1`);
     * **custom fields** — the `localization` attribute on a
       `KilnCMS.CMS.FieldDefinition`, set on the Fields screen;
     * **record attributes** — the `localization:` option of
@@ -235,20 +237,165 @@ defmodule KilnCMS.I18n.FieldLocalization do
         do: {name, mode}
   end
 
-  @doc "A block module's non-default field modes, by field name."
+  # Block types a site may not opt in through `block_fields:` (#2270): the
+  # editor cannot render one of their fields read-only or as a placeholder
+  # (a gallery's items, a fragment's reference, rich text, a column grid, a
+  # file attachment).
+  @unconfigurable_blocks ~w(gallery fragment rich_text columns file)
+
+  @doc """
+  A block module's non-default field modes, by field name: what the block
+  declares with `localized:` (`Kiln.Block.Info.localization/1`), joined with
+  what the operator configures for its type under
+  `config :kiln_cms, :i18n, block_fields: %{"image" => [shared: [:url], fallback: [:alt]]}`
+  (#2270).
+
+  The config is how a site opts a **core** block in, since a core block
+  declares nothing. It is keyed by the block's type string (its `_type`) and
+  takes the same keyword list `field_localization:` does. Joined like
+  `merge/2` joins a record's: a field the block declares `:shared` stays
+  shared, and one it declares `:fallback` stays fallback; the config only adds
+  fields the block leaves `:localized`.
+
+  Read at run time, on delivery paths, so it never raises: an entry that does
+  not validate (an unregistered or unconfigurable block type, a field the block
+  does not have, a field named both shared and fallback, a malformed list) is
+  ignored, and the problem is logged **once per distinct config**, not once per
+  call. A site that configures nothing pays one `Application.get_env/3`.
+  """
   @spec block_fields(module()) :: %{atom() => :shared | :fallback}
   def block_fields(module) when is_atom(module) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :spark_dsl_config, 0) do
-      for {name, mode} <- Kiln.Block.Info.localization(module),
-          mode != :localized,
-          into: %{},
-          do: {name, mode}
-    else
-      %{}
-    end
+    if Code.ensure_loaded?(module) and function_exported?(module, :spark_dsl_config, 0),
+      do: block_modes(module, Kiln.Block.Info.localization(module)),
+      else: %{}
   end
 
   def block_fields(_module), do: %{}
+
+  defp block_modes(module, declared) do
+    case configured_block(module) do
+      nil -> for({name, mode} <- declared, mode != :localized, into: %{}, do: {name, mode})
+      configured -> merge_block(declared, configured)
+    end
+  end
+
+  defp merge_block(declared, configured) do
+    declared_shared = for {name, :shared} <- declared, do: name
+    declared_fallback = for {name, :fallback} <- declared, do: name
+
+    %{shared: shared, fallback: fallback} =
+      merge(
+        %{shared: declared_shared, fallback: declared_fallback},
+        configured
+      )
+
+    Map.new(Enum.map(shared, &{&1, :shared}) ++ Enum.map(fallback, &{&1, :fallback}))
+  end
+
+  # The operator's `block_fields:` entry for this block's type; nil when there
+  # is none (the common case: one `get_env` and out).
+  defp configured_block(module) do
+    with config when is_list(config) <- Application.get_env(:kiln_cms, :i18n, []),
+         true <- Keyword.keyword?(config),
+         raw when not is_nil(raw) <- Keyword.get(config, :block_fields),
+         name when not is_nil(name) <- Kiln.Block.Info.name(module) do
+      raw |> validated_block_fields() |> Map.get(to_string(name))
+    else
+      _none -> nil
+    end
+  end
+
+  # The whole `block_fields:` term, validated and normalized to
+  # `%{type_string => %{shared: [atom], fallback: [atom]}}`, memoized per
+  # distinct term so the warnings are logged once, not on every call of a
+  # delivery path. A changed term (the e2e toggle) is validated afresh.
+  defp validated_block_fields(raw) do
+    key = {__MODULE__, :block_fields, raw}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        validated = validate_block_fields(raw)
+        :persistent_term.put(key, validated)
+        validated
+
+      validated ->
+        validated
+    end
+  end
+
+  defp validate_block_fields(raw) when is_map(raw) do
+    registry = Map.new(KilnCMS.Blocks.modules(), &{to_string(Kiln.Block.Info.name(&1)), &1})
+
+    Enum.reduce(raw, %{}, fn {type, entry}, acc ->
+      case validate_block_entry(type, entry, registry) do
+        {:ok, modes} ->
+          Map.put(acc, type, modes)
+
+        {:error, message} ->
+          Logger.warning("ignoring :i18n block_fields for #{inspect(type)}: " <> message)
+          acc
+      end
+    end)
+  end
+
+  defp validate_block_fields(raw) do
+    Logger.warning(
+      "ignoring :i18n block_fields: expected a map of block type => " <>
+        "[shared: [...], fallback: [...]], got: #{inspect(raw)}"
+    )
+
+    %{}
+  end
+
+  defp validate_block_entry(type, entry, registry) do
+    with {:ok, module} <- block_module_for(type, registry),
+         :ok <- check_block_keys(entry),
+         {:ok, shared} <- check_block_list(entry, :shared, module),
+         {:ok, fallback} <- check_block_list(entry, :fallback, module) do
+      case Enum.filter(shared, &(&1 in fallback)) do
+        [] -> {:ok, %{shared: shared, fallback: fallback}}
+        both -> {:error, "#{inspect(both)} cannot be both shared and fallback"}
+      end
+    end
+  end
+
+  defp block_module_for(type, _registry) when type in @unconfigurable_blocks,
+    do: {:error, "the #{type} block cannot be localized per field"}
+
+  defp block_module_for(type, registry) when is_binary(type) do
+    case Map.fetch(registry, type) do
+      {:ok, module} -> {:ok, module}
+      :error -> {:error, "no such block type"}
+    end
+  end
+
+  defp block_module_for(type, _registry),
+    do: {:error, "block types are named by string, got: #{inspect(type)}"}
+
+  defp check_block_keys(entry) do
+    if is_list(entry) and Keyword.keyword?(entry) and
+         Keyword.keys(entry) -- [:shared, :fallback] == [] do
+      :ok
+    else
+      {:error, "expected a keyword list of `shared:` and `fallback:`, got: #{inspect(entry)}"}
+    end
+  end
+
+  defp check_block_list(entry, key, module) do
+    names = Keyword.get(entry, key, [])
+    fields = module |> Kiln.Block.Info.fields() |> Enum.map(& &1.name)
+
+    cond do
+      not (is_list(names) and Enum.all?(names, &is_atom/1)) ->
+        {:error, "`#{key}:` must be a list of field names, got: #{inspect(names)}"}
+
+      (unknown = Enum.reject(names, &(&1 in fields))) != [] ->
+        {:error, "`#{key}:` names #{inspect(unknown)}, which the block does not have"}
+
+      true ->
+        {:ok, Enum.uniq(names)}
+    end
+  end
 
   @doc "The locale that owns shared values: the deployment's default locale."
   @spec source_locale() :: String.t()

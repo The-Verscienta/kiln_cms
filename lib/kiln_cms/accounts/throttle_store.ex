@@ -38,6 +38,14 @@ defmodule KilnCMS.Accounts.ThrottleStore do
 
   `KilnCMS.Collab.Crdt.DocServer` makes the same call for its checkpoint upsert.
 
+  ## Tallies
+
+  `count/3` and `window_count/3` use the same table for a counter that is not
+  a budget: the security alerts' failed-sign-in tally per site (#2245). It
+  never refuses, returns the window index alongside the count, and keeps its
+  row an hour past the window's end (through `expires_at`, so the prune needs
+  no special case) for the summary that reads the closed window's total.
+
   ## Never inside a transaction
 
   A charge made inside a transaction is **refunded by its rollback** — and a
@@ -137,6 +145,159 @@ defmodule KilnCMS.Accounts.ThrottleStore do
     end
   end
 
+  # `hit/5`'s upsert for a counter that is a tally rather than a budget
+  # (`count/3`): it also returns the window index, and keeps the row `$4` ms
+  # past the window's end so a reader that comes after the window closed (a
+  # summary sent a minute later) still finds the total.
+  @count_sql """
+  INSERT INTO throttle_counters AS c (bucket, key_hash, window_index, count, expires_at)
+  SELECT $1::text, $2::bytea, w.idx, 1,
+         to_timestamp((((w.idx + 1) * $3::bigint) + $4::bigint)::float8 / 1000) AT TIME ZONE 'UTC'
+  FROM (SELECT floor(extract(epoch FROM clock_timestamp()) * 1000 / $3::bigint)::bigint AS idx) AS w
+  ON CONFLICT (bucket, key_hash, window_index) DO UPDATE SET count = c.count + 1
+  RETURNING c.count, c.window_index
+  """
+
+  # How long a `count/3` row outlives its window. The security-alert summary
+  # (#2245) reads a closed window's total a minute or so after it closes, and
+  # the prune runs every five minutes: without the grace a window could be
+  # deleted between closing and being summarized.
+  @count_grace :timer.hours(1)
+
+  @doc """
+  Adds one to `key`'s **current** window in `bucket` (a fixed window of
+  `scale` ms, by the database clock, as `hit/5`) and returns
+  `{count, window_index}`: the window's total so far, and which window it is.
+
+  A tally, not a gate: it never refuses, so it has no limit. The caller
+  decides what a count means — the failed-sign-in alert (#2245) fires once,
+  on the call that brings the total to its threshold, and reads the window's
+  final total later with `window_count/3`. So the row is kept an hour past
+  the window's end rather than pruned the moment the window closes.
+
+  Raises `ArgumentError` inside a transaction, as `hit/5` does: a rollback
+  would refund the count. When the database cannot answer, it counts on this
+  node's fallback (the index then comes from this node's clock).
+  """
+  @spec count(String.t(), String.t(), pos_integer()) :: {pos_integer(), integer()}
+  def count(bucket, key, scale)
+      when is_binary(bucket) and is_binary(key) and is_integer(scale) and scale > 0 do
+    refuse_in_transaction!(bucket)
+    hash = key_hash(key)
+
+    case shared(fn ->
+           Repo.query!(@count_sql, [bucket, hash, scale, @count_grace], timeout: @timeout)
+         end) do
+      {:ok, %{rows: [[count, window_index]]}} ->
+        {count, window_index}
+
+      {:unavailable, reason} ->
+        log_fallback(bucket, reason)
+        # A limit no tally reaches: the fallback is only counting.
+        {:allow, count} = Local.hit({bucket, hash}, scale, 1_000_000_000)
+        {count, div(System.system_time(:millisecond), scale)}
+    end
+  end
+
+  @window_count_sql """
+  SELECT c.count FROM throttle_counters AS c
+  WHERE c.bucket = $1 AND c.key_hash = $2 AND c.window_index = $3
+  """
+
+  @doc """
+  The total `count/3` reached in window `window_index` of `key` in `bucket`,
+  current or closed. `nil` when there is no such row (pruned, or never
+  counted on the shared store) or the database cannot answer: the caller
+  cannot tell those apart from "nothing happened", so it must not read `nil`
+  as zero.
+  """
+  @spec window_count(String.t(), String.t(), integer()) :: non_neg_integer() | nil
+  def window_count(bucket, key, window_index)
+      when is_binary(bucket) and is_binary(key) and is_integer(window_index) do
+    hash = key_hash(key)
+
+    case shared(fn ->
+           Repo.query!(@window_count_sql, [bucket, hash, window_index], timeout: @timeout)
+         end) do
+      {:ok, %{rows: [[count]]}} -> count
+      {:ok, %{rows: []}} -> nil
+      {:unavailable, _reason} -> nil
+    end
+  end
+
+  @peek_sql """
+  SELECT c.count FROM throttle_counters AS c
+  WHERE c.bucket = $1 AND c.key_hash = $2
+    AND c.window_index = floor(extract(epoch FROM clock_timestamp()) * 1000 / $3::bigint)::bigint
+  """
+
+  @doc """
+  How much of `key`'s budget in `bucket` the **current** window has spent,
+  charging nothing (#2249).
+
+  For a decision that must not cost the thing it is deciding about: the
+  human-verification gate (`KilnCMS.Challenge.Gate`) asks whether an address's
+  sign-in attempts have reached the point where a challenge is required, and
+  answering that with `hit/5` would spend a unit of the very budget a refused
+  attempt must not spend.
+
+  It is a read, so it is not a gate: a burst can all read the same count. That
+  is acceptable for what it is used for, which is choosing whether to *ask* for
+  a challenge, never whether to admit — `hit/5` stays the only gate, and every
+  attempt the challenge admits still pays it.
+
+  The window is computed from the database clock with the same arithmetic
+  `hit/5` uses, so the two agree on which row is current. When the database
+  cannot answer, the node-local fallback is read instead (the bound `hit/5`
+  would be counting against meanwhile); when that has nothing either, `0` —
+  which leans toward *not* asking for a challenge, the direction that cannot
+  lock anyone out. Allowed inside a transaction: a read refunds nothing.
+  """
+  @spec peek(String.t(), String.t(), pos_integer()) :: non_neg_integer()
+  def peek(bucket, key, scale)
+      when is_binary(bucket) and is_binary(key) and is_integer(scale) and scale > 0 do
+    hash = key_hash(key)
+
+    case shared(fn -> Repo.query!(@peek_sql, [bucket, hash, scale], timeout: @timeout) end) do
+      {:ok, %{rows: [[count]]}} -> count
+      {:ok, %{rows: []}} -> 0
+      {:unavailable, _reason} -> local_peek(bucket, hash, scale)
+    end
+  end
+
+  @refund_sql """
+  UPDATE throttle_counters AS c SET count = greatest(c.count - 1, 0)
+  WHERE c.bucket = $1 AND c.key_hash = $2
+    AND c.window_index = floor(extract(epoch FROM clock_timestamp()) * 1000 / $3::bigint)::bigint
+  """
+
+  @doc """
+  Hands one unit of `key`'s **current** window in `bucket` back, never below
+  zero (#2249).
+
+  For a counter whose units are reserved up front by `hit/5` and released when
+  the thing they were reserved for turns out not to count — the
+  human-verification gate reserves a "free" sign-in per client address before
+  the password is checked, and a sign-in that succeeds gives it back, so an
+  office behind one address is not challenged for its own successful sign-ins.
+  A window that has rolled since is left alone: there is nothing in it to give
+  back. Best-effort on the node-local fallback, which has no decrement.
+  """
+  @spec refund(String.t(), String.t(), pos_integer()) :: :ok
+  def refund(bucket, key, scale)
+      when is_binary(bucket) and is_binary(key) and is_integer(scale) and scale > 0 do
+    hash = key_hash(key)
+    shared(fn -> Repo.query!(@refund_sql, [bucket, hash, scale], timeout: @timeout) end)
+    :ok
+  end
+
+  defp local_peek(bucket, hash, scale) do
+    Local.get({bucket, hash}, scale)
+  rescue
+    # The fallback table does not exist until `Local` has started.
+    ArgumentError -> 0
+  end
+
   @doc """
   Clears every window of `key` in `bucket` — on this node's fallback too.
 
@@ -182,7 +343,8 @@ defmodule KilnCMS.Accounts.ThrottleStore do
   end
 
   @doc """
-  Deletes every row whose window has closed. Returns how many went.
+  Deletes every row past its `expires_at`: the window's end, or for a
+  `count/3` tally an hour after it. Returns how many went.
 
   Run by `KilnCMS.Accounts.ThrottleCounter`'s scheduled `:prune` action; the
   node-local fallback is swept by Hammer's own cleaner.

@@ -682,6 +682,102 @@ defmodule KilnCMSWeb.CalendarLiveTest do
       assert DateTime.to_date(CMS.get_page!(page.id, actor: admin).unpublish_at) == target
     end
 
+    # A live page's unpublish date is an unpublish (#2134): an editor on a site
+    # where only admins publish is refused, in words, and nothing moves.
+    test "refuses an editor moving a live page's unpublish date while publishing needs an admin",
+         %{conn: conn} do
+      admin = authed_admin()
+      editor = authed_user(:editor)
+      day = soon()
+      at = DateTime.new!(day, ~T[17:00:00])
+
+      page =
+        %{title: "Embargo #{System.unique_integer([:positive])}", slug: slug()}
+        |> CMS.create_page!(actor: admin)
+        |> CMS.publish_page!(%{}, actor: admin)
+        |> CMS.update_page!(%{unpublish_at: at}, actor: admin)
+
+      {:ok, lv, _html} = open_calendar_on(conn, editor, day, page)
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "unpublish",
+          "date" => Date.to_iso8601(Date.add(day, 2))
+        })
+
+      assert html =~ "Only an admin can move the unpublish date of a live page on this site."
+      refute html =~ "Forbidden"
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).unpublish_at, at) == :eq
+    end
+
+    # The admin sentence is for the editor the publish switch refused (#2473).
+    # An editor scoped away from the type would not be helped by an admin's
+    # say-so on publishing; they are told what actually stops them.
+    test "tells an editor scoped away from the type so, not that an admin moves dates",
+         %{conn: conn} do
+      admin = authed_admin()
+
+      {:ok, _} =
+        KilnCMS.CMS.EditorialSettings.save(%{editors_can_publish: true},
+          actor: admin,
+          tenant: KilnCMS.Accounts.default_org_id()
+        )
+
+      editor = authed_user(:editor, %{editable_types: ["post"]})
+      day = soon()
+      at = DateTime.new!(day, ~T[09:30:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, _html} = open_calendar_on(conn, editor, day, page)
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(Date.add(day, 2))
+        })
+
+      assert html =~ "You can&#39;t edit this content type."
+      refute html =~ "Only an admin"
+      assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+    end
+
+    # A record that left the actor's reach after the window loaded is gone from
+    # their view: the refused read is not a refused publish (#2473).
+    test "says an item trashed since the window loaded is gone, not that an admin moves it",
+         %{conn: conn} do
+      admin = authed_admin()
+      editor = authed_user(:editor)
+      day = soon()
+      at = DateTime.new!(day, ~T[09:30:00])
+      page = scheduled_page(admin, at)
+
+      {:ok, lv, _html} = open_calendar_on(conn, editor, day, page)
+
+      CMS.destroy_page!(page, actor: admin)
+
+      # What the calendar's fetch now gets back: the read filters the row out.
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Query.NotFound{}]}} =
+               KilnCMS.CMS.ContentTypes.get_record("page", page.id,
+                 actor: editor,
+                 tenant: KilnCMS.Accounts.default_org_id()
+               )
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(Date.add(day, 2))
+        })
+
+      assert html =~ "That item is no longer on the calendar — reload to see why."
+      refute html =~ "Only an admin"
+    end
+
     test "refuses a move into the past and leaves the record alone", %{conn: conn} do
       admin = authed_admin()
       # An overdue chip on last month's grid, dragged one day further back.

@@ -1,33 +1,40 @@
 <Layouts.public locale_links={@locale_links} locale={@locale} current_org={@current_org}>
-  <article class="public-article prose max-w-none">
-    <header class="public-masthead mb-6">
-      <h1 class="public-title text-3xl font-bold tracking-tight">{@record.title}</h1>
-      <p class="public-meta mt-2 text-sm text-base-content/70">
-        <.byline
-          bylines={assigns[:bylines] || %{}}
-          fallback={@record.author && @record.author.name}
+  <%!-- The article is in the record's language, which a fallback chain can
+        make differ from the reader's (#2465). `<html lang>` and the chrome
+        around it are the reader's, the URL's (#2595); `lang` here marks the
+        article. --%>
+  <BlockComponents.in_locale locale={@content_locale}>
+    <article class="public-article prose max-w-none" lang={@content_locale}>
+      <header class="public-masthead mb-6">
+        <h1 class="public-title text-3xl font-bold tracking-tight">{@record.title}</h1>
+        <p class="public-meta mt-2 text-sm text-base-content/70">
+          <.byline
+            bylines={assigns[:bylines] || %{}}
+            fallback={@record.author && @record.author.name}
+          />
+          <span :if={
+            byline?(assigns[:bylines], @record.author && @record.author.name) &&
+              @record.published_at
+          }>
+            ·
+          </span>
+          <span :if={@record.published_at}>
+            {published_on(@record.published_at)}
+          </span>
+        </p>
+        <p :if={@record.excerpt} class="public-lede mt-3 text-lg text-base-content/70">
+          {@record.excerpt}
+        </p>
+      </header>
+      <div class="public-body space-y-4">
+        <BlockComponents.render_block
+          :for={block <- @blocks}
+          block={block}
+          variant={assigns[:experiment_variant]}
+          image_sizes={image_sizes(@current_org)}
+          locale={@content_locale}
         />
-        <span :if={
-          byline?(assigns[:bylines], @record.author && @record.author.name) &&
-            @record.published_at
-        }>
-          ·
-        </span>
-        <span :if={@record.published_at}>
-          {published_on(@record.published_at)}
-        </span>
-      </p>
-      <p :if={@record.excerpt} class="public-lede mt-3 text-lg text-base-content/70">
-        {@record.excerpt}
-      </p>
-    </header>
-    <div class="public-body space-y-4">
-      <BlockComponents.render_block
-        :for={block <- @blocks}
-        block={block}
-        variant={assigns[:experiment_variant]}
-        image_sizes={image_sizes(@current_org)}
-      />
-    </div>
-  </article>
+      </div>
+    </article>
+  </BlockComponents.in_locale>
 </Layouts.public>

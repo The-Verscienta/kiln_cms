@@ -81,3 +81,80 @@ if purge_url != "" do
       ),
     purge_token_header: System.get_env("KILN_CDN_PURGE_TOKEN_HEADER", "authorization")
 end
+
+# ## Reject unverifiable bearer tokens (KilnCMSWeb.Plugs.ApiKeyAuth, #2161)
+#
+# On by default: a JWT that fails verification is answered 401 instead of being
+# served anonymously. KILN_API_REJECT_INVALID_BEARER=false restores the anonymous
+# fallback; that escape hatch is removed in the release after this one (ADR 0012).
+# Unset writes no config, so the plug's default (on) applies.
+with {:ok, reject?} <- Env.fetch("KILN_API_REJECT_INVALID_BEARER") do
+  config :kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, reject_invalid_bearer: reject?
+end
+
+# ## Smart 404 blocking (KilnCMS.Security.ScannerGuard, #2253)
+#
+# Off by default. KILN_SCANNER_BLOCKING=1 temporarily blocks an address that
+# racks up delivery 404s (THRESHOLD per WINDOW_MINUTES) or probes bait paths
+# (BAIT_THRESHOLD per window), for BLOCK_MINUTES. Only a recognized spelling or
+# an in-range integer writes config, so an unset var keeps the default; a bad
+# value warns and is ignored rather than being interpreted.
+with {:ok, enabled?} <- Env.fetch("KILN_SCANNER_BLOCKING") do
+  config :kiln_cms, :scanner_blocking, enabled: enabled?
+end
+
+with {:ok, threshold} <- Env.integer_in("KILN_SCANNER_BLOCKING_THRESHOLD", 5, 100_000) do
+  config :kiln_cms, :scanner_blocking, threshold: threshold
+end
+
+with {:ok, threshold} <- Env.integer_in("KILN_SCANNER_BLOCKING_BAIT_THRESHOLD", 1, 1_000) do
+  config :kiln_cms, :scanner_blocking, bait_threshold: threshold
+end
+
+with {:ok, minutes} <- Env.integer_in("KILN_SCANNER_BLOCKING_WINDOW_MINUTES", 1, 1_440) do
+  config :kiln_cms, :scanner_blocking, window_ms: :timer.minutes(minutes)
+end
+
+with {:ok, minutes} <- Env.integer_in("KILN_SCANNER_BLOCKING_BLOCK_MINUTES", 1, 10_080) do
+  config :kiln_cms, :scanner_blocking, block_ms: :timer.minutes(minutes)
+end
+
+# ## Per-class delivery ceilings by user agent (#2243, KilnCMS.BotBudgets)
+#
+# Each is a percentage of the `:delivery` limit (the browser ceiling), 1-1000,
+# for search engines, AI crawlers, declared bots and clients with no user
+# agent. Unset keeps the built-in default (200 for verified search engines,
+# 100, 50, 20); a bad value keeps it too, and warns. A site may lower a class
+# below these from /editor/bot-budgets, never raise it above. See
+# docs/bot-budgets.md.
+#
+# Skipped under :test, like the gates in feature_gates.exs: the suite's limits
+# are pinned by `KilnCMS.RateLimitHelpers.assert_test_limits!/0` against the
+# compiled config, so a value exported in a developer's shell must not reach it.
+if config_env() != :test do
+  bot_budgets =
+    for {class, var} <- [
+          search_engine: "KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT",
+          ai_crawler: "KILN_BOT_BUDGET_AI_CRAWLER_PERCENT",
+          declared_bot: "KILN_BOT_BUDGET_DECLARED_BOT_PERCENT",
+          empty: "KILN_BOT_BUDGET_EMPTY_UA_PERCENT"
+        ],
+        {:ok, percent} <- [Env.integer_in(var, 1, 1000)],
+        into: %{},
+        do: {class, percent}
+
+  if bot_budgets != %{} do
+    config :kiln_cms, KilnCMSWeb.RateLimit, delivery_classes: bot_budgets
+  end
+
+  # ## Verified search engines (#2254, KilnCMS.CrawlerVerification)
+  #
+  # A request whose user agent names a search engine keeps that class's
+  # ceiling only until a reverse-DNS check proves the claim false. On by
+  # default; `false` turns the check off (every claim is believed, the #2243
+  # behavior) for a node that cannot reach a DNS resolver. Skipped under
+  # :test like the rest of this block: config/test.exs pins it to a stub.
+  with {:ok, enabled?} <- Env.fetch("KILN_CRAWLER_VERIFICATION") do
+    config :kiln_cms, KilnCMS.CrawlerVerification, enabled: enabled?
+  end
+end

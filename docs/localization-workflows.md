@@ -33,10 +33,13 @@ config :kiln_cms, :i18n,
   fallbacks: %{"fr-CA" => ["fr", "en"]}
 ```
 
-The same chain applies on the built-in site (`/fr-CA/about` served in French
-says `lang="fr"` and `Content-Language: fr`), the artifact API, `/api/resolve`,
+The same chain applies on the built-in site, the artifact API, `/api/resolve`,
 JSON:API `by-slug`, GraphQL `*BySlug`, and — for configured chains only —
-navigation menus. Headless callers can narrow it per request
+navigation menus. On the built-in site, `/fr-CA/about` served in French keeps
+the reader's language around the article and marks the article itself:
+`<html lang="fr-CA">` and `Content-Language: fr-CA` for the chrome,
+`<article lang="fr">` and `x-kiln-locale: fr` for the document (see
+[public-theming.md → Which language the page text is in](public-theming.md#which-language-the-page-text-is-in)). Headless callers can narrow it per request
 (`?fallback=false`, `?fallback_locale=`) and always get told which locale was
 served; the API side is documented in [api.md → Locale fallback](api.md#locale-fallback).
 
@@ -75,6 +78,19 @@ does not see no change. Where each kind of field opts in:
   end
   ```
 
+- **Fields of the core `image`, `video` and `audio` blocks** — a site cannot
+  edit those modules, so the operator config takes the block's type string
+  (#2270):
+
+  ```elixir
+  config :kiln_cms, :i18n,
+    block_fields: %{"image" => [shared: [:media_id, :url], fallback: [:alt, :caption]]}
+  ```
+
+  Enabling `:shared` overwrites translations' own values on the next source
+  publish; read
+  [Making core block fields per-locale](field-level-localization.md#making-core-block-fields-per-locale-2270)
+  first.
 - **Record attributes** of an overlay content type — the `localization:`
   option:
 

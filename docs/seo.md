@@ -140,9 +140,11 @@ a locked-out reader reads rather than a meta tag.
 
 ### On a fired artifact, from the next publish
 
-The `:json_ld` surface is a stored artifact, fired when a document is published.
+The `:json_ld` surface is a stored artifact, fired when a document is published,
+and so is the `social` object on the `:json` surface
+([Link previews](headless-consumer-guide.md#link-previews-the-social-object)).
 Editing a type's pattern re-titles every *page* at once, but an artifact already
-on disk keeps the description it was fired with until that document is published
+on disk keeps the values it was fired with until that document is published
 again or re-fired (`mix kiln.refire_all`, or `KilnCMS.Firing.Sweep.run/0` on a
 release). Stale, in other words, where it used to be permanently wrong.
 
@@ -354,6 +356,167 @@ and a site that moves to a custom domain follows at once.
 
 Only admins can edit it (`KilnCMS.CMS.SiteSecurityTxt`); the file, and the row
 behind it, are public.
+
+## Robots: `noindex` and `nofollow`
+
+Each document carries two flags, **noindex** and **nofollow** (#2256), both off
+by default. They are sent as `<meta name="robots">` and an `x-robots-tag`
+response header (one helper builds both, so they agree) when either is set.
+
+`noindex` also removes the document from the discovery surfaces Kiln
+generates, so the site does not advertise a page it asks crawlers to skip:
+
+- `/sitemap.xml` and `/news-sitemap.xml`
+- `/llms.txt`
+- every feed: the site feed, per-type, category and tag feeds (Atom and JSON)
+
+`nofollow` on its own changes nothing in those lists; a nofollow-only document
+stays listed.
+
+The flags are an instruction to crawlers, not a delivery switch. The document is
+still served, and still appears in the sync/change feed, the fired artifacts,
+the static export, JSON:API and GraphQL, each carrying the flags so a separate
+frontend can honour them.
+
+How fast a crawler may fetch pages is a separate setting: a search engine whose
+address DNS has verified gets twice the browser rate limit by default, any other
+claim at most the browser limit, and a site admin can lower it at
+**Sign-in & access → Bot budgets**; see
+[bot-budgets.md](bot-budgets.md#verified-search-engines).
+
+The flags are part of the document's working copy: while a published document
+has a pending working copy, changing them takes effect on the live page when
+the working copy is published, like any other field.
+
+In the editor, both flags are checkboxes in the SEO section beside the canonical
+URL. They follow the same field grants and soft locks as the canonical URL: an
+editor whose grant leaves them out cannot change them.
+
+The SEO panel also carries an advisory warning, `noindex_nav_linked`, when a
+published document is hidden from search but an enabled menu item links to it.
+"Enabled" is the same test the structure view's "not in any menu" badge uses
+(`KilnCMS.CMS.Menus.linked_content_ids/1`): the item is visible, and so is every
+ancestor up to a root. It is a prompt to confirm, not a block; `nofollow` alone
+never triggers it. The menu lookup is one read per editor session and document,
+and is skipped for drafts.
+
+### Per-type defaults
+
+A content type can start its new documents with either flag on: the
+`noindex_default` / `nofollow_default` options of `use KilnCMS.CMS.Content` for a
+compiled type, or the two checkboxes on the type's page under **Content types**
+for an admin-defined one. A flag takes the default only when the create does not
+name it, so an explicit `false` (or `true`) from an editor, the API or an import
+always wins. Duplicates and translations copy the source document's flags and
+ignore the default; an editor whose field grant leaves the flags out still gets
+them copied, so a copy never makes a hidden page indexable. Defaults are not retroactive: documents that already exist
+keep what they have, and changing a default touches only documents created
+afterwards.
+
+## Link previews: Open Graph and X (Twitter) cards
+
+When someone shares a link, the app they share it in (X, Slack, LinkedIn,
+iMessage, Facebook) builds the preview card from tags in the page's `<head>`.
+Every page Kiln renders carries two sets: Open Graph (`og:*`), which most apps
+read, and the X (Twitter) Card (`twitter:*`), which X reads first (#164,
+#2258). Both sets come from one resolution (`KilnCMSWeb.Layouts.social_meta/1`),
+so the title, description and image in one always match the other.
+
+| Tags | Value | Left out when |
+|---|---|---|
+| `og:title`, `twitter:title` | The page's **SEO title**, else its title. A type's [default pattern](#per-type-default-patterns) fills a blank SEO title. A page with no title of its own (the stock home page) gets the site name. | Never |
+| `og:description`, `twitter:description` | The page's **SEO description**, or its type's pattern | There is no description |
+| `og:image`, `twitter:image` | The page's **Social image**, else the site's **Default social image** (Branding) | Neither is set |
+| `twitter:card` | `summary_large_image` when there is an image (the page's or the site's), else `summary` | Never |
+| `twitter:site` | The site's **X (Twitter) username** (Branding), as `@handle` | The username is blank |
+
+A tag with no value is left out rather than sent empty: no page carries
+`content=""`, which some apps read as "this page has no title" instead of
+falling back to the next tag. `og:type`, `og:url`, `og:locale` and
+`og:locale:alternate` are unchanged. The same tags are on a gated post's
+teaser and on a passphrase lock page, built from the teaser's fields.
+
+**Images are always absolute, on the site's own host.** A Social image picked
+from the media library is stored as a site-relative path (`/uploads/…`), and
+a preview bot fetching the page cannot resolve that. Kiln prefixes the site's
+own address: its custom domain if it has one, else its subdomain of
+`TENANT_BASE_HOST`, else `PUBLIC_BASE_URL` for the default site. That applies to
+the page's own image, the Default social image and the page's JSON-LD `image`
+alike. A full
+`https://` URL is used as typed. A relative image Kiln has no site to resolve
+against is left out rather than put on the wrong host.
+
+**There are no separate "social" override fields.** The SEO title, SEO
+description and Social image in the editor's **SEO & scheduling** section are
+the overrides: what a search result shows and what a link preview shows are the
+same claim about the page, and a second set of fields would let them drift
+apart with nothing to say which is current. To give a page a different preview
+title, change its SEO title.
+
+Two tags are not emitted yet: `twitter:creator` (the author's own account, which
+needs a per-author handle) and `og:image:alt` / `twitter:image:alt` (the Social
+image stores no alt text).
+
+### Show your site's X account on link previews
+
+`twitter:site` names the X account a card is credited to. It is set per site,
+by a site admin; there is no environment variable or instance-wide default, so
+one site's handle never appears on another site's pages.
+
+1. In the console, open **Delivery → Branding** (`/editor/branding`). You need
+   to be an admin of this site; editors and viewers can't open the page.
+2. In the **Identity** section, find **X (Twitter) username**, below
+   **Default social image**.
+3. Type the account. Any of these work: `kilncms`, `@kilncms`, or the
+   profile URL copied from the browser, such as `https://x.com/kilncms`,
+   `https://twitter.com/kilncms/` or `https://x.com/kilncms?s=21`
+   (`www.` and `mobile.` hosts are accepted too).
+4. Click **Save branding**. The page reloads with "Branding saved." and the
+   field shows the stored form, `@kilncms`.
+5. Check a page. Fetch any public page and look for the tags:
+
+   ```bash
+   curl -s https://www.example.com/blog/hello-world | grep -E 'og:|twitter:'
+   ```
+
+   For a post with an SEO title, an SEO description and a Social image, on a
+   site whose username is `@kilncms`:
+
+   ```html
+   <meta property="og:title" content="Hello, world">
+   <meta property="og:description" content="Our first post.">
+   <meta property="og:image" content="https://www.example.com/uploads/hello.png">
+   <meta property="og:type" content="article">
+   <meta property="og:locale" content="en">
+   <meta property="og:url" content="https://www.example.com/blog/hello-world">
+   <meta name="twitter:card" content="summary_large_image">
+   <meta name="twitter:site" content="@kilncms">
+   <meta name="twitter:title" content="Hello, world">
+   <meta name="twitter:description" content="Our first post.">
+   <meta name="twitter:image" content="https://www.example.com/uploads/hello.png">
+   ```
+
+   To see the card itself, paste the link into a new post on X (the preview
+   appears in the composer) or into a Slack message. Apps cache previews,
+   often for days, so a link shared before the change may keep its old card.
+
+To remove the username, clear the field and save; **Reset to defaults**
+clears it along with the rest of the branding.
+
+What can go wrong:
+
+- **"must be an X (Twitter) username like @kilncms"**, in an error banner,
+  and nothing is saved. The value is not 1 to 15 letters, digits or
+  underscores (`@kiln-cms`, a 16-character name, a space), or it is a URL
+  that isn't an X profile: another site, a post (`https://x.com/kilncms/status/1`),
+  or one of X's own pages such as `home`, `explore`, `search`, `settings` or
+  `i/…`. Those names are refused as bare handles too.
+- **`twitter:site` appears twice.** A site that added the tag by hand under
+  **Code injection** now gets it from Branding as well. Remove the one in
+  Code injection.
+- **No `twitter:site` on an error page.** Pages served before Kiln knows which
+  site the request is for (some error pages) carry no site handle and no
+  Default social image, rather than another site's.
 
 ## Google News sitemap
 

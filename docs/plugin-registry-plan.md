@@ -1,6 +1,12 @@
 # Plugin registry on kilncms.dev — design & phased plan
 
-**Status:** proposal.
+**Status:** proposal, frozen. [#1447](https://github.com/The-Verscienta/kiln_cms/issues/1447)
+was closed as not planned, and the registry is on the frozen list in
+[Path forward](path-forward.md#frozen-and-deprecated). Two of the jobs it
+designed for already run without it (#2244): an installed plugin's checksum is
+compared with hex.pm, and its security notices are read from hex.pm and
+kilncms.dev's notices feed. See
+[Plugin system §7](plugin-system-plan.md#7-plugin-health-checks-2244).
 **Issue:** [#1447](https://github.com/The-Verscienta/kiln_cms/issues/1447),
 under [#333](https://github.com/The-Verscienta/kiln_cms/issues/333).
 **Relies on:** the marketplace stance in

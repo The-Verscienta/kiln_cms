@@ -1,11 +1,13 @@
 defmodule Mix.Tasks.Kiln.Fields.Convert do
-  @shortdoc "Move JSON-in-text custom-field values into a :group, or a multiple :select or :string"
+  @shortdoc "Move JSON-in-text custom-field values into a :group, a multiple :select or a list field"
 
   @moduledoc """
   Parses a custom field that holds a JSON string (an array of objects, one
   object, or either encoded twice) and writes the rows to a `:group` field —
-  or a JSON array of strings, written as the terms of a multiple `:select`
-  field or the items of a multiple `:string` field — see `KilnCMS.CMS.FieldConversion` and docs/field-conversion.md.
+  or a JSON array, written as the terms of a multiple `:select` field or the
+  items of a list field (a multiple `:string`, `:integer`, `:date`, `:url`,
+  …), each item coerced as the field's own save would — see
+  `KilnCMS.CMS.FieldConversion` and docs/field-conversion.md.
 
       mix kiln.fields.convert herb dosages_json --to dosages                # dry run
       mix kiln.fields.convert herb dosages_json --to dosages --apply
@@ -13,25 +15,29 @@ defmodule Mix.Tasks.Kiln.Fields.Convert do
       mix kiln.fields.convert herb dosages_json --to dosages --apply --skip-invalid --report out.json
       mix kiln.fields.convert herb western_properties --to properties          # terms + counts
       mix kiln.fields.convert clinic services_text --to services --lines      # one per line
+      mix kiln.fields.convert event dates_json --to event_dates               # a date list
 
   Options:
 
       --to FIELD         the target group (it and its sub-fields must exist), a
-                         select holding several terms, or a list of phrases
+                         select holding several terms, or a list field
       --org SLUG         the organization (default: the default org)
       --apply            write; without it the run is a dry run
       --skip-invalid     write the valid records even when others are invalid
                          (those keep only their string)
       --overwrite        also rewrite records whose group already has rows
       --map OLD=NEW      rename a key in every row (repeatable; groups only)
-      --lines            a list of phrases only: read text that is not JSON as
-                         one item per line
+      --lines            a list or a select only: read text that is not JSON
+                         as one item per line
       --report PATH      also write the report as JSON
       --batch N          records read per page (default 100)
 
-  A **dry run is the default**, and nothing is written while any record is
-  invalid unless `--skip-invalid` is given. The source field is left as it
-  is; drop it a release later. Re-running skips records already converted.
+  A **dry run is the default**, and nothing is written while any live record
+  is invalid unless `--skip-invalid` is given. Records in the trash are
+  converted too, so a restore after the source field is dropped finds the
+  converted value; a trashed record that does not fit is reported, keeps its
+  string, and does not block. The source field is left as it is; drop it a
+  release later. Re-running skips records already converted.
   """
 
   use Mix.Task
@@ -90,7 +96,10 @@ defmodule Mix.Tasks.Kiln.Fields.Convert do
     if path, do: File.write!(path, Jason.encode!(report, pretty: true))
 
     if report.blocked?,
-      do: Mix.raise("#{length(report.problems)} invalid record(s); nothing written")
+      do:
+        Mix.raise(
+          "#{length(FieldConversion.blocking(report))} invalid record(s); nothing written"
+        )
 
     unless report.dry_run? or report.problems == [],
       do: Mix.shell().error("#{length(report.problems)} record(s) not converted")

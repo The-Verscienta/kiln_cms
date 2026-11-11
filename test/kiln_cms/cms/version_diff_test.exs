@@ -109,6 +109,36 @@ defmodule KilnCMS.CMS.VersionDiffTest do
       refute Map.has_key?(entries, "kept")
     end
 
+    test "custom_fields entries tell nil, empty string and a missing key apart (#2294)" do
+      diff =
+        VersionDiff.between(
+          %{"custom_fields" => %{"a" => nil, "b" => "", "c" => "x"}},
+          %{"custom_fields" => %{"a" => "now", "b" => "now", "d" => nil}},
+          KilnCMS.CMS.Page
+        )
+
+      entries = Map.new(find_field(diff, :custom_fields).entries, &{&1.key, &1})
+
+      # A key present as nil/"" then filled in is a change, not an addition: the
+      # key existed on both sides.
+      assert %{status: :changed, old: nil, new: "now"} = entries["a"]
+      assert %{status: :changed, old: "", new: "now"} = entries["b"]
+      assert %{status: :removed, old: "x", new: nil} = entries["c"]
+      # Absent before, nil after: both sides read nil, so there is nothing to show.
+      refute Map.has_key?(entries, "d")
+    end
+
+    test "a nil custom_fields map against an empty one is not a change" do
+      diff =
+        VersionDiff.between(
+          %{"custom_fields" => nil},
+          %{"custom_fields" => %{}},
+          KilnCMS.CMS.Page
+        )
+
+      assert find_field(diff, :custom_fields) == nil
+    end
+
     test "bookkeeping columns are never diffed" do
       diffable = VersionDiff.diffable_fields(KilnCMS.CMS.Page)
 

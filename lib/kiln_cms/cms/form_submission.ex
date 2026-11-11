@@ -86,6 +86,13 @@ defmodule KilnCMS.CMS.FormSubmission do
       # rendered page to time simply omits it.
       argument :fill_time_ms, :integer
 
+      # What human verification decided (#2249), from
+      # `KilnCMS.Challenge.Gate.form/3`; nil when the form asked for none.
+      # Stored on `challenge` below by the scorer, which also holds every
+      # outcome but `:passed` as spam.
+      argument :challenge, :atom,
+        constraints: [one_of: [:passed, :missing, :wrong_host, :unavailable]]
+
       change KilnCMS.CMS.Changes.ScoreFormSubmission
     end
 
@@ -197,6 +204,17 @@ defmodule KilnCMS.CMS.FormSubmission do
     attribute :spam_score, :integer do
       default 0
       allow_nil? false
+      writable? false
+      public? true
+    end
+
+    # Human verification (#2249): `:passed`, or why the submission was held —
+    # `:missing` (no token), `:wrong_host` (solved on a host this deployment
+    # does not serve) or `:unavailable` (the provider could not answer). nil
+    # when the form asked for no check. Set only by
+    # `Changes.ScoreFormSubmission`, from the create's argument.
+    attribute :challenge, :atom do
+      constraints one_of: [:passed, :missing, :wrong_host, :unavailable]
       writable? false
       public? true
     end

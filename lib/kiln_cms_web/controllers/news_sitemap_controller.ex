@@ -95,14 +95,15 @@ defmodule KilnCMSWeb.NewsSitemapController do
   end
 
   # No actor + `authorize?: true` ⇒ published records only (the read policy);
-  # `audience: :public` keeps gated content out — see the moduledoc.
+  # `audience: :public` keeps gated content out — see the moduledoc; `noindex: false`
+  # leaves out documents that asked not to be indexed (#2256).
   defp type_records(ct, org, cutoff) do
     ct
     |> ContentTypes.list!(
       authorize?: true,
       tenant: org.id,
       query: [
-        filter: [audience: :public, published_at: [greater_than_or_equal: cutoff]],
+        filter: [audience: :public, noindex: false, published_at: [greater_than_or_equal: cutoff]],
         sort: [published_at: :desc],
         limit: @max_urls,
         select: @fields

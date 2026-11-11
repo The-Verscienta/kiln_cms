@@ -103,7 +103,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
   describe "/editor (content list)" do
     test "viewers are redirected away", %{conn: conn} do
-      assert {:error, {:redirect, %{to: "/"}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=editor"}}} =
                conn |> log_in(authed_user(:viewer)) |> live(~p"/editor")
     end
 
@@ -305,7 +305,8 @@ defmodule KilnCMSWeb.EditorLiveTest do
       page = draft_page(%{title: "ArchPage"})
       post = draft_post(%{title: "ArchPost"})
 
-      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor")
+      # Archive takes the publish permission (#2134), so an admin runs it.
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
 
       lv |> element("input[phx-click='toggle_select_all']") |> render_click()
 
@@ -379,7 +380,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> element("button[phx-value-action='delete']") |> render_click()
       cancelled = lv |> element("button[phx-click='cancel_bulk']") |> render_click()
 
-      refute cancelled =~ "to trash?"
+      # The bulk guard's own copy, not a bare "to trash?": every row's Move to
+      # trash menu item (#2137) carries a "… to trash?" confirm of its own.
+      refute cancelled =~ "selected item(s) to trash?"
+      refute has_element?(lv, "button[phx-click='confirm_bulk']")
       assert Enum.any?(CMS.list_pages!(authorize?: false), &(&1.id == page.id))
     end
 
@@ -992,9 +996,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
 
   describe "/editor/trash" do
     test "editors are redirected away", %{conn: conn} do
-      assert {:error,
-              {:redirect,
-               %{to: "/", flash: %{"error" => "You need admin access to view that page."}}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn |> log_in(authed_user(:editor)) |> live(~p"/editor/trash")
     end
 
@@ -2320,6 +2322,10 @@ defmodule KilnCMSWeb.EditorLiveTest do
       |> element("button[phx-click='restore'][phx-value-version_id='#{create_version.id}']")
       |> render_click()
 
+      # Restore previews first; only the confirm step writes.
+      assert CMS.get_page!(page.id, authorize?: false).title == "Changed"
+      render_click(lv, "confirm_restore", %{"version_id" => create_version.id})
+
       assert CMS.get_page!(page.id, authorize?: false).title == "Original"
     end
 
@@ -3601,6 +3607,72 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert [%{"blocks" => [child]}, %{"blocks" => []}] = block.data["columns"]
       assert child["_type"] == "heading"
       assert child["text"] == "Nested heading"
+    end
+
+    # Reloading a saved page mounts a form whose `blocks` subforms have not been
+    # through a `validate` yet: `AshPhoenix.Form.params/1` returned `"blocks" => nil`
+    # there, and `inject_children/2` left it, so the next `validate/2` crashed in
+    # `AshPhoenix.Form.condense/2`. Every `apply_children/2` caller shares it.
+    test "nested child events work on a freshly loaded page, before any form change", %{
+      conn: conn
+    } do
+      page = draft_page(%{blocks: []})
+      authed = conn |> log_in(authed_user(:editor))
+
+      {:ok, lv, _html} = live(authed, ~p"/editor/content/page/#{page.id}")
+      add_columns_block(lv)
+      id = columns_block_id(lv)
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='0'][phx-value-type='heading']")
+      |> render_click()
+
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      render_hook(lv, "col_update_child", %{
+        "id" => id,
+        "child" => child_id,
+        "field" => "text",
+        "value" => "Saved"
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      # Fresh mount: no phx-change has happened.
+      {:ok, lv, _html} = live(authed, ~p"/editor/content/page/#{page.id}")
+      id = columns_block_id(lv)
+      [_, child_id] = Regex.run(~r/data-child-id="([^"]+)"/, render(lv))
+
+      render_hook(lv, "col_update_child", %{
+        "id" => id,
+        "child" => child_id,
+        "field" => "text",
+        "value" => "Edited"
+      })
+
+      lv
+      |> element("button[phx-click='col_add_child'][phx-value-col='1'][phx-value-type='heading']")
+      |> render_click()
+
+      # A new child's required `text` starts blank; fill it or the save refuses.
+      [new_child_id] =
+        Regex.scan(~r/data-child-id="([^"]+)"/, render(lv), capture: :all_but_first)
+        |> List.flatten()
+        |> Enum.reject(&(&1 == child_id))
+
+      render_hook(lv, "col_update_child", %{
+        "id" => id,
+        "child" => new_child_id,
+        "field" => "text",
+        "value" => "Added"
+      })
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [block] = blocks_legacy(CMS.get_page!(page.id, authorize?: false))
+
+      assert [%{"blocks" => [%{"text" => "Edited"}]}, %{"blocks" => [%{"text" => "Added"}]}] =
+               block.data["columns"]
     end
 
     # #893. Changing a nested heading's level did nothing: the `<select>` had no

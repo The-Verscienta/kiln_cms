@@ -1,3 +1,52 @@
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} doesn't match the required format"
+msgstr ""
+
+#: lib/kiln_cms/cms/unique_values.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} holds a value another record already uses. Change it, then try again"
+msgstr ""
+
+#: lib/kiln_cms/cms/unique_values.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is already in use"
+msgstr ""
+
+#: lib/kiln_cms/cms/unique_values.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is being changed by another save at the same time. Try again"
+msgstr ""
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be at least %{count} character long"
+msgid_plural "%{field} must be at least %{count} characters long"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be at least %{min}"
+msgstr ""
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be at most %{count} character long"
+msgid_plural "%{field} must be at most %{count} characters long"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be at most %{max}"
+msgstr ""
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field}: %{message}"
+msgstr ""
+
 msgid "are still associated with this entry"
 msgstr ""
 
@@ -13,6 +62,13 @@ msgstr ""
 ## From Ecto.Changeset.cast/4
 msgid "can't be blank"
 msgstr ""
+
+#: lib/kiln_cms/cms/validations/unique_field_clean.ex
+#, elixir-autogen, elixir-format
+msgid "can't require unique values yet: %{count} value is shared by several records (%{samples}). Make them distinct first"
+msgid_plural "can't require unique values yet: %{count} values are shared by several records (%{samples}). Make them distinct first"
+msgstr[0] ""
+msgstr[1] ""
 
 ## From Ecto.Changeset.validate_confirmation/3
 msgid "does not match confirmation"
@@ -40,6 +96,11 @@ msgstr ""
 
 ## From Ecto.Changeset.no_assoc_constraint/3
 msgid "is still associated with this entry"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/bot_budget_ceiling.ex
+#, elixir-autogen, elixir-format
+msgid "may not be more than %{ceiling}%: this server's operator caps it there. Ask them to raise it, or choose a lower value."
 msgstr ""
 
 ## From KilnCMS.Accounts.OrgSlug.message/1 (#1710)

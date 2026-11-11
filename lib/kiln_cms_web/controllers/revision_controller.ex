@@ -41,6 +41,14 @@ defmodule KilnCMSWeb.RevisionController do
   only come back from the single-revision read, which adds that version's own
   raw `changes` and the full `snapshot` of the document at that version.
 
+  The single-revision read also carries `changed_custom_fields` — the sorted
+  *keys* of the custom fields that write changed, found by diffing its
+  `custom_fields` map against the previous version that carried one
+  (`KilnCMS.CMS.VersionSnapshot.changed_custom_fields/2`). `changed_fields` is
+  unchanged and still says just `custom_fields`. The list endpoint does not
+  carry it: it would cost a history fold per page. The version rows are read as the
+  caller (`MaskVersionFields`), so keys the caller may not see are never named.
+
   History is stored `:changes_only`, so no version row holds the whole document;
   the snapshot is the fold `KilnCMS.CMS.VersionSnapshot.at/4` computes — the
   same fold restore and the compare view use, so what this endpoint says a
@@ -62,6 +70,7 @@ defmodule KilnCMSWeb.RevisionController do
   alias KilnCMS.CMS.VersionFields
   alias KilnCMS.CMS.VersionSnapshot
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.InlineEditing
   alias KilnCMSWeb.Params
 
   @default_limit 20
@@ -92,13 +101,23 @@ defmodule KilnCMSWeb.RevisionController do
   def show(conn, %{"type" => type, "id" => id, "version_id" => version_id}) do
     with {:ok, scope} <- authorize(conn, type, id),
          {:ok, version} <- fetch_version(scope, version_id),
-         {:ok, snapshot} <-
-           VersionSnapshot.at(scope.version_module, scope.record.id, version, scope.opts) do
+         history =
+           VersionSnapshot.history(
+             scope.version_module,
+             scope.record.id,
+             version.version_inserted_at,
+             scope.opts
+           ),
+         {:ok, snapshot} <- VersionSnapshot.fold_through(history, version) do
       json(conn, %{
         data:
           version
           |> summary(scope)
-          |> Map.merge(%{changes: stringify(version.changes), snapshot: snapshot})
+          |> Map.merge(%{
+            changed_custom_fields: VersionSnapshot.changed_custom_fields(history, version),
+            changes: stringify(version.changes),
+            snapshot: snapshot
+          })
       })
     else
       # `VersionSnapshot.at/4`'s membership miss: the version is not in this
@@ -239,8 +258,21 @@ defmodule KilnCMSWeb.RevisionController do
   defp run_restore(scope, version) do
     case ContentTypes.restore_version(scope.ct, scope.record, version.id, scope.opts) do
       {:ok, record} -> {:ok, record}
-      {:error, error} -> {:restore_failed, Ash.Error.to_error_class(error)}
+      {:error, error} -> restore_refused(scope, Ash.Error.to_error_class(error))
     end
+  end
+
+  # A stale refusal (#2532) is either a write that landed since this request
+  # read the document, or the document moved to the trash or purged meanwhile
+  # (#2332). Read it again to tell them apart: a gone document answers as the
+  # route does for one already gone before the request, a 404.
+  defp restore_refused(_scope, %Ash.Error.Forbidden{} = error), do: {:restore_failed, error}
+
+  defp restore_refused(scope, error) do
+    if InlineEditing.stale_conflict?(error) and
+         fetch_record(scope.ct, scope.record.id, scope.opts) == :not_found,
+       do: :not_found,
+       else: {:restore_failed, error}
   end
 
   # --- shapes ---------------------------------------------------------------
@@ -339,8 +371,22 @@ defmodule KilnCMSWeb.RevisionController do
     )
   end
 
+  # The restore carries the optimistic lock (#2532): a write that landed
+  # between this request's read and its restore lost the race. That is a 409
+  # with the code JSON:API gives every other `StaleRecord`
+  # (`KilnCMSWeb.AshStateMachineErrors`), which the clients already treat as
+  # "reload and decide", not a 422 the request could fix by changing.
   defp refuse(conn, {:restore_failed, error}) do
-    ApiError.send(conn, :unprocessable_entity, "restore_failed", restore_detail(error))
+    if InlineEditing.stale_conflict?(error) do
+      ApiError.send(
+        conn,
+        :conflict,
+        "invalid_state_transition",
+        "This document changed while the version was being restored, so nothing was restored. Read it again and retry."
+      )
+    else
+      ApiError.send(conn, :unprocessable_entity, "restore_failed", restore_detail(error))
+    end
   end
 
   defp refuse(conn, _not_found),

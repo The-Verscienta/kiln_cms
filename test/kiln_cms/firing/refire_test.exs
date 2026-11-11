@@ -87,8 +87,22 @@ defmodule KilnCMS.Firing.RefireTest do
 
     assert [delivery] = CMS.list_webhook_deliveries!(authorize?: false, tenant: org_id())
     assert delivery.event == "page.updated"
+    # Marked as a re-render, so a receiver can tell it from an edit (#2463).
+    assert delivery.payload["reason"] == "refire"
     assert_enqueued(worker: KilnCMS.Webhooks.DeliveryWorker)
     assert_enqueued(worker: PurgeWorker, args: %{"org_id" => org_id()})
+  end
+
+  test "an edit's own `updated` carries no reason (#2463)" do
+    admin = user(:admin)
+    CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+    herb = page(%{blocks: heading("Herb")})
+
+    CMS.update_page!(herb, %{title: "Edited"}, actor: admin)
+
+    assert [delivery] = CMS.list_webhook_deliveries!(authorize?: false, tenant: org_id())
+    assert delivery.event == "page.updated"
+    refute Map.has_key?(delivery.payload, "reason")
   end
 
   test "a document that is not published fires and announces nothing" do

@@ -116,17 +116,44 @@ defmodule KilnCMS.CMS.Validations.FormAutoresponderTokensTest do
         actor: actor
       )
 
-    # Deleting the field the template referenced would make the *current*
-    # template invalid — but an unrelated General-tab save must not
-    # re-run this validation against it.
-    email_field = Enum.find(CMS.form_fields_for!(form.id, actor: actor), &(&1.name == "email"))
-    CMS.destroy_form_field!(email_field, actor: actor)
+    # A template naming a field the form no longer has is *currently*
+    # invalid — but an unrelated General-tab save must not re-run this
+    # validation against it. Deleting a field an enabled template names is
+    # refused since #2343, so the stale token is seeded as a row from before
+    # that change would hold it.
+    stale = Ash.Seed.update!(configured, %{autoresponder_subject: "Thanks, [field:gone]!"})
 
     assert {:ok, renamed} =
-             CMS.update_form(configured, %{name: "Contact Us"}, actor: actor)
+             CMS.update_form(stale, %{name: "Contact Us"}, actor: actor)
 
     assert renamed.name == "Contact Us"
-    assert renamed.autoresponder_subject == "Thanks, [field:email]!"
+    assert renamed.autoresponder_subject == "Thanks, [field:gone]!"
+  end
+
+  test "the token-rename context skips the token check, not the blank check (#2343)" do
+    actor = admin()
+    form = form_with_email_field!(actor)
+    context = %{autoresponder_token_rename: true}
+
+    assert {:ok, _} =
+             CMS.update_form(
+               form,
+               %{
+                 autoresponder_enabled: true,
+                 autoresponder_subject: "Hi [field:phone]",
+                 autoresponder_body: "body"
+               },
+               actor: actor,
+               context: context
+             )
+
+    assert {:error, error} =
+             CMS.update_form(form, %{autoresponder_enabled: true, autoresponder_subject: ""},
+               actor: actor,
+               context: context
+             )
+
+    assert error_message(error) =~ "can't be blank"
   end
 
   defp error_message(%Ash.Error.Invalid{errors: errors}) do

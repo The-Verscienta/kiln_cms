@@ -11,11 +11,67 @@ msgstr ""
 "Language: fr\n"
 "Plural-Forms: nplurals=2; plural=(n>1);\n"
 
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} doesn't match the required format"
+msgstr "%{field} ne correspond pas au format requis"
+
+#: lib/kiln_cms/cms/unique_values.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} holds a value another record already uses. Change it, then try again"
+msgstr "%{field} contient une valeur déjà utilisée par un autre enregistrement. Modifiez-la, puis réessayez"
+
+#: lib/kiln_cms/cms/unique_values.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is already in use"
+msgstr "%{field} est déjà utilisé"
+
+#: lib/kiln_cms/cms/unique_values.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is being changed by another save at the same time. Try again"
+msgstr "%{field} est modifié par une autre sauvegarde en même temps. Réessayez"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be at least %{count} character long"
+msgid_plural "%{field} must be at least %{count} characters long"
+msgstr[0] "%{field} doit contenir au moins %{count} caractère"
+msgstr[1] "%{field} doit contenir au moins %{count} caractères"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be at least %{min}"
+msgstr "%{field} doit être au moins %{min}"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be at most %{count} character long"
+msgid_plural "%{field} must be at most %{count} characters long"
+msgstr[0] "%{field} doit contenir au plus %{count} caractère"
+msgstr[1] "%{field} doit contenir au plus %{count} caractères"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be at most %{max}"
+msgstr "%{field} doit être au plus %{max}"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field}: %{message}"
+msgstr "%{field} : %{message}"
+
 msgid "are still associated with this entry"
 msgstr "sont toujours associés à cette entrée"
 
 msgid "can't be blank"
 msgstr "ne peut pas être vide"
+
+#: lib/kiln_cms/cms/validations/unique_field_clean.ex
+#, elixir-autogen, elixir-format
+msgid "can't require unique values yet: %{count} value is shared by several records (%{samples}). Make them distinct first"
+msgid_plural "can't require unique values yet: %{count} values are shared by several records (%{samples}). Make them distinct first"
+msgstr[0] "impossible d’exiger des valeurs uniques pour l’instant : %{count} valeur est partagée par plusieurs enregistrements (%{samples}). Rendez-les d’abord distinctes"
+msgstr[1] "impossible d’exiger des valeurs uniques pour l’instant : %{count} valeurs sont partagées par plusieurs enregistrements (%{samples}). Rendez-les d’abord distinctes"
 
 msgid "does not match confirmation"
 msgstr "ne correspond pas à la confirmation"
@@ -37,6 +93,11 @@ msgstr "est réservé"
 
 msgid "is still associated with this entry"
 msgstr "est toujours associé à cette entrée"
+
+#: lib/kiln_cms/cms/validations/bot_budget_ceiling.ex
+#, elixir-autogen, elixir-format
+msgid "may not be more than %{ceiling}%: this server's operator caps it there. Ask them to raise it, or choose a lower value."
+msgstr "ne peut pas dépasser %{ceiling}% : l'opérateur de ce serveur le plafonne à ce niveau. Demandez-lui de le relever, ou choisissez une valeur plus basse."
 
 ## From KilnCMS.Accounts.OrgSlug.message/1 (#1710)
 msgid "must be 1 to 63 lowercase letters, digits or hyphens, and cannot start or end with a hyphen"

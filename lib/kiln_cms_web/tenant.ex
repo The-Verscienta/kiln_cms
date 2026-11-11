@@ -277,6 +277,52 @@ defmodule KilnCMSWeb.Tenant do
     end
   end
 
+  @doc """
+  `url` as an absolute URL on the given org's own host, or `nil`.
+
+  The one absolutizer for page-advertised URLs that crawlers and link-preview
+  bots fetch from somewhere other than the page (`og:image`, `twitter:image`,
+  the JSON-LD `image`, #2258). Those consumers resolve a relative URL against
+  nothing useful, so a relative value is as good as no tag.
+
+    * blank or non-string → `nil`
+    * an absolute `http://` / `https://` URL → returned as is (trimmed)
+    * a site-relative path (`/uploads/x.png`) → prefixed with `base_url/1`
+    * a relative path with a `nil` org → `nil`: there is no host to put it
+      on, and a wrong host in a link preview is worse than no tag (#560)
+    * anything else (`//host`, `javascript:`, `uploads/x`) → `nil`
+
+  Accepts an `%Organization{}` or a bare org id, like `base_url/1`.
+  """
+  @spec absolute_url(Accounts.Organization.t() | Ash.UUID.t() | nil, term()) :: String.t() | nil
+  def absolute_url(org, url) when is_binary(url) do
+    trimmed = String.trim(url)
+
+    cond do
+      absolute_http?(trimmed) -> trimmed
+      is_nil(org) -> nil
+      site_path?(trimmed) -> String.trim_trailing(base_url(org), "/") <> trimmed
+      true -> nil
+    end
+  end
+
+  def absolute_url(_org, _url), do: nil
+
+  defp absolute_http?(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  defp site_path?("//" <> _), do: false
+  defp site_path?("/" <> _), do: true
+  defp site_path?(_), do: false
+
   defp global_base_url,
     do: Application.get_env(:kiln_cms, :public_base_url, "http://localhost:4000")
 
@@ -571,6 +617,25 @@ defmodule KilnCMSWeb.Tenant do
   end
 
   defp console_host?(_host), do: false
+
+  @doc """
+  Whether `host` is one this deployment serves as itself: the canonical base
+  host, the console host, a site's subdomain, custom domain or console host
+  (`<slug>.<console host>`). Never the lenient fallback — an unknown host that
+  `fetch_org/1` would answer with the default org is not one of ours here.
+
+  For a question asked about a host the *request* did not arrive on, such as
+  the hostname a human-verification provider reports a token was solved on
+  (`KilnCMS.Challenge.Gate`, #2249). Read through the same host cache as
+  `fetch_org/1`, so it costs a cache lookup.
+  """
+  @spec deployment_host?(String.t() | nil) :: boolean()
+  def deployment_host?(host) when is_binary(host) do
+    canonical_host?(host) or console_host?(host) or
+      match?(%Accounts.Organization{}, known_org(host))
+  end
+
+  def deployment_host?(_host), do: false
 
   @doc """
   `fetch_org/1` for a socket's connect info, whose host lives at `[:uri, :host]`.

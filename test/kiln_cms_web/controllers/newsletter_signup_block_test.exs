@@ -49,7 +49,8 @@ defmodule KilnCMSWeb.NewsletterSignupBlockTest do
 
     assert html =~ "Get the release notes"
     {action, names} = rendered_form(html)
-    assert action == "/newsletter/subscribe"
+    # Pinned to the page's locale: the test config is multi-locale (#2465).
+    assert action == "/en/newsletter/subscribe"
     assert Enum.sort(names) == Enum.sort(["email", "name", KilnCMS.Forms.honeypot_field()])
 
     email = "block-#{System.unique_integer([:positive])}@example.com"

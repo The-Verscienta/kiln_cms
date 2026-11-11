@@ -23,6 +23,13 @@ defmodule Kiln.Plugin do
       go to instead of the operator's store. Installing one changes nothing
       until the operator selects it
       (`config :kiln_cms, :image_backend, Module`).
+    * `challenge_providers/0` — `Kiln.Challenge.Provider` modules
+      (kiln_cms#2249): a human-verification widget and its check, offered
+      beside the built-in Turnstile and reCAPTCHA. Installing one changes
+      nothing until the operator names it (`CHALLENGE_PROVIDER`). Since 1.4.
+    * `security_checks/0` — `Kiln.Security.Check` modules (kiln_cms#2252):
+      lines on the console's Security posture page, run beside the core's own
+      checks, each under its own deadline. Since 1.4.
     * `nav_items/0` — links in the admin top nav
       (`%{label: "...", path: "/editor/...", role: :editor | :admin}`).
     * `admin_routes/0` — LiveViews mounted in the admin-gated live session
@@ -34,6 +41,12 @@ defmodule Kiln.Plugin do
       pipeline BEFORE the content-delivery catch-alls (booking pages,
       signup flows). Same route shape; paths must not sit under `/editor`,
       `/api`, `/gql`, or `/mcp`, and shadow same-named content slugs.
+    * `plug_routes/0` — controller-style routes and `forward`s to a Plug,
+      mounted BEFORE the content-delivery catch-alls in a scope with no
+      session, no CSRF check and no content negotiation (a JSON endpoint, a
+      webhook receiver, a form handler, a feed variant). Paths must not sit
+      under a core root (`/editor`, `/api`, `/gql`, `/mcp`, …); shadowing
+      follows `public_routes/0`. See `t:plug_route/0`.
     * `children/0` — supervision child specs appended to the app tree.
     * `oban_queues/0` — background queues merged into the Oban config at
       boot (`[my_queue: 3]`).
@@ -67,7 +80,8 @@ defmodule Kiln.Plugin do
   dependencies loaded, so what a dependency plugin can contribute is what it
   can build from this package alone:
 
-    * blocks, field types, spam checks, advisory checks and image backends;
+    * blocks, field types, spam checks, advisory checks, image backends,
+      human-verification providers and security posture checks;
     * nav items, supervision children and Oban queues;
     * routes, but only to a LiveView that depends on `phoenix_live_view`
       directly — one that does `use KilnCMSWeb, :live_view` needs the core.
@@ -82,6 +96,25 @@ defmodule Kiln.Plugin do
 
   @type nav_item :: %{label: String.t(), path: String.t(), role: :editor | :admin}
   @type admin_route :: {path :: String.t(), live_view :: module(), action :: atom()}
+
+  @typedoc """
+  A route to a plain Plug, for `c:plug_routes/0`:
+
+    * `{verb, path, plug_module, plug_opts}` — `verb` is `:get`, `:post`,
+      `:put`, `:patch`, `:delete` or `:match` (any method). A Phoenix
+      controller is a Plug whose `plug_opts` is the action atom, so
+      `{:post, "/hooks/ping", MyPlugin.PingController, :create}` works with no
+      dependency on Phoenix in this package. `:get` also answers `HEAD`.
+    * `{:forward, path, plug_module, plug_opts}` — hands every request under
+      `path` to the Plug (a `Plug.Router`, say), with `path` stripped.
+
+  `plug_opts` must survive `Macro.escape/1` (atoms, strings, numbers, lists,
+  keyword lists, maps of those): it is baked into the router at compile time.
+  """
+  @type plug_route ::
+          {:get | :post | :put | :patch | :delete | :match, path :: String.t(), plug :: module(),
+           plug_opts :: term()}
+          | {:forward, path :: String.t(), plug :: module(), plug_opts :: term()}
 
   @doc "Machine name (used in diagnostics). Defaults to the module's last segment."
   @callback name() :: String.t()
@@ -101,10 +134,18 @@ defmodule Kiln.Plugin do
   @callback advisories() :: [module()]
   @callback spam_checks() :: [module()]
   @callback image_backends() :: [module()]
+  @callback challenge_providers() :: [module()]
+
+  @doc """
+  `Kiln.Security.Check` modules shown on the Security posture page. Defaults
+  to `[]`. Since 1.4.
+  """
+  @callback security_checks() :: [module()]
   @callback nav_items() :: [nav_item()]
   @callback admin_routes() :: [admin_route()]
   @callback editor_routes() :: [admin_route()]
   @callback public_routes() :: [admin_route()]
+  @callback plug_routes() :: [plug_route()]
   @callback children() :: [Supervisor.child_spec() | {module(), term()} | module()]
   @callback oban_queues() :: keyword(pos_integer())
 
@@ -150,6 +191,12 @@ defmodule Kiln.Plugin do
       def image_backends, do: []
 
       @impl Kiln.Plugin
+      def challenge_providers, do: []
+
+      @impl Kiln.Plugin
+      def security_checks, do: []
+
+      @impl Kiln.Plugin
       def nav_items, do: []
 
       @impl Kiln.Plugin
@@ -160,6 +207,9 @@ defmodule Kiln.Plugin do
 
       @impl Kiln.Plugin
       def public_routes, do: []
+
+      @impl Kiln.Plugin
+      def plug_routes, do: []
 
       @impl Kiln.Plugin
       def children, do: []
@@ -177,10 +227,13 @@ defmodule Kiln.Plugin do
                      advisories: 0,
                      spam_checks: 0,
                      image_backends: 0,
+                     challenge_providers: 0,
+                     security_checks: 0,
                      nav_items: 0,
                      admin_routes: 0,
                      editor_routes: 0,
                      public_routes: 0,
+                     plug_routes: 0,
                      children: 0,
                      oban_queues: 0
     end

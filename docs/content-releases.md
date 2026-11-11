@@ -75,7 +75,9 @@ Composing a release is editor work; shipping one is admin work.
 
 This mirrors Kiln's existing rule that publishing is an admin approval step: a
 release must not become a way for an editor to publish content they otherwise
-couldn't. The go-live worker necessarily runs unauthorized (it publishes across
+couldn't, or to take it down: unpublishing needs the same permission as
+publishing (#2134), so an editor may queue an **Unpublish** item, and an admin
+decides when it happens. The go-live worker necessarily runs unauthorized (it publishes across
 types on behalf of the bundle), so the gate is at the release, and the admin who
 scheduled or started it is recorded and used as the acting user for every item —
 version history and the audit chain name a person, not "system".

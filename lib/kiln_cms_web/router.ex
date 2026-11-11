@@ -86,9 +86,11 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # A mutation is a `POST` like any other — see the JSON:API pipeline.
     plug KilnCMSWeb.Plugs.Idempotency
+    # `X-Kiln-On-Behalf-Of` on a mutation: provenance for a draft-write key (#2273).
+    plug KilnCMSWeb.Plugs.OnBehalfOf
     plug AshGraphql.Plug
   end
 
@@ -108,6 +110,11 @@ defmodule KilnCMSWeb.Router do
     # header it widens.
     plug KilnCMSWeb.Plugs.SiteStorageCsp
     plug :load_from_session
+    # The site's idle timeout and "sign out everyone" (#2246): a session that
+    # is no longer good is served signed out. After `load_from_session`, whose
+    # user it judges, and writing no session or cookie — this pipeline serves
+    # public pages a shared cache may store (#699).
+    plug KilnCMSWeb.Plugs.IdleTimeout, :session
   end
 
   # Dev-only browser tooling (AshAdmin, LiveDashboard, API explorers) ships its
@@ -130,7 +137,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
-    plug KilnCMSWeb.Plugs.ApiKeyAuth
+    plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     # The OpenAPI document is served from inside the `KilnCMSWeb.AshJsonApiRouter`
     # forward below, so there is no route here to gate. This plug knows the two
     # documentation paths and passes every other `/api` request through (#567).
@@ -148,6 +155,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.PreviewGrant
     # `If-Match` on a single-record write → the action's version check (412).
     plug KilnCMSWeb.Plugs.IfMatch
+    # `X-Kiln-On-Behalf-Of` on a create: provenance for a draft-write key (#2273).
+    plug KilnCMSWeb.Plugs.OnBehalfOf
     # `Idempotency-Key` on a write: claim it, or replay what the first attempt
     # answered. Runs after the auth plugs above — the key is scoped to the actor.
     plug KilnCMSWeb.Plugs.Idempotency
@@ -230,10 +239,15 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_browser_csp
+    # The human-verification widget's origin (#2249), only while a challenge
+    # can be shown; the header is untouched otherwise.
+    plug KilnCMSWeb.Plugs.ChallengeCsp
     # `:auth`, except on the registration POST, which gets its own tighter
     # bucket so the two registration doors agree (#724) — see
     # `KilnCMSWeb.Plugs.AuthRateLimit`.
     plug KilnCMSWeb.Plugs.AuthRateLimit
+    # The client and org the sign-in actions' audit hooks record (#2241).
+    plug KilnCMSWeb.Plugs.SecurityContext
     # Remember-me is read *only* here, not on `:browser` (#699), and the reason
     # is the public delivery surface. `sign_in_with_remember_me` signs the
     # visitor in by writing the session, so `Plug.Session` emits `Set-Cookie` —
@@ -251,8 +265,18 @@ defmodule KilnCMSWeb.Router do
     # Ahead of `load_from_session` so the sign-in is resolved within the same
     # request. Safe there because the plug is a no-op when the session already
     # names a user, so it cannot swap a live session for a stale cookie.
+    #
+    # The idle timeout (#2246) is judged first: an idle remember-me cookie, or
+    # one older than the site's last "sign out everyone", does not sign in.
+    plug KilnCMSWeb.Plugs.IdleTimeout, :remember_me
     plug :sign_in_with_remember_me
+    # Says why, when the session names a token revoked for inactivity or by
+    # "sign out everyone" — read before `load_from_session` drops it (#2246).
+    plug KilnCMSWeb.Plugs.IdleTimeout, :notice
     plug :load_from_session
+    # As on `:browser`, and this pipeline may write: the token leaves the
+    # session and the remember-me cookie is deleted (#2246).
+    plug KilnCMSWeb.Plugs.IdleTimeout, {:session, writes_session?: true}
     # After the two above, because it needs whichever of them resolved the user
     # — and it covers the remember-me path, which never reaches
     # `AuthController.complete_sign_in/3` (#675).
@@ -300,6 +324,9 @@ defmodule KilnCMSWeb.Router do
     plug :protect_from_forgery
     plug :load_from_session
     plug :read_only_session
+    # A session no longer good under the site's idle timeout or "sign out
+    # everyone" (#2246) is served as anonymous. Reads only.
+    plug KilnCMSWeb.Plugs.IdleTimeout, :read_only
   end
 
   pipeline :delivery do
@@ -351,6 +378,19 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :billing_webhook
   end
 
+  # Plugin endpoints (#2272, `Kiln.Plugin.plug_routes/0`): a webhook receiver, a
+  # JSON endpoint, a feed variant. Same posture as `:provider_webhook` and for
+  # the same reason: the caller is a machine, so there is no CSRF check and no
+  # session read (`conn.assigns.current_user` is never set; the plugin
+  # authenticates its own caller). Deliberately no `:accepts`, so a plugin can
+  # answer any content type, and no browser headers: the response is the
+  # plugin's to shape. The tenant is already on `conn.assigns.current_org` from
+  # the endpoint's `SetTenant`. Its own bucket, so a plugin's traffic cannot
+  # spend the budget of the core APIs.
+  pipeline :plugin_endpoint do
+    plug KilnCMSWeb.Plugs.RateLimit, :plugin_endpoint
+  end
+
   # The ActivityPub inbox (#491). Same situation as a payment webhook and the
   # same shape: no CSRF, no session, the caller is a remote server, and
   # authorization is an HTTP Signature over the raw body (preserved by
@@ -371,6 +411,28 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
+  # The site's admin allowlist (#2248): the console, `/setup` and every
+  # sign-in route are refused outside the networks a site admin listed. FIRST
+  # in each gated `pipe_through`, ahead of `fetch_session`, so a refused
+  # request reads no session and is never signed in by a remember-me cookie.
+  # Which routes carry it is pinned by `admin_allowlist_routes_test.exs`.
+  pipeline :admin_allowlist do
+    plug KilnCMSWeb.Plugs.AdminAllowlist, :html
+  end
+
+  # The same gate on the headless password sign-in and the security posture,
+  # answering in JSON.
+  pipeline :admin_allowlist_api do
+    plug KilnCMSWeb.Plugs.AdminAllowlist, :json
+  end
+
+  # Every answer of an admin JSON surface is per-caller, refusals from later
+  # plugs (ApiKeyAuth's 401, RateLimit's 429) included: `private, no-store`,
+  # set just before the response is sent, whatever the handler chose.
+  pipeline :no_store do
+    plug :put_no_store
+  end
+
   # Per-IP ceiling for unauthenticated infra/SEO endpoints (`/up` runs a DB
   # query; sitemap cache-misses do a table scan). Generous enough never to
   # throttle real probes/crawlers — see the `:probe` bucket.
@@ -378,8 +440,11 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :probe
   end
 
+  # The console and `/setup`, behind the admin allowlist (#2248). The scope
+  # below this one holds the signed-in routes that are not the console
+  # (`/account`, the billing handoffs), which the allowlist leaves alone.
   scope "/", KilnCMSWeb do
-    pipe_through :browser
+    pipe_through [:admin_allowlist, :browser]
 
     # First-run setup wizard (#1317). Anonymous by necessity — it exists to
     # create the account everything else authenticates as. The route-level gate
@@ -387,30 +452,18 @@ defmodule KilnCMSWeb.Router do
     # is the `:bootstrap_admin` policy + advisory lock in
     # `KilnCMS.Accounts.Bootstrap`, which hold for url-less joins and every
     # other path the router never sees.
+    #
+    # `session:` carries the address the allowlist admitted into the page's
+    # signed LiveView session (#2248), as `ash_authentication_live_session`'s
+    # own `"context"` does for the sessions below.
     live_session :first_run,
-      on_mount: [{KilnCMSWeb.LiveUserAuth, :assign_current_org}] do
+      session: {KilnCMSWeb.AdminAllowlist, :live_session, []},
+      on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org}
+      ] do
       live "/setup", SetupLive, :index
     end
-
-    # Signed in, but NOT necessarily an editor — the reader-facing surface (#337
-    # Phase 2). Gated at the router rather than per-LiveView, like the editor and
-    # admin sessions below.
-    ash_authentication_live_session :authenticated_routes,
-      on_mount: [
-        {KilnCMSWeb.LiveUserAuth, :current_user},
-        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
-        {KilnCMSWeb.LiveUserAuth, :live_user_required},
-        {KilnCMSWeb.LiveUserAuth, :restore_locale}
-      ] do
-      live "/account", AccountLive, :show
-    end
-
-    # Member payment handoffs. Plain CSRF-protected posts rather than LiveView
-    # events: both end in a redirect to a provider-hosted page on another origin,
-    # which a LiveView cannot navigate to. Two segments, so they must be declared
-    # before the `/:type/:slug` delivery catch-all far below.
-    post "/billing/checkout", BillingController, :checkout
-    post "/billing/portal", BillingController, :portal
 
     # The pre-generic editor URLs, removed at 1.0 (#1543): a 301 to
     # `/editor/content/page|post/:id` for bookmarks and mail sent by older
@@ -422,6 +475,8 @@ defmodule KilnCMSWeb.Router do
     # Authoring UIs — editors and admins only.
     ash_authentication_live_session :editor_routes,
       on_mount: [
+        # The admin allowlist (#2248), for a plugin view with no module hook.
+        {KilnCMSWeb.AdminAllowlist, :gated},
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_editor_required},
@@ -492,6 +547,7 @@ defmodule KilnCMSWeb.Router do
     # just in each LiveView's mount/3, so non-admins can't mount the route.
     ash_authentication_live_session :admin_routes,
       on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
         {KilnCMSWeb.LiveUserAuth, :live_admin_required},
@@ -530,6 +586,9 @@ defmodule KilnCMSWeb.Router do
       # branding is: full-text syndication is a disclosure decision, and it used
       # to live in a config file no tenant admin could reach.
       live "/editor/feeds", FeedSettingsLive, :index
+      # Per-site safety fields — which fields of which types need a severity when
+      # a published edit changes them. Org-scoped; writes are admin-only.
+      live "/editor/safety-fields", SafetyFieldsLive, :index
       # Per-site locale fallback chains (`fr-CA → fr → en`) — what every
       # delivery surface serves when a translation is missing. Org-scoped: one
       # site's "never fall back" must not decide another's.
@@ -545,10 +604,44 @@ defmodule KilnCMSWeb.Router do
       # The site's `/.well-known/security.txt` (RFC 9116, #1873). Org-scoped and
       # admin-only: a security contact is a statement on the whole site's behalf.
       live "/editor/security-txt", SecurityTxtLive, :index
+      # What happens when a new password is in a known breach (#2240). Org-scoped
+      # and admin-only: it decides whether the site's administrators can be
+      # refused a password.
+      live "/editor/password-policy", PasswordPolicyLive, :index
+      # The registration approval queue and its switch (#2251). Org-scoped and
+      # admin-only by the tier gate AND the `OrgMembership` policies, which admit
+      # an admin of the row's own org to list and decide registrations.
+      live "/editor/registrations", RegistrationsLive, :index
+      # The site's idle timeout and "sign out everyone" (#2246). Org-scoped and
+      # admin-only by the tier gate AND the resource policy; enforcement is
+      # `KilnCMSWeb.Plugs.IdleTimeout` and `KilnCMSWeb.IdleSession`.
+      live "/editor/sessions", SessionPolicyLive, :index
       # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.
       live "/editor/code-injection", CodeInjectionLive, :index
+      # The site's IP/CIDR block list (#2242). Admin-only by the tier gate AND the
+      # resource policy; enforcement is `KilnCMSWeb.Plugs.IpBlock` and the sockets.
+      live "/editor/ip-blocks", IpBlockLive, :index
+      # The networks this site's console and sign-in may be reached from (#2248).
+      # Admin-only by the tier gate AND the resource policy; enforcement is
+      # `KilnCMSWeb.Plugs.AdminAllowlist` and `KilnCMSWeb.AdminAllowlist`.
+      live "/editor/admin-allowlist", AdminAllowlistLive, :index
+      # Per-class delivery ceilings by user agent (#2243). Admin-only by the tier
+      # gate AND the resource policy; enforcement is `KilnCMSWeb.Plugs.RateLimit`
+      # on the `:delivery` pipeline.
+      live "/editor/bot-budgets", BotBudgetsLive, :index
+      # The site's security audit log (#2241): sign-ins, lockouts, second factors,
+      # roles, API keys. Admin-only by the tier gate AND the `Security.Event` policy;
+      # the CSV download is the controller route below.
+      live "/editor/security-log", SecurityLogLive, :index
+      # Which security events alert the site's admins, and how (#2245).
+      # Admin-only by the tier gate AND the `CMS.SiteSecurityAlerts` policy.
+      live "/editor/security-alerts", SecurityAlertsLive, :index
+      # Which security settings are on, and what to fix first (#2252).
+      # Admin-only by the tier gate AND the `Security.PostureReport` policy;
+      # the deployment's checks are shown to platform admins only.
+      live "/editor/security-posture", SecurityPostureLive, :index
       # In-app backups (#484) — status, "back up now", retention. Admin-only:
       # the artifact list names the database dump, and an editor has no action
       # to take on it. Restore stays a documented ops procedure.
@@ -628,6 +721,10 @@ defmodule KilnCMSWeb.Router do
     # type called "health".
     get "/editor/governance/health.csv", GovernanceController, :export_health_csv
 
+    # Security log download (#2241) - the page's filters as CSV; admin-gated in the
+    # controller, which also charges the `:export` budget and caps the rows.
+    get "/editor/security-log/export.csv", SecurityLogExportController, :export_csv
+
     # Form entries export (#477) — file download, admin-gated in the
     # controller (submissions are visitor-provided data, frequently PII;
     # FormSubmission's own policy is admin-only).
@@ -640,10 +737,46 @@ defmodule KilnCMSWeb.Router do
     get "/editor/analytics/export.json", AnalyticsExportController, :export
     get "/editor/analytics/export.csv", AnalyticsExportController, :export_csv
 
+    # The content list as a download (#2293): what `/editor` shows for the same
+    # filters, or a selection of its rows. Editor-gated in the controller, which
+    # also charges the `:export` budget and answers 413 over the row cap.
+    get "/editor/content/export.csv", ContentExportController, :export_csv
+    get "/editor/content/export.json", ContentExportController, :export_json
+
+    # The field definitions as a config-sync document (#2288). Admin-gated in
+    # the controller and again by `FieldSync.export/1`.
+    get "/editor/fields/export.json", FieldSyncController, :export
+
     # XLIFF export for translation vendors (#502) — a file download, so a
     # controller route; editor-gated in the controller for the same reason as
     # the analytics exports above (`TranslationsLive` is editor-visible).
     get "/editor/translations/export.xlf", TranslationsExportController, :export
+  end
+
+  # Signed in, but not the console: the allowlist (#2248) leaves these alone.
+  # Declared before the delivery catch-alls far below, like the scope above.
+  scope "/", KilnCMSWeb do
+    pipe_through :browser
+
+    # Signed in, but NOT necessarily an editor — the reader-facing surface (#337
+    # Phase 2). Gated at the router rather than per-LiveView, like the editor and
+    # admin sessions above.
+    ash_authentication_live_session :authenticated_routes,
+      on_mount: [
+        {KilnCMSWeb.LiveUserAuth, :current_user},
+        {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        {KilnCMSWeb.LiveUserAuth, :live_user_required},
+        {KilnCMSWeb.LiveUserAuth, :restore_locale}
+      ] do
+      live "/account", AccountLive, :show
+    end
+
+    # Member payment handoffs. Plain CSRF-protected posts rather than LiveView
+    # events: both end in a redirect to a provider-hosted page on another origin,
+    # which a LiveView cannot navigate to. Two segments, so they must be declared
+    # before the `/:type/:slug` delivery catch-all far below.
+    post "/billing/checkout", BillingController, :checkout
+    post "/billing/portal", BillingController, :portal
   end
 
   # Headless GraphQL — always available; the interactive playground is dev-only
@@ -720,11 +853,35 @@ defmodule KilnCMSWeb.Router do
   # account's password alone gets a pending token here, not a JWT, and the code
   # is redeemed at the second route. Same `:auth` bucket, and the code itself is
   # charged the per-account second-factor budget the browser prompt charges.
+  #
+  # Behind the admin allowlist (#2248): it exchanges a password for a token with
+  # the account's full role, so leaving it open would undo the list.
   scope "/api/auth", KilnCMSWeb do
-    pipe_through :api_auth
+    pipe_through [:admin_allowlist_api, :api_auth]
 
     post "/sign_in", ApiAuthController, :sign_in
     post "/sign_in/verify", ApiAuthController, :verify
+  end
+
+  # Security posture for monitoring (#2521): an administrator's JWT or API
+  # key, behind the site's admin allowlist (first, as on the headless
+  # sign-in, so an off-list caller learns nothing about its credential), on
+  # `:api`'s bucket. The checks behind it run at most once per site and scope
+  # set every 30 s per node (`KilnCMS.Security.Posture.snapshot/2`).
+  scope "/api/security", KilnCMSWeb do
+    pipe_through [:admin_allowlist_api, :no_store, :api]
+
+    get "/posture", SecurityPostureController, :show
+  end
+
+  # A drafts-only key exchanging itself for a fresh one (ADR 0012). On the
+  # `:auth` bucket, not `:api`'s: it issues a credential. No bearer/actor plugs —
+  # the controller authenticates the key itself, so a refused key can be checked
+  # for reuse after rotation (`KilnCMS.Accounts.ApiKeyReuse`).
+  scope "/api/keys", KilnCMSWeb do
+    pipe_through :api_auth
+
+    post "/rotate", ApiKeyRotationController, :rotate
   end
 
   # MCP server for LLM authoring clients (docs/mcp.md). The tool list comes
@@ -1087,27 +1244,20 @@ defmodule KilnCMSWeb.Router do
     # Served summary of the headless API surfaces — the header/footer
     # "GraphQL" / "JSON:API" links land here instead of on raw endpoints (#319).
     get "/developers", PageController, :developers
+    # Where the console's role guards send someone who lacks the role a page
+    # needs (#2143, `KilnCMSWeb.AccessDenied`). A 403 page, not a redirect.
+    get "/access-denied", PageController, :access_denied
     # Exact match: the JSON:API forward and nested API routes stay unchanged.
     get "/api", PageController, :api
     # UI locale switcher — persists the chosen locale in the session.
     get "/locale/:locale", LocaleController, :update
   end
 
+  # Signing out is never gated: giving up access is always allowed (#2248).
+  # Its own scope, ahead of the gated one below, which keeps every option it had.
   scope "/", KilnCMSWeb do
     pipe_through :browser_auth
 
-    # Passkey (WebAuthn) sign-in ceremony (#331) — JSON two-step driven by
-    # progressive-enhancement JS on /sign-in; same :auth rate limit + CSRF.
-    # Registered BEFORE auth_routes: its catch-all under /auth would shadow
-    # these paths otherwise.
-    post "/auth/passkey/options", PasskeyController, :options
-    post "/auth/passkey/verify", PasskeyController, :verify
-    # A site's own single sign-on provider (#1561). Before `auth_routes` for
-    # the same reason as the passkey routes above.
-    get "/auth/site-sso", SiteSsoController, :request
-    get "/auth/site-sso/callback", SiteSsoController, :callback
-
-    auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
     # Two routes, not one: a `DELETE` to the controller *and* a `live` route in
     # its own `live_session`. The second is easy to miss and is joinable at the
     # channel with a scraped session blob like any other, so it needs the same
@@ -1123,6 +1273,54 @@ defmodule KilnCMSWeb.Router do
       layout: {KilnCMSWeb.Layouts, :auth},
       on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
       overrides: [KilnCMSWeb.AuthOverrides]
+  end
+
+  # Every sign-in route, behind the admin allowlist (#2248): an outsider reaches
+  # no password form, magic link, passkey, single sign-on, second factor, reset
+  # or invitation.
+  scope "/", KilnCMSWeb do
+    pipe_through [:admin_allowlist, :browser_auth]
+
+    # Passkey (WebAuthn) sign-in ceremony (#331) — JSON two-step driven by
+    # progressive-enhancement JS on /sign-in; same :auth rate limit + CSRF.
+    # Registered BEFORE auth_routes: its catch-all under /auth would shadow
+    # these paths otherwise.
+    post "/auth/passkey/options", PasskeyController, :options
+    post "/auth/passkey/verify", PasskeyController, :verify
+    # A site's own single sign-on provider (#1561). Before `auth_routes` for
+    # the same reason as the passkey routes above.
+    get "/auth/site-sso", SiteSsoController, :request
+    get "/auth/site-sso/callback", SiteSsoController, :callback
+
+    # A site invitation's link (#2135). Under `/auth` so it can never shadow a
+    # site's content (`auth` is already a reserved path segment), and before
+    # `auth_routes` for the same reason as the routes above. Anonymous by
+    # necessity — the invitee may have no account yet; the emailed token is the
+    # credential, and every write the page makes is a system-only action that
+    # checks it. Opening the page only peeks at the token; nothing is consumed
+    # until a button is pressed. `invite_token` is in `:filter_parameters`,
+    # which keeps it out of the logged params map only: the request path, token
+    # included, is still logged, as for `/magic_link` and `/password-reset`.
+    live_session :invitation,
+      layout: {KilnCMSWeb.Layouts, :auth},
+      session: {KilnCMSWeb.AdminAllowlist, :live_session, []},
+      on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
+      ] do
+      live "/auth/invite/:invite_token", InviteLive, :show
+    end
+
+    # The sign-in unlock link (#2250): a plain form that asks for one, and the
+    # emailed link's page. Before `auth_routes` for the same reason as the
+    # routes above. Opening the link spends nothing (a mail scanner may follow
+    # it); only the POST redeems. `unlock_token` is in `:filter_parameters`.
+    get "/sign-in/unlock", SignInUnlockController, :new
+    post "/sign-in/unlock", SignInUnlockController, :create
+    get "/auth/unlock/:unlock_token", SignInUnlockController, :show
+    post "/auth/unlock/:unlock_token", SignInUnlockController, :redeem
+
+    auth_routes AuthController, KilnCMS.Accounts.User, path: "/auth"
 
     # Second-factor (TOTP) prompt after the first factor for a 2FA-enabled
     # account (#331). Gated by the signed :pending_2fa session token, not a login.
@@ -1151,6 +1349,7 @@ defmodule KilnCMSWeb.Router do
                     live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
+                      {KilnCMSWeb.AdminAllowlist, :gated},
                       {KilnCMSWeb.LiveUserAuth,
                        [:restore_locale, :assign_current_org, :live_no_user]}
                     ],
@@ -1161,6 +1360,7 @@ defmodule KilnCMSWeb.Router do
                     live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
+                      {KilnCMSWeb.AdminAllowlist, :gated},
                       {KilnCMSWeb.LiveUserAuth,
                        [:restore_locale, :assign_current_org, :live_no_user]}
                     ],
@@ -1178,21 +1378,30 @@ defmodule KilnCMSWeb.Router do
     reset_route auth_routes_prefix: "/auth",
                 live_view: KilnCMSWeb.ResetLive,
                 layout: {KilnCMSWeb.Layouts, :auth},
-                on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
+                on_mount: [
+                  {KilnCMSWeb.AdminAllowlist, :gated},
+                  {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
+                ],
                 overrides: [KilnCMSWeb.AuthOverrides]
 
     confirm_route KilnCMS.Accounts.User, :confirm_new_user,
       auth_routes_prefix: "/auth",
       live_view: KilnCMSWeb.ConfirmLive,
       layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
+      on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
+      ],
       overrides: [KilnCMSWeb.AuthOverrides]
 
     magic_sign_in_route(KilnCMS.Accounts.User, :magic_link,
       auth_routes_prefix: "/auth",
       live_view: KilnCMSWeb.MagicSignInLive,
       layout: {KilnCMSWeb.Layouts, :auth},
-      on_mount: [{KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}],
+      on_mount: [
+        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
+      ],
       overrides: [KilnCMSWeb.AuthOverrides]
     )
   end
@@ -1246,6 +1455,11 @@ defmodule KilnCMSWeb.Router do
       # (e2e/tests/field_localization.spec.js); the rest of the suite stays
       # single-locale. Same gating and :prod refusal.
       forward "/e2e-locales", KilnCMSWeb.Plugs.E2ELocales
+
+      # Marks core block fields shared / fallback per locale (#2270) for the
+      # block cases of that spec; the site configures none otherwise.
+      # Same gating and :prod refusal.
+      forward "/e2e-block-fields", KilnCMSWeb.Plugs.E2EBlockFields
     end
   end
 
@@ -1296,6 +1510,16 @@ defmodule KilnCMSWeb.Router do
       import KilnCMSWeb.PluginRouter
       plugin_public_routes()
     end
+  end
+
+  # Plugin plug routes (#2272) — compiled in from each installed plugin's
+  # `plug_routes/0`. Registered BEFORE the delivery catch-alls below, for the
+  # same reason as the public routes above. No `:browser`: see the pipeline.
+  scope "/" do
+    pipe_through :plugin_endpoint
+
+    import KilnCMSWeb.PluginRouter
+    plugin_plug_routes()
   end
 
   # Document downloads (#481) and A/V playback (#494) — anonymous-tolerant
@@ -1373,6 +1597,13 @@ defmodule KilnCMSWeb.Router do
   # to store the image — every CDN in front of Kiln would pass transforms
   # straight through.
   defp read_only_session(conn, _opts), do: configure_session(conn, ignore: true)
+
+  defp put_no_store(conn, _opts) do
+    Plug.Conn.register_before_send(
+      conn,
+      &Plug.Conn.put_resp_header(&1, "cache-control", "private, no-store")
+    )
+  end
 
   defp put_browser_csp(conn, _opts) do
     nonce = generate_csp_nonce()

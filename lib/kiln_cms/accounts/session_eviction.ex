@@ -96,6 +96,10 @@ defmodule KilnCMS.Accounts.SessionEviction do
   @spec evict_session(String.t(), atom()) :: :ok
   def evict_session(jti, reason) when is_binary(jti) do
     Logger.info("Evicting live sockets for one session: #{reason}")
+    broadcast_session(jti)
+  end
+
+  defp broadcast_session(jti) do
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, session_topic(jti), {:session_revoked, jti})
     :ok
   rescue
@@ -106,6 +110,21 @@ defmodule KilnCMS.Accounts.SessionEviction do
     :exit, reason ->
       Logger.warning("Session eviction exited: #{inspect(reason)}")
       :ok
+  end
+
+  @doc """
+  `evict_session/2` for many sessions at once (#2246, "sign out everyone"):
+  one summary line at `:info`, each session at `:debug`, the same message on
+  each session's own topic. Always `:ok`.
+  """
+  @spec evict_sessions([String.t()], atom()) :: :ok
+  def evict_sessions(jtis, reason) when is_list(jtis) do
+    Logger.info("Evicting live sockets for #{length(jtis)} sessions: #{reason}")
+
+    Enum.each(jtis, fn jti ->
+      Logger.debug("Evicting live sockets for one session: #{reason}")
+      broadcast_session(jti)
+    end)
   end
 
   @doc """

@@ -54,7 +54,11 @@ defmodule KilnCMSWeb.SiteSearchLive do
   end
 
   def handle_event("save", %{"search" => params}, socket) when is_map(params) do
-    opts = [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
+    opts = [
+      actor: socket.assigns.current_user,
+      tenant: socket.assigns.current_org,
+      context: socket.assigns.security_context
+    ]
 
     # An existing row is updated, never re-upserted: the upsert leaves the key
     # out of what it overwrites (see `SiteMeilisearch`'s moduledoc).
@@ -109,7 +113,8 @@ defmodule KilnCMSWeb.SiteSearchLive do
       row ->
         CMS.reset_site_meilisearch!(row,
           actor: socket.assigns.current_user,
-          tenant: socket.assigns.current_org
+          tenant: socket.assigns.current_org,
+          context: socket.assigns.security_context
         )
 
         {:noreply,

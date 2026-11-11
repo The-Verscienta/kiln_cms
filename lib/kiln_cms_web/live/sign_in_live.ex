@@ -125,6 +125,18 @@ defmodule KilnCMSWeb.SignInLive do
         KilnCMS.Accounts.SiteSso.sign_in_option(resolved.assigns.current_org)
       )
 
+    # The client and org the sign-in action's audit hook records (#2241).
+    socket =
+      update(
+        socket,
+        :context,
+        &Map.merge(&1, KilnCMS.Security.AuthEvents.context(socket, resolved.assigns.current_org))
+      )
+
+    # Human verification (#2249): the door, the host, and the page's hints for
+    # the forms — see `challenge_context/2`.
+    socket = update(socket, :context, &Map.merge(&1, challenge_context(socket, params, &1)))
+
     if charge_here?(socket) do
       {:ok, update(socket, :context, &Map.merge(&1, client_ip_context(socket)))}
     else
@@ -153,6 +165,23 @@ defmodule KilnCMSWeb.SignInLive do
     {Upstream.render(assigns)}
     <.passkey_sign_in :if={@live_action == :sign_in} />
     <.site_sso :if={@live_action == :sign_in} option={@site_sso} />
+    <.unlock_link :if={@live_action == :sign_in} />
+    """
+  end
+
+  # The way out of a sign-in pause (#2250). Always drawn, and worded as a
+  # question, never as "your account is locked": a pause answers exactly like a
+  # wrong password, and a link shown only to a paused account would say which
+  # accounts are paused.
+  defp unlock_link(assigns) do
+    ~H"""
+    <p
+      id="sign-in-unlock-link"
+      class="mx-auto -mt-8 w-full max-w-sm pb-12 text-center text-sm text-base-content/70 lg:max-w-md"
+    >
+      {gettext("Paused after too many attempts?")}
+      <a href={~p"/sign-in/unlock"} class="link">{gettext("Email me an unlock link")}</a>
+    </p>
     """
   end
 
@@ -232,6 +261,46 @@ defmodule KilnCMSWeb.SignInLive do
     do: gettext("Sign in with %{provider}", provider: label)
 
   defp site_sso_label(_option), do: gettext("Sign in with single sign-on")
+
+  # What the sign-in and registration forms need to know about human
+  # verification before anyone submits (#2249):
+  #
+  #   * whether to show the widget from the first render — the caller's own
+  #     address is already past its threshold (`Gate.*_preshow?/1`, read from
+  #     the security context above, so only on a connected mount), or the form
+  #     POST was refused for want of one and redirected here with
+  #     `?challenge=1`;
+  #   * which other ways in this page offers, so the fallback line names only
+  #     those (`ChallengeComponents.fallback_text/2`).
+  #
+  # The action reads only `surface` from it — never a host: the join URL is the
+  # client's to choose, so no host from this socket may vouch for a token.
+  defp challenge_context(socket, params, context) do
+    asked? = params_challenge?(params)
+
+    KilnCMS.Challenge.context(:browser, %{
+      preshow_sign_in: asked? or KilnCMS.Challenge.Gate.sign_in_preshow?(context),
+      preshow_register: asked? or KilnCMS.Challenge.Gate.registration_preshow?(context),
+      fallback: fallback_options(socket)
+    })
+  end
+
+  defp params_challenge?(%{"challenge" => "1"}), do: true
+  defp params_challenge?(_params), do: false
+
+  # A passkey is always offered (the block reveals itself where WebAuthn
+  # exists); a sign-in link only while the magic-link strategy is compiled in;
+  # the site's own single sign-on only when it has a usable one.
+  defp fallback_options(socket) do
+    magic_link =
+      if match?({:ok, _}, AshAuthentication.Info.strategy(KilnCMS.Accounts.User, :magic_link)),
+        do: [:magic_link],
+        else: []
+
+    site_sso = if match?({:ok, _}, socket.assigns[:site_sso]), do: [:site_sso], else: []
+
+    [:passkey] ++ magic_link ++ site_sso
+  end
 
   # A connected ROOT mount, which is the only socket that has a handshake to
   # read. `get_connect_info/2` raises `raise_root_and_mount_only!` when

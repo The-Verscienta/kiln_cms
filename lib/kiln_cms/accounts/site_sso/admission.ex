@@ -27,6 +27,23 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
        (`:viewer`, with a `:viewer` membership on this site only) only while
        open registration is on (`:registration_enabled`).
 
+  ## A new account may wait for approval
+
+  When the site has `approval_for_site_sso` on (`KilnCMS.CMS.SiteRegistration`,
+  #2514), a provisioned account's membership is a **pending** registration
+  (`OrgMembership.:queue_registration`, `method: :site_sso`) instead of a
+  `:viewer` one. The account signs in, holds nothing on any site until a site
+  admin approves it under `/editor/registrations`, and the site's admins are
+  told it is waiting once the account commits. The switch is independent of
+  `approval_required` (password sign-ups), and it applies to new accounts
+  only: an existing account is admitted by the rules above as it always was.
+
+  The setting is read before the transaction, and only when an account would
+  be provisioned. An unreadable setting refuses the sign-in
+  (`:registration_settings_unavailable`) and creates nothing: letting the
+  account in as a `:viewer` is the direction a site that turned approval on
+  meant to prevent.
+
   Then, and only then, a session token is minted
   (`Accounts.complete_site_sso_sign_in/2`), and the web layer completes the
   sign-in through `KilnCMSWeb.AuthController.success/4` — so an account with a
@@ -62,9 +79,14 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.RegistrationPolicy
   alias KilnCMS.Accounts.RoleGrant
   alias KilnCMS.Accounts.SiteSso.DomainCheck
+  alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
+  alias KilnCMS.Notifications.Registrations
+  alias KilnCMS.Security.Recorder
+  alias KilnCMS.SystemActor
 
   @type refusal ::
           :no_email
@@ -74,18 +96,25 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
           | :access_elsewhere
           | :unconfirmed_account
           | :registration_disabled
+          | :registration_settings_unavailable
           | :sign_in_failed
 
   @doc """
   Admit `claims` (a verified ID token's) to `org_id`: `{:ok, user}` with a
   session token in `user.__metadata__.token`, or `{:error, refusal}`.
+
+  `context` is the request's Ash context (`KilnCMS.Security.AuthEvents.context/2`),
+  so the audit event of a membership written here carries the client address.
   """
-  @spec admit(Ash.UUID.t(), map()) :: {:ok, Accounts.User.t()} | {:error, refusal()}
-  def admit(org_id, claims) when is_binary(org_id) and is_map(claims) do
+  @spec admit(Ash.UUID.t(), map(), map()) :: {:ok, Accounts.User.t()} | {:error, refusal()}
+  def admit(org_id, claims, context \\ %{})
+      when is_binary(org_id) and is_map(claims) and is_map(context) do
+    write_context = Map.take(context, [Recorder.context_key(), Recorder.tenant_key()])
+
     with {:ok, email} <- email(claims),
          :ok <- email_verified(claims),
          :ok <- domain_verified(org_id, DomainCheck.email_domain(email)),
-         {:ok, user} <- account(org_id, email, claims) do
+         {:ok, user} <- account(org_id, email, claims, write_context) do
       mint(user)
     end
   end
@@ -148,6 +177,10 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
 
   def describe_refusal(:unconfirmed_account), do: "the account's email was never confirmed"
   def describe_refusal(:registration_disabled), do: "open registration is off"
+
+  def describe_refusal(:registration_settings_unavailable),
+    do: "the site's registration settings could not be read"
+
   def describe_refusal(:sign_in_failed), do: "the session could not be created"
   def describe_refusal(other), do: inspect(other)
 
@@ -184,7 +217,7 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
       else: {:error, :domain_not_verified}
   end
 
-  defp account(org_id, email, claims) do
+  defp account(org_id, email, claims, write_context) do
     # authorize?: false — a pre-auth lookup of the account the verified ID
     # token names (rules 1 and 2 have passed); there is no actor to ask as.
     case Accounts.get_user_by_email(email, authorize?: false) do
@@ -195,24 +228,39 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
         end
 
       _no_account ->
-        provision(org_id, email, claims)
+        provision(org_id, email, claims, write_context)
     end
   end
 
   defp confirmed(%{confirmed_at: %DateTime{}}), do: :ok
   defp confirmed(_user), do: {:error, :unconfirmed_account}
 
-  defp provision(org_id, email, claims) do
+  defp provision(org_id, email, claims, write_context) do
     if Application.get_env(:kiln_cms, :registration_enabled, true),
-      do: provision_member(org_id, email, claims),
+      do: provision_member(org_id, email, claims, write_context),
       else: {:error, :registration_disabled}
   end
 
   # One transaction: an account left without its membership would be a
   # membership-less `:viewer`, whose legacy tier lands on the default org rather
-  # than on this site.
-  defp provision_member(org_id, email, claims) do
-    case KilnCMS.Repo.transaction(fn -> create_member(org_id, email, claims) end) do
+  # than on this site. The approval setting is read before it opens, so no
+  # connection is held for the read.
+  defp provision_member(org_id, email, claims, write_context) do
+    with {:ok, queue?} <- queue_new_accounts?(org_id),
+         {:ok, user} <- provision_in_transaction(org_id, email, claims, queue?, write_context) do
+      announce(org_id, queue?)
+      {:ok, user}
+    end
+  end
+
+  # After the commit: the admins are told about a row that exists.
+  defp announce(org_id, true), do: AfterCommit.run(fn -> Registrations.announce_org(org_id) end)
+  defp announce(_org_id, false), do: :ok
+
+  defp provision_in_transaction(org_id, email, claims, queue?, write_context) do
+    case KilnCMS.Repo.transaction(fn ->
+           create_member(org_id, email, claims, queue?, write_context)
+         end) do
       {:ok, user} ->
         {:ok, user}
 
@@ -222,7 +270,14 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
     end
   end
 
-  defp create_member(org_id, email, claims) do
+  defp queue_new_accounts?(org_id) do
+    case RegistrationPolicy.settings(org_id) do
+      {:ok, settings} -> {:ok, settings.approval_for_site_sso}
+      {:error, :unavailable} -> {:error, :registration_settings_unavailable}
+    end
+  end
+
+  defp create_member(org_id, email, claims, queue?, write_context) do
     name = if is_binary(claims["name"]), do: claims["name"]
 
     # authorize?: false — the system-only provisioning action, reachable no
@@ -230,18 +285,32 @@ defmodule KilnCMS.Accounts.SiteSso.Admission do
     # and has no account yet.
     with {:ok, user} <-
            Accounts.register_with_site_sso(%{email: email, name: name}, authorize?: false),
-         # authorize?: false — membership creation is an admin action; this is
-         # the system granting the new account `:viewer` on the one site whose
-         # provider vouched for it, and nothing more.
-         {:ok, _membership} <-
-           Accounts.create_org_membership(
-             %{user_id: user.id, organization_id: org_id, role: :viewer},
-             authorize?: false
-           ) do
+         {:ok, _membership} <- membership(org_id, user, queue?, write_context) do
       user
     else
       {:error, error} -> KilnCMS.Repo.rollback(error)
     end
+  end
+
+  # The site requires approval for its provider's new accounts: a pending
+  # registration, written by the one actor that action admits.
+  defp membership(org_id, user, true, write_context) do
+    Accounts.queue_registration(
+      %{organization_id: org_id, user_id: user.id, method: :site_sso, new_account?: true},
+      actor: SystemActor.new(:registrations),
+      context: write_context
+    )
+  end
+
+  defp membership(org_id, user, false, write_context) do
+    # authorize?: false — membership creation is an admin action; this is
+    # the system granting the new account `:viewer` on the one site whose
+    # provider vouched for it, and nothing more.
+    Accounts.create_org_membership(
+      %{user_id: user.id, organization_id: org_id, role: :viewer},
+      authorize?: false,
+      context: write_context
+    )
   end
 
   defp mint(user) do

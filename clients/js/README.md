@@ -199,7 +199,7 @@ cold-cache 503 once before throwing; everything else that fails throws — see
 | `list(plural, opts)`                 | `GET /api/json/:plural[/published]`                 | filters, sorts, includes, sparse fieldsets, pagination       |
 | `one(plural, filter, opts)`          | 〃                                                  | first match or `null`, `included` merged in                  |
 | `byIds(plural, ids, opts)`           | 〃                                                  | chunked at the 100-row page cap, results in `ids` order      |
-| `textSearch(plural, q, opts)`        | `GET /api/json/:plural/search[/published]`          | relevance-ranked                                             |
+| `textSearch(plural, q, opts)`        | `GET /api/json/:plural/search[/published]`          | relevance-ranked; `customSort` sorts by custom fields        |
 | `semanticSearch(plural, q, opts)`    | `GET /api/json/:plural/semantic-search[/published]` | cosine distance; empty without embeddings                    |
 | `autocomplete(plural, prefix, opts)` | `GET /api/json/:plural/autocomplete[/published]`    | typo-tolerant, ≤ 10 suggestions                              |
 | `search(q, opts)`                    | `GET /api/search`                                   | hybrid; visibility follows the credential                    |
@@ -252,6 +252,20 @@ relays a visitor's browser submission, pass the form's honeypot field
 (`honeypot_field` in the schema) and `_kiln_rendered_at` through untouched, so
 the server's spam checks see them. A filled honeypot is discarded and still
 answers success, so never set it yourself.
+
+A form whose schema has a `challenge` asks for a human-verification check
+(the operator's provider: Cloudflare Turnstile, reCAPTCHA v2 or a plugin's).
+Load `challenge.script_url`; when `challenge.onload_param` is set, append
+`<onload_param>=<a global callback>` and wait for that callback before
+rendering. Then call `window[challenge.global].render(element, options)` with
+`challenge.render_options`, `sitekey: challenge.site_key` and, when
+`challenge.action_option` is not `null`, `challenge.action` under that name.
+Send its token under `challenge.field` (`_kiln_challenge`). The result's
+`challenge` is then `"verified"`, or `"held"` when the submission was stored
+for review instead of being acted on (no token, a page host the server does
+not accept, or a provider it could not reach). A refused token throws `KilnValidationError`, with
+`_kiln_challenge` in `fieldErrors()`: draw a fresh widget and resend. See
+[Public forms](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/human-verification.md#public-forms).
 
 ### Media uploads
 
@@ -471,6 +485,40 @@ await admin.delete("posts", post.id); // reversible soft-delete
 - `transition(plural, id, verb)` takes any verb (`"publish"`,
   `"submit_for_review"`, …) and kebab-cases it into the route, so a verb a
   newer server adds is reachable before a client release names it.
+
+### Submitting drafts for review: a `:draft_write` key
+
+A service that only sends content in for a person to review (user-submitted
+articles, imported listings) should hold a **`:draft_write`** key instead of a
+`:read_write` one (a Kiln server newer than 1.8, kiln_cms#2273). It may
+`create()`, and `update()` a draft its account authored while it is still a
+draft — nothing else: every transition (`submitForReview` included), `delete`,
+a live or someone else's document, tags, categories and all media calls throw
+`KilnAuthError` (403). Pass `onBehalfOf` on the create to record which of your
+users the draft is for:
+
+```ts
+import { createClient, type ContentProvenance, type Item } from "@kiln-cms/client";
+
+// A viewer-tier service account's :draft_write key.
+const drafts = createClient({ baseUrl, apiKey: process.env.KILN_DRAFT_KEY });
+
+const draft = await drafts.create<Item & ContentProvenance>(
+  "posts",
+  { title: "Reader tip", slug: "reader-tip" },
+  { onBehalfOf: "user-42" },
+);
+draft.on_behalf_of; // "user-42"
+draft.created_via_key_name; // the key's name
+```
+
+`onBehalfOf` becomes the `X-Kiln-On-Behalf-Of` header. Kiln stores it on the
+draft beside the key's id and name so a reviewer sees who it was for; it is
+never authorization, and any other key's request ignores it. The three
+`ContentProvenance` attributes are returned only to editors, admins and the
+key that created the draft; everyone else's reads lack them, which is why each
+is optional. See
+[`docs/headless-consumer-guide.md`](../../docs/headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 
 ## GraphQL
 

@@ -39,6 +39,36 @@ defmodule KilnCMSWeb.SentryScrubberTest do
     assert params["locale"] == "en"
   end
 
+  test "a public form's human-verification token is masked in the params (#2249)" do
+    params =
+      SentryScrubber.scrub_params(%Plug.Conn{
+        params: %{
+          "_kiln_challenge" => "0.token",
+          "cf-turnstile-response" => "0.other",
+          "email" => "a@example.com"
+        }
+      })
+
+    assert params["_kiln_challenge"] == "*********"
+    assert params["cf-turnstile-response"] == "*********"
+    assert params["email"] == "a@example.com"
+  end
+
+  test "reCAPTCHA's own token field is masked (#2249)" do
+    params =
+      SentryScrubber.scrub_params(%Plug.Conn{
+        params: %{
+          "g-recaptcha-response" => "0.recaptcha",
+          "email" => "a@example.com"
+        }
+      })
+
+    assert params == %{
+             "g-recaptcha-response" => "*********",
+             "email" => "a@example.com"
+           }
+  end
+
   test "an empty or absent query string is left alone" do
     assert SentryScrubber.scrub_query_string("") == ""
     assert SentryScrubber.scrub_query_string(nil) == nil

@@ -16,6 +16,9 @@ defmodule KilnCMSWeb.Plugs.SessionTracking do
   response (just issued) or, failing that, the one the request carried. Its
   jti is recorded, not the cookie.
 
+  The stamp also records the site (org) the session signed in on, and binds
+  the remember-me cookie to it (#2246) — see `KilnCMS.Accounts.IdleTimeout`.
+
   What is stored is coarse on purpose: a browser family and an operating
   system from `KilnCMSWeb.UserAgent`. No user agent string, no IP address.
   """
@@ -43,23 +46,70 @@ defmodule KilnCMSWeb.Plugs.SessionTracking do
   @doc false
   # Public for the test that drives it without a sign-in.
   def stamp(conn) do
-    with jti when is_binary(jti) <- Token.peeked_jti(get_session(conn, :user_token)),
+    with token when is_binary(token) <- get_session(conn, :user_token),
+         jti when is_binary(jti) <- Token.peeked_jti(token),
          false <- get_session(conn, @stamped) == jti do
       user_agent = conn |> get_req_header("user-agent") |> List.first()
-      Sessions.record_sign_in(jti, KilnCMSWeb.UserAgent.parse(user_agent), remember_me_jti(conn))
+
+      # The session's token is the server's own (the session cookie is signed),
+      # so peeking it is safe; the remember-me cookie is verified below.
+      Sessions.record_sign_in(
+        jti,
+        KilnCMSWeb.UserAgent.parse(user_agent),
+        remember_me_jti(conn),
+        org_id(conn),
+        peeked_subject(token)
+      )
+
       put_session(conn, @stamped, jti)
     else
       _signed_out_or_already_stamped -> conn
     end
   end
 
-  defp remember_me_jti(conn) do
-    issued =
-      case conn.resp_cookies[@remember_me_cookie] do
-        %{value: value} when is_binary(value) and value != "" -> value
-        _none_or_deleted -> nil
-      end
+  # The site the session signs in on (#2246): sessions and remember-me cookies
+  # are bound to it, for the idle timeout and "sign out everyone".
+  defp org_id(conn) do
+    case conn.assigns[:current_org] do
+      %{id: id} when is_binary(id) -> id
+      _none -> nil
+    end
+  end
 
-    Token.peeked_jti(issued || fetch_cookies(conn).req_cookies[@remember_me_cookie])
+  # The cookie just issued on this response is the server's own; one the
+  # request carried is the client's and is verified first (#2246) — its row is
+  # bound to the site, so a forged one must not name someone else's.
+  defp remember_me_jti(conn) do
+    case conn.resp_cookies[@remember_me_cookie] do
+      %{value: value} when is_binary(value) and value != "" ->
+        Token.peeked_jti(value)
+
+      _none_or_deleted ->
+        conn
+        |> fetch_cookies()
+        |> Map.get(:req_cookies)
+        |> Map.get(@remember_me_cookie)
+        |> verified_jti()
+    end
+  end
+
+  defp verified_jti(token) when is_binary(token) do
+    case AshAuthentication.Jwt.verify(token, :kiln_cms) do
+      {:ok, %{"jti" => jti}, _resource} when is_binary(jti) -> jti
+      _invalid -> nil
+    end
+  rescue
+    _malformed -> nil
+  end
+
+  defp verified_jti(_token), do: nil
+
+  defp peeked_subject(token) do
+    case AshAuthentication.Jwt.peek(token) do
+      {:ok, %{"sub" => sub}} when is_binary(sub) -> sub
+      _ -> nil
+    end
+  rescue
+    _malformed -> nil
   end
 end

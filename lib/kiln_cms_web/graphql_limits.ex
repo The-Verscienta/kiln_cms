@@ -76,6 +76,15 @@ defmodule KilnCMSWeb.GraphqlLimits do
   # a smaller page or pass `limit` on the lists.
   @unlimited_list_rows 5
 
+  # `fields(names:)` lists at most this many custom fields (#2290).
+  @max_custom_field_names 50
+
+  # `customWhere` (#2290): conditions per query, values in one `in`, and what
+  # each condition adds to the query's price.
+  @max_custom_conditions 10
+  @max_custom_in_values 50
+  @custom_condition_cost 5
+
   @doc "The complexity cap, enforced by Absinthe's complexity result phase."
   @spec max_complexity() :: pos_integer()
   def max_complexity, do: @max_complexity
@@ -163,4 +172,44 @@ defmodule KilnCMSWeb.GraphqlLimits do
 
     rows * max(child_complexity, 1)
   end
+
+  @doc """
+  The complexity of `fields(names:)` (#2290): one, plus the child selection once
+  per name. The price cannot see which kind each name is, so every name pays for
+  the whole selection. A list longer than `max_custom_field_names/0` is refused
+  by the resolver, and a list that long is already over the cap.
+  """
+  @spec custom_fields_complexity(map(), non_neg_integer(), term()) :: pos_integer()
+  def custom_fields_complexity(args, child_complexity, _info) do
+    names = Map.get(args, :names)
+    count = if is_list(names), do: length(names), else: 0
+    1 + count * max(child_complexity, 1)
+  end
+
+  @doc "The most names one `fields(names:)` may ask for."
+  @spec max_custom_field_names() :: pos_integer()
+  def max_custom_field_names, do: @max_custom_field_names
+
+  @doc """
+  The complexity of a list query that takes `customWhere` (#2290): what
+  ash_graphql charges for it, plus `#{@custom_condition_cost}` per condition,
+  because each one is a predicate over the whole `custom_fields` column that no
+  index backs. More than `max_custom_conditions/0` is refused by the read.
+  """
+  @spec custom_where_complexity(map(), non_neg_integer(), term()) :: non_neg_integer()
+  def custom_where_complexity(args, child_complexity, info) do
+    conditions = Map.get(args, :custom_where)
+    count = if is_list(conditions), do: length(conditions), else: 0
+
+    AshGraphql.Graphql.Resolver.query_complexity(args, child_complexity, info) +
+      count * @custom_condition_cost
+  end
+
+  @doc "The most conditions one `customWhere` may hold."
+  @spec max_custom_conditions() :: pos_integer()
+  def max_custom_conditions, do: @max_custom_conditions
+
+  @doc "The most values one `in` operator of a `customWhere` condition may hold."
+  @spec max_custom_in_values() :: pos_integer()
+  def max_custom_in_values, do: @max_custom_in_values
 end

@@ -43,8 +43,9 @@ defmodule KilnCMS.Cache.ClusterBust do
   A broadcast is asynchronous even to the sending node's own subscriber, so a
   request that saves settings and immediately re-reads them could still see the
   old value. Deleting locally first makes the write's own node
-  read-your-writes consistent, and the redundant delete the broadcast then
-  triggers there is idempotent.
+  read-your-writes consistent. The broadcast then deletes the keys there a
+  second time, which is harmless: if a read cached a key again in between, that
+  entry is dropped too and the next read rebuilds it.
 
   ## Single-node deployments
 
@@ -79,22 +80,43 @@ defmodule KilnCMS.Cache.ClusterBust do
   end
 
   @doc """
+  The sibling of `broadcast/1` for a key in a cache of its own: delete `keys` from
+  the Cachex instance `cache` on this node now, and on every other node.
+
+  For the caches that deliberately sit outside `KilnCMS.Cache` (the IP block list,
+  #2242) but need the same cluster-wide "forget this" signal. Same guarantees as
+  `broadcast/1`.
+  """
+  @spec broadcast_in(atom(), [String.t()]) :: :ok
+  def broadcast_in(cache, keys) when is_atom(cache) and is_list(keys) do
+    Enum.each(keys, &Cachex.del(cache, &1))
+
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, @topic, {:bust_cache_keys, cache, keys})
+
+    :ok
+  end
+
+  @doc """
   Write `entries` on this node now, and ask every other node to do the same.
 
   The sibling of `broadcast/1` for a value that must *move*, not merely vanish
-  (#1079). Delivery ETags fold a per-org head-generation token; a delete-only
-  bust would leave every node on the default `"0"` after a miss, which is the
-  same ETag the page carried *before* the settings write. Putting the new token
-  cluster-wide is what makes a conditional GET stop returning 304.
+  (#1079). Delivery ETags fold a per-org head-generation token; putting the new
+  token everywhere is what makes a conditional GET stop returning 304 after a
+  settings write.
+
+  Each key lands in the instance that holds it, on both ends: the generation
+  tokens and the last-known admin allowlist go to
+  `KilnCMS.Cache.generation_cache_name/0` (#2502), everything else to
+  `KilnCMS.Cache.cache_name/0`. The message is the one a node on the release
+  before that sends and understands, so during a rolling deploy old and new
+  nodes keep honoring each other's bumps and saves.
 
   Same guarantees as `broadcast/1`: best effort, at-most-once, TTL is the
   backstop. Receivers stay dumb — they put whatever pairs arrive.
   """
   @spec broadcast_put([{String.t(), term()}]) :: :ok
   def broadcast_put(entries) when is_list(entries) do
-    Enum.each(entries, fn {key, value} ->
-      Cachex.put(KilnCMS.Cache.cache_name(), key, value)
-    end)
+    put_routed(entries)
 
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, @topic, {:put_keys, entries})
 
@@ -172,11 +194,13 @@ defmodule KilnCMS.Cache.ClusterBust do
     {:noreply, state}
   end
 
-  def handle_info({:put_keys, entries}, state) when is_list(entries) do
-    Enum.each(entries, fn {key, value} ->
-      Cachex.put(KilnCMS.Cache.cache_name(), key, value)
-    end)
+  def handle_info({:bust_cache_keys, cache, keys}, state) when is_atom(cache) and is_list(keys) do
+    Enum.each(keys, &Cachex.del(cache, &1))
+    {:noreply, state}
+  end
 
+  def handle_info({:put_keys, entries}, state) when is_list(entries) do
+    put_routed(entries)
     {:noreply, state}
   end
 
@@ -205,6 +229,12 @@ defmodule KilnCMS.Cache.ClusterBust do
   # understand for as long as it takes to restart.
   def handle_info(_other, state), do: {:noreply, state}
 
+  defp put_routed(entries) do
+    Enum.each(entries, fn {key, value} -> KilnCMS.Cache.put_routed(key, value) end)
+  end
+
+  # The generation store (`KilnCMS.Cache.generation_cache_name/0`) is left
+  # alone on purpose (#2502).
   defp clear_delivery_caches do
     Cachex.clear(KilnCMS.Cache.cache_name())
     KilnCMS.Firing.Cache.clear()

@@ -101,6 +101,49 @@ defmodule KilnCMS.CMS.FieldConversionTaskTest do
       end
     end
 
+    test "a trashed record that does not fit is reported, and does not block --apply",
+         %{post: post} = ctx do
+      trashed = post!(ctx, "Two grams")
+      :ok = CMS.destroy_post!(trashed, actor: ctx.admin)
+
+      capture_io(fn ->
+        Mix.Tasks.Kiln.Fields.Convert.run([
+          "post",
+          ctx.source,
+          "--to",
+          ctx.group,
+          "--map",
+          "dose=amount",
+          "--apply"
+        ])
+      end)
+
+      assert_received {:mix_shell, :info, [applied]}
+      assert applied =~ "converted 1 (0 published, 0 trashed)"
+      assert applied =~ "#{trashed.id} (#{trashed.slug}) (trashed) — unparseable:"
+      assert reload(post).custom_fields[ctx.group] == [%{"amount" => 2.0, "unit" => "g"}]
+    end
+
+    test "counts only the live invalid records when it refuses", ctx do
+      post!(ctx, "Two grams")
+      trashed = post!(ctx, "Three grams")
+      :ok = CMS.destroy_post!(trashed, actor: ctx.admin)
+
+      assert_raise Mix.Error, ~r/^1 invalid record\(s\); nothing written/, fn ->
+        capture_io(fn ->
+          Mix.Tasks.Kiln.Fields.Convert.run([
+            "post",
+            ctx.source,
+            "--to",
+            ctx.group,
+            "--map",
+            "dose=amount",
+            "--apply"
+          ])
+        end)
+      end
+    end
+
     test "--map takes OLD=NEW", ctx do
       assert_raise Mix.Error, ~r/--map takes OLD=NEW/, fn ->
         Mix.Tasks.Kiln.Fields.Convert.run(["post", ctx.source, "--to", ctx.group, "--map", "x"])

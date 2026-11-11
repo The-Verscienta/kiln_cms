@@ -414,6 +414,31 @@ defmodule KilnCMSWeb.CollabChannelTest do
       assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
     end
 
+    test "an open room closes once the site's admin allowlist stops admitting its address (#2248)",
+         %{actor: actor, page: page} do
+      Application.put_env(:kiln_cms, :socket_reauth_interval_ms, 50)
+
+      {:ok, socket} =
+        connect(CollabSocket, %{"token" => token(actor)},
+          connect_info: %{
+            peer_data: %{address: {203, 0, 113, 50}, port: 1, ssl_cert: nil},
+            x_headers: []
+          }
+        )
+
+      {:ok, _reply, joined} = subscribe_and_join(socket, topic(page), %{"vsn" => @schema_vsn})
+      channel = joined.channel_pid
+
+      # Saved by an admin elsewhere; the room's address is not on it.
+      CMS.save_site_admin_allowlist!(%{cidrs: ["198.51.100.0/24"]},
+        actor: actor,
+        tenant: KilnCMS.Accounts.default_org_id(),
+        context: %{client_ip: {198, 51, 100, 1}}
+      )
+
+      assert_receive {:EXIT, ^channel, {:shutdown, :unauthorized}}, 2_000
+    end
+
     test "a room whose authorization still holds survives its checks and keeps relaying",
          %{actor: actor, page: page} do
       # The negative control, and not a formality: a mechanism that closed every

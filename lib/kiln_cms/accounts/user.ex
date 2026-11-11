@@ -47,14 +47,27 @@ defmodule KilnCMS.Accounts.User do
         # :register_with_sso — the OIDC provider has already verified the email
         # (the register change rejects unverified claims), so no second
         # confirmation loop.
+        #
+        # `:sign_in_with_magic_link` is not here: magic-link registration is
+        # off, so it is a read, and the add-on confirms only on a create or an
+        # update. A magic-link sign-in leaves an unconfirmed account
+        # unconfirmed (#2516). Confirming there is #2594's: proof of the
+        # mailbox has to settle what happens to the credentials the earlier
+        # registrant set, and forgetting them would also delete a genuine
+        # registrant's own password. It would be a write inside a read flow
+        # as well.
         auto_confirm_actions [
-          :sign_in_with_magic_link,
           :reset_password_with_token,
           :register_with_sso,
           # A site's own identity provider (#1561) vouched for the address, and
           # the site proved by DNS that it controls the address's domain
           # (`KilnCMS.Accounts.SiteSso.Admission`).
           :register_with_site_sso,
+          # A site invitation accepted (#2135): the click on the token mailed to
+          # the address proved it. The update is the unconfirmed-account case,
+          # which also replaces the password and revokes every token.
+          :register_with_invitation,
+          :accept_invitation_with_password,
           # First-run bootstrap (#1317): the operator creating the instance's
           # first admin cannot receive a confirmation mail — SMTP is one of the
           # things they have not configured yet — and the account is created
@@ -179,8 +192,11 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_publish,
       :notify_on_return_to_draft,
       :notify_on_comment,
+      :notify_on_registration,
+      :notify_on_security_alert,
       :nav_preset,
-      :status_marks
+      :status_marks,
+      :content_list_columns
     ] do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
       authorize_if expr(id == ^actor(:id))
@@ -265,6 +281,19 @@ defmodule KilnCMS.Accounts.User do
       accept [:status_marks]
     end
 
+    # The custom-field columns the content list shows per site and type
+    # (`KilnCMS.CMS.ListFields`). Arguments rather than the whole map: the
+    # change merges one `org_id => type` entry into what is stored now, so a
+    # stale tab or another site's choice is never overwritten.
+    update :set_content_list_columns do
+      description "Choose which custom fields the content list shows as columns."
+      require_atomic? false
+      argument :org_id, :uuid, allow_nil?: false
+      argument :type, :string, allow_nil?: false
+      argument :names, {:array, :string}, allow_nil?: false
+      change KilnCMS.Accounts.Changes.SetContentListColumns
+    end
+
     # Self-service workflow-notification preferences (issue #46). A user can
     # toggle their own; admins can edit anyone's via the policy bypass.
     update :update_notification_prefs do
@@ -272,8 +301,18 @@ defmodule KilnCMS.Accounts.User do
         :notify_on_review_request,
         :notify_on_publish,
         :notify_on_return_to_draft,
-        :notify_on_comment
+        :notify_on_comment,
+        :notify_on_registration,
+        :notify_on_security_alert
       ]
+
+      # The validation below compares the actor with the row being changed.
+      require_atomic? false
+
+      # The security alert mute is the account holder's own (#2245): a platform
+      # admin may edit the other preferences of anyone, but not silence a site
+      # admin's security alerts.
+      validate KilnCMS.Accounts.Validations.OwnSecurityAlertMute
     end
 
     # Admin-only: assign a user's editorial role (authoring privilege) and the
@@ -281,10 +320,19 @@ defmodule KilnCMS.Accounts.User do
     # access is granted — self-registration always lands on `:viewer` with no
     # audiences. See KilnCMS.CMS.Audiences and the content read policy.
     update :manage_access do
-      accept [:role, :audiences, :editable_types, :readable_types, :field_grants]
+      accept [
+        :role,
+        :audiences,
+        :editable_types,
+        :readable_types,
+        :field_grants,
+        :field_read_grants
+      ]
+
       # The shape validation inspects the whole map — no atomic expression.
       require_atomic? false
       validate KilnCMS.Accounts.Validations.FieldGrantsShape
+      validate {KilnCMS.Accounts.Validations.FieldGrantsShape, attribute: :field_read_grants}
 
       # A temporary admin must not be able to make itself a permanent one — the
       # bound on a grant is otherwise whatever the grantee decides. See the module.
@@ -303,6 +351,9 @@ defmodule KilnCMS.Accounts.User do
       # a demotion or a narrowed scope left the live ones holding the grant they
       # had (#675). Dropping them makes the next message prove it again.
       change {KilnCMS.Accounts.Changes.EvictSessions, reason: :access_changed}
+
+      # Audit log (#2241), in the transaction: a raised or lowered role.
+      change KilnCMS.Security.Changes.RecordRoleChange
     end
 
     # Time-boxed elevation (`KilnCMS.Accounts.RoleGrant`) — "admin until Friday".
@@ -325,6 +376,9 @@ defmodule KilnCMS.Accounts.User do
       # grant; granting widens it, and a socket authorized a moment ago would
       # otherwise keep the old tier until it happened to reconnect.
       change {KilnCMS.Accounts.Changes.EvictSessions, reason: :role_grant_changed}
+
+      # Audit log (#2241), in the transaction: an elevation granted or revoked.
+      change KilnCMS.Security.Changes.RecordElevation
     end
 
     # The expiry sweep's write (AshOban trigger below). Authorization never needs
@@ -380,6 +434,11 @@ defmodule KilnCMS.Accounts.User do
       # two lines below is declared first.
       validate {KilnCMS.Accounts.Validations.NotLastAdmin, demotes?: true}
 
+      # The registrations system actor may erase only the account a rejection
+      # in this transaction has just turned away (#2514). Before the scrub, so
+      # a refusal leaves the account untouched.
+      change KilnCMS.Accounts.Changes.GuardRegistrationErasure
+
       change KilnCMS.Accounts.Changes.AnonymizeUser
 
       # The erasure revokes tokens, which stops new connections; the live ones
@@ -412,6 +471,19 @@ defmodule KilnCMS.Accounts.User do
       validate {AshAuthentication.Strategy.Password.PasswordValidation,
                 strategy_name: :password, password_argument: :current_password}
 
+      # Breached-password lookup (#2240), from a `before_transaction` hook so a
+      # rejected form never calls out. After the validations above: a wrong
+      # current password makes the changeset invalid and nothing is sent.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :change}
+
+      # `PasswordValidation` above checks the current password against the
+      # struct the request loaded, which may be from before an invitation took
+      # the account over (#2453): the stranger's settings page, still open,
+      # would accept the stranger's own old password and set a new one over the
+      # invitee's. Under the row lock, the account's password must still be the
+      # one that struct holds. Above the hash, so the lock comes first.
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover, user_id: :id, lock: :no_key_update}
+
       change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
 
       # Revokes every stored token the account holds — every session, the
@@ -431,6 +503,10 @@ defmodule KilnCMS.Accounts.User do
       # reconnect cannot beat the revocation.
       change {KilnCMS.Accounts.Changes.EvictSessions,
               reason: :password_changed, after_commit?: true}
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the new password is in a known breach and the site's policy allows it with a warning."
+      end
     end
 
     read :sign_in_with_password do
@@ -457,6 +533,14 @@ defmodule KilnCMS.Accounts.User do
         allow_nil? true
       end
 
+      # Human verification (#2249): read by `ThrottleSignIn` only when the
+      # attempt needs a challenge; ignored otherwise.
+      argument :challenge_token, :string do
+        description "A human-verification token, when the sign-in asks for one."
+        allow_nil? true
+        sensitive? true
+      end
+
       # validates the provided email and password and generates a token
       prepare AshAuthentication.Strategy.Password.SignInPreparation
 
@@ -464,6 +548,9 @@ defmodule KilnCMS.Accounts.User do
       # attacker rotating IPs gets a fresh window per address otherwise.
       # Refuses with the same `AuthenticationFailed` a wrong password produces.
       prepare KilnCMS.Accounts.Preparations.ThrottleSignIn
+
+      # Audit log (#2241): wrong passwords and lockouts, observed only.
+      prepare KilnCMS.Security.Preparations.AuditSignIn
 
       # Mints the remember-me token when the box is ticked. On the LiveView path
       # it deliberately does nothing here: `sign_in_tokens_enabled?` is on, so
@@ -555,6 +642,14 @@ defmodule KilnCMS.Accounts.User do
       # replaying `submit` was unlimited account creation.
       change KilnCMS.Accounts.Changes.ThrottleRegistration
 
+      # Human verification (#2249), per the operator's registration mode. After
+      # the throttle for the same reason as the breached-password lookup below.
+      change KilnCMS.Accounts.Changes.RequireRegistrationChallenge
+
+      # Breached-password lookup (#2240). After the throttle, so a flood of
+      # registrations is bounded before it can fan out to a third party.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :register}
+
       # Invite-only mode: reject self-registration when
       # `config :kiln_cms, :registration_enabled` is false.
       validate KilnCMS.Accounts.Validations.RegistrationEnabled
@@ -576,11 +671,26 @@ defmodule KilnCMS.Accounts.User do
         sensitive? true
       end
 
+      argument :challenge_token, :string do
+        description "A human-verification token, when registration asks for one (#2249)."
+        allow_nil? true
+        sensitive? true
+      end
+
       # Sets the email from the argument
       change set_attribute(:email, arg(:email))
 
       # Hashes the provided password
       change AshAuthentication.Strategy.Password.HashPasswordChange
+
+      # No row for an address that already has an account, and its owner is
+      # mailed (#2255). AFTER the hash, so a known address pays for bcrypt too.
+      change KilnCMS.Accounts.Changes.RefuseExistingAddress
+
+      # On a site that requires approval (#2251), a `:pending` membership on the
+      # site registered on, in this transaction. Its setting is read before the
+      # transaction and an unreadable one refuses the registration.
+      change KilnCMS.Accounts.Changes.QueueRegistration
 
       # Generates an authentication token for the user
       change AshAuthentication.GenerateTokenChange
@@ -591,6 +701,10 @@ defmodule KilnCMS.Accounts.User do
       metadata :token, :string do
         description "A JWT that can be used to authenticate the user."
         allow_nil? false
+      end
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the password is in a known breach and the site's policy allows it with a warning."
       end
     end
 
@@ -631,6 +745,15 @@ defmodule KilnCMS.Accounts.User do
 
       validate {AshAuthentication.Strategy.Password.PasswordConfirmationValidation,
                 strategy_name: :password}
+
+      # Breached-password verdict (#2240). `KilnCMS.Accounts.Bootstrap` takes
+      # the lookup BEFORE its advisory-locked transaction and passes the verdict
+      # in the changeset context; here the hook only applies it.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :bootstrap}
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the password is in a known breach and the site's policy allows it with a warning."
+      end
     end
 
     # Written out rather than generated, so a per-address budget can go in front
@@ -666,6 +789,33 @@ defmodule KilnCMS.Accounts.User do
     read :get_by_email do
       description "Looks up a user by their email"
       get_by :email
+    end
+
+    # The emailed link that lifts a sign-in pause (#2250). Both system-only:
+    # only `KilnCMSWeb.SignInUnlockController` calls them (`authorize?: false`,
+    # no actor), the policy below forbids every authorized caller, and
+    # `SignInUnlockAction` refuses an actor-carrying call itself because the
+    # admin bypass would pass that policy. The org they bind to comes from the
+    # action context, never from an argument. See `KilnCMS.Accounts.SignInUnlock`.
+    action :request_sign_in_unlock do
+      description "Email an unlock link to a paused account, if there is one (system-only)."
+
+      argument :email, :ci_string do
+        allow_nil? false
+      end
+
+      run {KilnCMS.Accounts.SignInUnlockAction, step: :request}
+    end
+
+    action :redeem_sign_in_unlock do
+      description "Lift the sign-in pause an emailed unlock link names (system-only)."
+
+      argument :token, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      run {KilnCMS.Accounts.SignInUnlockAction, step: :redeem}
     end
 
     # Passkey sign-in (#331): returns the verified account with its session
@@ -712,6 +862,124 @@ defmodule KilnCMS.Accounts.User do
       change KilnCMS.Accounts.Changes.RegisterWithSiteSso
     end
 
+    # Accepting a site invitation (#2135) when the address has no account: the
+    # invitee chooses a password and gets a confirmed account (`:viewer`, the
+    # default) holding the invited tier on the invited site. System-only — only
+    # `KilnCMSWeb.InviteLive` calls it (`authorize?: false`); the emailed token
+    # is the credential and `AcceptInvitation` refuses an actor-carrying call.
+    #
+    # Deliberately NOT gated by `Validations.RegistrationEnabled`: an
+    # invite-only site is exactly where invitations are how accounts arrive.
+    # It mints no session token either: the invitee signs in through the normal
+    # password flow afterwards, second factors and all (as `/setup` does).
+    create :register_with_invitation do
+      description "Create an account from a site invitation (system-only)."
+      accept []
+
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      argument :name, :string, constraints: [max_length: KilnCMS.Limits.line()]
+
+      argument :password, :string do
+        allow_nil? false
+        constraints min_length: 8
+        sensitive? true
+      end
+
+      argument :password_confirmation, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      # Bounded per client address like registration (#724): the form submits
+      # over `/live`, where no router pipeline charges anything.
+      change KilnCMS.Accounts.Changes.ThrottleRegistration
+
+      # Sets `email` from the invitation row (never from input), and in the
+      # transaction adds the membership and consumes the invitation.
+      change KilnCMS.Accounts.Changes.AcceptInvitation
+
+      change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+
+      validate {AshAuthentication.Strategy.Password.PasswordConfirmationValidation,
+                strategy_name: :password}
+
+      # Breached-password lookup (#2240), against the invited site's policy for
+      # the invited tier.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :invite}
+
+      change set_attribute(:name, arg(:name))
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the password is in a known breach and the site's policy allows it with a warning."
+      end
+    end
+
+    # Accepting a site invitation (#2135) when the address has an UNCONFIRMED
+    # account. Anyone can register an unconfirmed account for any address, so
+    # its password may be a stranger's: the invitee sets a new one, the account
+    # is confirmed (the click proved the address), and every token it held is
+    # revoked before the membership is added. System-only, like the create
+    # above. A confirmed account accepts with one click instead
+    # (`Invitation.:accept_existing`) and keeps its password.
+    update :accept_invitation_with_password do
+      description "Accept a site invitation over an unconfirmed account (system-only)."
+      accept []
+      require_atomic? false
+
+      argument :token, :string, allow_nil?: false, sensitive?: true
+      argument :name, :string, constraints: [max_length: KilnCMS.Limits.line()]
+
+      argument :password, :string do
+        allow_nil? false
+        constraints min_length: 8
+        sensitive? true
+      end
+
+      argument :password_confirmation, :string do
+        allow_nil? false
+        sensitive? true
+      end
+
+      change KilnCMS.Accounts.Changes.ThrottleRegistration
+      change KilnCMS.Accounts.Changes.AcceptInvitation
+      change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+
+      validate {AshAuthentication.Strategy.Password.PasswordConfirmationValidation,
+                strategy_name: :password}
+
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :invite}
+
+      # Whoever registered the address first may hold a session or a
+      # remember-me cookie; the password they chose stops working with the
+      # hash above, and this ends everything they already hold (#734).
+      change KilnCMS.Accounts.Changes.RevokeAllTokens
+
+      # ...and every other credential they may have set up on it (#2453): two-
+      # step verification, passkeys, identity-provider links, push devices and
+      # API keys, in this transaction, or the accept fails.
+      change KilnCMS.Accounts.Changes.ForgetPriorCredentials
+
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :password_reset, after_commit?: true}
+
+      # The display name is the invitee's too: whatever the account's first
+      # registrant chose is cleared when no name is given, never kept — it
+      # would be shown as the invitee's byline.
+      change fn changeset, _context ->
+        case Ash.Changeset.get_argument(changeset, :name) do
+          name when is_binary(name) and name != "" ->
+            Ash.Changeset.change_attribute(changeset, :name, name)
+
+          _none ->
+            Ash.Changeset.force_change_attribute(changeset, :name, nil)
+        end
+      end
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the new password is in a known breach and the site's policy allows it with a warning."
+      end
+    end
+
     update :reset_password_with_token do
       # `ForgiveSignInThrottle` runs an `after_action` hook (it needs the saved
       # record's email), which an atomic update has no place to put.
@@ -741,6 +1009,10 @@ defmodule KilnCMS.Accounts.User do
       # validates that the password matches the confirmation
       validate AshAuthentication.Strategy.Password.PasswordConfirmationValidation
 
+      # Breached-password lookup (#2240), after the token and confirmation
+      # validations above so an invalid reset never calls out.
+      change {KilnCMS.Accounts.Changes.CheckBreachedPassword, action: :reset}
+
       # Hashes the provided password
       change AshAuthentication.Strategy.Password.HashPasswordChange
 
@@ -768,6 +1040,10 @@ defmodule KilnCMS.Accounts.User do
       # releases the per-account sign-in budget (#478) — otherwise the remedy
       # the throttle's own alert mail recommends leaves the owner still locked.
       change KilnCMS.Accounts.Changes.ForgiveSignInThrottle
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when the new password is in a known breach and the site's policy allows it with a warning."
+      end
     end
 
     # --- Two-factor authentication (TOTP) self-service (issue #331) ---
@@ -792,6 +1068,11 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
       change set_attribute(:totp_pending_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
+
+      # Not guarded against an invitation's takeover (#2453): a secret staged
+      # from a stale session is enforced by nothing until `:confirm_totp`
+      # promotes it, and that refuses a request from before the takeover; the
+      # invitee's own enrolment stages a fresh secret over it.
     end
 
     # Finish enrolment by proving a code from the *pending* secret, then
@@ -839,7 +1120,21 @@ defmodule KilnCMS.Accounts.User do
       validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement
       change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
+
+      # Under the row lock, the secret promoted above must still be the one
+      # staged, and the account must not have changed hands since the request
+      # loaded it (#2453): a confirmation built before an invitation's takeover
+      # waits for it, then finds the staged secret cleared and is refused.
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover,
+              user_id: :id, lock: :no_key_update, pending_secret?: true}
+
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
+
+      # Audit log (#2241), in the transaction: the factor and its event commit together.
+      change {KilnCMS.Security.Changes.Record,
+              type: :second_factor_enrolled,
+              target: fn record, _changeset -> {"user", record.id} end,
+              metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
     end
 
     # Replace the recovery-code set — requires a current authenticator code, so
@@ -860,6 +1155,13 @@ defmodule KilnCMS.Accounts.User do
       # rejected it there is no hook left to charge from.
       change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
+
+      # `ValidTotpCode` checks the code against the struct the request loaded,
+      # which may hold a factor an invitation's takeover has since removed
+      # (#2453): the stranger would write recovery codes they know onto the
+      # invitee's account. Refused under the row lock instead.
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover, user_id: :id, lock: :no_key_update}
+
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
     end
 
@@ -875,6 +1177,16 @@ defmodule KilnCMS.Accounts.User do
       argument :code, :string, allow_nil?: false, sensitive?: true
 
       change KilnCMS.Accounts.Changes.ConsumeRecoveryCode
+
+      # Audit log (#2241), in the transaction: a burned code always has its event.
+      # The person is the record itself (this runs pre-auth, with no actor).
+      change {KilnCMS.Security.Changes.Record,
+              type: :recovery_code_used,
+              user: fn record, _changeset -> record end,
+              target: fn record, _changeset -> {"user", record.id} end,
+              metadata: fn record, _changeset ->
+                %{"remaining" => length(record.totp_recovery_hashes || [])}
+              end}
     end
 
     # Turn 2FA off — requires a current code, and that code is now budgeted, so
@@ -896,10 +1208,20 @@ defmodule KilnCMS.Accounts.User do
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
       change KilnCMS.Accounts.Changes.ThrottleSecondFactor
       validate KilnCMS.Accounts.Validations.ValidTotpCode
+
+      # Not guarded against an invitation's takeover (#2453): from a stale
+      # session it can only clear the factor columns, which the takeover has
+      # already cleared; it signs no one in and grants nothing.
       change set_attribute(:totp_secret, nil)
       change set_attribute(:totp_confirmed_at, nil)
       change set_attribute(:totp_recovery_hashes, [])
       change set_attribute(:totp_pending_secret, nil)
+
+      # Audit log (#2241), in the transaction.
+      change {KilnCMS.Security.Changes.Record,
+              type: :second_factor_removed,
+              target: fn record, _changeset -> {"user", record.id} end,
+              metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
     end
   end
 
@@ -953,6 +1275,10 @@ defmodule KilnCMS.Accounts.User do
       authorize_if expr(id == ^actor(:id))
     end
 
+    policy action(:set_content_list_columns) do
+      authorize_if expr(id == ^actor(:id))
+    end
+
     # 2FA is strictly self-service: a user manages the second factor on their own
     # account only (the admin bypass above still lets an operator intervene).
     # `:consume_totp_recovery_code` runs pre-auth as a system call
@@ -967,9 +1293,15 @@ defmodule KilnCMS.Accounts.User do
     end
 
     # Erasure is an operator action — admins only (covered by the admin bypass
-    # above; this makes the intent explicit and forbids everyone else).
+    # above; this makes the intent explicit and forbids everyone else). And
+    # the erasure of an unconfirmed, rejected registration (#2514), from
+    # `Changes.EraseRejectedAccount` inside the rejection: the deciding admin
+    # may be a site admin, who may not erase accounts, so it runs as the
+    # registrations system actor, held by `Changes.GuardRegistrationErasure`
+    # to that one rejection's account.
     policy action(:anonymize) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :registrations, action: :anonymize}
     end
 
     # First-run bootstrap (#1317): anyone may create the first admin while no
@@ -995,6 +1327,22 @@ defmodule KilnCMS.Accounts.User do
     # the token preparation and `Changes.RegisterWithSiteSso` refuse any
     # actor-carrying call themselves.
     policy action([:sign_in_with_site_sso, :register_with_site_sso]) do
+      forbid_if always()
+    end
+
+    # A site invitation's accepts (#2135): the same shape. Forbidden to every
+    # authorized caller; `Changes.AcceptInvitation` refuses an actor-carrying
+    # call itself, since the admin bypass above would pass this. Only
+    # `KilnCMSWeb.InviteLive` calls them (`authorize?: false`), and the emailed
+    # token is the credential.
+    policy action([:register_with_invitation, :accept_invitation_with_password]) do
+      forbid_if always()
+    end
+
+    # The sign-in unlock link (#2250): the same shape again. Forbidden to every
+    # authorized caller; `SignInUnlockAction` refuses an actor-carrying call,
+    # since the admin bypass above would pass this. The link is the credential.
+    policy action([:request_sign_in_unlock, :redeem_sign_in_unlock]) do
       forbid_if always()
     end
 
@@ -1025,6 +1373,30 @@ defmodule KilnCMS.Accounts.User do
     policy action(:legacy_audience_accounts) do
       forbid_if always()
     end
+  end
+
+  changes do
+    # Registration approval (#2251): the update that confirms an applicant's
+    # address tells the admins of every site where they wait. On every update
+    # rather than on `:confirm_new_user` alone, because three actions confirm
+    # an unconfirmed account (see the change).
+    change KilnCMS.Accounts.Changes.AnnouncePendingRegistration, on: [:update]
+
+    # The three updates that confirm an unconfirmed account take its row
+    # first and refuse an erased one (#2514): an erasure of a rejected,
+    # unconfirmed registration may have committed while one of them waited,
+    # and a confirmation, a new password or a session must not land on the
+    # tombstone. The erasure checks `confirmed_at` under the same lock, so
+    # one that waits for a confirmation keeps the account.
+    change {KilnCMS.Accounts.Changes.LockAccount, user_id: :id},
+      on: [:update],
+      where: [
+        action_is([
+          :confirm_new_user,
+          :reset_password_with_token,
+          :accept_invitation_with_password
+        ])
+      ]
   end
 
   attributes do
@@ -1139,6 +1511,17 @@ defmodule KilnCMS.Accounts.User do
       public? false
     end
 
+    # Per-custom-field READ restrictions (#2281): content-type name → the
+    # private custom fields (`custom_fields.<name>`, or the bare
+    # `custom_fields`) the editor may see. No entry for a type = unrestricted;
+    # `[]` hides every private field. Resolved like `field_grants`
+    # (KilnCMS.Accounts.Scoping.field_read_grant/3).
+    attribute :field_read_grants, :map do
+      default %{}
+      allow_nil? false
+      public? false
+    end
+
     # Per-user workflow-notification preferences (issue #46). Opt-out model:
     # every notification defaults on, and a user can mute each event for their
     # own account via `:update_notification_prefs`. `KilnCMS.Notifications`
@@ -1175,6 +1558,28 @@ defmodule KilnCMS.Accounts.User do
       public? true
     end
 
+    # Registration approval (#2251): mail me when someone is waiting for
+    # approval on a site I administer. Mutes the email only — the bell row is
+    # always written (`KilnCMS.Notifications.Registrations`), so a muted admin
+    # still sees the queue is waiting. One flag for every site the account
+    # administers.
+    attribute :notify_on_registration, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
+    # Security alerts (#2245): email me a site's security alerts. Mutes the
+    # email of SITE alerts only — the bell row is always written, and the
+    # platform's alerts and the `alerts_silenced` notices ignore it. One flag
+    # for every site the account administers; only the account holder can
+    # change it (`Validations.OwnSecurityAlertMute`).
+    attribute :notify_on_security_alert, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
     # How much of the console the sidebar shows (`KilnCMSWeb.ConsoleNav.sidebar/3`):
     # the daily author screens, or every screen. Per user and server-side, so it
     # follows them across devices and the first paint is already right.
@@ -1200,6 +1605,15 @@ defmodule KilnCMS.Accounts.User do
       constraints one_of: [:words, :trigrams]
       default :words
       allow_nil? false
+      public? true
+    end
+
+    # The content list's custom-field columns (`KilnCMS.CMS.ListFields`):
+    # `%{org_id => %{content type => [field name]}}`. Written only by
+    # `:set_content_list_columns`; nil until someone picks a column, which reads
+    # as no columns. Nullable and without a default, so the migration is plainly
+    # additive for the release that does not know it.
+    attribute :content_list_columns, :map do
       public? true
     end
 

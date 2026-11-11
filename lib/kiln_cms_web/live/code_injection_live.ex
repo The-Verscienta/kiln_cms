@@ -44,7 +44,8 @@ defmodule KilnCMSWeb.CodeInjectionLive do
   def handle_event("save", %{"injection" => params}, socket) when is_map(params) do
     case CMS.save_site_code_injection(attrs(params),
            actor: socket.assigns.current_user,
-           tenant: socket.assigns.current_org
+           tenant: socket.assigns.current_org,
+           context: socket.assigns.security_context
          ) do
       {:ok, _row} ->
         {:noreply,
@@ -68,7 +69,8 @@ defmodule KilnCMSWeb.CodeInjectionLive do
       row ->
         CMS.reset_site_code_injection!(row,
           actor: socket.assigns.current_user,
-          tenant: socket.assigns.current_org
+          tenant: socket.assigns.current_org,
+          context: socket.assigns.security_context
         )
 
         {:noreply,

@@ -278,6 +278,39 @@ defmodule KilnCMS.Forms.MailWorkersTest do
       end)
     end
 
+    test "a field renamed after the template was saved still renders its value (#2343)" do
+      form =
+        autoresponder_form!(
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "Thanks, [field:name]!",
+            autoresponder_body: "<p>Hi [field:name].</p>"
+          },
+          [
+            %{name: "name", label: "Name", field_type: :string},
+            %{name: "email", label: "Email", field_type: :email}
+          ]
+        )
+
+      admin = admin()
+      name = form.id |> CMS.form_fields_for!(actor: admin) |> Enum.find(&(&1.name == "name"))
+      CMS.update_form_field!(name, %{name: "full_name"}, actor: admin)
+
+      # Submissions from now on carry the value under the new key.
+      assert :ok =
+               perform_job(AutoresponderWorker, %{
+                 "form_id" => form.id,
+                 "org_id" => KilnCMS.Accounts.default_org_id(),
+                 "to" => "ada@example.com",
+                 "data" => %{"full_name" => "Ada", "email" => "ada@example.com"}
+               })
+
+      assert_email_sent(fn email ->
+        assert email.subject == "Thanks, Ada!"
+        assert email.html_body == "<p>Hi Ada.</p>"
+      end)
+    end
+
     test "the mail carries the escaped body and a header-safe subject" do
       form =
         autoresponder_form!(

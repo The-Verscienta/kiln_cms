@@ -202,6 +202,79 @@ defmodule KilnPublish.Markdown do
 
   def render(_other), do: ""
 
+  # ── AST → page blocks ─────────────────────────────────────────────────────
+  #
+  # A page body is a list of typed blocks, and the rich-text sanitizer keeps
+  # no `<img>` (its allowlist is prose). So a guide's screenshots travel as
+  # image blocks of their own, pointing at media-library items, and the prose
+  # around them as rich_text blocks.
+
+  @doc """
+  Splits a document into the blocks of a page body, in order:
+  `{:html, html}` for prose and `{:image, %{src, alt, caption}}` for a
+  paragraph holding nothing but an image whose source is a file in the repo.
+  `src` is that file's repo-relative path (resolved against `source`), for the
+  caller to upload.
+
+  The HTML of a document with no images is exactly `render/1`'s, as one
+  block. Images that cannot be blocks keep the author's words:
+
+    * an image inside a paragraph or a link (a "Deploy to Render" badge)
+      renders as its alt text, so the link keeps a label;
+    * a standalone image at an external URL renders as a link to it labelled
+      with its alt text, because the site's `img-src` policy would block it.
+  """
+  def blocks(ast, source) do
+    ast
+    |> Enum.map(&block(&1, source))
+    |> Enum.chunk_by(&match?({:html, _}, &1))
+    |> Enum.flat_map(fn
+      [{:html, _} | _] = run -> [{:html, Enum.map_join(run, &elem(&1, 1))}]
+      images -> images
+    end)
+    |> Enum.reject(&(&1 == {:html, ""}))
+    |> case do
+      [] -> [{:html, ""}]
+      blocks -> blocks
+    end
+  end
+
+  defp block({"p", _attrs, children, _meta} = node, source) do
+    case Enum.reject(children, &(is_binary(&1) and String.trim(&1) == "")) do
+      [{"img", attrs, _, _}] -> standalone_image(attrs, source)
+      _ -> {:html, render(images_to_alt(node))}
+    end
+  end
+
+  defp block(node, _source), do: {:html, render(images_to_alt(node))}
+
+  defp standalone_image(attrs, source) do
+    src = attr(attrs, "src") || ""
+    alt = attr(attrs, "alt") || ""
+
+    external? = URI.parse(src).scheme in ~w(http https) and safe_url(src, ~w(http https)) != nil
+
+    case {external?, repo_path(src, source)} do
+      {true, _} ->
+        label = if alt == "", do: String.trim(src), else: alt
+        {:html, ~s(<p><a href="#{escape(String.trim(src))}">#{escape_text(label)}</a></p>)}
+
+      {false, {path, _fragment}} ->
+        {:image, %{src: path, alt: alt, caption: presence(attr(attrs, "title") || "")}}
+
+      {false, nil} ->
+        {:html, "<p>" <> escape_text(alt) <> "</p>"}
+    end
+  end
+
+  # Every `<img>` below `node` becomes its alt text.
+  defp images_to_alt({"img", attrs, _children, _meta}), do: attr(attrs, "alt") || ""
+
+  defp images_to_alt({tag, attrs, children, meta}) when is_list(children),
+    do: {tag, attrs, Enum.map(children, &images_to_alt/1), meta}
+
+  defp images_to_alt(other), do: other
+
   # `KilnCMS.HTMLSanitizer.safe_href/1` and `safe_image_src/1`, narrowed to
   # what a script can check without the application: an in-page fragment, a
   # same-origin path, or a URL in `schemes`. Anything else loses its anchor (or
@@ -349,7 +422,94 @@ defmodule KilnPublish.API do
   legacy shape put it — because its code blocks are what Portable Text cannot
   hold faithfully.
   """
-  def rich_text_tree(html), do: [%{"_type" => "rich_text", "legacy_html" => html}]
+  def rich_text_tree(html), do: block_tree([{:html, html}])
+
+  @doc """
+  A body of typed blocks from `KilnPublish.Markdown.blocks/2`, once each
+  image has its media item: `{:html, html}` is a rich_text block as in
+  `rich_text_tree/1`; `{:image, %{media_id, url, alt, caption}}` is an image
+  block linked to that library item, so delivery adds its variants.
+  """
+  def block_tree(blocks), do: Enum.map(blocks, &block_json/1)
+
+  defp block_json({:html, html}), do: %{"_type" => "rich_text", "legacy_html" => html}
+
+  # A caption only when the Markdown gave one (`![alt](src "caption")`).
+  defp block_json({:image, %{caption: caption} = image}) when is_binary(caption),
+    do: block_json({:image, Map.delete(image, :caption)}) |> Map.put("caption", caption)
+
+  defp block_json({:image, image}) do
+    %{"_type" => "image", "media_id" => image.media_id, "url" => image.url, "alt" => image.alt}
+  end
+
+  @doc """
+  The media item for the repo file at `path`: `{:ok, :exists | :uploaded,
+  %{media_id, url}}`, or `{:error, message}`.
+
+  The item is named `<basename>-<first 12 hex of its sha256>.<ext>`, so a
+  re-run finds the one it uploaded (`filter[filename]`) instead of uploading a
+  copy, and an edited image is a new item rather than a changed one. An
+  upload is `POST /api/media` with the file and its alt text — outside
+  `/api/json`, on the `:api` pipeline, which accepts plain JSON only, hence
+  the absolute URL and the replaced `accept`, as in `schema/1`.
+  """
+  def ensure_media(req, path, alt) do
+    content = File.read!(path)
+    filename = media_filename(path, content)
+
+    case find_media(req, filename) do
+      {:ok, nil} -> upload_media(req, filename, content, alt)
+      {:ok, media} -> {:ok, :exists, media}
+      error -> error
+    end
+  end
+
+  @doc "The library filename a repo file is uploaded as: `<basename>-<hash12>.<ext>`."
+  def media_filename(path, content) do
+    hash = :sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower) |> binary_part(0, 12)
+    ext = Path.extname(path)
+    "#{Path.basename(path, ext)}-#{hash}#{String.downcase(ext)}"
+  end
+
+  defp find_media(req, filename) do
+    case request(req, :get, "/media-items", params: [{"filter[filename]", filename}]) do
+      {:ok, %{"data" => [item | _]}} -> {:ok, media(item)}
+      {:ok, %{"data" => []}} -> {:ok, nil}
+      error -> error
+    end
+  end
+
+  defp upload_media(req, filename, content, alt) do
+    url = String.replace_suffix(req.options.base_url, "/json", "") <> "/media"
+
+    fields = [
+      file: {content, filename: filename, content_type: content_type(filename)},
+      alt: alt
+    ]
+
+    req
+    |> Req.Request.put_header("accept", "application/json")
+    |> Req.Request.delete_header("content-type")
+    |> request(:post, url, form_multipart: fields)
+    |> case do
+      {:ok, %{"data" => item}} -> {:ok, :uploaded, media(item)}
+      {:ok, other} -> {:error, "POST #{url}: unexpected response #{inspect(other)}"}
+      error -> error
+    end
+  end
+
+  defp media(%{"id" => id, "attributes" => %{"url" => url}}), do: %{media_id: id, url: url}
+
+  defp content_type(filename) do
+    case filename |> Path.extname() |> String.downcase() do
+      ".webp" -> "image/webp"
+      ".png" -> "image/png"
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      ".gif" -> "image/gif"
+      _ -> "application/octet-stream"
+    end
+  end
 
   @doc """
   Creates or updates one record by slug, then publishes it if it isn't.

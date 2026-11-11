@@ -3,7 +3,7 @@
 // The `:json` fired-artifact shape served by
 // `GET /api/content/:type/:slug?surface=json`.
 //
-// Artifact format version: 3
+// Artifact format version: 4
 
 
 // MARK: - Shared
@@ -1023,17 +1023,23 @@ public struct PageDocument: Codable, Hashable, Sendable {
     /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.
     public let inheritedFields: [String: JSONValue]?
     public let locale: String?
+    /// The document's robots flags. Absent when neither is set; absent means both false.
+    public let robots: Robots?
     public let slug: String?
+    /// The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.
+    public let social: Social?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, social: Social? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.id = id
         self.inheritedFields = inheritedFields
         self.locale = locale
+        self.robots = robots
         self.slug = slug
+        self.social = social
         self.title = title
         self.type = type
     }
@@ -1044,13 +1050,37 @@ public struct PageDocument: Codable, Hashable, Sendable {
         case id
         case inheritedFields = "inherited_fields"
         case locale
+        case robots
         case slug
+        case social
         case title
         case type
     }
 
     public struct CustomFields: Codable, Hashable, Sendable {
         public init() {}
+    }
+
+    public struct Robots: Codable, Hashable, Sendable {
+        public let nofollow: Bool
+        public let noindex: Bool
+
+        public init(nofollow: Bool, noindex: Bool) {
+            self.nofollow = nofollow
+            self.noindex = noindex
+        }
+    }
+
+    public struct Social: Codable, Hashable, Sendable {
+        public let description: String?
+        public let image: String?
+        public let title: String?
+
+        public init(description: String? = nil, image: String? = nil, title: String? = nil) {
+            self.description = description
+            self.image = image
+            self.title = title
+        }
     }
 }
 
@@ -1065,18 +1095,24 @@ public struct PostDocument: Codable, Hashable, Sendable {
     /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.
     public let inheritedFields: [String: JSONValue]?
     public let locale: String?
+    /// The document's robots flags. Absent when neither is set; absent means both false.
+    public let robots: Robots?
     public let slug: String?
+    /// The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.
+    public let social: Social?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, social: Social? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.customFieldsPlain = customFieldsPlain
         self.id = id
         self.inheritedFields = inheritedFields
         self.locale = locale
+        self.robots = robots
         self.slug = slug
+        self.social = social
         self.title = title
         self.type = type
     }
@@ -1088,26 +1124,39 @@ public struct PostDocument: Codable, Hashable, Sendable {
         case id
         case inheritedFields = "inherited_fields"
         case locale
+        case robots
         case slug
+        case social
         case title
         case type
     }
 
     public struct CustomFields: Codable, Hashable, Sendable {
+        public let accent: String?
         public let codeSample: String?
+        public let contactEmail: String?
+        /// The items, in the order the editor arranged them.
+        public let contacts: [String]?
         /// Rows of this group, in the order the editor arranged them.
         public let dosages: [DosagesItem]?
+        /// The items, in the order the editor arranged them.
+        public let eventDates: [String]?
+        public let extra: JSONValue?
         public let featured: Bool?
         /// Snapshots of the picked media items, in gallery order.
         public let gallery: [MediaSnapshot]?
+        public let handle: String?
         /// Snapshot of the picked media item.
         public let hero: MediaSnapshot?
         public let homepage: String?
         public let launchDate: String?
+        public let opensAt: String?
         /// Write-time snapshot of a referenced record.
         ///
         /// Links to: `post`.
         public let parent: [String: JSONValue]?
+        public let phone: String?
+        public let priceBand: PriceBand?
         /// The chosen terms, in the order the editor arranged them.
         public let properties: [String]?
         public let publishedAt: String?
@@ -1117,7 +1166,11 @@ public struct PostDocument: Codable, Hashable, Sendable {
         ///
         /// Links to: `post`.
         public let related: [RelatedItem]?
+        /// The items, in the order the editor arranged them.
+        public let scores: [Int]?
         public let seo: Seo?
+        public let source: Source?
+        public let specs: [SpecsItem]?
         public let subtitle: String?
         public let summary: String?
         /// The items, in the order the editor arranged them.
@@ -1125,21 +1178,33 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let tier: String?
         public let `where`: Where?
 
-        public init(codeSample: String? = nil, dosages: [DosagesItem]? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, parent: [String: JSONValue]? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, seo: Seo? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, contacts: [String]? = nil, dosages: [DosagesItem]? = nil, eventDates: [String]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, priceBand: PriceBand? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, scores: [Int]? = nil, seo: Seo? = nil, source: Source? = nil, specs: [SpecsItem]? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+            self.accent = accent
             self.codeSample = codeSample
+            self.contactEmail = contactEmail
+            self.contacts = contacts
             self.dosages = dosages
+            self.eventDates = eventDates
+            self.extra = extra
             self.featured = featured
             self.gallery = gallery
+            self.handle = handle
             self.hero = hero
             self.homepage = homepage
             self.launchDate = launchDate
+            self.opensAt = opensAt
             self.parent = parent
+            self.phone = phone
+            self.priceBand = priceBand
             self.properties = properties
             self.publishedAt = publishedAt
             self.rating = rating
             self.readTime = readTime
             self.related = related
+            self.scores = scores
             self.seo = seo
+            self.source = source
+            self.specs = specs
             self.subtitle = subtitle
             self.summary = summary
             self.synonyms = synonyms
@@ -1148,20 +1213,32 @@ public struct PostDocument: Codable, Hashable, Sendable {
         }
 
         enum CodingKeys: String, CodingKey {
+            case accent
             case codeSample = "code_sample"
+            case contactEmail = "contact_email"
+            case contacts
             case dosages
+            case eventDates = "event_dates"
+            case extra
             case featured
             case gallery
+            case handle
             case hero
             case homepage
             case launchDate = "launch_date"
+            case opensAt = "opens_at"
             case parent
+            case phone
+            case priceBand = "price_band"
             case properties
             case publishedAt = "published_at"
             case rating
             case readTime = "read_time"
             case related
+            case scores
             case seo
+            case source
+            case specs
             case subtitle
             case summary
             case synonyms
@@ -1178,6 +1255,18 @@ public struct PostDocument: Codable, Hashable, Sendable {
                 self.amount = amount
                 self.form = form
                 self.unit = unit
+            }
+        }
+
+        public struct PriceBand: Codable, Hashable, Sendable {
+            /// A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind.
+            public let max: JSONValue?
+            /// A number, or an ISO-8601 date (YYYY-MM-DD); both bounds are the same kind.
+            public let min: JSONValue?
+
+            public init(max: JSONValue? = nil, min: JSONValue? = nil) {
+                self.max = max
+                self.min = min
             }
         }
 
@@ -1210,6 +1299,62 @@ public struct PostDocument: Codable, Hashable, Sendable {
             }
         }
 
+        public struct Source: Codable, Hashable, Sendable {
+            public let label: String?
+            public let rel: String?
+            public let target: Target?
+            public let url: String
+
+            public init(label: String? = nil, rel: String? = nil, target: Target? = nil, url: String) {
+                self.label = label
+                self.rel = rel
+                self.target = target
+                self.url = url
+            }
+
+            public enum Target: RawRepresentable, Codable, Hashable, Sendable {
+                case blank
+                case self_
+                /// A value this schema does not list — an option added since it was generated.
+                case unknown(String)
+
+                public init(rawValue: String) {
+                    switch rawValue {
+                    case "_blank": self = .blank
+                    case "_self": self = .self_
+                    default: self = .unknown(rawValue)
+                    }
+                }
+
+                public var rawValue: String {
+                    switch self {
+                    case .blank: return "_blank"
+                    case .self_: return "_self"
+                    case .unknown(let value): return value
+                    }
+                }
+
+                public init(from decoder: Decoder) throws {
+                    self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+                }
+
+                public func encode(to encoder: Encoder) throws {
+                    var container = encoder.singleValueContainer()
+                    try container.encode(rawValue)
+                }
+            }
+        }
+
+        public struct SpecsItem: Codable, Hashable, Sendable {
+            public let key: String
+            public let value: String
+
+            public init(key: String, value: String) {
+                self.key = key
+                self.value = value
+            }
+        }
+
         public struct Where: Codable, Hashable, Sendable {
             public let label: String?
             public let lat: Double?
@@ -1230,6 +1375,28 @@ public struct PostDocument: Codable, Hashable, Sendable {
 
         public init(summary: String? = nil) {
             self.summary = summary
+        }
+    }
+
+    public struct Robots: Codable, Hashable, Sendable {
+        public let nofollow: Bool
+        public let noindex: Bool
+
+        public init(nofollow: Bool, noindex: Bool) {
+            self.nofollow = nofollow
+            self.noindex = noindex
+        }
+    }
+
+    public struct Social: Codable, Hashable, Sendable {
+        public let description: String?
+        public let image: String?
+        public let title: String?
+
+        public init(description: String? = nil, image: String? = nil, title: String? = nil) {
+            self.description = description
+            self.image = image
+            self.title = title
         }
     }
 }

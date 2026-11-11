@@ -1,8 +1,18 @@
 defmodule KilnCMSWeb.WebhookLive do
   @moduledoc """
   Webhooks (`/editor/webhooks`) — register outbound endpoints and choose which
-  events each one receives. Admin-only, mirroring the `WebhookEndpoint` policy;
-  the per-endpoint signing secret is shown so receivers can verify deliveries.
+  events each one receives. Admin-only, mirroring the `WebhookEndpoint` policy.
+
+  Each endpoint's signing secret is masked in the list (`•••• ` and its last
+  four characters, or dots alone for a secret under 16 characters) and is not
+  sent to the browser until an admin reveals it (#2140). Reveal re-reads the
+  endpoint with the admin as actor and the site as tenant, so a forged id from
+  another site reveals nothing. A revealed secret gets a Copy button; Hide
+  masks it again. Revealed state lasts for this LiveView session only. A newly
+  added endpoint's secret starts revealed, so it can be copied into the
+  receiver straight away. Rotate secret (#2347) replaces it and reveals the
+  new one the same way, with a hint under it that deliveries already use the
+  new secret (#2384). Hiding the secret drops the hint.
 
   A new endpoint starts with `WebhookEndpoint.default_events/1` ticked, which
   leaves out the events that carry unpublished content; those are marked in
@@ -19,26 +29,18 @@ defmodule KilnCMSWeb.WebhookLive do
   def mount(_params, _session, socket) do
     actor = socket.assigns.current_user
 
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:page_title, gettext("Webhooks"))
-       |> assign(:available_events, WebhookEndpoint.events(socket.assigns.current_org.id))
-       |> assign(:default_events, WebhookEndpoint.default_events(socket.assigns.current_org))
-       |> assign(:edit, nil)
-       |> assign(:form, create_form(actor, socket.assigns.current_org))
-       |> load_endpoints()
-       |> load_deliveries()}
-    else
-      # Defense-in-depth: the `:live_admin_required` on_mount guard already
-      # redirects non-admins with this flash before mount runs; mirror it here so
-      # this fallback stays consistent rather than silently bouncing to /editor.
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, actor)
+     |> assign(:page_title, gettext("Webhooks"))
+     |> assign(:available_events, WebhookEndpoint.events(socket.assigns.current_org.id))
+     |> assign(:default_events, WebhookEndpoint.default_events(socket.assigns.current_org))
+     |> assign(:edit, nil)
+     |> assign(:revealed, MapSet.new())
+     |> assign(:rotated, MapSet.new())
+     |> assign(:form, create_form(actor, socket.assigns.current_org))
+     |> load_endpoints()
+     |> load_deliveries()}
   end
 
   # --- create ----------------------------------------------------------------
@@ -51,12 +53,16 @@ defmodule KilnCMSWeb.WebhookLive do
 
   def handle_event("create", %{"webhook" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: normalize(params)) do
-      {:ok, _endpoint} ->
+      {:ok, endpoint} ->
         {:noreply,
          socket
          |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
          |> load_endpoints()
-         |> put_flash(:info, gettext("Webhook added."))}
+         |> update(:revealed, &MapSet.put(&1, endpoint.id))
+         |> put_flash(
+           :info,
+           gettext("Webhook added. Copy its signing secret into your receiver.")
+         )}
 
       {:error, form} ->
         {:noreply, assign(socket, :form, form)}
@@ -122,6 +128,64 @@ defmodule KilnCMSWeb.WebhookLive do
     end
   end
 
+  # --- signing secret (#2140) ----------------------------------------------------
+
+  # The id comes from the client, so re-read the endpoint as this admin on this
+  # site before revealing: an id from another site, or one already deleted,
+  # reveals nothing.
+  def handle_event("reveal_secret", %{"id" => id}, socket) when is_binary(id) do
+    actor = socket.assigns.actor
+
+    socket =
+      with {:ok, endpoint} <-
+             CMS.get_webhook_endpoint(id, actor: actor, tenant: socket.assigns.current_org),
+           secret when is_binary(secret) <- WebhookEndpoint.secret(endpoint) do
+        update(socket, :revealed, &MapSet.put(&1, endpoint.id))
+      else
+        _ -> put_flash(socket, :error, gettext("Couldn't reveal that signing secret."))
+      end
+
+    {:noreply, socket}
+  end
+
+  # Replace the signing secret (#2347). The old one stops working at once. The
+  # id comes from the client, so the endpoint is re-read inside this site
+  # first: the tenant is what stops another site's id from being rotated.
+  def handle_event("rotate_secret", %{"id" => id}, socket) when is_binary(id) do
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    socket =
+      with {:ok, endpoint} <- CMS.get_webhook_endpoint(id, actor: actor, tenant: org),
+           {:ok, rotated} <- CMS.rotate_webhook_secret(endpoint, actor: actor, tenant: org) do
+        socket
+        |> load_endpoints()
+        |> update(:revealed, &MapSet.put(&1, rotated.id))
+        |> update(:rotated, &MapSet.put(&1, rotated.id))
+        |> put_flash(
+          :info,
+          gettext(
+            "Signing secret replaced. Copy the new secret into your receiver; the old one no longer works."
+          )
+        )
+      else
+        _ -> put_flash(socket, :error, gettext("Couldn't rotate that signing secret."))
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("hide_secret", %{"id" => id}, socket) when is_binary(id) do
+    {:noreply,
+     socket
+     |> update(:revealed, &MapSet.delete(&1, id))
+     |> update(:rotated, &MapSet.delete(&1, id))}
+  end
+
+  # Pushed by the `Clipboard` hook on a revealed secret's Copy button.
+  def handle_event("copied", _params, socket),
+    do: {:noreply, put_flash(socket, :info, gettext("Signing secret copied."))}
+
   # --- quick actions ---------------------------------------------------------
 
   def handle_event("toggle_active", %{"id" => id}, socket) when is_binary(id) do
@@ -172,8 +236,15 @@ defmodule KilnCMSWeb.WebhookLive do
       case CMS.get_webhook_delivery(id, actor: actor, tenant: socket.assigns.current_org) do
         {:ok, delivery} ->
           case Webhooks.redeliver(delivery) do
+            # The page is stale: the endpoint was deleted after it rendered
+            # (#2330). Reload so the row loses its button.
             {:error, :endpoint_deleted} ->
-              put_flash(socket, :error, gettext("Couldn't redeliver that webhook."))
+              socket
+              |> load_deliveries()
+              |> put_flash(
+                :error,
+                gettext("That delivery's endpoint was deleted, so it can't be redelivered.")
+              )
 
             _queued ->
               socket |> load_deliveries() |> put_flash(:info, gettext("Redelivery queued."))
@@ -204,16 +275,22 @@ defmodule KilnCMSWeb.WebhookLive do
 
   # --- data ------------------------------------------------------------------
 
+  # A revealed secret stays revealed across a refresh only while its endpoint
+  # is still listed.
   defp load_endpoints(socket) do
-    assign(
-      socket,
-      :endpoints,
+    endpoints =
       CMS.list_webhook_endpoints!(
         actor: socket.assigns.actor,
         tenant: socket.assigns.current_org,
         query: [sort: [inserted_at: :asc]]
       )
-    )
+
+    listed = MapSet.new(endpoints, & &1.id)
+
+    socket
+    |> assign(:endpoints, endpoints)
+    |> update(:revealed, &MapSet.intersection(&1, listed))
+    |> update(:rotated, &MapSet.intersection(&1, listed))
   end
 
   defp load_deliveries(socket) do
@@ -381,7 +458,7 @@ defmodule KilnCMSWeb.WebhookLive do
             <li :for={endpoint <- @endpoints} id={"webhook-#{endpoint.id}"} class="p-4">
               <div
                 :if={!editing?(@edit, endpoint.id)}
-                class="flex items-start justify-between gap-4"
+                class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
               >
                 <div class="min-w-0 space-y-2">
                   <div class="flex items-center gap-2">
@@ -425,20 +502,13 @@ defmodule KilnCMSWeb.WebhookLive do
                       {event}
                     </span>
                   </div>
-                  <p class="text-xs text-base-content/70">
-                    {gettext("Signing secret")}:
-                    <%= if secret = WebhookEndpoint.secret(endpoint) do %>
-                      <code>{secret}</code>
-                    <% else %>
-                      <span class="text-error">
-                        {gettext(
-                          "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Delete and re-create the endpoint."
-                        )}
-                      </span>
-                    <% end %>
-                  </p>
+                  <.signing_secret
+                    endpoint={endpoint}
+                    revealed={MapSet.member?(@revealed, endpoint.id)}
+                    rotated={MapSet.member?(@rotated, endpoint.id)}
+                  />
                 </div>
-                <div class="flex shrink-0 items-center gap-1">
+                <div class="flex shrink-0 flex-wrap items-center gap-1">
                   <button
                     type="button"
                     phx-click="ping"
@@ -464,14 +534,31 @@ defmodule KilnCMSWeb.WebhookLive do
                     {gettext("Edit")}
                   </button>
                   <button
+                    :if={CMS.can_rotate_webhook_secret?(@actor, endpoint, tenant: @current_org)}
+                    type="button"
+                    id={"rotate-secret-#{endpoint.id}"}
+                    phx-click="rotate_secret"
+                    phx-value-id={endpoint.id}
+                    phx-disable-with={gettext("Rotating…")}
+                    data-confirm={rotate_confirmation()}
+                    class="btn btn-sm btn-default"
+                  >
+                    {gettext("Rotate secret")}
+                  </button>
+                  <%!-- Labelled, not icon-only (#2136): beside three text
+                       buttons an unlabelled trash icon went unseen. This and
+                       the edit form's Delete share a selector; the row and
+                       the form are `:if`-exclusive, so only one renders. --%>
+                  <button
                     type="button"
                     phx-click="delete"
                     phx-value-id={endpoint.id}
-                    data-confirm={gettext("Delete this webhook? Deliveries will stop.")}
+                    data-confirm={delete_confirmation()}
                     aria-label={gettext("Delete webhook")}
-                    class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
+                    class="btn btn-sm btn-danger"
                   >
                     <.icon name="hero-trash" class="size-4" />
+                    {gettext("Delete")}
                   </button>
                 </div>
               </div>
@@ -504,10 +591,20 @@ defmodule KilnCMSWeb.WebhookLive do
                     target="edit"
                   />
                 </fieldset>
-                <div class="flex gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                   <.button type="submit" variant="primary">{gettext("Save")}</.button>
                   <button type="button" phx-click="cancel_edit" class="btn btn-sm btn-default">
                     {gettext("Cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="delete"
+                    phx-value-id={endpoint.id}
+                    data-confirm={delete_confirmation()}
+                    class="btn btn-sm btn-danger ml-auto"
+                  >
+                    <.icon name="hero-trash" class="size-4" />
+                    {gettext("Delete webhook")}
                   </button>
                 </div>
               </.form>
@@ -556,7 +653,20 @@ defmodule KilnCMSWeb.WebhookLive do
                   </td>
                   <td><code class="text-xs">{delivery.event}</code></td>
                   <td class="max-w-48 truncate">
-                    <code class="text-xs">{delivery.endpoint && delivery.endpoint.url}</code>
+                    <code :if={delivery.endpoint_id} class="text-xs">
+                      {delivery.endpoint && delivery.endpoint.url}
+                    </code>
+                    <%!-- The endpoint was deleted; the row keeps its URL copy (#2330). --%>
+                    <code :if={is_nil(delivery.endpoint_id) and delivery.endpoint_url} class="text-xs">
+                      {delivery.endpoint_url}
+                    </code>
+                    <span
+                      :if={is_nil(delivery.endpoint_id)}
+                      data-role="deleted-endpoint"
+                      class="text-xs italic text-base-content/70"
+                    >
+                      ({gettext("deleted endpoint")})
+                    </span>
                   </td>
                   <td>
                     <span class={[
@@ -575,7 +685,7 @@ defmodule KilnCMSWeb.WebhookLive do
                   </td>
                   <td class="text-right">
                     <button
-                      :if={delivery.status != :pending}
+                      :if={delivery.status != :pending and not is_nil(delivery.endpoint_id)}
                       type="button"
                       phx-click="redeliver"
                       phx-value-id={delivery.id}
@@ -592,6 +702,84 @@ defmodule KilnCMSWeb.WebhookLive do
       </div>
     </Layouts.console>
     """
+  end
+
+  attr :endpoint, :map, required: true
+  attr :revealed, :boolean, required: true
+  attr :rotated, :boolean, default: false
+
+  # The plaintext secret is rendered only while revealed; masked, the page
+  # carries at most its last four characters (#2140).
+  defp signing_secret(assigns) do
+    assigns = assign(assigns, :secret, WebhookEndpoint.secret(assigns.endpoint))
+
+    ~H"""
+    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-base-content/70">
+      <span>{gettext("Signing secret")}:</span>
+      <%= cond do %>
+        <% is_nil(@secret) -> %>
+          <span class="text-error">
+            {gettext(
+              "unreadable — it was encrypted under a SECRET_KEY_BASE this server no longer has. Rotate the secret, or delete and re-create the endpoint."
+            )}
+          </span>
+        <% @revealed -> %>
+          <code id={"webhook-#{@endpoint.id}-secret"} class="break-all">{@secret}</code>
+          <button
+            type="button"
+            id={"copy-secret-#{@endpoint.id}"}
+            phx-hook="Clipboard"
+            data-clipboard-text={@secret}
+            aria-label={gettext("Copy signing secret for %{url}", url: @endpoint.url)}
+            class="btn btn-sm btn-default px-2 py-0.5 text-xs"
+          >
+            <.icon name="hero-clipboard-document" class="size-3.5" />
+            {gettext("Copy")}
+          </button>
+          <button
+            type="button"
+            id={"reveal-secret-#{@endpoint.id}"}
+            phx-click="hide_secret"
+            phx-value-id={@endpoint.id}
+            aria-label={gettext("Hide signing secret for %{url}", url: @endpoint.url)}
+            class="btn btn-sm btn-default px-2 py-0.5 text-xs"
+          >
+            <.icon name="hero-eye-slash" class="size-3.5" />
+            {gettext("Hide")}
+          </button>
+          <p
+            :if={@rotated}
+            id={"webhook-#{@endpoint.id}-rotated-hint"}
+            class="basis-full text-warning-ink"
+          >
+            <.icon name="hero-exclamation-triangle" class="size-3.5" />
+            {gettext("Update your receiver now: deliveries already use this secret.")}
+          </p>
+        <% true -> %>
+          <span id={"webhook-#{@endpoint.id}-secret-masked"} class="font-mono">
+            {mask_secret(@secret)}
+          </span>
+          <button
+            type="button"
+            id={"reveal-secret-#{@endpoint.id}"}
+            phx-click="reveal_secret"
+            phx-value-id={@endpoint.id}
+            aria-label={gettext("Reveal signing secret for %{url}", url: @endpoint.url)}
+            class="btn btn-sm btn-default px-2 py-0.5 text-xs"
+          >
+            <.icon name="hero-eye" class="size-3.5" />
+            {gettext("Reveal")}
+          </button>
+      <% end %>
+    </div>
+    """
+  end
+
+  # A short secret's last four characters would be most of it, so it shows
+  # dots alone.
+  @mask "••••"
+  defp mask_secret(secret) do
+    if String.length(secret) >= 16, do: @mask <> " " <> String.slice(secret, -4, 4), else: @mask
   end
 
   defp delivery_status_label(:succeeded), do: gettext("Delivered")
@@ -689,6 +877,21 @@ defmodule KilnCMSWeb.WebhookLive do
       </div>
     </div>
     """
+  end
+
+  defp rotate_confirmation do
+    gettext(
+      "Rotate this signing secret? Deliveries start using the new secret now, and the old one stops working, so update the receiver with the new secret."
+    )
+  end
+
+  # Deleting nilifies the deliveries' endpoint (history stays, under the usual
+  # retention), and the delivery worker settles a queued row whose endpoint is
+  # gone as failed rather than sending it.
+  defp delete_confirmation do
+    gettext(
+      "Delete this webhook? Queued deliveries, including retractions, won't be sent. Delivery history is kept."
+    )
   end
 
   defp editing?(nil, _id), do: false

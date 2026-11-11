@@ -8,7 +8,8 @@ list encoded twice, or plain prose where JSON was expected.
 
 `mix kiln.fields.convert` moves those values into a `:group` field, whose
 rows Kiln validates on every write
-([group fields](extending-content.md)). It changes the field's type, so it
+([group fields](extending-content.md)), or into a select holding several
+terms or a list field ([below](#into-a-select-holding-several-terms)). It changes the field's type, so it
 follows **expand / migrate / contract** (`docs/releasing.md`, "Migrations:
 expand, migrate, contract"):
 
@@ -26,7 +27,8 @@ mix kiln.fields.convert <content_type> <source_field> --to <group_field> [option
 | --- | --- |
 | `--apply` | Write. Without it the run is a **dry run** that writes nothing. |
 | `--org SLUG` | The organization to convert (default: the default org). |
-| `--map OLD=NEW` | Rename a key in every row before coercion. Repeatable. `NEW` must be a sub-field. |
+| `--map OLD=NEW` | Rename a key in every row before coercion. Repeatable. `NEW` must be a sub-field. Groups only. |
+| `--lines` | A list or multiple select target only: read a source that is not JSON as one item per line ([below](#into-a-list-of-values)). |
 | `--skip-invalid` | Write the valid records even if some are invalid. The invalid ones keep only their string. |
 | `--overwrite` | Also rewrite records whose group already holds rows. |
 | `--report PATH` | Also write the report as JSON. |
@@ -73,9 +75,22 @@ group repeating first.
 ### All or nothing
 
 The task checks every record before it writes anything. **Nothing is
-written while any record is invalid**, unless you pass `--skip-invalid`. With
-that flag the valid records are written, and the invalid ones keep only their
-old string until you fix them and run the task again.
+written while any live record is invalid**, unless you pass `--skip-invalid`.
+With that flag the valid records are written, and the invalid ones keep only
+their old string until you fix them and run the task again.
+
+A record in the trash never blocks the run. If it does not fit, the report
+lists it with `(trashed)` after its id and slug, and it keeps its string:
+
+```text
+3f2c…  (ashwagandha) (trashed) — unparseable:
+    is not JSON: "Take 2 g twice daily with food"
+1 trashed record(s) keep their string; they do not block --apply.
+```
+
+The site serves only live content, so only live content decides whether a
+run writes. Fix a trashed record you mean to restore, or restore it, fix it
+and run the task again.
 
 The source field is never modified.
 
@@ -91,15 +106,27 @@ you fix the invalid records, running it again converts just those.
 The task visits drafts as well as published records. A live record with a
 pending working copy (its unpublished edits) gets two conversions: the live
 value, and the held copy's own value. Otherwise "Publish changes" would bring
-back a map without the group. Trashed records are skipped: if you restore one
-later, run the task again.
+back a map without the group.
+
+Records in the trash are converted too, after the live ones, so a record
+restored after the contract release still holds the group (#2533). A trashed
+record's write fires nothing: its artifacts were removed when it was
+trashed, and restoring a published one rebuilds them. The report counts these writes
+as `trashed`.
+
+The live records and the trashed ones are two separate reads, so a record
+trashed or restored while the task runs can be missed by both. **Run the
+task once more right before the release that deletes the source field.** A
+second run is cheap: records already converted count as `kept` and are not
+written.
 
 ### What it costs
 
 Each converted record costs the same as `mix kiln.media.resnapshot`:
 
 - one versioned update, which the sync delta API sees as a change;
-- for a published record, one artifact re-fire job on the `:firing` queue.
+- for a published record that is not in the trash, one artifact re-fire job
+  on the `:firing` queue.
 
 There is **no webhook and no notification**. `updated_at` and
 `lock_version` stay unchanged, so an open editor does not hit a stale-record
@@ -124,7 +151,7 @@ Every report — a dry run included — lists the **distinct terms** with their
 counts, and the ones not yet in `options`, most used first:
 
 ```text
-herb: western_properties → properties: scanned 412, would convert 398 (391 published), …
+herb: western_properties → properties: scanned 412, would convert 398 (391 published, 2 trashed), …
 20 distinct term(s), 2 not in the options:
   nervine (14)
   anti-spasmodic (3)
@@ -132,17 +159,43 @@ herb: western_properties → properties: scanned 412, would convert 398 (391 pub
 
 That list is what an admin reviews before deciding: add the terms to
 `options`, or open the vocabulary with `allow_custom`. The JSON report
-(`--report`) carries the same `terms` and `new_terms`.
+(`--report`) carries the same `terms` and `new_terms`. Both include the terms
+of records in the trash: a trashed record can be restored, and its terms
+need to be options too.
 
 Every report also counts the **published** records a run converts: each of
-those writes re-fires the record's artifact.
+those writes re-fires the record's artifact. Records in the trash are not
+among them; `trashed` counts those, and their writes fire nothing.
 
-## Into a list of phrases
+## Into a list of values
 
-A `:string` field with `multiple: true` takes the same JSON arrays of
-strings, with no vocabulary to check. Some importers kept a list as plain
-text, one item per line ("One service per line"); pass `--lines` to read a
-source that is not JSON that way:
+A list field (`multiple: true` on a `:string`, `:integer`, `:float`, `:date`,
+`:datetime`, `:time`, `:url`, `:email`, `:telephone`, `:color` or `:slug`
+field, see
+[Make a field hold a list of values](extending-content.md#make-a-field-hold-a-list-of-values))
+takes a JSON array of its items, or that array encoded again. A list of
+phrases takes strings (`["fatigue","insomnia"]`); a typed list takes its own
+values (`[3, 5]`, `["2026-03-01","2026-03-08"]`). Each item is checked and
+tidied exactly as the field's own save would, so a list of colors stores
+`#FFF` as `#ffffff`, repeats drop out except in a number list, and
+`min_items` / `max_items` apply. An item that does not fit makes the record
+invalid, and the report names it by its position from 1: `item 2 must be a
+date (YYYY-MM-DD)`.
+
+There is no vocabulary to check, so the report lists no terms, and `--map`
+does not apply: items have no keys. The target must already be a list: a
+single typed field is refused before anything is read (`event_dates is a
+single date field — make it a list first`), as is a single `:string` (`… is a
+string field that holds one line — make it a list first`).
+
+```bash
+mix kiln.fields.convert event dates_json --to event_dates
+```
+
+Some importers kept a list as plain text, one item per line ("One service per
+line"); pass `--lines` to read a source that is not JSON that way. It works
+for any list target, a multiple select included, and each line is then
+checked as an item:
 
 ```bash
 mix kiln.fields.convert clinic services_text --to services --lines
@@ -153,7 +206,12 @@ target: prose would otherwise become a one-item list without a word.
 
 Use a **new** field, as for a group. Retyping the old `:text` field into a
 multiple select or a list in place leaves its JSON strings untouched — they are not
-wrapped as one-term lists — and the next save of each record refuses them.
+wrapped as one-item lists — and the next save of each record refuses them.
+The same holds when you retype one list into another (a list of strings into
+a list of dates): the stored items stay as they were, the fields admin says
+so, and the next save of a record refuses an item the new type cannot hold.
+To convert them, run this task from that field into a new list field; the
+source and the target cannot be the same field.
 
 ## Recipe: Verscienta's herb lists
 
@@ -212,7 +270,9 @@ Verscienta stores `dosages`, `safety_warnings`, `drug_interactions` and
 4. Ship the clients reading `custom_fields.dosage_rows`. Until every client
    has moved, they can fall back to parsing `dosages`.
 
-**Release N+1 — contract.** Once no client reads `dosages`, delete the
+**Release N+1 — contract.** Right before it, run step 3 once more, to
+catch a record trashed or restored during the first run. Once no client
+reads `dosages`, delete the
 `dosages` field definition. Deleting it scrubs its stored values from every
 record (`Changes.SyncFieldValues`). If the clients should keep the old key,
 you can then rename `dosage_rows` to `dosages`. A rename moves the stored

@@ -68,3 +68,87 @@ defmodule Kiln.ContractTest.Backend do
   @impl Kiln.ImageBackend
   def url(key), do: "https://img.example/" <> key
 end
+
+defmodule Kiln.ContractTest.Captcha do
+  @moduledoc false
+  use Kiln.Challenge.Provider
+
+  @impl Kiln.Challenge.Provider
+  def id, do: "sdk_captcha"
+
+  @impl Kiln.Challenge.Provider
+  def widget,
+    do: %{script_url: "https://captcha.example/v1/api.js?render=explicit", global: "sdkCaptcha"}
+
+  @impl Kiln.Challenge.Provider
+  def csp_sources,
+    do: %{script_src: ["https://captcha.example/v1/"], frame_src: [], connect_src: []}
+
+  @impl Kiln.Challenge.Provider
+  def verify("good", _opts), do: {:ok, %{hostname: "example.com"}}
+  def verify(_token, _opts), do: {:error, :invalid}
+end
+
+defmodule Kiln.ContractTest.ConfigurableCaptcha do
+  @moduledoc false
+  # One provider module per set of overrides, compiled on demand, so each
+  # conformance case can break exactly one thing.
+  @base [
+    id: "configurable",
+    script_url: "https://captcha.example/v1/api.js",
+    global: "configurable",
+    script_src: ["https://captcha.example/v1/"],
+    frame_src: [],
+    connect_src: []
+  ]
+
+  @widget_keys [
+    :api,
+    :render_options,
+    :action_option,
+    :onload_param,
+    :response_field,
+    :interactive
+  ]
+
+  def with(overrides) do
+    opts = Keyword.merge(@base, overrides)
+    name = Module.concat(__MODULE__, "V#{:erlang.phash2(opts)}")
+
+    unless Code.ensure_loaded?(name) do
+      widget =
+        Map.merge(
+          %{script_url: opts[:script_url], global: opts[:global]},
+          Map.new(Keyword.take(opts, @widget_keys))
+        )
+
+      csp = %{
+        script_src: opts[:script_src],
+        frame_src: opts[:frame_src],
+        connect_src: opts[:connect_src]
+      }
+
+      raising = opts[:raise]
+
+      Module.create(
+        name,
+        quote do
+          use Kiln.Challenge.Provider
+
+          def id, do: unquote(opts[:id])
+
+          def widget do
+            if unquote(raising) == :widget, do: raise("boom")
+            unquote(Macro.escape(widget))
+          end
+
+          def csp_sources, do: unquote(Macro.escape(csp))
+          def verify(_token, _opts), do: {:error, :invalid}
+        end,
+        Macro.Env.location(__ENV__)
+      )
+    end
+
+    name
+  end
+end

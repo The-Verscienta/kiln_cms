@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang={@locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>
+      {if @reason == :unavailable,
+        do: gettext("Temporarily unavailable"),
+        else: gettext("Not available from this network")}
+    </title>
+    <link rel="stylesheet" href={~p"/assets/css/app.css"} />
+  </head>
+  <body class="min-h-screen bg-base-100 text-base-content antialiased">
+    <main class="mx-auto flex min-h-screen max-w-xl items-center px-4 py-12">
+      <section
+        id="admin-allowlist-refused"
+        role="alert"
+        class="w-full rounded-2xl border border-base-content/10 bg-base-200/40 p-6 sm:p-10"
+      >
+        <%= if @reason == :unavailable do %>
+          <h1 class="text-2xl font-semibold tracking-tight text-balance">
+            {gettext("Temporarily unavailable")}
+          </h1>
+          <p class="mt-3 text-base leading-7 text-base-content/70">
+            {gettext("Sign-in is temporarily unavailable. Try again in a minute.")}
+          </p>
+        <% else %>
+          <p class="text-sm font-medium uppercase tracking-[0.2em] text-base-content/70">
+            {gettext("Network not allowed")}
+          </p>
+          <h1 class="mt-3 text-2xl font-semibold tracking-tight text-balance">
+            {gettext("Not available from this network")}
+          </h1>
+          <p class="mt-3 text-base leading-7 text-base-content/70">
+            {gettext(
+              "This site only allows sign-in and its admin console from networks its administrators have approved. Connect through your organisation's network or VPN, or ask a site administrator."
+            )}
+          </p>
+          <p :if={@ip} id="admin-allowlist-refused-address" class="mt-6 text-sm leading-6">
+            {gettext("Your address appears as %{ip}.", ip: @ip)}
+          </p>
+        <% end %>
+        <p class="mt-6 text-sm">
+          <a href={@site_url} class="font-medium underline underline-offset-4">
+            {gettext("Go to the site")}
+          </a>
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

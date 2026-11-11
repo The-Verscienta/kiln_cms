@@ -66,7 +66,7 @@ defmodule KilnCMSWeb.FunnelBuilderLiveTest do
     admin = authed_user(:admin)
     funnel = Analytics.create_funnel!(%{name: "Signup", slug: slug()}, actor: admin)
 
-    assert {:error, {:redirect, %{to: "/"}}} =
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
              conn |> log_in(authed_user(:editor)) |> live(~p"/editor/funnels/#{funnel.id}")
   end
 

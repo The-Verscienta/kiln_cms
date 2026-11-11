@@ -21,6 +21,14 @@ defmodule KilnCMSWeb.AuthSignInForm do
   `KilnCMSWeb.AuthOverridesTest` renders this component with the toggle off and
   upstream's with the same assigns, and asserts the two are identical: an
   upstream change to this form fails that test rather than going stale here.
+
+  ## The human-verification widget (#2249)
+
+  The one other addition: `KilnCMSWeb.ChallengeComponents.challenge_widget/1`
+  above the submit button, which renders nothing until a challenge is needed.
+  `"submit"` is still upstream's; this only reads what the action answered
+  afterwards and shows the widget, with the refusal's reason, when the action
+  asked for a challenge (`KilnCMS.Accounts.Errors.ChallengeRequired`).
   """
   use KilnCMSWeb, :live_component
 
@@ -28,7 +36,7 @@ defmodule KilnCMSWeb.AuthSignInForm do
 
   alias AshAuthentication.Phoenix.Components.Password.Input
   alias AshAuthentication.Phoenix.Web
-  alias KilnCMSWeb.{AuthOverrides, AuthPasswordInput}
+  alias KilnCMSWeb.{AuthIdentityInput, AuthOverrides, AuthPasswordInput, ChallengeComponents}
 
   # Aliased, not spelled out: the template below names it, and inside `~H` a
   # `@`-prefixed name is an assign rather than a module attribute.
@@ -37,7 +45,11 @@ defmodule KilnCMSWeb.AuthSignInForm do
   @impl true
   def update(assigns, socket) do
     {:ok, socket} = Upstream.update(assigns, socket)
-    {:ok, assign_new(socket, :password_reveal, fn -> true end)}
+
+    {:ok,
+     socket
+     |> assign_new(:password_reveal, fn -> true end)
+     |> assign_new(:challenge, fn -> ChallengeComponents.initial(:sign_in, assigns[:context]) end)}
   end
 
   @impl true
@@ -62,13 +74,14 @@ defmodule KilnCMSWeb.AuthSignInForm do
         method="POST"
         class={AuthOverrides.override_for(@overrides, Upstream, :form_class)}
       >
-        <Input.identity_field
+        <AuthIdentityInput.identity_field
           strategy={@strategy}
           form={form}
           overrides={@overrides}
           gettext_fn={@gettext_fn}
         />
         <AuthPasswordInput.password_field
+          autocomplete="current-password"
           strategy={@strategy}
           form={form}
           overrides={@overrides}
@@ -80,6 +93,13 @@ defmodule KilnCMSWeb.AuthSignInForm do
             {render_slot(@inner_block, form)}
           </div>
         <% end %>
+
+        <ChallengeComponents.challenge_widget
+          id={@form.id}
+          state={@challenge}
+          name={form[:challenge_token].name}
+          action={:sign_in}
+        />
 
         <Input.remember_me_field
           :if={@remember_me_field}
@@ -125,5 +145,11 @@ defmodule KilnCMSWeb.AuthSignInForm do
   end
 
   @impl true
+  def handle_event("submit", params, socket) do
+    {:noreply, socket} = Upstream.handle_event("submit", params, socket)
+    source = socket.assigns.form.source
+    {:noreply, update(socket, :challenge, &ChallengeComponents.after_submit(&1, source))}
+  end
+
   def handle_event(event, params, socket), do: Upstream.handle_event(event, params, socket)
 end

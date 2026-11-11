@@ -50,6 +50,55 @@ defmodule KilnCMS.SchemaExport.SwiftCompileTest do
     end
   end
 
+  # Aliases are camel-cased admin field names: the keywords among them are
+  # compiled, not just string-matched.
+  test "GraphQL result types with keyword and clashing aliases still compile", %{dir: dir} do
+    document = %{
+      "$defs" => %{
+        "content_post" => %{
+          "type" => "object",
+          "x-kiln-graphql" => %{"type" => "Post"},
+          "properties" => %{
+            "type" => %{"const" => "post"},
+            "custom_fields" => %{
+              "type" => "object",
+              "additionalProperties" => true,
+              "properties" =>
+                Map.new(
+                  ~w(self class in object hash_value type unknown foo_bar foo__bar title),
+                  &{&1, %{"type" => ["string", "null"], "x-kiln-graphql-kind" => "string"}}
+                )
+                |> Map.put("venue", %{"type" => "object", "x-kiln-graphql-kind" => "geolocation"})
+            }
+          }
+        }
+      }
+    }
+
+    path = Path.join(dir, "AwkwardGraphQL.swift")
+    File.write!(path, SchemaExport.Swift.emit_graphql(document))
+    {out, status} = swiftc(["-typecheck", path])
+    assert status == 0, "AwkwardGraphQL.swift does not type-check:\n#{out}"
+  end
+
+  test "the GraphQL golden compiles and decodes a custom-fields result", %{dir: dir} do
+    binary = Path.join(dir, "graphql")
+
+    {out, status} =
+      swiftc([
+        "-o",
+        binary,
+        Path.join(@fixtures, "full.graphql.swift"),
+        Path.join([@fixtures, "swift_graphql", "main.swift"])
+      ])
+
+    assert status == 0, "the GraphQL golden did not compile:\n#{out}"
+
+    {output, status} = System.cmd(binary, [], stderr_to_stdout: true)
+    assert status == 0, output
+    assert output =~ "swift ok"
+  end
+
   # Admin-named custom fields and select options have no charset rules, so the
   # names the emitter has to rescue are compiled, not just string-matched.
   test "keywords, clashes, escapes and shadowing names still compile", %{dir: dir} do

@@ -15,14 +15,24 @@ defmodule Mix.Tasks.Kiln.RefireAll do
 
   Jobs run through the normal `:firing` Oban queue (bounded concurrency,
   retries); editorial state, versions, and timestamps are untouched.
+
+  By default nothing is announced. `--notify` sends each re-fired document to
+  the webhook endpoints and the change feed as `<type>.updated` with
+  `"reason": "refire"` (#2463), for headless consumers that cache on webhooks
+  rather than revalidate. It does not purge the CDN; purge once the sweep has
+  drained (`KilnCMS.Firing.Sweep.pending/0` is `0`):
+
+      mix kiln.refire_all --notify
+      /app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run(notify: true)"
   """
   use Mix.Task
 
   @requirements ["app.start"]
 
   @impl Mix.Task
-  def run(_args) do
-    counts = KilnCMS.Firing.Sweep.run()
+  def run(args) do
+    {opts, _rest} = OptionParser.parse!(args, strict: [notify: :boolean])
+    counts = KilnCMS.Firing.Sweep.run(notify: Keyword.get(opts, :notify, false))
     total = counts |> Map.values() |> Enum.sum()
 
     Mix.shell().info(

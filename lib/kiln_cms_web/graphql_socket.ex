@@ -21,7 +21,8 @@ defmodule KilnCMSWeb.GraphqlSocket do
     # `/ws/*` gap — see `KilnCMSWeb.SocketJoinBudget`): a connect this
     # deployment is about to refuse anyway still cost a handshake, so it still
     # has to count.
-    with :ok <- KilnCMSWeb.SocketJoinBudget.charge(:gql_join, connect_info) do
+    with :ok <- KilnCMSWeb.IpBlock.check_connect(:gql, connect_info),
+         :ok <- KilnCMSWeb.SocketJoinBudget.charge(:gql_join, connect_info) do
       do_connect(params, socket, connect_info)
     end
   end

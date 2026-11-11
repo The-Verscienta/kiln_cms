@@ -241,6 +241,12 @@ defmodule KilnCMSWeb.SeoComponents do
   def finding_message(%{code: :og_image_missing}, _pinned?),
     do: gettext("No social image — links to this page will share without a preview picture.")
 
+  def finding_message(%{code: :noindex_nav_linked}, _pinned?),
+    do:
+      gettext(
+        "This page is hidden from search engines but a menu links to it. Turn off “Hide from search engines” if that is not intended."
+      )
+
   # ── Links, as an SEO concern (#495) ───────────────────────────────────────
 
   # `Kiln.Advisory.Checks.LinkText` reports into BOTH panels, so these need a

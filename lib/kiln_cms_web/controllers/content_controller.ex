@@ -32,6 +32,7 @@ defmodule KilnCMSWeb.ContentController do
   require Ash.Query
 
   alias KilnCMS.Cache
+  alias KilnCMS.Challenge
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentPassword
   alias KilnCMS.CMS.ContentTypes
@@ -41,11 +42,19 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMS.I18n
   alias KilnCMS.I18n.Fallback
   alias KilnCMS.Seo.Patterns
+  alias KilnCMSWeb.BlockComponents
   alias KilnCMSWeb.ContentLock
   alias KilnCMSWeb.EventIndex
   alias KilnCMSWeb.Params
+  alias KilnCMSWeb.Plugs.ChallengeCsp
+  alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.StructuredData
   alias KilnCMSWeb.ViewTracking
+
+  # Every response here takes its language from the URL, never the session
+  # (#2595): most are `public` and shared-cacheable under that URL. See
+  # `KilnCMSWeb.Plugs.UrlLocale`.
+  plug UrlLocale
 
   # The site root. A site whose Home page (slug `home`, see
   # `KilnCMS.CMS.StarterContent`) is published serves it here, through the
@@ -155,8 +164,62 @@ defmodule KilnCMSWeb.ContentController do
            end) do
       serve(conn, :show, to_string(ct.type), payload, ct, audiences)
     else
-      _ -> follow_redirect_or_404(conn, "/" <> type <> "/" <> slug, ct)
+      _ ->
+        follow_redirect_or_404(conn, "/" <> type <> "/" <> slug, ct, form_page(conn, type, slug))
     end
+  end
+
+  # The standalone page of an active form at `/forms/<slug>` (#2138), as the
+  # funnel's last resort before the 404 — the same slot the event index (#766)
+  # takes for single segments, for the same reason: it can only turn a 404 into
+  # a page, never take a URL from something that already answers there. A site
+  # with a content type of its own at `/forms` keeps its entries, and a path
+  # alias, redirect, lock page or teaser at the address still wins.
+  #
+  # Not a route of its own, and `forms` is not a reserved path segment: either
+  # would have taken `/forms/<slug>` away from such a type outright. Before
+  # this the only browser GET under `/forms/` was the iframe document
+  # (`/forms/:slug/embed`), and the address the editor shows 404ed.
+  #
+  # The form read goes through `KilnCMS.Forms.get_active/2` — the form's own
+  # policies, scoped to this site's org — so an inactive form, or another
+  # site's slug, falls through to the normal 404 and its missed-path tracking.
+  defp form_page(conn, "forms", slug) do
+    fn ->
+      case KilnCMS.Forms.get_active(slug, current_org_id(conn)) do
+        nil -> nil
+        form -> render_form_page(conn, form)
+      end
+    end
+  end
+
+  defp form_page(_conn, _type, _slug), do: fn -> nil end
+
+  defp render_form_page(conn, form) do
+    conn
+    # The page draws the form's human-verification widget when it asks for one
+    # (#2249); only then does the policy allow the provider.
+    |> widen_for_forms([form])
+    # Same window as the event index's: the page changes only when an admin
+    # edits the form, and a form deactivated inside it refuses the POST anyway.
+    |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
+    |> put_resp_header("vary", "Accept-Language")
+    # Matches the embed document's `<meta name="robots" content="noindex">`: a
+    # form is a destination for a link, not a page with content of its own, and
+    # it stays out of the sitemap for the same reason.
+    |> put_resp_header("x-robots-tag", "noindex")
+    |> put_view(KilnCMSWeb.FormHTML)
+    |> render(:show,
+      form: form,
+      # Under `/fr/forms/<slug>` the form posts to `/fr/forms/<slug>`, so the
+      # thank-you page and a refused re-render stay in the page's language.
+      # Pinned, not localized (#2465): the default locale too, unprefixed URL
+      # included (#2595), since an unprefixed POST would take the session's.
+      action: I18n.pinned_path(locale(conn), "/forms/" <> form.slug),
+      current_org: conn.assigns[:current_org],
+      locale: locale(conn),
+      page_title: form.name
+    )
   end
 
   # Serve a payload at its canonical URL: a record with a `path_alias` (#485)
@@ -215,7 +278,7 @@ defmodule KilnCMSWeb.ContentController do
   # would have shown every member a paywall they had already paid past.
   #
   # `fallback` is one last thing to try before the 404 — the event index (#766)
-  # is the only caller that passes one. It sits at the very end deliberately:
+  # and the standalone form page (#2138) are the callers that pass one. It sits at the very end deliberately:
   # a generated listing must never outrank a record that actually resolves at
   # the same URL, and putting it here means the ordering is stated once, in the
   # funnel, rather than inferred from which branch called what.
@@ -367,9 +430,10 @@ defmodule KilnCMSWeb.ContentController do
     # being indexed in the document's place — the canonical below still points at
     # the document's own URL, so nothing about it moves in an index.
     |> put_resp_header("x-robots-tag", "noindex, nofollow")
-    |> put_resp_header("content-language", teaser.locale)
+    |> assign(:robots, "noindex, nofollow")
+    |> put_served_locales(teaser.locale)
     |> put_status(:unauthorized)
-    |> assign(:locale, teaser.locale)
+    |> assign(:content_locale, teaser.locale)
     |> assign(:page_title, teaser.seo_title || teaser.title)
     |> assign(:meta_description, teaser.seo_description)
     |> assign(:og_image, teaser.seo_image)
@@ -382,6 +446,9 @@ defmodule KilnCMSWeb.ContentController do
       unlock_path: path,
       unlock_type: to_string(ct.type),
       unlock_locale: record.locale,
+      # Pinned like a form's action: the re-render after a wrong passphrase
+      # and the redirect after a right one stay in this page's language.
+      unlock_action: I18n.pinned_path(locale(conn), "/_unlock"),
       error: error
     )
   end
@@ -439,8 +506,9 @@ defmodule KilnCMSWeb.ContentController do
     # URL returns the full document for an entitled reader — a shared cache keyed
     # on URL alone would eventually cross the two.
     |> put_private_delivery_headers()
-    |> put_resp_header("content-language", teaser.locale)
-    |> assign(:locale, teaser.locale)
+    |> KilnCMSWeb.Robots.put(teaser)
+    |> put_served_locales(teaser.locale)
+    |> assign(:content_locale, teaser.locale)
     |> assign(:page_title, teaser.seo_title || teaser.title)
     |> assign(:meta_description, teaser.seo_description)
     |> assign(:og_image, teaser.seo_image)
@@ -684,29 +752,46 @@ defmodule KilnCMSWeb.ContentController do
         else:
           KilnCMS.Search.facets(query, authorize?: true, tenant: org_id, locale: locale).categories
 
-    # A sparse result set gets a trigram "did you mean" (published titles
-    # only) — the fuzzy hybrid leg may have rescued a typo's hits, and the
-    # suggestion then names the corrected term. Exact-match queries never
-    # suggest (`Search.suggest/2` skips exact word matches).
-    total = length(results.posts) + length(results.pages) + length(results.entries)
-
-    suggestion =
-      if query != "" and total < 3,
-        do: KilnCMS.Search.suggest(query, authorize?: true, tenant: org_id, locale: locale)
+    suggestion = search_suggestion(query, results, filters, org_id, locale)
 
     conn
     # Don't cache personalized/empty query result pages on shared caches.
     |> put_resp_header("cache-control", "private, no-cache")
     |> assign(:locale, locale)
     |> assign(:page_title, gettext("Search"))
-    |> assign(:locale_links, search_locale_links(locale, query, KilnCMSWeb.Tenant.base_url(org)))
+    |> assign(
+      :locale_links,
+      search_locale_links(locale, query, category_slug(category), KilnCMSWeb.Tenant.base_url(org))
+    )
     |> render(:search,
       query: query,
       results: results,
       suggestion: suggestion,
       facets: facets,
-      active_category: if(is_struct(category), do: category)
+      active_category: if(is_struct(category), do: category),
+      unknown_category?: category == :unknown
     )
+  end
+
+  # A sparse result set gets a trigram "did you mean" (published titles
+  # only) — the fuzzy hybrid leg may have rescued a typo's hits, and the
+  # suggestion then names the corrected term. Exact-match queries never
+  # suggest (`Search.suggest/2` skips exact word matches). Scoped like the
+  # search, so the suggestion's link (which keeps the category) leads
+  # somewhere (#2457).
+  defp search_suggestion("", _results, _filters, _org_id, _locale), do: nil
+
+  defp search_suggestion(query, results, filters, org_id, locale) do
+    total = length(results.posts) + length(results.pages) + length(results.entries)
+
+    if total < 3 do
+      KilnCMS.Search.suggest(query,
+        authorize?: true,
+        tenant: org_id,
+        locale: locale,
+        category_id: filters[:category_id]
+      )
+    end
   end
 
   # Resolve a `?category=` slug world-readably: nil when absent, the category
@@ -719,6 +804,11 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   defp category_filter(_absent, _org_id), do: nil
+
+  # The slug links on the page carry forward (#2457): only a category that
+  # resolved. An unknown one is dropped, so a resubmit searches everything.
+  defp category_slug(%{slug: slug}), do: slug
+  defp category_slug(_none_or_unknown), do: nil
 
   # Dynamic-entry hits as plain view maps: resolve each result's type through
   # the registry for its URL segment and label, dropping hits whose type no
@@ -745,8 +835,8 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   # Language-switcher links to the search page (preserving the query) per locale.
-  defp search_locale_links(current, query, base_url) do
-    suffix = if query == "", do: "", else: "?q=#{URI.encode_www_form(query)}"
+  defp search_locale_links(current, query, category_slug, base_url) do
+    suffix = KilnCMSWeb.ContentHTML.search_params(query, category_slug)
 
     for locale <- I18n.locales() do
       prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"
@@ -814,8 +904,11 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
-  # The requested locale (set by `KilnCMSWeb.Plugs.SetLocale`).
-  defp locale(conn), do: conn.assigns[:locale] || I18n.default_locale()
+  # The requested locale: the URL's prefix or the default, never the session
+  # (#2595, `KilnCMSWeb.Plugs.UrlLocale`). Derived from the URL here too, not
+  # read from `assigns.locale`, so no path through this controller can depend
+  # on whether the plug ran.
+  defp locale(conn), do: UrlLocale.locale(conn)
 
   defp current_org_id(conn), do: KilnCMSWeb.Tenant.current_org_id(conn)
 
@@ -947,20 +1040,30 @@ defmodule KilnCMSWeb.ContentController do
         not is_nil(Map.get(record, :access_password_hash)) or
         Experiments.Delivery.goal_page?(conn)
 
+    # Human verification on a form this page renders (#2249): the policy is
+    # widened only when one draws the widget, and the ETag carries what the
+    # forms render — fields, settings and the provider's site key — so a
+    # client holding a validator sees a form edit. Both before the 304 branch,
+    # so a conditional hit carries the same headers as the full response.
+    challenge = Challenge.config()
+    conn = widen_for_forms(conn, BlockComponents.block_forms(blocks), challenge)
+    forms_digest = forms_digest(blocks, challenge)
+
     conn =
       if private?,
         do: put_private_delivery_headers(conn),
-        else: put_delivery_cache_headers(conn, record)
+        else: put_delivery_cache_headers(conn, record, forms_digest)
 
-    # The locale actually served, which a fallback chain can make differ from
-    # the one in the URL (`/fr-CA/…` answered in French). `<html lang>` already
-    # follows `record.locale`; this is the same fact for HTTP.
-    conn = put_resp_header(conn, "content-language", record.locale)
+    # Both before the 304 branch below, so a conditional hit carries them too.
+    conn = put_served_locales(conn, record.locale)
+
+    # Before the 304 branch below, so a conditional hit carries the same header.
+    conn = KilnCMSWeb.Robots.put(conn, record)
 
     start = System.monotonic_time()
 
     result =
-      if not private? and delivery_fresh?(conn, record) do
+      if not private? and delivery_fresh?(conn, record, forms_digest) do
         send_resp(conn, :not_modified, "")
       else
         render_content_body(conn, template, record, blocks, translations, bylines, ct, variant)
@@ -987,7 +1090,12 @@ defmodule KilnCMSWeb.ContentController do
     base_url = KilnCMSWeb.Tenant.base_url(org)
 
     conn
-    |> assign(:locale, record.locale)
+    # The chrome (`<html lang>`, the header, the menus, the switcher) is in the
+    # reader's language, the URL's (#2595); the article is in the record's,
+    # which a fallback chain can make differ (`/fr/x` answered by an English
+    # record). The templates mark that with `<article lang>`.
+    |> assign(:locale, locale(conn))
+    |> assign(:content_locale, record.locale)
     |> assign(:page_title, record.seo_title || record.title)
     |> assign(:meta_description, record.seo_description)
     |> assign(:meta_keywords, record.seo_keywords)
@@ -1004,16 +1112,65 @@ defmodule KilnCMSWeb.ContentController do
     )
     |> assign(
       :feeds,
-      feed_alternates(ct, org, base_url, record.locale) ++
+      feed_alternates(ct, org, base_url, locale(conn)) ++
         calendar_alternates(ct, org, base_url)
     )
     |> assign(:json_ld, json_ld_script(StructuredData.document(record, ct, org, bylines)))
     |> assign(:bylines, bylines)
     |> assign(:experiment_variant, variant && variant.id)
+    |> render_variant(template, record, blocks, variant, org.id)
+  end
+
+  # A variant that patches blocks can render a form the canonical page does
+  # not (#2249), so its policy is widened from what it actually renders. A
+  # variant render is private — no ETag to keep in step.
+  defp render_variant(conn, template, record, blocks, variant, org_id) do
+    rendered = variant_blocks(record, blocks, variant, org_id, conn)
+
+    conn
+    |> widen_for_forms(BlockComponents.block_forms(rendered))
     |> render(template,
       record: Experiments.Assignment.apply_to_record(record, variant),
-      blocks: variant_blocks(record, blocks, variant, org.id, conn)
+      blocks: rendered
     )
+  end
+
+  defp widen_for_forms(conn, forms, config \\ Challenge.config()) do
+    if Enum.any?(forms, &Challenge.form_required?(config, &1)),
+      do: ChallengeCsp.widen_for_forms(conn, config),
+      else: conn
+  end
+
+  # What the forms on a page render, for its ETag (#2249): each form's id,
+  # `updated_at` and effective challenge, its fields' ids and `updated_at`, and
+  # — when any of them draws the widget — the provider and site key. `""` for a
+  # page with no form, so its ETag is exactly what it was. A form or field
+  # write busts the payload cache (`Changes.BustFormCache`), so these are the
+  # rows the next render reads.
+  defp forms_digest(blocks, config) do
+    forms = blocks |> BlockComponents.block_forms() |> Enum.uniq_by(& &1.id)
+
+    parts =
+      Enum.map(forms, fn form ->
+        fields =
+          case Map.get(form, :fields) do
+            fields when is_list(fields) ->
+              Enum.map_join(fields, ",", &"#{&1.id}@#{&1.updated_at}")
+
+            _not_loaded ->
+              ""
+          end
+
+        challenge = if Challenge.form_required?(config, form), do: "always", else: "off"
+        "#{form.id}@#{form.updated_at}@#{challenge}[#{fields}]"
+      end)
+
+    parts =
+      if Enum.any?(forms, &Challenge.form_required?(config, &1)),
+        do: parts ++ [Challenge.forms_fingerprint(config)],
+        else: parts
+
+    Enum.join(parts, ";")
   end
 
   # Applying the patch to the STORED blocks and re-running the pipeline, rather
@@ -1046,11 +1203,13 @@ defmodule KilnCMSWeb.ContentController do
   # URL and the routed one cannot drift. A type that doesn't syndicate
   # advertises only the site-wide feed; if nothing syndicates, nothing is
   # advertised at all.
-  # Advertised in the locale of the page being read (#720). A French reader on a
-  # French article was being pointed at the default-locale feed, which carries no
-  # article they can read — and the locale feeds exist precisely so that reader
-  # has one. Same reason the paths come from `FeedController`: the advertised URL
-  # and the routed one cannot drift.
+  # Advertised in the reader's locale, the URL's (#720, #2595). A French reader
+  # on a French article was being pointed at the default-locale feed, which
+  # carries no article they can read — and the locale feeds exist precisely so
+  # that reader has one. Part of the chrome: under `/fr/` a fallback article in
+  # English still advertises the French feed, as the header links to `/fr/blog`.
+  # Same reason the paths come from `FeedController`: the advertised URL and
+  # the routed one cannot drift.
   # Whether this type syndicates and whether *anything* does are the same
   # question about the same site's policy (#719), so both are answered from one
   # resolved policy rather than two lookups that could disagree. `syndicated?/2`
@@ -1200,8 +1359,14 @@ defmodule KilnCMSWeb.ContentController do
     # renders live from the block tree rather than from the fired artifact, so
     # the expansion has to happen on this path too. `audiences` is the reader's,
     # and the payload cache is already keyed on it.
+    #
+    # Rendered in the record's locale, not the request's (#2164): the payload
+    # cache builds this in another process, which has no request locale, and
+    # the renderers write reader-facing labels (a code block's) into the HTML.
     tree =
-      record |> expand_fragments(org_id, audiences) |> KilnCMSWeb.BlockComponents.view_blocks()
+      KilnCMS.CodeBlocks.with_content_locale(record.locale, fn ->
+        record |> expand_fragments(org_id, audiences) |> KilnCMSWeb.BlockComponents.view_blocks()
+      end)
 
     flat = flatten_block_tree(tree)
 
@@ -1395,6 +1560,10 @@ defmodule KilnCMSWeb.ContentController do
     # else would list a path whose one-click redirect could never fire.
     KilnCMSWeb.MissedPathTracking.track(path, locale(conn), current_org_id(conn))
 
+    # Probe-shaped 404s feed the scanner guard (#2253). Off unless configured;
+    # delivery 404s only, and it never raises into this render.
+    KilnCMS.Security.ScannerGuard.record_miss(conn, path)
+
     conn
     # A 404 may be an unpublished/draft slug — never let a CDN or browser cache
     # it (it would mask the page once published).
@@ -1410,8 +1579,12 @@ defmodule KilnCMSWeb.ContentController do
 
   # CDN/browser cache headers for published HTML: a short shared max-age with a
   # longer stale-while-revalidate window (the in-BEAM cache is single-node, so
-  # these let a CDN absorb origin load), plus a content ETag for conditional GETs
-  # and `Vary: Accept-Language` since delivery is locale-sensitive.
+  # these let a CDN absorb origin load), plus a content ETag for conditional GETs.
+  #
+  # The language is the URL's (#2595): the path prefix or the default, never
+  # the session, so the URL is the whole cache key. `Vary: Accept-Language`
+  # stays as a published contract (docs/performance.md); delivery does not
+  # read that header today.
   # Personalised or paywalled HTML: never shared-cacheable. `Vary: Cookie` is a
   # belt (CDNs honour it unevenly); `no-store` is the actual control.
   defp put_private_delivery_headers(conn) do
@@ -1420,11 +1593,23 @@ defmodule KilnCMSWeb.ContentController do
     |> put_resp_header("vary", "Cookie, Accept-Language")
   end
 
-  defp put_delivery_cache_headers(conn, record) do
+  defp put_delivery_cache_headers(conn, record, forms_digest) do
     conn
     |> put_resp_header("cache-control", "public, max-age=60, stale-while-revalidate=300")
     |> put_resp_header("vary", "Accept-Language")
-    |> put_resp_header("etag", etag(record, current_org_id(conn)))
+    |> put_resp_header("etag", etag(record, current_org_id(conn), forms_digest, locale(conn)))
+  end
+
+  # `Content-Language` names the reader's language, the URL's: the chrome and
+  # every word Kiln writes around the article are in it (#2595). The article
+  # itself is the record's, which a fallback chain can make differ (`/fr/x`
+  # answered by an English record); `x-kiln-locale` names that, as it does on
+  # the headless APIs. Not `KilnCMSWeb.DeliveryLocale.put_served/2`, which
+  # sets both headers to the record's locale.
+  defp put_served_locales(conn, content_locale) do
+    conn
+    |> put_resp_header("content-language", locale(conn))
+    |> put_resp_header("x-kiln-locale", content_locale)
   end
 
   # The resolved SEO fields are part of the raw string, not just the record's
@@ -1436,18 +1621,36 @@ defmodule KilnCMSWeb.ContentController do
   # autodiscovery, branding, code injection and calendar links live in `<head>`
   # but are not columns on the content row, so a settings save must move the
   # ETag or a revalidating client keeps a 304 body whose links are already wrong.
-  defp etag(record, org_id) do
+  #
+  # `forms_digest` (#2249, `forms_digest/2`) is appended only when the page
+  # renders a form, so every page without one keeps the ETag it had.
+  #
+  # The build is named last (#2463, `KilnCMSWeb.BuildFingerprint`): the page is
+  # rendered by this request's code, so a deploy that changes a template or a
+  # block renderer must move the ETag too, or a revalidating client keeps the
+  # old markup for as long as the content goes unedited.
+  #
+  # The chrome's locale is named too (#2595): `/fr/x` and `/x` can be answered
+  # by the same record, around it French chrome at one and English at the
+  # other, and a validator from one must never 304 a request for the other.
+  defp etag(record, org_id, forms_digest, chrome_locale) do
     raw =
       "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
         ":#{record.seo_title}:#{record.seo_description}" <>
-        ":#{KilnCMS.Cache.head_generation(org_id)}"
+        ":#{KilnCMSWeb.Robots.directive(record)}" <>
+        ":#{KilnCMS.Cache.head_generation(org_id)}" <>
+        if(forms_digest == "", do: "", else: ":" <> forms_digest) <>
+        ":chrome=#{chrome_locale}" <>
+        ":" <> KilnCMSWeb.BuildFingerprint.fingerprint()
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     ~s("#{digest}")
   end
 
-  defp delivery_fresh?(conn, record) do
-    match?([_ | _], get_req_header(conn, "if-none-match")) and
-      etag(record, current_org_id(conn)) in get_req_header(conn, "if-none-match")
+  defp delivery_fresh?(conn, record, forms_digest) do
+    case get_req_header(conn, "if-none-match") do
+      [] -> false
+      validators -> etag(record, current_org_id(conn), forms_digest, locale(conn)) in validators
+    end
   end
 end

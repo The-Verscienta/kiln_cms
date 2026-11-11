@@ -270,6 +270,27 @@ defmodule KilnCMS.Webhooks.TaxonomyEventsTest do
       assert_enqueued(worker: KilnCMS.Federation.AnnounceWorker)
     end
 
+    test "announce: :delivery reaches the endpoints and the change feed only (#2463)", %{
+      org: org,
+      opts: opts
+    } do
+      CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, opts)
+      :ok = KilnCMS.Delivery.Feed.subscribe(org.id)
+      id = Ecto.UUID.generate()
+
+      Webhooks.dispatch("page.updated", %{id: id, state: :published}, org.id, announce: :delivery)
+
+      assert [%{event: "page.updated"}] =
+               CMS.list_webhook_deliveries!(authorize?: false, tenant: org.id)
+
+      KilnCMS.Delivery.Feed.sync(org.id)
+      assert_received {:kiln_feed, %KilnCMS.Delivery.Feed.Event{kind: :updated, id: ^id}}
+
+      refute_enqueued(worker: KilnCMS.Automation.DispatchWorker)
+      refute_enqueued(worker: KilnCMS.Federation.AnnounceWorker)
+      refute_enqueued(worker: KilnCMS.CDN.PurgeWorker)
+    end
+
     test "purges? covers every taxonomy verb, and no more content verbs than before" do
       for event <- WebhookEndpoint.taxonomy_events(), do: assert(KilnCMS.CDN.purges?(event))
 

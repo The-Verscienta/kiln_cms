@@ -52,7 +52,7 @@ mutation API. They grant nothing — every route is still enforced by the Ash
 policies and the API key's access scope — but an anonymous stranger has no need
 of the map. An API key is different: only an admin can mint one, so its holder
 is an integration the site chose, and generating a client against the site's
-own schema is exactly what it needs. Any key works, `read` or `read_write`. A
+own schema is exactly what it needs. Any key works, `read`, `read_write` or `draft_write`. A
 user JWT does not — open registration hands those to anyone.
 
 ```bash
@@ -98,7 +98,9 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Provenance** | `GET /api/provenance/verify/:type/:slug`, `GET /api/provenance/:type/:slug`, `…/verify`, `GET /api/provenance/public-key` | Whether an artifact is `verified`, `tampered` or `unsigned`, and the signed manifests behind the answer. On by default since 1.7; 404 when an operator switches provenance off. | [provenance.md](provenance.md) |
 | **Locales** | `GET /api/locales` | Configured content locales, the default, and each locale's fallback chain. | [§ Locale discovery](#locale-discovery), [§ Locale fallback](#locale-fallback) |
 | **Schema** | `GET /api/schema` | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
-| **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account. | [§ Uploading media](#uploading-media) |
+| **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account (a `draft_write` key is refused). | [§ Uploading media](#uploading-media) |
+| **Key rotation** | `POST /api/keys/rotate` | A drafts-only key with a self-rotation window swaps itself for a fresh one; the old key is revoked. | [headless-consumer-guide.md](headless-consumer-guide.md#keeping-the-key-alive-self-rotation) |
+| **Security posture** | `GET /api/security/posture` | The console's Security posture checks as JSON, for monitoring. A site administrator's JWT or API key (never a `draft_write` key), behind the site's admin allowlist; no check's details. | [§ Security posture (monitoring)](#security-posture-monitoring) |
 | **MCP** | `/mcp` | Model Context Protocol server for LLM authoring clients; **API key required**. | [mcp.md](mcp.md) |
 | **Forms** | `GET /api/forms/:slug`, `POST /api/forms/:slug`, `<script src="…/embed.js">` | A form's schema and JSON submission, or an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
@@ -149,7 +151,8 @@ curl -s -X POST http://localhost:4000/api/auth/sign_in \
 resolved to** — the same per-org authorization boundary the server enforces
 (#419), not a single global role. It therefore **changes with the host you dial**
 (`acme.example.com` vs `beta.example.com`), and is `"none"` on an org where the
-account has no tier. Shape UI on it only for the org you signed in against.
+account has no tier. That includes an org where the account's registration is
+awaiting approval or was rejected (#2251). Shape UI on it only for the org you signed in against.
 
 > The account must already exist with an `:editor` or `:admin` role — signup
 > always creates a `:viewer`. See
@@ -168,6 +171,14 @@ Notes:
 
 - Invalid credentials return a generic **401** (`{"errors": [...]}`) — the
   response never reveals whether the email exists. Missing fields return **422**.
+- After 20 attempts on one address in 15 minutes, sign-in for that address is
+  paused, and the endpoint keeps answering the same **401**
+  `invalid_credentials`, never a 429 or a "locked" code, so a paused account
+  cannot be told from a wrong password. Recovery is browser-only: the person
+  waits, resets their password, or asks for an unlock link at
+  `/sign-in/unlock` ([Lift a sign-in pause by email](account-administration.md#lift-a-sign-in-pause-by-email)).
+  There is no API endpoint to request or redeem an unlock link. Point your
+  app's "can't sign in" help at those pages on the site's host.
 - The endpoint is rate-limited per IP under the tight `auth` bucket (40/min —
   a two-factor sign-in spends two of it, one for the password and one for the
   code).
@@ -176,6 +187,154 @@ Notes:
   log-out-everywhere) takes effect immediately.
 - The browser `/sign-in` LiveView remains the path for the interactive
   admin/editor UI (it establishes a session, not a bearer token).
+- When the site has an [admin allowlist](admin-allowlist.md) turned on, both
+  `/api/auth/sign_in` and `/api/auth/sign_in/verify` answer **403**
+  `network_not_allowed` to a caller outside the listed networks, before the
+  credentials are looked at, and **503** `temporarily_unavailable` (with
+  `retry-after: 30`) when the list cannot be read. This applies to every
+  account, members included, so a single-page app or a mobile app that signs
+  people in from their own devices only works from listed networks while a
+  list is on. Tokens already issued and API keys are not affected, except
+  on [`GET /api/security/posture`](#security-posture-monitoring), which
+  answers only to listed networks whatever the credential.
+- The endpoint accepts an optional `challenge_token`, which is read only when
+  the operator has turned on [human verification](#human-verification) for
+  it. By default it is not, and the endpoint behaves exactly as above.
+
+### Human verification
+
+An operator can ask for a human-verification check (Cloudflare Turnstile,
+Google reCAPTCHA v2 or a plugin's provider) on password sign-in once
+an email address or an IP address has had too many attempts
+([Human verification](human-verification.md)). **`POST /api/auth/sign_in` is
+only challenged when the operator also sets `CHALLENGE_API_SIGN_IN=true`.**
+With that off, which is the default, the endpoint never asks for a check and
+none of the responses below occur.
+
+With it on, three more answers are possible:
+
+| Status | `code` | Meaning | What to do |
+|---|---|---|---|
+| `401` | `challenge_required` | This sign-in needs a check and the request had no `challenge_token`. The password was not checked. | Draw the widget from `meta`, then repeat the request with the token. |
+| `401` | `challenge_failed` | The provider refused the token: wrong, expired, already used, or solved on a host this deployment does not serve. | Draw a fresh widget; a token is good for one request. |
+| `503` | `challenge_unavailable` | The provider could not be reached and this caller's IP address is past the point where Kiln lets sign-ins through without a check. Carries `retry-after: 30`. | Retry later. |
+
+The two `401`s carry what a client needs to draw the widget in the error's
+`meta`:
+
+```json
+{
+  "errors": [
+    {
+      "status": "401",
+      "code": "challenge_required",
+      "detail": "Complete a human-verification challenge.",
+      "meta": {
+        "provider": "turnstile",
+        "site_key": "0x4AAAAAAA...",
+        "script_url": "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit",
+        "global": "turnstile",
+        "onload_param": null,
+        "render_options": {"response-field": false},
+        "action": "sign_in",
+        "action_option": "action",
+        "interactive": false,
+        "api": "explicit_render"
+      }
+    }
+  ]
+}
+```
+
+With reCAPTCHA the same object reads `"provider": "recaptcha"`,
+`"script_url": "https://www.recaptcha.net/recaptcha/api.js?render=explicit"`,
+`"global": "grecaptcha"`, `"onload_param": "onload"`, `"render_options": {}`,
+`"action_option": null` and `"interactive": true`; `action` is still
+`"sign_in"`, but reCAPTCHA's widget takes no action, so don't pass it. Draw
+the widget as [Draw the widget in your own front end](#draw-the-widget-in-your-own-front-end)
+describes, then send its token as a string:
+
+```bash
+curl -s -X POST http://localhost:4000/api/auth/sign_in \
+  -H 'content-type: application/json' \
+  -d '{"email": "editor@example.com", "password": "…", "challenge_token": "<token>"}'
+```
+
+Notes:
+
+- **Branch on `code`, not on the status.** `invalid_credentials` is a `401`
+  too.
+- A `challenge_token` that is not a string is treated as absent.
+- Whether a check is required depends only on attempts against the submitted
+  address and from the caller's IP address, so an address with no account gets
+  the same answer as one with an account.
+- A refused attempt does not spend the account's sign-in budget.
+- The page the widget runs on must be on a host the deployment serves, or one
+  the operator lists in `CHALLENGE_HOSTNAMES`; otherwise every token comes back
+  `challenge_failed`.
+- Failed sign-ins on this endpoint count toward the IP address's failure count
+  even when `CHALLENGE_API_SIGN_IN` is off (it decides when an outage stops
+  letting sign-ins through), but they do not make the browser form ask for a
+  check.
+
+### Draw the widget in your own front end
+
+A sign-in's `meta` and a form schema's `challenge`
+([Human verification on forms](#human-verification-on-forms)) describe the
+widget the same way, whichever provider the operator chose, so one piece of
+browser code draws any of them:
+
+| Key | What to do with it |
+|---|---|
+| `api` | Which browser API the script offers. Today always `"explicit_render"`: `render(element, options)` returning a widget id. Don't draw a widget whose `api` you don't know. |
+| `script_url` | Load it once per page with a `<script>` tag. |
+| `onload_param` | `null`: the script is ready on its `load` event. Otherwise, define a global function, add `<onload_param>=<its name>` to `script_url`'s query, and wait until the script calls it. reCAPTCHA (`"onload"`) defines its global before it can render, so the global being there proves nothing. |
+| `global` | The `window` property the script defines (`"turnstile"`, `"grecaptcha"`). |
+| `render_options` | Pass these to `render`, then add your own. |
+| `site_key` | Pass as `sitekey`. |
+| `action`, `action_option` | When `action_option` is not `null`, pass `action` under that name (`action: "sign_in"` for Turnstile). When it is `null` (reCAPTCHA), pass no action. |
+| `interactive` | `true` when people normally have to click (reCAPTCHA's checkbox). Ask the visitor to complete it rather than waiting for a token to arrive on its own. |
+
+The token arrives in the `callback` you pass `render`.
+
+```js
+// `challenge` is a sign-in's error `meta` or a form schema's `challenge`.
+function drawChallenge(challenge, element, onToken) {
+  if (challenge.api !== "explicit_render") {
+    return Promise.reject(new Error("unsupported human-verification widget"))
+  }
+
+  return new Promise((resolve, reject) => {
+    const render = () => {
+      const options = {...challenge.render_options}
+      if (challenge.action_option) options[challenge.action_option] = challenge.action
+      options.sitekey = challenge.site_key
+      options.callback = onToken
+      resolve(window[challenge.global].render(element, options))
+    }
+
+    let src = challenge.script_url
+    const script = document.createElement("script")
+
+    if (challenge.onload_param) {
+      window.kilnChallengeReady = render
+      src += (src.includes("?") ? "&" : "?") +
+        encodeURIComponent(challenge.onload_param) + "=kilnChallengeReady"
+    } else {
+      script.onload = render
+    }
+
+    script.src = src
+    script.async = true
+    script.onerror = () => reject(new Error("the widget's script did not load"))
+    document.head.appendChild(script)
+  })
+}
+```
+
+Your own page's Content-Security-Policy has to admit the provider's script
+and frame origins, the same ones Kiln adds to its own pages
+([Choose a provider](human-verification.md#choose-a-provider)).
 
 ### Accounts with two-factor authentication
 
@@ -264,13 +423,22 @@ curl -s 'http://localhost:4000/api/json/posts' \
   - **Read + write**: may additionally author content over **all three
     key-authenticated surfaces** — JSON:API (`POST`/`PATCH`/`DELETE`), GraphQL
     (mutations), and MCP (`/mcp`) — as its owning user, within that user's role.
-    An **editor** creates/updates/submits drafts; **return-to-draft, publish,
-    unpublish and (soft-)delete require an admin** — an editor submits for
-    review, and deciding the outcome is the admin's half; the hard delete
+    An **editor** creates/updates/submits drafts; **return-to-draft and
+    (soft-)delete require an admin**, and so do **publish and unpublish**
+    unless the site lets editors publish (Team → Publishing). The same switch
+    covers changing `unpublish_at` or `expiry_action` on a record that is
+    published or scheduled to publish (#2134). The hard delete
     (`:purge`) is never exposed to any key. `/mcp` additionally exposes no publish/delete tools at all (LLM
     authoring is draft-only). See [json-api.md](json-api.md) → "Writing",
     [headless-graphql-api.md](headless-graphql-api.md) → "Mutations", and
     [mcp.md](mcp.md).
+  - **Draft write** (`draft_write`, #2273): for a headless service that submits
+    content for a person to review. It may create drafts and edit **its own**
+    drafts while they are drafts, and nothing else (no transitions, deletes,
+    tags, categories, links or media), whatever its owner's role. Minted on a
+    viewer-tier service account with a short lifetime. A create may carry
+    `X-Kiln-On-Behalf-Of`, stored as provenance, never authorization. See
+    [headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 - **`tag_ids` replaces, it doesn't merge** (#521): sending it on a content write
   overwrites the *entire* tag set, so a partial list detaches every tag not
   named. To attach/detach a subset instead, use `add_tag_ids`/`remove_tag_ids`
@@ -280,6 +448,10 @@ curl -s 'http://localhost:4000/api/json/posts' \
   and [mcp.md](mcp.md) → "Tools".
 - Keys always **expire** and can be **revoked** immediately from the admin UI; an
   expired/revoked key returns **401**.
+- A **drafts-only** (`draft_write`) key minted with a self-rotation window can
+  renew itself: `POST /api/keys/rotate` with the key as the bearer returns a
+  fresh key of the same account, scope and name and revokes the old one. See
+  [headless-consumer-guide.md](headless-consumer-guide.md#keeping-the-key-alive-self-rotation).
 - Works on JSON:API (`/api/json`), GraphQL (`/gql`, incl. the subscription
   WebSocket via the `token` connection param), and MCP (`/mcp`).
 
@@ -312,6 +484,10 @@ surfaces — see [headless-consumer-guide.md](headless-consumer-guide.md) →
 ## Core content endpoints
 
 Full filtering / sorting / pagination reference: **[json-api.md](json-api.md)**.
+Admin-defined custom fields filter and sort on the index routes either as
+`custom_filter[price][gt]=10` / `custom_sort=price` (the stable form) or, when
+no built-in has that name, as `filter[price][gt]=10` / `sort=title,price`; see
+[json-api.md](json-api.md#naming-a-custom-field-like-a-column).
 A quick map:
 
 | Resource  | Collection                  | Single record                   | Extra reads                                   |
@@ -382,8 +558,9 @@ curl -s 'http://localhost:4000/api/content/recipe/pancakes?expand=ingredients'
 - Only targets an **anonymous** reader could fetch are expanded: published,
   public, not passphrase-locked. A draft target is left out as if it were not
   linked, even when the request unlocks the source. The response is the same
-  for every caller, so it keeps `public` cache headers. Its `ETag` also covers
-  the expanded targets, so republishing a target invalidates it.
+  for every caller, so it keeps `public` cache headers. Its `ETag` is a
+  digest of the expanded body, so a republished target that changes what is
+  expanded moves it.
 - `link` is the data stored on the connection (a relationship's link fields),
   passed through as stored; `{}` when the field has none.
 - `target` is `null` for a target that is published but not fired yet; a
@@ -688,6 +865,17 @@ curl -s "http://localhost:4000/api/content/post/$POST_ID/revisions?limit=10" \
   is stored as *changes only*, so the snapshot is folded from every version up
   to that one: the same fold a restore writes back and the editor's compare view
   diffs. Values are in their stored JSON shape (the block tree as typed blocks).
+- **Which custom fields changed.** Custom fields share one `custom_fields`
+  map, so `changed_fields` reports an edit to any of them as the single name
+  `custom_fields` (unchanged), and `changes["custom_fields"]` is the whole new
+  map. The single-revision read adds `changed_custom_fields`: the sorted *keys*
+  whose value was added, removed or edited, found by diffing against the
+  previous revision that carried `custom_fields` (not simply the adjacent row,
+  and an empty map for the first). A revision that did not touch them has `[]`.
+  Revisions written in one transaction share an instant and have random ids, so
+  which counts as the earlier of two is arbitrary. The list does not carry it.
+  The version reads are masked for the caller (private and field-grant-hidden
+  keys are absent), so a key the caller may not see is never named.
 - **The acting user is an id.** User records are not exposed over the API (PII,
   #183); `user_id` is `null` when the write had no actor.
 - **Pagination** is newest first: `?limit=` (1–100, default 20) and an opaque
@@ -701,6 +889,18 @@ curl -s "http://localhost:4000/api/content/post/$POST_ID/revisions?limit=10" \
   `{"data": {"id", "type", "state", "restored_version_id", "revision": {…}}}`.
   A restore that cannot land (a category or media item deleted since that
   version) answers `422` `restore_failed`, naming the field.
+- **A restore that loses a race is refused whole.** The route reads the
+  document and restores onto what it read, and the restore only lands while
+  the row still has that read's `lock_version` and workflow `state` (#2532).
+  A save, publish, unpublish, archive or other write landing in between
+  answers `409` `invalid_state_transition` (*This document changed while the
+  version was being restored, so nothing was restored. Read it again and
+  retry.*) and writes nothing, not even a revision: send the restore again.
+  A document moved to the trash in between answers `404` `not_found`, the
+  same as one trashed before the request. A credential the content policies
+  refuse still gets `403`, whatever raced it. A successful restore increments
+  `lock_version`, so a client holding the document from before it gets a
+  conflict on its next write rather than overwriting the restore.
 
 **Who gets what.** Authorization is the version resources' own policies, with
 your credential as the actor and the request host's org as the tenant:
@@ -711,6 +911,12 @@ your credential as the actor and the request host's org as the tenant:
 | Admin; editor whose read scope covers the type | ✅ | ✅ with a JWT or a **`:read_write`** key |
 | Same, with a **read-only** key | ✅ | `403` — refused by the content policies |
 | Viewer; editor whose `readable_types` leave the type out | `404` | `404` |
+| **`:draft_write`** key on its (viewer-tier) service account | `404`, its own drafts included | `404` |
+| **`:draft_write`** key whose owner was later promoted | as that role | `403` — the key's draft-only bound outlives the promotion |
+
+A `:draft_write` key's policies do let it read the versions of drafts it
+authored (autosave needs that), but only as a per-row filter, and this surface
+serves a document's whole history or nothing, so the revisions API refuses it.
 
 Anything the caller may not read history for is a `404`, never a `403`, whether
 or not the document exists — a document in another org, a document of a
@@ -813,11 +1019,18 @@ item is one of
 
 ```json
 {"op": "upsert", "type": "post", "id": "…", "slug": "hello", "locale": "en",
- "published_at": "…", "updated_at": "…", "artifact": { …the fired surface… }}
+ "published_at": "…", "updated_at": "…",
+ "latest_edit_severity": "critical", "latest_edit_at": "…",
+ "artifact": { …the fired surface… }}
 {"op": "delete", "type": "post", "id": "…"}
 ```
 
 `artifact` is exactly what `GET /api/content/:type/:slug?surface=…` serves.
+`latest_edit_severity` (`critical` / `notable` / `routine`) and `latest_edit_at`
+say how much the document's latest edit to a safety-relevant field mattered and
+when it was made; both are `null` when it has none. They sit beside the
+artifact, not in it (no `format_version` change), and an upsert is re-sent when
+the edit is made. See [json-api.md](json-api.md) → *Change severity*.
 Apply items **in order**, keyed by `id`: an upsert replaces your copy, a delete
 removes it.
 
@@ -850,8 +1063,9 @@ public never appears in a delta at all, not even as an id.
 * **Edits re-send.** Any editorial write to a public document re-sends it,
   even one that did not change the rendered body.
 * **Not seen:** a change that writes no version to the document itself —
-  editing a *fragment* it embeds, or its type's custom-field definitions. Its
-  artifact re-fires, but the document is not reported. A periodic full resync
+  editing a *fragment* it embeds, or its type's custom-field definitions, or
+  an operator re-firing every document after a Kiln upgrade. Its artifact
+  re-fires, but the document is not reported. A periodic full resync
   (`initial=true`) covers that.
 
 **Errors.** `400 invalid_cursor` — the cursor was tampered with, belongs to
@@ -941,6 +1155,12 @@ They are accepted by `GET /api/content/:type/:slug` (and `POST …/unlock`),
   locale. `/api/resolve` and `/api/menus` also carry it as `locale` in the body;
   the artifact `json` surface carries it in the document, and the JSON:API
   resource in `attributes.locale`.
+- **The built-in HTML site is the exception** (#2595). Its pages are in two
+  languages on a fallback: the chrome around the article is in the URL's
+  language and the article in the record's. `x-kiln-locale` names the served
+  document, as above; `Content-Language` names the URL's locale (the prefix,
+  or the default), matching `<html lang>`. Read `x-kiln-locale` if you scrape
+  or proxy these pages.
 - **GraphQL** cannot set a header per field: select `locale` on the result.
 - **ETags** name the served locale, and every cache key in front of Kiln is
   the URL — which carries the *requested* locale and the fallback parameters —
@@ -971,6 +1191,7 @@ curl -s http://localhost:4000/api/schema | jq '.["$defs"] | keys'
 |-----------|--------|
 | `?type=post,page` | Only these content types. An unknown name is a `400`, not a silent full export. |
 | `?blocks=only` | The block union alone — no content types, no database read. |
+| `?format=json\|typescript\|typescript-graphql\|swift-graphql\|kotlin-graphql` | `json` (default) is this document. `typescript` is the same types as a `.d.ts`; `typescript-graphql` is a `.ts` module that adds a GraphQL fragment per type for the typed custom-field readers ([headless-graphql-api.md](headless-graphql-api.md#generate-types-and-fragments-for-your-site)); `swift-graphql` and `kotlin-graphql` are the Swift and Kotlin models of the `json` artifact plus the same fragments (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)). Any other value is a `400` with code `invalid_format`. |
 
 It is **per site**: dynamic content types and custom fields are
 organization-scoped, so the document is built for the org the request host
@@ -990,6 +1211,11 @@ Notable properties:
   added after a document was last saved has no stored value and publishing does
   not invent one, while a point-in-time read (`?as_of=`) serves the values
   stored at that instant — which may include fields since removed;
+- `social`, the document's link-preview title, description and absolute image
+  ([headless-consumer-guide.md](headless-consumer-guide.md#link-previews-the-social-object)),
+  is optional: an artifact fired before `format_version` 4 lacks it until it
+  is re-fired. Inside it, `title` is required (a string or `null`) and
+  `description` and `image` are present only when set;
 - a `required: true` block field is listed in `required` (the key is always
   present) **and** is non-nullable — a container child now runs through the
   same Ash cast a top-level block does (#935), so a nested block cannot carry
@@ -1166,7 +1392,10 @@ carries `x-kilncms-webhook-signature: t=<unix>,v1=<hex>`, an **HMAC-SHA256** of
 that stays the same across retries. Verify the signature and reject a `t` more than
 five minutes from your clock before trusting the payload. The JS and Elixir
 clients ship a `verifyWebhook` / `KilnClient.Webhook.verify/4` helper. Selectable
-events are derived at runtime from every registered content type × verb.
+events are derived at runtime from every registered content type × verb, plus
+the built-in families (forms, memberships, tasks, releases, experiments,
+taxonomy) and the opt-in `security.*` events that carry a site's
+[security alerts](security-alerts.md) (#2245).
 
 **Reliability.** Every delivery is recorded on a ledger shown at
 `/editor/webhooks`: per-attempt status, last HTTP code, and last error. A
@@ -1365,6 +1594,10 @@ Submissions post to the normal `POST /forms/:slug` endpoint and render the
 form's success message inside the iframe. No CORS is involved: the iframe is
 served *from* the CMS origin, so its form post is same-origin.
 
+The iframe document is for framing. To link to a form instead, use its own
+page, **`GET /forms/:slug`** (#2138): the same form inside the site's layout,
+for an active form only. See [Share a form at its own address](forms.md#share-a-form-at-its-own-address).
+
 **Who may embed** is set per form, in the builder's Embed tab, and becomes that
 page's CSP `frame-ancestors`. A form that leaves it alone inherits the
 deployment-wide `EMBED_ORIGINS`:
@@ -1401,6 +1634,64 @@ submission is deliberately CSRF-free. See [forms.md](forms.md#embedding-on-anoth
 
 Inactive or unknown slugs render a framable "Form not found" page (HTTP 404)
 rather than a blank iframe.
+
+### Human verification on forms
+
+A site admin can make a form ask for a human-verification check, drawn by
+the operator's provider (#2249;
+[Public forms](human-verification.md#public-forms)). Nothing below changes
+for a form that does not ask: its schema has `"challenge": null` and its
+answers carry no `challenge` key.
+
+**`GET /api/forms/:slug`** gains `challenge`, `null` or:
+
+| Key | Value |
+|---|---|
+| `required` | `true` |
+| `provider` | `"turnstile"`, `"recaptcha"` or a plugin provider's id |
+| `site_key` | The widget's public site key |
+| `script_url` | The provider's script, for explicit rendering: `https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit` for Turnstile, `https://www.recaptcha.net/recaptcha/api.js?render=explicit` for reCAPTCHA |
+| `global` | The browser global the script defines: `"turnstile"`, `"grecaptcha"` |
+| `onload_param` | `null`, or the query parameter that names the callback the script calls when ready: `"onload"` for reCAPTCHA |
+| `render_options` | Options to pass `render`: `{"response-field": false}` for Turnstile, `{}` for reCAPTCHA |
+| `action` | `"form"` |
+| `action_option` | The `render` option to pass `action` under (`"action"` for Turnstile), or `null` when the widget takes none (reCAPTCHA). A Turnstile token drawn for another action is refused. |
+| `interactive` | `true` when the visitor has to click (reCAPTCHA), `false` otherwise |
+| `api` | `"explicit_render"`, the only kind today |
+| `field` | `"_kiln_challenge"`, the name to send the token under |
+| `without_token` | `"held"`: what happens to a submission without one |
+
+How to use them: [Draw the widget in your own front end](#draw-the-widget-in-your-own-front-end).
+
+`challenge` is `null` too while the operator has forms off
+(`CHALLENGE_FORMS=false`), the kill switch on, or no provider configured,
+whatever the form's own setting.
+
+**`POST /api/forms/:slug`** reads the token from `_kiln_challenge`. When
+that is absent or empty, it reads the field the provider's own markup posts
+(`g-recaptcha-response` with reCAPTCHA, or a plugin provider's own), and
+last `cf-turnstile-response`. Send it as a string.
+For a form that asks, the answer gains `challenge`:
+
+| Status | Body | Meaning |
+|---|---|---|
+| `200` | `{"ok": true, "message": "…", "challenge": "verified"}` | Passed; acted on as usual. |
+| `200` | `{"ok": true, "message": "…", "challenge": "held"}` | Stored for review in Spam, and not acted on: no token, a token solved on a host this deployment does not serve, or the provider could not be asked. |
+| `422` | `{"ok": false, "errors": {"_kiln_challenge": "did not pass the human-verification check"}, "challenge": "failed"}` | The provider refused the token (wrong, expired, already used, malformed, another action). Nothing stored. Draw a fresh widget and send again. With reCAPTCHA, a `422` on every submission usually means the operator's secret key is wrong. |
+
+Field errors come first and do not spend the token: a `422` without
+`challenge` is the usual per-field map. A tripped honeypot answers `200` in
+the same shape as a real submission (`"verified"` when a token was sent,
+`"held"` when not), but nothing is stored and the provider is not asked.
+
+The page that draws the widget must be on a host the deployment serves, or
+one in `CHALLENGE_HOSTNAMES`, and in the provider's key (the Turnstile
+widget's hostnames, or the reCAPTCHA key's domains). Otherwise every
+submission comes back `"held"`, and the server log names the host.
+
+A reCAPTCHA v2 token is not bound to an action: one solved for a form could
+also be spent once on this deployment's sign-in, within its two minutes. The
+hostname is still checked.
 
 ## Image transforms
 
@@ -1500,6 +1791,142 @@ and the default payload has no `explain` key. An explained response is
 `private, no-store` and carries no `ETag`, so a CDN never stores it. The
 cached answer for a search URL is always the plain one.
 
+## Security posture (monitoring)
+
+`GET /api/security/posture` returns the checks of the console's
+[Security posture](security-posture.md) page as JSON (#2521), so an uptime
+monitor or a scheduled job can alert when a security setting is turned off.
+It is the same report as the page, in English, with one difference: a
+check's **Details** (the email addresses and key names the page lists) are
+never included.
+
+### Set up a posture monitor
+
+1. **Pick the account.** It must be an administrator of the site. An
+   administrator of the site gets the site's checks only (`scopes: ["site"]`);
+   a platform administrator also gets the installation's checks
+   (`scopes: ["site", "deployment"]`).
+2. **Mint a key for it.** At **`/editor/api-keys`**, mint a **Read-only**
+   (`read`) key owned by that account
+   ([API keys](#api-keys-third-party-access)). Use `read`, not `read_write`:
+   the posture's own `core.api_keys` check reports a read-write key owned by
+   an administrator as **Fix now**. A `draft_write` key is always refused
+   here, whoever owns it. A bearer JWT from `POST /api/auth/sign_in` works
+   too, but expires.
+3. **Allow the monitor's network.** When the site has an
+   [admin allowlist](admin-allowlist.md) on, this endpoint answers only to
+   listed networks, like the console. Add the monitor's outgoing address or
+   range to the list, or every request is a `403` `network_not_allowed`.
+4. **Call it on the site's host**, as for every other surface: the site is
+   the host's, never a parameter.
+
+```bash
+curl -s https://cms.example.com/api/security/posture \
+  -H "authorization: Bearer $KILN_API_KEY"
+```
+
+```jsonc
+// 200 OK, cache-control: private, no-store
+{
+  "version": 1,
+  "generated_at": "2026-11-10T09:00:00Z",
+  "org_id": "5b1f0c9e-…",
+  "scopes": ["site"],
+  "status": "warn",
+  "counts": {"fail": 0, "warn": 1, "error": 0, "unknown": 0, "pass": 2, "n_a": 1},
+  "checks": [
+    {"id": "core.admin_allowlist", "scope": "site", "source": "core", "plugin": null,
+     "status": "n_a", "title": "Admin allowlist",
+     "summary": "No admin allowlist (optional; useful when administrators sign in from fixed networks).",
+     "fix_path": "/editor/admin-allowlist",
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#admin-allowlist",
+     "facts": {"entries": 0, "operator_disabled": false}, "error": null},
+    {"id": "core.breached_passwords", "scope": "site", "source": "core", "plugin": null,
+     "status": "pass", "title": "Breached passwords",
+     "summary": "A breached password is refused for administrators.",
+     "fix_path": "/editor/password-policy",
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#breached-passwords",
+     "facts": {"admin_policy": "block", "deployment_enabled": true}, "error": null},
+    {"id": "core.idle_timeout", "scope": "site", "source": "core", "plugin": null,
+     "status": "pass", "title": "Idle sign-out", "summary": "Idle browsers are signed out.",
+     "fix_path": "/editor/sessions",
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#idle-sign-out",
+     "facts": {"admin_idle_minutes": 15, "idle_minutes": 30}, "error": null},
+    {"id": "core.second_factor", "scope": "site", "source": "core", "plugin": null,
+     "status": "warn", "title": "Two-step sign-in for administrators and editors",
+     "summary": "1 editor has no authenticator app.",
+     "fix_path": "/editor/settings",
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#two-step-sign-in",
+     "facts": {"admins": 2, "admins_without": 0, "editors": 3, "editors_without": 1}, "error": null}
+  ]
+}
+```
+
+### Posture fields
+
+| Field | What it holds |
+|-------|---------------|
+| `version` | `1`. Changes only for a change that breaks this shape, and only alongside a major release. |
+| `generated_at` | When the checks ran (ISO 8601, UTC, whole seconds). Up to 30 seconds ago for a cached answer. |
+| `org_id` | The site the report is about: the one the request's host resolved to. |
+| `scopes` | `["site"]`, or `["site", "deployment"]` for a platform administrator. |
+| `status` | The worst line: `fail` if any check is `fail`; otherwise `warn` if any is `warn`, `unknown` or `error`; otherwise `pass` (a report of only `n_a` lines is `pass`). The page's summary badge. |
+| `counts` | How many checks have each status. Every key is present, `0` included: `fail`, `warn`, `error`, `unknown`, `pass`, `n_a`. |
+| `checks[].id` | The check's stable id: `core.…` for Kiln's own ([the list](security-posture.md#the-checks)), the plugin's own id otherwise. |
+| `checks[].scope` | `site` or `deployment`. |
+| `checks[].source` | `core`; `plugin` (a plugin's `security_checks/0`, with its name in `plugin`); or `config` (a check listed in `config :kiln_cms, KilnCMS.Security.Posture, checks: [...]`). |
+| `checks[].plugin` | The contributing plugin's name for `source: "plugin"`, otherwise `null`. |
+| `checks[].status` | `pass`, `warn`, `fail`, `unknown`, `n_a`, or `error` when the check produced no result ([what each means](security-posture.md#reading-the-page)). |
+| `checks[].title`, `checks[].summary` | English sentences for a person. `summary` is `null` on an `error` line. |
+| `checks[].fix_path` | The console path of the screen that changes the setting (`/editor/…`), relative to the site's console host. `null` when the setting is an environment variable, and on an `error` line. |
+| `checks[].docs_url` | An `https://` page describing the check. `null` when the check names none, and on an `error` line. |
+| `checks[].facts` | The check's machine-readable values (at most 20): strings, numbers, booleans or `null`. `{}` on an `error` line. |
+| `checks[].error` | Why an `error` line has no result: `crashed`, `timeout`, `invalid_result` or `busy` ([How the checks are run](security-posture.md#how-the-checks-are-run)); `null` otherwise. |
+
+### What a posture consumer can rely on
+
+- **Additive only**, like the [reporting views](reporting.md): a field may be
+  added, never removed, renamed or retyped. `version` changes only for a
+  change that breaks that.
+- **Value sets are open.** `status`, `checks[].status`, `checks[].source`,
+  `checks[].scope` and `checks[].error` hold the values above today, and a
+  later release may add one; `counts` may gain a key. Tolerate a value or key
+  you don't know, and read an unknown status as a warning.
+- **Read a check by its `id`.** `checks` is sorted by `id` today, but the
+  order is not part of the contract. Core ids (`core.…`) and the keys of core
+  checks' `facts` are part of it; a plugin's ids and facts are the plugin's
+  own.
+- **`title` and `summary` are not stable.** They may be reworded in any
+  release; never match on them.
+- **`fix_path` is relative.** Prefix it with the site's console origin to
+  link to the fix.
+- **Answers are cached for up to 30 seconds on each server.** The checks run
+  at most once per site and per scope set every 30 seconds on a node, however
+  many monitors ask, so `generated_at` can be up to 30 seconds old, and a
+  fix made in the console shows after that. The cache is per node: behind a
+  load balancer, two requests a second apart can come from different runs.
+- **Never cached by anyone else.** Every answer, refusals included, carries
+  `cache-control: private, no-store` (the admin allowlist's refusals send
+  `no-store`).
+
+### Posture status codes
+
+A request meets these in order, and the first that applies answers:
+
+| Status | `code` | When |
+|--------|--------|------|
+| `403` | `network_not_allowed` | The site's admin allowlist is on and the request's address is not on it. Checked before the credential, so an off-list caller learns nothing about its key. Recorded in the security log as `admin_access_refused` (sampled). |
+| `503` | `temporarily_unavailable` | The site's admin allowlist could not be read (it fails closed), with `retry-after: 30`. |
+| `429` | `too_many_requests` | The `api` bucket for the client's address is spent ([Rate limits](#rate-limits)), with `retry-after`. |
+| `401` | `invalid_token` | A bearer was sent that is not a valid JWT or API key (unknown, revoked or expired). |
+| `401` | `unauthenticated` | No credential at all, with `www-authenticate: Bearer`. |
+| `403` | `forbidden` | The credential is not an administrator of this site (an editor, a viewer, an administrator of another site, an administrator whose membership is still waiting), or it is a `draft_write` key. |
+| `503` | `temporarily_unavailable` | Three reports of this site are already running on this server, with `retry-after: 5`. Retry after five seconds. |
+| `200` | | The report. |
+
+An unexpected failure answers `500` `internal_server_error`; the server log
+names the error's class and nothing a check said.
+
 ## Caching and CDNs
 
 Every headless read surface tells a shared cache what it may keep, so a CDN in
@@ -1530,14 +1957,25 @@ What the cached responses carry:
   validator (`W/"…"`) so the server can still gzip the response; conditional
   `GET`s compare weakly anyway. A credentialed request never gets a `304` from
   this: it has no `ETag` to match.
-- **A fired artifact's `ETag` is weak too** (`W/"…"`), for the same reason:
-  Kiln gzips the artifact for a client that sends `Accept-Encoding: gzip`. It
-  names the document, locale, surface and publish time (a `?fields=` response
-  is tagged by a digest of its filtered body instead). `If-None-Match` is
-  compared weakly: a `W/` prefix is ignored, a comma-separated list matches if
-  any tag does, and `*` matches. A tag cached from an older Kiln (the same
-  value without `W/`) still revalidates. A passphrase-unlocked document has no
-  `ETag` and is never `304`ed.
+- **A fired artifact's `ETag` is a digest of the body too**, of the
+  response as served: after a `?fields=` cut or an `?expand=`, and of the
+  Markdown for `surface=llm`. It has the form
+  `W/"<id>-<locale>-<surface>-b<digest>"`, with `-<variant id>` appended for
+  an A/B arm, so a tag for one locale, surface or arm never `304`s another.
+  It moves whenever the stored artifact's body changes, including a re-fire
+  after a Kiln upgrade that changes the markup without an edit
+  ([#2463](https://github.com/The-Verscienta/kiln_cms/issues/2463)), and
+  stays put across a republish or re-fire that produced the same body. Treat
+  it as opaque. `Last-Modified` is still the document's last edit, which a
+  re-fire does not move: Kiln answers `304` only on `If-None-Match`, but a
+  cache between you and Kiln that revalidates with `If-Modified-Since` alone
+  can keep a re-rendered body stale until it expires.
+- **The fired artifact's tag is weak** (`W/"…"`) for the same reason as the
+  others: Kiln gzips the artifact for a client that sends
+  `Accept-Encoding: gzip`. `If-None-Match` is compared weakly: a `W/` prefix
+  is ignored, a comma-separated list matches if any tag does, and `*`
+  matches. A passphrase-unlocked document has no `ETag` and is never
+  `304`ed.
 - **`Vary: Accept, Authorization, Origin`** on every response of these
   surfaces, cached or not. `Origin` because the CORS `Access-Control-Allow-Origin`
   header is only sent to a request with an allowed `Origin` — a copy cached from
@@ -1682,7 +2120,7 @@ Over the limit returns **429** with a `retry-after` header.
 
 | Bucket | Endpoints       | Limit (per IP)        |
 |--------|-----------------|-----------------------|
-| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search` | 120 requests / minute |
+| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search`, `GET /api/security/posture` | 120 requests / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth  | 40 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
@@ -1777,13 +2215,18 @@ array**, each entry carrying a string `status` (HTTP code), a machine-readable
 
 This is the JSON:API shape. `status` is always the **numeric** HTTP code as a
 string (`"422"`, never `"unprocessable_entity"`) — safe to `parseInt` — and
-`code` is a stable token you can branch on.
+`code` is a stable token you can branch on. An entry may also carry JSON:API's
+`meta` object with facts a client needs to act on the error, such as the
+widget details on a sign-in's `challenge_required`
+([Human verification](#human-verification)); ignore members you do not use.
 
 You get it from the headless sign-in, fired-artifact (`not_found` /
 `artifact_compiling`), related-content, provenance, form-schema and
 form-submission, visual-editing, media-upload ([§ Upload errors](#upload-errors)),
 version-history (`unauthenticated`, `invalid_id`, `invalid_cursor`,
-`forbidden`, `restore_failed`) and preview-token (`invalid_preview`)
+`forbidden`, `not_found`, `restore_failed`, `invalid_state_transition`), security-posture
+(`network_not_allowed`, `temporarily_unavailable`, `invalid_token`,
+`unauthenticated`, `forbidden`; [§ Posture status codes](#posture-status-codes)) and preview-token (`invalid_preview`)
 endpoints — **and from the 429 when you exceed a rate-limit bucket**
 (`too_many_requests`, alongside `retry-after`). All of them render through one
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
@@ -1799,7 +2242,10 @@ Three responses on these paths are deliberately **not** this envelope:
   spec's `id`, `title` and `source.pointer`.
 - **Field-level validation errors** from `POST /api/forms/:slug` are
   `{"ok": false, "errors": {"<field>": "…"}}` — a per-field map. The envelope
-  says the request failed; this says which input was wrong.
+  says the request failed; this says which input was wrong. A refused
+  human-verification token is reported the same way, under
+  `_kiln_challenge`, with `"challenge": "failed"` beside it
+  ([Human verification on forms](#human-verification-on-forms)).
 - **`GET /api/resolve`**'s 200/301-equivalent and 404 responses are a verdict,
   not an error: `{"status": "ok" | "moved" | "not_found"}`. That `status` is
   the verdict and is *not* an HTTP code. A missing/malformed `?path=` **is**
@@ -1820,6 +2266,10 @@ release**, not the HTTP contract — don't pin behaviour to it.
 - The **published-content read contract**: resource types, their `public?`
   attribute names/types, the JSON:API filter/sort/page semantics, and the fired
   artifact surfaces (`json` / `json_ld` / `web`).
+- The [security posture](#security-posture-monitoring) body
+  (`GET /api/security/posture`): additive only, with its own `version`, open
+  value sets, and `title`/`summary` excluded. See
+  [What a posture consumer can rely on](#what-a-posture-consumer-can-rely-on).
 - Author PII is never exposed (only `authorId` + display `name`); `*BySlug`
   returns published content only. See the consumer guide.
 - A JSON:API GET of an **unpublished** record returns **404** (not 403) for

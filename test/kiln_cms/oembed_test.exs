@@ -1,8 +1,12 @@
 defmodule KilnCMS.OEmbedTest do
   @moduledoc """
   The oEmbed resolver (#489). Most of what matters here is what it *refuses*.
+
+  `async: false` because every test switches the feature on (and one off) in
+  `KilnCMS.OEmbed`'s VM-global config, which content writes and the router's
+  CSP read too (#2380).
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias KilnCMS.OEmbed
   alias KilnCMS.OEmbed.Provider

@@ -9,13 +9,17 @@ and review submissions in the same builder.
 
 - `Form` — name, public `slug`, description, `active` flag, success message,
   optional `notify_email`, optional submitter autoresponder (subject/body +
-  on/off toggle — see Side effects below).
+  on/off toggle — see Side effects below), and `challenge` (`:off`, the
+  default, or `:always`), whether visitors must complete a human-verification
+  check (#2249, see [Abuse protection](#abuse-protection)).
 - `FormField` — machine name (the key in each submission), label, type
   (see [Field types](#field-types)), required flag, options (`select`,
   `radio`, `checkboxes`), `min_value` / `max_value` / `step` (`number`,
   `rating`), help text, order.
 - `FormSubmission` — the coerced `data` map, a moderation `status`
-  (`new`/`reviewed`/`spam`) and `spam_score`, plus a timestamp.
+  (`new`/`reviewed`/`spam`) and `spam_score`, what the human-verification
+  check decided (`challenge`: `passed`, `missing`, `wrong_host`,
+  `unavailable`, or empty when the form asked for none), plus a timestamp.
   **Privacy-first: no IP, no user agent** (rate limiting uses the IP
   transiently). Admin-only to read, moderate, or delete; deleting a form
   removes its submissions.
@@ -83,11 +87,262 @@ The `:form` content block references a form by slug:
 - **On-site** pages render the live form server-side (inputs per field, a
   visually-hidden honeypot) POSTing to `/forms/<slug>`; a successful
   submission shows the form's success message. An inactive form renders
-  nothing (form and field edits clear the delivery cache immediately).
+  nothing (a form or field edit drops the site's cached pages on every node
+  at once, and a page that renders a form carries the form in its `ETag`, so
+  a revalidating client sees the edit too). Kiln's own text in the form (the
+  **Submit** label, "required", **Select…**, error messages, the
+  human-verification widget) is in the article's language, the one its
+  `<article lang>` declares, which a fallback page can make differ from the
+  reader's `<html lang>`. On a multilingual site the block posts to
+  `/<locale>/forms/<slug>` in that language, the default language's included
+  (`/en/forms/<slug>`), so a refused submission re-renders and the thank-you
+  page answers in the language the visitor was reading. A single-language
+  site and the editor previews post to the bare `/forms/<slug>`. A theme
+  stylesheet or analytics rule that matched the form by its `action` should
+  match the `.kiln-form` class instead.
 - **Fired `:web` artifacts** carry `<div data-kiln-form="<slug>"></div>` —
   headless frontends fetch the schema from `GET /api/forms/<slug>` (fields,
-  labels, types, options, honeypot field name, submit URL) and POST JSON to
-  `/api/forms/<slug>` (`{ok: true}` or `{ok: false, errors: {...}}`).
+  labels, types, options, honeypot field name, submit URL, and the
+  human-verification widget's details in `challenge` when the form asks for
+  a check) and POST JSON to `/api/forms/<slug>` (`{ok: true}` or
+  `{ok: false, errors: {...}}`). The placeholder is the same whatever the
+  form's human-verification setting.
+- **The form's own page**, `GET /forms/<slug>` (#2138), renders an active
+  form with no content around it: its name, description and fields inside the
+  site's layout. See [below](#share-a-form-at-its-own-address).
+
+## Edit and rename form fields
+
+Each field has a **label**, which visitors see, and a **machine name**, the
+key its value is stored under in every submission. The machine name is also
+what the CSV export's columns, the `form.submitted` webhook's `data`, the
+`GET /api/forms/<slug>` schema and the autoresponder's `[field:<name>]` tokens
+use. You can change it at any time, but a submission keeps the keys it was
+received with, so read step 5 before renaming a field on a form that already
+has entries.
+
+You need the **admin** role: the Forms pages are admin-only.
+
+1. Open **Forms** (`/editor/forms`) and click the form's name. The builder
+   opens on its **Fields** tab, with the palette (**Add a field**), a preview
+   of the form, and **Field settings** side by side on a wide screen. Each
+   field on the preview shows its machine name in small monospace text under
+   it.
+2. Click a field on the preview. **Field settings** shows its **Label**,
+   **Machine name**, **Type**, **Width**, **Required**, **Default value** and
+   **Help text**, plus **Placeholder** for every type but a checkbox or
+   dropdown, and **Options — one per line** for a dropdown.
+3. Edit a value. Most inputs save as you type or choose; **Machine name**
+   saves when you leave the input. To save straight away, press Enter in any
+   input or click **Save** at the bottom of the panel. After a save that
+   changed something, the panel says **Saved.**, and a new machine name
+   appears under the field on the preview.
+4. If a value is refused, it stays in the input as you typed it, marked as
+   invalid, with the reason underneath. Fix it and save again. A refused value
+   does not hold up the other inputs: a label you change meanwhile still
+   saves. Selecting another field or closing the panel discards the refused
+   value and shows what is stored.
+5. If you renamed a field on a form that has received entries, the panel also
+   says *Entries already received keep the old key “email”.* (with the old
+   name). Kiln does not rewrite stored submissions: entries received before
+   the rename are keyed by the old name, and entries from now on by the new
+   one.
+6. If the **Confirmations** subject or body used the field's old token, the
+   panel also says *The autoresponder now uses [field:full_name] where it used
+   [field:string].* (with the two names). Kiln has rewritten the template in
+   the same save; see
+   [Autoresponder tokens follow a rename](#autoresponder-tokens-follow-a-rename).
+
+For example, renaming `string` to `full_name` on a contact form that has two
+entries and an autoresponder subject of `Thanks, [field:string]!`: the preview
+shows `full_name` under the field, the panel says *Saved.*, *Entries already
+received keep the old key “string”.* and *The autoresponder now uses
+[field:full_name] where it used [field:string].*, the **Confirmations** tab
+shows `Thanks, [field:full_name]!`, and the next submission is stored as
+`{"full_name": "…"}` while the two earlier ones stay `{"string": "…"}`.
+
+### Read entries after a rename
+
+The **Entries** tab lists each submission's values under the current field's
+label, with its machine name beside it, in the order the fields appear on the
+form. A key that no current field has (left by a field that was renamed or
+deleted) is not hidden: it appears in a dashed box headed **From a renamed or
+removed field**, under its raw key.
+
+So after the rename above, the two earlier entries show their value in that
+box under `string`, and new entries show it under the field's label, with
+`full_name` beside it.
+
+**Export CSV** on the same tab keeps the old keys too. After the current
+fields' columns, in form order, it adds one column per old key the exported
+entries carry, headed with the key and ` (renamed or removed)`, sorted by key,
+then `status`, `spam_score` and `submitted_at`. An entry with no value under a
+column leaves that cell empty. After the rename above, the export's header is:
+
+```csv
+full_name,string (renamed or removed),status,spam_score,submitted_at
+```
+
+The two earlier entries have their value in the `string (renamed or
+removed)` column and an empty `full_name`; new entries are the other way
+round. The suffix is always in English, whatever the admin's language,
+because a spreadsheet or import script keys on the header the way it keys on
+the machine names.
+
+The extra columns come only from the entries being exported: with
+**New**, **Reviewed** or **Spam** selected above the list, the export holds
+only those entries (`?status=`), and only their old keys get a column. A
+form whose fields were never renamed or removed, or a filter that leaves no
+entry with an old key, exports exactly the current fields' columns, as
+before.
+
+### Autoresponder tokens follow a rename
+
+Renaming a field rewrites every `[field:<old name>]` token in the
+**Confirmations** subject and body to `[field:<new name>]`, in the same save
+as the rename. Without that, the old token would render empty in every
+confirmation email from then on, because no field has that name any more.
+
+- **Exact tokens only.** Renaming `email` rewrites `[field:email]` and leaves
+  `[field:email2]` alone.
+- **On or off.** A template is rewritten whether **Email the submitter a
+  confirmation** is ticked or not, so switching it on later does not find a
+  token for a field that was only renamed.
+- **One save.** If the template cannot be saved, the rename is refused too,
+  and the field keeps its old name.
+- **Older broken tokens stay.** A token left behind by a field deleted
+  earlier, or by a rename before this release, is not repaired, and it does not
+  hold up the rename of a different field. Fix it in the **Confirmations** tab;
+  while the autoresponder is on, that tab refuses to save until every token
+  names a current field.
+
+The builder reloads the **Confirmations** tab with the rewritten template, so
+a later save there does not write the old token back.
+
+### What a rename does not carry over
+
+- **Headless clients and webhook consumers.** `GET /api/forms/<slug>` and
+  new `form.submitted` payloads carry the new name straight away; a frontend
+  or integration that reads the old key needs changing at the same time.
+- **Reusing an old name.** If you rename `email` to `work_email` and later
+  give another field the machine name `email`, the old entries' `email`
+  values show under that new field on the Entries tab, because the key
+  matches it. **Export CSV** merges them the same way: they land in the
+  `email` column, with no `email (renamed or removed)` column.
+
+Kiln has no option to rewrite the keys in existing entries
+([#2344](https://github.com/The-Verscienta/kiln_cms/issues/2344)).
+
+### Delete a field the autoresponder uses
+
+While the autoresponder is on, Kiln refuses to delete a field whose
+`[field:<name>]` token is in the **Confirmations** subject or body: every
+confirmation from then on would show nothing where the value was. To delete
+such a field (admin role):
+
+1. Click the trash icon on the field in the preview and confirm **Delete this
+   field?**. The field stays, and a message at the corner of the screen says
+   *The autoresponder uses [field:email]: remove it from the Confirmations
+   template first.* (with the field's name).
+2. Open the **Confirmations** tab and either remove the token from **Subject**
+   and **Body**, or untick **Email the submitter a confirmation**. Click
+   **Save**.
+3. Go back to **Fields** and delete the field again. It disappears from the
+   preview.
+
+With the autoresponder off, a field is deleted even if the template names it.
+The token then stays in the template, and the tab refuses to save with the
+autoresponder switched back on until you remove or replace it.
+
+Moving a field to another form (changing its `form_id`, which the builder does
+not offer) is refused the same way while the old form's autoresponder is on and
+uses the field's token, with an error on `form_id`.
+
+### Errors you can see
+
+| Message | Meaning |
+| --- | --- |
+| must be lowercase letters, digits and underscores, starting with a letter | The machine name has a capital, a space, a hyphen or another character outside `a-z`, `0-9` and `_`, or starts with a digit or underscore. |
+| has already been taken | Another field on this form already has that machine name. Machine names are unique per form. |
+| a select field must list at least one option | A dropdown's **Options** box is empty. Enter at least one option, one per line. |
+| The autoresponder uses [field:email]: remove it from the Confirmations template first. | Shown when you delete a field: the autoresponder is on and its subject or body uses this field's token. See [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses). |
+
+An error that belongs to no input in the panel, such as a permission error,
+shows as a message at the corner of the screen instead.
+
+## Share a form at its own address
+
+Every active form has a page of its own at `/forms/<slug>` on the site's
+host, so you can link to it from an email, a social post or a QR code without
+first making a content page to hold a form block. The page shows the form's
+name as its heading, then its description and fields, inside the site's
+header and footer, and posts to the same `POST /forms/<slug>` as a form block.
+
+You need the **admin** role: the Forms pages are admin-only.
+
+1. Open **Forms** in the console (`/editor/forms`). Under *Your forms*, each
+   active form's row lists a **Hosted form** address, which is the form's page
+   (for example `https://www.example.com/forms/contact`), beside its **JSON
+   API** address and its embed code. An inactive form's row says it is not
+   public yet instead.
+2. Click the form's name to open the builder (`/editor/forms/<id>`). Under the
+   form's name in the header you see the same address as a link.
+3. If the header says **Not public while inactive.**, open the **General**
+   tab, tick **Active (accepting submissions)** and click **Save**. The header
+   now shows the address. A new form is active from the start.
+4. Click the address, or **Preview** beside it. The page opens in a new tab,
+   the way a visitor sees it.
+5. Copy the address and share it. A visitor who submits the form sees the
+   form's success message on a thank-you page; a submission with mistakes
+   comes back to the form page with each error shown against its field.
+
+The address follows the form's **Slug** (General tab). Change the slug and
+the old address stops answering, so shared links break; Kiln does not add a
+redirect for it.
+
+On a multilingual site the page answers under each language prefix too:
+`/fr/forms/contact` renders the form in French and posts back to
+`/fr/forms/contact`, so the thank-you page and any error messages stay in
+French. The page's language comes from its address alone: the prefix, or the
+site's default language when there is none, never the visitor's session.
+The default language's prefix is kept on the way back, so `/forms/contact`
+and `/en/forms/contact` both post to `/en/forms/contact` (with English as
+the default): an unprefixed post takes its language from the visitor's
+session and could answer an English page in French. The embed works alike:
+`/fr/forms/contact/embed` posts to `/fr/forms/contact`, `/forms/contact/embed`
+posts to `/en/forms/contact`, and a refused submission re-renders inside the
+frame in the language it was posted under. A single-language site keeps the
+bare `/forms/contact`.
+
+What the page sends with it:
+
+| Header | Value | Why |
+| --- | --- | --- |
+| `Cache-Control` | `public, max-age=60, stale-while-revalidate=300` | The page changes only when an admin edits the form. A form deactivated within that minute refuses the submission anyway. |
+| `Vary` | `Accept-Language` | Kept as published HTML sends it. The text Kiln adds around your form (the default **Submit** label, the site's chrome) follows the address's language prefix, which is already part of the cache key. |
+| `X-Robots-Tag` | `noindex` | A form is somewhere a link sends people, not content to find by search. The embed document carries `noindex` for the same reason, and forms are not listed in `sitemap.xml`. |
+
+The page is not a route of its own. It is the last thing Kiln tries for a
+`/forms/<slug>` address before answering 404, so anything else at that
+address wins: a content type of your own whose path segment is `forms` keeps
+its entries, and a path alias, a redirect, a locked page or a members-only
+teaser at the address is served instead of the form. The form shows only
+when none of those answer.
+
+What can go wrong:
+
+- **404 at `/forms/<slug>`.** The form is inactive, the slug is wrong (slugs
+  are exact, so check the General tab), or the form belongs to another site:
+  each site serves only its own forms, on its own host. The miss is recorded
+  like any other 404, so it shows on the **404s** tab of
+  `/editor/redirects`.
+- **A different page at the address.** Something else answers at
+  `/forms/<slug>` first (above). Give the form another slug, or remove the
+  alias or redirect.
+- **The thank-you page has no site header or footer.** It is a plain card
+  with a **Back** link, the same as after a form block's submission. Only the
+  form page itself and a refused submission's re-render carry the site's
+  layout.
 
 ## Embedding on another site
 
@@ -244,6 +499,18 @@ fetched it in the preceding minute can keep replaying the older, more permissive
 policy after you narrow the list. There is no purge to issue; wait a minute
 before treating a revocation as in force.
 
+**An embedded form that asks for a human-verification check** (#2249) draws
+the widget inside the iframe and loads one small script of its own,
+`/assets/js/challenge_static.js` (the embed never loads `app.js`). Its
+policy then gains the provider's sources in `script-src` and an explicit
+`frame-src 'self' <provider sources>`, on the form, its thank-you page and a
+refused re-render: `https://challenges.cloudflare.com` for Turnstile;
+`https://www.recaptcha.net/recaptcha/` and `https://www.gstatic.com/recaptcha/`
+in `script-src` and `https://www.recaptcha.net/recaptcha/` in `frame-src` for
+reCAPTCHA; a plugin provider's own declared sources. Every other form's
+embed policy is unchanged. The iframe is served from the site's own host, so the token is
+solved there and the parent page's host needs no configuration.
+
 ## Abuse protection
 
 No CSRF on the submission endpoints (they're anonymous, and fired artifacts
@@ -252,7 +519,20 @@ couldn't carry a token). Instead:
 - **honeypot** — a hidden `website` input; a filled honeypot gets a *fake
   success* and stores nothing;
 - **rate limit** — the tight per-IP `form` bucket (20/min);
-- server-side validation of every declared field (unknown keys dropped).
+- server-side validation of every declared field (unknown keys dropped);
+- **human verification** (#2249), per form and off by default: with the
+  form's **General** tab's "Ask visitors to complete a human-verification
+  check" ticked, the form draws the operator's provider's widget
+  (Cloudflare Turnstile, Google reCAPTCHA v2 or a plugin's) and every
+  submission must carry its token. Only after the fields validate and the
+  honeypot is empty is the token checked. A refused token gets the form back
+  (`422`); a submission with no token, one solved on a host the deployment
+  does not serve, or one the provider could not check is **held**: stored as
+  `:spam` and never acted on. With a widget the visitor has to click
+  (reCAPTCHA's checkbox), the first click on submit without a token asks
+  them to complete it ("Complete the check above, then send again.") and the
+  second sends. Needs the operator's provider; see
+  [Public forms](human-verification.md#public-forms).
 
 A browser submission that fails validation gets a `422` carrying the same form
 again (#1683), on-site inside the public layout and embedded inside the iframe
@@ -283,6 +563,15 @@ reaches the autoresponder or the `form.submitted` webhook (see Side effects
 below); everything else about it — CSV export inclusion, retention — is an
 admin decision, not automatic.
 
+A submission **held** by human verification (#2249) has the threshold added
+to its score, so it is always `:spam`. That is done by the scorer itself,
+not by a registry check, so a plugin cannot unregister or reweigh it; checks
+do see the outcome as the `:challenge` fact
+(`Kiln.Forms.SpamCheck.Context.fact/3`: `:passed`, `:missing`,
+`:wrong_host`, `:unavailable`, or `nil` when the form asked for none). The
+Entries tab marks each entry of a form that asks with a **Verified** or
+**Held** badge; the CSV export does not carry it.
+
 The builder's **Entries** tab filters by status, marks a submission
 spam/reviewed individually or in bulk, and exports a CSV
 (`/editor/forms/:id/entries/export.csv`, admin-gated, `?status=` filterable).
@@ -296,7 +585,8 @@ module, declared from the plugin's `spam_checks/0` callback — see
 
 ## Side effects
 
-Each accepted submission that wasn't scored `:spam` optionally mails
+Each accepted submission that wasn't scored `:spam` (held submissions
+included, above) optionally mails
 `notify_email` (Oban `:mail` queue, HTML-escaped), optionally autoresponds to
 the submitter (below), and fires the `form.submitted` webhook event
 (selectable per endpoint at `/editor/webhooks`) with `{form: slug, data: {...}}`; values are typed per the table under [Field types](#field-types), so a `checkboxes` answer is a list and a `number` or `rating` a number.
@@ -321,3 +611,15 @@ Saving with the toggle on requires a non-blank subject and body, both
 referencing only tokens the form currently has; saving with it off skips both
 checks, so a draft template — even one written against a field you haven't
 added yet — never blocks an unrelated save.
+
+The template follows the form's fields (#2343). Renaming a field rewrites its
+exact `[field:<old>]` tokens to `[field:<new>]`, enabled or not, in the
+rename's own transaction (`KilnCMS.CMS.Changes.RewriteAutoresponderTokens` on
+`FormField`'s `:update`); that write skips the token check above, so a stale
+token from an earlier delete cannot refuse the rename of another field.
+Deleting a field, or moving it to another form, is refused while the
+autoresponder is on and uses its token
+(`KilnCMS.CMS.Validations.AutoresponderFieldInUse`). Both live on the resource,
+so every writer of `FormField` gets them, not only the builder. See
+[Autoresponder tokens follow a rename](#autoresponder-tokens-follow-a-rename)
+and [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses).

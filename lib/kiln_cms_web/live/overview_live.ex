@@ -485,7 +485,13 @@ defmodule KilnCMSWeb.OverviewLive do
           icon="hero-exclamation-triangle"
           icon_class="text-error"
         >
-          <span class="block text-sm font-medium">{@backup_headline}</span>
+          <span
+            :for={line <- @backup_headline}
+            data-role="backup-headline"
+            class="block text-sm font-medium"
+          >
+            {line}
+          </span>
           <span class="block text-xs text-base-content/70">
             {gettext(
               "Scheduled backups run from the server's cron job — ask whoever runs this server to check it, or take one now from Backups."
@@ -924,10 +930,10 @@ defmodule KilnCMSWeb.OverviewLive do
   # `assign_backup_warning/1` and left this reading as though the experiment
   # check were the cheap one (#1008 review).
   #
-  # Reads the backup manifest — one small file, no query. Computed at mount
-  # rather than per render, and only the two values the strip needs, so the
-  # whole `Backups.status/0` map isn't held in the socket for a banner that is
-  # usually absent.
+  # Reads the backup manifest (one small file) and a few run rows per
+  # component (#2219). Computed at mount rather than per render, and only the
+  # two values the strip needs, so the whole `Backups.status/0` map isn't held
+  # in the socket for a banner that is usually absent.
 
   # The two ways forward from a backup strip (#1772): the panel (back up now,
   # read the manifest) and the operator guide that owns the schedule.
@@ -1026,7 +1032,10 @@ defmodule KilnCMSWeb.OverviewLive do
     )
   end
 
-  defp assign_backup_warning(socket) do
+  # Platform admins only (#2219): the strips are theirs alone, and the status
+  # reads the run history as well as the manifest, which nobody else's home
+  # page should pay for.
+  defp assign_backup_warning(%{assigns: %{platform_admin?: true}} = socket) do
     status = KilnCMS.Backups.status()
 
     socket
@@ -1034,17 +1043,29 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:backup_headline, backup_headline(status))
   end
 
-  # `:never` — no manifest at all: a deployment that has not had its first
-  # backup, which on day one is expected rather than an incident.
+  defp assign_backup_warning(socket) do
+    socket
+    |> assign(:backup_state, :ok)
+    |> assign(:backup_headline, [])
+  end
+
+  # Per component (#2219).
   #
-  # `:alarm` — NOT `status.stale?` alone. A backup that failed five minutes ago
-  # is not stale — it is recent and worthless — and gating on age let the
+  # `:never` — no component has ever been backed up or tried: a deployment
+  # that has not had its first backup, which on day one is expected rather
+  # than an incident.
+  #
+  # `:alarm` — any component that failed, went stale or was never backed up
+  # while another was. NOT `stale?` alone: a backup that failed five minutes
+  # ago is not stale — it is recent and worthless — and gating on age let the
   # overview stay clean while `/editor/backups` said "The last backup failed".
   # Same trap as `BackupLive.alarming?/1`; it needed fixing in both places.
-  defp backup_state(%{manifest: nil}), do: :never
-
   defp backup_state(status) do
-    if status.stale? or failed?(status), do: :alarm, else: :ok
+    cond do
+      Enum.all?(status.components, fn {_component, cs} -> cs.never? end) -> :never
+      status.stale? or status.failed? -> :alarm
+      true -> :ok
+    end
   end
 
   # "71 published · 1 draft · 3 media items". Published, drafts and media are
@@ -1069,16 +1090,21 @@ defmodule KilnCMSWeb.OverviewLive do
     end
   end
 
-  defp failed?(%{manifest: %{ok: false}}), do: true
-  defp failed?(_status), do: false
+  # One line per component that needs attention, naming it (#2219).
+  defp backup_headline(status) do
+    for component <- status.expected,
+        cs = status.components[component],
+        cs.failed? or cs.stale?,
+        do: component_headline(backup_component(component), cs)
+  end
 
-  defp backup_headline(%{manifest: nil}),
-    do: gettext("No backup has ever been recorded for this deployment.")
+  defp backup_component(:db), do: gettext("database")
+  defp backup_component(:media), do: gettext("media")
 
-  defp backup_headline(%{manifest: %{ok: false}}),
-    do: gettext("The last backup failed.")
+  defp component_headline(component, %{failed?: true}),
+    do: gettext("The last %{component} backup failed.", component: component)
 
-  defp backup_headline(%{manifest: %{finished_at: %DateTime{} = at}}) do
+  defp component_headline(component, %{last_good: %{at: at}}) do
     # Hours below a day: `DateTime.diff(:day)` truncates, so a deployment with
     # `BACKUP_STALE_AFTER_HOURS` under 24 rendered "The last backup was 0 days
     # ago" — a sentence that reads as a bug rather than a warning.
@@ -1086,24 +1112,27 @@ defmodule KilnCMSWeb.OverviewLive do
 
     if hours < 24 do
       ngettext(
-        "The last backup was %{count} hour ago.",
-        "The last backup was %{count} hours ago.",
+        "The last %{component} backup was %{count} hour ago.",
+        "The last %{component} backup was %{count} hours ago.",
         hours,
-        count: hours
+        count: hours,
+        component: component
       )
     else
       days = div(hours, 24)
 
       ngettext(
-        "The last backup was %{count} day ago.",
-        "The last backup was %{count} days ago.",
+        "The last %{component} backup was %{count} day ago.",
+        "The last %{component} backup was %{count} days ago.",
         days,
-        count: days
+        count: days,
+        component: component
       )
     end
   end
 
-  defp backup_headline(_status), do: gettext("The backup status can't be determined.")
+  defp component_headline(component, _never),
+    do: gettext("No %{component} backup has been recorded.", component: component)
 
   defp tiles(assigns), do: Enum.map(@tile_order, &tile_spec(&1, assigns))
 

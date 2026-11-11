@@ -28,7 +28,10 @@ and reads an optional bearer token (`load_from_bearer`). Anonymous requests are 
 supported — they simply run through the resource read policies, which already
 make **published content world-readable and everything else editor-only**. So an
 unauthenticated query can only ever see published content and world-readable
-taxonomy; there is nothing to leak.
+taxonomy; there is nothing to leak. Anonymous means *no* `Authorization` header:
+a bearer token that does not verify (garbled, expired, another instance's) is a
+`401` (`code: "invalid_token"`, `extensions.code: "unauthenticated"`), not an anonymous read (#2161; see
+[`KILN_API_REJECT_INVALID_BEARER`](environment-variables.md)).
 
 ## Design: delivery reads, authenticated writes
 
@@ -55,8 +58,8 @@ from its singular type name. For `post`:
 | `postBySlug` | `:public_by_slug` | `slug: String!`, `locale: String!`, `fallback`, `fallbackLocale` | one published post (or `null`), through the site's locale fallback chain |
 | `postTranslations` | `:published_translations` | `slug: String!` | every published locale variant of a slug |
 | `publishedPosts` | `:published` | `limit`, `offset`, `customFilter`, `customSort` | published posts, newest first, **offset-paginated** (`PageOfPost`) |
-| `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter` | full-text matches, relevance-ranked |
-| `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter` | vector/semantic matches |
+| `searchPosts` | `:search` | `query: String!`, `locale`, `categoryId`, `authorId`, `state`, `tagIds`, `customFilter`, `customSort` | full-text matches, relevance-ranked |
+| `semanticSearchPosts` | `:search_semantic` | `query: String!`, `locale`, `customFilter`, `customSort` | vector/semantic matches |
 | `autocompletePosts` | `:autocomplete` | `prefix: String!`, `locale` | typo-tolerant title suggestions |
 | `searchPublishedPosts` | `:search_published` | as `searchPosts`, minus `state` | published-only full-text matches — the anonymous rule (published, `audience: :public`, unlocked) pinned server-side (#297, #1013) |
 | `semanticSearchPublishedPosts` | `:search_semantic_published` | as `semanticSearchPosts`, minus `state` | published-only semantic matches |
@@ -98,6 +101,90 @@ consumers never need the plain, credential-widened list.
 > under their snake_case names: `customFilter: {tags: {has_all: ["<id>",
 > "<id>"]}, related_posts: {has_none: ["<id>"]}}`. A target the caller may not
 > read (a draft, for an anonymous caller) neither matches nor counts.
+>
+> A list of values (`multiple` on a string, select, number, date, link, …
+> field) takes the same names for its items: `customFilter: {scores: {has:
+> [3, 7], count: {gte: 2}}, event_dates: "2026-03-01"}`. `has_none` matches a
+> record with no value; `not_eq` does not. See
+> [json-api.md → Lists of values](json-api.md#lists-of-values).
+>
+> `customFilter` also takes boolean groups: `customFilter: {_or: [{price: {gt:
+> 100}}, {color: "red"}]}`, `_and`, `_not: {color: "red"}`, and `_native: {title:
+> "Sale"}` inside a condition for built-in columns (snake_case names) — see
+> [json-api.md](json-api.md) → "Boolean groups". `customSort` may put a built-in
+> after a custom key with `_native:`: `customSort: "-price,_native:title"`. A
+> reference or media field is not sortable; the error says why.
+>
+> `customSort` is also an argument of the keyword and semantic search queries
+> (and their `…Published` twins). Precedence: explicit `sort` > `customSort` >
+> relevance or distance > recency. On semantic search a leading custom sort
+> replaces distance ordering and the "name match first" rule. GraphQL has no
+> bare-name form: custom fields are only reachable through `customFilter` /
+> `customSort`.
+
+### Typed filters: `customWhere`
+
+`customWhere` is the typed form of `customFilter`, on every query that takes
+`customFilter`. A condition names a field and gives **exactly one** kind key,
+which must be the field's kind (the one its `customFloat`-style accessor
+reads):
+
+```graphql
+{
+  publishedPosts(
+    limit: 20
+    customWhere: [
+      { name: "price", float: { gt: 10, lte: 50 } }
+      { name: "color", string: { contains: "re" } }
+    ]
+  ) { results { title customFloat(name: "price") } }
+}
+```
+
+| Kind key | For fields of kind | Operators |
+|---|---|---|
+| `string` | `string`, `text`, `url`, `select` | `eq`, `notEq`, `in`, `contains`, `startsWith`, `isNull` |
+| `int` | `integer` | `eq`, `notEq`, `in`, `gt`, `gte`, `lt`, `lte`, `isNull` |
+| `float` | `float` | same as `int` |
+| `boolean` | `boolean` | `eq`, `isNull` |
+| `date` | `date` | same as `int`, with `Date` operands |
+| `dateTime` | `datetime` | same as `int`, with `DateTime` operands |
+
+- Operands are real GraphQL scalars: `float: {gt: "abc"}` fails validation, not
+  the database. Conditions (and the operators in one condition) are ANDed, and
+  they are ANDed with `customFilter` if both are given.
+- A wrong kind (`float:` on a string field), no kind key, or two of them is an
+  error that names the field's kind. A name that is unknown, or private to the
+  reader, is the same `unknown custom field` error.
+- `contains` and `startsWith` ignore case and take their text literally: `%`,
+  `_` and `\` are not wildcards. `customFilter` accepts them too, as
+  `contains` / `starts_with`, on text-like fields.
+- A **list of values** (`multiple` on a string, select, number, date, link, …
+  field) takes the kind of its items, with the list's meaning: `eq` (contains),
+  `notEq` (does not contain), `in` (contains any) and `isNull`. A list of
+  integers is `int: {eq: 10}`, a list of dates `date: {in: ["2026-03-01",
+  "2026-03-08"]}`; a list of URLs, emails, phone numbers, colours, slugs or
+  times is `string`. Another kind is refused (`custom field "scores" is a
+  list of int values, not string; use the int condition`), as is any other
+  operator (`customWhere supports only eq, notEq, in and isNull on it
+  (customFilter also takes has, has_all, has_none and count)`).
+- Not in `customWhere`: `has`, `has_all`, `has_none` and `count` on a list,
+  other `multiple` fields, reference, media, group, geolocation and link
+  fields, and the relationship operators. Use `customFilter` for those.
+  Sorting stays `customSort`; a list is not sortable.
+- Limits: at most 10 conditions per query and 50 values in an `in`; each
+  condition adds 5 to the query's [complexity](#query-cost).
+
+How a custom field's `customFilter` / `customSort` differs from a column's
+`filter` / `sort` (the same vocabulary as JSON:API, full table in
+[json-api.md](json-api.md) → "Naming a custom field like a column"):
+
+| | `customFilter` / `customSort` | `filter` / `sort` |
+|---|---|---|
+| Operators | `eq`, `not_eq`, `gt`, `gte`, `lt`, `lte`, `in`, `ilike` (text only), `contains`, `starts_with` (text only), `null` (`is_nil` is a synonym) | the generated filter input |
+| Unknown name | error `unknown custom field "x"` | rejected by the schema |
+| Sort nulls | last, both directions | plain `asc` / `desc` |
+| Relationship operators | `has`, `has_all`, `has_none`, `count` (also on lists of values) | not available |
 
 ### Relationships: references and referencedBy
 
@@ -155,6 +242,157 @@ query {
 - Nesting is allowed (`target { references(field: …) { … } }`) and is bounded
   by the usual limits below: both fields are priced like any to-many
   relationship.
+
+### Read custom fields typed by kind
+
+`customFields` is one `JsonString` holding every admin-defined field. To read
+a field with a real GraphQL type instead, every content type (`Page`, `Post`, a
+project type, `Entry`) and the `ContentRecord` interface has these readers:
+
+| Field | Returns |
+|-------|---------|
+| `customString(name:)` | `String`: a `string`, `text`, `url`, `select` or `user` field |
+| `customInt(name:)` | `Int`: an `integer` field |
+| `customFloat(name:)` | `Float`: a `float` field |
+| `customBoolean(name:)` | `Boolean`: a `boolean` field |
+| `customDate(name:)` | `Date`: a `date` field |
+| `customDateTime(name:)` | `DateTime`: a `datetime` field |
+| `fields(names: [String!]!)` | `[CustomFieldValue!]!`: any field, including the kinds above that have no accessor |
+
+Use an alias to name the result after the field:
+
+```graphql
+query {
+  postBySlug(slug: "pancakes", locale: "en") {
+    title
+    price: customFloat(name: "price")
+    servings: customInt(name: "servings")
+    fields(names: ["ingredients", "hero_image", "nutrition"]) {
+      __typename
+      name
+      ... on ReferenceValue { ids }
+      ... on MediaValue { id url alt }
+      ... on JsonValue { asJson: value }
+      ... on GroupValue { fields { name ... on FloatValue { asFloat: value } } }
+    }
+  }
+}
+```
+
+**What is typed, and what is not.** The schema is compiled and the same for
+every site, while an admin adds and renames fields at runtime, so a field
+cannot become a GraphQL field of its own (`price: Float`). What is typed is the
+*accessor*: `customFloat(name: "price")` is a `Float` or `null`, and the server
+cannot tell you that `"price"` is misspelled. A typo, a renamed or deleted
+field, a field of another kind, a stored value that no longer fits its
+definition, and a private field read below editor are all `null` (and left out
+of `fields`), never an error. Catch a wrong name at build time with the
+generated types [below](#generate-types-and-fragments-for-your-site).
+
+- `fields(names:)` returns the `CustomFieldValue` interface (`name: String!`).
+  Narrow with `... on FloatValue { value }`. The members are `StringValue`,
+  `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
+  `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
+  `MediaValue` (the shape every surface serves a media item: `id`, `url`,
+  `alt`, `width`, `height`, `mimeType`, `focal`, `variants`),
+  `GeolocationValue { lat lng label zoom }` and `JsonValue { value }`.
+- Alias `value` per member (`asString: value`, `asFloat: value`): GraphQL does
+  not allow one response key to have two types, and the generated fragments do
+  the same.
+- A field with `multiple` is a `ListValue`, whatever its item type: a list
+  of integers is a `ListValue` of `IntValue`s, a list of dates of
+  `DateValue`s, a list of URLs or emails of `StringValue`s. A group
+  is a `GroupValue` of its sub-fields (a repeating group is a `ListValue` of
+  `GroupValue`s), nested to depth 3.
+- A `geolocation` field is a `GeolocationValue`: `lat` and `lng` are floats,
+  `label` (place name) and `zoom` are `null` when not set. A stored value that
+  is not a coordinate (a legacy shape) is left out, as for any other kind.
+- `computed`, `datetime_range` and `recurrence` fields, and a plugin type that does not name a GraphQL kind, are `JsonValue`.
+- **A reference field returns ids only** (`ReferenceValue { ids }`; a
+  `multiple` one is a `ListValue` of `ReferenceValue`s, one id each). For the
+  records, use [`references(field:)`](#relationships-references-and-referencedby).
+- `names` is required and at most 50; more is an error. The cost is 1 plus the
+  selection once per name, and an accessor costs 1, within the usual
+  [limits](#query-cost).
+- Values are the record's own, as `customFields` serves them. A
+  `localization: :fallback` field does **not** inherit along the locale chain
+  here: read the record in the locale whose value you want.
+- A page of records reads the site's field definitions once per content type,
+  not once per record.
+- Filtering and sorting are unchanged: `customFilter` and `customSort` take the
+  same names as before. Only reads are typed.
+- A dynamic content type is an `Entry`; read it with
+  `publishedEntries(filter: {typeName: {eq: "recipe"}})`.
+
+`null` means "not served", not "empty". An unset field, an unknown name and a
+private one look the same on purpose: a client can't learn from the response
+which private fields exist.
+
+### Generate types and fragments for your site
+
+`GET /api/schema` takes a `format` (a closed set; anything else is a `400` with
+code `invalid_format`):
+
+| `format` | Response |
+|----------|----------|
+| `json` (default) | JSON Schema, as before ([api.md](api.md#schema-discovery-typed-clients)) |
+| `typescript` | The same types as a `.d.ts` declaration file |
+| `typescript-graphql` | A `.ts` **module** (the fragments are values): the declarations above plus, per content type, a `<Type>CustomFields` interface and a `<Type>CustomFieldsFragment` string |
+| `swift-graphql` | The Swift models of the `json` artifact plus, per content type, a `<Type>CustomFields` struct with a `fragment` string (*Typed models from GET /api/schema* in [native-apps.md](native-apps.md)) |
+| `kotlin-graphql` | The Kotlin models (package `kiln`) plus, per content type, a `<Type>CustomFields` data class with a `FRAGMENT` string |
+
+Fetch it at build time and commit the file. A recipe for a front end that
+reads with GraphQL:
+
+1. Download the module from the site, with no key for published content:
+
+   ```bash
+   curl -s 'https://cms.example.com/api/schema?format=typescript-graphql&type=post' \
+     -o src/generated/kiln.ts
+   ```
+
+   The file now has `PostCustomFields` and `PostCustomFieldsFragment`. A type
+   with no public custom field has no section, and `?type=` limits the output
+   as it does for JSON.
+2. Spread the fragment in your query:
+
+   ```ts
+   import { PostCustomFieldsFragment, type PostCustomFields } from "./generated/kiln";
+
+   const query = `
+     query ($slug: String!) {
+       postBySlug(slug: $slug, locale: "en") { title ...PostCustomFields }
+     }
+     ${PostCustomFieldsFragment}`;
+
+   type PostResult = { postBySlug: { title: string } & PostCustomFields };
+   ```
+
+3. Read the result. A scalar field is a property named after the field in
+   camelCase (`price` is `price: number | null`, `launch_date` is
+   `launchDate: string | null`), and every other kind arrives in `fields`,
+   narrowed on `__typename`. A name that collides with a record property (such
+   as `title` or `slug`) gets a `custom` prefix (`customTitle`), and two names
+   that camelize alike get a numeric suffix.
+4. Regenerate after an admin adds, renames or removes a field, and fail CI on a
+   diff: the generated names are the site's definitions *now*. The response is
+   cached for five minutes and is refreshed when a content type or field
+   definition is written.
+
+For a dynamic type the fragment is on `Entry`; use it with
+`publishedEntries(filter: {typeName: {eq: "recipe"}})`. The comment above each
+generated type says which. The fragment goes one level into lists and groups.
+Private custom fields are not in the export. An editor whose role hides a
+private field from them
+([granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions))
+gets `null` for it, as for any private field read below editor.
+
+Why the schema types the accessor and the export types the names, and the
+alternatives that were rejected, is in
+[ADR 0016](decisions/0016-the-graphql-schema-types-the-custom-field-accessor-and-a-per-org-export-types-the-names.md).
+
+Not available yet: typed
+filter operators, a per-site schema with a regenerate step, and typed writes.
 
 ### Taxonomy — categories, tags & tag groups
 
@@ -282,8 +520,8 @@ identical; the dynamic tier shares one generic `*_entry` set):
 | `updatePost(id:, input:)` | `:update` | `:read_write` key, editor+ | Edits content; **re-fires** if the record is already published |
 | `submitPostForReview(id:)` | `:submit_for_review` | `:read_write` key, editor+ | draft → in_review |
 | `returnPostToDraft(id:)` | `:return_to_draft` | `:read_write` key, **admin** | in_review → draft — the return half of the approve/return pair |
-| `publishPost(id:)` | `:publish` | `:read_write` key, **admin** | Publishes and fires artifacts |
-| `unpublishPost(id:)` | `:unpublish` | `:read_write` key, **admin** | Takes content down, purges artifacts |
+| `publishPost(id:)` | `:publish` | `:read_write` key, **admin** (or editor where editors may publish) | Publishes and fires artifacts |
+| `unpublishPost(id:)` | `:unpublish` | `:read_write` key, **admin** (or editor where editors may publish) | Takes content down, purges artifacts |
 | `deletePost(id:)` | `:destroy` | `:read_write` key, **admin** | **Reversible** soft-delete (AshArchival) |
 | `addPostReferences(id:, field:, targets:, position:)` | `:update` | `:read_write` key, editor+ | Connects records through a `:reference` field ([below](#writing-relationships)) |
 | `removePostReferences(id:, field:, targets:)` | `:update` | `:read_write` key, editor+ | Disconnects records from a `:reference` field |
@@ -292,10 +530,24 @@ identical; the dynamic tier shares one generic `*_entry` set):
 Authorization mirrors `/mcp` exactly: a **read-only key** can run none of these;
 a **`:read_write` key on a `:viewer`** account can run none (the role has no
 authoring rights); a **`:read_write` key on an `:editor`** account can
-create/update/submit; **return-to-draft, publish, unpublish and delete require an
-`:admin`** account — an editor submits for review, and deciding the outcome
-(approve or return) is the admin's half. The hard delete (`:purge`) is **never** exposed as a mutation and is
+create/update/submit; **return-to-draft and delete require an `:admin`**
+account, and so do **publish and unpublish** unless the site lets editors
+publish (Team → Publishing) — an editor submits for review, and deciding the
+outcome (approve or return) is the admin's half, as is taking content down
+(#2134). So is an `update…` that changes `unpublishAt` or `expiryAction` on a
+record that is published or has `scheduledAt` set. A refused mutation returns
+`result: null` and an authorization error in `errors`, and changes nothing.
+The hard delete (`:purge`) is **never** exposed as a mutation and is
 API-key-banned regardless of scope.
+
+A **`:draft_write` key** (#2273) may run `create…` and `update…` on a draft its
+account authored while it is still a draft, whatever the owner's role; every
+other mutation above is refused, as are the reference, tag, category and media
+mutations. An HTTP `X-Kiln-On-Behalf-Of` header on the create is stored as
+`onBehalfOf` (beside `createdViaKeyId` / `createdViaKeyName`); those fields
+resolve to `null`, with a `forbidden_field` error, for anyone but editors,
+admins and the creating key. See
+[headless-consumer-guide.md](headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 
 ### Media metadata — `updateMediaItem`
 

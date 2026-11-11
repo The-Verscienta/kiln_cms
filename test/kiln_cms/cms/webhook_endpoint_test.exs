@@ -100,4 +100,131 @@ defmodule KilnCMS.CMS.WebhookEndpointTest do
                actor: admin
              )
   end
+
+  describe "rotate_secret (#2347)" do
+    defp endpoint!(admin, opts \\ []) do
+      CMS.create_webhook_endpoint!(
+        %{url: "https://example.test/hook"},
+        [actor: admin] ++ opts
+      )
+    end
+
+    defp user(role) do
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "wh-rot-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: role
+      })
+    end
+
+    test "an admin gets a new secret and the rest of the endpoint is untouched" do
+      admin = admin()
+      endpoint = endpoint!(admin)
+      old = WebhookEndpoint.secret(endpoint)
+      assert is_binary(old)
+
+      stale = Ash.Seed.update!(endpoint, %{consecutive_failures: 3})
+
+      rotated = CMS.rotate_webhook_secret!(stale, actor: admin)
+
+      new = WebhookEndpoint.secret(rotated)
+      assert is_binary(new) and new != old
+      assert rotated.id == endpoint.id
+      assert rotated.inserted_at == endpoint.inserted_at
+      assert rotated.url == endpoint.url
+      assert rotated.events == endpoint.events
+      assert rotated.consecutive_failures == 3
+
+      reloaded = CMS.get_webhook_endpoint!(endpoint.id, actor: admin)
+      assert WebhookEndpoint.secret(reloaded) == new
+    end
+
+    test "editor, viewer, anonymous and the delivery pipeline are refused" do
+      admin = admin()
+      endpoint = endpoint!(admin)
+      old = WebhookEndpoint.secret(endpoint)
+
+      for actor <- [user(:editor), user(:viewer), nil, KilnCMS.Webhooks.system()] do
+        refute CMS.can_rotate_webhook_secret?(actor, endpoint)
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 CMS.rotate_webhook_secret(endpoint, actor: actor)
+      end
+
+      reloaded = CMS.get_webhook_endpoint!(endpoint.id, actor: admin)
+      assert WebhookEndpoint.secret(reloaded) == old
+    end
+
+    test "an admin of another org cannot rotate" do
+      admin = admin()
+
+      org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Org Rotate",
+          slug: "wh-rot-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      endpoint = endpoint!(admin, tenant: org)
+      old = WebhookEndpoint.secret(endpoint)
+      other = admin()
+
+      # Acting in their own site (the console always passes the request's
+      # tenant), the other org's endpoint is out of reach.
+      own = KilnCMS.Accounts.default_org_id()
+
+      assert {:error, _} = CMS.rotate_webhook_secret(endpoint, actor: other, tenant: own)
+
+      reloaded = CMS.get_webhook_endpoint!(endpoint.id, actor: admin, tenant: org)
+      assert WebhookEndpoint.secret(reloaded) == old
+    end
+
+    test "a url passed to the action is rejected and the url is unchanged" do
+      admin = admin()
+      endpoint = endpoint!(admin)
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.rotate_webhook_secret(endpoint, %{url: "https://evil.test/x"}, actor: admin)
+
+      reloaded = CMS.get_webhook_endpoint!(endpoint.id, actor: admin)
+      assert reloaded.url == "https://example.test/hook"
+    end
+
+    test "an endpoint whose ciphertext no longer opens can be rotated" do
+      admin = admin()
+      endpoint = endpoint!(admin)
+      broken = Ash.Seed.update!(endpoint, %{secret_encrypted: "not-a-ciphertext"})
+      assert WebhookEndpoint.secret(broken) == nil
+
+      rotated = CMS.rotate_webhook_secret!(broken, actor: admin)
+      assert is_binary(WebhookEndpoint.secret(rotated))
+    end
+  end
+
+  describe "security events (#2245)" do
+    test "a site's endpoint can subscribe to the site alert kinds and the silencing notice" do
+      events = WebhookEndpoint.events()
+
+      for kind <- KilnCMS.Security.Alerts.site_kinds(),
+          do: assert("security.#{kind}" in events)
+
+      assert "security.alerts_silenced" in events
+      assert WebhookEndpoint.security_events() == KilnCMS.Security.Alerts.webhook_events()
+    end
+
+    test "platform kinds are not webhook events, and none is subscribed by default" do
+      events = WebhookEndpoint.events()
+
+      for kind <- [:platform_role_changed, :new_api_key, :api_key_abuse],
+          do: refute("security.#{kind}" in events)
+
+      refute Enum.any?(WebhookEndpoint.default_events(), &String.starts_with?(&1, "security."))
+    end
+
+    test "they are domain events, reserving the `security` namespace" do
+      assert "security.lockout" in WebhookEndpoint.domain_events()
+      assert "security" in WebhookEndpoint.reserved_namespaces()
+    end
+  end
 end

@@ -38,6 +38,13 @@ defmodule KilnCMS.Accounts.Scoping do
   get (role loaded alongside), memoized per process for a few seconds
   (several checks run per request), and short-circuits for non-editor actors
   — the anonymous delivery hot path never pays it.
+
+  **Only an `:active` membership grants anything** (#2251). A registration
+  awaiting approval (`:pending`) or turned away (`:rejected`) is a membership
+  row, so it still makes the account *affiliated* — `:none` on every other
+  site, the default org included — but on its own site it resolves to no tier,
+  no audiences, a `:denied` scope and an empty grant, exactly what a foreign
+  org gets.
   """
 
   require Ash.Query
@@ -118,20 +125,42 @@ defmodule KilnCMS.Accounts.Scoping do
         ) :: [String.t()] | nil
   def field_grant(_actor, _subject, nil), do: nil
 
-  def field_grant(actor, subject, type_name) do
+  def field_grant(actor, subject, type_name),
+    do: resolve_grant(actor, subject, type_name, :field_grants)
+
+  # Membership → role → user, per type key, for either grant map.
+  defp resolve_grant(actor, subject, type_name, attribute) do
     case affiliation(actor, subject_org_id(subject)) do
-      {:member, membership} ->
-        grant_key(membership, type_name) ||
-          grant_key(role_of(membership), type_name) ||
-          grant_key(actor, type_name)
+      {:member, %{status: :active} = membership} ->
+        grant_key(membership, type_name, attribute) ||
+          grant_key(role_of(membership), type_name, attribute) ||
+          grant_key(actor, type_name, attribute)
 
       :unaffiliated ->
-        grant_key(actor, type_name)
+        grant_key(actor, type_name, attribute)
 
-      :foreign_org ->
+      # A foreign org, or a registration not (yet) approved here.
+      _none ->
         []
     end
   end
+
+  @doc """
+  The actor's effective per-custom-field READ restriction for `type_name`
+  (#2281): the same shape and the same membership → role → user resolution as
+  `field_grant/3`, over `field_read_grants`. `nil` means unrestricted, a list
+  names the private custom fields that stay visible (`[]` hides all of them),
+  and a foreign-org actor gets `[]`. See `KilnCMS.CMS.FieldAccess`.
+  """
+  @spec field_read_grant(
+          map(),
+          Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil,
+          String.t() | nil
+        ) :: [String.t()] | nil
+  def field_read_grant(_actor, _subject, nil), do: nil
+
+  def field_read_grant(actor, subject, type_name),
+    do: resolve_grant(actor, subject, type_name, :field_read_grants)
 
   @doc """
   The consumer **audiences** the actor holds on the org the subject runs under
@@ -165,7 +194,10 @@ defmodule KilnCMS.Accounts.Scoping do
 
   def audiences(actor, subject) do
     case affiliation(actor, audience_org_id(subject)) do
-      {:member, membership} -> list_of(membership, :audiences)
+      {:member, %{status: :active} = membership} -> list_of(membership, :audiences)
+      # A registration awaiting approval reads nothing gated, whatever its row
+      # holds (#2251).
+      {:member, _not_active} -> []
       :unaffiliated -> []
       :foreign_org -> []
     end
@@ -215,21 +247,168 @@ defmodule KilnCMS.Accounts.Scoping do
           map() | nil,
           Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
         ) :: :admin | :editor | :viewer | :none
-  def effective_tier(%{} = actor, subject) do
-    if RoleGrant.effective_role(actor) == :admin,
-      do: :admin,
-      else: member_tier(actor, subject)
+  def effective_tier(actor, subject), do: elem(tier_source(actor, subject), 0)
+
+  @typedoc "Which branch of `effective_tier/2` decided a tier."
+  @type tier_source :: :platform | :member | :legacy | :none
+
+  @typedoc "A tier and the row whose grant columns govern it — see `tier_source/2`."
+  @type sourced_tier :: {:admin | :editor | :viewer | :none, tier_source(), map() | nil}
+
+  @typedoc "One change ahead: at `at`, the tier becomes `tier`."
+  @type tier_change :: {DateTime.t(), :admin | :editor | :viewer | :none}
+
+  @doc """
+  `effective_tier/2` together with **where it came from** — for a page that has
+  to explain a tier, not only act on it (#2142).
+
+  Returns `{tier, source, record}`:
+
+    * `{:admin, :platform, user}` — a platform admin, standing or by a live
+      grant on the user;
+    * `{tier, :member, membership}` — the membership's tier on this org;
+    * `{:none, :member, membership}` — a membership on this org that is not
+      `:active` (a registration awaiting approval, or rejected, #2251): the row
+      is the source, and it grants nothing;
+    * `{tier, :legacy, user}` — a membership-less account on the default org,
+      from `User.role`;
+    * `{:none, :none, nil}` — no tier here (foreign org, a membership-less
+      account off the default org, no actor).
+
+  `record` is the row whose grant columns govern the tier. `effective_tier/2`
+  IS `elem(tier_source(actor, subject), 0)`, so a page rendering from this
+  cannot disagree with the decision it describes.
+  """
+  @spec tier_source(
+          map() | nil,
+          Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
+        ) :: sourced_tier()
+  def tier_source(%{} = actor, subject) do
+    decide(actor, fn ->
+      org = subject_org_id(subject)
+      {org, affiliation(actor, org)}
+    end)
   end
 
-  def effective_tier(_actor, _subject), do: :none
+  def tier_source(_actor, _subject), do: {:none, :none, nil}
 
-  defp member_tier(actor, subject) do
+  @doc """
+  `tier_source/2` for a page that has just read the user's membership on
+  `org_id` itself (`nil`: none there) — the team page, an account's sites.
+
+  The same decision, fed the given row instead of the memoized lookup the
+  policy checks share, so a page that re-reads after a write shows the tier the
+  write left rather than one remembered from a few seconds before. Display only:
+  no policy check calls it.
+  """
+  @spec tier_source_for_membership(map(), struct() | String.t() | nil, map() | nil) ::
+          sourced_tier()
+  def tier_source_for_membership(%{} = user, org, membership),
+    do: decide(user, fn -> {subject_org_id(org), loaded_affiliation(user, membership)} end)
+
+  @doc """
+  The changes ahead in `effective_tier/2` as the live grants behind it expire —
+  the "until Friday, then viewer" of a temporary tier (#2142). `[]` when nothing
+  is due to change.
+
+  Each grant that is live now (the user's, and the membership's on this org)
+  expires at its own time; at each expiry the tier is decided again with every
+  grant expired by then removed, and a change is listed only when the tier
+  actually differs from the one before it. So a temporary platform admin whose
+  membership here is standing admin has no change ahead, and one whose live
+  membership grant outlasts the platform grant steps down through it.
+  Display only — no decision consults it.
+  """
+  @spec tier_changes(
+          map() | nil,
+          Ash.Query.t() | Ash.Changeset.t() | struct() | String.t() | nil
+        ) :: [tier_change()]
+  def tier_changes(%{} = actor, subject) do
     org = subject_org_id(subject)
+    changes(actor, org, affiliation(actor, org))
+  end
 
-    case affiliation(actor, org) do
-      {:member, membership} -> RoleGrant.effective_role(membership)
-      :unaffiliated -> legacy_tier(actor, org)
-      :foreign_org -> :none
+  def tier_changes(_actor, _subject), do: []
+
+  @doc "`tier_changes/2` from an already-read membership, as `tier_source_for_membership/3`."
+  @spec tier_changes_for_membership(map(), struct() | String.t() | nil, map() | nil) ::
+          [tier_change()]
+  def tier_changes_for_membership(%{} = user, org, membership),
+    do: changes(user, subject_org_id(org), loaded_affiliation(user, membership))
+
+  # The one decision every entry point shares. `resolve` returns `{org_id,
+  # affiliation}` and is a thunk so the platform branch — most policy checks'
+  # hot path — pays neither the org resolution nor the membership lookup.
+  defp decide(actor, resolve) do
+    if RoleGrant.effective_role(actor) == :admin,
+      do: {:admin, :platform, actor},
+      else: member_tier(actor, resolve.())
+  end
+
+  defp member_tier(actor, {org, affiliation}) do
+    case affiliation do
+      {:member, %{status: :active} = membership} ->
+        {RoleGrant.effective_role(membership), :member, membership}
+
+      # A registration awaiting approval, or rejected (#2251): the row is the
+      # source, and it grants nothing.
+      {:member, membership} ->
+        {:none, :member, membership}
+
+      :unaffiliated ->
+        legacy_tier(actor, org)
+
+      :foreign_org ->
+        {:none, :none, nil}
+    end
+  end
+
+  defp loaded_affiliation(_user, %{} = membership), do: {:member, membership}
+
+  # No membership on this org: whether the user holds one elsewhere decides
+  # foreign-org vs legacy — asked now, not from the memo.
+  defp loaded_affiliation(%{id: user_id}, nil) when is_binary(user_id),
+    do: if(any_membership?(user_id), do: :foreign_org, else: :unaffiliated)
+
+  defp loaded_affiliation(_user, nil), do: :unaffiliated
+
+  defp changes(actor, org, affiliation) do
+    membership =
+      case affiliation do
+        {:member, membership} -> membership
+        _other -> nil
+      end
+
+    {current, _source, _record} = decide(actor, fn -> {org, affiliation} end)
+
+    [actor, membership]
+    |> Enum.filter(&(is_map(&1) and RoleGrant.live?(&1)))
+    |> Enum.map(& &1.granted_role_expires_at)
+    |> Enum.sort(DateTime)
+    |> Enum.dedup_by(&DateTime.to_unix(&1, :microsecond))
+    |> Enum.map_reduce(current, fn at, previous ->
+      actor_then = expire_by(actor, at)
+
+      affiliation_then =
+        if membership, do: {:member, expire_by(membership, at)}, else: affiliation
+
+      {tier, _source, _record} = decide(actor_then, fn -> {org, affiliation_then} end)
+      {if(tier != previous, do: {at, tier}), tier}
+    end)
+    |> elem(0)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # `record` as it will be at `at`: a grant expiring by then is gone.
+  defp expire_by(record, at) do
+    case Map.get(record, :granted_role_expires_at) do
+      %DateTime{} = expires_at ->
+        if DateTime.compare(expires_at, at) == :gt,
+          do: record,
+          else: Map.merge(record, %{granted_role: nil, granted_role_expires_at: nil})
+
+      _none ->
+        record
     end
   end
 
@@ -254,6 +433,20 @@ defmodule KilnCMS.Accounts.Scoping do
   """
   @spec users_with_tier(struct() | String.t() | nil, [:admin | :editor | :viewer]) :: [struct()]
   def users_with_tier(org, tiers) when is_list(tiers) do
+    # authorize?: false — a roster over every account (who to notify, who may
+    # review). A system grant on `Accounts.User` would be a standing read of
+    # every account on the deployment — wider than this query (#1402).
+    org |> users_with_tier_query(tiers) |> Ash.read!(authorize?: false)
+  end
+
+  @doc """
+  `users_with_tier/2` as a query, not yet run, for a caller that narrows it
+  further (the Security posture page's second-factor check, #2252). Reading it
+  is the caller's system read to justify, as `users_with_tier/2` does.
+  """
+  @spec users_with_tier_query(struct() | String.t() | nil, [:admin | :editor | :viewer]) ::
+          Ash.Query.t()
+  def users_with_tier_query(org, tiers) when is_list(tiers) do
     org_id = Accounts.org_id(org)
     platform? = :admin in tiers
     legacy? = org_id == Accounts.default_org_id()
@@ -269,23 +462,72 @@ defmodule KilnCMS.Accounts.Scoping do
     admin_tier = RoleGrant.expression([:admin])
     wanted = RoleGrant.expression(tiers)
 
-    # authorize?: false — a roster over every account (who to notify, who may
-    # review). A system grant on `Accounts.User` would be a standing read of
-    # every account on the deployment — wider than this query (#1402).
-    Accounts.User
-    |> Ash.Query.filter(
+    Ash.Query.filter(
+      Accounts.User,
       (^platform? and ^admin_tier) or
-        (not (^admin_tier) and exists(org_memberships, organization_id == ^org_id and ^wanted)) or
+        (not (^admin_tier) and
+           exists(
+             org_memberships,
+             organization_id == ^org_id and status == :active and ^wanted
+           )) or
         (^legacy? and ^wanted and not exists(org_memberships, true))
     )
-    |> Ash.read!(authorize?: false)
+  end
+
+  @doc """
+  Every **platform admin**: an account whose `User.role` is `:admin`, standing
+  or by a live temporary grant (`RoleGrant.expression/1`), that has not been
+  erased. Who is told about a deployment-wide security event (#2245) and a
+  reused API key: they are the people who can act on one.
+
+  A system read, as `users_with_tier/2` is: a roster is about other people.
+  """
+  @spec platform_admins() :: [struct()]
+  def platform_admins do
+    admin = RoleGrant.expression([:admin])
+    query = Ash.Query.filter(Accounts.User, ^admin and is_nil(anonymized_at))
+    # authorize?: false — a roster of who to alert, never returned to a caller;
+    # User's read policy is self-only, as for users_with_tier/2.
+    Accounts.list_users!(authorize?: false, query: query)
+  end
+
+  @doc """
+  The **member admins** of `org`: accounts holding an `:active` membership
+  there whose effective tier on it is `:admin` (standing or by a live grant on
+  the membership), and which are neither platform admins nor erased. The
+  site's own administrators, and who a site-level security alert (#2245) goes
+  to.
+
+  Literal on purpose: a platform admin is admin on every site but is not
+  listed here (they get the platform's alerts instead), and a site whose only
+  admin is a platform admin has no member admins — `[]`, with no fallback.
+  A legacy membership-less account is not listed either: it holds no
+  membership to be a member admin by.
+
+  `org` takes the shapes `KilnCMS.Accounts.org_id/1` does. A system read.
+  """
+  @spec site_member_admins(struct() | String.t() | nil) :: [struct()]
+  def site_member_admins(org) do
+    org_id = Accounts.org_id(org)
+    admin = RoleGrant.expression([:admin])
+
+    query =
+      Ash.Query.filter(
+        Accounts.User,
+        is_nil(anonymized_at) and not (^admin) and
+          exists(org_memberships, organization_id == ^org_id and status == :active and ^admin)
+      )
+
+    # authorize?: false — a roster of who to alert, never returned to a caller;
+    # User's and OrgMembership's read policies are self-only.
+    Accounts.list_users!(authorize?: false, query: query)
   end
 
   # A membership-less account's global role applies only on the default org.
   defp legacy_tier(actor, org) do
     if org == Accounts.default_org_id(),
-      do: RoleGrant.effective_role(actor) || :none,
-      else: :none
+      do: {RoleGrant.effective_role(actor) || :none, :legacy, actor},
+      else: {:none, :none, nil}
   end
 
   @doc """
@@ -303,14 +545,15 @@ defmodule KilnCMS.Accounts.Scoping do
 
   defp scope(actor, subject, axis) do
     case affiliation(actor, org_id(subject)) do
-      {:member, membership} ->
+      {:member, %{status: :active} = membership} ->
         list_axis(membership, axis) || list_axis(role_of(membership), axis) ||
           list_axis(actor, axis) || []
 
       :unaffiliated ->
         list_axis(actor, axis) || []
 
-      :foreign_org ->
+      # A foreign org, or a registration not (yet) approved here (#2251).
+      _none ->
         :denied
     end
   end
@@ -325,10 +568,10 @@ defmodule KilnCMS.Accounts.Scoping do
     end
   end
 
-  defp grant_key(nil, _type_name), do: nil
+  defp grant_key(nil, _type_name, _attribute), do: nil
 
-  defp grant_key(source, type_name) do
-    with grants when is_map(grants) <- Map.get(source, :field_grants),
+  defp grant_key(source, type_name, attribute) do
+    with grants when is_map(grants) <- Map.get(source, attribute),
          fields when is_list(fields) <- Map.get(grants, type_name) do
       fields
     else
@@ -342,7 +585,8 @@ defmodule KilnCMS.Accounts.Scoping do
   # ── membership affiliation ─────────────────────────────────────────────────
 
   # The actor's relationship to the org, memoized per process:
-  #   {:member, membership} — a membership row exists for this org;
+  #   {:member, membership} — a membership row exists for this org, in any
+  #                           status (the callers above grant only `:active`);
   #   :foreign_org          — the user holds memberships, none for this org;
   #   :unaffiliated         — the user holds no memberships at all (legacy).
   defp affiliation(%{id: user_id}, org_id) when is_binary(user_id) and is_binary(org_id) do

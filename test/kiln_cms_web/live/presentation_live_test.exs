@@ -81,7 +81,7 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert {:error, {:redirect, %{to: to}}} =
              conn |> log_in(viewer) |> live(~p"/editor/presentation/post/#{post.slug}")
 
-    assert to in ["/", "/sign-in"]
+    assert to == KilnCMSWeb.AccessDenied.path(:editor)
   end
 
   test "renders the framed front end at the configured preview URL", %{conn: conn} do
@@ -182,6 +182,71 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     render_hook(lv, "save", %{})
 
     assert CMS.get_post!(post.id, actor: admin).title == "Retitled via console"
+  end
+
+  # #2332: a post someone moved to the trash while the console had it open.
+  describe "the record is moved to the trash while open" do
+    @gone "This content was moved to the trash or deleted"
+
+    # Raw, so the trash's read filter does not hide the row.
+    defp row(post) do
+      %{rows: [row]} =
+        KilnCMS.Repo.query!(
+          "SELECT title, lock_version, updated_at, archived_at FROM posts WHERE id = $1",
+          [Ecto.UUID.dump!(post.id)]
+        )
+
+      row
+    end
+
+    defp open_title(conn, admin, post) do
+      {:ok, lv, _html} =
+        conn |> log_in(admin) |> live(~p"/editor/presentation/post/#{post.slug}")
+
+      render_hook(lv, "edit_field", %{"type" => "post", "id" => post.id, "field" => "title"})
+      render_hook(lv, "update_scalar", %{"field" => "title", "value" => "After the trash"})
+      lv
+    end
+
+    defp assert_gone_pane(lv) do
+      assert has_element?(lv, ~s(#presentation-gone[role="alert"]), @gone)
+      assert has_element?(lv, ~s(#presentation-gone a[href="/editor"]), "Back to content")
+      refute has_element?(lv, ~s(button[phx-click="reload"]))
+      assert has_element?(lv, ~s(button[phx-click="save"][disabled]))
+    end
+
+    # Before the fix the Save wrote the title into the trashed row.
+    test "a Save is refused and the pane says the content is gone", %{conn: conn} do
+      admin = user(:admin)
+      post = post_with_heading(admin)
+      lv = open_title(conn, admin, post)
+
+      CMS.destroy_post!(post, actor: admin)
+      before = row(post)
+
+      render_hook(lv, "save", %{})
+
+      assert_gone_pane(lv)
+      assert row(post) == before
+    end
+
+    # Before the fix Reload raised on the trashed record and killed the console.
+    test "Reload after the trash keeps the console", %{conn: conn} do
+      admin = user(:admin)
+      post = post_with_heading(admin)
+      lv = open_title(conn, admin, post)
+
+      {:ok, _} = CMS.update_post(post, %{title: "Changed elsewhere"}, actor: admin)
+      render_hook(lv, "save", %{})
+      assert has_element?(lv, ~s(button[phx-click="reload"]))
+
+      CMS.destroy_post!(CMS.get_post!(post.id, actor: admin), actor: admin)
+
+      lv |> element(~s(button[phx-click="reload"])) |> render_click()
+
+      assert Process.alive?(lv.pid)
+      assert_gone_pane(lv)
+    end
   end
 
   test "an unknown scalar field still offers the full editor", %{conn: conn} do

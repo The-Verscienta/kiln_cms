@@ -77,7 +77,8 @@ defmodule KilnCMSWeb.ComplianceLive do
         # A destroy answers `:ok`, not `{:ok, record}`.
         case CMS.reset_site_compliance(row,
                actor: socket.assigns.current_user,
-               tenant: socket.assigns.current_org
+               tenant: socket.assigns.current_org,
+               context: socket.assigns.security_context
              ) do
           {:error, error} ->
             {:noreply, socket |> put_flash(:error, error_message(error)) |> load_settings()}
@@ -94,7 +95,8 @@ defmodule KilnCMSWeb.ComplianceLive do
   defp save(socket, attrs, message) do
     case CMS.save_site_compliance(attrs,
            actor: socket.assigns.current_user,
-           tenant: socket.assigns.current_org
+           tenant: socket.assigns.current_org,
+           context: socket.assigns.security_context
          ) do
       {:ok, _row} ->
         {:noreply, socket |> put_flash(:info, message) |> load_settings()}

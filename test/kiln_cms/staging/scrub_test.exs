@@ -98,6 +98,66 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Mail.Settings, :count) == 0
     end
 
+    test "purges the backup history (a clone must not carry destinations)" do
+      KilnCMS.Backups.start_run!(
+        %{stamp: "20260102-030000", trigger: "cron"},
+        actor: KilnCMS.Backups.system()
+      )
+
+      assert Repo.aggregate(KilnCMS.Backups.Run, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.backup_runs_purged >= 1
+      assert Repo.aggregate(KilnCMS.Backups.Run, :count) == 0
+    end
+
+    test "purges the security audit log (raw IPs and email snapshots)" do
+      KilnCMS.Security.record!(%{type: :sign_in, ip: "203.0.113.5"},
+        actor: KilnCMS.Security.system(),
+        tenant: KilnCMS.Accounts.default_org_id()
+      )
+
+      assert Repo.aggregate(KilnCMS.Security.Event, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.security_events_purged >= 1
+      assert Repo.aggregate(KilnCMS.Security.Event, :count) == 0
+    end
+
+    test "purges pending security alerts (they would notify production admins)" do
+      KilnCMS.Repo.transaction(fn ->
+        KilnCMS.Security.AlertGate.insert_notice!(KilnCMS.Accounts.default_org_id(), %{
+          change: "kind_disabled"
+        })
+      end)
+
+      assert Repo.aggregate(KilnCMS.Security.AlertDispatch, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.security_alert_dispatches_purged >= 1
+      assert Repo.aggregate(KilnCMS.Security.AlertDispatch, :count) == 0
+    end
+
+    test "purges pending site invitations (production addresses, live links)" do
+      KilnCMS.Accounts.invite_to_org!(
+        %{
+          organization_id: KilnCMS.Accounts.default_org_id(),
+          email: "scrub-invitee-#{System.unique_integer([:positive])}@example.com"
+        },
+        actor: admin()
+      )
+
+      assert Repo.aggregate(KilnCMS.Accounts.Invitation, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.invitations_purged >= 1
+      assert Repo.aggregate(KilnCMS.Accounts.Invitation, :count) == 0
+    end
+
     test "provisions one usable pre-confirmed admin when credentials are given" do
       _real = admin()
 

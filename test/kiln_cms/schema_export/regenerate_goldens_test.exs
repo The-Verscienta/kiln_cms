@@ -6,16 +6,16 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
 
   The fixture is a real `KilnCMS.SchemaExport.json_schema/1` export: every
   registered block plus `post` and `page`, with a `post` custom field of each
-  kind (a `:string` list, both `:text` formats with `deliver_plain`, single and multiple
+  kind (a `:string` list, typed lists of dates, integers and emails, both `:text` formats with `deliver_plain`, single and multiple
   `:select`/`:media`/`:reference`, a single and a repeating `:group`, a
-  `Kiln.FieldType`). Checked in rather than built per run, so the goldens
+  `Kiln.FieldType`), two of them in a tab section at less than full width. Checked in rather than built per run, so the goldens
   change only when someone regenerates them and the diff shows what moved.
 
   After a deliberate change to the export or an emitter:
 
       mix test --only regenerate_schema_goldens test/kiln_cms/schema_export/regenerate_goldens_test.exs
 
-  then review the diff of `full.schema.json`, `full.d.ts`, `full.swift` and `full.kt`.
+  then review the diff of `full.schema.json`, `full.graphql.schema.json`, `full.graphql.ts`, `full.graphql.swift`, `full.graphql.kt`, `full.d.ts`, `full.swift` and `full.kt`.
   `clients/js/test/parity.test.ts` reads `full.d.ts` too. Run `npm test` in
   `clients/js` as well; if a change to the TypeScript emitter isn't mirrored
   in `kiln-types`, that run fails.
@@ -28,11 +28,11 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
   @dir Path.expand("../../support/fixtures/schema_export", __DIR__)
 
   @fields [
-    {"subtitle", :string, %{}},
+    {"subtitle", :string, %{section: "Overview", width: :half}},
     {"synonyms", :string, %{multiple: true}},
     {"summary", :text, %{deliver_plain: true}},
     {"code_sample", :text, %{format: :plain}},
-    {"read_time", :integer, %{}},
+    {"read_time", :integer, %{section: "Overview", width: :third}},
     {"rating", :float, %{}},
     {"featured", :boolean, %{}},
     {"launch_date", :date, %{}},
@@ -45,7 +45,19 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     {"gallery", :media, %{multiple: true}},
     {"related", :reference, %{target_type: "post", multiple: true}},
     {"parent", :reference, %{target_type: "post"}},
-    {"where", :geolocation, %{}}
+    {"where", :geolocation, %{}},
+    {"contact_email", :email, %{}},
+    {"phone", :telephone, %{}},
+    {"accent", :color, %{}},
+    {"handle", :slug, %{}},
+    {"opens_at", :time, %{}},
+    {"extra", :json, %{}},
+    {"price_band", :range, %{}},
+    {"specs", :key_value, %{}},
+    {"source", :link, %{}},
+    {"event_dates", :date, %{multiple: true, max_items: 10}},
+    {"scores", :integer, %{multiple: true, min_items: 1}},
+    {"contacts", :email, %{multiple: true}}
   ]
 
   @tag :regenerate_schema_goldens
@@ -88,6 +100,12 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     for {name, type} <- [{"title", :string}, {"no_index", :boolean}],
         do: define.(%{name: name, label: name, field_type: type, group_of_id: seo.id})
 
+    # The editor layout annotations (#2280): `x-kiln-width` and
+    # `x-kiln-section-display` on the two "Overview" fields.
+    CMS.create_field_section!(%{content_type: :post, name: "Overview", display: :tab},
+      actor: actor
+    )
+
     document =
       SchemaExport.json_schema(
         org_id: KilnCMS.Accounts.default_org_id(),
@@ -98,6 +116,35 @@ defmodule KilnCMS.SchemaExport.RegenerateGoldensTest do
     File.write!(
       Path.join(@dir, "full.schema.json"),
       Mix.Tasks.Kiln.Export.Schema.encode(document, :json, pretty: true)
+    )
+
+    # The same definitions with the GraphQL annotations (#2290), for the
+    # `*-graphql` goldens.
+    graphql_document =
+      SchemaExport.json_schema(
+        org_id: KilnCMS.Accounts.default_org_id(),
+        types: ["post", "page"],
+        graphql: true
+      )
+
+    File.write!(
+      Path.join(@dir, "full.graphql.schema.json"),
+      Mix.Tasks.Kiln.Export.Schema.encode(graphql_document, :json, pretty: true)
+    )
+
+    File.write!(
+      Path.join(@dir, "full.graphql.ts"),
+      SchemaExport.TypeScript.emit_graphql(graphql_document)
+    )
+
+    File.write!(
+      Path.join(@dir, "full.graphql.swift"),
+      SchemaExport.Swift.emit_graphql(graphql_document)
+    )
+
+    File.write!(
+      Path.join(@dir, "full.graphql.kt"),
+      SchemaExport.Kotlin.emit_graphql(graphql_document)
     )
 
     File.write!(Path.join(@dir, "full.d.ts"), SchemaExport.TypeScript.emit(document))

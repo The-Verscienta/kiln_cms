@@ -78,6 +78,20 @@ defmodule KilnCMS.Scripts.PublishSecurityTest do
       assert notice.cve_id == nil
     end
 
+    test "an unnamed vulnerability beside a named plugin is the core's too" do
+      [core, plugin] = @advisory["vulnerabilities"]
+      unnamed = Map.delete(core, "package")
+      named = put_in(plugin, ["package", "name"], "kiln_seo")
+
+      assert {:ok, %{package: "kiln_cms, kiln_seo"}} =
+               PublishSecurity.notice(%{@advisory | "vulnerabilities" => [unnamed, named]})
+
+      blank = put_in(core, ["package", "name"], " ")
+
+      assert {:ok, %{package: "kiln_seo, kiln_cms"}} =
+               PublishSecurity.notice(%{@advisory | "vulnerabilities" => [named, blank]})
+    end
+
     test "severity is the repository API's vocabulary; anything else is unknown" do
       for {given, expected} <- [
             {"critical", "critical"},

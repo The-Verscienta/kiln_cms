@@ -1,7 +1,7 @@
 defmodule KilnPlugin.MixProject do
   use Mix.Project
 
-  @version "1.3.1"
+  @version "1.4.0"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do
@@ -17,7 +17,8 @@ defmodule KilnPlugin.MixProject do
       deps: deps(),
       description:
         "The compile-time plugin contract for KilnCMS: Kiln.Plugin, Kiln.Block, " <>
-          "Kiln.FieldType, Kiln.Forms.SpamCheck, Kiln.ImageBackend, Kiln.Advisory and " <>
+          "Kiln.FieldType, Kiln.Forms.SpamCheck, Kiln.ImageBackend, Kiln.Challenge.Provider, " <>
+          "Kiln.Security.Check, Kiln.Advisory and " <>
           "Kiln.SafeFetch, " <>
           "so a plugin can ship as a Hex, git or path dependency.",
       package: package(),
@@ -84,6 +85,8 @@ defmodule KilnPlugin.MixProject do
         "Spam checks": ~r/^Kiln\.Forms\.SpamCheck(\.|$)/,
         "Advisory checks": ~r/^Kiln\.Advisory(\.|$)/,
         "Image backends": [Kiln.ImageBackend],
+        "Challenge providers": [Kiln.Challenge.Provider],
+        "Security posture checks": ~r/^Kiln\.Security\.Check(\.|$)/,
         "Outbound HTTP": [Kiln.SafeFetch]
       ]
     ]

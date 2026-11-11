@@ -152,6 +152,8 @@ defmodule KilnCMS.CMS.Slugs do
       :seo_description,
       :seo_image,
       :canonical_url,
+      :noindex,
+      :nofollow,
       :path_alias,
       :published_at,
       :updated_at

@@ -28,6 +28,15 @@ The two tiers are also the honest answer to the trade-off D4 was protecting:
 you get Directus-style agility *and* keep the "harder, better-typed than
 Strapi" story — with a graduation path between them instead of a fork.
 
+> **Indexing note (#2291).** Equality, `in` and list-has `custom_filter`s on
+> dynamic fields are served by a GIN index on `custom_fields`. Range filters,
+> `not_eq`, `ilike`, `null` and `custom_sort` are not, and the dynamic tier
+> will not grow per-field indexes of its own: field names are runtime data
+> that codegen cannot see. A field that needs fast range or sort is D4's
+> case for the compiled tier, so promote it (`mix kiln.gen.content --from`).
+> A hand-written expression btree is possible as a recipe; see
+> [json-api.md](json-api.md#which-custom-filters-use-an-index).
+
 ---
 
 ## 1. What already works at runtime (why this is cheaper than it looks)

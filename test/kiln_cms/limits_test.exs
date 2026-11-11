@@ -44,6 +44,13 @@ defmodule KilnCMS.LimitsTest do
     {KilnCMS.Analytics.FunnelStep, :content_type},
     {KilnCMS.Analytics.ReferrerDay, :content_type},
     {KilnCMS.Automation.Rule, :content_type},
+    # Bounded by `Backups.Run.Changes.Normalize` on every write (error 4 000,
+    # trigger 64) and by a `\A\d{8}-\d{6}\z` match (stamp): a `max_length`
+    # would reject an over-long operator value instead of truncating it, and a
+    # backup attempt must never fail on its own bookkeeping.
+    {KilnCMS.Backups.Run, :error},
+    {KilnCMS.Backups.Run, :stamp},
+    {KilnCMS.Backups.Run, :trigger},
     {KilnCMS.Billing.MembershipEvent, :provider_event_id},
     {KilnCMS.Billing.MembershipTier, :provider_price_id},
     {KilnCMS.Billing.Settings, :provider_account_id},

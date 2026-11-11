@@ -71,7 +71,8 @@ config :kiln_cms,
   occurrence_sweep_cron: false,
   media_quarantine_reaper_cron: false,
   federation_nonce_sweep_cron: false,
-  health_sweep_cron: false
+  health_sweep_cron: false,
+  security_log_prune_cron: false
 
 # Same reasoning as config/test.exs: application boot is outside any journey,
 # and with queues now running a boot-time backfill enqueue would execute
@@ -119,6 +120,10 @@ config :phoenix, :plug_init_mode, :runtime
 # must not spend the instance's unauthenticated rate-limit budget.
 config :kiln_cms, Kiln.Updates, enabled: false
 
+# Same for the plugin health check (#2244): no hex.pm or kilncms.dev from a
+# browser run.
+config :kiln_cms, Kiln.Plugins.Health, enabled: false
+
 # The collaborative-editing CRDT prototype (KilnCMS.Collab.Crdt) stays OFF
 # here, as config/prod.exs pins it, so the editor specs drive the solo
 # rich-text editor production runs. `e2e/tests/collab.spec.js` switches it on
@@ -130,3 +135,12 @@ config :kiln_cms, :collab_prototype, false
 # `e2e/tests/status_marks.spec.js` assume. `e2e/tests/field_localization.spec.js`
 # adds `fr` for itself through `/dev/e2e-locales` (KilnCMSWeb.Plugs.E2ELocales)
 # and restores the list after, on the same `workers: 1` footing as the above.
+
+# No `block_fields:` is configured under `:i18n`, so every core block stays
+# localized as before. The block cases of the same spec mark `image` fields
+# shared / fallback through `/dev/e2e-block-fields` (KilnCMSWeb.Plugs.E2EBlockFields,
+# #2270) and clear them after.
+
+# The breached-password check (#2240) calls a third party on every password
+# set; the browser suite must never depend on it.
+config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false

@@ -50,7 +50,9 @@ defmodule KilnCMSWeb.OpenApi do
       the key's `access` scope. A `read` key reads what its account may read;
       a `read_write` key may also **write**: create and update drafts, submit
       for review, and — on an admin account — publish, unpublish, return to
-      draft and soft-delete. The key for server-to-server use.
+      draft and soft-delete. A `draft_write` key may only create drafts and
+      edit its own drafts (no review, publishing, deletes or media). The key
+      for server-to-server use.
     * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from
       **`POST /api/auth/sign_in`** (documented below), with that user's role.
 
@@ -90,6 +92,9 @@ defmodule KilnCMSWeb.OpenApi do
       `PATCH /api/json/media-items/{id}` below.
     * **Search, resolve, menus, locales, forms, related, ask, provenance** under
       `/api/*`.
+    * **Security posture** for monitoring at `GET /api/security/posture`
+      (operation below): a site administrator's checks as JSON, behind the
+      site's admin allowlist.
     * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).
     * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.
     * **Signed preview URLs** for unpublished content at `GET /preview/:token`
@@ -114,7 +119,8 @@ defmodule KilnCMSWeb.OpenApi do
           spec.paths
           |> Map.merge(auth_paths())
           |> Map.merge(delivery_paths())
-          |> Map.merge(media_paths()),
+          |> Map.merge(media_paths())
+          |> Map.merge(admin_paths()),
         info: %{
           spec.info
           | title: "KilnCMS Headless API",
@@ -153,7 +159,8 @@ defmodule KilnCMSWeb.OpenApi do
         description:
           "An API key minted at `/editor/api-keys`, sent as " <>
             "`Authorization: Bearer kiln_…`. Acts as its owning account, bounded " <>
-            "by the key's `access` scope (`read` or `read_write`)."
+            "by the key's `access` scope (`read`, `read_write`, or `draft_write`, which " <>
+            "may only create drafts and edit its own drafts)."
       })
 
     Map.put(components, :securitySchemes, schemes)
@@ -188,7 +195,14 @@ defmodule KilnCMSWeb.OpenApi do
                   required: [:email, :password],
                   properties: %{
                     email: %OpenApiSpex.Schema{type: :string, format: :email},
-                    password: %OpenApiSpex.Schema{type: :string, format: :password}
+                    password: %OpenApiSpex.Schema{type: :string, format: :password},
+                    challenge_token: %OpenApiSpex.Schema{
+                      type: :string,
+                      description:
+                        "A human-verification token. Only read when the operator " <>
+                          "has turned on challenges for this endpoint and the " <>
+                          "sign-in needs one (a `challenge_required` 401 says so)."
+                    }
                   }
                 }
               }
@@ -211,12 +225,27 @@ defmodule KilnCMSWeb.OpenApi do
                 "application/json" => %OpenApiSpex.MediaType{schema: token_schema()}
               }
             },
-            401 => %OpenApiSpex.Response{description: "Invalid email or password"},
+            401 => %OpenApiSpex.Response{
+              description:
+                "Invalid email or password (`invalid_credentials`). Where the " <>
+                  "operator has turned on human verification for this endpoint, " <>
+                  "also `challenge_required` or `challenge_failed`, whose `meta` " <>
+                  "names the provider, `site_key`, `script_url`, `global`, " <>
+                  "`onload_param`, `render_options`, `action` and `action_option`, " <>
+                  "`interactive` and `api` to draw the widget with; retry with " <>
+                  "`challenge_token`."
+            },
             422 => %OpenApiSpex.Response{description: "Missing email or password"},
             429 => %OpenApiSpex.Response{
               description:
                 "Rate limited — per-IP `auth` bucket, or the per-account " <>
                   "sign-in budget. See `Retry-After`."
+            },
+            503 => %OpenApiSpex.Response{
+              description:
+                "`challenge_unavailable` — human verification is required and " <>
+                  "its provider cannot be reached. See `Retry-After`. Only where " <>
+                  "the operator has turned on human verification for this endpoint."
             }
           }
         }
@@ -270,6 +299,71 @@ defmodule KilnCMSWeb.OpenApi do
             429 => %OpenApiSpex.Response{
               description: "Per-account second-factor budget spent — see `Retry-After`"
             }
+          }
+        }
+      },
+      "/api/keys/rotate" => %OpenApiSpex.PathItem{
+        post: %OpenApiSpex.Operation{
+          tags: ["Authentication"],
+          operationId: "rotateApiKey",
+          summary: "Exchange a drafts-only API key for a fresh one",
+          description:
+            "A `draft_write` key minted with a rotation window (`rotatable_until`) " <>
+              "exchanges itself for a new key with the same owner, scope and name. " <>
+              "The new key expires at the draft-write lifetime cap or at " <>
+              "`rotatable_until`, whichever is sooner. The presenting key is " <>
+              "revoked in the same transaction: store the new key before you stop " <>
+              "using the old one, and rotate from one place. Presenting a " <>
+              "rotated-away key here again more than 120 seconds after it was " <>
+              "rotated revokes the whole rotation chain and alerts the " <>
+              "administrators. Empty body. Rate limited by the `auth` bucket.",
+          security: [%{"bearerAuth" => []}],
+          responses: %{
+            201 => %OpenApiSpex.Response{
+              description: "Rotated. `api_key` is shown once.",
+              content: %{
+                "application/json" => %OpenApiSpex.MediaType{schema: rotated_key_schema()}
+              }
+            },
+            401 => %OpenApiSpex.Response{
+              description:
+                "No `Bearer kiln_…` key, or it is revoked, expired or unknown " <>
+                  "(`invalid_api_key`)"
+            },
+            403 => %OpenApiSpex.Response{
+              description: "Not a drafts-only key with an open rotation window (`forbidden`)"
+            },
+            409 => %OpenApiSpex.Response{
+              description:
+                "The key was revoked or rotated by a concurrent request, or its " <>
+                  "owner may now edit or publish (`not_rotatable`)"
+            },
+            429 => %OpenApiSpex.Response{description: "Rate limited — see `Retry-After`"},
+            500 => %OpenApiSpex.Response{
+              description: "Server failure; the key is unchanged, retry later"
+            }
+          }
+        }
+      }
+    }
+  end
+
+  defp rotated_key_schema do
+    %OpenApiSpex.Schema{
+      type: :object,
+      properties: %{
+        data: %OpenApiSpex.Schema{
+          type: :object,
+          required: [:id, :api_key, :expires_at, :rotatable_until, :rotated_from_id],
+          properties: %{
+            id: %OpenApiSpex.Schema{type: :string, format: :uuid},
+            api_key: %OpenApiSpex.Schema{
+              type: :string,
+              description: "The new key's plaintext, `kiln_…`. Shown once."
+            },
+            expires_at: %OpenApiSpex.Schema{type: :string, format: :"date-time"},
+            rotatable_until: %OpenApiSpex.Schema{type: :string, format: :"date-time"},
+            rotated_from_id: %OpenApiSpex.Schema{type: :string, format: :uuid}
           }
         }
       }
@@ -646,6 +740,142 @@ defmodule KilnCMSWeb.OpenApi do
         content: %{"application/json" => %OpenApiSpex.MediaType{schema: media_item_schema()}}
       })
     )
+  end
+
+  # Admin surfaces for machines (`KilnCMSWeb.SecurityPostureController`): a
+  # credential is required, so `security` lists no empty requirement. Value
+  # sets are open (`KilnCMSWeb.SecurityPostureJSON`'s contract), so no field
+  # carries an `enum`; the description lists today's values.
+  defp admin_paths do
+    %{
+      "/api/security/posture" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          tags: ["Monitoring"],
+          operationId: "getSecurityPosture",
+          summary: "Read the site's security posture",
+          description:
+            "The Security posture page's checks as JSON, for monitoring (#2521). " <>
+              "Needs a bearer JWT or API key of an administrator of the request's site " <>
+              "(not a `draft_write` key); a platform administrator also gets the " <>
+              "deployment's checks. Behind the site's admin allowlist. Runs the checks " <>
+              "at most once per site and scope set every 30 seconds per node, so " <>
+              "`generated_at` may be that old. Never includes a check's details. " <>
+              "Additive only: read checks by `id`, and tolerate status values and " <>
+              "`counts` keys you do not know. Every answer is `Cache-Control: " <>
+              "private, no-store`.",
+          security: [%{"apiKeyAuth" => []}, %{"bearerAuth" => []}],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "The site's posture",
+              content: %{
+                "application/json" => %OpenApiSpex.MediaType{schema: posture_schema()}
+              }
+            },
+            401 =>
+              error_response(
+                "No credential (`unauthenticated`), or one that does not verify (`invalid_token`)"
+              ),
+            403 =>
+              error_response(
+                "Not an administrator of this site, or a `draft_write` key (`forbidden`); " <>
+                  "or an address outside the site's admin allowlist (`network_not_allowed`)"
+              ),
+            429 => error_response("`api` bucket spent — see `Retry-After`"),
+            503 =>
+              error_response(
+                "`temporarily_unavailable`: the site's checks are already running " <>
+                  "(`Retry-After: 5`), or its admin allowlist could not be read " <>
+                  "(`Retry-After: 30`)"
+              )
+          }
+        }
+      }
+    }
+  end
+
+  defp posture_schema do
+    string = fn description -> %OpenApiSpex.Schema{type: :string, description: description} end
+
+    nullable_string = fn description ->
+      %OpenApiSpex.Schema{type: :string, nullable: true, description: description}
+    end
+
+    %OpenApiSpex.Schema{
+      type: :object,
+      required: [:version, :generated_at, :org_id, :scopes, :status, :counts, :checks],
+      properties: %{
+        version: %OpenApiSpex.Schema{
+          type: :integer,
+          description: "`1`. Changes only for a change that breaks this shape."
+        },
+        generated_at: %OpenApiSpex.Schema{
+          type: :string,
+          format: :"date-time",
+          description: "When the checks ran (up to 30 seconds ago for a cached answer)"
+        },
+        org_id: string.("The site's id"),
+        scopes: %OpenApiSpex.Schema{
+          type: :array,
+          items: string.("`site`, or `site` and `deployment` for a platform administrator")
+        },
+        status: string.("The worst status: `pass`, `warn` or `fail` today"),
+        counts: %OpenApiSpex.Schema{
+          type: :object,
+          description:
+            "How many checks have each status: `fail`, `warn`, `error`, `unknown`, " <>
+              "`pass`, `n_a` today, every one present",
+          additionalProperties: %OpenApiSpex.Schema{type: :integer}
+        },
+        checks: %OpenApiSpex.Schema{
+          type: :array,
+          description: "One per check, sorted by `id` (not part of the contract)",
+          items: %OpenApiSpex.Schema{
+            type: :object,
+            required: [
+              :id,
+              :scope,
+              :source,
+              :plugin,
+              :status,
+              :title,
+              :summary,
+              :fix_path,
+              :docs_url,
+              :facts,
+              :error
+            ],
+            properties: %{
+              id: string.("Stable id, e.g. `core.second_factor`"),
+              scope: string.("`site` or `deployment` today"),
+              source: string.("`core`, `plugin` or `config` today"),
+              plugin: nullable_string.("The contributing plugin's name, for `source: plugin`"),
+              status: string.("`pass`, `warn`, `fail`, `unknown`, `n_a` or `error` today"),
+              title: string.("English, for a person; not stable"),
+              summary: nullable_string.("English, for a person; not stable. `null` on an error"),
+              fix_path: nullable_string.("A console path, relative to the site's console host"),
+              docs_url: nullable_string.("An `https://` page explaining the check"),
+              facts: %OpenApiSpex.Schema{
+                type: :object,
+                description: "Machine-readable values (at most 20); a check's own keys",
+                additionalProperties: %OpenApiSpex.Schema{
+                  oneOf: [
+                    %OpenApiSpex.Schema{type: :string},
+                    %OpenApiSpex.Schema{type: :number},
+                    %OpenApiSpex.Schema{type: :boolean}
+                  ],
+                  nullable: true
+                }
+              },
+              error:
+                nullable_string.(
+                  "Why a check produced no result: `crashed`, `timeout`, " <>
+                    "`invalid_result` or `busy` today"
+                )
+            }
+          }
+        }
+      }
+    }
   end
 
   # 401/403/429 answer every media route the same way.

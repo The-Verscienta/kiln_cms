@@ -388,6 +388,24 @@ defmodule KilnCMS.CMS.DuplicationTest do
     assert Duplication.duplicate!(:post, source, actor: editor).audience == :member
   end
 
+  # Dropping the flags would fall back to `false`: a copy of a page hidden from
+  # search engines would be indexable (#2256).
+  test "noindex and nofollow survive a field grant that doesn't name them" do
+    admin = user(:admin)
+
+    source =
+      CMS.create_post!(
+        %{title: "Hidden", slug: slug(), noindex: true, nofollow: true, blocks: []},
+        actor: admin
+      )
+
+    editor = user(:editor, %{field_grants: %{"post" => ["title", "blocks"]}})
+    copy = Duplication.duplicate!(:post, source, actor: editor)
+
+    assert copy.noindex
+    assert copy.nofollow
+  end
+
   test "an editor with no field grant gets a complete copy" do
     admin = user(:admin)
 

@@ -24,6 +24,7 @@ defmodule KilnCMS.CMS.PreviewToken do
   editor's *Copy preview link* action and `POST /api/content/:type/:id/preview-token`
   both go through it. `sign/1` is the unchecked primitive underneath.
   """
+  alias KilnCMS.Accounts.Checks.DraftWriteKey
   alias KilnCMS.CMS.Checks.ReadableContentType
   alias KilnCMS.CMS.ContentTypes
 
@@ -105,8 +106,20 @@ defmodule KilnCMS.CMS.PreviewToken do
   # the same check, so the button, the API and the policy cannot disagree about
   # who sees drafts. The subject only has to carry the tenant — that is all
   # `Scoping` reads off it to resolve the actor's tier on this site.
-  defp editorial_read?(actor, %resource{}, org_id) do
-    ReadableContentType.match?(actor, %{resource: resource, subject: %{tenant: org_id}}, [])
+  #
+  # A `:draft_write` API key (#2273) is bounded further, to the drafts it
+  # authored: the key's own scope, not its owner's current tier, decides how
+  # far a minted link reaches. The tier gate still applies on top, so a
+  # viewer-tier service account (the normal owner) mints nothing at all.
+  defp editorial_read?(actor, %resource{} = record, org_id) do
+    ReadableContentType.match?(actor, %{resource: resource, subject: %{tenant: org_id}}, []) and
+      own_draft_if_draft_write_key?(actor, record)
+  end
+
+  defp own_draft_if_draft_write_key?(actor, record) do
+    not DraftWriteKey.draft_write?(actor) or
+      (Map.get(record, :state) == :draft and not is_nil(actor.id) and
+         Map.get(record, :author_id) == actor.id)
   end
 
   @doc """

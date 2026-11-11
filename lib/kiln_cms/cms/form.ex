@@ -44,7 +44,8 @@ defmodule KilnCMS.CMS.Form do
       :autoresponder_enabled,
       :autoresponder_subject,
       :autoresponder_body,
-      :embed_origins
+      :embed_origins,
+      :challenge
     ]
 
     create :create, primary?: true
@@ -120,6 +121,10 @@ defmodule KilnCMS.CMS.Form do
     # list that reaches outside the operator's ceiling is refused, naming the
     # offending entries and never the ceiling. See `KilnCMS.Forms.EmbedCeiling`.
     validate {KilnCMS.CMS.Validations.EmbedCeiling, field: :embed_origins}
+
+    # Human verification (#2249) can only be switched on while a form can ask
+    # for it; a form already on keeps saving after the operator turns it off.
+    validate KilnCMS.CMS.Validations.ChallengeAvailable
   end
 
   # Multi-tenancy (epic #336): a form belongs to one site, so its slug is unique
@@ -217,6 +222,19 @@ defmodule KilnCMS.CMS.Form do
     attribute :embed_origins, {:array, :string},
       public?: true,
       constraints: [max_length: 16, items: [max_length: 253]]
+
+    # Human verification on this form's submissions (#2249): `:off`, or
+    # `:always` — every submission carries a provider token
+    # (`KilnCMS.Challenge.Gate.form/3`). Per form, because a form that turns
+    # it off exposes only its own site's inbox; the operator's ceiling
+    # (`CHALLENGE_FORMS`, the kill switch, a usable provider) clamps it on
+    # every read (`KilnCMS.Challenge.form_required?/2`).
+    attribute :challenge, :atom do
+      constraints one_of: [:off, :always]
+      default :off
+      allow_nil? false
+      public? true
+    end
 
     timestamps()
   end

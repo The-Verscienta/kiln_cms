@@ -73,6 +73,7 @@ defmodule KilnCMS.Firing.Sync do
 
   alias KilnCMS.CMS.Audiences
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.LatestEdit
   alias KilnCMS.Firing
   alias KilnCMS.Firing.Cache
   alias KilnCMS.Firing.Delivery
@@ -494,7 +495,10 @@ defmodule KilnCMS.Firing.Sync do
       bodies ->
         case Enum.reject(records, &Map.has_key?(bodies, &1.id)) do
           [] ->
-            {:ok, Enum.map(records, &upsert(&1, Map.fetch!(bodies, &1.id), ctx))}
+            edits = LatestEdit.for_records(records)
+
+            {:ok,
+             Enum.map(records, &upsert(&1, Map.fetch!(bodies, &1.id), Map.get(edits, &1.id), ctx))}
 
           misses ->
             misses
@@ -574,7 +578,11 @@ defmodule KilnCMS.Firing.Sync do
     end
   end
 
-  defp upsert(record, body, ctx) do
+  # `latest_edit_severity` / `latest_edit_at` are siblings of the artifact, not
+  # part of it (no `format_version` change): how much the document's latest
+  # safety edit mattered and when it was made, `nil` when it has none
+  # (`KilnCMS.CMS.LatestEdit`; one version query per type for the page).
+  defp upsert(record, body, edit, ctx) do
     %{
       op: "upsert",
       type: type_name(record, ctx),
@@ -583,6 +591,8 @@ defmodule KilnCMS.Firing.Sync do
       locale: record.locale,
       published_at: record.published_at,
       updated_at: record.updated_at,
+      latest_edit_severity: edit && edit.severity,
+      latest_edit_at: edit && edit.at,
       artifact: body
     }
   end

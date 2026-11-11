@@ -9,14 +9,22 @@ defmodule KilnCMSWeb.FormEntriesExportController do
   `AnalyticsLive` itself is editor-visible; this mirrors
   `KilnCMSWeb.GovernanceController` instead, whose dashboard is admin-only.
 
-  Columns are the form's **current** field set, in its configured order, plus
-  `status`/`spam_score`/`submitted_at` — not a union of whatever keys happen
-  to appear in the stored data, which would reshape the export every time an
-  admin adds a field. The tradeoff: a field removed after some submissions
-  already carry it drops that column, and their data for it, from the
-  export entirely — nothing recovers it here. `FormSubmission.data` itself
-  still has it (this only affects what the CSV projects), but there is no
-  "show removed fields too" option in this endpoint today.
+  Columns are the form's **current** field set, in its configured order, then
+  one column per *orphaned* key, then `status`/`spam_score`/`submitted_at`. An
+  orphaned key is one the exported submissions carry that no current field
+  is named: what a field renamed or removed after those submissions arrived
+  left behind (#2342). Each gets the header `"<key> (renamed or removed)"`,
+  sorted by key, so its values are still in the export but never pass for a
+  current field's, the same split as the Entries tab's "From a renamed or
+  removed field" box. The suffix is a fixed English string, not gettext: it
+  is a data header that spreadsheets and imports key on, like the raw
+  machine names and `status`. A key equal to a current field's name (a
+  reused name) is that field's column, as on the Entries tab.
+
+  Orphaned columns come from the exported rows only (after `?status=`), so a
+  form with no rename history, or a filter that leaves none of its old keys,
+  exports exactly the current field set: the columns do not shift just
+  because an admin added a field.
 
   Not streamed: unlike the analytics export, submission volume for one form
   has no comparable retention window to bound a request against, but a
@@ -50,6 +58,8 @@ defmodule KilnCMSWeb.FormEntriesExportController do
       CMS.export_form_submissions!(form.id, %{status: status}, actor: actor, tenant: org)
 
     field_names = Enum.map(form.fields, & &1.name)
+    orphan_keys = orphan_keys(submissions, field_names)
+    keys = field_names ++ orphan_keys
 
     conn =
       conn
@@ -60,7 +70,12 @@ defmodule KilnCMSWeb.FormEntriesExportController do
       )
       |> send_chunked(200)
 
-    header = CSV.line(field_names ++ ["status", "spam_score", "submitted_at"])
+    header =
+      CSV.line(
+        field_names ++
+          Enum.map(orphan_keys, &(&1 <> " (renamed or removed)")) ++
+          ["status", "spam_score", "submitted_at"]
+      )
 
     rows =
       Enum.map(submissions, fn submission ->
@@ -68,7 +83,7 @@ defmodule KilnCMSWeb.FormEntriesExportController do
         # formula guard) sees one string. A phone number starting `+` or an
         # option starting `=` gets the guard's leading `'`.
         values =
-          Enum.map(field_names, fn name ->
+          Enum.map(keys, fn name ->
             submission.data |> Map.get(name) |> KilnCMS.Forms.display_value()
           end)
 
@@ -84,6 +99,19 @@ defmodule KilnCMSWeb.FormEntriesExportController do
 
     [header | rows]
     |> Enum.reduce_while(conn, &write_chunk/2)
+  end
+
+  # Keys the exported submissions carry that no current field is named,
+  # sorted. Bounded by the form's rename history: submission keys only ever
+  # come from the form's fields at submit time (`KilnCMS.Forms` coerces against them).
+  defp orphan_keys(submissions, field_names) do
+    current = MapSet.new(field_names)
+
+    submissions
+    |> Enum.flat_map(&Map.keys(&1.data))
+    |> Enum.uniq()
+    |> Enum.reject(&MapSet.member?(current, &1))
+    |> Enum.sort()
   end
 
   defp write_chunk(body, conn) do

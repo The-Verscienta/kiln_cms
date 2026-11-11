@@ -54,21 +54,45 @@ defmodule KilnCMS.Delivery.Feed do
   The topic is per site (`topic/1`). Phoenix.PubSub reaches every node of a
   cluster. Transports (SSE, a channel) and resume are 2.2.
 
+  ## Delivery is asynchronous
+
+  `publish/4` does not deliver to this node's subscribers itself: it hands the
+  event to the site's relay (`KilnCMS.Delivery.Feed.Relay`, #2083), which
+  broadcasts it locally, and sends one message per remote node, whose PubSub
+  server fans it out there. The publisher's cost is the same with no
+  subscribers or ten thousand. A site's events reach its subscribers in the
+  order they reached its relay, so one publisher's events stay in order. A
+  burst (a release going live, a bulk publish, `KilnCMS.Portability.Import`)
+  queues in the site's relay instead of slowing the publisher.
+
+  When `publish/4` returns, the event may not have arrived yet. `sync/1`
+  waits for it (tests, benchmarks).
+
   ## Telemetry
 
-  Each broadcast emits `[:kiln_cms, :delivery, :feed, :event]` with
-  measurement `count: 1` and metadata `kind`, `type`, `id` and `org_id` — the "feed
-  events per transition" number the path forward asks for.
+  Each event handed to the broadcast emits
+  `[:kiln_cms, :delivery, :feed, :event]` with measurement `count: 1` and
+  metadata `kind`, `type`, `id` and `org_id` — the "feed events per
+  transition" number the path forward asks for. It is emitted in the
+  publisher, once the event is handed off, not when subscribers receive it.
 
   ## Failure handling
 
-  Like the other consumers of the funnel, `publish/3` never raises into the
-  caller: the transition has already committed, so a broken feed is logged and
-  the publish stands.
+  Like the other consumers of the funnel, `publish/4` never raises or exits
+  into the caller: the transition has already committed, so a broken feed is
+  logged and the publish stands.
+
+  Delivery is at most once, as PubSub's is. Events already in a relay's
+  mailbox are lost if that relay crashes or the node shuts down (the local
+  endpoint stops first, so no local subscriber would have received them
+  anyway), and an event cast to a relay that crashed just then, before its
+  partition restarted it, is lost too. When no relay is running at all, the
+  local broadcast runs inline in the publisher, as before #2083.
   """
   require Logger
 
   alias KilnCMS.CMS.WebhookEndpoint
+  alias KilnCMS.Delivery.Feed.Relay
 
   @pubsub KilnCMS.PubSub
   @telemetry_event [:kiln_cms, :delivery, :feed, :event]
@@ -106,7 +130,7 @@ defmodule KilnCMS.Delivery.Feed do
           }
   end
 
-  @doc "The telemetry event each broadcast emits."
+  @doc "The telemetry event each event handed to the broadcast emits."
   def telemetry_event, do: @telemetry_event
 
   @doc "The PubSub topic of `org`'s feed."
@@ -123,6 +147,18 @@ defmodule KilnCMS.Delivery.Feed do
   @doc "Undo `subscribe/1`."
   @spec unsubscribe(Ash.ToTenant.t()) :: :ok
   def unsubscribe(org), do: Phoenix.PubSub.unsubscribe(@pubsub, topic(org))
+
+  @doc """
+  Wait until every event the calling process published to `org`'s feed
+  before this call has reached this node's subscribers' mailboxes (see
+  "Delivery is asynchronous"). It also covers whatever reached the site's
+  relay earlier, but not events other processes are still publishing.
+
+  This node only: remote nodes deliver on their own. Blocks while the site's
+  relay is busy or suspended; `:ok` at once when no relay is running.
+  """
+  @spec sync(Ash.ToTenant.t()) :: :ok
+  def sync(org), do: Relay.sync(org_id!(org))
 
   @doc """
   The feed kind webhook `event` maps to (see the moduledoc's table), or `nil`.
@@ -150,7 +186,10 @@ defmodule KilnCMS.Delivery.Feed do
 
   @doc """
   Broadcast the feed event for webhook `event` to `org`'s subscribers, when it
-  maps to one. Called by `KilnCMS.Webhooks.dispatch/4`; never raises.
+  maps to one. Called by `KilnCMS.Webhooks.dispatch/4`; never raises or exits.
+
+  Returns once the event is handed off, before this node's subscribers have
+  it (see "Delivery is asynchronous" and `sync/1`).
   """
   @spec publish(String.t(), map(), Ash.ToTenant.t() | nil, boolean()) :: :ok
   def publish(event, payload, org, withdraws? \\ true) do
@@ -170,7 +209,7 @@ defmodule KilnCMS.Delivery.Feed do
         affected: affected(payload)
       }
 
-      Phoenix.PubSub.broadcast(@pubsub, "feed:" <> org_id, {:kiln_feed, feed_event})
+      :ok = Relay.dispatch(org_id, "feed:" <> org_id, {:kiln_feed, feed_event})
 
       :telemetry.execute(@telemetry_event, %{count: 1}, %{
         kind: kind,
@@ -184,6 +223,12 @@ defmodule KilnCMS.Delivery.Feed do
   rescue
     error ->
       Logger.error("Feed event for #{event} not published: " <> Exception.message(error))
+      :ok
+  catch
+    # Runs in the publisher's `after_transaction`: an exit must not escape it
+    # either.
+    :exit, reason ->
+      Logger.error("Feed event for #{event} not published: " <> inspect(reason))
       :ok
   end
 

@@ -5,6 +5,46 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Added
+
+- **Human verification on forms (kiln_cms#2249):** `form/2` and
+  `submit_form/3` document the new response keys. A form's schema may carry
+  `"challenge"`, `nil` or the widget's `"provider"`, `"site_key"`,
+  `"script_url"`, `"action"` and `"field"` (`"_kiln_challenge"`); relay the
+  visitor's token in the params under that name. The submit result then
+  carries `"challenge" => "verified"` or `"held"` (stored for review, not
+  acted on); a refused token is `reason: :validation` with
+  `"_kiln_challenge"` in its field errors. Documentation only: the client
+  passes both through unchanged, and servers older than this send neither.
+
+- **Any provider's widget (kiln_cms#2249):** the documented `"challenge"`
+  keys now include `"global"`, `"onload_param"`, `"render_options"`,
+  `"action_option"`, `"interactive"` and `"api"`, which describe how the
+  visitor's browser draws the operator's provider (Cloudflare Turnstile,
+  Google reCAPTCHA v2 or a plugin's). A server relaying a browser's
+  reCAPTCHA submission may find the token under `"g-recaptcha-response"`;
+  the server accepts it there too. Documentation only.
+
+## 0.7.0
+
+### Added
+
+- `text_search/3` and `semantic_search/3` take `:custom_sort` (kiln_cms#2292).
+  The server also accepts a custom field's bare name in `:filter` / `:sort`,
+  but this client keeps emitting `custom_filter` / `custom_sort`, the stable form.
+
+- **`:draft_write` keys (kiln_cms#2273):** `create/3` takes `on_behalf_of:`,
+  sent as the `X-Kiln-On-Behalf-Of` header, which Kiln records on a draft
+  created with a `:draft_write` API key so reviewers see which of your users
+  it was for. Stored only, never authorization; `nil` sends nothing, and
+  other writes never send it (the server reads it on `POST` only). The module
+  doc and README describe what a `:draft_write` key may do, and the three
+  optional provenance attributes (`"created_via_key_id"`,
+  `"created_via_key_name"`, `"on_behalf_of"`) a created record carries back.
+  Needs a Kiln server newer than 1.8; an older one ignores the header.
+
 ## 0.6.0
 
 ### Added

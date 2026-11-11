@@ -50,7 +50,8 @@ defmodule KilnCMSWeb.LocaleSettingsLive do
 
     case CMS.save_site_locale_settings(%{fallbacks: fallbacks},
            actor: socket.assigns.current_user,
-           tenant: socket.assigns.current_org
+           tenant: socket.assigns.current_org,
+           context: socket.assigns.security_context
          ) do
       {:ok, _row} ->
         {:noreply,
@@ -73,7 +74,8 @@ defmodule KilnCMSWeb.LocaleSettingsLive do
       row ->
         case CMS.reset_site_locale_settings(row,
                actor: socket.assigns.current_user,
-               tenant: socket.assigns.current_org
+               tenant: socket.assigns.current_org,
+               context: socket.assigns.security_context
              ) do
           {:error, error} ->
             {:noreply, socket |> put_flash(:error, error_message(error)) |> load_settings()}

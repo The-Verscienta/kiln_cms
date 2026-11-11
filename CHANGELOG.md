@@ -56,14 +56,185 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **If the app's environment sets `BACKUP_RCLONE_REMOTE`, check it before deploying: the official image now ships `rclone` (pinned, checksum-verified), so in-app backups start copying there, and an unreachable or unconfigured remote fails them. On a custom image without `rclone`, the variable now fails every in-app backup: install `rclone` or unset it.**
+  No migration; rolling the pin back is safe. The image grows by about 82 MiB.
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482) · [long form](docs/changelog/unreleased.md#rclone-in-image-upgrade))
+
+- **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `access-denied` and path aliases under `/access-denied`, which the new access-denied page (#2143) shadows; give each a new slug or alias.** No migration; read-only.
+  ([#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) · [long form](docs/changelog/unreleased.md#reserved-paths-upgrade))
+
+- **Run `mix ash.migrate` (new nullable `backup_locks.waiting_*` columns; `backup_runs.scheduled_components` and `schedule_ids`, default empty). While older nodes still run, a database-only or media-only backup request may back up everything (part of #2219). Rolling back is safe.**
+  ([#2685](https://github.com/The-Verscienta/kiln_cms/pull/2685) · [long form](docs/changelog/unreleased.md#backup-components-upgrade))
+
+- **Update the host's copy of `scripts/backup.sh` so cron's prune honors the new `kiln-<stamp>.good` marker, which the app keeps on the newest verified backup of each component (part of #2219).** No migration; rolling back is safe.
+  ([#2552](https://github.com/The-Verscienta/kiln_cms/pull/2552) · [long form](docs/changelog/unreleased.md#backup-last-good-marker-upgrade))
+
+- **Before rolling back to v1.8.0, run `DELETE FROM notifications WHERE event IN ('registration_pending', 'security_alert', 'security_notice');` and `DELETE FROM api_keys WHERE access = 'draft_write';` (re-mint those keys after rolling forward; never `UPDATE` them). Back up, then delete every `key_value` and `telephone` custom field (and its values).**
+  Fields of the other types added since v1.8.0, and the new scalar lists, load there but can fail to save or open; the long form has the queries and a console loop.
+  ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#rollback-to-1-8-0-upgrade))
+
+- **Run `mix ash.migrate` (new tables `security_alert_dispatches`, `site_security_alerts`; `users.notify_on_security_alert`, `NOT NULL DEFAULT true`). Site member admins now get security alert emails for every kind but failed sign-ins; platform admins get platform alerts they can't mute. A site with no member admins sends them to the platform admins.**
+  The stolen-key email is now an alert, with the old email as fallback; alert email uses the instance relay. `security` is a reserved webhook namespace. Before rolling back past #2509, delete the new notifications and `api_key_reuse_detected` events.
+  ([#2638](https://github.com/The-Verscienta/kiln_cms/pull/2638) · [long form](docs/changelog/unreleased.md#security-alerts-upgrade))
+
+- **Every `/api/content` `ETag` and every Kiln-rendered page's `ETag` changes once on this deploy, so revalidating clients and CDNs get one round of `200`s. Page tags now also change on every deploy whose code or assets differ.**
+  No migration; rolling the pin back is safe (another one-time round of `200`s).
+  ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#render-etags-upgrade))
+
+- **Run `mix ash.migrate` (new nullable `site_branding.twitter_site`). Fired `json` artifacts move to `format_version` 4 (new `social` key) and re-fire on their first uncached read; on a large site, run `mix kiln.refire_all` after the deploy.**
+  `/api/sync` mirrors and clients revalidating with `If-None-Match` keep the old body until a document is edited (#2463). Rolling the pin back is safe.
+  ([#2582](https://github.com/The-Verscienta/kiln_cms/pull/2582) · [long form](docs/changelog/unreleased.md#twitter-card-upgrade))
+
+- **Accepting an invitation now raises a member below the invited tier; before this, demoting or removing a member left their pending invitation live. For 7 days after upgrading, check Team → Pending invitations for such members and revoke those invitations.**
+  No migration; rolling the pin back is safe.
+  ([#2573](https://github.com/The-Verscienta/kiln_cms/pull/2573) · [long form](docs/changelog/unreleased.md#invitation-raise-tier-upgrade))
+
+- **New on by default: with a plugin from Hex installed, opening System or Security posture asks hex.pm about it, which tells hex.pm that plugin's package name and version. Opt out with `KILN_PLUGIN_HEALTH_CHECK=false` (`KILN_UPDATE_CHECK=false` also does, unless the first is set).**
+  No migration; rolling the pin back is safe.
+  ([#2562](https://github.com/The-Verscienta/kiln_cms/pull/2562) · [long form](docs/changelog/unreleased.md#plugin-health-egress-upgrade))
+
+- **Run `mix ash.migrate` (new tables `backup_locks`, `backup_node_beats`; `backup_runs` gains `chain_id` and status `canceled`). Backups run on a new Oban queue `backup_steps` (1 per node; add 1 to `POOL_SIZE`); drain the `backups` queue before the next minor. Node names must be unique.**
+  Mid-deploy, don't start backups from an old node. Before rolling back, cancel running backups, then relabel `canceled` runs and delete `backup_canceled` events (#2509), or roll forward.
+  ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-step-chain-upgrade))
+
+- **Run `mix ash.migrate` (new column `field_definitions.width`, new table `field_sections`). Field sync files exported from now on carry `width`, which builds from before this change refuse.** Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#field-layout-upgrade))
+
+- **Run `mix ash.migrate` (new nullable `field_definitions.widget`, no backfill). Field-sync files now carry `"widget"`, which an older release's import refuses: upgrade the target first.** Rolling the pin back is safe.
+  ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets-upgrade))
+
+- **Run `mix ash.migrate` (new table `site_registration`; `org_memberships` gains `status` and `decided_at`). Turn registration approval on only once every node runs this release: an older node reads a waiting registration as an active viewer.**
+  Before rolling back, anonymize the waiting and rejected accounts you don't want (don't delete their rows) and delete the three `registration_*` security events (#2509), or roll forward.
+  ([#2512](https://github.com/The-Verscienta/kiln_cms/pull/2512) · [long form](docs/changelog/unreleased.md#registration-approval-upgrade))
+
+- **Run `mix ash.migrate` (`users.notify_on_registration`, `NOT NULL DEFAULT true`). A node on an older release can't load the new `registration_pending` notification: during a rolling deploy and after a rollback, an admin's bell there shows the count but an empty list and Mark all read fails (#2509).**
+  Before rolling back, run `DELETE FROM notifications WHERE event = 'registration_pending'`, or roll forward.
+  ([#2517](https://github.com/The-Verscienta/kiln_cms/pull/2517) · [long form](docs/changelog/unreleased.md#registration-notifications-upgrade))
+
+- **Run `mix ash.migrate` (`org_memberships.created_account`, `site_registration.approval_for_site_sso`, both `NOT NULL DEFAULT false`). Turn on Registrations → "New accounts from this site's single sign-on wait for approval too" only once every node runs this release: an older node makes those accounts active viewers.**
+  ([#2519](https://github.com/The-Verscienta/kiln_cms/pull/2519) · [long form](docs/changelog/unreleased.md#registration-invitations-sso-upgrade))
+
+- **Run `mix ash.migrate` (`site_registration.rejected_accounts`, `NOT NULL DEFAULT 'keep'`). Set Registrations → "When you reject someone" to erase only once every node runs this release: an older node takes no account lock, so an erasure can race its membership, billing, key and confirmation writes.**
+  Rolling the pin back is safe; accounts already erased stay erased.
+  ([#2527](https://github.com/The-Verscienta/kiln_cms/pull/2527) · [long form](docs/changelog/unreleased.md#registration-erasure-upgrade))
+
+- **Before rolling back to a build that has the security log but predates sign-in unlock links, delete the `sign_in_unlock_requested`, `sign_in_unlocked` and `sign_in_unlock_refused` security events, or roll forward.**
+  No migration. An older build cannot load those rows, which breaks that site's security log and CSV, and erasing a person named in one (#2509). v1.8.0 has no security log and is unaffected.
+  ([#2510](https://github.com/The-Verscienta/kiln_cms/pull/2510) · [long form](docs/changelog/unreleased.md#sign-in-unlock-upgrade))
+
+- **Run `mix ash.migrate` (`forms` and `form_submissions` each gain a `challenge` column). A custom asset build or overlay Dockerfile that does not run `mix assets.deploy` must also run `esbuild kiln_challenge_embed`.**
+  Rolling the pin back is safe, but forms switched to a human-verification check stop asking, without a word, until you upgrade again.
+  ([#2501](https://github.com/The-Verscienta/kiln_cms/pull/2501) · [long form](docs/changelog/unreleased.md#form-human-verification-upgrade))
+
+- **Lists on number, date, link and other scalar custom fields: no migration, but before rolling back, don't edit those list fields or their records on the older release.**
+  It clears `multiple` on such a field's definition when saved, keeping each list's first item, and stringifies a list written there.
+  ([long form](docs/changelog/unreleased.md#scalar-list-fields-upgrade))
+
+- **Run `mix ash.migrate` (new table `site_admin_allowlist`). Rolling the pin back turns every site's admin allowlist off without a word; while a list is on, members and apps calling `/api/auth/sign_in` sign in only from listed networks.**
+  Nothing changes until a site admin saves a list. Lock-out: `bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'`.
+  ([long form](docs/changelog/unreleased.md#admin-allowlist-upgrade))
+
+- **Run `mix ash.migrate` (new table `site_session_policy`; `tokens` gains two nullable columns and an index built concurrently). Every signed-in browser request now reads its session's token row once.**
+  Idle timeout is off by default; existing sessions stay signed in. Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#session-idle-timeout-upgrade))
+
+- **In-app backups whose off-site copy fails now finish `Failed`, and both paths re-hash each file just before its off-site copy and refuse one that changed; check your rclone remote and credentials if backups turn red.** No migration; rolling back is safe.
+  ([long form](docs/changelog/unreleased.md#backup-offsite-rehash-upgrade))
+
+- **`scripts/backup.sh` now splits media into `.partNN.tar.gz` parts like the app (400 MB, no off switch), skips empty folders, honours `BACKUP_MEDIA_EXCLUDE` and needs GNU tar or bsdtar; `restore.sh` refuses a part set with no sidecar unless `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1`.** No migration.
+  ([long form](docs/changelog/unreleased.md#backup-sh-media-parts-upgrade))
+
+- **Run `mix ash.migrate` (new table `site_bot_budgets`). Scripts (`curl`, Go, Java, Python) now get 150 public-page requests a minute per address, not 300, and requests with no user agent 60; one count is shared per address.** Rolling the pin back is safe.
+  ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets-upgrade))
+
+- **New on by default: nodes ask their DNS resolver about the address of any visitor claiming to be a search engine. Allow outbound DNS (PTR, A, AAAA), set `TRUSTED_PROXIES` behind a proxy, or set `KILN_CRAWLER_VERIFICATION=false`. With smart 404 blocking on, link-preview fetchers are no longer exempt.**
+  No migration; rolling the pin back is safe.
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#verified-search-bots-upgrade))
+
+- **Run `mix ash.migrate` (new table `invitations`). A new daily job prunes invitations 30 days past expiry; no setting.** Rolling the pin back is safe; pending invitation links stop working until you upgrade again.
+  ([#2448](https://github.com/The-Verscienta/kiln_cms/pull/2448) · [long form](docs/changelog/unreleased.md#team-invitations-upgrade))
+
+- **Run `mix ash.migrate` (new tables `security_events` and `site_security_log`); overlays that restate `:ash_domains` must add `KilnCMS.Security`. A new daily prune job is on by default (`KILN_SECURITY_LOG_PRUNE_CRON`, 365-day window).** Rolling the pin back is safe.
+  ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441) · [long form](docs/changelog/unreleased.md#security-log-upgrade))
+
+- **App-made media backups may be several `kiln-media-<stamp>.partNN.tar.gz` files: update any script that globs `kiln-media-*.tar.gz`; after a rollback they do not show in History.** No migration.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) · [long form](docs/changelog/unreleased.md#backup-media-parts-upgrade))
+- **Run `mix ash.migrate` (new table `backup_runs`); overlays that restate `:ash_domains` must add `KilnCMS.Backups`.** Rolling the pin back is safe.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history-upgrade))
+
+- **Run `mix ash.migrate` (new table `site_password_policy`, no data change). Password changes now call the Have I Been Pwned range API by
+  default; air-gapped deployments set `BREACHED_PASSWORD_CHECK=false`.** Rolling the pin back is safe.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-upgrade))
+
+- **API consumers: a stale, expired or garbled `Authorization: Bearer` JWT is now a 401 (`invalid_token`), not anonymous
+  data. Fix the client; `KILN_API_REJECT_INVALID_BEARER=false` restores the old fallback for this release only.**
+  ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer-default-on))
+
+
 - **Overlays: run `mix ash.codegen`. Content tables gain a generated `name_lexemes`
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
+
+- **Overlays: run `mix ash.codegen` and commit the migration. Existing content types gain the `kiln_reporting_v1` SQL views.**
+  Additive; re-run `mix kiln.reporting.sql` grants after upgrading.
+  ([long form](docs/changelog/unreleased.md#reporting-views-upgrade))
+
+- **Content tables gain a GIN index on `custom_fields`, built concurrently: slow on a large
+  `entries`; a failed build leaves an INVALID index to drop. Overlays run `mix ash.codegen`.**
+  ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-fields-gin-upgrade))
+
+- **Overlays: run `mix ash.codegen` again for the per-document `noindex` / `nofollow` columns
+  on your content types. Both are additive (`NOT NULL DEFAULT false`); `type_definitions` gains two too.**
+  ([long form](docs/changelog/unreleased.md#robots-flags-upgrade))
+
+- **Overlays and plugins: the field type names `email`, `telephone`, `color`, `slug`, `time`, `json`, `range`, `key_value` and `link` are now built in. Rename a type that uses one; stored definitions with that name get the new strict check.**
+  ([long form](docs/changelog/unreleased.md#builtin-field-type-names-upgrade))
+
+- **Overlays: run `mix ash.codegen`, commit the migration and run `mix ash.migrate`. Users, memberships and roles gain a `field_read_grants` column.**
+  Additive (`NOT NULL DEFAULT '{}'`). Rolling the pin back is safe for data, but an older release ignores read grants, so a private field you restricted shows to editors again.
+  ([long form](docs/changelog/unreleased.md#custom-field-grants-upgrade))
+
+- **Field definitions gain a `validation` column (`NOT NULL DEFAULT '{}'`, additive, safe to roll back). Overlays: run `mix ash.codegen`.
+  `unique` fields have no database backstop; audit with `mix kiln.fields.duplicates`.**
+  ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation-upgrade))
+
+- **Optional: `mix kiln.refire_all` after deploying puts the new code-block focus attributes into `:web` artifacts fired before the upgrade.**
+  Revalidating clients get the new HTML; add `--notify` to tell webhook receivers too. No migration.
+  ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks-upgrade))
+
+- **Optional: `mix kiln.refire_all` after deploying puts the new table focus attributes, and the wrapper around old bare tables, into `:web` artifacts fired before the upgrade.**
+  Same sweep and `--notify` choice as the code-block note above; no migration, safe to roll back.
+  ([#2596](https://github.com/The-Verscienta/kiln_cms/pull/2596) · [long form](docs/changelog/unreleased.md#scrollable-tables-upgrade))
 
 - **Forms: don't use the new field types until every node runs this release. A node on the
   previous release cannot load a form field with an unknown type, so the public form fails
   to load; rolling the image back breaks any form that uses them.**
   ([long form](docs/changelog/unreleased.md#form-field-types-upgrade))
+
+### Breaking
+
+- **Public pages take their language from the URL only. On a fallback page `<html lang>` and `Content-Language` now name the reader's (URL) language; the new `x-kiln-locale` header and `<article lang>` name the record's. Style articles with `.public-article:lang(xx)`, not `html[lang]`.**
+  Unprefixed URLs serve only the default locale (a French-only page is a 404 there), and a form page or embed posts under a prefix. Headless APIs unchanged.
+  ([#2646](https://github.com/The-Verscienta/kiln_cms/pull/2646) · [long form](docs/changelog/unreleased.md#public-chrome-follows-url-locale))
+
+- **Overlay and plugin code: `restore_<type>_version` now refuses a record read before a later write (`StaleRecord`) and increments `lock_version`. Read the record again before restoring, and use the one it returns.**
+  The revisions restore route answers a lost race with `409` `invalid_state_transition`, not `422`.
+  ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-version-stale-struct))
+
+- **Overlay and plugin code: `purge_<type>` and `purge_media_item` now refuse a record that isn't in the trash (`StaleRecord`). Trash it first (`destroy_<type>`).** The API never exposed `:purge`.
+  ([#2609](https://github.com/The-Verscienta/kiln_cms/pull/2609) · [long form](docs/changelog/unreleased.md#purge-trashed-only))
+
+- **Console and overlays: `Backups.enqueue/1` returns `{:ok, %{status:, chain:}}`, not an `Oban.Job`, and `Backups.Worker.run/3` requests a backup and waits for it instead of running it inline; both are deprecated for `Backups.request/2`.**
+  ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-request-api))
+
+- **Unpublishing and archiving need publish rights (admin, or editor where Team → Publishing allows). Upgraded sites default it off, so editors there lose both, and their `:read_write` keys get 403; an admin can choose Let editors publish.** No migration.
+  ([long form](docs/changelog/unreleased.md#takedown-needs-publish-rights))
+
+- **Overlays: `Accounts.Bootstrap.create_first_admin/1` returns `{:ok, user, notices}`, not `{:ok, user}`.**
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-bootstrap-return))
+
+- **Registering no longer signs the user in: everyone is told to check their email and sent to `/sign-in`, and an address that already has an account gets no new row.**
+  ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
 
@@ -72,7 +243,310 @@ Every summary line below that was shortened links to its own entry there.
   (new `min`/`max`/`step` keys), mail, entries, CSV and the `form.submitted` payload.**
   ([#2261](https://github.com/The-Verscienta/kiln_cms/issues/2261) · [long form](docs/changelog/unreleased.md#form-field-types))
 
+- **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
+  The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).
+  ([#2521](https://github.com/The-Verscienta/kiln_cms/issues/2521) · [#2648](https://github.com/The-Verscienta/kiln_cms/pull/2648) · [long form](docs/changelog/unreleased.md#security-posture-json))
+
+- **Back up only the database or only the media from a release console (`KilnCMS.Backups.request([components: [:db]], actor)`); the Backups page and the overview report each component's last backup and alarm when either failed or went stale (part of #2219).**
+  Guide: [docs/backups.md](docs/backups.md#back-up-only-the-database-or-only-the-media).
+  ([#2685](https://github.com/The-Verscienta/kiln_cms/pull/2685) · [long form](docs/changelog/unreleased.md#backup-components))
+
+- **Security alerts: site admins get a bell notice and an email when someone becomes an admin, a role is raised, an account is locked out, two-factor is turned off or single sign-on changes; platform admins when a platform admin or API key is created or a stolen key is reused. Organization → Security alerts picks the kinds.**
+  One alert per kind per 15 minutes plus a summary; opt-in `security.*` webhook events; turning alerts down sends the site's member admins a notice nobody can mute. Guide: [docs/security-alerts.md](docs/security-alerts.md).
+  ([#2638](https://github.com/The-Verscienta/kiln_cms/pull/2638) · [long form](docs/changelog/unreleased.md#security-alerts))
+
+- **Security posture gains a Security notices for Kiln line (`core.security_notices`): Fix now, at any severity, when a published notice's affected range covers the running Kiln. System's Updates card shows the same.**
+  Off with `KILN_UPDATE_CHECK=false`; shares the plugin check's notices fetch, which `KILN_PLUGIN_HEALTH_CHECK=false` no longer stops. Guide: [docs/security-posture.md](docs/security-posture.md#security-notices-for-kiln).
+  ([#2628](https://github.com/The-Verscienta/kiln_cms/pull/2628) · [long form](docs/changelog/unreleased.md#core-security-notices))
+
+- **A site can index custom fields for range filters and `custom_sort`: list the field names in `config :kiln_cms, :indexed_custom_fields`, run `mix ash.codegen`, and `gt`/`gte`/`lt`/`lte` and sort-with-a-limit on them read an index instead of scanning the table.**
+  Two btrees per name per content table (ascending and descending), built concurrently; nothing is indexed by default, and `mix kiln.custom_fields.index --check` reports drift. Cost and limits: [docs/json-api.md](docs/json-api.md#which-custom-filters-use-an-index), [ADR 0025](docs/decisions/0025-a-site-declares-which-custom-fields-get-range-and-sort-indexes-in-config.md).
+  ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index))
+
+- **`mix kiln.refire_all --notify` (`KilnCMS.Firing.Sweep.run(notify: true)`) announces each re-fired document to webhook endpoints and the change feed as `<type>.updated` with `"reason": "refire"`, which `Firing.refire/3`'s `updated` now carries too.**
+  Not to automation, federation or the CDN purge. Guide: [docs/releasing.md](docs/releasing.md#re-render-published-content-after-an-upgrade).
+  ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#refire-notify))
+
+- **Site admins can set the site's X (Twitter) username under Branding, sent as `twitter:site`. Link-preview tags never go out empty, images are absolute on the site's own host, and the `json` artifact gains `social`.**
+  Guide: [docs/seo.md](docs/seo.md#link-previews-open-graph-and-x-twitter-cards). Remove any `twitter:site` added under Code injection, or it appears twice.
+  ([#2582](https://github.com/The-Verscienta/kiln_cms/pull/2582) · [long form](docs/changelog/unreleased.md#twitter-card-tags))
+
+- **Operations → System → Plugins shows whether each plugin still checks out: changed on Hex since this build, a security notice, retired or unmaintained on Hex, or a `kiln_plugin` requirement this Kiln doesn't meet. Security posture gains an Installed plugins line.**
+  Unknown is never OK; git and path plugins can't be verified against Hex. `mix kiln.plugins.list --health` runs it too. Guide: [docs/security-posture.md](docs/security-posture.md#check-your-installed-plugins).
+  ([#2562](https://github.com/The-Verscienta/kiln_cms/pull/2562) · [long form](docs/changelog/unreleased.md#plugin-health-checks))
+
+- **A Slug field can now be marked unique: no two records of a content type (and language) may hold the same slug, on every way of saving.**
+  Compared after the slug is tidied, so `Hello World` and `hello-world` collide; a record keeps its own value on update. Follow-up to the Slug field type.
+  ([#2433](https://github.com/The-Verscienta/kiln_cms/issues/2433))
+
+- **In-app backups run as retried steps behind a cluster-wide lock: a second backup queues, a stopped node's step moves on, and platform admins can Cancel a running backup (audited, resumable).**
+  Each step retries 4 times (1/5/15 min); database-only backups can now be resumed. Guide: [docs/backups.md](docs/backups.md#how-an-in-app-backup-runs-2218).
+  ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-step-chain))
+
+- **Site admins can see which security settings are on, and what to fix first, at Organization → Security posture; platform admins also see the installation's checks.**
+  Read-only, ten checks; an unknown or broken check counts as a warning, never a pass. Plugins add checks with `security_checks/0` and `Kiln.Security.Check` (`kiln_plugin` 1.4). Guide: [docs/security-posture.md](docs/security-posture.md).
+  ([#2520](https://github.com/The-Verscienta/kiln_cms/pull/2520) · [long form](docs/changelog/unreleased.md#security-posture))
+
+- **Admins can lay out a type's custom fields as tabs, fieldsets or accordions, and set a field's width (full, half, a third), at Fields → Sections of.**
+  Keyboard-accessible tabs in the editor; `GET /api/schema` adds `x-kiln-section-display` and `x-kiln-width`. Guide: [docs/extending-content.md](docs/extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
+  ([long form](docs/changelog/unreleased.md#field-layout))
+
+- **Admins can choose each custom field's editor input: radios or buttons for a select, checkboxes, one-line text, a reference dropdown, or a plugin type's own (`widget`).**
+  Editor-only; nothing stored or delivered changes. Guide: [docs/extending-content.md](docs/extending-content.md#choose-how-editors-fill-in-a-field).
+  ([#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495) · [long form](docs/changelog/unreleased.md#field-widgets))
+
+- **A site can hold new password sign-ups for an admin's approval: Sign-in & access → Registrations, then Approve or Reject each applicant.**
+  Until approved an account can sign in but reads only what's public, on every site, and can't pay its way in. Guide: [docs/account-administration.md](docs/account-administration.md#approving-registrations).
+  ([#2512](https://github.com/The-Verscienta/kiln_cms/pull/2512) · [long form](docs/changelog/unreleased.md#registration-approval))
+
+- **Site admins get one bell notice and email per site when a confirmed applicant is waiting, and applicants are emailed when they're approved or rejected.**
+  The notice collapses while unread, names no applicant, and is read by opening Registrations; mute the email under Your settings → Email notifications. Guide: [docs/account-administration.md](docs/account-administration.md#get-told-when-someone-is-waiting).
+  ([#2517](https://github.com/The-Verscienta/kiln_cms/pull/2517) · [long form](docs/changelog/unreleased.md#registration-notifications))
+
+- **Accepting an invitation, or Team's Add or invite, now approves the person's waiting or rejected registration on that site (an invitation overrides a rejection only if it is newer), and a site can hold new accounts from its own single sign-on for approval.**
+  The SSO switch is on Registrations, separate from password sign-ups. Guide: [docs/account-administration.md](docs/account-administration.md#invitations-and-registrations).
+  ([#2519](https://github.com/The-Verscienta/kiln_cms/pull/2519) · [long form](docs/changelog/unreleased.md#registration-invitations-sso))
+
+- **A site can erase the account of an applicant it rejects whose email address was never confirmed: Registrations → Settings → "When you reject someone".**
+  Off by default; only a standing admin's rejection erases, and only an account that is nothing but that registration. A confirmed rejection is always kept. Guide: [docs/account-administration.md](docs/account-administration.md#erase-unconfirmed-applicants-you-reject).
+  ([#2527](https://github.com/The-Verscienta/kiln_cms/pull/2527) · [long form](docs/changelog/unreleased.md#registration-erasure))
+
+- **Someone whose sign-in is paused after too many attempts can have a link emailed that lifts the pause: "Email me an unlock link" on the sign-in page.**
+  The link lasts 15 minutes, works once and goes only to confirmed members of that site (3 an hour). It clears only the account pause, and the sign-in page still never says an account is paused. Guide: [docs/account-administration.md](docs/account-administration.md#lift-a-sign-in-pause-by-email).
+  ([#2510](https://github.com/The-Verscienta/kiln_cms/pull/2510) · [long form](docs/changelog/unreleased.md#sign-in-unlock))
+
+- **Plugins can add a human-verification provider (`challenge_providers/0`, `Kiln.Challenge.Provider`, new in `kiln_plugin` 1.4); the operator selects it with `CHALLENGE_PROVIDER=<id>`.**
+  Checked once against the contract (and by `mix kiln.plugins.doctor`); an unknown or non-conforming provider leaves checks off with a boot warning. The core enforces the hostname and action a provider reports.
+  ([#2507](https://github.com/The-Verscienta/kiln_cms/pull/2507) · [long form](docs/changelog/unreleased.md#challenge-provider-plugins))
+
+- **Google reCAPTCHA v2 (the checkbox) is a second built-in human-verification provider, `CHALLENGE_PROVIDER=recaptcha`; Cloudflare Turnstile stays the recommended one.**
+  Loaded and verified from `www.recaptcha.net` only, never `www.google.com`; v2 keys only; a wrong secret refuses every check. Guide: [Turn on reCAPTCHA](docs/human-verification.md#turn-on-recaptcha).
+  ([#2507](https://github.com/The-Verscienta/kiln_cms/pull/2507) · [long form](docs/changelog/unreleased.md#recaptcha-provider))
+
+- **Site admins can ask for a human-verification check (Turnstile) on each public form; a submission without a passing check is kept in Spam for review instead of being acted on.**
+  Per form, off by default (Forms → General); `CHALLENGE_FORMS=false` turns every form off. `GET /api/forms/:slug` gains `challenge`; headless sites send `_kiln_challenge`.
+  ([#2501](https://github.com/The-Verscienta/kiln_cms/pull/2501) · [long form](docs/changelog/unreleased.md#form-human-verification))
+
+- **Operators can turn on an adaptive Cloudflare Turnstile check for password sign-in and registration with `CHALLENGE_PROVIDER`, `CHALLENGE_SITE_KEY` and `CHALLENGE_SECRET_KEY`; `/api/auth/sign_in` is only challenged with `CHALLENGE_API_SIGN_IN=true`.**
+  Off until configured; deployment-wide; no migration. Guide: [docs/human-verification.md](docs/human-verification.md).
+  ([long form](docs/changelog/unreleased.md#human-verification))
+
+- **Integer, float, date, date-time, time, URL, email, telephone, colour and slug custom fields can hold a list (Holds → A list in `/editor/fields`).**
+  Stored as a JSON array of tidied values, one typed input per item in the editor; `custom_filter` takes `eq`/`in`/`has`/`has_all`/`has_none`/`count`. Guide: [docs/extending-content.md](docs/extending-content.md#make-a-field-hold-a-list-of-values).
+  ([long form](docs/changelog/unreleased.md#scalar-list-fields))
+
+- **Site admins can restrict the console and every sign-in route, members' and `/api/auth/sign_in` included, to listed IPv4/IPv6 networks, at Configure → Sign-in & access → Admin allowlist.**
+  Off by default; fails closed; API keys and issued tokens are not affected. Guide: [docs/admin-allowlist.md](docs/admin-allowlist.md).
+  ([long form](docs/changelog/unreleased.md#admin-allowlist))
+
+- **Site admins can sign idle browsers out after 15 minutes to 24 hours (shorter for admins) and sign everyone out of the site at once, at Configure → Integrations → Sessions.**
+  Off by default; idle wins over "remember me"; API keys and headless tokens are not affected. Guide: [docs/account-administration.md](docs/account-administration.md#sign-people-out-when-idle).
+  ([long form](docs/changelog/unreleased.md#session-idle-timeout))
+
+- **Optional smart 404 blocking: an address that racks up delivery 404s or probes `/wp-login.php`-style bait paths is blocked for an hour.**
+  Off by default; turn on with `KILN_SCANNER_BLOCKING=1`. Guide: [docs/ip-blocking.md](docs/ip-blocking.md#block-scanners-automatically).
+  ([#2471](https://github.com/The-Verscienta/kiln_cms/pull/2471) · [long form](docs/changelog/unreleased.md#scanner-404-blocking))
+
+- **Public delivery throttles by user-agent class: scripts and clients with no user agent are refused sooner than browsers; admins can lower each class at Organization → Bot budgets.**
+  Operators set the ceilings with `KILN_BOT_BUDGET_*_PERCENT`; a site may only lower them. Cost control, not security. Guide: [docs/bot-budgets.md](docs/bot-budgets.md).
+  ([#2470](https://github.com/The-Verscienta/kiln_cms/pull/2470) · [long form](docs/changelog/unreleased.md#bot-budgets))
+
+- **Search-engine claims are checked by reverse and forward DNS; a claim proven false is charged as no user agent (60 a minute by default), and a search-engine budget above 100% goes only to verified addresses.**
+  Never on the request path; unchecked claims keep the browser limit. Guide: [docs/bot-budgets.md](docs/bot-budgets.md#verified-search-engines).
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#verified-search-bots))
+
+- **Platform admins can invite someone with no account to a site by email: Team → Add or invite, with Pending invitations to resend or revoke.**
+  Links last 7 days and work on invite-only sites; an unconfirmed account is now invited, not added. Guide: [docs/account-administration.md](docs/account-administration.md#invite-someone-to-a-site).
+  ([#2448](https://github.com/The-Verscienta/kiln_cms/pull/2448) · [long form](docs/changelog/unreleased.md#team-invitations))
+
+- **The single-revision API read carries `changed_custom_fields`, the sorted keys of the custom fields that write changed.**
+  Additive: `changed_fields` still says `custom_fields`; no migration.
+  ([#2353](https://github.com/The-Verscienta/kiln_cms/issues/2353) · [long form](docs/changelog/unreleased.md#revisions-changed-custom-fields))
+
+
+- **Admins get a security log: who signed in, was locked out, or changed a second factor, passkey, role, API key or sign-in setting, and from where.**
+  At `/editor/security-log`, with filters, CSV download and a per-site retention window (default 365 days). Guide: [docs/security-events.md](docs/security-events.md).
+  ([#2441](https://github.com/The-Verscienta/kiln_cms/pull/2441) · [long form](docs/changelog/unreleased.md#security-log))
+- **Export and import custom-field definitions between environments: `mix kiln.fields.export` / `mix kiln.fields.import`, release `rpc` functions and an admin download at `/editor/fields/export.json`.**
+  One versioned JSON file carries every field attribute, link fields, group sub-fields and dynamic types; the import prints a diff, dry-runs in a rolled-back transaction, applies all-or-nothing, is idempotent, and blocks changes that drop stored values unless `--allow-data-loss`. Admin only; no migration, no DDL.
+  ([#2288](https://github.com/The-Verscienta/kiln_cms/issues/2288) · [long form](docs/changelog/unreleased.md#field-definition-sync))
+
+- **In-app media backups are split into independent `tar.gz` parts with SHA-256 sidecars, a Resume button for failed runs, and a multi-part `restore.sh media`.**
+  Settings `BACKUP_MEDIA_PART_MB` and `BACKUP_MEDIA_EXCLUDE`; no migration.
+  ([#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) · [long form](docs/changelog/unreleased.md#backup-media-parts))
+
+- **Roles and members can be granted individual custom fields, and private custom fields can be hidden from some editors.**
+  New `custom_fields.<name>` grant keys and a `field_read_grants` axis; set both on `/editor/team`. Guide: [docs/granular-rbac.md](docs/granular-rbac.md#per-custom-field-grants-and-read-restrictions).
+  ([long form](docs/changelog/unreleased.md#custom-field-grants))
+
+- **Backups gains a History of every attempt, app- and cron-made, with verified state and whether files are still on disk.**
+  Platform admins, at `/editor/backups`; no new settings.
+  ([#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) · [long form](docs/changelog/unreleased.md#backup-history))
+
+- **Site admins can block an IP address or range at `/editor/ip-blocks` ("Blocked addresses"): an empty 403 on dynamic routes and sockets.
+  Static assets and `/uploads` are not covered; behind a proxy set `TRUSTED_PROXIES` first.
+  If an admin blocks their own network, `bin/kiln_cms rpc 'KilnCMS.Release.ip_blocks(remove: true)'` lifts the blocks.**
+  ([#2242](https://github.com/The-Verscienta/kiln_cms/issues/2242) · [long form](docs/changelog/unreleased.md#ip-block-rules))
+- **Custom fields can be shown or required only when another field has a given value (Conditions in `/editor/fields`).**
+  Hidden values are kept and still served by the API; new `visible_when` / `required_when` attributes; additive migration, nothing else to run.
+  ([long form](docs/changelog/unreleased.md#conditional-custom-fields))
+- **A custom field can default to today, now, the creating user, the site locale or another field (Default comes from in `/editor/fields`).**
+  Create-only, a supplied value wins; new `default_source` / `default_field` attributes; additive migration, nothing else to run.
+  ([#2286](https://github.com/The-Verscienta/kiln_cms/issues/2286) · [long form](docs/changelog/unreleased.md#dynamic-field-defaults))
+- **Admins choose what happens to a breached password at Organization → Password policy: off, warn (default) or block for administrators.**
+  Checked on register, change, reset and first-run setup, by k-anonymity.
+  ([#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240) · [long form](docs/changelog/unreleased.md#breached-password-check))
+- **Admins can constrain a custom field: `min`/`max`, length, a whole-value `pattern`, or `unique`, enforced on every write path.**
+  Set in `/editor/fields` or via the `validation` attribute; stored values are grandfathered. Audit with `mix kiln.fields.duplicates`.
+  ([#2406](https://github.com/The-Verscienta/kiln_cms/pull/2406) · [long form](docs/changelog/unreleased.md#field-validation))
+- **Admins can replace a webhook's signing secret with Rotate secret on `/editor/webhooks`; it works even when the old secret is unreadable.**
+  ([#2347](https://github.com/The-Verscienta/kiln_cms/issues/2347) · [long form](docs/changelog/unreleased.md#webhook-rotate-secret))
+
+- **Six built-in custom field types check and tidy a value: `:email`, `:telephone` (E.164), `:color`, `:slug`, `:time` and `:json`.**
+  Those six names are now reserved: rename an overlay or plugin type that uses one (`mix kiln.plugins.doctor` fails).
+  ([long form](docs/changelog/unreleased.md#builtin-format-field-types))
+
+- **Three more built-in custom field types: `:range` (two numbers or two dates), `:key_value` (ordered `key=value` pairs) and `:link` (URL, label, target, rel).**
+  Names reserved; stored as JSON, filterable only for "Empty or not", not sortable. Plugin `input_parts` may now declare a select part.
+  ([long form](docs/changelog/unreleased.md#builtin-composite-field-types))
+
+- **`custom_filter` takes `_or` / `_and` / `_not` groups, a custom sort may come before a built-in one, and sorting by a reference or media field says why it is refused.**
+  `filter[or][0][price][gt]=100&filter[or][1][title]=Sale` now works, and `sort=price,title` is one combined order instead of a `400`. Additive; no migration or index.
+  ([#2355](https://github.com/The-Verscienta/kiln_cms/issues/2355) · [#2356](https://github.com/The-Verscienta/kiln_cms/issues/2356) · [#2354](https://github.com/The-Verscienta/kiln_cms/issues/2354) · [long form](docs/changelog/unreleased.md#custom-field-groups-and-mixed-sort))
+
+- **GraphQL `customWhere` filters custom fields with typed operators: `customWhere: [{name: "price", float: {gt: 10}}]`.**
+  A wrong operand type is a schema error; `contains` and `startsWith` (case-insensitive, literal) also work in `customFilter`.
+  ([#2290](https://github.com/The-Verscienta/kiln_cms/issues/2290) · [long form](docs/changelog/unreleased.md#graphql-custom-where))
+
+- **Admins can move one document to the trash from the content list's row menu or the editor's Settings tab.**
+  Same soft delete as bulk Delete; pending autosave edits are saved first. Guide: [docs/trash.md](docs/trash.md).
+  ([#2333](https://github.com/The-Verscienta/kiln_cms/pull/2333) · [long form](docs/changelog/unreleased.md#move-to-trash-in-editor))
+
+- **The content list can show up to four custom fields on each row; pick them under Columns once one content type is listed.**
+  Remembered per person, site and type; additive migration, nothing to run.
+  ([long form](docs/changelog/unreleased.md#content-list-field-columns))
+
+- **The content list can be filtered by up to four custom-field conditions and sorted by one field once one content type is listed; the count reads "1000+" past 1000.**
+  Saved views keep them and flag a field that no longer applies; no migration.
+  ([long form](docs/changelog/unreleased.md#content-list-field-filter-sort))
+
+- **Editors can download the content list as CSV or JSON from a new Export menu, or only the ticked rows with Export selected.**
+  Up to 10,000 rows, the saved list columns, private fields only if ticked; no migration.
+  ([long form](docs/changelog/unreleased.md#content-list-export))
+
+- **`custom_filter` equality, `in` and list membership use a new GIN index on `custom_fields`: a selective filter on 100,000 rows drops from about 40 ms to about 3 ms.**
+  Range, `not_eq`, `ilike`, `null` and `custom_sort` are unchanged.
+  ([#2321](https://github.com/The-Verscienta/kiln_cms/pull/2321) · [long form](docs/changelog/unreleased.md#custom-field-indexes))
+
+- **Custom fields can be filtered and sorted by bare name (`filter[price]`, `sort=title,price`), and `custom_sort` now works on search routes.**
+  ([long form](docs/changelog/unreleased.md#custom-field-native-filter-sort))
+
+- **Opt-in `KILN_API_REJECT_INVALID_BEARER=true` answers 401 for an unverifiable bearer token on the API
+  instead of serving anonymous data; the default flips on in the next release.**
+  ([#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161) · [long form](docs/changelog/unreleased.md#reject-invalid-bearer))
+
+- **Change severity: an edit to a safety-relevant field of published content is recorded as critical, notable or routine on its own version.**
+  The editor asks before publishing; API writes default to notable; read back as `latest_edit_severity` / `latest_edit_at`.
+  ([long form](docs/changelog/unreleased.md#change-severity))
+
+- **Read-only SQL views of published content for BI tools: the `kiln_reporting_v1` schema, with a read-only role from `mix kiln.reporting.sql`.**
+  Allowlisted custom fields, wide and one-row-per-field; no typed columns yet. Guide: [docs/reporting.md](docs/reporting.md).
+  ([long form](docs/changelog/unreleased.md#reporting-views))
+
+- **Plugins can mount plain-Plug endpoints (webhooks, JSON, feeds) with `plug_routes/0`, new in `kiln_plugin` 1.4.**
+  No session or CSRF check, raw body kept for HMACs, own 300/min rate limit; `mix kiln.plugins.doctor` checks paths.
+  ([#2272](https://github.com/The-Verscienta/kiln_cms/issues/2272) · [long form](docs/changelog/unreleased.md#plugin-plug-routes))
+
+- **GraphQL reads admin-defined custom fields typed by kind (`customFloat(name:)`, `fields(names:)`), and `GET /api/schema?format=typescript-graphql` exports ready fragments and types; `swift-graphql` and `kotlin-graphql` do the same for native apps.**
+  ([#2361](https://github.com/The-Verscienta/kiln_cms/pull/2361) · [long form](docs/changelog/unreleased.md#graphql-typed-custom-fields))
+
+- **Drafts-only API keys (`access: draft_write`): a headless service can create and edit its own drafts
+  and never publish, delete or touch live content. Drafts record the key and an optional `X-Kiln-On-Behalf-Of` label.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-api-keys))
+
+- **Drafts-only keys can rotate themselves: an admin sets a window at mint, and until then `POST /api/keys/rotate`
+  swaps the key for an identical fresh one and revokes the old. Reusing a rotated-away key burns the chain.**
+  ([#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273) · [long form](docs/changelog/unreleased.md#draft-write-key-rotation))
+
+- **`config :kiln_cms, :i18n, block_fields:` makes core image/video/audio block fields shared or
+  fallback across locales; the editor locks them on translations.**
+  ([long form](docs/changelog/unreleased.md#block-field-localization-config))
+
+- **Per-document `noindex` / `nofollow` (with per-type defaults for new documents): sent as
+  `<meta name="robots">` and `x-robots-tag`, carried in versions, copies and the API, left out
+  of sitemap, news sitemap, llms.txt and feeds, with an advisory for a menu-linked noindex page.**
+  ([#2256](https://github.com/The-Verscienta/kiln_cms/issues/2256) · [long form](docs/changelog/unreleased.md#robots-flags))
+
 ### Changed
+
+- **While a backup runs, a request folds into the queued one only when it is the same kind: Back up now into a queued fresh backup, Resume into a queued resume of the same backup. Any other request is refused with "Try again once the queue clears", and the queue is left as it was.**
+  ([#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) · [long form](docs/changelog/unreleased.md#backup-fold-like-into-like))
+
+- **An in-app backup with `BACKUP_RCLONE_REMOTE` set and no `rclone` in the image now fails (Run log and run error say so) instead of skipping the off-site copy; the Backups page's “Where backups go” says so ahead of time.**
+  ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482))
+
+- **Search engines whose address DNS has verified now get 200% of the `:delivery` limit by default (600 requests a minute per address instead of 300); unverified claims stay at the browser limit, and with `KILN_CRAWLER_VERIFICATION=false` the default stays 100%. Set `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100` to go back.**
+  ([#2587](https://github.com/The-Verscienta/kiln_cms/issues/2587) · [long form](docs/changelog/unreleased.md#verified-search-engine-default))
+
+- **Release images no longer ship `priv/static/images/logo-lockup.png` (234 KB), which nothing in Kiln referenced. An overlay that linked `/images/logo-lockup.png` must ship its own copy.**
+  ([#2401](https://github.com/The-Verscienta/kiln_cms/issues/2401))
+
+- **A custom-field range filter (`gt`, `gte`, `lt`, `lte`) no longer matches a record whose stored value is a JSON `null`, array or object.**
+  They compare as "no value", as `custom_sort` already read them; before, JSON ordering made an array greater than every number. Only rows whose field was retyped or written off-type are affected.
+  ([#2359](https://github.com/The-Verscienta/kiln_cms/issues/2359) · [#2551](https://github.com/The-Verscienta/kiln_cms/pull/2551) · [long form](docs/changelog/unreleased.md#custom-field-range-index-changed))
+
+- **The smart 404 guard no longer exempts link-preview fetchers or Slurp from its miss threshold, and exempts a search-engine claim only until DNS proves it false.**
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#scanner-guard-exemption-narrowed))
+
+- **`kiln_cms_delivery_client_class_count`'s `class` is now the class charged: `class="empty"` includes search-engine claims proven false by DNS.**
+  ([#2591](https://github.com/The-Verscienta/kiln_cms/pull/2591) · [long form](docs/changelog/unreleased.md#client-class-is-charged-class))
+
+- **Every update action on a content resource, an overlay's own included, refuses a trashed row with `StaleRecord`; only `:restore`, `:clear_reference_target`, `:convert_custom_field` and `:resnapshot_media` are exempt.**
+  ([#2528](https://github.com/The-Verscienta/kiln_cms/pull/2528) · [long form](docs/changelog/unreleased.md#trashed-row-update-actions-refuse))
+
+- **Erasing an account also deletes its Web Push subscriptions, its private saved views and the notifications addressed to it, and now always clears its audiences.**
+  ([#2527](https://github.com/The-Verscienta/kiln_cms/pull/2527) · [long form](docs/changelog/unreleased.md#erasure-deletes-more))
+
+- **Lists of strings and multiple selects now take `has`, `has_all`, `has_none` and `count` in `custom_filter`, and read a bare value stored before the field became a list as a one-item list (`eq` matches it, `not_eq` leaves it out).**
+  `has_none` matches a record with no value; `not_eq` does not. An unsupported operator's `400` now lists the supported ones.
+  ([long form](docs/changelog/unreleased.md#scalar-list-filters-changed))
+
+- **Single sign-on, Sessions, Password policy, Blocked addresses and Bot budgets moved to a new Configure → Sign-in & access section; their addresses are unchanged.**
+  ([long form](docs/changelog/unreleased.md#console-sign-in-access-section))
+
+- **Backup retention keeps the newest good backup of each component, honours `kiln-<stamp>.keep` recovery points, ages a stamp's dump and media separately, and deletes nothing when it can't read what it needs.**
+  `BACKUP_KEEP_DAYS` unchanged; no migration. Local disk use may grow by up to two backups per component, plus pinned ones.
+  ([long form](docs/changelog/unreleased.md#backup-retention-by-component))
+
+- **The signed-out home page and the default logo ship right-sized images: page image weight drops from about 1,030 KB to about 100 KB (WebP).**
+  ([#2165](https://github.com/The-Verscienta/kiln_cms/issues/2165) · [long form](docs/changelog/unreleased.md#public-image-weight))
+
+- **The console sidebar and the thin page shell render the built-in logo at its small size too, instead of the 95 KB 278x379 original.**
+  A custom `logo_url` is still a plain `<img>`. The `KilnCMSWeb.Layouts.brand_logo` helper is removed; use `Layouts.brand_mark/1`.
+  ([#2400](https://github.com/The-Verscienta/kiln_cms/issues/2400) · [long form](docs/changelog/unreleased.md#console-brand-mark))
+
+- **CSV exports write a negative number as `-5`, not `'-5`; text starting with `=`, `+`, `-` or `@` is still prefixed.**
+  Affects any CSV that passes a negative number to `KilnCMSWeb.CSV`; text is unchanged.
+  ([long form](docs/changelog/unreleased.md#csv-numbers-unguarded))
+
+- **A console page you lack the role for now lands on a 403 `/access-denied` page naming the role it needs, instead of home with a toast; `access-denied` is now a reserved root slug.**
+  ([#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143) · [long form](docs/changelog/unreleased.md#access-denied-page))
+
+- **Roles on accounts, team and settings lead with the tier that applies now ("Platform:" / "On this site:"), with
+  a line saying when a temporary one ends and what follows; "unconfirmed" is now "Email not confirmed", apart from it.**
+  ([#2366](https://github.com/The-Verscienta/kiln_cms/pull/2366) · [long form](docs/changelog/unreleased.md#effective-role-display))
+
+- **On `/editor/team`, a custom role's or member's content types and field grants are picked from the site's types
+  and fields instead of typed as a list and JSON; "No fields" stores `[]`, and unrecognized stored names are kept.**
+  ([#2352](https://github.com/The-Verscienta/kiln_cms/pull/2352) · [long form](docs/changelog/unreleased.md#team-scope-pickers))
+
+- **Webhook signing secrets on `/editor/webhooks` are masked to their last four characters until an admin clicks Reveal;
+  a revealed secret has Copy and Hide, and a new endpoint's secret starts revealed.**
+  ([#2349](https://github.com/The-Verscienta/kiln_cms/pull/2349) · [long form](docs/changelog/unreleased.md#webhook-secret-masked))
+
+- **Version compare, restore and the publish-conflict panel show custom fields one by one.**
+  Restore now previews before it writes; the conflict stays whole-map.
+  ([long form](docs/changelog/unreleased.md#custom-field-history))
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored
   name lexemes, empty names skip the phrase match, and the tag leg runs once per sweep.**
@@ -82,30 +556,176 @@ Every summary line below that was shortened links to its own entry there.
   and with ~60 fewer from third-party deps.**
   ([long form](docs/changelog/unreleased.md#quiet-image-build))
 
+- **A publish hands its change-feed event to a per-site relay instead of sending to every local subscriber;
+  feed telemetry now fires at hand-off. 10k-subscriber publish p99 1.5 s → 143 ms; p95 still ~4× the 0 leg.**
+  ([#2327](https://github.com/The-Verscienta/kiln_cms/pull/2327) · [long form](docs/changelog/unreleased.md#feed-relay))
+
+- **The Essentials sidebar now says where Forms, Webhooks, API keys and Trash went and how to list them.**
+  ([#2144](https://github.com/The-Verscienta/kiln_cms/issues/2144) · [long form](docs/changelog/unreleased.md#essentials-hidden-screens-hint))
+
+- **kilncms.dev `/docs` opens with one "Start here": the wedge guide, Editor/Developer/Operator reading paths, then site search;
+  maintainer pages move to a last "Contributing to Kiln" section. chain-fold-order leaves the site; seven guides are retitled.**
+  ([#2456](https://github.com/The-Verscienta/kiln_cms/pull/2456) · [long form](docs/changelog/unreleased.md#docs-index-role-tracks))
+
+- **New guide "The editorial workflow": draft → review → publish in eight annotated screenshots, with a role table a test checks against the policies.
+  It leads the Editor track; two home-page cards link to it; kilncms.dev publishes guide screenshots as media items.**
+  ([#2459](https://github.com/The-Verscienta/kiln_cms/pull/2459) · [long form](docs/changelog/unreleased.md#editorial-workflow-guide))
+
 ### Fixed
+
+- **A category-scoped `/search?category=<slug>` now stays scoped: the search form, the "did you mean" link and the language links keep the category, and the page says what it searches with a "Search everything" link. kilncms.dev's /docs links to a docs-only search this way.**
+  ([#2457](https://github.com/The-Verscienta/kiln_cms/issues/2457) · [long form](docs/changelog/unreleased.md#scoped-search-keeps-category))
+
+- **A custom field of a type this release doesn't know (a newer release's, after a rollback, or a removed plugin's) no longer breaks the Fields screen, the editor, saves and delivery: it is hidden, records keep its values, and Fields lists it under "Fields of an unknown type" with a Delete.**
+  ([#2670](https://github.com/The-Verscienta/kiln_cms/pull/2670) · [long form](docs/changelog/unreleased.md#unknown-field-type-rollback))
+
+- **The `/access-denied` page no longer tells a signed-in account with no role on the site that it is signed in as viewer; it says the account has no role there and offers Sign out.**
+  ([#2372](https://github.com/The-Verscienta/kiln_cms/issues/2372) · [long form](docs/changelog/unreleased.md#access-denied-no-role))
+
+- **The Essentials sidebar hint now lists the screens it names the way each language does: "Forms, Webhooks, API keys and Trash" in English, "… y Papelera" in Spanish, "… et Corbeille" in French, instead of a bare comma list. A single screen reads "is under Configure".**
+  ([#2379](https://github.com/The-Verscienta/kiln_cms/issues/2379))
+
+- **The editor can start a new document of a type with a required custom field that has no default; it used to fail with "Couldn't create the draft" and log nothing. The field starts blank, the first save asks for it, and the refused-create path now logs its error.**
+  Publish and scheduled publish now refuse a document while a required custom field is blank, including drafts written before the field became required.
+  ([#2651](https://github.com/The-Verscienta/kiln_cms/pull/2651))
+
+- **The `401` for an unverifiable bearer token now matches the scheme case-insensitively and treats a bare `Bearer` as invalid, on every `Authorization` value; the response is `private, no-store` with `Vary: Authorization`, and `/gql` answers in GraphQL's error shape (`extensions.code: "unauthenticated"`, plus `code: "invalid_token"`) while `/api` keeps `invalid_token`. A lower-case `bearer <jwt>`, which used to be served as anonymous, is now a `401`.**
+  ([#2318](https://github.com/The-Verscienta/kiln_cms/issues/2318) · [long form](docs/changelog/unreleased.md#bearer-401-hardening))
+
+- **A visitor's session language no longer reaches shared caches: unprefixed public pages, the blog and event indexes, `index.json`, the stock home and form pages and embeds were cached `public` in whichever language the first visitor's session chose.**
+  ([#2646](https://github.com/The-Verscienta/kiln_cms/pull/2646) · [long form](docs/changelog/unreleased.md#public-delivery-session-locale-leak))
+
+- **`mix kiln.fields.convert` and `mix kiln.media.resnapshot` now also process trashed documents, without firing them, so a document restored after a contract release has the new shape. A trashed record that fails is reported as `(trashed)` and blocks nothing; re-run both right before the contract release.**
+  ([#2622](https://github.com/The-Verscienta/kiln_cms/pull/2622) · [long form](docs/changelog/unreleased.md#contract-backfills-reach-trash))
+
+- **Field locks (collaborative editing): a field its holder leaves while a takeover waits on their save now stays theirs until that save lands, then goes to the taker, so a third editor can no longer grab it and then lose it, unsaved, when the takeover went through.**
+  ([#2619](https://github.com/The-Verscienta/kiln_cms/pull/2619) · [long form](docs/changelog/unreleased.md#field-lock-release-mid-flush))
+
+- **Restoring a version from a copy someone has since saved or published is now refused (editor: the conflict banner; API: `409`, or `404` if trashed), instead of reporting success and writing nothing or skipping the claim and alt-text gates.**
+  ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-refuses-stale-copy))
+
+- **A save from a tab opened before a version restore no longer silently writes the old text back over it; a restore now increments `lock_version`, so that tab gets the conflict banner.**
+  ([#2616](https://github.com/The-Verscienta/kiln_cms/pull/2616) · [long form](docs/changelog/unreleased.md#restore-bumps-lock-version))
+
+- **Permanently deleting a trashed page, post, entry or media file that someone else had restored in the meantime no longer hard-deletes the live record, with no `deleted` webhook and no artifact cleanup. `:purge` now takes only a trashed row.**
+  The Trash page now says when someone else restored or permanently deleted an item and reloads the list. Code that purges a live record must trash it first.
+  ([#2609](https://github.com/The-Verscienta/kiln_cms/pull/2609) · [long form](docs/changelog/unreleased.md#purge-refuses-restored-rows))
+
+- **An applicant waiting for approval who hasn't confirmed their address is now told on `/account` to confirm first, by resetting their password or following the confirmation link; a magic-link sign-in never confirmed an address, and the setting that claimed it did is gone.**
+  ([#2608](https://github.com/The-Verscienta/kiln_cms/pull/2608) · [long form](docs/changelog/unreleased.md#unconfirmed-applicant-confirm-first))
+
+- **A security event type or notification event written by a newer release no longer breaks the security log, its CSV export, account erasure, the notification bell, the inbox or mark-all-read on an older one; the log shows "Unrecognized event (name)".**
+  No migration. Columns that will gain values must switch to `KilnCMS.Types.KnownAtom` a release first ([releasing.md](docs/releasing.md#new-values-in-an-atom-column)).
+  ([#2606](https://github.com/The-Verscienta/kiln_cms/pull/2606) · [long form](docs/changelog/unreleased.md#unknown-atom-values-load))
+
+- **A media edit, a content-type promotion, a portability import, a bulk media action, the delivery-cache flush or the cache's 10k-entry eviction no longer moves a site's `<head>` and menus tokens back, which could answer `304` with an old `<head>` or navigation.**
+  An unsaved site's `ETag` now differs per node and per restart until its next settings save: extra `200`s, never a stale `304`.
+  ([#2601](https://github.com/The-Verscienta/kiln_cms/pull/2601) · [long form](docs/changelog/unreleased.md#generation-tokens-survive-clears))
+
+- **A refused workflow action now says why: "Only an admin …" only to an editor (publish, unpublish, archive: where only admins publish; return: any site), "You can't edit this content type." to an editor scoped away from the type (never for the trash), the plain sentence to everyone else.**
+  ([#2600](https://github.com/The-Verscienta/kiln_cms/pull/2600) · [long form](docs/changelog/unreleased.md#refusal-wording-names-the-reason))
+
+- **Kiln's own text inside a content page's article (form and sign-up labels and messages, byline and date, the verification widget, an untitled embed's title) now follows the article's `lang`, not the visitor's.**
+  On a multilingual site form and sign-up blocks post to `/<locale>/forms/<slug>` and `/<locale>/newsletter/subscribe`, default locale included; select them by class, not `action`.
+  ([#2598](https://github.com/The-Verscienta/kiln_cms/pull/2598) · [long form](docs/changelog/unreleased.md#block-strings-follow-page-locale))
+
+- **A re-fire or a deploy that changes rendered markup is no longer answered `304` to a client holding the old copy: a fired artifact's `ETag` is now a digest of the body served, and a Kiln-rendered page's names the running build.**
+  ([#2583](https://github.com/The-Verscienta/kiln_cms/pull/2583) · [long form](docs/changelog/unreleased.md#render-etags))
+
+- **Accepting an invitation raises a lower membership on the site to the invited tier (never lowers one) and the page says which happened; changing a member's tier or removing them retires their pending invitation.**
+  ([#2573](https://github.com/The-Verscienta/kiln_cms/pull/2573) · [long form](docs/changelog/unreleased.md#invitation-raises-lower-membership))
+
+- **Field locks: an idle or takeover-flush timeout that fires just as it is reset is now ignored. Two narrow races: a keystroke at the idle limit lost the field, and a stale flush timeout granted the next takeover unflushed.**
+  ([#2556](https://github.com/The-Verscienta/kiln_cms/pull/2556) · [long form](docs/changelog/unreleased.md#field-lock-stale-timers))
+
+- **A form's CSV export keeps values stored under a renamed or removed field's old machine name, in a column headed `<key> (renamed or removed)`; forms never renamed export the same columns as before.**
+  ([#2555](https://github.com/The-Verscienta/kiln_cms/pull/2555) · [long form](docs/changelog/unreleased.md#form-export-renamed-field-keys))
+
+- **Renaming a form field rewrites its `[field:<old>]` tokens in the autoresponder's subject and body, and a field the enabled autoresponder uses can no longer be deleted until the token is removed.**
+  ([#2560](https://github.com/The-Verscienta/kiln_cms/pull/2560) · [long form](docs/changelog/unreleased.md#autoresponder-tokens-follow-rename))
+
+- **The range and link editor inputs now carry translatable help lines, and a field type's input part may declare a `help:` string.**
+  Range says both bounds are the same kind; link lists the allowed `rel` tokens. A hostile link address over JSON:API HTTP, the Kotlin golden and dialyzer are verified.
+  ([#2435](https://github.com/The-Verscienta/kiln_cms/issues/2435) · [long form](docs/changelog/unreleased.md#composite-field-part-help))
+
+- **A document in the trash takes no more writes: an editor, API client or job still holding it is refused, so no `updated`, `unpublished` or `archived` follows `deleted`.**
+  Open editors keep the unsaved text and say it was trashed; a second trash or restore is refused.
+  ([#2528](https://github.com/The-Verscienta/kiln_cms/pull/2528) · [long form](docs/changelog/unreleased.md#trashed-row-updates-refused))
+
+- **A webhook delivery whose endpoint was deleted shows its URL marked "(deleted endpoint)" and no Redeliver button, and a stale click says the endpoint was deleted.**
+  ([#2524](https://github.com/The-Verscienta/kiln_cms/pull/2524) · [long form](docs/changelog/unreleased.md#redeliver-deleted-endpoint))
+
+- **A single scalar custom field sent a list keeps its first item: a single URL field sent two URLs no longer stores them run together.**
+  ([long form](docs/changelog/unreleased.md#single-field-handed-a-list))
+
+- **The content editor ignores list, gallery and repeating-group edits on a field the editor's field grant leaves read-only.**
+  ([long form](docs/changelog/unreleased.md#read-only-list-events))
+
+- **Three dead links in the docs now resolve (the `KilnCMS.Keys` link in Memberships and Ghost's schema in both comparison pages), and a docs test refuses relative `.html` links.** ([#2167](https://github.com/The-Verscienta/kiln_cms/issues/2167))
+
+- **The sign-in, register and reset pages now have a header landmark, one `h1`, and `autocomplete` on their email and password boxes.**
+  ([#2162](https://github.com/The-Verscienta/kiln_cms/issues/2162) · [long form](docs/changelog/unreleased.md#auth-pages-landmarks-autocomplete))
+
+- **The first-run setup page's logo row is now a header landmark, and the invite-only sign-in page is tested for one `h1`, one header and one main.**
+  ([#2390](https://github.com/The-Verscienta/kiln_cms/issues/2390) · [long form](docs/changelog/unreleased.md#setup-header-invite-only-landmarks))
+
+- **`custom_sort` ranks a stored JSON `null`, array or object as no value (last in either direction), and page 2 of a keyset-paged sort no longer fails on one.**
+  ([long form](docs/changelog/unreleased.md#custom-sort-json-null-last))
+
+- **Renaming a form field now saves on Enter or Save, keeps a refused name on screen with its error, and shows
+  machine names on the canvas; the Entries tab groups old keys under "From a renamed or removed field".**
+  ([#2346](https://github.com/The-Verscienta/kiln_cms/pull/2346) · [long form](docs/changelog/unreleased.md#form-field-rename))
+
+- **`/forms/<slug>`, the address the form builder shows, now serves the active form as a page in the
+  site's layout (it was a 404); the builder and forms list link it. Content at that address still wins.**
+  ([#2341](https://github.com/The-Verscienta/kiln_cms/pull/2341) · [long form](docs/changelog/unreleased.md#public-form-page))
+
+- **A webhook's Delete is now a labelled button on every endpoint's row (it was an easy-to-miss trash icon),
+  and the edit form has Delete webhook too.** The confirm says queued deliveries won't be sent and history is kept.
+  ([#2328](https://github.com/The-Verscienta/kiln_cms/pull/2328) · [long form](docs/changelog/unreleased.md#webhook-delete-labelled))
+
+- **Editing a nested column block on a freshly opened page no longer crashes the editor.**
+  Adding, removing, reordering or editing a column child before the first form change raised
+  in `AshPhoenix.Form`; the editor now builds the block list from the form's current values.
+  ([long form](docs/changelog/unreleased.md#columns-child-fresh-form))
+
+- **Global search's compound leg (`huang qi`, `xiao yao san`) is about 3× cheaper per candidate name: variant
+  tsvectors and span tsqueries are built once per statement, not per row.**
+  ([#2367](https://github.com/The-Verscienta/kiln_cms/pull/2367) · [long form](docs/changelog/unreleased.md#compound-leg-hoist))
 
 - **Phoenix 1.8.16 with absinthe_phoenix 2.0.6: GraphQL subscription pushes still reach
   WebSocket clients after the bump, which silently dropped every push on absinthe_phoenix 2.0.5.**
   ([#2202](https://github.com/The-Verscienta/kiln_cms/pull/2202) · [long form](docs/changelog/unreleased.md#phoenix-1-8-16-subscription-pushes))
 
-- **The KILN_ML build compiles again: lazy_html stays below 0.1.14, which keeps `fine` at
-  0.1.6, the version EXLA 1.0.0's NIF builds against.**
-  ([long form](docs/changelog/unreleased.md#exla-fine-pin))
+- **`KILN_ML=1` builds compile EXLA again: `fine` is held at 0.1.x, since EXLA 1.0.0's NIF
+  does not build against fine 0.2.0, which lazy_html 0.1.14 had pulled into the lock.**
+  ([#2212](https://github.com/The-Verscienta/kiln_cms/pull/2212) · [#2213](https://github.com/The-Verscienta/kiln_cms/pull/2213) · [long form](docs/changelog/unreleased.md#exla-fine-pin))
 
 - **The content list's "New" menu (sites with more than three content types) is a real
   button that reports open/closed to assistive tech.**
   ([#2145](https://github.com/The-Verscienta/kiln_cms/issues/2145) · [long form](docs/changelog/unreleased.md#new-menu-button))
-
-- **`KILN_ML=1` builds compile EXLA again: `fine` is held at 0.1.x, since EXLA 1.0.0's NIF
-  does not build against fine 0.2.0, which lazy_html 0.1.14 had pulled into the lock.**
-  ([#2212](https://github.com/The-Verscienta/kiln_cms/pull/2212))
 
 - **A phrase list (multiple `:string`) holding a character whose UTF-8 contains byte 0x85
   (`內`, many other CJK characters) saves again: line splitting reads Unicode, not bytes, so
   the character is no longer cut in two and refused.**
   ([#2214](https://github.com/The-Verscienta/kiln_cms/pull/2214))
 
+- **Muted text on public pages and shared form components is now readable: `text-base-content/70`, 4.5:1 or better on every surface.**
+  ([#2163](https://github.com/The-Verscienta/kiln_cms/issues/2163) · [long form](docs/changelog/unreleased.md#public-muted-text-contrast))
+
+- **Code blocks take keyboard focus and a name ("Code sample", translated), with a visible focus ring, so the arrow keys can scroll a line wider than the column.**
+  ([#2467](https://github.com/The-Verscienta/kiln_cms/pull/2467) · [long form](docs/changelog/unreleased.md#focusable-code-blocks))
+
+- **Tables in rich text take keyboard focus and a name ("Scrollable table", translated), with a visible focus ring, so the arrow keys can scroll a table wider than the column.**
+  ([#2596](https://github.com/The-Verscienta/kiln_cms/pull/2596) · [long form](docs/changelog/unreleased.md#scrollable-tables))
+
 ### Security
+
+- **Accepting an invitation over an unconfirmed account now also removes its two-step verification, passkeys, identity-provider links and push devices, and revokes its API keys (#2453).**
+  ([#2593](https://github.com/The-Verscienta/kiln_cms/pull/2593) · [long form](docs/changelog/unreleased.md#invitation-takeover-credentials))
+
+- **Sign-in, reset, magic link, registration, newsletter, SSO and passkey answer a known and an unknown address alike; the per-surface matrix is in the threat model.**
+  ([long form](docs/changelog/unreleased.md#account-enumeration-audit))
 
 - **ecto 3.14.3 fixes EEF-CVE-2026-118391 (unbounded query cache growth), and
   ash_sql 0.8.7 replaces the retired 0.8.4 (query cache returned wrong rows).**

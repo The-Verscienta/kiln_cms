@@ -23,7 +23,8 @@ document is about the network edge.
   passkey credentials, and the `role` / `audiences` attributes driving RBAC.
 - **Auth tokens** — AshAuthentication JWTs, magic-link and password-reset
   tokens, preview tokens, collab and bridge socket tokens.
-- **API keys** — `kiln_…` bearer keys carrying a `:read` or `:read_write` scope.
+- **API keys** — `kiln_…` bearer keys carrying a `:read`, `:read_write` or
+  `:draft_write` scope.
 - **Tenant isolation** — one deployment serves multiple organizations; content,
   media, branding and analytics must not cross org boundaries.
 - **Media & object storage** — uploaded files and their storage credentials.
@@ -63,8 +64,10 @@ the router so preflights are answered before route matching).
 | Content unlock | `POST /api/content/:type/:slug/unlock`, `POST /_unlock` (CSRF) | passphrase | `:unlock` (`POST /_unlock` also `:delivery`) |
 | Media upload | `POST /api/media`, `/api/media/import-url`, `/api/media/uploads[/complete]` | JWT / API key; `:read_write` + editor, checked **before** `POST /api/media`'s body is parsed (the endpoint leaves it unread) | `:api` + `:media_upload` |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
+| Security posture (monitoring) | `GET /api/security/posture` (#2521) | **JWT or API key of an administrator of the request's site required** (never a `:draft_write` key); behind the site's admin allowlist, checked first | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
+| Form page | `GET /forms/:slug` (#2138): not a route, the last fallback of `/:type/:slug` delivery; active forms of the serving org only | none | `:delivery` (site CSP) |
 | Preview | `/preview/:token`, `/preview/:token/live`, `/preview/release/:token` | signed token *is* the credential | `:preview` |
 | Headless draft mode | `GET /api/json/*`, `GET /api/content/:type/:slug` and `GET /api/visual-editing/:type/:slug` with `x-kiln-preview-token` / `?preview_token=` (#1887) | signed token, pinned to the serving site, admits its one record on the primary read only; never read on a write | `:api` + `:preview_api` |
 | Newsletter | `POST /newsletter/subscribe`, `/newsletter/confirm/:token`, `/newsletter/unsubscribe/:token` | honeypot / opaque token; the confirm and unsubscribe GETs only render a page, the POST changes the subscription (#1664) — confirm's POST is also CSRF-checked | `:form` |
@@ -74,11 +77,12 @@ the router so preflights are answered before route matching).
 | Membership (paid audiences) | `/membership` | optional session | `:delivery` |
 | Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*`, `/auth/site-sso[/callback]` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
 | Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
+| Sign-in unlock (#2250) | `GET`/`POST /sign-in/unlock` (ask for a link), `GET`/`POST /auth/unlock/:unlock_token` (the emailed link) | none to ask; the signed, stored `sign_in_unlock` token is the credential, and only the `POST` spends it | `:auth`; the mail also `mail:sign_in_unlock` per address (3/h), charged only for a paused member of the site |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
 | Media bytes | `/media/:id/download`, `/media/:id/stream` | session (a gated item needs its audience) | `:delivery` |
 | Image transforms | `/media/:id/t/:ops` | session (same read as the download); unsigned URLs allowlisted, signed ones HMAC-checked | `:media_transform` per request + `:media_render` per cache miss, plus a per-node render gate |
-| Media blobs | `/uploads/*` (`Plug.Static`) | none | none |
+| Media blobs | `/uploads/*` (`Plug.Static`) | none | none (and not covered by the IP block list) |
 | Sockets | `/live`, `/ws/collab`, `/ws/bridge` | session / signed token + per-document read / preview token (one document, re-verified until it expires) or API key + per-document read | `/live` root joins `:live_join` per address (#1183); every frame on a `/ws/collab` connection `:collab_event` per account (#1305); otherwise none (except the sign-in submit, above) |
 | Dev tools | `/dev/dashboard`, `/dev/mailbox`, `/admin`, `/gql/playground` | compile-gated off in prod | — |
 
@@ -110,8 +114,10 @@ build if a resource is ever registered without that authorizer.
   block-level `editable_by` field policies (below). Backed by the policy test
   suite and [`policy-matrix.md`](policy-matrix.md).
 - **API-key scoping** — keys store only a SHA-256 hash, carry an immutable
-  `:read` / `:read_write` access scope, require an expiry, and can be revoked.
-  A `:read` key is refused every write action; no key may hard-delete.
+  `:read` / `:read_write` / `:draft_write` access scope, require an expiry, and
+  can be revoked. A `:read` key is refused every write action; a `:draft_write`
+  key may only create drafts and edit its own, by an allowlist placed above the
+  admin bypass (#2273); no key may hard-delete.
 - **Multi-tenancy** — `Plugs.SetTenant` resolves the org from the HTTP host
   (subdomain of `TENANT_BASE_HOST`, then custom domain) and sets it as the Ash
   tenant for the whole request, so tenant scoping applies to GraphQL and
@@ -123,7 +129,11 @@ build if a resource is ever registered without that authorizer.
   buckets; limits in `lib/kiln_cms_web/rate_limit.ex`. The credential buckets
   (`:auth`, `:register`, `:unlock`) and every `AccountThrottle` budget count in
   Postgres (`KilnCMS.Accounts.ThrottleStore`, #1619), so they hold across nodes
-  and restarts; the rest are flood ceilings counted per node in ETS. **The credential forms
+  and restarts; the rest are flood ceilings counted per node in ETS. Inside
+  `:delivery`, a request whose `User-Agent` claims to be a search engine, an AI
+  crawler, another bot or nothing at all is refused at its own share of the same
+  per-address count (#2243, see [Bot budgets](#bot-budgets)); browsers are
+  unchanged. **The credential forms
   submit where no plug can reach them:** each is an AshAuthentication
   LiveComponent calling `AshPhoenix.Form.submit/2` in-process, so the
   credentials arrive as a `/live` event and pass no pipeline. (`auth_routes`
@@ -160,7 +170,8 @@ build if a resource is ever registered without that authorizer.
   account it named. Deliberately flat rather than escalating —
   a lockout that lengthens each time an attacker burns a window is a denial of
   service against any known address. A successful sign-in, a completed password
-  reset and a passkey sign-in each clear it. A separate flat per-address budget
+  reset and a passkey sign-in each clear it, and so does an emailed unlock link
+  (#2250), which clears nothing else ([Account unlock](#account-unlock-2250)). A separate flat per-address budget
   covers the two mail-triggering requests (password reset, magic link) so
   neither becomes a mailbomb.
 
@@ -317,6 +328,9 @@ build if a resource is ever registered without that authorizer.
   LiveViews (`SessionEviction.evict_session/2`). It does not reach a
   `/ws/collab` or `/ws/gql` socket already connected from that browser: those
   are keyed per user, and close at their next reconnect or re-check.
+  Since #2246 a site admin can also end sessions on one site: after a
+  configurable idle time, or all at once with *Sign out everyone*; see
+  [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
 
   **Remember-me and the second factor.** The cookie is a completed sign-in in a
   cookie — the read plug hands it to `store_in_session/2` directly, so it never
@@ -331,6 +345,20 @@ build if a resource is ever registered without that authorizer.
   the resulting cookie then signs the user in later *without* a code is the
   deliberate part — it is a "this device completed every factor" credential, and
   that is what remember-me is for on a 2FA account.
+- **Breached-password check (#2240)** — when a password is set (register,
+  change, reset, first-run setup) `KilnCMS.Accounts.Changes.CheckBreachedPassword`
+  looks it up against the Have I Been Pwned range API by k-anonymity: SHA-1
+  here, only the 5-character prefix out (`Add-Padding: true`), the match made
+  locally, through `KilnCMS.SafeFetch` with no redirects, a 128 KB cap and a 3 s
+  deadline. The site's stance is `CMS.SitePasswordPolicy` (off / warn / block,
+  `/editor/password-policy`, admin-only), then `BREACHED_PASSWORD_POLICY`, then
+  warn; `block` refuses only an account whose tier is admin (the stricter of its
+  global role and its tier on the request's org), and the tier is the
+  *target's*, never the actor's. `BREACHED_PASSWORD_CHECK=false` makes no call.
+  The lookup runs once per submitted action (a `before_transaction` hook, so
+  not per keystroke and holding no connection), after the validations and the
+  registration throttle, and nothing identifying the password, hash, prefix,
+  account or org is logged or put in telemetry. See *Breached passwords* below.
 - **SSRF protection on outbound calls** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
   required in prod, private/loopback/link-local/metadata ranges rejected for
   both IPv4 and IPv6, DNS resolved with an all-or-nothing rule and a hard
@@ -368,7 +396,11 @@ build if a resource is ever registered without that authorizer.
   (`public, max-age=60`) would otherwise let a shared cache serve one member's
   gated render to every anonymous visitor.
 - **Scraping / enumeration** — content is public and the sitemap is intentional.
-  The `:delivery` bucket caps volume; front with a CDN to absorb load.
+  The `:delivery` bucket caps volume per address, and since #2243 a client that
+  declares itself a script or bot, or sends no user agent, is capped lower than a
+  browser ([bot-budgets.md](bot-budgets.md)). *Residual:* the class comes from the
+  `User-Agent` header, so a scraper that claims to be a browser gets a browser's
+  ceiling; this is cost control, not a defence. Front with a CDN to absorb load.
 
 ### Image transforms (`/media/:id/t/:ops`)
 - **Resource exhaustion** — every distinct parameter set is a decode, a resize
@@ -423,6 +455,9 @@ build if a resource is ever registered without that authorizer.
   the budget keys on the *submitted* identifier, so an address with no account
   throttles identically and the refusal is not an enumeration oracle. The
   account owner is mailed once per window when attempts start being refused.
+  The operator can also ask for a human-verification check here with
+  `CHALLENGE_API_SIGN_IN` (off by default, so the contract is unchanged); see
+  [Human verification](#human-verification-2249).
 - **Skipping the second factor** — *closed (#726).* This endpoint used to return
   a full JWT for a 2FA-enabled account on the password alone, where the browser
   flow diverts to `/sign-in/verify`. That made TOTP optional in practice rather
@@ -589,6 +624,246 @@ build if a resource is ever registered without that authorizer.
   reach the same end state, just via a moment where 2FA visibly dropped) and is
   tracked separately rather than folded into this fix.
 
+### Blocked addresses
+
+An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks`; see
+[ip-blocking.md](ip-blocking.md).
+
+- **What it stops.** Every dynamic route, via `KilnCMSWeb.Plugs.IpBlock` straight
+  after tenant resolution, and the sockets (`/live`, `/ws/gql`, `/ws/collab`,
+  `/ws/bridge`), which check the same list on connect. The answer is an empty
+  `403`; nothing says a list exists.
+- **What it does not.** `Plug.Static` assets and `/uploads/*` are served above the
+  tenant lookup and cannot be scoped to a site, so a block does not cover them
+  (see "Media" below): refuse those at a CDN or proxy. Loopback is never blocked,
+  and `/up` and `/ready` are exempt.
+- **The address is only as good as the proxy config.** The rule matches the
+  address `KilnCMSWeb.Plugs.ClientIp` resolves. Behind a proxy with
+  `TRUSTED_PROXIES` unset that is the proxy, so a rule would block every visitor.
+  The console page warns when it sees that state.
+- **It cannot lock the operator out silently or wholesale.** Ranges wider than
+  `/8` (IPv4) or `/16` (IPv6) and anything overlapping loopback are refused on
+  write; a rule containing the admin's own address needs confirmation.
+- **It fails open.** An unreadable list lets requests through rather than taking
+  the site down with the database. Nothing is cached from a failed read.
+- **Who can edit.** Organization admins only, every action including the read; no
+  API surface exposes it, so a leaked API key cannot lock a site out.
+- **No address in logs.** The refusal counter `kiln_cms.ip_block.refused.count`
+  carries the surface only.
+- **Limits.** Matching is per source address: it does not stop a distributed
+  source, and a visitor can change address. Expired rules are not swept.
+
+### Admin allowlist (#2248)
+
+`KilnCMS.Security.AdminAllowlist`, `KilnCMSWeb.Plugs.AdminAllowlist`,
+`KilnCMSWeb.AdminAllowlist`. A site admin can restrict the console and every
+sign-in route to listed networks at `/editor/admin-allowlist`; see
+[admin-allowlist.md](admin-allowlist.md) and
+[ADR 0019](decisions/0019-the-admin-allowlist-fails-closed-and-only-the-operator-lifts-it-from-outside.md).
+
+- **What it stops.** A stolen admin (or any) password, session cookie or
+  remember-me cookie used from outside the listed networks to reach the
+  console, its exports, `/setup` or any sign-in route, including the headless
+  password exchange `POST /api/auth/sign_in`, and any credential, API keys
+  included, used from outside to read the site's security posture
+  (`GET /api/security/posture`, #2521). The password form checks the
+  password over its LiveView socket (`SignInLive`), so the socket join is gated
+  as well as the HTTP request; otherwise an outsider could test passwords.
+- **Gated by route, not by path.** The HTTP gate is the router pipelines
+  `:admin_allowlist` and `:admin_allowlist_api`, first in each gated
+  `pipe_through`, ahead of `fetch_session`: a refused request reads no session
+  and is never signed in by a remember-me cookie. The socket gate is an
+  `on_mount` hook on every LiveView module and in every gated `live_session`,
+  acting for exactly the `live_session`s behind the pipeline.
+  `test/kiln_cms_web/admin_allowlist_routes_test.exs` pins the gated route set
+  route by route, so a new console or sign-in route cannot land ungated by
+  accident.
+- **Fails closed.** An unreadable list answers `503` and refuses joins, and is
+  not cached. The exception is a site this node last read as off, which stays
+  off through a failed read (per node, a day, replaced by any save), so a
+  database blip does not take every site's console down. A host that resolves
+  no site refuses a gated join. Public delivery never reads the list.
+- **Cannot lock the saver out.** A save that does not admit the address the
+  page was loaded from (and the socket's own address, when it has one) is
+  refused, as is one made while a forwarding header arrives that nothing
+  trusts. Loopback, and ranges wider than `/8` or `/16`, cannot be listed.
+- **Break-glass only widens or clears.** `KilnCMS.Release.admin_allowlist/1`
+  runs `operator_override` as the `:operator` system actor and records
+  `admin_allowlist_overridden`; adding to a list that is off is refused. An org
+  admin is refused that action.
+- **The block list wins.** `KilnCMSWeb.Plugs.IpBlock` runs at the endpoint
+  before any gated pipeline.
+- **No platform-admin exemption.** The gate runs before anyone is known, so
+  an exemption would make a stolen platform credential the bypass.
+- **Sampled, address-free telemetry.** `admin_access_refused` is sampled per
+  site and address (an IPv6 address per `/64`) because anyone outside can
+  cause it. The counter `kiln_cms.admin_allowlist.refused.count` carries
+  surface and reason, never the address.
+- **Residual risks.**
+  1. **Stamp-vouched socket joins on Fly.io and App Platform.** Where the
+     socket cannot see the client (`Fly-Client-IP`, `do-connecting-ip`, or a
+     proxy that sets only `Forwarded:`), a join is admitted on the address the
+     HTTP gate stamped into the page's signed LiveView session. A session
+     token carried to another network, or scraped from a page, can join for up
+     to **5 minutes** after the HTTP load that stamped it; after that the join
+     is refused and the page must reload over HTTP.
+  2. **Platform-header spoofing from inside the platform.** `CLIENT_IP_HEADER`
+     trusts the platform's header with no peer check. A machine inside the
+     platform's private network (another app in the same Fly.io organization,
+     a Railway project's private network) can reach the app directly, set the
+     header to a listed address and bypass the list.
+  3. **Long-poll keeps its first connect info.** The LiveView long-poll
+     transport evaluates `connect_info` on the first poll; later polls from a
+     different address are not re-checked until the session reconnects.
+  4. **A session cookie carried outside still reaches the ungated signed-in
+     routes**: `/account` (the reader's own settings) and the media routes
+     (`/media/:id/download` and its siblings), which serve what the session
+     may read. It cannot reach the console.
+  5. **Issued JWTs and API keys keep working anywhere**, including a JWT
+     obtained from a listed network before the attacker left it, on every
+     surface but `GET /api/security/posture` (#2521), which is behind the
+     allowlist whatever the credential. A per-key allowlist is a follow-up.
+  6. **The kill switch is not in the security log.** `KILN_ADMIN_ALLOWLIST_DISABLED`
+     has no site and no person; the boot log warns and the allowlist page
+     shows a banner, and the platform's environment history is the only trail.
+     The direct SQL recovery is not recorded either.
+  7. **Rolling back turns the control off silently.** A release before #2248
+     has no gate; the table stays and is ignored. The upgrade notes say so.
+  8. **Members are gated with admins.** While a list is on, members, readers
+     and apps that sign people in from their own devices can only sign in from
+     listed networks. Gating only the console host is a follow-up.
+
+### Scanner 404 blocking (#2253)
+
+An opt-in control on top of the block list above: `KilnCMS.Security.ScannerGuard`
+adds a temporary `IpBlockRule` for an address that racks up delivery 404s or
+probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
+[ip-blocking.md](ip-blocking.md#block-scanners-automatically).
+
+- **What it is for.** Slowing automated probing (credential-file and CMS-plugin
+  scans) and cutting its load. It is not a defence against a determined or
+  distributed attacker: matching is per address, an attacker can rotate
+  addresses (an IPv6 host is counted per `/64`), and blocks expire.
+- **Turning it against others.** The main hazard is a hostile page or email that
+  makes visitors' browsers request missing paths on our site so the visitors are
+  blocked. Browser-like requests (`Sec-Fetch-Mode`, `Sec-Fetch-Dest`, or a
+  `Sec-Fetch-Site` other than `none` / `same-origin`) are never counted, and a
+  signed-in visitor is never counted. Header absence is not proof of a scanner, so
+  the threshold stays the real control, and a recent sign-in from the address
+  (24 hours) prevents a block. Addresses that are private, loopback,
+  link-local, CGNAT or in `TRUSTED_PROXIES` are never counted, and a forwarded
+  request with no trusted proxy is never counted, so a shared proxy or office
+  NAT is not blocked as one scanner.
+- **Search-engine exemption, checked by DNS.** A `User-Agent` naming a search
+  engine (`KilnCMS.BotClass.search_engine/1`) skips the miss threshold only,
+  never the bait threshold, and only until crawler verification (#2254, below)
+  proves the claim false. A claim not yet checked, skipped, or whose DNS gave no
+  answer keeps the exemption, so a real crawler's first misses from a new
+  address never count. A scanner claiming to be Googlebot is therefore counted
+  once its address fails the reverse-DNS check, but one whose PTR zone never
+  answers (an attacker's own reverse zone left silent) keeps the exemption, as
+  every claim did before #2254. A DuckDuckBot claim cannot be checked and is
+  always exempt. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
+  names in the user agent are enough, as before. Link-preview fetchers
+  (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and `Slurp` are not
+  exempt in either mode: anyone can claim them and there is nothing to check.
+- **Bounded blast radius.** One rule per address, always with an expiry (60 minutes
+  by default), so a false positive heals itself; an admin can remove one at any
+  time. At most 300 automatic rules per site, so spreading a scan over many
+  addresses cannot grow the list or the matcher's cache without bound. At the
+  cap a new trip is skipped and logged.
+- **Least privilege.** The guard acts as the `:scanner_guard` system actor, which
+  can `create` an `IpBlockRule` and read one kind of security event (a recent
+  `sign_in` from an address) and nothing else. It cannot list or remove rules.
+  See the [policy matrix](policy-matrix.md).
+- **Fails open.** A dropped count, a database fault or a failed sign-in lookup
+  never blocks the 404 from rendering. The counting runs off the request path.
+  A failed sign-in lookup at the moment of a trip leans toward not blocking.
+- **A skipped trip is not retried.** A trip is claimed once per block window, so a
+  trip skipped for the cap, a recent sign-in or a database error is not retried
+  until the window rolls over. The window itself is fixed, not sliding, so a burst
+  split across a boundary may not trip.
+- **No address or path in logs or metrics.** The counter
+  `kiln_cms.scanner_guard.blocked.count` is tagged by reason only. The
+  `ip_auto_blocked` security event carries the address (as the event IP, subject
+  to the log's retention and erasure) and never the attacker-controlled path.
+
+### Bot budgets
+
+Each `:delivery` request is put in a class by its `User-Agent` (#2243,
+`KilnCMS.BotClass`): browser, search engine, AI crawler, other bot, or no user
+agent. Each class is refused at its own percentage of the `:delivery` limit;
+see [bot-budgets.md](bot-budgets.md).
+
+- **What it stops.** Volume from clients that say what they are: a runaway
+  `curl` loop, a crawler with no user agent, an over-eager SEO tool. Defaults
+  are 50% of the browser limit for other bots and 20% for no user agent.
+- **What it does not.** Anything that lies about being a browser, an AI
+  crawler or a script. The user agent is spoofable, so those classes grant
+  nothing: AI crawlers default to 100%, the same as a browser, and raising that
+  class by environment raises it for every spoofer too. Search engines default
+  to 200% (#2587), but their claims are checked (next point), and the part
+  above 100% goes only to verified addresses; with verification off the
+  default is 100%.
+- **Search-engine claims are checked by DNS (#2254).**
+  `KilnCMS.CrawlerVerification` looks up the address's PTR name, requires it
+  under the engine's published domain (label-aligned, so `evilgooglebot.com`
+  fails), and requires the name's forward lookup to contain the address. Only a
+  claim **proven** false (no PTR, wrong domain, forward mismatch) is charged as
+  no user agent. Everything not proven either way (lookup pending, skipped, DNS
+  error or timeout, DuckDuckBot, a non-public address, untrusted forwarding)
+  keeps the search-engine class but held to the `:delivery` limit, so a
+  search-engine value above 100% (the default 200% included) is spent only on
+  verified addresses: a spoofer typing "Googlebot" never gets more than a
+  browser. A DNS outage or a
+  busy verifier therefore never refuses a real crawler; the cost is that a
+  spoofer whose claim cannot be settled gets what a browser gets. The lookup
+  runs off the request path, so a request never waits on DNS.
+- **Lookups as an amplification surface.** An anonymous client can make the
+  node send DNS queries by naming a search engine from a new address. Bounded:
+  at most 3 queries per address (1 PTR, forward only for up to 2 of the first
+  3 names, only the client's family), a 3-second deadline per lookup,
+  single-flight per address, results cached per address (6 h verified, 1 h
+  proven false, 5 min DNS error), at most 16 concurrent lookups per node with
+  no queue, and new lookups rate limited per network (IPv4 `/24` 30 and `/16`
+  120 a minute; IPv6 `/64` 30, `/48` 60, `/32` 120) and per node (600 a
+  minute). The cache is bounded (50,000 addresses, evicted oldest-written
+  first) and is its own Cachex instance, so a flood of new addresses cannot
+  evict anything else. No address, hostname, user agent or org is in any
+  verification event or log line.
+- **Residual: lookup starvation.** An attacker who controls a slow or silent
+  reverse zone can hold lookup slots until the deadline, and an attacker with
+  many addresses can spend the per-network and per-node lookup budgets or churn
+  the cache. Either way new real-crawler addresses stay unverified for longer.
+  That only costs anything when the operator has set the search-engine value
+  above 100%, because an unverified claim is held to the browser limit, not
+  refused.
+- **Residual: no IP-range verification.** DuckDuckBot publishes IP ranges only,
+  so its claims are never verified (and never proven false); the other
+  engines' published ranges are not read either.
+- **Outbound DNS to the system resolver.** Each node sends PTR, A and AAAA
+  queries for visitors' addresses to the nameservers in its `/etc/resolv.conf`
+  (`:inet_res`, not `SafeFetch`: no HTTP, and the names queried are the
+  `in-addr.arpa` / `ip6.arpa` name of the client's address, then PTR names
+  that matched an engine's domain). The resolver, and the authoritative server
+  of the address's reverse zone, learn that this server was visited from that
+  address; see [data-flows.md](data-flows.md#optional-subprocessors).
+  `KILN_CRAWLER_VERIFICATION=false` turns all of it off.
+- **Switching user agents gains nothing.** Every class charges the one
+  per-address counter, so an address never gets past the highest single class
+  ceiling. The cost of sharing is that a browser-heavy shared address (an office
+  NAT) uses up a script's smaller ceiling.
+- **A site cannot widen it.** A site admin may lower a class but not raise it
+  above the operator's value: refused on write, clamped on read
+  ([ADR 0018](decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)).
+  An unreadable site row is answered with the operator's values, never looser.
+- **Never classified.** `:probe` routes (`robots.txt`, `llms.txt`, sitemaps,
+  feeds, `/up`, `/ready`) and `/live`, so crawlers can always read the files
+  that tell them what to do and probes are never throttled by class.
+- **No user agent, address or org in the metric.** The counter
+  `kiln_cms.delivery.client_class.count` carries only `class` and `result`;
+  `class` is the class charged, so a proven spoof is counted as `empty`.
+
 ### Public forms
 - **CSRF** — deliberately absent: forms are meant to be posted from third-party
   pages. Abuse is bounded by the `:form` bucket and a honeypot field, and a
@@ -602,6 +877,10 @@ build if a resource is ever registered without that authorizer.
   overlay would harvest — and grants nothing across the tenant boundary.
 - **Submission contents** — treat as untrusted PII; retention is covered in
   [`data-flows.md`](data-flows.md).
+- **Scripted submissions** — a site admin can make a form ask for a
+  human-verification check (#2249). A submission without a pass is held in
+  Spam rather than refused, so a script gets nothing acted on; see
+  [Human verification](#human-verification-2249).
 
 ### Preview
 - **Token as credential** — `/preview/:token` verifies a signed token and then
@@ -658,6 +937,10 @@ build if a resource is ever registered without that authorizer.
   sign deliveries. The trade-off is the vault's: rotating `SECRET_KEY_BASE`
   orphans the secrets, and each endpoint must be re-created
   ([secrets-rotation.md](secrets-rotation.md)).
+  In the console (`/editor/webhooks`, admin-only) each secret is masked to its
+  last four characters, and the plaintext reaches the browser only when an
+  admin clicks **Reveal** or has just added the endpoint (#2140), so a screen
+  share or a saved page of the list doesn't carry it.
 
 ### oEmbed resolution (`OEMBED_ENABLED`, #489)
 - **Content choosing the destination** — prevented by design. Kiln does **not**
@@ -719,13 +1002,955 @@ a credential, so the operator's trust assumptions do not carry over:
   page's text, a block and the editor's instruction, or published passages and
   an anonymous visitor's question. It is the site's choice and the page says so.
 
+### Breached passwords
+
+`KilnCMS.Accounts.BreachedPassword`, #2240. The one place a derivative of a
+password leaves the server.
+
+- **What leaves.** The first five hex characters of the password's SHA-1, as the
+  path of `GET /range/<prefix>`, with `Add-Padding: true` so the response length
+  does not reveal how many real hits the prefix has (padding lines carry count
+  `0` and are never read as hits). The suffix, the password and the account
+  stay on the node. The provider learns that *someone* on this IP set a
+  password whose hash starts with that prefix, and nothing more.
+- **Where it applies.** Self-registration, change password, password reset by
+  token, the first-run wizard and accepting a site invitation with a password
+  (#2135; judged by the *invited* site's policy for the *invited* tier, not the
+  host the link was opened on). **Not** sign-in: a breached password that was
+  set before this shipped is not noticed. Follow-up.
+- **Exempt paths, deliberately.** The admin-sent reset *mail* is checked when
+  its token is used (it is `reset_password_with_token`), but these set or
+  create a credential without a lookup: `AdminPasswordReset` (the admin
+  triggers a mail, not a password), magic links, SSO and passkey registration
+  (no password is set), `AnonymizeUser` (account erasure), seeds,
+  `Beta.Round` and `Staging.Scrub` (operator-run scripts).
+- **Fails open.** A timeout, a non-200, a transport or malformed answer, an
+  unreadable policy row, or an exception resolving the tier accepts the
+  password, logs one warning without detail, and emits the telemetry event
+  with `result: :error`. This is the right trade for an advisory control: the
+  alternative is an attacker, or an outage at a third party, deciding whether
+  anyone can change a password. An attacker who can block egress from the
+  server (or poison its DNS, which `SafeUrl` pins against) can therefore turn
+  the check off; they already hold the network position to do worse.
+- **Residual risks.** (1) Fail-open, above. (2) The policy is the *request's*
+  org and the tier is the account's tier the stricter of global role and that
+  org's membership: an admin of org A with `block`, changing their password on
+  org B's host, is judged by B's policy and B's tier for them. (3) No check at
+  sign-in. (4) The warning after register or reset is a best-effort note held
+  in a node-local cache for ten minutes; on a multi-node deployment without
+  sticky routing, or after a restart, the person may never see it. The password
+  was accepted either way. (5) `warn` is advisory; only an administrator's
+  password can be refused. (6) The check is only as complete as the public
+  corpus.
+- **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
+  [observability.md](observability.md#breached-password-checks).
+
+### Human verification (#2249)
+
+`KilnCMS.Challenge`, `KilnCMS.Challenge.Gate`, `KilnCMS.Challenge.Registry`,
+`KilnCMS.Challenge.Siteverify`, `KilnCMS.Challenge.Providers.Turnstile`,
+`KilnCMS.Challenge.Providers.Recaptcha`, `KilnCMSWeb.Plugs.ChallengeCsp`; the
+contract `Kiln.Challenge.Provider` in `kiln_plugin`. An adaptive check on
+password sign-in and registration, configured by the operator for the whole
+deployment with one provider: Cloudflare Turnstile (recommended), Google
+reCAPTCHA v2, or a plugin's. Off until a provider, a site key and a secret
+are set. A site admin can also make each public form ask (below). Guide:
+[human-verification.md](human-verification.md); decisions:
+[ADR 0020](decisions/0020-human-verification-is-deployment-wide-and-fails-open-only-within-the-sign-in-budget.md),
+[ADR 0021](decisions/0021-a-form-opts-in-to-human-verification-and-an-unverified-submission-is-held-not-refused.md)
+for forms,
+[ADR 0022](decisions/0022-a-challenge-provider-is-a-plugin-contract-and-the-core-enforces-its-claims.md)
+for providers.
+
+- **What it slows.** Password guessing that stays under the per-account budget
+  by spreading across accounts, and scripted self-registration. Sign-in asks
+  once the submitted address has had `account_threshold` (3) attempts in the
+  account window, or the client address `ip_threshold` (5) unrefunded attempts
+  in `ip_window` (15 minutes); a correct password refunds the address's unit,
+  so in effect only failures count there. Registration asks after
+  `registration_threshold` (2) attempts per address per hour, or always.
+- **Where it is enforced.** On the actions (`ThrottleSignIn` on
+  `:sign_in_with_password`, `RequireRegistrationChallenge` on
+  `:register_with_password`), so the LiveView, the no-JavaScript POST and
+  `POST /api/auth/sign_in` pass one check. The API is checked only with
+  `CHALLENGE_API_SIGN_IN` on. Passkeys, magic links, reset, the second factor,
+  single sign-on and invitations are never challenged: each needs a proof the
+  guesser lacks, and they are the way in for someone who cannot solve a check.
+- **Deployment-wide.** No site setting can turn sign-in challenges off, because
+  the account is shared across sites; the decision never reads the dialled
+  host. Tested: a site's own host cannot weaken the mode.
+- **A refusal costs the owner nothing.** The gate runs before
+  `AccountThrottle.consume/1`; an attempt refused for want of a check spends no
+  budget and runs no bcrypt, so the challenge cannot be used to lock an owner
+  out.
+- **No enumeration.** The account axis keys on the submitted string, the
+  address axis on the caller's own IP; a known and an unknown address are
+  refused alike (see the table below). The refusal is never "incorrect
+  password".
+- **Races.** Free attempts are spent with one atomic increment-and-compare per
+  axis, so a burst at the start of a window cannot all skip the check; at most
+  the threshold's worth do.
+- **Token binding, enforced by the core.** A provider's pass reports the
+  hostname and the action the token was solved for (`{:ok, claims}`), and
+  `KilnCMS.Challenge.verify/4`, not the provider, applies them: a hostname
+  that is missing or is not one this deployment serves (or one in
+  `CHALLENGE_HOSTNAMES`) is `:hostname_mismatch`, and an action that is
+  present and differs from the one the widget was drawn for (`sign_in`,
+  `register`, `form`) is `:action_mismatch`. Turnstile always reports the
+  action, and its provider refuses an answer without one. The request's
+  `Host` and a LiveView join URL never vouch for a hostname (tested with a
+  forged `Host`). Tokens are single-use at the provider and never cached by
+  Kiln.
+- **A provider's answer is read conservatively.** `:missing` and `:malformed`
+  come only from the core's own precheck (absent; not a short printable
+  string). A provider that returns either, or any refusal the contract does
+  not name, is read as `:invalid`, because a missing token can be admitted
+  during an outage and a refused one never can. An unknown unavailable
+  reason, any answer outside `{:ok, _}` / `{:error, _}`, a crash, and the
+  3-second deadline are `{:unavailable, :crashed}` or `:timeout`. Tested with
+  a plugin provider answering `:missing` during an outage: refused, not
+  admitted; on a form, refused, not held.
+- **reCAPTCHA v2.** Its tokens carry no action, so the action rule cannot
+  bind them: a token solved on one of this deployment's pages (a form, say)
+  can be spent once on another of its checks (sign-in) within its two-minute
+  life. The hostname is still enforced, so the token was solved on a page
+  this deployment serves. An answer that carries a `score` (a v3 or
+  Enterprise key) is refused as `:invalid`, never admitted on a guessed
+  threshold. Google answers a wrong secret with `invalid-input-response`, the
+  bad-token code, so a misconfigured reCAPTCHA secret refuses everyone
+  rather than failing open, and does not log "could not use its secret
+  key".
+- **Fail rules.** A provider refusal never admits. "Unavailable" (timeout past
+  the 3-second deadline, transport error, `5xx`, `429`, malformed answer,
+  unreadable or rejected secret, crash) admits a sign-in until the account's
+  own budget refuses or the client address reaches `ip_closed_after` (20)
+  failed sign-ins in the window, and then refuses (`503` on the API). A
+  registration is admitted within the `:register` rate limit. A missing token
+  is a refusal, except within `outage_window` (60 s) of this node seeing an
+  unavailable answer, when it gets the unavailable treatment.
+- **Outbound call.** Through `KilnCMS.SafeFetch` (`KilnCMS.Challenge.Transport`),
+  which a provider receives as the `:post` function: to
+  `challenges.cloudflare.com` for Turnstile and
+  `www.recaptcha.net/recaptcha/api/siteverify` for reCAPTCHA (never
+  `www.google.com`, so an egress allowlist needs one host per provider). No
+  redirects, no retries, a 16 KB cap, 1 s connect and 2 s receive timeouts,
+  the whole call bounded at 3 s in an unlinked task. The secret is read from
+  `KilnCMS.Keys` only at verification and never logged; the client address
+  is sent only with `send_remote_ip`.
+- **Content-Security-Policy.** `script-src`, `frame-src` and `connect-src`
+  on the `:browser_auth` pipeline gain the provider's declared sources only
+  while a challenge can be shown; the header is byte-identical otherwise,
+  and also when the named provider is unknown or fails conformance (tested).
+  Turnstile adds `https://challenges.cloudflare.com` to `script-src` and
+  `frame-src`. reCAPTCHA adds `https://www.recaptcha.net/recaptcha/` and
+  `https://www.gstatic.com/recaptcha/` to `script-src` and
+  `https://www.recaptcha.net/recaptcha/` to `frame-src`, path-scoped. It is
+  loaded from `www.recaptcha.net` because `www.google.com` serves JSONP
+  endpoints that are a known way round a strict policy; no policy ever names
+  `www.google.com` (tested). Checked in headless Chromium against the
+  development server: `/sign-in`, `/register`, a form's page and its embed
+  raised no violation with those sources. No inline script: the `Challenge`
+  hook loads the provider's script.
+- **Plugin providers.** A provider is compile-time plugin code
+  (`c:Kiln.Plugin.challenge_providers/0`), as trusted as any plugin: it runs
+  in the VM and sees the secret and each token in `verify/2`. What the core
+  limits is what reaches the page and the decision. The provider is resolved
+  once per node and id and checked with
+  `Kiln.Challenge.Provider.conformance/1`: `script_url` must be `https://`,
+  without credentials, fragment, whitespace or quotes, and covered by one of
+  its own `script_src` entries; every CSP source must be
+  `https://host[:port][/path]`, with no wildcard, keyword, quote, `;` or `,`,
+  so a provider cannot inject a directive or `'unsafe-inline'`; render
+  options must be JSON and may not set `sitekey` or the callbacks. A
+  provider that fails, raises, or that no plugin registered, leaves the
+  feature off with a boot warning, never on with a guessed policy. Request
+  paths read only the memoised descriptor, so `widget/0` or `csp_sources/0`
+  cannot slow or crash a page; only `verify/2` runs per attempt, under the
+  deadline. A built-in id (`turnstile`, `recaptcha`) always resolves to the
+  built-in, and `mix kiln.plugins.doctor` flags a plugin that claims one.
+  Residual: once the operator names a plugin's provider, its sources are
+  added to the `:browser_auth` policy, which includes the console host's
+  sign-in, and its script runs there; a conformant source can still be an
+  origin the operator would not otherwise trust. Choosing it is the
+  operator's act, as choosing to install the plugin was.
+- **Secrets in transit and logs.** `challenge_token`,
+  `cf-turnstile-response`, `g-recaptcha-response` and the forms'
+  `_kiln_challenge` are in `:filter_parameters` and the Sentry scrubber; the
+  argument is `sensitive?` on both sign-in actions. A plugin provider's own
+  `response_field` is added to the Sentry scrubber from the registry, but not
+  to `:filter_parameters`, which Phoenix compiles before the plugins are
+  read: a boot warning (`challenge_response_fields`) asks the operator to add
+  it.
+- **Residual risks.**
+  1. **Outage as a bypass, bounded.** An attacker who can make verification
+     fail (a network position between Kiln and Cloudflare, or a provider
+     incident) gets attempts without a check, up to the account budget per
+     address and `ip_closed_after` per client address. Rotating addresses
+     defeats the second bound; the first still holds. The
+     `kiln_cms.challenge.decision.count` `fail_open` share shows it.
+  2. **A wrong secret fails open silently (Turnstile).** Only a missing
+     secret *source* is logged at boot. A secret Turnstile rejects makes every
+     verification "unavailable" (`result: :not_configured` in the verify
+     metric), which also arms the outage memory, so missing tokens are
+     admitted within the bounds above. A wrong reCAPTCHA secret fails closed
+     instead (see reCAPTCHA v2 above).
+  3. **Shared addresses.** Everyone behind one NAT shares the address axis:
+     more than `ip_threshold` failures there challenge everyone for the window,
+     and during an outage `ip_closed_after` failures refuse password sign-in
+     for the whole address. Passkeys and magic links still work.
+  4. **The outage memory is node-local.** Each node decides for itself whether
+     a missing token means "down"; on a cluster, a node that has not yet seen
+     the outage refuses missing tokens.
+  5. **The API failure count is shared.** Failed `POST /api/auth/sign_in`
+     attempts count toward the address's failure count even with
+     `CHALLENGE_API_SIGN_IN` off, so API traffic from an address can bring the
+     browser's outage closed point nearer. They do not trigger the browser
+     check itself.
+  6. **Solvers.** A paid CAPTCHA-solving service passes the check; it raises
+     the cost of a run, it does not stop one. The per-account budget remains
+     the limit.
+  7. **Thin, wide stuffing.** A run spread across many accounts and addresses,
+     each under its threshold, is never asked. A deployment-wide failure-rate
+     trigger is a follow-up.
+  8. **Third-party script.** When the widget is shown, the provider's script
+     runs in the sign-in page's origin, which is the console's own origin
+     when someone signs in on the console host. The policy admits only the
+     provider's declared sources (one origin for Turnstile, two path-scoped
+     ones for reCAPTCHA), and only on the auth pages and on responses that
+     draw a form's widget (below).
+  9. **reCAPTCHA cross-check reuse.** As above: a v2 token is not bound to
+     sign-in, registration or a form, so one solved for any of them passes
+     once on another within two minutes. Turnstile tokens are bound.
+  10. **No `remove` in reCAPTCHA.** reCAPTCHA has no `remove`: a widget LiveView
+     replaces stays in the script's own bookkeeping until the page unloads.
+     Harmless (its element is gone).
+
+#### Human verification on public forms
+
+`KilnCMS.Challenge.Gate.form/3`, `KilnCMS.CMS.Validations.ChallengeAvailable`,
+`KilnCMS.CMS.Changes.ScoreFormSubmission`, `KilnCMSWeb.FormController`.
+
+- **Who sets it.** `Form.challenge` (`:off` by default, or `:always`) is a
+  site admin's, per form: a form with it off exposes only that site's inbox
+  (the ADR 0018 test). The operator's ceiling is `CHALLENGE_FORMS`, the kill
+  switch and a usable provider. It is refused on write while forms cannot ask
+  (only when the write changes `challenge`, so a form already on still saves
+  and can be switched off) and clamped on every read
+  (`KilnCMS.Challenge.form_required?/2`). Form writes stay admin-only; the
+  system actor cannot write it. Tested per role and across sites.
+- **Held, not refused.** No token, a token solved on a host this deployment
+  does not serve, and a token the provider could not check (timeout,
+  transport, `5xx`, `429`, crash, unreadable secret) are all *held*: stored
+  as `:spam` with the threshold added to the score, so no notification,
+  autoresponder, `form.submitted` webhook or experiment conversion. Holding is
+  in the scorer, not a registry check, so a plugin cannot unregister it. Only
+  a refusal the provider gave (invalid, expired, malformed, wrong action) is
+  refused, with a `422`.
+- **No outage bypass.** Unlike sign-in there is no fail-open: a missing token
+  is held even during an outage, and so is a token the provider could not
+  check. An attacker who provokes "unavailable" (a burst that draws `429`s)
+  gets their submissions stored as spam, not acted on.
+- **Order.** Inactive form, honeypot, field validation, then the check. A
+  tripped honeypot is discarded without calling the provider and answers
+  `200` with `"verified"` when any token was sent and `"held"` when none
+  was. That matches a real submission except for a token the provider would
+  refuse: with the honeypot empty, a junk token is a `422`, so a bot that
+  sends junk can tell the two apart. A field error does not spend the token.
+- **Token binding.** The same `KilnCMS.Challenge.hostname_allowed?/1` rule as
+  sign-in, on both `POST /forms/:slug` and `POST /api/forms/:slug`: a host
+  this deployment serves or one in `CHALLENGE_HOSTNAMES`, never the request's
+  `Host`. The embed's `embed_origins` are not accepted hosts: the widget runs
+  inside the iframe, on the site's own host. A provider that reports the
+  action (Turnstile) must report `form`, so a sign-in token cannot be
+  replayed on a form, nor the reverse; reCAPTCHA v2 reports none (residual
+  risk 9 above). A mismatch is
+  held, not refused, and logged at most once a minute per node with the host
+  the provider reported (a config cause, almost always a headless site).
+- **Content-Security-Policy.** Widened with the provider's origins only on a
+  response that draws a form's widget: a delivered page whose blocks (or an
+  experiment variant's) render a form that asks, `/forms/:slug`, and a
+  non-embedded refused re-render. The embed policy adds the provider to
+  `script-src` and an explicit `frame-src 'self' <origin>` only for such a
+  form. Every other response's policy is byte-identical; tested. The embed's
+  mount is a separate same-origin module script
+  (`/assets/js/challenge_static.js`), never inline.
+- **Not covered.** Fired artifacts (the `data-kiln-form` placeholder is
+  settings-independent), previews (render no form), newsletter sign-up and
+  any form left `:off`.
+- **Residual risks.**
+  1. **Held data is still stored.** A script can fill Spam up to the per-IP
+     `:form` bucket (20 a minute); spam is pruned after
+     `spam_retention_days`.
+  2. **Stale pages.** A page loaded or cached (60 s plus 300 s
+     stale-while-revalidate) before the check was switched on posts without a
+     token and is held. No grace window is offered: held submissions keep
+     their data, and a grace keyed on when the page was rendered would admit
+     token-less posts for as long as an old render stamp stays valid.
+  3. **Outage memory is sign-in's alone.** A form verification the provider
+     could not answer never arms the node-local outage memory
+     (`KilnCMS.Challenge.verify/4` skips it for `:form`), so a burst of junk
+     form tokens that draws `429`s cannot switch on sign-in's bounded
+     fail-open. Tested.
+  4. **Solvers.** As for sign-in, a paid solving service passes the check.
+
+### Idle timeout and sign out everyone (#2246)
+
+`KilnCMS.Accounts.IdleTimeout`, `KilnCMS.Accounts.SignOutAll`. A site admin
+can sign browsers out after a stretch of inactivity, and end every browser
+session on the site at once. Admin guide:
+[account administration](account-administration.md#sign-people-out-when-idle).
+
+Configured at `/editor/sessions`.
+
+- **Sessions are bound to a site.** A session's token row, and its remember-me
+  row, record the site (`tokens.org_id`) they signed in on, or the first site
+  that uses them if they predate #2246. The cookies are host-only, so a row
+  bound to site A arriving on a host of site B was copied there: it is served
+  signed out on B and nothing is written to it, so it can neither be used on B
+  nor kept awake from B. A remember-me cookie's signature is verified before
+  its row is looked at, and every write is also filtered on the account
+  (`subject`), so a forged or foreign jti changes no one's row.
+- **Last activity is the database's clock.** `last_used_at` is written by and
+  compared with Postgres `now()`, never a node's clock, and the expiring
+  UPDATE repeats the idle test in its `WHERE`, so a tab that kept the session
+  awake a moment earlier wins the race. Idle time is measured from no earlier
+  than the policy's last save (`policy_changed_at`), so enabling or shortening
+  the timeout signs no one out for past inactivity. That stamp is the saving
+  node's clock: skew between nodes shifts the grace by the skew.
+- **Public pages stay cache-safe.** On `:browser` an expired session is served
+  signed out without writing the session or a cookie (#699); the session and
+  remember-me cookies are dropped only on `:browser_auth`. On
+  `:media_transform` the check only reads.
+- **Sign out everyone.** One transaction revokes every session, remember-me and
+  two-factor hold row bound to the site, writes a watermark
+  (`SiteSessionPolicy.sessions_revoked_at`) and records `all_sessions_revoked`.
+  A row bound to no site that predates the watermark is revoked the next time
+  it is used on this site's host, for 30 days (the remember-me lifetime). The
+  token writes that bind a row to a site read the watermark in the same
+  statement, so such a row cannot escape by being used first. Other sites are
+  never reached.
+- **Fails open.** An unreadable `SiteSessionPolicy` row is logged and treated as
+  "no timeout, no watermark" for that request, uncached; an unreadable token
+  row leaves the request as it was, and an open page looks again in a minute.
+  The site decides the timeout; there is no operator ceiling
+  ([ADR 0018](decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)
+  constrains a site only against one).
+- **Cost.** Every signed-in browser request and LiveView mount reads the
+  session's token row by primary key, whether or not the site has a timeout,
+  because the cross-site rule needs it.
+- **Residual risks.** (1) Not covered: API keys and headless bearer tokens,
+  including a token minted with a phished password. A breach response needs a
+  password reset or *Sign out everywhere* as well. (2) `/ws/collab` (a 24-hour
+  per-account token, behind a flag that is off by default) and `/ws/gql`
+  sockets are keyed per account and survive both idle expiry and sign out
+  everyone until their next reconnect or re-check. (3) Events a LiveComponent
+  handles itself (`phx-target={@myself}`) do not count as activity on their
+  own. (4) A node holding a cached policy from before a sign out everyone may,
+  for up to the cache's minute and until the cluster-wide bust lands, let an
+  unbound pre-watermark session through on a request; binding still refuses
+  it, and the next check catches it. (5) Activity is written at most once per
+  tenth of the timeout (30 seconds to 5 minutes), so a session can end after
+  as little as 90% of the timeout since its real last use. (6) Fail-open,
+  above.
+
+### Site invitations (`/auth/invite/:invite_token`, #2135)
+
+A platform admin invites an address to a site from `/editor/team`; the invitee
+opens the mailed link and sets up an account, or adds the site to the account
+they have. The link is the only credential, so this is a bearer token that
+creates an account and grants a site tier.
+
+- **The token.** 32 random bytes, URL-safe base64, mailed once. Only its SHA-256
+  is stored (`invitations.token_hash`), so a database read or a backup cannot
+  rebuild a link. Single use: accepting destroys the row in the same
+  transaction as the account and membership, and both accepts re-read the row
+  by token under `FOR UPDATE`, so two submits of one link serialize and the
+  second finds nothing. A resend rotates the token and revoking destroys the
+  row; either way the old link names nothing. Usable for 7 days.
+- **Opening is not accepting.** The page only peeks at the token on `GET` and on
+  the socket mount; nothing is written until a button is pressed. A mail
+  scanner or link previewer that follows the link changes nothing.
+- **Every write is system-only.** `User` `:register_with_invitation` and
+  `:accept_invitation_with_password`, and `Invitation` `:by_token`, `:consume`
+  and `:accept_existing`, are `forbid_if always()` and refuse any actor-carrying
+  call in their own change or preparation, because the platform-admin bypass
+  would otherwise pass them ([policy-matrix.md](policy-matrix.md)). The email
+  of a new account is taken from the invitation row, never from input.
+- **Pre-registered accounts (pre-hijack).** Anyone can register an unconfirmed
+  account for any address. So an unconfirmed account is never added to a site
+  directly: the Team page invites it instead, and accepting sets a new
+  password, confirms the account, revokes every token it held, signs out its
+  sessions and clears a display name the first registrant chose. It also
+  forgets every other credential the first registrant could have set up
+  (#2453, `Changes.ForgetPriorCredentials`): two-step verification (the live
+  secret, recovery codes and any pending re-enrollment), passkeys,
+  identity-provider links and push devices are removed, and every live API
+  key is revoked. Whoever registered first can sign in with their own
+  password while the account is unconfirmed, and an admin can raise an
+  unconfirmed account's role (`:manage_access`, `:grant_temporary_role`) to one
+  that reaches `/editor/settings`, or mint it an API key. So "a self-registered
+  viewer cannot enroll a factor" is no defense. The removals run inside the accept's transaction, as
+  `SystemActor.new(:invitations)` (each action admits that actor and no
+  person; the passkey and push-device removals sit above the platform-admin
+  bypass), with reads that fail closed, so any error rolls the whole accept
+  back rather than handing over an account a stranger can still get into. The
+  TOTP columns are cleared from the row re-read `FOR NO KEY UPDATE` in the
+  transaction, not from the caller's possibly stale struct. Each removal is
+  logged with no person: `second_factor_removed` and `passkey_removed` with
+  `via` `invitation`, and `api_key_revoked`. A credential write the
+  stranger's session already had in flight cannot slip past the takeover. The
+  takeover holds the account's row (`FOR NO KEY UPDATE`) while it forgets the
+  account's credentials. A passkey registration, push subscription,
+  two-step confirmation, recovery-code regeneration or password change
+  (`Passkey` `:register`, `PushSubscription` `:subscribe`, `User`
+  `:confirm_totp`, `:regenerate_totp_recovery_codes`, `:change_password`)
+  that the stranger's session had in flight takes the account's row first
+  (`Changes.GuardAccountTakeover`, through `AccountLock.credentials/2`:
+  `FOR SHARE` for the two inserts, `FOR NO KEY UPDATE` for the three user
+  updates). If it gets there before the takeover, it commits first, and the
+  takeover removes or overwrites what it wrote. If it gets there after, it
+  waits, finds the password changed (or the staged secret cleared), and is
+  refused with `Errors.AccountTakenOver`. The stranger's sessions are evicted
+  once the takeover commits. `:setup_totp` and `:disable_totp` are left
+  unguarded on purpose: a secret staged from a stale session is enforced by
+  nothing until `:confirm_totp` promotes it, which the guard refuses, and the
+  invitee's own enrollment stages a fresh one over it; a stale disable can
+  only clear columns the takeover already cleared. Only a confirmed account accepts
+  with one click, and it keeps its password and every credential. An erased
+  account cannot accept.
+- **Who can send, and for how long it counts.** Only a standing platform admin
+  can invite or resend (`StandingAdminOnly`): a temporary admin's invitation
+  would outlast the grant. An `:admin` invitation is honoured at accept time
+  only while its sender is still a standing platform admin, not erased and not
+  deleted. A `:viewer` or `:editor` invitation is honored whatever has
+  happened to its sender since, and that now includes raising a lower
+  membership (below), as it already included creating one.
+- **An invitation raises, never lowers, and a later decision retires it
+  (#2452).** Accepting over an active membership below the invited tier raises
+  it (`OrgMembership.:raise_role_by_invitation`, admitted only for the
+  `:invitations` system actor and a platform admin). The comparison is made on
+  the membership row locked `FOR UPDATE`, against its standing tier, so a site
+  admin's edit between the page load and the click is what is judged; an equal
+  or higher tier is refused before any write and the invitation is simply
+  used up. The other grant axes are kept, and the invitee's sessions are
+  evicted after the commit. Because accepting can now raise, a pending
+  invitation would otherwise outlive a demotion: `OrgMembership` `:update`
+  (when it changes `role` or `role_id`) and `:destroy` delete the pending
+  invitation for the member's address on the membership's own site
+  (`Changes.RetirePendingInvitation`, through the system-only
+  `Invitation.:retire`), locking it before the membership row, the same order
+  as the accept, so an edit and an accept racing on one person serialize. The
+  retirement is logged as `invitation_revoked`, with the admin who made the
+  membership change as the actor, so an invitation never vanishes untraced.
+- **Mail as a weapon.** The admin names any address. Invitation mail is budgeted
+  per address (`mail:invitation`, the shared mail budget, 5 per hour by
+  default), and a spent budget or a suppressed address is refused by name, so
+  the admin is not told "sent" for mail that will not arrive. The "you were
+  added" notice to a confirmed account has its own budget
+  (`mail:membership_notice`) and is dropped silently when spent. The mail
+  carries no free text from the inviter (that would be a phishing channel from
+  this instance's address), and the site and inviter names are HTML-escaped.
+- **Submit flooding.** Both password accepts and the one-click accept charge the
+  per-client registration budget (`ThrottleRegistration`, the `:register`
+  bucket), because they arrive over `/live`, past every router plug.
+- **The right host.** The link is built on the invited site's host for the
+  invited tier (`ConsoleHost.tier_url/3`: the public site host for a viewer,
+  the console host for an editor or admin when `KILN_CONSOLE_HOST` is set). The
+  page redirects to it if opened elsewhere, so the account and the first
+  sign-in happen on the site it was made for.
+- **Invite-only sites.** Accepting deliberately skips the `:registration_enabled`
+  check: on an invite-only site this is how accounts arrive. The admin's
+  choice to invite is the control.
+- **Residuals.** (1) *The token is in the request path*, and Phoenix logs the
+  path: `invite_token` is in `:filter_parameters`, which filters the logged
+  params map only. The same holds for `/magic_link/…` and `/password-reset/…`.
+  Whoever can read request logs within the 7 days can accept the invitation.
+  (2) *The plaintext link sits in the mail job's args* in `oban_jobs`, and so
+  in any backup taken meanwhile, until Oban's Pruner deletes the finished job 7
+  days later, as for reset and magic-link mail. (3) *Whoever holds the mail
+  holds the invitation.* A forwarded or intercepted link is accepted by
+  whoever opens it first; the account it creates has the invited address,
+  and an admin can remove the membership from Team. (4) *Accepting through single sign-on is not supported*, so an
+  invitee whose organisation signs in by SSO must still accept with a password
+  or an existing account first. (5) *Pending invitations from before #2452.*
+  A tier change or removal made on a build that had invitations but not #2452
+  did not retire the member's pending invitation, so for up to 7 days after
+  upgrading such a link raises a demoted member back (and, as before, re-adds
+  a removed one). Admins check **Pending invitations** on Team. (6) *The
+  same takeover by another route keeps the stranger's credentials.*
+  `:confirm_new_user` and `:reset_password_with_token` confirm an
+  unconfirmed account without running the wipe above. A magic-link sign-in
+  (`:sign_in_with_magic_link`, a read) neither confirms the account nor takes
+  it over (#2516), so the stranger keeps a working password on an account the
+  address's owner now shares and that stays unconfirmed. Both are the general
+  pre-hijack residual, tracked in #2594. (7) *What the takeover does not touch:* memberships on
+  other sites, billing, and newsletter subscriptions stay as the first
+  registrant left them. (8) *Erasure leaves the TOTP columns.*
+  `Changes.AnonymizeUser` removes passkeys and identities but not
+  `totp_*`; a follow-up.
+
+### Account unlock (#2250)
+
+`AccountThrottle` pauses password sign-in for an address after 20 attempts in
+15 minutes, and the pause answers exactly as a wrong password does. An emailed
+link lets the owner lift it without waiting or resetting the password
+(`KilnCMS.Accounts.SignInUnlock`; the reasoning is
+[ADR 0023](decisions/0023-an-unlock-link-lifts-only-the-account-pause-and-the-pause-stays-undisclosed.md)).
+The how-to is
+[Lift a sign-in pause by email](account-administration.md#lift-a-sign-in-pause-by-email).
+
+- **No stronger than a reset.** The link goes only to the account's mailbox,
+  and whoever reads that mailbox can already reset the password, which lifts
+  the pause too. The link does less: it clears the `signin` counter for the
+  account's current address (`AccountThrottle.unlock/1`) and nothing else. Not
+  `challenge:free_signin`, the `2fa` budget, the alert windows, `ip:auth` or
+  the challenge gate's IP axes. It signs no one in, mints no session, confirms
+  nothing and touches no other token.
+- **The pause stays undisclosed.** The sign-in page shows the same link to
+  everyone, the request page answers one sentence for every address, and
+  `POST /api/auth/sign_in` still answers a paused account with the generic
+  `401`. There is no JSON request or redeem endpoint.
+- **The request does the same work for every address.** `request/2` hands
+  the address to a task under its own `Task.Supervisor` (at most 20 children,
+  apart from the shared `KilnCMS.TaskSupervisor`) and returns. The task mails
+  only a confirmed, not erased, not demo-shared account that is paused right
+  now and is a member of the requesting site, and only then charges the
+  per-address budget (`mail:sign_in_unlock`, 3 an hour), so a name that is
+  never mailed writes no counter row. The mail echoes nothing from the request
+  (no IP, no attempt count), so it cannot carry a phisher's text.
+- **The token.** An AshAuthentication JWT, purpose and `act`
+  `sign_in_unlock`, 15 minutes, stored like every token. Single use through
+  the token resource's atomic revoke (two concurrent redeems: exactly one
+  wins), and revoked with every other token on a password change or reset. It
+  is refused as a bearer credential and by the reset, confirmation,
+  magic-link and token sign-in routes. Its claims, also stored in
+  `tokens.extra_data`, bind it to the requesting site (`org`: refused
+  elsewhere, and not spent there) and to the address it was mailed to (`ed`, an
+  HMAC keyed from `secret_key_base`, so the stored value is not a lookup away
+  from the address).
+- **Opening is not redeeming.** The `GET` renders the same page for any token
+  and spends nothing, so a scanner that follows the link does not use it.
+  Only the CSRF-checked `POST` redeems.
+- **Who calls it.** `User` `:request_sign_in_unlock` and
+  `:redeem_sign_in_unlock` are `forbid_if always()`, and
+  `SignInUnlockAction` refuses an actor-carrying call because the admin bypass
+  would pass that ([policy-matrix.md](policy-matrix.md)). No signed-in person,
+  an operator included, can mint or spend a link.
+- **Audit.** `sign_in_unlock_requested` only once a mail is queued,
+  `sign_in_unlocked`, and `sign_in_unlock_refused` (sampled per IP like a
+  failed sign-in, with the account named only when the link's signature
+  verified and the account belongs to the site). See
+  [security-events.md](security-events.md).
+- **Residuals.**
+  (1) *A link holder gets 20 more attempts.* Whoever holds a link (the
+  owner, or someone reading the owner's mail) can redeem it for a fresh
+  sign-in budget: 20 more password attempts per link, at most 3 links an
+  hour per address. Each attempt still pays the human-verification check
+  where the operator turned it on (the free attempts are not given back), the
+  per-IP limits and the second factor. Someone reading the mailbox could
+  reset the password instead, so this is not a new capability, but it is a
+  quieter one: the attacker keeps guessing without changing the password,
+  which the owner would notice.
+  (2) *Denial of the unlock mail.* An attacker who knows the address can
+  keep the account paused by guessing, and can spend its 3 unlock mails an
+  hour by asking for them; the owner then gets no link until the hour rolls
+  (they receive the 3 the attacker caused). A password reset, which has its
+  own mail budget, and waiting are still open, and an attacker still guessing
+  re-pauses the account within seconds of any unlock anyway.
+  (3) *The node-local fallback.* An unlock is a `forget` of the shared
+  Postgres counter, so it reaches every node (`ThrottleStorePeerTest`). A node
+  that counted attempts in its own ETS fallback while the database was
+  unreachable keeps those counts through an unlock made elsewhere, until its
+  window rolls. That is `ThrottleStore`'s documented bound, not a new one.
+  (4) *The token is in the request path*, as for invitations, reset and
+  magic links: `unlock_token` is in `:filter_parameters`, which filters the
+  logged params map only. (5) *The plaintext link sits in the mail job's
+  args* in `oban_jobs` until Oban's Pruner deletes the finished job 7 days
+  later; it has expired long before. (6) *A newer link does not revoke an
+  older one*; each is short-lived and single use, and the mail budget bounds
+  how many exist. (7) *A scanner that submits forms* (not just follows
+  links) can spend a link; the refusal page says so and offers a new one.
+  (8) *A link revoked by a password change is logged as `used`*, not as
+  revoked.
+
+### Registration approval (#2251)
+
+A site can make password sign-ups wait for an admin
+(`KilnCMS.CMS.SiteRegistration`, `KilnCMS.Accounts.Registrations`; the
+reasoning is
+[ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md)).
+The how-to is
+[Approving registrations](account-administration.md#approving-registrations).
+
+- **One choke point.** Waiting is a `status` on the account's
+  `OrgMembership`, and `KilnCMS.Accounts.Scoping` grants nothing through a row
+  that is not `:active`: no tier, no audiences, a denied type scope, no field
+  grants. Every surface already asks `Scoping`, so none needed its own check.
+  The row still makes the account affiliated, so it is `:none` on every other
+  site, the default one included.
+- **Site admins see applicants' addresses, and only those.** Until now a site
+  admin who is not a platform admin could not read another account (`User`
+  reads are self-only). The queue shows each applicant's email address, name
+  and whether it is confirmed. `Registrations.page/2` reads those columns as
+  the system, for the user ids of rows that the `:registration_queue` read
+  returned, and that read admits only an admin of the org the
+  `organization_id` argument names (`Checks.AdminOfMembershipOrg`), never the
+  request's host. So a site admin sees exactly the people who asked to join
+  their site, and an admin of site B is refused site A's queue from any host.
+  The `User` policies are unchanged.
+- **Hijack by an unconfirmed address.** Anyone can register an address they
+  don't own. Approving it would give the site's access to whoever typed it, and
+  the real owner, signing up later, would find the address taken. So approving
+  requires `confirmed_at`, checked on the locked row inside the action
+  (`Changes.DecideRegistration`), not just hidden in the page. Rejecting does
+  not require it.
+- **Bot waves.** A flood of sign-ups costs an admin nothing to ignore: the
+  queue lists confirmed, unconfirmed and rejected applicants separately, 50 a
+  page on a keyset, with counts capped at 100, so an unconfirmed wave neither
+  loads unbounded nor pushes approvable applicants off the first page.
+  Registration's own per-address throttle and human verification apply first.
+  A site that erases unconfirmed applicants it rejects (#2514, below) also
+  removes the wave's accounts as it rejects them, rather than keeping a pile
+  of accounts for addresses nobody proved they own.
+  Residual: there is no bulk reject, and waiting rows never expire (a
+  follow-up), so a wave stays in the unconfirmed list until rejected one by
+  one.
+- **Notifying admins can't be turned into a mail flood.** Admins are told
+  only when an applicant confirms an address (a link mailed to it, a password
+  reset, or accepting an invitation), not on sign-up, so an unconfirmed wave
+  sends no notice at all. The `:registration_pending` notice collapses: one
+  unread row per admin and site, and the email goes only when a new row is
+  written (`Notifications.record_in_app_result/1`). A confirmed wave is one
+  notice and one email per admin until that admin opens the queue.
+- **No applicant data in the bell or the admin email.** The notice's title is
+  the site's name, with no excerpt and no actor; the email names the site and
+  links to the queue. An applicant's address and name stay in the queue,
+  behind its admin-only read, and do not end up in an inbox or a mail
+  provider's logs. Recipients are standing admins only
+  (`Notifications.Registrations.recipient?/2`): a temporary platform admin,
+  which may not decide, and an erased account are left out.
+- **Decision emails can't be aimed at strangers.** Rejecting is allowed
+  before confirmation, so the rejection is mailed only to a confirmed address
+  (`Changes.MailRegistrationDecision`): registering someone else's address
+  and getting it rejected does not make the site mail them. Approval already
+  requires confirmation. An erased account is mailed nothing, and approving
+  one is refused (`:erased`).
+- **Decision emails carry nothing an admin typed.** Approval is one sentence
+  and a sign-in link on the site's host; rejection is one neutral sentence
+  with no reason, no link and no name of who decided. There is no free-text
+  field, so the feature can't be used to send arbitrary content from the
+  site's address. Both, and the admin email, are sent for the site
+  (`org_id:`), so they leave through the site's own SMTP relay when it has one
+  (#1322), and the site's suppression list applies.
+- **Best effort, after commit.** Notices and mails run through
+  `KilnCMS.AfterCommit` once the confirmation or decision has committed; a
+  failure is logged and cannot roll it back or block it.
+- **Billing.** The entitlement recompute gives a paying reader a viewer
+  membership on a site where it has none, which would let anyone pay past the
+  queue. On a site that requires approval, `Billing.Membership` `:start` is
+  refused (`Validations.RegistrationApproved`) unless the account is already
+  let in there (`Scoping.effective_tier/2` is not `:none`, which includes the
+  legacy membership-less viewer on the default site), and the recompute
+  creates no viewer row for an account that is not. A waiting or rejected row
+  on the site is always refused. Residual: on a site that does **not** require
+  approval, an account waiting on another site can still pay and becomes a
+  viewer member of that site; that site chose open sign-up.
+- **Fails closed.** The setting is read before the sign-up's transaction as
+  a system actor admitted to `read` only, `authorize_with: :error`. An
+  unreadable row refuses the sign-up and creates nothing, and an unreadable
+  setting at checkout refuses the start; "no approval needed" is the
+  direction that would let an unreviewed account in.
+- **Decisions race safely.** Approve and reject lock the row
+  (`get_and_lock_for_update`) and refuse one that is no longer waiting, so two
+  admins or a stale tab cannot both decide. Sessions are evicted after commit,
+  so the reconnect is authorized against the decided row. A temporary platform
+  admin is refused by `StandingAdminOnly`.
+- **Who may queue.** `OrgMembership` `:queue_registration` admits only the
+  `:registrations` system actor (the password sign-up and the site single
+  sign-on admission); the platform-admin bypass forbids it, so no person can
+  create a waiting row, for themselves or anyone.
+- **Mixed-version nodes.** A node on the previous release has no `status` and
+  reads a waiting (or rejected) row as an active viewer membership: no
+  audiences, but comments and checkout where viewers may. Operators turn
+  approval on only once every node runs the new release, and before rolling
+  back anonymize the waiting and rejected accounts they would not let in
+  ([ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md#upgrade-notes)).
+- **Invitations decide registrations, without reopening a rejection by
+  accident (#2514).** An invitation is a platform admin's decision to let an
+  address in, so accepting one approves the invitee's waiting or rejected
+  row on that site with the invited tier
+  (`OrgMembership.:approve_registration_by_invitation`, admitted only for the
+  `:invitations` system actor and a standing platform admin). A rejected row
+  is approved only if the invitation was sent or last resent **after** the
+  rejection (`invited_at` later than `decided_at`, compared on the locked
+  row; equal or missing times leave the rejection standing). An invitation
+  older than the rejection is refused as "no longer valid", with the same
+  page as any other dead link, and the accept rolls back, confirming
+  nothing. So a site admin's rejection is not undone by an invitation that
+  predates it. A platform admin's direct add on Team overrides any rejection,
+  because it is a decision made now, and does it visibly: the outcome is
+  `:approved_over_rejection`, the page says the rejection was overridden, and
+  the log records `registration_approved` with `via` `added` and that admin
+  as the person. Approval still requires a confirmed, unerased applicant: an
+  unconfirmed address is invited, never added, and the invitee proves the
+  address by accepting. The applicant's sessions are evicted after the
+  accept's own commit (`KilnCMS.AfterCommit`), not when the nested approval
+  finishes, so a reconnect is never authorized against the row before it is
+  committed, and a rolled-back accept evicts nothing.
+- **A site's own single sign-on can be held for approval (#2514).**
+  `SiteRegistration.approval_for_site_sso`, off by default and independent of
+  `approval_required`, makes a **new** account the site's provider
+  provisions a `:pending` row (`queue_registration`, `method: site_sso`)
+  instead of a `:viewer` membership. The account gets a session that grants
+  nothing. Rule 3 of `SiteSso.Admission` (no access on any other site) is
+  unchanged and still sound: the pending row is on this site only, so the
+  account stays affiliated and is never the legacy membership-less viewer on
+  the default site, and a pending or rejected row on *another* site counts as
+  access elsewhere and refuses the sign-in, as any membership does. The
+  setting is read only when an account would be provisioned, before the
+  transaction, and fails closed: an unreadable row refuses the sign-in
+  (`:registration_settings_unavailable`) and creates nothing.
+- **Erasing a rejected account is a site's opt-in, limited to unconfirmed
+  applicants (#2514).** `SiteRegistration.rejected_accounts` is `:keep` by
+  default; with `:erase_unconfirmed`, rejecting an applicant whose address was
+  never confirmed erases the account (`User.:anonymize`) in the rejection's
+  transaction (`Changes.EraseRejectedAccount`). A confirmed rejection is always
+  kept: the kept account holds the address, which is what stops the same
+  person registering on the site again, and erasing it would hand them a fresh
+  start. An unconfirmed sign-up proves nothing about who owns the address, so
+  erasing it gives up little, and it frees an address a stranger may have
+  registered in its owner's name. Nobody is mailed, since an unconfirmed
+  applicant never is. An unreadable setting means keep: erasure cannot be
+  undone, so it needs the site's known consent.
+- **Only an account that is nothing but its application can be erased.** A
+  site admin may not erase accounts, and this does not let them: the account
+  must have been created by this registration (`created_account`), be
+  unconfirmed, unerased, a standing *Viewer* with no live grant and no
+  audiences, with no other membership of any status on any site, and nothing
+  may reference it (paid membership, API key, content, version, comment, task,
+  media, release, invitation sent, consent, newsletter row or logged event:
+  `Accounts.Registrations.Erasure`, one query). The referencing tables are a
+  static list, and a test holds every foreign key to `users` to it, so a new
+  table cannot silently stop blocking. Anything else keeps the account. So a
+  site admin can erase only an account that exists solely because someone
+  applied to *their* site and has done nothing since.
+- **Who may erase.** A **standing** admin of the site, or a standing platform
+  admin (`Erasure.standing_admin?/2`), and only when the console's dialog
+  said the account would be erased (`erase: true`; a client pushing the
+  argument without it is still bound by the setting and the check). A
+  temporary admin may reject, but the account is kept: an erasure would
+  outlast the grant that allowed it.
+- **The system actor's grant is held to one erasure.** The deciding admin may
+  be a site admin, who is refused `:anonymize`, so the erasure runs as
+  `SystemActor.new(:registrations)`, which the `User` policy now admits to
+  `:anonymize`. A policy can only name the subsystem, so
+  `Changes.GuardRegistrationErasure` on the action narrows it: the changeset
+  context must name a membership of this account on that site that is
+  `:rejected`, with `created_account`, and with exactly the `decided_at` this
+  transaction wrote; a transaction must be open; the account's row is locked
+  `FOR UPDATE`; and the erasable check must pass again. Anything else is
+  refused (`ErasureRefused`) before the scrub touches anything. Any other
+  caller that ever obtains the `:registrations` actor cannot use it to erase
+  an arbitrary account.
+- **A row lock, not a check alone, against races.** Under READ COMMITTED the
+  erasable check cannot see a membership, key or confirmation that another
+  transaction is writing. So the rejection takes the account's `users` row
+  `FOR UPDATE` before it locks the membership (only when it will try to
+  erase), and every path that would give the account a footprint or confirm
+  it takes the same row `FOR KEY SHARE` first (`Accounts.AccountLock`): every
+  `OrgMembership` create (resource-wide), both approvals, `Billing.Membership`
+  `:start` and `:comp`, the entitlement recompute's write, `ApiKey` `:create`
+  and `:rotate`, and the three `User` updates that confirm an account
+  (`:confirm_new_user`, `:reset_password_with_token`,
+  `:accept_invitation_with_password`). Whichever locks first goes first. An
+  erasure that waited checks against what the other committed, a
+  confirmation included, and keeps the account. A writer that waited reads
+  `anonymized_at` and is refused (`AccountErased`), so no membership, key,
+  password or session lands on the tombstone, and the entitlement recompute
+  writes nothing to an erased account. Lock order is the users row, then any
+  membership row, on every path, so they cannot deadlock. A foreign-key
+  insert alone would only make a writer wait and then succeed against the
+  tombstone, which is why the listed paths lock and re-read explicitly.
+- **One transaction.** A failed erasure rolls the rejection back, so a
+  rejection never claims an erasure that did not happen. The security event
+  is recorded after the erasure: `registration_rejected` with
+  `outcome: erased` and no target (it would name only a tombstone), or
+  `outcome: kept` naming the applicant.
+- **Erasure itself deletes more (every erasure).** Web Push subscriptions (an
+  endpoint that reaches the person's device), private saved views, and the
+  notifications addressed to the account are deleted, and stored audiences
+  are cleared in their own statement, which a stale copy of the account
+  could previously skip ([data flows](data-flows.md#subject-rights-workflows)).
+- **Enumeration.** The sign-up page says nothing about waiting, and a
+  registration for an existing address answers as before. Single sign-on
+  answers a new and an existing account the same way whether or not the new
+  one waits: both are signed in. **Add or invite** tells a platform admin,
+  after the fact, that a confirmed address had a waiting or rejected
+  registration on the site (the outcome names it); for an unconfirmed address
+  it says nothing and invites. That is an admin of the site learning about
+  its own applicants, and a platform admin can read every account anyway.
+  Erasing (#2514) adds one bit: "erased" or "kept" after rejecting an
+  unconfirmed applicant tells a site admin whether that account is more than
+  its application here (another membership, content, a key) without saying
+  what. The account was created by a registration on their site, so the bit
+  is about their own applicant, and the event records the same outcome.
+- **Residuals.** (1) The erasable check scans several referencing columns
+  that have no index while the account's row is locked `FOR UPDATE`, so an
+  erasing rejection on a large site is slower, and holds that one account's
+  writers (its memberships, billing, keys and confirmation) for as long. It
+  runs only on a rejection that will try to erase; indexes are a follow-up.
+  (2) A site admin whose admin tier is a temporary membership
+  grant can decide registrations, and is told about them;
+  `StandingAdminOnly` constrains only platform grants. (3) A node on an older
+  release cannot load a `registration_pending` notification, so during a
+  rolling deploy or after a rollback an affected admin's bell there lists
+  nothing ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509));
+  an availability gap, not an exposure. (4) A magic-link sign-in does not
+  confirm an account, so an applicant who only ever signs in that way is
+  never announced
+  ([#2516](https://github.com/The-Verscienta/kiln_cms/issues/2516)).
+  (5) Holding single sign-on accounts covers new accounts only: an existing
+  account the site's provider admits for the first time is not queued
+  ([#2515](https://github.com/The-Verscienta/kiln_cms/issues/2515)).
+  (6) Sending, resending or re-inviting an address whose registration was
+  rejected does not tell the platform admin about the rejection; if the
+  invitee accepts, the rejection is overridden, and only the
+  `registration_approved` event (`via` `invitation`) after the
+  `registration_rejected` shows it. (7) A node on an older release ignores
+  `approval_for_site_sso` and provisions single sign-on accounts as active
+  viewers; operators turn it on only once every node runs the release.
+  (8) A node on an older release takes no account lock on its membership,
+  billing, key and confirmation writes, so during a rolling deploy an
+  erasure can race one of them and attach it to a tombstone, or erase an
+  account that has just been confirmed. Operators turn `erase_unconfirmed`
+  on only once every node runs the release
+  ([ADR 0024](decisions/0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md#upgrade-notes)).
+
+### Security posture (`/editor/security-posture`, #2252)
+
+`KilnCMS.Security.Posture`, `KilnCMS.Security.PostureReport`,
+`KilnCMSWeb.SecurityPostureLive`. A read-only page that lists which security
+settings are on. The guide is [Security posture](security-posture.md); the
+policy is under "Security posture" in [policy-matrix.md](policy-matrix.md).
+
+- **It discloses configuration, so it is gated twice.** The page is a map of
+  what is off, which is what an attacker wants. It sits in the `:admin_routes`
+  live session (the tier gate) and its one action is authorized by
+  `Checks.OrgAdmin` on the request's site, which is the tenant and never an
+  argument. Editors, viewers, admins of other sites and admins whose
+  membership is still waiting are refused. **Run checks again** re-checks the
+  tier, because the socket outlives the mount.
+- **The deployment's lines are for platform admins only.** Which checks run is
+  decided inside the action from the actor's effective platform role, not by
+  the page: a site admin's report contains no `:deployment` entry at all. So
+  only platform admins learn which platform admins lack an authenticator app,
+  whether metrics, the API explorer or introspection are exposed, which
+  administrators hold long-lived or read-write keys, and how far behind the
+  release is. The per-site second-factor check leaves platform admins out, so
+  a site admin does not learn their two-factor status either. The JSON
+  endpoint applies the same rule: a site admin's key gets no `:deployment`
+  entry.
+- **Email addresses are shown on the page and nowhere else.** A site admin
+  sees the addresses of that site's administrators and editors who have no
+  authenticator app (until now, a site admin who is not a platform admin
+  could not read another account). A platform admin also sees the addresses
+  of platform admins without one, and each flagged API key's name and owner.
+  They are in a result's `details`, which only the page renders. `facts`
+  carry counts, booleans and short values, and the SDK contract forbids
+  secrets and addresses in them, because they are published to monitoring
+  (below). Nothing is stored or logged; the only copy kept is the monitoring
+  snapshot, which has no `details`.
+- **Monitoring over HTTP (#2521).** `GET /api/security/posture`
+  (`KilnCMSWeb.SecurityPostureController`, `KilnCMSWeb.SecurityPostureJSON`)
+  serves the report as JSON through a second action, `:snapshot`, under the
+  same policy as `:run` and the same scope rule
+  (`Posture.scopes_for/1`). What a key reveals:
+  - **Credential.** A JWT or API key of an administrator of the request's
+    site; a platform administrator's also gets the deployment's lines. A
+    `:draft_write` key is refused by `forbid_if DraftWriteKey` on both
+    actions, even if its owner has since become an admin. Note that a
+    long-lived `read` key on an admin account now carries this map; the
+    page could only be read through a signed-in session.
+  - **Allowlist first.** The route is behind `:admin_allowlist_api` ahead of
+    the rate limit and the credential plugs, so a caller off the list gets
+    `403` `network_not_allowed` without learning whether its key is valid.
+    The allowlist's JSON refusal details are neutral ("Not available from
+    this network", "Temporarily unavailable") since they now answer more than
+    sign-in.
+  - **No details.** `Posture.without_details/1` empties every result's
+    `details` before the report is cached, and the serializer picks each
+    field by name, so no email address, key name, check description,
+    duration or module leaves the server. A field added to `Entry` or
+    `Result` stays private until the serializer names it.
+  - **Facts and summaries are published data.** A plugin's `facts` and
+    `summary` reach every admin of the site (site checks) or every platform
+    admin (deployment checks) who holds a key. The SDK documents that.
+    Every string is passed through `String.replace_invalid/1` and non-scalar
+    fact values become `null`, so a bad result cannot break the encoding.
+  - **Cache.** The detail-free report is kept 30 s in the node's Cachex,
+    keyed by site and scope set (`KilnCMS.Cache.security_posture_key/2`), so
+    a site admin is never served a platform admin's deployment lines, and one
+    site's answer never another's. A burst of monitors runs the checks once
+    per window; a busy answer is not cached. Every response is
+    uncacheable: `cache-control: private, no-store`, or `no-store` on the
+    allowlist's own refusals.
+- **Three system reads.** The two second-factor rosters and the API key list
+  read with `authorize?: false` (`User` reads are self-only; `ApiKey` reads are
+  platform-admin only), each with its reason at the call site. They select
+  only what the page needs (id, email, `totp_confirmed_at`; key name, access,
+  dates and owner), and only counts and the addresses above leave the check.
+  The other site checks read through their existing system grants
+  (`:accounts`, `:admin_allowlist`).
+- **Plugin checks are trusted code, contained.** A plugin's
+  `Kiln.Security.Check` runs in the node with the core's privileges and no
+  actor, like any plugin code: the page cannot stop it reading what it likes.
+  What the page does limit is the damage to the report. Each check runs in its
+  own task with a kill timer armed before it is called, so it dies at its
+  deadline even after the page is gone; a raise, throw, exit, timeout or
+  non-result is one "could not run" row, never a pass; checks run under their
+  own supervisor (50 tasks per node) so they cannot starve the rest of the
+  app; and every result passes `Result.sanitize/1`: summary and details are
+  escaped text, a fix link must be a `/editor/` path, a "Learn more" link must
+  be `https://`, and facts are held to scalars. A plugin cannot take a `core.`
+  id or displace a core check.
+- **Load.** Each report starts one task per check. A page refuses a rerun while
+  one runs and within five seconds of the last; at most three reports of one
+  site run at once per node (`with_slot/2`, a `Registry` count), and a full
+  supervisor makes the extra checks "busy" rows rather than queueing them.
+- **Residual risks.** (1) Work a check hands to another process (a `Task` it
+  starts, a `GenServer` call it makes) is not killed at its deadline. (2) A
+  check's metadata callbacks (`title/0`, `description/0`, …) are called before
+  the deadlines start, in the report's process: a plugin whose metadata
+  blocks holds up the whole page. (3) The admin-allowlist check reads
+  `KILN_ADMIN_ALLOWLIST_DISABLED` on the node that runs the report, so in a
+  cluster whose nodes disagree the line can change between page loads. (4)
+  The per-site cap is per node: N nodes allow 3×N concurrent reports of one
+  site; monitoring runs count against the same three. (5) Opening the page,
+  or a platform admin's call to `GET /api/security/posture`, sends the update
+  check when nothing is cached, below. (6) The monitoring snapshot is per
+  node, so a cluster runs the checks up to once per node per window, and two
+  answers a second apart can differ.
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
-admin-triggered, and the feed's `links.next` is followed only on its own
+admin-triggered from System, or from Security posture when no answer is
+cached, and the feed's `links.next` is followed only on its own
 origin),
+`Kiln.Plugins.Health` (hex.pm's package API for each plugin locked from
+hex.pm, and the security notices feed; on the same platform-admin triggers,
+through `SafeFetch`, the feed's `links.next` followed only on its own origin
+and at most five pages; package names are checked against Hex's naming rule
+before they are put in a URL),
+`Kiln.SecurityNotices` (the same security notices feed, fetched once per
+node and shared by `Kiln.Plugins.Health` and the `core.security_notices`
+posture check; that check asks only while `KILN_UPDATE_CHECK` is on, on the
+same platform-admin triggers plus System's **Check now**, and logs only
+notice ids, never a notice's text or links),
 Meilisearch (the operator's instance — a site's own is below), S3/MinIO, the
 mailer, and the LLM providers behind `/api/ask` and
-SEO drafting all make outbound requests to *operator-configured or fixed*
+SEO drafting, and the breached-password check (`api.pwnedpasswords.com`, a
+fixed host, 5-character hash prefix only, through `SafeFetch`; below),
+all make outbound requests to *operator-configured or fixed*
 endpoints, not user-supplied ones — so they are not SSRF vectors in the way
 webhooks are. The exceptions are a site's own SMTP relay (#1322) and AI
 endpoint (above), which are tenant-chosen and SSRF-checked, and
@@ -865,6 +2090,96 @@ choosing a host this server sends signed requests and file bodies to:
 - **CSP** — the site's public base URL origin (a plain host name, validated)
   is added to that site's own `img-src` and `media-src`
   (`KilnCMSWeb.Plugs.SiteStorageCsp`); never `script-src`, never another site.
+
+## Account enumeration by surface (#2255)
+
+The question for every screen or endpoint that takes an email address or other
+identifier: can a stranger tell, from the response, whether an account exists?
+Each surface below was audited, and where a known and an unknown address
+differed, the difference was removed. Every row has a test under
+`test/**/enumeration_*` that compares the two responses **whole** (status,
+redirect, headers that carry a credential or a challenge, the complete flash and
+the complete body) through `KilnCMS.EnumerationAssertions`. A substring check
+would pass when one side also said "no such account" three lines further down,
+so none is used. The control for each refusal is that the test pins what the
+answer actually says, so "equal" cannot mean "equally empty".
+
+"Indistinguishable" means in the response. The one difference that is
+deliberately left is in the **owner's inbox**: mail goes to the address that
+was named, never to the person who named it.
+
+| Surface | Result | Tested in | Residual |
+| --- | --- | --- | --- |
+| Browser sign-in (form and LiveView submit) | Wrong password for a known address and an unknown address: same page, same redirect, same flash ("Email or password was incorrect"). An unknown address still pays for one bcrypt check. | `enumeration_sign_in_test.exs` | Lockout owner mail (below). |
+| Headless sign-in (`POST /api/auth/sign_in`) | Same generic 401 for both, with the simulated hash for an unknown address. | `enumeration_sign_in_test.exs` | None beyond timing. |
+| Human-verification challenge (#2249) | A known and an unknown address are asked at the same attempt and refused with the same error, page, redirect and API body: the account axis keys on the submitted string and the address axis on the caller's IP. A refused attempt runs no bcrypt for either. | `accounts/sign_in_challenge_test.exs`, `challenge_auth_test.exs` | None. |
+| Per-account sign-in budget | A known and an unknown address run out at the same attempt and get the same refusal, because the budget keys on the string typed. | `accounts/enumeration_throttle_test.exs` | Lockout owner mail (below). |
+| Password reset request | Form, plain POST and the action answer `:ok` / the same page and flash for both. A spent mail budget (`mail:password_reset`) still answers as for an unknown address. | `enumeration_request_forms_test.exs`, `accounts/enumeration_throttle_test.exs` | Owner-only mail; request-time timing not equalised (below). |
+| Magic link request | As password reset (`mail:magic_link`). | same | Same. |
+| Registration (`register_with_password`, form and POST) | **Changed.** A known and a new address both get "Check your email - we have sent instructions for what to do next." and a redirect to `/sign-in`; neither is signed in. A known address creates no row and its owner is mailed a notice. Both pay for exactly one bcrypt hash. A real validation error (a short password) is still shown, alike for both. | `enumeration_registration_test.exs` | Owner-only mail; concurrent race (below). |
+| Registration with self-registration off | A known and an unknown address are refused with the same error, and nobody is mailed. | `enumeration_registration_test.exs` | None. |
+| Email confirmation link | A made-up token, a used one and one for a deleted account are refused alike; the page the link opens is the same for a real token and a made-up one. | `enumeration_confirmation_test.exs` | None. A token is mailed only to the address it names. |
+| Newsletter subscribe | New, pending, confirmed and unsubscribed addresses get the same page. A malformed address is the one distinct answer and says nothing about anyone. | `enumeration_newsletter_test.exs` | Owner-only mail; pending address can be re-mailed (below). |
+| Site SSO (`/editor/site-sso`) | An existing account, an account with access only on another site, an unconfirmed account and an invite-only refusal share one answer; an existing and a new account are both signed in with the same response. | `enumeration_site_sso_test.exs` | Server logs; `register_with_sso` (below). |
+| `register_with_sso` | Covered by the site SSO test: the caller has already proved, at the provider, that they hold the address. | `enumeration_site_sso_test.exs` | Invite-only refusal (below). |
+| Passkey options and verify | `options` ignores any identifier and offers no credential list. `verify` answers one 401 and one sentence for an unknown credential, one that fails verification, a regressed counter, a malformed payload and a missing challenge. | `enumeration_passkey_test.exs` | An unknown credential skips signature work (below). |
+| API key sign-in | A key that never existed, an expired key and a revoked key are refused with the same status, challenge header and envelope. | `enumeration_api_key_test.exs` | None. A key is a random secret, not an address. |
+| JSON:API, GraphQL, MCP reads | `User` is not a JSON:API resource, a GraphQL type or an MCP tool. A filter or sort through the content's `author` relationship (`filter[author][email]`, `sort=author.email`, an MCP `author.email` filter) answers an anonymous reader, a viewer and an editor the same for a registered and an unregistered address. An admin control proves the question is answerable, so the empty result comes from the read policy. | `enumeration_api_reads_test.exs` | None. |
+| REST and author routes | No route serves accounts by name, address or slug outside the console and the sign-in flow. WebFinger answers a registered and an unregistered `acct:` handle with the same 404. A published post by a known account carries no address on HTML, feeds or the JSON:API. | `enumeration_author_routes_test.exs` | None. |
+| Site invitation link (`/auth/invite/:invite_token`, #2135) | A made-up, expired, revoked and used token open the same page, "This invitation is no longer valid", on the dead render and the connected one. A token is mailed only to the address it names. | `enumeration_invitation_test.exs` | An admin-tier invitation whose sender lost the role gets the same page. |
+| Admin lookups (`get_user_by_email`, `list_users`, `get_user`, admin password reset, add-or-invite) | Any actor but an admin, or none, finds nothing for a registered address and for an unregistered one alike; the admin-only reset and add-or-invite (#2135) refuse a non-admin before they look at the account. | `accounts/enumeration_lookups_test.exs` | Admin-only oracles (below). |
+| Sign-in unlock (`/sign-in/unlock`, `/auth/unlock/:unlock_token`, #2250) | An unknown address, a known one that is not paused, a paused one, a paused one whose unlock-mail budget is spent and an erased one get the same page and the same sentence. The request hands the address to a background task before anything is looked up, so the request process does the same work for each. The sign-in page shows the same "Paused after too many attempts?" link to everyone, paused or not. The link's page is the same for a real and a made-up token, and every refused redeem renders one page. | `enumeration_unlock_test.exs` (the request); `accounts/sign_in_unlock_async_test.exs` (equal work on the request process); `controllers/sign_in_unlock_controller_test.exs` (the link's page, the sign-in page) | Owner-only mail (below). |
+
+### What registration does now
+
+`KilnCMS.Accounts.Changes.RefuseExistingAddress` runs on
+`:register_with_password` **after** the password is hashed, so a known address
+pays for bcrypt like a new one. If the address already has an account the
+action fails with `KilnCMS.Accounts.Errors.AlreadyRegistered` and creates no
+row. `KilnCMSWeb.AuthRegisterForm` and `KilnCMSWeb.AuthController` recognise
+that error and answer exactly as they answer a success. The owner is mailed
+"Someone tried to create a (site name) account with your address" by
+`KilnCMS.Accounts.User.Senders.SendRegistrationNotice`. It carries no token,
+only links to the sign-in and reset pages. The mail is budgeted per address by
+`AccountThrottle` (`mail:registration_notice`, 5 per hour, the same budget as
+reset and magic-link mail) and is dropped silently once spent.
+
+### Residuals
+
+- **Owner-only mail side channel.** A known address receives a reset, magic-link,
+  registration-notice or sign-in unlock mail that a stranger's does not. The requester never
+  sees it; the owner does. The per-address mail budget bounds how much
+  of it anyone can cause.
+- **Reset and magic-link request time is not equalised.** A known address mints
+  a token, inserts it and enqueues an Oban job; an unknown address performs only
+  a read. The response is identical, the work is not. Mail goes on the `mail`
+  queue and is never sent inline, so the SMTP round trip is on neither path.
+- **Concurrent registration race.** Two simultaneous registrations of the same
+  new address can both pass the lookup; the loser may then see the
+  `:unique_email` identity's "has already been taken".
+- **Admin-only oracles, accepted by decision.** The team page's "Add or
+  invite" form says "Member added to this site." for an address with a
+  confirmed account and "Invitation sent to (address)." for any other (#2135),
+  the accounts console
+  searches by address, and the editor comment `author_label` falls back to an
+  address when the author has no name. All three are for people who may see
+  accounts anyway. `enumeration_lookups_test.exs` pins that the underlying
+  resource calls give nobody else the same answer.
+- **Sign-in lockout owner mail.** When attempts start being refused, the account
+  owner is mailed once per window. A stranger sees the same refusal for a known
+  and an unknown address.
+- **Site SSO refusal reasons in server logs.** The browser gets one sentence;
+  the logs still distinguish why a sign-in was refused.
+- **`register_with_sso` under invite-only.** The refusal is visible only to
+  someone who controls the address at the identity provider.
+- **Newsletter pending address.** An address awaiting confirmation can be mailed
+  the confirmation link again, with no per-address budget.
+- **Passkey unknown credential.** An unknown credential skips the signature
+  check a known one pays for. The credential id is a random value held by the
+  authenticator, not an address a stranger can guess.
+- **Timing was never measured by wall clock.** The tests assert that equal
+  *work* ran (one bcrypt check on each side, via `Bcrypt.no_user_verify/1` and
+  `Bcrypt.verify_pass/2`), not that equal time passed.
 
 ## Residual risks
 

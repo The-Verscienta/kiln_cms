@@ -3,7 +3,12 @@ defmodule KilnCMSWeb.AuthController do
   use AshAuthentication.Phoenix.Controller
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.AlreadyRegistered
+  alias KilnCMS.Accounts.Errors.ChallengeRequired
+  alias KilnCMS.Accounts.PasswordNotice
   alias KilnCMS.Accounts.PendingSignIn
+  alias KilnCMS.Security.AuthEvents
+  alias KilnCMSWeb.ChallengeComponents
   alias KilnCMSWeb.SafeRedirect
 
   # Same flag the session cookie rides, for the same reason: `__Host-` is only
@@ -11,7 +16,14 @@ defmodule KilnCMSWeb.AuthController do
   @secure_cookies Application.compile_env(:kiln_cms, :secure_session_cookie, false)
   @remember_me_cookie KilnCMSWeb.SessionCookie.remember_me_key(@secure_cookies)
 
+  # Registering is not signing in, whether the address was new or already had
+  # an account (#2255): either way the answer is the same sentence, and the
+  # account's owner learns the rest from their inbox.
+  def success(conn, {:password, :register}, _user, _token), do: registration_requested(conn)
+
   def success(conn, activity, user, token) do
+    conn = carry_password_notice(conn, activity, user)
+
     # If the account has two-factor enabled, the first factor alone must not grant
     # a session: stash a signed, expiring pending token (carrying the first-factor
     # auth token, already minted + stored) and divert to the code prompt.
@@ -30,11 +42,34 @@ defmodule KilnCMSWeb.AuthController do
           remember_me?: remember_me?
         )
       )
+      # How the first factor was passed, for the sign-in event the code prompt
+      # completes (#2241).
+      |> put_session(:sign_in_method, AuthEvents.method(activity))
       |> redirect(to: ~p"/sign-in/verify")
     else
-      complete_sign_in(conn, user, message_for(activity))
+      complete_sign_in(conn, user, message_for(activity), AuthEvents.method(activity))
     end
   end
+
+  # The "breached password" note left by a register or reset (#2240) is taken
+  # only at a *password* sign-in (register, reset, sign-in, sign-in with token),
+  # never at a magic link or any other method. It rides the session, as a
+  # boolean, to wherever the sign-in completes: straight away below, or after
+  # the second factor in `TwoFactorController`.
+  defp carry_password_notice(conn, {:password, _phase}, user) do
+    # Always drop any earlier marker first: one left by another account that
+    # abandoned its second-factor prompt must not surface for this one.
+    conn = delete_session(conn, :password_breach_notice)
+
+    if PasswordNotice.take(user.id),
+      do: put_session(conn, :password_breach_notice, true),
+      else: conn
+  end
+
+  # Any other method: drop a leftover from an abandoned password attempt, so a
+  # later magic-link + second-factor sign-in cannot surface it.
+  defp carry_password_notice(conn, _activity, _user),
+    do: delete_session(conn, :password_breach_notice)
 
   # A remember-me cookie is a *complete* sign-in in a cookie: the read plug hands
   # it to `store_in_session/2` directly, which never passes through this module
@@ -101,19 +136,38 @@ defmodule KilnCMSWeb.AuthController do
   Establish the session for `user` and redirect to their destination. Shared by
   the no-2FA path here and by `TwoFactorController` once the code is verified.
   """
-  def complete_sign_in(conn, user, message) do
+  def complete_sign_in(conn, user, message),
+    do: complete_sign_in(conn, user, message, get_session(conn, :sign_in_method) || "password")
+
+  @doc """
+  `complete_sign_in/3` for a caller that knows how the sign-in was made. Records
+  the `:sign_in` security event (#2241) with `method`: this is where every
+  password, magic-link, SSO and post-second-factor sign-in completes.
+  """
+  def complete_sign_in(conn, user, message, method) do
     return_to = sign_in_destination(conn, user)
+    notice? = get_session(conn, :password_breach_notice) == true
+
+    AuthEvents.signed_in(conn, user, method)
 
     conn
+    |> delete_session(:sign_in_method)
     |> delete_session(:return_to)
+    |> delete_session(:password_breach_notice)
     |> delete_session(:pending_2fa)
     |> store_in_session(user)
     |> put_live_socket_id(user)
     # If your resource has a different name, update the assign name here (i.e :current_admin)
     |> assign(:current_user, user)
     |> put_flash(:info, message)
+    |> flash_password_notice(notice?)
     |> redirect(to: return_to)
   end
+
+  # `:error`, not `:info`: the info flash dismisses itself, and this is a
+  # nudge to act on.
+  defp flash_password_notice(conn, true), do: put_flash(conn, :error, PasswordNotice.message())
+  defp flash_password_notice(conn, false), do: conn
 
   @doc """
   Key this session's LiveView socket to its user, so it can be dropped (#675).
@@ -205,7 +259,41 @@ defmodule KilnCMSWeb.AuthController do
   defp message_for({:password, :reset}), do: gettext("Your password has successfully been reset")
   defp message_for(_activity), do: gettext("You are now signed in")
 
-  def failure(conn, activity, reason) do
+  def failure(conn, {:password, phase} = activity, reason) when phase in [:sign_in, :register] do
+    cond do
+      challenge = ChallengeRequired.find(reason) -> challenge_required(conn, phase, challenge)
+      phase == :register and AlreadyRegistered.in?(reason) -> registration_requested(conn)
+      true -> rejected(conn, activity, reason)
+    end
+  end
+
+  def failure(conn, activity, reason), do: rejected(conn, activity, reason)
+
+  # The form POST behind the sign-in and registration pages was refused for
+  # want of a human-verification challenge (#2249). Back to the page it came
+  # from with `?challenge=1`, which draws the widget from the first render, and
+  # the refusal's reason in the flash. Never "Incorrect email or password": the
+  # password was not checked, and saying it was wrong would send a user with
+  # the right one to retype it into a form that is asking for something else.
+  defp challenge_required(conn, phase, %ChallengeRequired{reason: reason}) do
+    action = if phase == :register, do: :register, else: :sign_in
+    path = if phase == :register, do: ~p"/register?challenge=1", else: ~p"/sign-in?challenge=1"
+
+    conn
+    |> put_flash(:error, ChallengeComponents.reason_text(reason, action))
+    |> redirect(to: path)
+  end
+
+  defp registration_requested(conn) do
+    conn
+    |> put_flash(
+      :info,
+      gettext("Check your email - we have sent instructions for what to do next.")
+    )
+    |> redirect(to: ~p"/sign-in")
+  end
+
+  defp rejected(conn, activity, reason) do
     message =
       case {activity, reason} do
         {_,

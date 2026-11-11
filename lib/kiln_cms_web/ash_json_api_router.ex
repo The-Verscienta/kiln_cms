@@ -12,6 +12,10 @@ defmodule KilnCMSWeb.AshJsonApiRouter do
   pipeline, since the route lives inside this router rather than in the
   application's own.
 
+  `KilnCMSWeb.CustomFieldAliases` runs as `before_dispatch`: on an index route it
+  moves the names of admin-defined custom fields from `filter[...]` / `sort`
+  to the `custom_filter` / `custom_sort` arguments.
+
   `KilnCMSWeb.OpenApi.modify/3` enriches the generated spec with auth/usage
   documentation and concrete servers.
   """
@@ -22,5 +26,9 @@ defmodule KilnCMSWeb.AshJsonApiRouter do
   use AshJsonApi.Router,
     domains: Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS]),
     open_api: "/open_api",
-    modify_open_api: {KilnCMSWeb.OpenApi, :modify, []}
+    modify_open_api: {KilnCMSWeb.OpenApi, :modify, []},
+    # `filter[price]=10` / `sort=-price` for a custom field named `price`
+    # (#2292): rewritten to `custom_filter` / `custom_sort` before
+    # `ash_json_api` parses them against the public fields.
+    before_dispatch: {KilnCMSWeb.CustomFieldAliases, :call, []}
 end

@@ -151,4 +151,78 @@ defmodule KilnCMS.CMS.ContentTypesTest do
       assert rest == ContentTypes.options(nil)
     end
   end
+
+  # "Move to trash" (#2137) offers the control from this, and its handlers ask
+  # it again before writing — so it must give the destroy policy's answer:
+  # admin of the RECORD's org, whatever the state, and nobody else.
+  describe "can_destroy?/4" do
+    defp user(role) do
+      Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+        email: "ct-trash-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: role
+      })
+    end
+
+    defp membership(user, org, tier) do
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: org.id,
+        role: tier
+      })
+    end
+
+    test "an admin may trash a page, draft or published; an editor may not" do
+      admin = user(:admin)
+      editor = user(:editor)
+      draft = CMS.create_page!(%{title: "D", slug: slug()}, actor: admin)
+      page = CMS.create_page!(%{title: "P", slug: slug()}, actor: admin)
+      published = CMS.publish_page!(page, %{}, actor: admin)
+
+      assert ContentTypes.can_destroy?(:page, draft, admin)
+      assert ContentTypes.can_destroy?("page", published, admin)
+      refute ContentTypes.can_destroy?(:page, draft, editor)
+      refute ContentTypes.can_destroy?("page", published, editor)
+    end
+
+    test "a membership admin may trash on their org despite a global editor role" do
+      site = KilnCMS.OrgFixtures.org("ct-trash")
+      site_admin = user(:editor)
+      membership(site_admin, site, :admin)
+      post = CMS.create_post!(%{title: "P", slug: slug()}, actor: site_admin, tenant: site)
+
+      assert ContentTypes.can_destroy?(:post, post, site_admin, tenant: site)
+    end
+
+    test "admin of another org is not admin here" do
+      site = KilnCMS.OrgFixtures.org("ct-trash-here")
+      elsewhere = KilnCMS.OrgFixtures.org("ct-trash-there")
+      user = user(:editor)
+      membership(user, site, :editor)
+      membership(user, elsewhere, :admin)
+
+      here = CMS.create_page!(%{title: "Here", slug: slug()}, actor: user, tenant: site)
+      there = CMS.create_page!(%{title: "There", slug: slug()}, actor: user, tenant: elsewhere)
+
+      refute ContentTypes.can_destroy?(:page, here, user, tenant: site)
+      assert ContentTypes.can_destroy?(:page, there, user, tenant: elsewhere)
+    end
+
+    test "a dynamic type routes to the entry policy" do
+      admin = user(:admin)
+      editor = user(:editor)
+
+      definition =
+        CMS.create_type_definition!(
+          %{name: "t#{System.unique_integer([:positive])}", label: "Trashable"},
+          actor: admin
+        )
+
+      entry = ContentTypes.create!(definition.name, %{title: "E", slug: slug()}, actor: admin)
+
+      assert ContentTypes.can_destroy?(definition.name, entry, admin)
+      refute ContentTypes.can_destroy?(definition.name, entry, editor)
+    end
+  end
 end

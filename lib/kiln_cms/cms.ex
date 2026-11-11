@@ -392,6 +392,7 @@ defmodule KilnCMS.CMS do
       define :create_webhook_endpoint, action: :create
       define :update_webhook_endpoint, action: :update
       define :destroy_webhook_endpoint, action: :destroy
+      define :rotate_webhook_secret, action: :rotate_secret
       define :record_webhook_success, action: :record_delivery_success
       define :record_webhook_failure, action: :record_delivery_failure
     end
@@ -575,6 +576,13 @@ defmodule KilnCMS.CMS do
       define :save_site_editorial_settings, action: :save
     end
 
+    # Which fields of which content types need a change severity on a live edit
+    # (`KilnCMS.CMS.Severity`). An absent row means nothing is safety-relevant.
+    resource KilnCMS.CMS.SiteSafetyFields do
+      define :list_site_safety_fields, action: :read
+      define :save_site_safety_fields, action: :save
+    end
+
     # Per-org claim-checking settings (#857): whether the compliance panel runs
     # for this site, whether it gates publishing, and the site's own claim
     # vocabulary. The layer above `config :kiln_cms, KilnCMS.Compliance`,
@@ -641,6 +649,13 @@ defmodule KilnCMS.CMS do
       define :create_search_synonym, action: :create
       define :update_search_synonym, action: :update
       define :destroy_search_synonym, action: :destroy
+    end
+
+    resource KilnCMS.CMS.IpBlockRule do
+      define :list_ip_block_rules, action: :list
+      define :get_ip_block_rule, action: :read, get_by: [:id]
+      define :create_ip_block_rule, action: :create
+      define :destroy_ip_block_rule, action: :destroy
     end
 
     resource KilnCMS.CMS.SavedView do
@@ -848,6 +863,72 @@ defmodule KilnCMS.CMS do
       define :reset_site_locale_settings, action: :destroy
     end
 
+    # Per-org stance on breached passwords (#2240): off / warn / block (admins).
+    # Resolved through `KilnCMS.Accounts.PasswordPolicy`.
+    resource KilnCMS.CMS.SitePasswordPolicy do
+      define :list_site_password_policy, action: :read
+      define :save_site_password_policy, action: :save
+      define :reset_site_password_policy, action: :destroy
+    end
+
+    # Per-org registration approval (#2251): whether a self-registration waits
+    # for a site admin. Resolved through `KilnCMS.Accounts.RegistrationPolicy`.
+    resource KilnCMS.CMS.SiteRegistration do
+      define :list_site_registration, action: :read
+      define :save_site_registration, action: :save
+      define :reset_site_registration, action: :destroy
+    end
+
+    # Per-org idle timeout and "sign out everyone" (#2246). Enforced through
+    # `KilnCMS.Accounts.IdleTimeout`; `sign_out_all_sessions` is admin-only.
+    resource KilnCMS.CMS.SiteSessionPolicy do
+      define :list_site_session_policy, action: :read
+      define :save_site_session_policy, action: :save
+      define :record_sessions_revoked, action: :record_sessions_revoked
+      define :sign_out_all_sessions, action: :sign_out_all
+    end
+
+    # The networks a site's console and sign-in may be reached from (#2248).
+    # The gates read it through `KilnCMS.Security.AdminAllowlist` (cached);
+    # `override_site_admin_allowlist` is the operator's way back in
+    # (`KilnCMS.Release.admin_allowlist/1`).
+    resource KilnCMS.CMS.SiteAdminAllowlist do
+      define :list_site_admin_allowlist, action: :read
+      define :save_site_admin_allowlist, action: :save
+      define :override_site_admin_allowlist, action: :operator_override
+    end
+
+    # Per-class delivery ceilings by user agent (#2243). Delivery reads the row
+    # through `KilnCMS.BotBudgets` (cached); this interface is for the settings
+    # page and tests.
+    resource KilnCMS.CMS.SiteBotBudgets do
+      define :list_site_bot_budgets, action: :read
+      define :save_site_bot_budgets, action: :save
+      # An existing row is updated rather than upserted, so a column the admin
+      # left as it was is not "changing" and is not held to a ceiling the
+      # operator lowered since (`Validations.BotBudgetCeiling`).
+      define :update_site_bot_budgets, action: :update
+      define :reset_site_bot_budgets, action: :destroy
+    end
+
+    # Per-org retention window of the security audit log (#2241). Read through
+    # `KilnCMS.Security.retention_days/1`, written through
+    # `KilnCMS.Security.set_retention_days/3`.
+    resource KilnCMS.CMS.SiteSecurityLog do
+      define :list_site_security_log, action: :read
+      define :save_site_security_log, action: :save
+      define :reset_site_security_log, action: :destroy
+    end
+
+    # Security alerts (#2245): which site kinds are on, the bell and email,
+    # and whether addresses show in full. Admin-only.
+    resource KilnCMS.CMS.SiteSecurityAlerts do
+      define :list_site_security_alerts, action: :read
+      define :save_site_security_alerts, action: :save
+      define :update_site_security_alerts, action: :update
+      define :reset_site_security_alerts, action: :destroy
+    end
+
     # Per-org `/.well-known/security.txt` (RFC 9116, #1873). Served through
     # `KilnCMS.SecurityTxt` (cached); this interface is for the settings page
     # and the resolver's own lookup.
@@ -951,6 +1032,22 @@ defmodule KilnCMS.CMS do
       define :refresh_time_dependent_fields,
         action: :refresh_time_dependent,
         args: [{:optional, :today}]
+    end
+
+    # How each section of a type's custom fields is laid out in the editor
+    # (#2280): accordion, fieldset or tab. Presentation only — the fields'
+    # `section` string is the grouping itself.
+    resource KilnCMS.CMS.FieldSection do
+      define :list_field_sections, action: :read
+      define :field_sections_for, action: :for_type, args: [:content_type]
+
+      define :field_sections_for_definition,
+        action: :for_definition,
+        args: [:type_definition_id]
+
+      define :create_field_section, action: :create
+      define :update_field_section, action: :update
+      define :destroy_field_section, action: :destroy
     end
 
     # Admin-defined (dynamic) content types — rows, not modules (decision D17,

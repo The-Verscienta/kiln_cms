@@ -79,6 +79,14 @@ defmodule KilnClient do
       KilnClient.create("posts", %{title: "Hi", slug: "hi"},
         api_key: System.fetch_env!("KILN_WRITE_KEY"))
 
+  A service that only **submits drafts for a person to review** should use a
+  `:draft_write` key instead (a server newer than Kiln 1.8, kiln_cms#2273): it may `create/3`, and
+  `update/4` a draft it authored that is still a draft, and nothing else —
+  every transition, `delete/3`, a live or someone else's document and all media
+  calls are `reason: :forbidden`. Pass `on_behalf_of:` to `create/3` to record
+  which of your users the draft is for (stored for reviewers, never
+  authorization). Kiln's `docs/headless-consumer-guide.md` has the full rules.
+
   ## Errors
 
   Every function returns `{:error, %KilnClient.Error{}}` on failure, reads and
@@ -121,7 +129,13 @@ defmodule KilnClient do
       relationship filters (`%{tags: %{slug: "x"}}`).
     * `:custom_filter` — same shape, for admin-defined fields living in
       `custom_fields` (validated against Kiln's FieldDefinition registry).
+      The server also accepts a custom field's bare name in `:filter`
+      (`filter[price]`) when no built-in attribute has that name, but
+      `:custom_filter` is the stable form (a later built-in with the same name
+      would shadow it); this client keeps emitting `custom_filter`.
     * `:sort` / `:custom_sort` — list of field strings, `-` prefix descends.
+      A custom name also works in `:sort` (`sort=-price`) if custom names come
+      last; `:custom_sort` is the stable form and has no ordering rule.
     * `:include` — list of relationship paths (`["tags", "content_links"]`).
     * `:fields` — sparse fieldsets, `%{"post" => ["title", "slug"]}`. Also the
       way to pull public calculations, which are not serialized by default.
@@ -222,7 +236,10 @@ defmodule KilnClient do
   Options: `:locale`, `:tag_ids` (match content carrying any of these tag
   ids), `:custom_filter` (facets compose with the search), `:sort` (an
   explicit sort overrides relevance, which degrades to the tiebreaker — the
-  contract kiln_cms#310 pinned), `:limit` (`page[limit]`; the action caps its
+  contract kiln_cms#310 pinned), `:custom_sort` (list of custom-field names,
+  `-` prefix descends; precedence is `:sort`, then `:custom_sort`, then
+  relevance; on `semantic_search/3` a leading custom sort replaces distance
+  ordering; not accepted by `autocomplete/3`), `:limit` (`page[limit]`; the action caps its
   own maximum), `:include`, `:fields`, `:published`, `:req`.
   """
   @spec text_search(String.t(), String.t(), keyword()) ::
@@ -273,6 +290,7 @@ defmodule KilnClient do
       |> array_param("tag_ids", opts[:tag_ids])
       |> filter_params("custom_filter", opts[:custom_filter])
       |> put_param(:sort, join_sort(opts[:sort]))
+      |> put_param(:custom_sort, join_sort(opts[:custom_sort]))
       |> put_param("page[limit]", opts[:limit])
       |> put_param(:include, join_list(opts[:include]))
       |> sparse_fields(opts[:fields])
@@ -521,9 +539,13 @@ defmodule KilnClient do
   `"rating"`). `"type"` is one of `"string"`, `"text"`, `"email"`,
   `"integer"`, `"boolean"`, `"date"`, `"select"`, `"radio"`, `"checkboxes"`,
   `"phone"`, `"url"`, `"hidden"`, `"number"` and `"rating"`; the list only
-  grows, so treat a type you do not know as `"text"`. An unknown or inactive
-  form is `reason: :not_found`.
-  Options: `:req`.
+  grows, so treat a type you do not know as `"text"`. Newer servers add
+  `"challenge"`: `nil`, or the form's
+  human-verification check (`"provider"`, `"site_key"`, `"script_url"`,
+  `"global"`, `"onload_param"`, `"render_options"`, `"action"`,
+  `"action_option"`, `"interactive"`, `"api"`, `"field"`). An unknown or
+  inactive form is
+  `reason: :not_found`. Options: `:req`.
   """
   @spec form(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def form(slug, opts \\ []), do: json_get("/api/forms/" <> segment(slug), [], opts)
@@ -541,6 +563,11 @@ defmodule KilnClient do
   submission, pass the honeypot field (`form/2`'s `"honeypot_field"`) and
   `"_kiln_rendered_at"` through untouched. A filled honeypot is discarded
   and still answers success, so never set it yourself.
+
+  A form whose schema has a `"challenge"` wants the visitor's
+  human-verification token as `"_kiln_challenge"`: relay it untouched as
+  well. Without it the submission is accepted but held for review, and the
+  result carries `"challenge" => "held"` (`"verified"` when it passed).
 
   Options: `:locale` (recorded on the submission), `:req`.
   """
@@ -1040,8 +1067,16 @@ defmodule KilnClient do
 
   Options:
 
-    * `:api_key` — the `:read_write` key for this call (falls back to the
-      configured `:api_key`; with neither, nothing is sent).
+    * `:api_key` — the `:read_write` (or `:draft_write`) key for this call
+      (falls back to the configured `:api_key`; with neither, nothing is sent).
+    * `:on_behalf_of` — sent as the `X-Kiln-On-Behalf-Of` header: an opaque
+      label (typically your own user id) that Kiln stores on a draft created
+      with a `:draft_write` key, beside the key's id and name, so a reviewer
+      sees who it was for. Stored only, never authorization; any other key
+      ignores it. `nil` sends no header. The created record carries it back as
+      `"on_behalf_of"` (with `"created_via_key_id"` / `"created_via_key_name"`)
+      to an editor, an admin, or the key that created it; other readers never
+      see those three attributes.
     * `:type` — the JSON:API resource type sent as `data.type`, which the
       server validates. Derived from `plural` (`"entries"` → `"entry"`,
       `"posts"` → `"post"`); pass it for an irregular plural.
@@ -1055,6 +1090,13 @@ defmodule KilnClient do
     # No `id`: the create schema is `additionalProperties: false`, so a
     # client-chosen id is a 400, not a hint.
     body = %{data: %{type: resource_type(plural, opts), attributes: attributes}}
+
+    opts =
+      case opts[:on_behalf_of] do
+        nil -> opts
+        who -> Keyword.put(opts, :extra_headers, [{"x-kiln-on-behalf-of", to_string(who)}])
+      end
+
     :post |> write_request("/api/json/#{plural}", body, opts) |> only_item()
   end
 
@@ -1418,20 +1460,24 @@ defmodule KilnClient do
 
       key ->
         accept = opts[:accept] || @json_api
+        extra = opts[:extra_headers] || []
 
         # Req's `:json` encodes the body but only *defaults* the content
         # type, so the media type set here is the one sent.
         req_opts =
           cond do
             opts[:form_multipart] ->
-              [headers: [{"accept", accept}], form_multipart: opts[:form_multipart]]
+              [headers: [{"accept", accept} | extra], form_multipart: opts[:form_multipart]]
 
             body == nil ->
-              [headers: [{"accept", accept}]]
+              [headers: [{"accept", accept} | extra]]
 
             true ->
               [
-                headers: [{"accept", accept}, {"content-type", opts[:content_type] || @json_api}],
+                headers: [
+                  {"accept", accept},
+                  {"content-type", opts[:content_type] || @json_api} | extra
+                ],
                 json: body
               ]
           end

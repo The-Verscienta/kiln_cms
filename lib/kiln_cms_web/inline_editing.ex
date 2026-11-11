@@ -153,4 +153,18 @@ defmodule KilnCMSWeb.InlineEditing do
     do: Enum.any?(errors, &stale_conflict?/1)
 
   def stale_conflict?(_other), do: false
+
+  @doc """
+  True when a read by id found nothing: the record was moved to the trash or
+  purged while an editor had it open (#2332). A write such an editor tries is
+  refused as stale (`stale_conflict?/1`), so the editors read the record again
+  and ask this to tell the two apart.
+  """
+  @spec not_found?(term()) :: boolean()
+  def not_found?(%Ash.Error.Query.NotFound{}), do: true
+
+  def not_found?(%{errors: [_ | _] = errors}),
+    do: Enum.all?(errors, &not_found?/1)
+
+  def not_found?(_other), do: false
 end

@@ -320,21 +320,173 @@ defmodule KilnCMS.Accounts.SiteSsoTest do
       assert {:error, :unconfirmed_account} = Admission.admit(org.id, claims("pre@#{domain}"))
     end
 
-    test "invite-only: no new accounts, known ones still sign in", %{org: org, domain: domain} do
-      previous = Application.get_env(:kiln_cms, :registration_enabled)
-      Application.put_env(:kiln_cms, :registration_enabled, false)
+    # The invite-only case is KilnCMS.Accounts.SiteSsoRegistrationTest: it turns
+    # `:registration_enabled` off VM-wide, so it runs async: false (#2380).
+  end
 
-      on_exit(fn ->
-        if is_nil(previous),
-          do: Application.delete_env(:kiln_cms, :registration_enabled),
-          else: Application.put_env(:kiln_cms, :registration_enabled, previous)
-      end)
+  describe "approval for the site's new accounts (#2514)" do
+    defp platform_admin!,
+      do: user!("op-#{System.unique_integer([:positive])}@example.com", %{role: :admin})
 
-      assert {:error, :registration_disabled} = Admission.admit(org.id, claims("new@#{domain}"))
+    defp site_admin!(org) do
+      admin = user!("site-admin-#{System.unique_integer([:positive])}@example.com")
+      member!(admin, org, :admin)
+      admin
+    end
 
-      known = user!("known@#{domain}")
+    defp switches!(org, attrs),
+      do: CMS.save_site_registration!(attrs, actor: platform_admin!(), tenant: org.id)
+
+    defp waiting_notices(admin, org),
+      do:
+        admin
+        |> KilnCMS.Notifications.recent(org.id, 50)
+        |> Enum.filter(&(&1.event == :registration_pending))
+
+    defp queued_events(org, user),
+      do:
+        KilnCMS.Security.list_events!(
+          actor: platform_admin!(),
+          tenant: org.id,
+          page: [limit: 200]
+        )
+        |> then(fn
+          %{results: results} -> results
+          list -> list
+        end)
+        |> Enum.filter(&(&1.type == :registration_queued and &1.target_id == user.id))
+
+    test "off (the default): a new account is an active viewer here, as before",
+         %{org: org, domain: domain} do
+      assert {:ok, user} = Admission.admit(org.id, claims("plain@#{domain}"))
+
+      assert [%{status: :active, role: :viewer, created_account: false}] =
+               Accounts.list_memberships_for_user!(user.id, authorize?: false)
+
+      assert queued_events(org, user) == []
+    end
+
+    test "on: a new account signs in, waits here holding nothing, and the admins are told",
+         %{org: org, domain: domain} do
+      admin = site_admin!(org)
+      switches!(org, %{approval_for_site_sso: true})
+
+      assert {:ok, user} = Admission.admit(org.id, claims("waits@#{domain}"))
+      assert is_binary(user.__metadata__.token)
+
+      org_id = org.id
+
+      assert [%{organization_id: ^org_id, status: :pending, role: :viewer, created_account: true}] =
+               Accounts.list_memberships_for_user!(user.id, authorize?: false)
+
+      assert KilnCMS.Accounts.Scoping.effective_tier(user, org) == :none
+      assert [event] = queued_events(org, user)
+      assert event.metadata == %{"method" => "site_sso"}
+      assert [_notice] = waiting_notices(admin, org)
+
+      # The queue's decision works on it like on any other.
+      row = Accounts.get_org_membership!(user.id, org.id, authorize?: false)
+      assert {:ok, %{status: :active}} = Accounts.approve_registration(row, %{}, actor: admin)
+      assert KilnCMS.Accounts.Scoping.effective_tier(user, org) == :viewer
+    end
+
+    test "the queued event carries the request's client address", %{org: org, domain: domain} do
+      switches!(org, %{approval_for_site_sso: true})
+      request = %{ip: "203.0.113.7", user_agent: "sso-test-agent"}
+
+      context = %{
+        KilnCMS.Security.Recorder.context_key() => request,
+        KilnCMS.Security.Recorder.tenant_key() => org.id
+      }
+
+      assert {:ok, user} = Admission.admit(org.id, claims("ctx@#{domain}"), context)
+      assert [event] = queued_events(org, user)
+      assert event.ip == "203.0.113.7"
+      assert event.user_agent == "sso-test-agent"
+    end
+
+    test "on: a waiting account signs in again, and still waits", %{org: org, domain: domain} do
+      switches!(org, %{approval_for_site_sso: true})
+      assert {:ok, first} = Admission.admit(org.id, claims("again@#{domain}"))
+      assert {:ok, second} = Admission.admit(org.id, claims("again@#{domain}"))
+
+      assert second.id == first.id
+
+      assert [%{status: :pending}] =
+               Accounts.list_memberships_for_user!(first.id, authorize?: false)
+    end
+
+    test "independent of password approval, both ways",
+         %{org: org, other: other, domain: domain} do
+      switches!(org, %{approval_required: true})
+      other_domain = F.unique_domain("other-switch")
+      F.provider!(other)
+      F.domain!(other, other_domain, verified: true)
+      switches!(other, %{approval_for_site_sso: true})
+
+      assert {:ok, admitted} = Admission.admit(org.id, claims("pw-only@#{domain}"))
+
+      assert [%{status: :active}] =
+               Accounts.list_memberships_for_user!(admitted.id, authorize?: false)
+
+      assert {:ok, waiting} = Admission.admit(other.id, claims("sso-only@#{other_domain}"))
+
+      assert [%{status: :pending}] =
+               Accounts.list_memberships_for_user!(waiting.id, authorize?: false)
+    end
+
+    test "an existing account is admitted as it always was", %{org: org, domain: domain} do
+      switches!(org, %{approval_for_site_sso: true})
+      known = user!("known-member@#{domain}")
+      member!(known, org, :editor)
+
+      assert {:ok, signed_in} = Admission.admit(org.id, claims("known-member@#{domain}"))
+      assert signed_in.id == known.id
+
+      assert [%{status: :active, role: :editor}] =
+               Accounts.list_memberships_for_user!(known.id, authorize?: false)
+    end
+
+    test "an unreadable setting refuses a new account and creates nothing",
+         %{org: org, domain: domain} do
+      switches!(org, %{approval_for_site_sso: true})
+
+      assert {:error, :registration_settings_unavailable} =
+               KilnCMS.OrgSettings.with_actor(nil, fn ->
+                 Admission.admit(org.id, claims("unreadable@#{domain}"))
+               end)
+
+      assert {:error, _} =
+               Accounts.get_user_by_email("unreadable@#{domain}", authorize?: false)
+
+      assert SiteSso.describe_error(:registration_settings_unavailable) =~ "could not be read"
+    end
+
+    test "the setting is not read for an existing account", %{org: org, domain: domain} do
+      known = user!("known-unread@#{domain}")
       member!(known, org, :viewer)
-      assert {:ok, _user} = Admission.admit(org.id, claims("known@#{domain}"))
+
+      assert {:ok, _signed_in} =
+               KilnCMS.OrgSettings.with_actor(nil, fn ->
+                 Admission.admit(org.id, claims("known-unread@#{domain}"))
+               end)
+    end
+
+    test "a sign-in rolled back with the transaction around it announces nothing",
+         %{org: org, domain: domain} do
+      admin = site_admin!(org)
+      switches!(org, %{approval_for_site_sso: true})
+
+      {:error, :rolled_back} =
+        KilnCMS.AfterCommit.deferring(fn ->
+          KilnCMS.Repo.transaction(fn ->
+            {:ok, _user} = Admission.admit(org.id, claims("rolled@#{domain}"))
+            KilnCMS.Repo.rollback(:rolled_back)
+          end)
+        end)
+
+      assert waiting_notices(admin, org) == []
+      assert {:error, _} = Accounts.get_user_by_email("rolled@#{domain}", authorize?: false)
     end
   end
 

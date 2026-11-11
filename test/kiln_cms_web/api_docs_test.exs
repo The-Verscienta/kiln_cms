@@ -121,6 +121,25 @@ defmodule KilnCMSWeb.ApiDocsTest do
                path =~ ~r{/media-items/\{id\}$} and Map.has_key?(item, "patch")
              end)
     end
+
+    test "the security posture is described, with a credential required", %{conn: conn} do
+      conn = conn |> put_req_header("accept", "application/json") |> get(@spec_path)
+      paths = Jason.decode!(response(conn, 200))["paths"]
+
+      assert %{"get" => %{"operationId" => "getSecurityPosture"} = op} =
+               paths["/api/security/posture"]
+
+      # No empty requirement: unlike the document's default, auth is not optional.
+      assert op["security"] == [%{"apiKeyAuth" => []}, %{"bearerAuth" => []}]
+      refute %{} in op["security"]
+
+      for status <- ~w(200 401 403 429 503),
+          do: assert(Map.has_key?(op["responses"], status), "no #{status} response")
+
+      # Value sets are open: no field of the response pins an enum.
+      schema = get_in(op, ["responses", "200", "content", "application/json", "schema"])
+      refute Jason.encode!(schema) =~ ~s("enum")
+    end
   end
 
   describe "disabled" do

@@ -286,7 +286,10 @@ registered user with authorization bypassed — once, and only for the first one
 1. Register your own account at `https://<PHX_HOST>/register`. (Want
    invite-only sign-up afterwards? `config :kiln_cms, :registration_enabled,
    false` is **compile-time** — set it in `config/config.exs` or a project
-   overlay and rebuild the image; there is no environment variable for it.)
+   overlay and rebuild the image; there is no environment variable for it.
+   People then join by invitation: a platform admin enters their address on
+   **Team** (`/editor/team`) and they set up an account from the emailed link.
+   See [Invite someone to a site](account-administration.md#invite-someone-to-a-site).)
 2. Attach to the **running** node and promote it:
 
    ```bash
@@ -332,7 +335,9 @@ it must:
   to `https://…` — which the proxy terminates and forwards again, forever
   (nginx does not add the header by default; Caddy and Traefik do);
 - forward `X-Forwarded-For`, and name the proxy in `TRUSTED_PROXIES` (above),
-  or rate limiting keys on the proxy's address;
+  or rate limiting keys on the proxy's address and a site's
+  [admin allowlist](admin-allowlist.md) sees everyone at the proxy's address
+  (its page refuses to save a list while forwarded requests arrive untrusted);
 - pass WebSocket upgrades on `/live`, `/ws/*` — the editor is LiveView, and
   collaboration, GraphQL subscriptions and the visual-editing bridge are
   channels;
@@ -370,8 +375,11 @@ Postgres is published on the host loopback (`127.0.0.1:5432`) so the cron in
 `backups.md` runs on the host against
 `postgres://kiln:…@127.0.0.1:5432/kiln_prod` and writes `/var/backups/kiln`,
 and that same directory is bind-mounted into the app at `BACKUP_DIR`, so the
-in-app page reads cron's manifest and cron's off-site copy and pruning cover
-what the page writes. One uid has to own that directory and both writers
+in-app page reads cron's manifest and cron's pruning covers what the page
+writes. Cron copies off-site only the files its own run wrote: a backup taken
+from the page goes off-site when the app's environment sets
+`BACKUP_RCLONE_REMOTE` (the official image ships `rclone`; see
+[Backups](backups.md#it-needs-the-client-tools-in-the-image)). One uid has to own that directory and both writers
 have to be it — the app runs as `nobody` (uid 65534) and makes its
 subdirectories `0700`, so a shared group does not help. Create it **before
 the first `up`** (Docker otherwise auto-creates a bind source root-owned; a
@@ -409,7 +417,10 @@ ships no `rel/env.sh.eex`, so it starts with `mix release`'s defaults
 `kiln_cms@<ip>` names DNSCluster resolves — set `RELEASE_DISTRIBUTION=name`
 and `RELEASE_NODE=kiln_cms@<this node's IP>` in each node's environment (the
 snippet Phoenix's Fly guide generates), or the nodes stay silently
-disconnected and cache busts never cross them.
+disconnected and cache busts never cross them. Give every node its own name:
+in-app backups key each node's heartbeat by it, and two nodes sharing one can
+take a running backup step away from each other
+([backups.md](backups.md#several-nodes-and-the-backup-lock)).
 
 The auth budgets need nothing from the cluster at all. The sign-in, second
 factor, reset-mail and credential-form budgets count in Postgres
@@ -533,6 +544,10 @@ is the canonical list; in deploy order:
 - Database TLS on (default), with `DATABASE_SSL_CACERTFILE` when the provider
   publishes a CA bundle.
 - `TRUSTED_PROXIES` set behind a proxy.
+- If the console should only be reachable from your own networks, a site
+  admin turns on the [admin allowlist](admin-allowlist.md); know how to
+  [recover from a lock-out](admin-allowlist.md#recovering-from-a-lock-out)
+  before they do.
 - `PHX_HOST` correct; `CHECK_ORIGINS` for any additional hostnames.
 - `CORS_ORIGINS` unset unless a separate front end reads the headless API —
   the write API and the visual-editing bridge are inert cross-origin until it
@@ -540,7 +555,9 @@ is the canonical list; in deploy order:
   is the checklist for turning that on).
 - Registration closed once the first admin exists, unless the site is meant
   to be open — `config :kiln_cms, :registration_enabled, false` is compile-time
-  config, so this is a rebuild, not an env change.
+  config, so this is a rebuild, not an env change. Bring people in afterwards
+  by [inviting them from Team](account-administration.md#invite-someone-to-a-site);
+  invitations are mailed, so outgoing mail must work first.
 - Backups scheduled and a restore rehearsed ([`backups.md`](backups.md#restore-drill-quarterly)).
 - Error tracking / tracing (`SENTRY_DSN`, OpenTelemetry) — env-gated no-ops
   until set ([`observability.md`](observability.md)).
@@ -581,8 +598,8 @@ attempt. Without the rescue, such a row would stay `executing` for ever. For a
 
 The rescue goes by time alone. It cannot tell a dead job from a slow one, so
 the window must be longer than any job legitimately runs. Otherwise a live job
-runs a second time. The longest job with a timeout is a backup
-(`KilnCMS.Backups.Worker`, 2 h), and a test fails if any worker's `timeout/1`
+runs a second time. The longest job with a timeout is a backup step
+(`KilnCMS.Backups.StepWorker`, 2 h), and a test fails if any worker's `timeout/1`
 comes within 30 minutes of the window. Raise the variable if you have added a
 longer worker. Lower it to get stranded work back sooner, but only if you know
 your longest real job. `false` switches the rescue off, for a deployment that
@@ -604,11 +621,16 @@ of work:
 - **Newsletter fan-out** (`SendWorker`) is safe to repeat. Each
   `{send, subscriber}` pair can be enqueued only once, so a repeat reaches only
   the recipients the first run missed.
-- **`max_attempts: 1` workers are discarded, not re-run:** backups,
-  demo reset, slug regeneration, content-release go-live/rollback. A backup
-  leaves a `.partial` file that is never mistaken for a finished one; take a
-  new backup. A release left in `publishing` or `rolling_back` is freed with
-  the admin-only **abandon** action in the release console.
+- **Backups do not wait for the rescue.** A backup step on a stopped node is
+  taken back by the backup heartbeat of any node within about 3 minutes (or
+  at the restarted node's first beat), and requeued under the same stamp with
+  the attempts it had left, reusing the files already finished
+  ([backups.md](backups.md#several-nodes-and-the-backup-lock)). Its job is
+  canceled first, so Lifeline never re-runs it.
+- **`max_attempts: 1` workers are discarded, not re-run:** demo reset, slug
+  regeneration, content-release go-live/rollback. A release left in
+  `publishing` or `rolling_back` is freed with the admin-only **abandon**
+  action in the release console.
 
 ## Upgrading a deployment
 
@@ -620,3 +642,9 @@ section is where a release says if it needs more (a new required variable, a
 reindex, a backfill). Downstream projects that pin Kiln as a submodule move
 the pin with `mix kiln.update`, which prints that section before it does —
 [`releasing.md`](releasing.md#updating-a-project-to-a-release).
+
+**Reporting access.** BI tools read published content through the
+`kiln_reporting_v1` views with a read-only role that
+`mix kiln.reporting.sql` prints. Re-run its grants after an upgrade that adds
+views, and point the tool at a read replica. See
+[`reporting.md`](reporting.md).

@@ -728,6 +728,7 @@
   [data-nav-collapsed~="delivery"] .side-group[data-nav-group="delivery"],
   [data-nav-collapsed~="outbound"] .side-group[data-nav-group="outbound"],
   [data-nav-collapsed~="integrations"] .side-group[data-nav-group="integrations"],
+  [data-nav-collapsed~="access"] .side-group[data-nav-group="access"],
   [data-nav-collapsed~="organization"] .side-group[data-nav-group="organization"],
   [data-nav-collapsed~="account"] .side-group[data-nav-group="account"],
   [data-nav-collapsed~="operations"] .side-group[data-nav-group="operations"] {
@@ -1646,6 +1647,15 @@
   border-radius: 0.3rem;
   overflow-x: auto;
 }
+/* A scrolling code block takes keyboard focus so the arrow keys can scroll it
+   (#2164: `KilnCMS.CodeBlocks` for content, `tabindex="0"` on the app's own
+   `<pre>`s). Inset, so a parent's `overflow-x: clip` (monograph) can't trim
+   the ring — which puts it on the block's own `base-200` fill, where plain
+   `primary` misses WCAG 1.4.11's 3:1 in light mode; the ink token clears it. */
+pre[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--color-primary-ink);
+  outline-offset: -2px;
+}
 .kiln-block pre code {
   background: none;
   padding: 0;
@@ -1726,6 +1736,15 @@ pre.highlight .gs {
    implicit ARIA table semantics (Chrome/Safari) and shrink-wrap the grid. */
 .kiln-block .kiln-table-wrap {
   overflow-x: auto;
+}
+/* The wrapper takes keyboard focus so the arrow keys can scroll it (#2464,
+   `KilnCMS.ScrollableTables`). Outset, unlike the code block's ring: inset it
+   would sit on the cells' own `base-300` borders and `base-200` header fill.
+   Outside, it sits on the page background, where the ink token clears
+   WCAG 1.4.11's 3:1 in both modes. */
+.kiln-table-wrap[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--color-primary-ink);
+  outline-offset: 2px;
 }
 .kiln-block table {
   border-collapse: collapse;

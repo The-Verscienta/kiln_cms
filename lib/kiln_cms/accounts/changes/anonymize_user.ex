@@ -13,6 +13,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   (logging the account out everywhere and removing token PII via the existing
   AshAuthentication revocation flow), and nulls the `actor_id` on the user's
   block-level events so the audit trail keeps the *what* without the *who*.
+
+  It also deletes what belongs to the account alone and names or reaches the
+  person (#2514): its Web Push subscriptions (a device endpoint), its private
+  saved views (shared ones are the team's, kept like authored content), and
+  the notifications addressed to it.
   """
   use Ash.Resource.Change
 
@@ -37,6 +42,9 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       notify_on_review_request: true,
       notify_on_publish: true,
       notify_on_return_to_draft: true,
+      notify_on_comment: true,
+      notify_on_registration: true,
+      notify_on_security_alert: true,
       anonymized_at: DateTime.utc_now()
     })
     |> Ash.Changeset.after_action(fn _changeset, user ->
@@ -44,13 +52,19 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       remove_identities(user)
       remove_passkeys(user)
       revoke_api_keys(user)
+      clear_audiences(user)
       clear_account_grant(user)
       clear_membership_grants(user)
       cancel_memberships(user)
+      remove_push_subscriptions(user)
+      remove_private_saved_views(user)
+      :ok = KilnCMS.Notifications.forget_recipient(user.id)
       :ok = History.anonymize_actor(user.id)
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
       # Their name, snapshotted into other people's inboxes (#1320).
       :ok = KilnCMS.Notifications.anonymize_actor(user.id)
+      # Security audit log (#2241): events they acted in or were the target of.
+      :ok = KilnCMS.Security.anonymize_actor(user.id)
       {:ok, user}
     end)
   end
@@ -105,6 +119,28 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     )
   end
 
+  # Clear the account's audiences in SQL, for the reason `clear_account_grant/1`
+  # gives below: the forced `audiences: []` above is dropped whenever the caller's
+  # struct already reads `[]` (one read before a billing recompute granted
+  # some), and the column keeps them. A later recompute used to wipe them as a
+  # side effect; since #2514 a recompute writes nothing to an erased account.
+  defp clear_audiences(user) do
+    require Ash.Query
+
+    # authorize?: false — erasure is authorized once, as the `:anonymize` action
+    # (or the staging scrub); `:sync_billing_audiences` refuses any
+    # actor-carrying call by design, and the filter pins the write to this
+    # user's id.
+    KilnCMS.Accounts.User
+    |> Ash.Query.filter(id == ^user.id and fragment("coalesce(cardinality(?), 0) > 0", audiences))
+    |> Ash.bulk_update!(:sync_billing_audiences, %{audiences: []},
+      authorize?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    )
+  end
+
   # Clear the account's own temporary grant. `role: :viewer` alone did nothing
   # while a grant was live — the effective tier stayed the granted one, which put
   # `anonymized-…@deleted.invalid` on the admin roster and
@@ -152,6 +188,57 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       return_errors?: true
     )
   end
+
+  # Delete the account's Web Push subscriptions (#2514): each is a browser's
+  # endpoint and keys, a way to reach the person's device, and nothing else
+  # needs it once they are gone. One statement: the resource is not
+  # tenant-scoped (its `org_id` is the site that minted it, not a tenant).
+  defp remove_push_subscriptions(user) do
+    require Ash.Query
+
+    # authorize?: false — erasure is authorized once, as the `:anonymize`
+    # action (or the staging scrub). The person being erased owns these rows,
+    # so no admin actor would be admitted to them, and the filter pins every
+    # row to this user's id.
+    KilnCMS.Accounts.PushSubscription
+    |> Ash.Query.filter(user_id == ^user.id)
+    |> Ash.bulk_destroy!(:destroy, %{},
+      authorize?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    )
+  end
+
+  # Delete the account's private saved views (#2514). A shared view is an
+  # admin's published filter the team uses, so it stays, as authored content
+  # does; its `owner_id` points at the tombstone, which names nobody.
+  #
+  # One statement per org: saved views are tenant-scoped under strict tenancy
+  # and have no tenant-bypassing action, and adding one only for this would
+  # widen the resource. Erasure is rare, so a delete per site is the price
+  # (`Notifications.forget_recipient/1` pays it the same way).
+  defp remove_private_saved_views(user) do
+    require Ash.Query
+
+    each_org(fn org_id ->
+      # authorize?: false — erasure is authorized once, as the `:anonymize`
+      # action (or the staging scrub). The person being erased owns these rows,
+      # so no admin actor would be admitted to them, and the filter pins every
+      # row to this user's id.
+      KilnCMS.CMS.SavedView
+      |> Ash.Query.filter(owner_id == ^user.id and shared == false)
+      |> Ash.bulk_destroy!(:destroy, %{},
+        tenant: org_id,
+        authorize?: false,
+        strategy: [:atomic, :atomic_batches, :stream],
+        return_records?: false,
+        return_errors?: true
+      )
+    end)
+  end
+
+  defp each_org(fun), do: Enum.each(KilnCMS.Accounts.list_org_ids(), fun)
 
   # A throwaway bcrypt hash of random bytes — there is no plaintext that matches
   # it, so the scrubbed account can never authenticate.

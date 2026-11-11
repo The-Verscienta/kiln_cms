@@ -79,6 +79,27 @@ defmodule KilnCMSWeb.NotificationText do
   # Actor-less by nature: a delivery the pipeline gave up on (#1926).
   def headline(%{event: :retraction_lost}), do: gettext("Retraction not delivered")
 
+  # Actor-less by design (#2251): the row is about the site's queue, and names
+  # no applicant — not in the bell, not in the email.
+  def headline(%{event: :registration_pending}),
+    do: gettext("Registrations waiting for approval")
+
+  # Actor-less by design (#2245): the row's excerpt names the alert, and the
+  # site is its title. Neither names who caused it.
+  def headline(%{event: :security_alert}), do: gettext("Security alert")
+
+  # The un-mutable notice that a site's alerts were made quieter (#2245).
+  def headline(%{event: :security_notice}), do: gettext("Security alerts were turned down")
+
+  # An event this module has no sentence for — one a newer node wrote during a
+  # rolling deploy, say. A neutral line rather than a crash of the whole bell;
+  # the test holds every event this release knows to its own sentence.
+  def headline(_notification), do: fallback()
+
+  @doc "The neutral line for an event with no sentence of its own."
+  @spec fallback() :: String.t()
+  def fallback, do: gettext("Notification")
+
   # `""` is treated as absent, not as a name: `KilnCMS.Notifications` only ever
   # stores a non-empty `name` or nil (privacy #214 — never the email
   # local-part), but a blank string rendered as an actor would produce a

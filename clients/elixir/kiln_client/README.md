@@ -26,7 +26,7 @@ one production incident at a time.
 ```elixir
 def deps do
   [
-    {:kiln_client, "~> 0.6"}
+    {:kiln_client, "~> 0.7"}
   ]
 end
 ```
@@ -103,6 +103,9 @@ its visibility follows the credential, which is why viewer-minted keys matter.
     filter: %{type_name: "product"},
     custom_filter: %{price: {:lte, 10}}
   )
+
+# Sort search results by a custom field (explicit :sort wins, then :custom_sort, then relevance)
+{:ok, %{items: hits}} = KilnClient.text_search("entries", "tea", custom_sort: ["price"])
 
 # The dynamic-type registry (editor-or-above key) and its custom-field schema
 {:ok, product_type} =
@@ -188,6 +191,20 @@ When it relays a visitor's browser submission, pass the honeypot field and
 `"_kiln_rendered_at"` through untouched, so the server's spam checks see
 them. A filled honeypot is discarded and still answers success, so never set
 it yourself.
+
+A form whose schema has a `"challenge"` asks for a human-verification check
+(the operator's provider: Cloudflare Turnstile, Google reCAPTCHA v2 or a
+plugin's), which the visitor's browser has to draw from the schema's
+`"script_url"`, `"global"`, `"render_options"`, `"site_key"`,
+`"action_option"` and `"onload_param"` (see
+[Draw the widget in your own front end](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api.md#draw-the-widget-in-your-own-front-end)).
+Relay its token untouched as `"_kiln_challenge"` (a reCAPTCHA widget posts
+it as `"g-recaptcha-response"`, which the server also accepts); the result
+then carries
+`"challenge" => "verified"`, or `"held"` when the submission was stored for
+review instead of being acted on. A refused token is `reason: :validation`
+with `"_kiln_challenge"` in `KilnClient.Error.field_errors/1`. See
+[Public forms](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/human-verification.md#public-forms).
 
 A front end's draft mode mints a preview link where the key lives and hands
 only the token to the browser:
@@ -365,6 +382,36 @@ admin = [api_key: System.fetch_env!("KILN_ADMIN_KEY")]    # admin, :read_write
 - Editing published content re-fires its artifacts; draft edits do not.
 - `transition/4` takes any verb and kebab-cases it into the route, so a verb
   a newer server adds is reachable before a client release names it.
+
+### Submitting drafts for review: a `:draft_write` key
+
+A service that only sends content in for a person to review (user-submitted
+articles, imported listings) should hold a **`:draft_write`** key instead of a
+`:read_write` one (a Kiln server newer than 1.8, kiln_cms#2273). It may
+`create/3`, and `update/4` a draft its account authored while it is still a
+draft — nothing else: every transition (`submit_for_review/3` included),
+`delete/3`, a live or someone else's document, tags, categories and all media
+calls come back `reason: :forbidden`. Pass `on_behalf_of:` on the create to
+record which of your users the draft is for:
+
+```elixir
+drafts = [api_key: System.fetch_env!("KILN_DRAFT_KEY")]   # viewer service account, :draft_write
+
+{:ok, draft} =
+  KilnClient.create("posts", %{title: "Reader tip", slug: "reader-tip"},
+    drafts ++ [on_behalf_of: "user-42"])
+
+draft["on_behalf_of"]          #=> "user-42"
+draft["created_via_key_name"]  #=> the key's name
+```
+
+`on_behalf_of:` becomes the `X-Kiln-On-Behalf-Of` header. Kiln stores it on
+the draft beside the key's id and name (`"created_via_key_id"`,
+`"created_via_key_name"`) so a reviewer sees who it was for; it is never
+authorization, and any other key's request ignores it. Those three attributes
+are returned only to editors, admins and the key that created the draft;
+everyone else's reads simply lack them, so treat them as optional. See Kiln's
+[`docs/headless-consumer-guide.md`](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/headless-consumer-guide.md#submitting-drafts-from-your-app-the-draft_write-key).
 
 ## GraphQL
 

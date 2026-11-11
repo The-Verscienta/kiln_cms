@@ -27,13 +27,16 @@ import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
 import {PasskeyEnroll, PasskeySignIn} from "./passkeys"
+import {Challenge, mountAllWhenReady as mountFormChallenges} from "./challenge"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
 import {initRevealSection} from "./reveal_section"
+import {initRevealInvalidField} from "./reveal_invalid_field"
 import {FlashAutoDismiss} from "./flash_auto_dismiss"
 import {SavedTicker} from "./saved_ticker"
 import {TabKeys} from "./tab_keys"
 import {ReferencePicker} from "./reference_picker"
+import {FieldConditions} from "./field_conditions"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
 import {watchConnectionNotices} from "./connection_notice"
@@ -60,6 +63,9 @@ const Hooks = {
   // Combobox keys and drag-to-reorder for a reference custom field — see
   // assets/js/reference_picker.js.
   ReferencePicker,
+  // Show/hide and required-when for conditional custom fields (#2277) — see
+  // assets/js/field_conditions.js.
+  FieldConditions,
   BodyImageUploader,
   FocusTrap,
   // Info flashes close themselves after a few seconds — see
@@ -70,6 +76,9 @@ const Hooks = {
   // Passkey sign-in on /sign-in (#331, #1681): reveals the server-rendered,
   // hidden button where WebAuthn exists — see assets/js/passkeys.js.
   PasskeySignIn,
+  // Human verification on the sign-in and registration forms (#2249): loads
+  // the provider's script and draws the widget — see assets/js/challenge.js.
+  Challenge,
   // Web Push opt-in on /editor/settings (#628) — see assets/js/push.js.
   PushToggle,
   // Presentation console (#355): relay the framed external front end's
@@ -566,20 +575,27 @@ const Hooks = {
     },
   },
   // The "add" box of a list field: a multiple select's tag picker, or a
-  // multiple string's list of phrases (`data-split="lines"`). Enter adds what
-  // is typed. In a tag picker a comma does too, and a typed comma list splits
-  // into terms; phrases may hold commas, so there only line breaks split —
-  // pasting several lines adds one item per line. Picking a `<datalist>`
-  // suggestion adds it straight away; Backspace in an empty box removes the
-  // last item. The items themselves live in the form — the server edits them
+  // scalar list — phrases, numbers, links, addresses (`data-split="lines"`),
+  // or dates, times and colours (`data-split="none"`). Enter adds what is
+  // typed. In a tag picker a comma does too, and a typed comma list splits
+  // into terms; phrases may hold commas, so in lines mode only line breaks
+  // split — pasting several lines adds one item per line. Picking a
+  // `<datalist>` suggestion adds it straight away; Backspace in an empty box
+  // removes the last item. In "none" mode the box holds exactly one value (a
+  // date picker's), added by Enter or the sibling `[data-list-add]` button —
+  // never on input or change, which a picker fires while the value is half
+  // chosen — with no splitting, no paste handling and no Backspace removal.
+  // The items themselves live in the form — the server edits them
   // (`list_item_add` / `list_item_remove`) and re-renders the list.
   TermPicker: {
     mounted() {
-      const lines = this.el.dataset.split === "lines"
+      const split = this.el.dataset.split
+      const lines = split === "lines"
+      const whole = split === "none"
       const push = text => {
         const field = this.el.dataset.field
-        text
-          .split(lines ? /\r?\n/ : /[,\n]/)
+        const items = whole ? [text] : text.split(lines ? /\r?\n/ : /[,\n]/)
+        items
           .map(item => item.trim())
           .filter(Boolean)
           .forEach(item => this.pushEvent("list_item_add", {field, item}))
@@ -590,10 +606,10 @@ const Hooks = {
       }
       this.el.addEventListener("keydown", e => {
         if (e.isComposing) return
-        if (e.key === "Enter" || (!lines && e.key === ",")) {
+        if (e.key === "Enter" || (!lines && !whole && e.key === ",")) {
           e.preventDefault()
           add()
-        } else if (e.key === "Backspace" && this.el.value === "") {
+        } else if (!whole && e.key === "Backspace" && this.el.value === "") {
           const count = Number(this.el.dataset.count || 0)
           if (count > 0) {
             e.preventDefault()
@@ -601,6 +617,11 @@ const Hooks = {
           }
         }
       })
+      if (whole) {
+        const button = this.el.parentElement && this.el.parentElement.querySelector("[data-list-add]")
+        if (button) button.addEventListener("click", () => add())
+        return
+      }
       // A pasted block of several lines is several items, wherever the caret
       // was; a single line pastes into the box as usual.
       this.el.addEventListener("paste", e => {
@@ -1212,6 +1233,11 @@ document.addEventListener(
 // highlights what it is about — see assets/js/advisory_jump.js.
 initAdvisoryJump()
 
+// Human verification on public forms (#2249): the site's pages are dead
+// renders, so their widgets are mounted here rather than by a hook — see
+// `mountAll` in assets/js/challenge.js. The embed loads its own copy.
+mountFormChallenges()
+
 // A button carrying `data-kiln-reveal="<id>"` scrolls to and focuses that
 // section once its click has been answered — see assets/js/reveal_section.js.
 initRevealSection()
@@ -1302,6 +1328,10 @@ function focusEditorField(name) {
 window.addEventListener("phx:kiln:focus-field", ({detail}) => {
   if (detail && detail.field) requestAnimationFrame(() => focusEditorField(detail.field))
 })
+
+// A required custom field in a hidden tab or collapsed section is shown when
+// the browser refuses a save over it — see assets/js/reveal_invalid_field.js.
+initRevealInvalidField(liveSocket)
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()

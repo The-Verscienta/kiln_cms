@@ -18,7 +18,18 @@ defmodule KilnCMSWeb.CSV do
   turn every round trip of `=SUM(A1)` into `'=SUM(A1)`, growing a quote per
   cycle. It strips a leading `'` only when the character after it is one of the
   guarded set, so a genuine value like `'tis` is untouched.
+
+  The guard applies to text only. A value that is a number (integer, float or
+  `Decimal`) is written as itself, so a negative number stays `-5` rather than
+  becoming the text `'-5`; the test is the value's own type, never its look.
   """
+
+  @doc """
+  The UTF-8 byte order mark. A content export starts with it so Excel opens the
+  file as UTF-8 rather than guessing a legacy code page; `parse/1` strips it.
+  """
+  @spec bom() :: String.t()
+  def bom, do: "\uFEFF"
 
   @doc "One CSV row: fields joined with commas, RFC 4180 quoted, CRLF-terminated."
   @spec line([term()]) :: String.t()
@@ -27,6 +38,14 @@ defmodule KilnCMSWeb.CSV do
   @doc "Escapes a single CSV field: formula-prefix guard, then RFC 4180 quoting."
   @spec field(term()) :: String.t()
   def field(nil), do: ""
+
+  # A real number never starts a formula, and the guard would turn `-5` into
+  # the text `'-5` in the spreadsheet. The test is the VALUE's own type, never
+  # a regex over its text or a field's declared type: the string "-5" and an
+  # integer field holding "=1+1" are strings here, and stay guarded. A boolean
+  # is not a number in Elixir, so it takes the ordinary path.
+  def field(value) when is_number(value), do: to_string(value)
+  def field(%Decimal{} = value), do: Decimal.to_string(value)
 
   def field(value) do
     value = to_string(value)

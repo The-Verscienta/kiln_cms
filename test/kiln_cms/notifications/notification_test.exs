@@ -409,4 +409,109 @@ defmodule KilnCMS.Notifications.NotificationTest do
       assert Notifications.notifications_for_user!(me.id, actor: me) == []
     end
   end
+
+  # An event a newer release added (#2509), read by this one during a rolling
+  # deploy or after a rollback. Plain `:atom` failed every read that met such
+  # a row, so the bell, the inbox, mark-all-read and erasure all broke on it.
+  describe "an event a newer release wrote" do
+    alias KilnCMS.NewerReleaseRows
+    alias KilnCMS.Types.UnknownAtom
+
+    test "is read as an UnknownAtom, listed and counted beside known rows" do
+      me = user()
+      known = record(me)
+      id = NewerReleaseRows.notification!(me.id)
+      name = NewerReleaseRows.unknown()
+
+      rows = Map.new(Notifications.notifications_for_user!(me.id, actor: me), &{&1.id, &1})
+
+      assert %{event: %UnknownAtom{value: ^name}} = rows[id]
+      assert %{event: :comment_mention} = rows[known.id]
+      assert length(Notifications.unread_notifications_for_user!(me.id, actor: me)) == 2
+      assert Notifications.unread_count(me, nil) == 2
+    end
+
+    test "links to the inbox, in the bell and in an email" do
+      me = user()
+      id = NewerReleaseRows.notification!(me.id)
+      {:ok, row} = Notifications.get_notification(id, actor: me)
+
+      assert Link.editor_path(row) == "/editor/inbox"
+      assert Link.editor_url(row) == KilnCMSWeb.Endpoint.url() <> "/editor/inbox"
+    end
+
+    test "mark_all_read moves it with the known rows" do
+      me = user()
+      record(me)
+      id = NewerReleaseRows.notification!(me.id)
+
+      assert {:ok, 2} = Notifications.mark_all_read(me, nil)
+      assert Notifications.unread_count(me, nil) == 0
+      assert NewerReleaseRows.stored_row("notifications", id)["read_at"]
+    end
+
+    test "mark_read_about/4 still finds a known row past it" do
+      me = user()
+      known = record(me, %{event: :published})
+      NewerReleaseRows.notification!(me.id)
+
+      assert {:ok, 1} = Notifications.mark_read_about(me, nil, :published, known.content_id)
+      assert Notifications.unread_count(me, nil) == 1
+    end
+
+    test "marks read and unread, keeping its event" do
+      me = user()
+      id = NewerReleaseRows.notification!(me.id)
+      {:ok, row} = Notifications.get_notification(id, actor: me)
+
+      {:ok, marked} = Notifications.mark_notification_read(row, actor: me)
+      assert marked.read_at
+      assert %UnknownAtom{} = marked.event
+
+      {:ok, restored} = Notifications.mark_notification_unread(marked, actor: me)
+      assert is_nil(restored.read_at)
+
+      assert NewerReleaseRows.stored_row("notifications", id)["event"] ==
+               NewerReleaseRows.unknown()
+    end
+
+    test "erasure blanks its actor and deletes the recipient's" do
+      recipient = user()
+      actor = user()
+
+      caused =
+        NewerReleaseRows.notification!(recipient.id, %{
+          actor_id: actor.id,
+          actor_name: "Jane Editor"
+        })
+
+      received = NewerReleaseRows.notification!(actor.id)
+
+      assert :ok = Notifications.anonymize_actor(actor.id)
+      assert :ok = Notifications.forget_recipient(actor.id)
+
+      c = NewerReleaseRows.stored_row("notifications", caused)
+      assert {c["actor_id"], c["actor_name"]} == {nil, nil}
+
+      assert %{num_rows: 0} =
+               KilnCMS.Repo.query!("SELECT 1 FROM notifications WHERE id = $1", [
+                 Ecto.UUID.dump!(received)
+               ])
+    end
+
+    test "creating one is still refused" do
+      me = user()
+
+      for event <- [NewerReleaseRows.unknown(), %UnknownAtom{value: "published"}] do
+        assert {:error, %Ash.Error.Invalid{}} =
+                 Notifications.record_notification(%{
+                   user_id: me.id,
+                   event: event,
+                   content_type: "page",
+                   content_id: Ecto.UUID.generate(),
+                   title: "Nope"
+                 })
+      end
+    end
+  end
 end

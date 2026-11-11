@@ -46,7 +46,7 @@ defmodule KilnCMSWeb.FormLiveTest do
   end
 
   test "editors are redirected away", %{conn: conn} do
-    assert {:error, {:redirect, %{to: "/"}}} =
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
              conn |> log_in(authed_user(:editor)) |> live(~p"/editor/forms")
   end
 
@@ -156,9 +156,10 @@ defmodule KilnCMSWeb.FormLiveTest do
   end
 
   describe "public addresses (#1783)" do
-    # The list used to show `/forms/:slug`, which has no GET route at the root —
-    # a browser got the public 404. Every address it shows now must answer, so
-    # the test reads them off the rendered page and requests each one.
+    # The list once showed `/forms/:slug` while nothing answered there (#1783),
+    # then linked the iframe document instead; since #2138 the form has a page
+    # of its own at that address. Every address shown must answer, so the test
+    # reads them off the rendered page and requests each one.
     test "an active form's hosted page and JSON API resolve, and the snippet is copyable",
          %{conn: conn} do
       admin = authed_user(:admin)
@@ -179,12 +180,15 @@ defmodule KilnCMSWeb.FormLiveTest do
         |> LazyHTML.text()
         |> String.trim()
 
-      assert URI.parse(hosted).path == "/forms/#{slug}/embed"
+      assert URI.parse(hosted).path == "/forms/#{slug}"
       assert URI.parse(api).path == "/api/forms/#{slug}"
 
-      # Both resolve for an anonymous visitor.
+      # Both resolve for an anonymous visitor — the hosted address as the
+      # form's page in the site's chrome, not the transparent iframe document.
       hosted_conn = get(build_conn(), URI.parse(hosted).path)
       assert html_response(hosted_conn, 200) =~ "Newsletter"
+      assert hosted_conn.resp_body =~ "public-shell"
+      refute hosted_conn.resp_body =~ "kiln-embed-body"
 
       api_conn =
         build_conn()
@@ -192,11 +196,6 @@ defmodule KilnCMSWeb.FormLiveTest do
         |> get(URI.parse(api).path)
 
       assert %{"slug" => ^slug} = json_response(api_conn, 200)
-
-      # The dead address is no longer advertised as a page anywhere on the row
-      # (it still 404s for an HTML GET — which is why it had to go).
-      refute html =~ ~s(>/forms/#{slug}<)
-      assert get(build_conn(), "/forms/#{slug}").status == 404
 
       # The embed snippet is on the row with an accessible Copy button that
       # carries exactly the snippet the builder hands out.

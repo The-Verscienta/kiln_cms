@@ -94,7 +94,7 @@ defmodule KilnCMSWeb.PluginSurfaceTest do
     assert html =~ "Fixture plugin panel"
 
     # Non-admins are bounced by the live_session guard, like any admin route.
-    assert {:error, {:redirect, %{to: "/"}}} =
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
              build_conn() |> log_in(authed_user(:editor)) |> live("/editor/fixture")
   end
 

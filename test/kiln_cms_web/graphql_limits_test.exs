@@ -118,6 +118,45 @@ defmodule KilnCMSWeb.GraphqlLimitsTest do
     assert messages(gql(conn, %{query: query})) == ["Token limit exceeded"]
   end
 
+  describe "typed custom fields (#2290)" do
+    test "fields(names:) is priced at one plus the child once per name" do
+      assert GraphqlLimits.custom_fields_complexity(%{names: ["a", "b", "c"]}, 2, nil) == 7
+      assert GraphqlLimits.custom_fields_complexity(%{names: []}, 2, nil) == 1
+      assert GraphqlLimits.custom_fields_complexity(%{names: ["a"]}, 0, nil) == 2
+    end
+
+    test "a page of records cannot ask for many names each, and an accessor is cheap", %{
+      conn: conn
+    } do
+      names = fn n -> Enum.map_join(1..n, ", ", &~s("f#{&1}")) end
+
+      many =
+        "{ publishedPosts(limit: 25) { results { fields(names: [#{names.(10)}]) { name } } } }"
+
+      assert Enum.any?(messages(gql(conn, %{query: many})), &(&1 =~ "is too complex"))
+
+      few = "{ publishedPosts(limit: 25) { results { fields(names: [#{names.(1)}]) { name } } } }"
+      refute Map.has_key?(gql(conn, %{query: few}), "errors")
+
+      accessors =
+        ~s|{ publishedPosts(limit: 25) { results { a: customFloat(name: "a") b: customString(name: "b") } } }|
+
+      refute Map.has_key?(gql(conn, %{query: accessors}), "errors")
+    end
+
+    test "a group's fields and a list's items are priced as unlimited lists", %{conn: conn} do
+      # Five rows each, so two nested levels (5 x 5 = 25) over a 25-row page
+      # is past the cap while one level is not.
+      nested = """
+      { publishedPosts(limit: 25) { results {
+        fields(names: ["g"]) { ... on ListValue { items { ... on GroupValue { fields { name } } } } }
+      } } }
+      """
+
+      assert Enum.any?(messages(gql(conn, %{query: nested})), &(&1 =~ "is too complex"))
+    end
+  end
+
   describe "the socket" do
     # The channel replaces a socket's Absinthe options with `[context: …]` after
     # every document, so a cap set at connect would hold for the first document

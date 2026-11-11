@@ -1,6 +1,10 @@
 import Config
 config :kiln_cms, Oban, testing: :manual
 
+# No backup heartbeat process (#2218): it would beat and sweep the lock on a
+# timer against the sandbox. Tests drive `KilnCMS.Backups.Heartbeat.tick/1`.
+config :kiln_cms, KilnCMS.Backups, heartbeat?: false
+
 # No boot-time occurrence backfill (#766). Every test runs inside a rolled-back
 # sandbox, but application boot is OUTSIDE them — so an enqueue there commits a
 # real `oban_jobs` row, which `DataCase.drain_oban/0` then re-executes inside
@@ -58,6 +62,12 @@ config :kiln_cms, KilnCMS.Federation,
 # to `no-store` under tests that assert cache headers.
 config :kiln_cms, KilnCMS.Experiments, enabled: false
 
+# Security alerts (#2245) off for the suite: recording an event claims a row
+# lock on its alert window, and two sandboxed tests minting an API key would
+# wait on each other's uncommitted claim of the same platform window. Tests
+# about alerts turn them on for themselves (async: false).
+config :kiln_cms, KilnCMS.Security.Alerts, enabled: false
+
 # Outbound link checking (#474). Every request goes to a Req.Test stub; nothing
 # in the suite may reach the real web. The per-host throttle is widened to
 # effectively off, because pacing is tested directly (`Links.Throttle`) and
@@ -84,6 +94,23 @@ config :kiln_cms, :unsplash, req_options: [plug: {Req.Test, KilnCMS.Unsplash}]
 # reaches api.github.com. Left enabled so the enabled/disabled branches can
 # both be exercised by overriding this per-test.
 config :kiln_cms, Kiln.Updates, req_options: [plug: {Req.Test, Kiln.Updates}]
+
+# The plugin health check (#2244) is off by default here: it inherits the
+# update check's `enabled: true`, and with the dependency fixture plugin
+# installed every System or Security posture test would otherwise ask the
+# stub. Its tests enable it per case; requests go to a Req.Test stub.
+config :kiln_cms, Kiln.Plugins.Health,
+  enabled: false,
+  req_options: [plug: {Req.Test, Kiln.Plugins.Health}]
+
+# The security notices feed (#2522) is off by default here for the same
+# reason, and because the core's own notices check would otherwise ask it on
+# every System or Security posture mount. Tests that read it set `url:`
+# (unset follows the update feed, kilncms.dev's); requests go to a Req.Test
+# stub.
+config :kiln_cms, Kiln.SecurityNotices,
+  url: false,
+  req_options: [plug: {Req.Test, Kiln.SecurityNotices}]
 
 # The HTTP governance witness (#733) reaches an operator-configured transparency
 # log. Never dialled for real in tests; the stub stands in for the log.
@@ -193,7 +220,10 @@ config :kiln_cms, KilnCMSWeb.RateLimit,
     # for its own tests.
     gql_join: {1_000_000, :timer.minutes(1)},
     bridge_join: {1_000_000, :timer.minutes(1)},
-    collab_join: {1_000_000, :timer.minutes(1)}
+    collab_join: {1_000_000, :timer.minutes(1)},
+    # The export suite downloads many times as the same seeded actors
+    # (#2293); `ContentExportControllerTest` lowers it back for its 429 test.
+    export: {1_000_000, :timer.minutes(1)}
   }
 
 # Per-account auth budgets (#478). The whole suite signs in as seeded users and
@@ -244,7 +274,17 @@ config :kiln_cms, KilnCMS.Repo,
   # Measured on a full local run, a 5s ceiling changed nothing — the same 80
   # waiters (all degrade-by-design settings lookups) still timed out, having
   # held >5s — while adding ~4s of wall time to each, +290s on the suite.
-  pool_size: System.schedulers_online() * 2 + 8
+  pool_size: System.schedulers_online() * 2 + 8,
+  # The per-statement `:timeout`, 30 s instead of Ecto's 15 s (#2545). Under a
+  # loaded host any statement can exceed 15 s, not only the heavy ones: an
+  # ordinary single-row insert in a setup failed `CustomFieldIndexTest`, a
+  # `FieldDefinition` create was cancelled in `ReferenceLinksApiTest` (#2620),
+  # and a `MailSettingsLiveTest` insert held its connection past 15 s, all in
+  # full `mix precommit` runs. A slow statement is not a wrong one; the cost
+  # is only paid by a test that is about to fail anyway. It stays well under
+  # the sandbox's 120 s ownership timeout, so a statement that is really
+  # wedged still fails the test instead of hanging it.
+  timeout: :timer.seconds(30)
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
@@ -393,3 +433,47 @@ config :kiln_cms, :embed_origins_locked, false
 # key in the developer's shell or a generated one left in the test database; the
 # provenance tests turn it on and supply a key themselves.
 config :kiln_cms, KilnCMS.Provenance, enabled: false
+
+# Breached-password check (#2240): off in the suite, so no test calls a third
+# party; the tests that exercise it switch it on with a stub for their own
+# duration (`KilnCMS.BreachedPasswordFixtures`).
+config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false
+
+# Human verification (#2249). No provider is configured, so nothing is ever
+# required; `KilnCMS.ChallengeFixtures.enable!/1` turns it on for a test with
+# the fake provider (`KilnCMS.ChallengeFake`), and Turnstile's own tests point
+# the transport at a `Req.Test` stub.
+config :kiln_cms, KilnCMS.Challenge,
+  providers: [KilnCMS.ChallengeFake],
+  req_options: [plug: {Req.Test, KilnCMS.Challenge}]
+
+# The sign-in unlock request (#2250) runs its lookup and mail inline, like
+# `:async_analytics` above, so they stay on the test's sandbox connection;
+# `KilnCMS.Accounts.SignInUnlockAsyncTest` turns the hand-off back on.
+config :kiln_cms, KilnCMS.Accounts.SignInUnlock, async: false
+
+# Search's per-sweep time budget (#2166) is 1.5 s by default: a `Search.global/2`
+# sweep past it drops the legs it had not finished and answers those sections
+# empty (`partial` in `Search.global_report/2`). On a loaded host, an async
+# test's sweep can cross 1.5 s, and the test then fails on an empty result
+# (#2337: the search page, `KilnCMS.Ask` and synonym tests). A generous budget
+# keeps the budgeted path (deadlines, slots) under test without making the
+# host's load part of the assertion. It stays well under the 30 s section
+# ceiling (`@section_timeout`), so a wedged leg is cut at 10 s and the test
+# fails on its empty result inside ExUnit's 60 s test timeout, rather than
+# timing out the test. The tests about the budget set their own
+# (`query_budget_test.exs`, `search_api_budget_test.exs`).
+#
+# How to tell if it happens anyway: a search test that finds nothing where it
+# expected hits, with no error. Run the query through `Search.global_report/2`
+# and look at `:partial`.
+config :kiln_cms, KilnCMS.Search, query_budget: 10_000
+
+# Crawler verification (#2254) is on, like production, but asks
+# `KilnCMS.Test.StubCrawlerResolver` instead of DNS: every address has no PTR
+# record unless a test plants one, so nothing reaches the network. Tests that
+# need a settled result without a lookup plant it with
+# `KilnCMS.CrawlerVerification.put_result/4`.
+config :kiln_cms, KilnCMS.CrawlerVerification,
+  enabled: true,
+  resolver: KilnCMS.Test.StubCrawlerResolver

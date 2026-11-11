@@ -1,6 +1,6 @@
 {
   "name": "@kiln-cms/client",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Official JS/TS client for the KilnCMS APIs — typed JSON:API reads and writes, workflow transitions, GraphQL, search, fired artifacts, preview tokens, point-in-time reads, media uploads, and the kiln-types generator.",
   "license": "MIT",
   "author": {
@@ -66,5 +66,10 @@
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.14.0",
     "vitest": "^5.0.4"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.5"
+    }
   }
 }

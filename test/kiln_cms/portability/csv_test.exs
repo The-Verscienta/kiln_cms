@@ -170,7 +170,10 @@ defmodule KilnCMS.Portability.CSVTest do
 
       {:ok, csv} = export_csv(ctx)
 
-      for record <- [a, b], do: ContentTypes.purge(ctx.name, record, ctx.scope)
+      for record <- [a, b] do
+        :ok = ContentTypes.destroy(ctx.name, record, ctx.scope)
+        :ok = ContentTypes.purge(ctx.name, record, ctx.scope)
+      end
 
       {:ok, records} = CSV.decode(csv, ctx.name, ctx.scope)
 

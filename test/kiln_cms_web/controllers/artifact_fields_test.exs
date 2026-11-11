@@ -74,6 +74,18 @@ defmodule KilnCMSWeb.ArtifactFieldsTest do
            }
   end
 
+  # #2258: `social` is a top-level key like any other, so a client building
+  # link previews can ask for it alone.
+  test "fields=social keeps the link-preview object", ctx do
+    body = ctx.conn |> fetch(ctx.post, "fields=social") |> json_response(200)
+
+    assert body == %{
+             "id" => ctx.post.id,
+             "type" => "post",
+             "social" => %{"title" => "Sparse"}
+           }
+  end
+
   test "custom_fields.<name> keeps just that custom field", ctx do
     body =
       ctx.conn |> fetch(ctx.post, "fields=title,custom_fields.#{ctx.price}") |> json_response(200)

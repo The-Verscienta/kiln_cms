@@ -65,7 +65,8 @@ history (#338) together per content item. Admin-only.
     its retries, which means a consumer may still be serving what the site
     withdrew. Each row has its endpoint and error, a Redeliver button, and
     the time a later retraction of the document reached that endpoint, once
-    one has. See
+    one has. A row whose endpoint has since been deleted keeps the URL,
+    marked "(deleted endpoint)", and has no Redeliver button. See
     [webhooks.md](webhooks.md#retractions-are-exempt). A trashed document's
     trail is still reachable for this reason.
   - **Export trail (JSON / CSV)** — downloadable compliance records of the

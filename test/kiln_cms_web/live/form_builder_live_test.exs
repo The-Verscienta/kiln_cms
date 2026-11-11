@@ -65,7 +65,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     admin = authed_user(:admin)
     form = CMS.create_form!(%{name: "Contact", slug: "fb-tier"}, actor: admin)
 
-    assert {:error, {:redirect, %{to: "/"}}} =
+    assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
              conn |> log_in(authed_user(:editor)) |> live(~p"/editor/forms/#{form.id}")
   end
 
@@ -299,9 +299,10 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
       assert updated.placeholder == nil
     end
 
-    test "switching select -> text drops the options; text -> checkboxes seeds them", %{
-      conn: conn
-    } do
+    test "switching select -> text keeps the options and drops the default; text -> checkboxes restores them",
+         %{
+           conn: conn
+         } do
       admin = authed_user(:admin)
 
       {form, [f], lv, _html} =
@@ -319,7 +320,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
 
       updated = form.id |> CMS.form_fields_for!(authorize?: false) |> hd()
       assert updated.field_type == :string
-      assert updated.options == []
+      assert updated.options == ["x", "y"]
       assert updated.default_value == nil
 
       lv
@@ -328,7 +329,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
 
       updated = form.id |> CMS.form_fields_for!(authorize?: false) |> hd()
       assert updated.field_type == :checkboxes
-      assert length(updated.options) == 2
+      assert updated.options == ["x", "y"]
     end
 
     test "switching a required field to hidden drops required", %{conn: conn} do
@@ -490,6 +491,29 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert html =~ "unknown token"
     updated = CMS.get_form!(form.id, authorize?: false)
     assert updated.autoresponder_enabled == false
+  end
+
+  describe "the public address in the header (#2138)" do
+    test "an active form links its public page, and Preview opens it", %{conn: conn} do
+      {form, [], lv, _html} = builder(conn, authed_user(:admin))
+      url = KilnCMSWeb.Tenant.base_url(nil) <> "/forms/#{form.slug}"
+
+      assert has_element?(lv, ~s(a#form-public-url[href="#{url}"][target="_blank"]), url)
+      assert has_element?(lv, ~s(a.btn[href="#{url}"]), "Preview")
+      refute render(lv) =~ "/forms/#{form.slug}/embed"
+
+      # The address it shows is one that answers.
+      assert build_conn() |> get(URI.parse(url).path) |> html_response(200) =~ "Contact"
+    end
+
+    test "an inactive form shows no address and says why", %{conn: conn} do
+      {form, [], lv, _html} = builder(conn, authed_user(:admin), %{active: false})
+
+      assert has_element?(lv, "p#form-public-url", "Not public while inactive.")
+      refute has_element?(lv, "a#form-public-url")
+      refute has_element?(lv, "a.btn", "Preview")
+      refute render(lv) =~ "/forms/#{form.slug}"
+    end
   end
 
   test "the embed tab shows a copyable snippet", %{conn: conn} do
@@ -732,5 +756,355 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert html =~ ~s(value="hi@example.com")
     assert html =~ "sm:col-span-3"
     assert html =~ "Send it"
+  end
+
+  describe "renaming a field and refused edits (#2139)" do
+    # Opens the options panel for `field`, returning the panel's form selector.
+    defp open_settings(lv, field) do
+      lv
+      |> element(~s(button[phx-click="select_field"][phx-value-id="#{field.id}"]))
+      |> render_click()
+
+      "#field-settings-#{field.id}"
+    end
+
+    # A browser's change event: the whole panel's values, plus the one input
+    # that changed in `_target`.
+    defp change(lv, selector, field, overrides, target) do
+      values =
+        Map.merge(
+          %{"label" => field.label, "name" => field.name, "field_type" => "string"},
+          overrides
+        )
+
+      lv
+      |> form(selector, %{field: values})
+      |> render_change(%{"_target" => ["field", target]})
+    end
+
+    defp reload(form), do: form.id |> CMS.form_fields_for!(authorize?: false) |> hd()
+
+    test "a rename saves, shows on the canvas, and says Saved", %{conn: conn} do
+      {form, [field], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "string", label: "Single line text", field_type: :string}
+        ])
+
+      selector = open_settings(lv, field)
+      html = change(lv, selector, field, %{"name" => "name"}, "name")
+
+      assert reload(form).name == "name"
+      assert lv |> element("#canvas-field-name-#{field.id}") |> render() =~ "name"
+      refute lv |> element("#canvas-field-name-#{field.id}") |> render() =~ "string"
+      assert lv |> element("#fs-name") |> render() =~ ~s(value="name")
+      assert html =~ ~r/id="field-settings-status"[^>]*>\s*<span[^>]*>Saved\./
+
+      # No entries yet, so there is nothing to say about stranded ones.
+      refute lv |> element("#field-settings-status") |> render() =~ "already received"
+    end
+
+    test "the Save button (and Enter) saves the whole panel", %{conn: conn} do
+      {form, [field], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "string", label: "Single line text", field_type: :string}
+        ])
+
+      selector = open_settings(lv, field)
+      assert lv |> element("#{selector} button[type=submit]") |> has_element?()
+
+      html =
+        lv
+        |> form(selector, %{
+          field: %{label: "Your name", name: "name", field_type: "string", width: "half"}
+        })
+        |> render_submit()
+
+      updated = reload(form)
+      assert updated.name == "name"
+      assert updated.label == "Your name"
+      assert updated.width == :half
+      assert html =~ "Saved."
+    end
+
+    test "an invalid name is refused inline and the typed value stays", %{conn: conn} do
+      {form, [field], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "string", label: "Single line text", field_type: :string}
+        ])
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "Bad Name!"}, "name")
+
+      assert reload(form).name == "string"
+
+      input = lv |> element("#fs-name") |> render()
+      assert input =~ ~s(value="Bad Name!")
+      assert input =~ ~s(aria-invalid="true")
+      assert input =~ ~s(aria-describedby="fs-name-hint fs-name-error")
+
+      assert lv |> element("#fs-name-error") |> render() =~
+               "must be lowercase letters, digits and underscores"
+
+      # The refusal is inline, not a flash the admin has to notice.
+      refute render(lv) =~ ~s(id="flash-error")
+      refute lv |> element("#field-settings-status") |> render() =~ "Saved."
+
+      # Another input still saves while the name error stands.
+      change(lv, selector, field, %{"name" => "Bad Name!", "label" => "Full name"}, "label")
+
+      updated = reload(form)
+      assert updated.label == "Full name"
+      assert updated.name == "string"
+      assert lv |> element("#fs-name") |> render() =~ ~s(value="Bad Name!")
+      assert lv |> element("#fs-name-error") |> has_element?()
+      assert lv |> element("#field-settings-status") |> render() =~ "Saved."
+
+      # Fixing the name clears the error.
+      change(lv, selector, field, %{"name" => "full_name", "label" => "Full name"}, "name")
+
+      assert reload(form).name == "full_name"
+      refute lv |> element("#fs-name-error") |> has_element?()
+      refute lv |> element("#fs-name") |> render() =~ "aria-invalid"
+    end
+
+    test "a name another field already uses is refused inline", %{conn: conn} do
+      {form, [field, _email], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "string", label: "Single line text", field_type: :string, position: 0},
+          %{name: "email", label: "Email", field_type: :email, position: 1}
+        ])
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "email"}, "name")
+
+      assert form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.map(& &1.name) ==
+               ["string", "email"]
+
+      assert lv |> element("#fs-name") |> render() =~ ~s(value="email")
+      assert lv |> element("#fs-name-error") |> render() =~ "has already been taken"
+    end
+
+    test "selecting another field drops the refused value and its error", %{conn: conn} do
+      {_form, [field, other], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "string", label: "Single line text", field_type: :string, position: 0},
+          %{name: "email", label: "Email", field_type: :email, position: 1}
+        ])
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "Bad Name!"}, "name")
+      assert lv |> element("#fs-name-error") |> has_element?()
+
+      open_settings(lv, other)
+      refute lv |> element("#fs-name-error") |> has_element?()
+      assert lv |> element("#fs-name") |> render() =~ ~s(value="email")
+
+      open_settings(lv, field)
+      assert lv |> element("#fs-name") |> render() =~ ~s(value="string")
+      refute lv |> element("#fs-name-error") |> has_element?()
+    end
+
+    test "a held options error does not outlive a type switch", %{conn: conn} do
+      {form, [field], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "topic", label: "Topic", field_type: :select, options: ["a", "b"]}
+        ])
+
+      selector = open_settings(lv, field)
+      base = %{"field_type" => "select"}
+
+      html = change(lv, selector, field, Map.put(base, "options", ""), "options")
+      assert html =~ "a select field must list at least one option"
+
+      change(lv, selector, field, %{"field_type" => "string"}, "field_type")
+      html = change(lv, selector, field, base, "field_type")
+
+      refute html =~ "a select field must list at least one option"
+      assert reload(form).options == ["a", "b"]
+      assert lv |> element("#fs-options") |> render() =~ "a\nb"
+    end
+
+    test "an error on an input with no error slot still reaches the admin", %{conn: conn} do
+      {form, [field], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "topic", label: "Topic", field_type: :string}
+        ])
+
+      selector = open_settings(lv, field)
+
+      # A tampered whole-panel save: `width` is a select whose values the
+      # browser limits, so it has no error slot; the bad name has one. The
+      # name error shows inline, and the width error must not be dropped.
+      lv
+      |> form(selector, %{
+        field: %{"label" => "Topic", "name" => "Bad Name!", "field_type" => "string"}
+      })
+      |> render_submit(%{"field" => %{"width" => "huge"}})
+
+      html = render(lv)
+      assert html =~ ~s(id="fs-name-error")
+      assert html =~ ~s(id="flash-error")
+      assert reload(form).width == :full
+      assert reload(form).name == "topic"
+    end
+
+    test "renaming a field with entries says they keep the old key, and Entries flags it",
+         %{conn: conn} do
+      {form, [field], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "string", label: "Single line text", field_type: :string}
+        ])
+
+      for value <- ["Ada", "Grace"] do
+        CMS.create_form_submission!(%{form_id: form.id, data: %{"string" => value}},
+          authorize?: false
+        )
+      end
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "name"}, "name")
+
+      assert lv |> element("#field-settings-status") |> render() =~
+               "Entries already received keep the old key “string”."
+
+      CMS.create_form_submission!(%{form_id: form.id, data: %{"name" => "Linus"}},
+        authorize?: false
+      )
+
+      lv |> element(~s(#form-builder-tabs button[phx-value-tab="entries"])) |> render_click()
+
+      [new_one | old_ones] = CMS.recent_form_submissions!(form.id, authorize?: false)
+      assert new_one.data == %{"name" => "Linus"}
+
+      # The new entry sits under the field's current label and name …
+      refute has_element?(lv, "#submission-#{new_one.id}-orphaned")
+
+      # … the old ones under "renamed or removed", by their raw key.
+      for old <- old_ones do
+        orphaned = lv |> element("#submission-#{old.id}-orphaned") |> render()
+        assert orphaned =~ "From a renamed or removed field"
+        assert orphaned =~ "string"
+      end
+
+      html = render(lv)
+      assert html =~ "Ada"
+      assert html =~ "Linus"
+    end
+
+    test "an editor cannot update a form field", %{conn: _conn} do
+      admin = authed_user(:admin)
+
+      form =
+        CMS.create_form!(%{name: "Contact", slug: "fb-ed-#{System.unique_integer()}"},
+          actor: admin
+        )
+
+      field =
+        CMS.create_form_field!(
+          %{form_id: form.id, name: "string", label: "Text", field_type: :string},
+          actor: admin
+        )
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.update_form_field(field, %{name: "name"}, actor: authed_user(:editor))
+
+      assert reload(form).name == "string"
+    end
+
+    # The builder over a form whose autoresponder is already set up: the
+    # template may only name fields that exist, so the fields come first.
+    defp autoresponder_builder(conn, admin, names, autoresponder) do
+      form =
+        CMS.create_form!(%{name: "Contact", slug: "fb-ar-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      fields =
+        for {name, position} <- Enum.with_index(names) do
+          type = if position == 0, do: :email, else: :string
+
+          CMS.create_form_field!(
+            %{form_id: form.id, name: name, label: name, field_type: type, position: position},
+            actor: admin
+          )
+        end
+
+      form = CMS.update_form!(form, autoresponder, actor: admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/forms/#{form.id}")
+      {form, fields, lv}
+    end
+
+    test "a rename carries the autoresponder's tokens, and the Confirmations tab shows it (#2343)",
+         %{conn: conn} do
+      {form, [field], lv} =
+        autoresponder_builder(conn, authed_user(:admin), ["email"], %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, [field:email]!",
+          autoresponder_body: "<p>Sent to [field:email].</p>"
+        })
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "address", "field_type" => "email"}, "name")
+
+      status = lv |> element("#field-settings-status") |> render()
+      assert status =~ "The autoresponder now uses [field:address] where it used [field:email]."
+      # No entries, so nothing about stranded keys.
+      refute status =~ "already received"
+
+      stored = CMS.get_form!(form.id, authorize?: false)
+      assert stored.autoresponder_subject == "Thanks, [field:address]!"
+      assert stored.autoresponder_body == "<p>Sent to [field:address].</p>"
+
+      lv
+      |> element(~s(#form-builder-tabs button[phx-value-tab="confirmations"]))
+      |> render_click()
+
+      assert lv |> element(~s(input[name="form[autoresponder_subject]"])) |> render() =~
+               ~s(value="Thanks, [field:address]!")
+
+      body = lv |> element(~s(textarea[name="form[autoresponder_body]"])) |> render()
+      assert body =~ "[field:address]"
+      refute body =~ "[field:email]"
+    end
+
+    test "a rename the autoresponder does not use says nothing about it", %{conn: conn} do
+      {_form, [_email, field], lv} =
+        autoresponder_builder(conn, authed_user(:admin), ["email", "message"], %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, [field:email]!",
+          autoresponder_body: "b"
+        })
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "note"}, "name")
+
+      status = lv |> element("#field-settings-status") |> render()
+      assert status =~ "Saved."
+      refute status =~ "autoresponder"
+    end
+
+    test "deleting a field the autoresponder uses is refused with the reason (#2343)",
+         %{conn: conn} do
+      {form, [field], lv} =
+        autoresponder_builder(conn, authed_user(:admin), ["email"], %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, [field:email]!",
+          autoresponder_body: "b"
+        })
+
+      html =
+        lv
+        |> element(~s(button[phx-click="delete_field"][phx-value-id="#{field.id}"]))
+        |> render_click()
+
+      assert html =~
+               "The autoresponder uses [field:email]: remove it from the Confirmations template first."
+
+      assert has_element?(lv, "#canvas-field-name-#{field.id}")
+
+      assert form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.map(& &1.name) == [
+               "email"
+             ]
+    end
   end
 end

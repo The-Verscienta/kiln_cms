@@ -7,19 +7,28 @@ defmodule KilnCMSWeb.TeamLive do
   every other console page):
 
     * **Members** — the org's memberships: capability tier, assigned custom
-      role, and per-member overrides of the scope axes.
+      role, and per-member overrides of the scope axes. "Add or invite" adds
+      an address with a confirmed account and emails an invitation to any
+      other (#2135, `KilnCMS.Accounts.Invitations.AddOrInvite`); **Pending
+      invitations** lists this org's invitations to resend or revoke.
     * **Roles** — the org's custom roles: named bundles of `editable_types` /
-      `readable_types` / `field_grants` (see docs/granular-rbac.md).
+      `readable_types` / `field_grants` / `field_read_grants` (see docs/granular-rbac.md).
 
-  Scope-axis inputs are deliberately plain: comma-separated type lists and a
-  JSON textarea for field grants (the same convention as the automation rule
-  config), keeping the first team UI honest instead of half-modelling a
-  permission matrix.
+  The scope axes are picked, not typed (#2141): `KilnCMSWeb.ScopePickers`
+  renders them for the role forms and the member form alike, and
+  `KilnCMSWeb.ScopeParams` turns what they post into the stored attributes —
+  merged onto the stored value, so a form saved untouched writes back exactly
+  what it held, including names this site no longer has a type for.
 
   A member's tier can also be granted **temporarily** — "editor on this site until
   Friday" — which leaves the standing tier alone and expires on its own; see
   `KilnCMS.Accounts.RoleGrant`. A membership's `role` is always that standing
   tier; this page shows a live grant beside it and never writes one into it.
+
+  Each row leads with the tier that applies on this site **now** — resolved by
+  `KilnCMS.Accounts.Scoping.tier_source/2`, the same answer the policies get, so a
+  platform admin reads as admin whatever their membership holds — and explains a
+  live grant under it (`KilnCMSWeb.RoleDisplay`, #2142).
 
   The instance-wide account register — who has signed up at all, their platform
   role, password resets, account removal — is `KilnCMSWeb.AccountsLive`.
@@ -29,11 +38,17 @@ defmodule KilnCMSWeb.TeamLive do
   require Ash.Expr
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.InvitationRefused
+  alias KilnCMS.Accounts.Invitations
+  alias KilnCMS.Accounts.Registrations
   alias KilnCMS.Accounts.Role
   alias KilnCMS.Accounts.RoleGrant
+  alias KilnCMSWeb.RoleDisplay
   alias KilnCMSWeb.RoleGrantForm
+  alias KilnCMSWeb.ScopeParams
+  alias KilnCMSWeb.ScopePickers
 
-  @tier_options [{"Viewer", :viewer}, {"Editor", :editor}, {"Admin", :admin}]
+  import KilnCMSWeb.RoleDisplay, only: [role_label: 1, role_summary: 1]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -47,52 +62,132 @@ defmodule KilnCMSWeb.TeamLive do
        |> assign(:member_edit, nil)
        |> assign(:role_edit, nil)
        |> assign(:role_form, role_form(actor))
+       |> assign(:role_scope, blank_scope())
        |> assign(
          :editors_can_publish,
          KilnCMS.CMS.EditorialSettings.editors_can_publish?(socket.assigns.current_org)
        )
        |> load_data()}
     else
+      # Not redundant: the `:live_admin_required` hook admits any ADMIN of this
+      # site, and this page needs a PLATFORM admin (#419), so it refuses the rest
+      # itself, to the same access-denied page (#2143).
       {:ok,
        socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
+       |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
   end
 
   # --- members ---------------------------------------------------------------
 
+  # "Add or invite" (#2135): an address with a confirmed account is added now;
+  # any other is emailed an invitation. `Invitation.:add_or_invite` runs every
+  # read and write as the actor, so the policies decide.
   @impl true
   def handle_event("add_member", %{"member" => %{"email" => email} = params}, socket)
       when is_binary(email) do
     %{actor: actor, current_org: org} = socket.assigns
 
-    with {:ok, user} <- find_user(email, actor),
-         {:ok, _} <-
-           Accounts.create_org_membership(
-             %{
-               user_id: user.id,
-               organization_id: org.id,
-               role: params["role"] || "viewer",
-               role_id: presence(params["role_id"])
-             },
-             actor: actor
-           ) do
-      {:noreply, socket |> load_data() |> put_flash(:info, gettext("Member added to this site."))}
-    else
-      {:error, :not_found} ->
-        {:noreply,
-         put_flash(socket, :error, gettext("No account with that email address exists."))}
+    result =
+      Accounts.add_or_invite_member(
+        %{
+          organization_id: org.id,
+          email: String.trim(email),
+          role: text(params["role"]) || "viewer",
+          role_id: presence(text(params["role_id"]))
+        },
+        actor: actor,
+        context: socket.assigns.security_context
+      )
 
-      {:error, _error} ->
+    case result do
+      {:ok, %{outcome: :added}} ->
         {:noreply,
-         put_flash(
-           socket,
-           :error,
-           gettext("Couldn't add that member — are they already on this site?")
+         socket |> load_data() |> put_flash(:info, gettext("Member added to this site."))}
+
+      {:ok, %{outcome: :approved}} ->
+        {:noreply,
+         socket
+         |> load_data()
+         |> put_flash(
+           :info,
+           gettext("Their registration on this site is approved, and they are now a member.")
          )}
+
+      {:ok, %{outcome: :approved_over_rejection}} ->
+        {:noreply,
+         socket
+         |> load_data()
+         |> put_flash(
+           :info,
+           gettext(
+             "Their registration on this site had been rejected; it's now approved, and they are a member."
+           )
+         )}
+
+      {:ok, %{outcome: outcome}} when outcome in [:invited, :reinvited] ->
+        {:noreply,
+         socket
+         |> load_data()
+         |> put_flash(:info, gettext("Invitation sent to %{email}.", email: String.trim(email)))}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, add_error_message(error))}
     end
   end
+
+  # A pushed payload is client-chosen; give the guarded head above somewhere to
+  # fall (#764).
+  def handle_event("add_member", _params, socket), do: {:noreply, socket}
+
+  # Pending invitations (#2135). Looked up in the loaded `@invitations` — this
+  # org's rows only — so a crafted id from another site matches nothing.
+  def handle_event("resend_invitation", %{"id" => id}, socket) when is_binary(id) do
+    %{actor: actor} = socket.assigns
+
+    socket =
+      with {:ok, invitation} <- get_invitation(socket, id),
+           {:ok, _resent} <-
+             Accounts.resend_invitation(invitation, %{},
+               actor: actor,
+               context: socket.assigns.security_context
+             ) do
+        socket
+        |> load_data()
+        |> put_flash(
+          :info,
+          gettext("Invitation sent again to %{email}.", email: invitation.email)
+        )
+      else
+        {:error, :not_found} -> socket
+        {:error, error} -> put_flash(socket, :error, add_error_message(error))
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("revoke_invitation", %{"id" => id}, socket) when is_binary(id) do
+    %{actor: actor} = socket.assigns
+
+    socket =
+      with {:ok, invitation} <- get_invitation(socket, id),
+           :ok <-
+             Accounts.revoke_invitation(invitation,
+               actor: actor,
+               context: socket.assigns.security_context
+             ) do
+        socket |> load_data() |> put_flash(:info, gettext("Invitation revoked."))
+      else
+        {:error, :not_found} -> socket
+        _error -> put_flash(socket, :error, gettext("Couldn't revoke that invitation."))
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event(event, _params, socket)
+      when event in ["resend_invitation", "revoke_invitation"],
+      do: {:noreply, socket}
 
   # Who can publish on this site (`SiteEditorialSettings.editors_can_publish`).
   # Here because it is a statement about what a tier may do, beside the tiers
@@ -130,7 +225,11 @@ defmodule KilnCMSWeb.TeamLive do
 
     socket =
       with {:ok, membership} <- get_membership(socket, id),
-           :ok <- Accounts.remove_org_membership(membership, actor: actor) do
+           :ok <-
+             Accounts.remove_org_membership(membership,
+               actor: actor,
+               context: socket.assigns.security_context
+             ) do
         socket |> load_data() |> put_flash(:info, gettext("Member removed."))
       else
         _ -> put_flash(socket, :error, gettext("Couldn't remove that member."))
@@ -144,10 +243,21 @@ defmodule KilnCMSWeb.TeamLive do
       {:ok, membership} ->
         form =
           membership
-          |> AshPhoenix.Form.for_update(:update, actor: socket.assigns.actor, as: "member")
+          |> AshPhoenix.Form.for_update(:update,
+            actor: socket.assigns.actor,
+            context: socket.assigns.security_context,
+            as: "member"
+          )
           |> to_form()
 
-        {:noreply, assign(socket, :member_edit, %{id: id, form: form})}
+        {:noreply,
+         assign(socket, :member_edit, %{
+           id: id,
+           form: form,
+           stored: ScopeParams.stored(membership),
+           scope: blank_scope(),
+           inherited: %{role: membership.custom_role, user: membership.user}
+         })}
 
       _ ->
         {:noreply, socket}
@@ -157,14 +267,38 @@ defmodule KilnCMSWeb.TeamLive do
   def handle_event("cancel_member_edit", _params, socket),
     do: {:noreply, assign(socket, :member_edit, nil)}
 
-  def handle_event("save_member", %{"member" => params}, socket) when is_map(params) do
-    handle_submit(
-      socket,
-      socket.assigns.member_edit.form,
-      params,
-      &assign(&1, :member_edit, %{&1.assigns.member_edit | form: &2}),
-      &(&1 |> assign(:member_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved.")))
-    )
+  def handle_event("validate_member", %{"member" => params}, socket)
+      when is_map(params) and is_map(socket.assigns.member_edit) do
+    if admin?(socket) do
+      edit = socket.assigns.member_edit
+      {form, scope} = validate_scoped(edit, member_params(params))
+
+      # "Currently inherited" follows the custom role picked in this form, not
+      # the one stored: switching the role changes what the axes fall back to.
+      inherited =
+        if Map.has_key?(params, "role_id"),
+          do: %{edit.inherited | role: picked_role(socket, params["role_id"])},
+          else: edit.inherited
+
+      {:noreply,
+       assign(socket, :member_edit, %{edit | form: form, scope: scope, inherited: inherited})}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("save_member", %{"member" => params}, socket)
+      when is_map(params) and is_map(socket.assigns.member_edit) do
+    edit = socket.assigns.member_edit
+
+    case submit_scoped(edit, member_params(params)) do
+      {:ok, _membership} ->
+        {:noreply,
+         socket |> assign(:member_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved."))}
+
+      {:error, form, scope} ->
+        {:noreply, assign(socket, :member_edit, %{edit | form: form, scope: scope})}
+    end
   end
 
   # Time-boxed per-site tiers (`KilnCMS.Accounts.RoleGrant`). Its own event rather
@@ -185,7 +319,8 @@ defmodule KilnCMSWeb.TeamLive do
            Accounts.grant_membership_temporary_role(
              membership,
              %{granted_role: role, granted_role_expires_at: expires_at},
-             actor: actor
+             actor: actor,
+             context: socket.assigns.security_context
            ) do
       {:noreply,
        socket
@@ -194,7 +329,7 @@ defmodule KilnCMSWeb.TeamLive do
        |> put_flash(
          :info,
          gettext("%{role} on this site until %{when}.",
-           role: role,
+           role: role_label(role),
            when: RoleGrantForm.format(expires_at)
          )
        )}
@@ -217,7 +352,8 @@ defmodule KilnCMSWeb.TeamLive do
              Accounts.grant_membership_temporary_role(
                membership,
                %{granted_role: nil, granted_role_expires_at: nil},
-               actor: actor
+               actor: actor,
+               context: socket.assigns.security_context
              ) do
         socket |> load_data() |> put_flash(:info, gettext("Temporary tier ended."))
       else
@@ -229,19 +365,34 @@ defmodule KilnCMSWeb.TeamLive do
 
   # --- roles -----------------------------------------------------------------
 
+  def handle_event("validate_role", %{"role" => params}, socket) when is_map(params) do
+    if admin?(socket) do
+      new = new_role(socket)
+
+      {form, scope} =
+        validate_scoped(new, Map.put(params, "org_id", socket.assigns.current_org.id))
+
+      {:noreply, socket |> assign(:role_form, form) |> assign(:role_scope, scope)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("create_role", %{"role" => params}, socket) when is_map(params) do
     params = Map.put(params, "org_id", socket.assigns.current_org.id)
 
-    handle_submit(
-      socket,
-      socket.assigns.role_form,
-      params,
-      &assign(&1, :role_form, &2),
-      &(&1
-        |> assign(:role_form, role_form(&1.assigns.actor))
-        |> load_data()
-        |> put_flash(:info, gettext("Role added.")))
-    )
+    case submit_scoped(new_role(socket), params) do
+      {:ok, _role} ->
+        {:noreply,
+         socket
+         |> assign(:role_form, role_form(socket.assigns.actor))
+         |> assign(:role_scope, blank_scope())
+         |> load_data()
+         |> put_flash(:info, gettext("Role added."))}
+
+      {:error, form, scope} ->
+        {:noreply, socket |> assign(:role_form, form) |> assign(:role_scope, scope)}
+    end
   end
 
   def handle_event("edit_role", %{"id" => id}, socket) when is_binary(id) do
@@ -249,10 +400,23 @@ defmodule KilnCMSWeb.TeamLive do
       {:ok, role} ->
         form =
           role
-          |> AshPhoenix.Form.for_update(:update, actor: socket.assigns.actor, as: "role")
+          # Its own html id: the create form beside it is also `as: "role"`,
+          # and two `role_name` inputs on one page break DOM patching.
+          |> AshPhoenix.Form.for_update(:update,
+            actor: socket.assigns.actor,
+            as: "role",
+            id: "edit-role-#{id}"
+          )
           |> to_form()
 
-        {:noreply, assign(socket, :role_edit, %{id: id, form: form})}
+        {:noreply,
+         assign(socket, :role_edit, %{
+           id: id,
+           form: form,
+           role: role,
+           stored: ScopeParams.stored(role),
+           scope: blank_scope()
+         })}
 
       _ ->
         {:noreply, socket}
@@ -262,15 +426,41 @@ defmodule KilnCMSWeb.TeamLive do
   def handle_event("cancel_role_edit", _params, socket),
     do: {:noreply, assign(socket, :role_edit, nil)}
 
-  def handle_event("save_role", %{"role" => params}, socket) when is_map(params) do
-    handle_submit(
-      socket,
-      socket.assigns.role_edit.form,
-      params,
-      &assign(&1, :role_edit, %{&1.assigns.role_edit | form: &2}),
-      &(&1 |> assign(:role_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved.")))
-    )
+  def handle_event("validate_role_edit", %{"role" => params}, socket)
+      when is_map(params) and is_map(socket.assigns.role_edit) do
+    if admin?(socket) do
+      edit = socket.assigns.role_edit
+      {form, scope} = validate_scoped(edit, params)
+      {:noreply, assign(socket, :role_edit, %{edit | form: form, scope: scope})}
+    else
+      {:noreply, socket}
+    end
   end
+
+  def handle_event("save_role", %{"role" => params}, socket)
+      when is_map(params) and is_map(socket.assigns.role_edit) do
+    edit = socket.assigns.role_edit
+
+    # Every role update evicts the live sessions of everyone holding the role
+    # (`EvictRoleMembers`), so a save that changes nothing is not sent at all.
+    case submit_scoped(edit, params, &unchanged_role?(edit.role, &1)) do
+      :unchanged ->
+        {:noreply, socket |> assign(:role_edit, nil) |> put_flash(:info, gettext("No changes."))}
+
+      {:ok, _role} ->
+        {:noreply,
+         socket |> assign(:role_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved."))}
+
+      {:error, form, scope} ->
+        {:noreply, assign(socket, :role_edit, %{edit | form: form, scope: scope})}
+    end
+  end
+
+  # A change or save for an edit form that has since closed (or a payload in
+  # another shape) has nothing to apply to.
+  def handle_event(event, _params, socket)
+      when event in ~w(validate_member save_member create_role validate_role validate_role_edit save_role),
+      do: {:noreply, socket}
 
   def handle_event("delete_role", %{"id" => id}, socket) when is_binary(id) do
     %{actor: actor} = socket.assigns
@@ -302,10 +492,22 @@ defmodule KilnCMSWeb.TeamLive do
     roles =
       Accounts.list_roles_for_org!(org.id, actor: actor, query: [sort: [name: :asc]])
 
+    invitations =
+      Accounts.list_invitations_for_org!(org.id, actor: actor, load: [:custom_role, :invited_by])
+
+    site_admins = site_admins_without_membership(actor, org.id)
+
     socket
+    |> assign(:catalog, ScopePickers.catalog(org, actor))
     |> assign(:members, members)
-    |> assign(:site_admins, site_admins_without_membership(actor, org.id))
+    |> assign(:site_admins, site_admins)
+    # Each person's tier on this site through the decision the policies make,
+    # keyed by user — fed the rows just read rather than the policy checks'
+    # memo, so the row shows what a save or a revoke left.
+    |> assign(:access, access(members, site_admins, org))
     |> assign(:roles, roles)
+    |> assign(:invitations, invitations)
+    |> assign(:pending_registrations, Registrations.pending_count(org, actor: actor))
   end
 
   # Platform admins — `User.role == :admin`, or a live admin grant — reach every
@@ -327,6 +529,13 @@ defmodule KilnCMSWeb.TeamLive do
     )
   end
 
+  defp access(members, site_admins, org) do
+    Map.new(
+      Enum.map(members, &{&1.user.id, RoleDisplay.site_access_for_membership(&1.user, org, &1)}) ++
+        Enum.map(site_admins, &{&1.id, RoleDisplay.site_access_for_membership(&1, org, nil)})
+    )
+  end
+
   defp site_admin?(user), do: RoleGrant.effective_role(user) == :admin
 
   defp get_membership(socket, id) do
@@ -336,12 +545,50 @@ defmodule KilnCMSWeb.TeamLive do
     end
   end
 
-  defp find_user(email, actor) do
-    case Accounts.get_user_by_email(String.trim(to_string(email)), actor: actor) do
-      {:ok, %{} = user} -> {:ok, user}
-      _ -> {:error, :not_found}
+  defp get_invitation(socket, id) do
+    case Enum.find(socket.assigns.invitations, &(&1.id == id)) do
+      nil -> {:error, :not_found}
+      invitation -> {:ok, invitation}
     end
   end
+
+  # What the admin is told when an address could not be added or invited.
+  defp add_error_message(error) do
+    case InvitationRefused.reason(error) do
+      :already_member ->
+        gettext("That person is already on this site.")
+
+      :already_invited ->
+        gettext("That address is already invited — resend it from Pending invitations.")
+
+      :suppressed ->
+        gettext(
+          "That address is on the mail suppression list, so the invitation would not arrive. Clear it under Mail first."
+        )
+
+      :mail_budget ->
+        gettext(
+          "That address has been sent too many invitations in the last hour. Try again later."
+        )
+
+      _other ->
+        ash_error_message(error,
+          fallback: gettext("Couldn't add or invite that address.")
+        )
+    end
+  end
+
+  defp invitation_status(invitation) do
+    if Invitations.live?(invitation),
+      do: gettext("Expires %{when}", when: RoleGrantForm.format(invitation.expires_at)),
+      else: gettext("Expired")
+  end
+
+  defp inviter(%{invited_by: %{} = user}), do: user.name || to_string(user.email)
+  defp inviter(_invitation), do: nil
+
+  defp text(value) when is_binary(value), do: value
+  defp text(_value), do: nil
 
   defp role_form(actor) do
     Role
@@ -349,24 +596,25 @@ defmodule KilnCMSWeb.TeamLive do
     |> to_form()
   end
 
-  # One outcome handler for every scoped submit (member edit, role create,
-  # role edit): `set_form` re-assigns the failed form, `on_ok` applies the
-  # success transition. Keeps the invalid-JSON flash from drifting per event.
-  defp handle_submit(socket, form, params, set_form, on_ok) do
-    case submit_scoped(form, params) do
-      {:ok, _} ->
-        {:noreply, on_ok.(socket)}
+  defp blank_scope, do: %{picks: nil, errors: %{}}
 
-      {:error, form} ->
-        {:noreply, set_form.(socket, form)}
+  defp admin?(socket), do: KilnCMSWeb.LiveUserAuth.platform_admin?(socket)
 
-      {:invalid_json, form} ->
-        {:noreply,
-         socket
-         |> set_form.(form)
-         |> put_flash(:error, gettext("Field grants must be a JSON object."))}
-    end
-  end
+  # The create form, in the shape `validate_scoped/2`/`submit_scoped/3` take
+  # from an edit: its stored scope is the attribute defaults.
+  defp new_role(socket),
+    do: %{
+      form: socket.assigns.role_form,
+      stored: ScopeParams.blank(),
+      scope: socket.assigns.role_scope
+    }
+
+  defp picked_role(socket, role_id) when is_binary(role_id) and role_id != "",
+    do: Enum.find(socket.assigns.roles, &(&1.id == role_id))
+
+  defp picked_role(_socket, _blank), do: nil
+
+  defp member_params(params), do: Map.replace(params, "role_id", presence(params["role_id"]))
 
   # Per-org tiers are LIVE (#419): the membership tier governs this site.
   defp tier_hint do
@@ -375,72 +623,73 @@ defmodule KilnCMSWeb.TeamLive do
     )
   end
 
-  # Scope-axis inputs arrive as text: comma-separated type lists and a JSON
-  # field-grants object. Convert before submit; bad JSON gets its own outcome
-  # for a friendly flash (same convention as the automation config).
-  defp submit_scoped(form, params) do
-    case normalize_scopes(params) do
-      {:ok, params} -> AshPhoenix.Form.submit(form, params: params)
-      :error -> {:invalid_json, AshPhoenix.Form.validate(form, params)}
+  # The scope pickers post modes; `ScopeParams` merges them onto the stored
+  # value. A picker refusal ("Only these…" with nothing ticked) is shown once a
+  # submit has hit it, and then follows the admin's edits until it is fixed.
+  defp validate_scoped(%{form: form, stored: stored, scope: scope}, params) do
+    {form_params, errors} =
+      case ScopeParams.normalize(params, stored) do
+        {:ok, normalized} -> {normalized, %{}}
+        {:error, errors} -> {ScopeParams.strip(params), errors}
+      end
+
+    errors = if scope.errors == %{}, do: %{}, else: errors
+
+    {AshPhoenix.Form.validate(form, form_params),
+     %{picks: ScopeParams.picks(params), errors: errors}}
+  end
+
+  # A refused picker never reaches the action: the form keeps the stored scope
+  # and the picks as posted. `unchanged?` sees the normalized params and can
+  # stop a submit that would write nothing.
+  defp submit_scoped(
+         %{form: form, stored: stored},
+         params,
+         unchanged? \\ fn _normalized -> false end
+       ) do
+    picks = ScopeParams.picks(params)
+
+    case ScopeParams.normalize(params, stored) do
+      {:ok, normalized} ->
+        if unchanged?.(normalized),
+          do: :unchanged,
+          else: submit_normalized(form, normalized, picks)
+
+      {:error, errors} ->
+        {:error, AshPhoenix.Form.validate(form, ScopeParams.strip(params)),
+         %{picks: picks, errors: errors}}
     end
   end
 
-  defp normalize_scopes(params) do
-    params =
-      params
-      |> split_list("editable_types")
-      |> split_list("readable_types")
-      |> Map.replace("role_id", presence(params["role_id"]))
-
-    case params do
-      %{"field_grants" => raw} when is_binary(raw) ->
-        case decode_grants(raw) do
-          {:ok, grants} -> {:ok, Map.put(params, "field_grants", grants)}
-          :error -> :error
-        end
-
-      _ ->
-        {:ok, params}
+  defp submit_normalized(form, normalized, picks) do
+    case AshPhoenix.Form.submit(form, params: normalized) do
+      {:ok, result} -> {:ok, result}
+      {:error, form} -> {:error, form, %{picks: picks, errors: %{}}}
     end
   end
 
-  defp split_list(%{} = params, key) do
-    case params do
-      %{^key => raw} when is_binary(raw) ->
-        Map.put(
-          params,
-          key,
-          raw |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
-        )
-
-      _ ->
-        params
-    end
+  defp unchanged_role?(role, params) do
+    same_text?(Map.get(params, "name", role.name), role.name) and
+      same_text?(Map.get(params, "description", role.description || ""), role.description) and
+      params["editable_types"] == role.editable_types and
+      params["readable_types"] == role.readable_types and
+      params["field_grants"] == role.field_grants and
+      params["field_read_grants"] == (role.field_read_grants || %{})
   end
 
-  defp decode_grants(raw) do
-    case String.trim(raw) do
-      "" -> {:ok, %{}}
-      trimmed -> decode_grants_json(trimmed)
-    end
-  end
-
-  defp decode_grants_json(trimmed) do
-    case Jason.decode(trimmed) do
-      {:ok, %{} = grants} -> {:ok, grants}
-      _ -> :error
-    end
-  end
+  # As the `:string` attribute casts it: trimmed, and blank is nil.
+  defp same_text?(param, stored) when is_binary(param), do: presence(String.trim(param)) == stored
+  defp same_text?(_param, _stored), do: false
 
   defp presence(""), do: nil
   defp presence(value), do: value
 
-  defp tier_options, do: @tier_options
+  defp tier_options, do: RoleDisplay.role_options()
 
   # Only tiers ABOVE the membership's standing one can be granted
   # (`RoleGrant.elevation?/2`), so offering the rest would offer a refusal.
   defp grantable_tiers(membership) do
-    Enum.filter(@tier_options, fn {_label, tier} ->
+    Enum.filter(tier_options(), fn {_label, tier} ->
       RoleGrant.elevation?(tier, membership.role)
     end)
   end
@@ -448,7 +697,7 @@ defmodule KilnCMSWeb.TeamLive do
   defp grant_summary(%{granted_role: role, granted_role_expires_at: at} = membership) do
     if RoleGrant.live?(membership) do
       gettext("%{role} until %{when}",
-        role: role,
+        role: role_label(role),
         when: RoleGrantForm.format(at)
       )
     end
@@ -457,27 +706,12 @@ defmodule KilnCMSWeb.TeamLive do
   defp custom_role_options(roles),
     do: [{gettext("No custom role"), ""}] ++ Enum.map(roles, &{&1.name, &1.id})
 
-  defp types_value(form, field) do
-    case form[field].value do
-      list when is_list(list) -> Enum.join(list, ", ")
-      raw when is_binary(raw) -> raw
-      _ -> ""
-    end
-  end
-
-  defp grants_value(form) do
-    case form[:field_grants].value do
-      map when is_map(map) and map_size(map) > 0 -> Jason.encode!(map, pretty: true)
-      raw when is_binary(raw) -> raw
-      _ -> ""
-    end
-  end
-
-  defp scope_summary(membership) do
+  defp scope_summary(record, catalog) do
     [
-      scope_part(gettext("edit"), membership.editable_types),
-      scope_part(gettext("read"), membership.readable_types),
-      grants_part(membership.field_grants)
+      scope_part(gettext("edit"), record.editable_types),
+      scope_part(gettext("read"), record.readable_types),
+      ScopePickers.grants_summary(record.field_grants, catalog),
+      ScopePickers.read_grants_summary(record.field_read_grants, catalog)
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" · ")
@@ -485,11 +719,6 @@ defmodule KilnCMSWeb.TeamLive do
 
   defp scope_part(_label, types) when types in [nil, []], do: nil
   defp scope_part(label, types), do: "#{label}: #{Enum.join(types, ", ")}"
-
-  defp grants_part(grants) when is_map(grants) and map_size(grants) > 0,
-    do: gettext("field grants: %{types}", types: grants |> Map.keys() |> Enum.join(", "))
-
-  defp grants_part(_grants), do: nil
 
   # --- render ----------------------------------------------------------------
 
@@ -546,6 +775,26 @@ defmodule KilnCMSWeb.TeamLive do
             {gettext("Members")} ({length(@members) + length(@site_admins)})
           </h2>
 
+          <%!-- Registrations awaiting approval (#2251) are not members, so the
+                list below leaves them out; this says where they are. --%>
+          <p :if={@pending_registrations > 0} id="team-pending-registrations" class="text-sm">
+            <.link navigate={~p"/editor/registrations"} class="link">
+              <%!-- A bounded count (`Registrations.count_cap/0`): at the cap
+                    it says "or more" rather than a number it did not read. --%>
+              {if @pending_registrations >= Registrations.count_cap(),
+                do:
+                  gettext("%{count} or more registrations are waiting for approval",
+                    count: @pending_registrations
+                  ),
+                else:
+                  ngettext(
+                    "1 registration is waiting for approval",
+                    "%{count} registrations are waiting for approval",
+                    @pending_registrations
+                  )}
+            </.link>
+          </p>
+
           <form phx-submit="add_member" class="card card-pad space-y-4" id="add-member-form">
             <div class="grid gap-4 sm:grid-cols-3">
               <.input
@@ -572,11 +821,71 @@ defmodule KilnCMSWeb.TeamLive do
               />
             </div>
             <p class="text-xs text-base-content/60">
-              {gettext("The account must already exist — invite people via sign-up or SSO first.")}
+              {gettext(
+                "No account yet, or not confirmed? They'll get an email invitation. A confirmed account is added straight away."
+              )}
               {tier_hint()}
             </p>
-            <.button type="submit" variant="primary">{gettext("Add member")}</.button>
+            <.button type="submit" variant="primary">{gettext("Add or invite")}</.button>
           </form>
+
+          <section
+            :if={@invitations != []}
+            id="team-invitations"
+            class="space-y-2"
+            aria-labelledby="team-invitations-heading"
+          >
+            <h3 id="team-invitations-heading" class="text-sm font-medium">
+              {gettext("Pending invitations")} ({length(@invitations)})
+            </h3>
+            <ul class="card divide-y divide-base-content/10 overflow-hidden">
+              <li
+                :for={invitation <- @invitations}
+                id={"invitation-#{invitation.id}"}
+                class="flex items-start justify-between gap-4 p-4"
+              >
+                <div class="min-w-0 space-y-1">
+                  <span class="font-medium">{invitation.email}</span>
+                  <p class="flex flex-wrap items-center gap-1 text-xs text-base-content/70">
+                    <.badge variant="outline">{role_label(invitation.role)}</.badge>
+                    <span :if={invitation.custom_role}>{gettext("Custom role:")}</span>
+                    <.badge :if={invitation.custom_role} variant="outline">
+                      {invitation.custom_role.name}
+                    </.badge>
+                  </p>
+                  <p class="text-xs text-base-content/70">
+                    <span :if={inviter(invitation)}>
+                      {gettext("Invited by %{name}.", name: inviter(invitation))}
+                    </span>
+                    <span class={!Invitations.live?(invitation) && "text-warning"}>
+                      {invitation_status(invitation)}
+                    </span>
+                  </p>
+                </div>
+                <div class="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    phx-click="resend_invitation"
+                    phx-value-id={invitation.id}
+                    aria-label={gettext("Resend the invitation to %{email}", email: invitation.email)}
+                    class="btn btn-sm btn-default"
+                  >
+                    {gettext("Resend")}
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="revoke_invitation"
+                    phx-value-id={invitation.id}
+                    data-confirm={gettext("Revoke this invitation? Its link will stop working.")}
+                    aria-label={gettext("Revoke the invitation to %{email}", email: invitation.email)}
+                    class="btn btn-sm btn-ghost text-base-content/70 hover:text-error"
+                  >
+                    <.icon name="hero-x-mark" class="size-4" />
+                  </button>
+                </div>
+              </li>
+            </ul>
+          </section>
 
           <.empty_state
             :if={@members == [] and @site_admins == []}
@@ -599,6 +908,11 @@ defmodule KilnCMSWeb.TeamLive do
             <li :for={user <- @site_admins} id={"site-admin-#{user.id}"} class="p-4">
               <div class="min-w-0 space-y-1">
                 <span class="font-medium">{user.email}</span>
+                <.role_summary
+                  id={"site-admin-#{user.id}-role"}
+                  label={gettext("On this site:")}
+                  access={@access[user.id]}
+                />
                 <p class="text-sm text-base-content/70">
                   <.badge variant="info">{gettext("Site admin")}</.badge>
                 </p>
@@ -623,23 +937,37 @@ defmodule KilnCMSWeb.TeamLive do
               >
                 <div class="min-w-0 space-y-1">
                   <span class="font-medium">{membership.user.email}</span>
-                  <p class="text-sm text-base-content/70">
-                    <%!-- A membership never demotes a platform admin
-                          (`Scoping.effective_tier/2`), so say so beside
-                          whatever tier the row holds. --%>
-                    <.badge :if={site_admin?(membership.user)} variant="info" class="mr-1">
+                  <%!-- A membership never demotes a platform admin
+                        (`Scoping.effective_tier/2`), so the row leads with
+                        the tier that applies and names the one it overrides. --%>
+                  <.role_summary
+                    id={"member-#{membership.id}-role"}
+                    label={gettext("On this site:")}
+                    access={@access[membership.user.id]}
+                  >
+                    <:note :if={@access[membership.user.id].source == :platform}>
+                      {gettext("Site tier %{tier}, overridden by the platform admin role.",
+                        tier: role_label(RoleGrant.effective_role(membership))
+                      )}
+                    </:note>
+                  </.role_summary>
+                  <p
+                    :if={site_admin?(membership.user) or membership.custom_role}
+                    class="flex flex-wrap items-center gap-1 text-xs text-base-content/60"
+                  >
+                    <.badge :if={site_admin?(membership.user)} variant="info">
                       {gettext("Site admin")}
                     </.badge>
-                    <.badge>{membership.role}</.badge>
-                    <.badge :if={grant_summary(membership)} variant="warning" class="ml-1">
-                      {grant_summary(membership)}
-                    </.badge>
-                    <.badge :if={membership.custom_role} variant="outline" class="ml-1">
+                    <span :if={membership.custom_role}>{gettext("Custom role:")}</span>
+                    <.badge :if={membership.custom_role} variant="outline">
                       {membership.custom_role.name}
                     </.badge>
                   </p>
-                  <p :if={scope_summary(membership) != ""} class="text-xs text-base-content/60">
-                    {scope_summary(membership)}
+                  <p
+                    :if={scope_summary(membership, @catalog) != ""}
+                    class="text-xs text-base-content/60"
+                  >
+                    {scope_summary(membership, @catalog)}
                   </p>
                 </div>
                 <div class="flex shrink-0 items-center gap-1">
@@ -669,6 +997,7 @@ defmodule KilnCMSWeb.TeamLive do
                 :if={@member_edit != nil && @member_edit.id == membership.id}
                 for={@member_edit.form}
                 id={"edit-member-#{membership.id}"}
+                phx-change="validate_member"
                 phx-submit="save_member"
                 class="space-y-4"
               >
@@ -688,7 +1017,16 @@ defmodule KilnCMSWeb.TeamLive do
                   />
                 </div>
                 <p class="text-xs text-base-content/60">{tier_hint()}</p>
-                <.scope_fields form={@member_edit.form} prefix="member" />
+                <ScopePickers.scope_pickers
+                  id={"edit-member-#{membership.id}"}
+                  form={@member_edit.form}
+                  level={:member}
+                  stored={@member_edit.stored}
+                  picks={@member_edit.scope.picks}
+                  errors={@member_edit.scope.errors}
+                  catalog={@catalog}
+                  inherited={@member_edit.inherited}
+                />
                 <div class="flex gap-2">
                   <.button type="submit" variant="primary">{gettext("Save")}</.button>
                   <button type="button" phx-click="cancel_member_edit" class="btn btn-sm btn-default">
@@ -716,6 +1054,7 @@ defmodule KilnCMSWeb.TeamLive do
           <.form
             for={@role_form}
             id="new-role-form"
+            phx-change="validate_role"
             phx-submit="create_role"
             class="card card-pad space-y-4"
           >
@@ -727,7 +1066,15 @@ defmodule KilnCMSWeb.TeamLive do
                 placeholder={gettext("Optional")}
               />
             </div>
-            <.scope_fields form={@role_form} prefix="role" />
+            <ScopePickers.scope_pickers
+              id="new-role"
+              form={@role_form}
+              level={:role}
+              stored={ScopeParams.blank()}
+              picks={@role_scope.picks}
+              errors={@role_scope.errors}
+              catalog={@catalog}
+            />
             <.button type="submit" variant="primary">{gettext("Add role")}</.button>
           </.form>
 
@@ -752,8 +1099,8 @@ defmodule KilnCMSWeb.TeamLive do
                   <p :if={role.description} class="text-sm text-base-content/70">
                     {role.description}
                   </p>
-                  <p :if={scope_summary(role) != ""} class="text-xs text-base-content/60">
-                    {scope_summary(role)}
+                  <p :if={scope_summary(role, @catalog) != ""} class="text-xs text-base-content/60">
+                    {scope_summary(role, @catalog)}
                   </p>
                 </div>
                 <div class="flex shrink-0 items-center gap-1">
@@ -785,6 +1132,7 @@ defmodule KilnCMSWeb.TeamLive do
                 :if={@role_edit != nil && @role_edit.id == role.id}
                 for={@role_edit.form}
                 id={"edit-role-#{role.id}"}
+                phx-change="validate_role_edit"
                 phx-submit="save_role"
                 class="space-y-4"
               >
@@ -792,7 +1140,15 @@ defmodule KilnCMSWeb.TeamLive do
                   <.input field={@role_edit.form[:name]} label={gettext("Name")} />
                   <.input field={@role_edit.form[:description]} label={gettext("Description")} />
                 </div>
-                <.scope_fields form={@role_edit.form} prefix="role" />
+                <ScopePickers.scope_pickers
+                  id={"edit-role-#{role.id}"}
+                  form={@role_edit.form}
+                  level={:role}
+                  stored={@role_edit.stored}
+                  picks={@role_edit.scope.picks}
+                  errors={@role_edit.scope.errors}
+                  catalog={@catalog}
+                />
                 <div class="flex gap-2">
                   <.button type="submit" variant="primary">{gettext("Save")}</.button>
                   <button type="button" phx-click="cancel_role_edit" class="btn btn-sm btn-default">
@@ -869,48 +1225,6 @@ defmodule KilnCMSWeb.TeamLive do
         <.input name="until" value="" type="datetime-local" label={gettext("Or until (UTC)")} />
         <.button type="submit">{gettext("Grant")}</.button>
       </form>
-    </div>
-    """
-  end
-
-  attr :form, :any, required: true
-  attr :prefix, :string, required: true
-
-  defp scope_fields(assigns) do
-    assigns =
-      assigns
-      |> assign(:editable_text, types_value(assigns.form, :editable_types))
-      |> assign(:readable_text, types_value(assigns.form, :readable_types))
-      |> assign(:grants_json, grants_value(assigns.form))
-
-    ~H"""
-    <div class="grid gap-4 sm:grid-cols-2">
-      <.input
-        name={"#{@prefix}[editable_types]"}
-        value={@editable_text}
-        type="text"
-        label={gettext("Editable types")}
-        placeholder={gettext("post, page — empty = all")}
-      />
-      <.input
-        name={"#{@prefix}[readable_types]"}
-        value={@readable_text}
-        type="text"
-        label={gettext("Readable types (editorial)")}
-        placeholder={gettext("post — empty = all")}
-      />
-    </div>
-    <div>
-      <.input
-        name={"#{@prefix}[field_grants]"}
-        value={@grants_json}
-        type="textarea"
-        label={gettext("Field grants (JSON)")}
-        placeholder={~s({"post": ["title", "blocks"]})}
-      />
-      <p class="mt-1 text-xs text-base-content/60">
-        {gettext("Content type → attributes a member may change. Empty = no field restriction.")}
-      </p>
     </div>
     """
   end

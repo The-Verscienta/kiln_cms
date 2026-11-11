@@ -85,7 +85,7 @@ defmodule KilnCMSWeb.ConsoleNav do
   The nav as the SIDEBAR draws it for `user` — `nav/2` filtered by the user's
   sidebar preset (`User.nav_preset`).
 
-    * `:everything` — `nav/2` unchanged, plus `pinned: []`.
+    * `:everything` — `nav/2` unchanged, plus `pinned: []` and `hidden_screens: []`.
     * `:essentials` — the daily author screens, the Configure hub for an admin,
       and `:pinned`: **Your settings**, plus whichever screen is `active` when
       the preset would otherwise hide it, so nobody lands on a page the sidebar
@@ -99,7 +99,7 @@ defmodule KilnCMSWeb.ConsoleNav do
 
     case preset(user) do
       :essentials -> essentials(nav, active)
-      :everything -> Map.put(nav, :pinned, [])
+      :everything -> nav |> Map.put(:pinned, []) |> Map.put(:hidden_screens, [])
     end
   end
 
@@ -125,6 +125,20 @@ defmodule KilnCMSWeb.ConsoleNav do
         plugin: []
     }
     |> Map.put(:pinned, Enum.reject([stray, settings], &is_nil/1))
+    |> Map.put(:hidden_screens, hidden_screens(grouped, nav.hub))
+  end
+
+  # The screens an admin goes looking for that Essentials drops from the
+  # sidebar (#2144), as the labels the actor can actually open — read from the
+  # nav map, so a screen that moves, is renamed or is gated for this actor
+  # changes (or leaves) the hint with it. Only for someone who has the Configure
+  # hub to send them to.
+  @hint_keys [:forms, :webhooks, :api_keys, :trash]
+
+  defp hidden_screens(_grouped, nil), do: []
+
+  defp hidden_screens(grouped, _hub) do
+    for key <- @hint_keys, item = Enum.find(grouped, &(&1.key == key)), do: item.label
   end
 
   defp on_page?(_item, nil), do: false
@@ -413,6 +427,15 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-rss",
             description: gettext("Which types syndicate, and whether in full."),
             keywords: ["rss", "atom", "syndication", "json feed"]
+          },
+          %{
+            key: :safety_fields,
+            label: gettext("Safety fields"),
+            path: ~p"/editor/safety-fields",
+            icon: "hero-shield-check",
+            description:
+              gettext("Which fields need a severity when a published edit changes them."),
+            keywords: ["severity", "critical", "notable", "routine", "change", "safety"]
           }
         ]
       },
@@ -597,17 +620,6 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("The mail provider and From address this site sends from."),
             keywords: ["smtp", "email", "relay", "sender", "from address", "postmark", "ses"]
           },
-          # A site's own identity provider (#1561). Not with the operator's
-          # `OIDC_*` provider, which has no screen: this one is a site admin's
-          # to set, and is honoured only for the domains the site verified.
-          %{
-            key: :site_sso,
-            label: gettext("Single sign-on"),
-            path: ~p"/editor/site-sso",
-            icon: "hero-finger-print",
-            description: gettext("Your own identity provider on this site's sign-in page."),
-            keywords: ["sso", "oidc", "openid connect", "okta", "entra", "identity provider"]
-          },
           # A site's own Web Push key (#1560), generated rather than entered.
           %{
             key: :site_push,
@@ -640,6 +652,121 @@ defmodule KilnCMSWeb.ConsoleNav do
           }
         ]
       },
+      # How people sign in to this site and from where (#2248): split out of
+      # Integrations and Organization, which were both at the seven-item cap.
+      %{
+        key: :access,
+        label: gettext("Sign-in & access"),
+        items: [
+          # A site's own identity provider (#1561). Not with the operator's
+          # `OIDC_*` provider, which has no screen: this one is a site admin's
+          # to set, and is honoured only for the domains the site verified.
+          %{
+            key: :site_sso,
+            label: gettext("Single sign-on"),
+            path: ~p"/editor/site-sso",
+            icon: "hero-finger-print",
+            description: gettext("Your own identity provider on this site's sign-in page."),
+            keywords: ["sso", "oidc", "openid connect", "okta", "entra", "identity provider"]
+          },
+          # How long a signed-in browser lasts on this site, and the button that
+          # ends them all (#2246).
+          %{
+            key: :session_policy,
+            label: gettext("Sessions"),
+            path: ~p"/editor/sessions",
+            icon: "hero-clock",
+            description: gettext("Sign out idle browsers, or everyone signed in to this site."),
+            keywords: [
+              "session",
+              "idle",
+              "timeout",
+              "inactivity",
+              "sign out",
+              "log out",
+              "logout",
+              "security"
+            ]
+          },
+          # What happens when a new password is in a known breach (#2240).
+          %{
+            key: :password_policy,
+            label: gettext("Password policy"),
+            path: ~p"/editor/password-policy",
+            icon: "hero-key",
+            description: gettext("What happens when a new password is in a known breach."),
+            keywords: ["password", "breach", "pwned", "hibp", "leaked", "compromised", "security"]
+          },
+          # Who has signed up and is waiting for an admin, and the switch that
+          # makes them wait (#2251). Beside Password policy: both decide what a
+          # sign-up gets.
+          %{
+            key: :registrations,
+            label: gettext("Registrations"),
+            path: ~p"/editor/registrations",
+            icon: "hero-user-plus",
+            description: gettext("Approve or reject people who sign up on this site."),
+            keywords: [
+              "registration",
+              "sign up",
+              "signup",
+              "approval",
+              "approve",
+              "pending",
+              "moderation",
+              "new users"
+            ]
+          },
+          # The networks the console and sign-in may be reached from (#2248).
+          %{
+            key: :admin_allowlist,
+            label: gettext("Admin allowlist"),
+            path: ~p"/editor/admin-allowlist",
+            icon: "hero-shield-check",
+            description: gettext("Networks that can open the console and sign in."),
+            keywords: [
+              "allowlist",
+              "whitelist",
+              "ip",
+              "cidr",
+              "vpn",
+              "office",
+              "network",
+              "sign-in",
+              "lockout"
+            ]
+          },
+          # The addresses refused everywhere on the site (#2242), after the one
+          # list that admits them to the console.
+          %{
+            key: :ip_blocks,
+            label: gettext("Blocked addresses"),
+            path: ~p"/editor/ip-blocks",
+            icon: "hero-no-symbol",
+            description: gettext("Refuse requests from an IP address or range."),
+            keywords: ["ip", "block", "ban", "cidr", "firewall", "deny", "abuse"]
+          },
+          # Beside Blocked addresses: both decide what a client may cost the site,
+          # one by address, this by what the client says it is (#2243).
+          %{
+            key: :bot_budgets,
+            label: gettext("Bot budgets"),
+            path: ~p"/editor/bot-budgets",
+            icon: "hero-bug-ant",
+            description: gettext("How many requests crawlers, bots and scripts may make."),
+            keywords: [
+              "bot",
+              "crawler",
+              "scraper",
+              "user agent",
+              "googlebot",
+              "gptbot",
+              "rate limit",
+              "throttle"
+            ]
+          }
+        ]
+      },
       %{
         key: :organization,
         label: gettext("Organization"),
@@ -652,6 +779,24 @@ defmodule KilnCMSWeb.ConsoleNav do
             description: gettext("Content freshness, provenance and the audit record."),
             keywords: ["audit", "provenance", "witness", "freshness", "review cadence"]
           },
+          # Which security settings are on, and what to fix first (#2252):
+          # beside Governance, the other "how is this site doing" report.
+          %{
+            key: :security_posture,
+            label: gettext("Security posture"),
+            path: ~p"/editor/security-posture",
+            icon: "hero-check-badge",
+            description: gettext("Which security settings are on, and what to fix first."),
+            keywords: [
+              "security",
+              "posture",
+              "hardening",
+              "checklist",
+              "2fa",
+              "score",
+              "audit"
+            ]
+          },
           # Organization, not Delivery: who answers for the site's security is a
           # statement about the organization, served as a file (#1873).
           %{
@@ -661,6 +806,44 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-shield-exclamation",
             description: gettext("Where researchers report a vulnerability: security.txt."),
             keywords: ["security.txt", "vulnerability", "disclosure", "rfc 9116", "contact"]
+          },
+          # Beside the other security screens: who did what, from where (#2241).
+          %{
+            key: :security_log,
+            label: gettext("Security log"),
+            path: ~p"/editor/security-log",
+            icon: "hero-clipboard-document-list",
+            description: gettext("Sign-ins, lockouts, roles and keys: who did what, from where."),
+            keywords: [
+              "audit",
+              "log",
+              "sign-in",
+              "login",
+              "lockout",
+              "ip",
+              "2fa",
+              "retention",
+              "events"
+            ]
+          },
+          # Beside the log it is about: which of its events tell the site's
+          # admins at once (#2245).
+          %{
+            key: :security_alerts,
+            label: gettext("Security alerts"),
+            path: ~p"/editor/security-alerts",
+            icon: "hero-bell-alert",
+            description: gettext("Which security events alert this site's admins."),
+            keywords: [
+              "alert",
+              "notify",
+              "notification",
+              "new admin",
+              "lockout",
+              "failed sign-in",
+              "2fa",
+              "security"
+            ]
           },
           %{
             key: :trash,

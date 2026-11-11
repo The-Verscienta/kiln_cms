@@ -109,12 +109,16 @@ defmodule KilnCMS.CMS.PrivateFields do
     end
   end
 
+  # A field of a type this release does not know (#2605) is private all the
+  # same: `private` does not depend on the type, and its value is still
+  # stored. Left out of this read, it would be served to everyone below editor.
   defp load(org_id) do
     KilnCMS.CMS.list_field_definitions!(
       query: [filter: [private: true, link_of_id: [is_nil: true], group_of_id: [is_nil: true]]],
       actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
       authorize_with: :error,
-      tenant: org_id
+      tenant: org_id,
+      context: KilnCMS.CMS.FieldDefinition.all_types_context()
     )
     |> Enum.reject(&KilnCMS.CMS.FieldDefinition.orphaned?/1)
     |> Enum.group_by(&owner/1, & &1.name)

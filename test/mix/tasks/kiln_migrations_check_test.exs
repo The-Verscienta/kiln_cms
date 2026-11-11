@@ -597,4 +597,197 @@ defmodule Mix.Tasks.Kiln.Migrations.CheckTest do
       end
     end
   end
+
+  describe "reporting view pin (#2295)" do
+    @viewed [viewed_tables: ["posts"]]
+    @both [viewed_tables: ["posts", "pages"]]
+
+    # A fixture with a `down` of its own: the shared one retypes `posts.title`,
+    # which is itself a pinned column.
+    defp pin_migration(up, down) do
+      """
+      defmodule KilnCMS.Repo.Migrations.PinFixture do
+        use Ecto.Migration
+
+        def up do
+      #{up}
+        end
+
+        def down do
+      #{down}
+        end
+      end
+      """
+    end
+
+    defp pin_rules(up, opts \\ @viewed, down \\ "    :ok") do
+      up
+      |> pin_migration(down)
+      |> rules(opts)
+      |> Enum.filter(&(&1 == :reporting_view_pin))
+    end
+
+    defp drop_views(table),
+      do:
+        ~s|execute("DROP VIEW IF EXISTS kiln_reporting_v1.#{table}_field_values")\n| <>
+          ~s|execute("DROP VIEW IF EXISTS kiln_reporting_v1.#{table}")\n|
+
+    test "removing a viewed column is flagged" do
+      assert [:reporting_view_pin] ==
+               pin_rules("alter table(:posts) do\n  remove :title\nend")
+    end
+
+    test "retyping a viewed column is flagged" do
+      assert [:reporting_view_pin] ==
+               pin_rules("alter table(:posts) do\n  modify :slug, :text, from: :string\nend")
+    end
+
+    test "renaming a viewed column is flagged" do
+      assert [:reporting_view_pin] == pin_rules("rename table(:posts), :slug, to: :handle")
+    end
+
+    test "a column no view reads, or a table with no view, is not a pin" do
+      assert [] == pin_rules("alter table(:posts) do\n  remove :excerpt\nend")
+      assert [] == pin_rules("alter table(:tags) do\n  remove :title\nend")
+      assert [] == pin_rules("alter table(:posts) do\n  remove :title\nend", [])
+    end
+
+    test "a contract marker does not excuse a pin" do
+      up = """
+      # kiln:contract-ok since v0.1.0 - nothing reads it
+      alter table(:posts) do
+        remove :title
+      end
+      """
+
+      assert [:reporting_view_pin] == pin_rules(up)
+    end
+
+    test "dropping the view and its field-values twin earlier in the migration clears it" do
+      up = drop_views("posts") <> "alter table(:posts) do\n  remove :title\nend\n"
+      assert [] == pin_rules(up)
+    end
+
+    test "dropping only one of the two views does not" do
+      change = "alter table(:posts) do\n  remove :title\nend\n"
+
+      assert [:reporting_view_pin] ==
+               pin_rules(~s|execute("DROP VIEW IF EXISTS kiln_reporting_v1.posts")\n| <> change)
+
+      assert [:reporting_view_pin] ==
+               pin_rules(
+                 ~s|execute("DROP VIEW IF EXISTS kiln_reporting_v1.posts_field_values")\n| <>
+                   change
+               )
+    end
+
+    test "dropping the views after the change does not" do
+      up = "alter table(:posts) do\n  remove :title\nend\n" <> drop_views("posts")
+      assert [:reporting_view_pin] == pin_rules(up)
+    end
+
+    test "the down is checked, and a drop in up does not excuse it" do
+      change = "alter table(:posts) do\n  remove :title\nend\n"
+
+      assert [:reporting_view_pin] == pin_rules(drop_views("posts") <> change, @viewed, change)
+
+      assert [] ==
+               pin_rules(drop_views("posts") <> change, @viewed, drop_views("posts") <> change)
+
+      assert [:reporting_view_pin] == pin_rules("    :ok", @viewed, change)
+    end
+
+    test "the Ash shape: views dropped, column changed, views re-created" do
+      up = drop_views("posts") <> "alter table(:posts) do\n  remove :title\nend\n"
+      assert [] == pin_rules(up, @viewed, up)
+    end
+
+    for {sql, label} <- [
+          {"ALTER TABLE posts DROP COLUMN title", "DROP COLUMN"},
+          {"ALTER TABLE posts DROP COLUMN IF EXISTS \\\"title\\\"",
+           "DROP COLUMN IF EXISTS, quoted"},
+          {"alter table public.posts rename column slug to handle", "RENAME COLUMN"},
+          {"ALTER TABLE ONLY posts RENAME slug TO handle", "RENAME without COLUMN"},
+          {"ALTER TABLE posts ALTER COLUMN slug TYPE text", "ALTER COLUMN TYPE"},
+          {"ALTER TABLE posts ALTER COLUMN slug SET DATA TYPE text", "SET DATA TYPE"},
+          {"ALTER TABLE posts ADD COLUMN x int, DROP COLUMN title", "among other actions"}
+        ] do
+      test "raw #{label} on a viewed column is flagged" do
+        sql = unquote(sql)
+        assert [:reporting_view_pin] == pin_rules(~s|execute("#{sql}")|)
+      end
+    end
+
+    test "raw SQL on a column no view reads, or an unrelated alteration, is not a pin" do
+      for sql <- [
+            "ALTER TABLE posts DROP COLUMN excerpt",
+            "ALTER TABLE posts ALTER COLUMN excerpt TYPE text",
+            "ALTER TABLE posts ALTER COLUMN title SET NOT NULL",
+            "ALTER TABLE posts RENAME TO articles",
+            "ALTER TABLE tags DROP COLUMN title"
+          ] do
+        assert [] == pin_rules(~s|execute("#{sql}")|), sql
+      end
+    end
+
+    test "raw SQL is cleared by dropping both views earlier in the same function" do
+      up = drop_views("posts") <> ~s|execute("ALTER TABLE posts DROP COLUMN title")|
+      assert [] == pin_rules(up)
+
+      assert [:reporting_view_pin] ==
+               pin_rules("    :ok", @viewed, ~s|execute("ALTER TABLE posts DROP COLUMN title")|)
+    end
+
+    test "the field_definitions and type_definitions columns the views read are pinned" do
+      for {table, col} <- [
+            {"field_definitions", "private"},
+            {"field_definitions", "link_of_id"},
+            {"field_definitions", "type_definition_id"},
+            {"type_definitions", "path_segment"},
+            {"type_definitions", "name"}
+          ] do
+        assert [:reporting_view_pin] ==
+                 pin_rules("alter table(:#{table}) do\n  remove :#{col}\nend"),
+               "#{table}.#{col}"
+      end
+
+      assert [:reporting_view_pin] ==
+               pin_rules("rename table(:field_definitions), :name, to: :key")
+
+      assert [:reporting_view_pin] ==
+               pin_rules(~s|execute("ALTER TABLE type_definitions ALTER COLUMN id TYPE text")|)
+    end
+
+    test "a definition-table column no view reads, or no views at all, is not a pin" do
+      assert [] == pin_rules("alter table(:field_definitions) do\n  remove :label\nend")
+      assert [] == pin_rules("alter table(:type_definitions) do\n  remove :icon\nend")
+      assert [] == pin_rules("alter table(:field_definitions) do\n  remove :private\nend", [])
+    end
+
+    test "a definition-table pin needs every viewed table's pair dropped" do
+      change = "alter table(:field_definitions) do\n  remove :private\nend\n"
+
+      assert [:reporting_view_pin] == pin_rules(drop_views("posts") <> change, @both)
+      assert [] == pin_rules(drop_views("posts") <> drop_views("pages") <> change, @both)
+    end
+
+    test "a column name is pinned by its own table: posts.name is no field_definitions.name" do
+      assert [] == pin_rules("alter table(:posts) do\n  remove :name\nend")
+      assert [] == pin_rules("alter table(:field_definitions) do\n  remove :title\nend")
+    end
+
+    test "the task's column lists equal the ones the views are built from" do
+      assert Enum.sort(Check.reporting_pinned_columns()) ==
+               Enum.sort(KilnCMS.Reporting.ViewSql.pinned_columns())
+
+      other = KilnCMS.Reporting.ViewSql.pinned_other_columns()
+
+      assert Map.keys(Check.reporting_pinned_other_columns()) |> Enum.sort() ==
+               Enum.sort(Map.keys(other))
+
+      for {table, cols} <- other do
+        assert Enum.sort(cols) == Enum.sort(Check.reporting_pinned_other_columns()[table])
+      end
+    end
+  end
 end

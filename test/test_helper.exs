@@ -143,6 +143,16 @@ kotlinc_exclusion =
     [:kotlinc]
   end
 
+# The backup scale runs (#2218): multi-GB sparse files through the checksum and
+# archive pipeline to prove memory stays bounded. They take a minute or more and
+# write gigabytes of (sparse) scratch space, so they are excluded by default:
+#
+#     mix test --include backup_scale test/kiln_cms/backups
+#
+# The always-on tests in the same files prove the same property on a ~1 GiB
+# sparse file; this tag is the 3 GiB run recorded in the PR.
+backup_scale_exclusion = [:backup_scale]
+
 # Not a test: rewrites the schema-export fixture and goldens. Run it with
 # `--only regenerate_schema_goldens` (see its moduledoc).
 regenerate_exclusion = [:regenerate_schema_goldens]
@@ -159,7 +169,7 @@ else
         no_ffmpeg_exclusion ++
         calibration_exclusion ++
         table_lock_exclusion ++
-        swiftc_exclusion ++ kotlinc_exclusion ++ regenerate_exclusion
+        swiftc_exclusion ++ kotlinc_exclusion ++ regenerate_exclusion ++ backup_scale_exclusion
   )
 end
 
@@ -171,3 +181,9 @@ Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)
 # other tests and fails with "type `X` can not be handled" (#1796). See
 # `KilnCMS.Test.TypeCache`.
 KilnCMS.Test.TypeCache.warm!(KilnCMS.Repo)
+
+# The table behind the crawler-verification DNS stub (#2254), owned by a
+# process that lives as long as the run so every test and lookup task can
+# plant and read answers.
+KilnCMS.Test.StubCrawlerResolver.start()
+KilnCMS.Test.PublicAddress.start()

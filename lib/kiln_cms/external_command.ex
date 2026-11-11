@@ -8,6 +8,9 @@ defmodule KilnCMS.ExternalCommand do
   and both need the same containment. This is that containment, in one place,
   because the two got it in different orders: the PDF path grew a real timeout
   in #918 while the A/V path was still on `System.cmd/3`, which has none (#1100).
+  The backup pipeline's `pg_dump`, `pg_restore`, `rclone` and `tar` run here too
+  (#2218), for the other half of the containment: a child that must not outlive
+  a caller killed mid-run.
 
   ## Why a port rather than `System.cmd/3`
 
@@ -49,46 +52,119 @@ defmodule KilnCMS.ExternalCommand do
 
   `exe` must be an absolute path — a `System.find_executable/1` result — since
   `:spawn_executable` does not search `PATH`.
+
+  `timeout_ms` may be `:infinity` for a caller that is bounded some other way
+  (an Oban job timeout). That bound kills the *caller*, which is why the
+  caller-death watcher below exists.
+
+  ## Options
+
+    * `:env` — `[{name, value}]` added to the child's environment, as
+      `System.cmd/3`'s `:env`. The place for a secret that must not sit in argv
+      (`/proc/<pid>/cmdline` is world-readable).
+    * `:tail` — keep only the last this-many bytes of output instead of all of
+      it, for a child whose output is unbounded (a `tar` listing).
+
+  ## The caller dying
+
+  The port is linked to the caller, so a caller killed mid-run (a job timeout,
+  `Oban.cancel_job/1`, a supervisor shutdown) closes it — and closing a port
+  signals nothing. A watcher process *outside* the caller's link set monitors
+  it and `kill -9`s the OS pid if the caller dies before the child exits, so
+  the child cannot go on writing a file a retry then collides with.
   """
   # `Port.open/2` with `:spawn_executable` execs directly rather than through a
   # shell, so neither the program nor the argument list can be injected into.
   # Even a hostile *filename* arrives as one exec argv entry, not shell syntax.
-  @spec run(Path.t(), [String.t()], pos_integer()) :: {binary(), non_neg_integer() | :timeout}
-  def run(exe, args, timeout_ms)
-      when is_binary(exe) and is_list(args) and is_integer(timeout_ms) and timeout_ms > 0 do
+  @spec run(Path.t(), [String.t()], timeout(), keyword()) ::
+          {binary(), non_neg_integer() | :timeout}
+  def run(exe, args, timeout_ms, opts \\ [])
+      when is_binary(exe) and is_list(args) and is_list(opts) and
+             (timeout_ms == :infinity or (is_integer(timeout_ms) and timeout_ms > 0)) do
     port =
       Port.open({:spawn_executable, exe}, [
         :binary,
         :exit_status,
         :stderr_to_stdout,
-        {:args, args}
+        {:args, args},
+        {:env, port_env(Keyword.get(opts, :env, []))}
       ])
 
-    os_pid =
-      case Port.info(port, :os_pid) do
-        {:os_pid, pid} -> pid
-        _closed -> nil
-      end
-
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    os_pid = os_pid(port)
+    watcher = watch(os_pid)
+    deadline = deadline(timeout_ms)
     timed_out = "#{Path.basename(exe)} timed out after #{timeout_ms}ms"
+    tail = Keyword.get(opts, :tail)
 
-    collect(port, os_pid, [], deadline, timed_out)
+    try do
+      collect(port, os_pid, empty(tail), deadline, timed_out, tail)
+    after
+      send(watcher, :done)
+    end
   end
 
-  defp collect(port, os_pid, acc, deadline, timed_out) do
-    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+  defp os_pid(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, pid} -> pid
+      _closed -> nil
+    end
+  end
 
+  defp deadline(:infinity), do: :infinity
+  defp deadline(timeout_ms), do: System.monotonic_time(:millisecond) + timeout_ms
+
+  # `System.cmd/3` takes strings; a port takes charlists.
+  defp port_env(env) do
+    for {name, value} <- env, do: {String.to_charlist(name), String.to_charlist(value)}
+  end
+
+  # A process that is not linked to the caller, so it outlives a caller killed
+  # with an untrappable exit, and kills the OS child when that happens.
+  defp watch(nil), do: spawn(fn -> :ok end)
+
+  defp watch(os_pid) do
+    caller = self()
+
+    spawn(fn ->
+      ref = Process.monitor(caller)
+
+      receive do
+        :done -> :ok
+        {:DOWN, ^ref, :process, _pid, _reason} -> kill(os_pid)
+      end
+    end)
+  end
+
+  defp empty(nil), do: []
+  defp empty(_tail), do: ""
+
+  defp collect(port, os_pid, acc, deadline, timed_out, tail) do
     receive do
-      {^port, {:data, chunk}} -> collect(port, os_pid, [acc | chunk], deadline, timed_out)
-      {^port, {:exit_status, code}} -> {IO.iodata_to_binary(acc), code}
+      {^port, {:data, chunk}} ->
+        collect(port, os_pid, append(acc, chunk, tail), deadline, timed_out, tail)
+
+      {^port, {:exit_status, code}} ->
+        {IO.iodata_to_binary(acc), code}
     after
-      remaining ->
+      remaining(deadline) ->
         kill(os_pid)
         close(port)
         drain(port)
         {timed_out, :timeout}
     end
+  end
+
+  defp remaining(:infinity), do: :infinity
+  defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp append(acc, chunk, nil), do: [acc | chunk]
+
+  defp append(acc, chunk, tail) do
+    bin = acc <> chunk
+
+    if byte_size(bin) <= tail,
+      do: bin,
+      else: binary_part(bin, byte_size(bin) - tail, tail)
   end
 
   defp drain(port) do
@@ -100,8 +176,9 @@ defmodule KilnCMS.ExternalCommand do
   end
 
   # SIGKILL, because the point is that the process stops now: it is holding CPU
-  # or disk on work the caller has already given up on, and neither qpdf nor
-  # ffmpeg has cleanup worth waiting for. Closing the port does not signal it.
+  # or disk on work the caller has already given up on, and none of qpdf,
+  # ffmpeg, pg_dump, tar or rclone has cleanup worth waiting for. Closing the
+  # port does not signal it. A pid that already exited is not an error.
   #
   # `os_pid` is an integer from `Port.info/2`, never caller input.
   # sobelow_skip ["CI.System"]

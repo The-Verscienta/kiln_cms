@@ -98,7 +98,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     # reconstructs every field, not just the last one changed.
     page = Ash.update!(page, %{title: "Edited title"}, action: :autosave, actor: admin)
     page = Ash.update!(page, %{seo_title: "Edited SEO"}, action: :autosave, actor: admin)
-    _page = Ash.update!(page, %{slug: "coalesced-slug"}, action: :autosave, actor: admin)
+    page = Ash.update!(page, %{slug: "coalesced-slug"}, action: :autosave, actor: admin)
 
     autosaves = Enum.filter(versions(page, admin), &(&1.version_action_name == :autosave))
     assert length(autosaves) == 1
@@ -123,7 +123,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
     page = Ash.update!(page, %{title: "First edit"}, action: :autosave, actor: admin)
     page = Ash.update!(page, %{title: "Second edit"}, action: :autosave, actor: admin)
-    _page = Ash.update!(page, %{title: "Third edit"}, action: :autosave, actor: admin)
+    page = Ash.update!(page, %{title: "Third edit"}, action: :autosave, actor: admin)
 
     [coalesced] = Enum.filter(versions(page, admin), &(&1.version_action_name == :autosave))
 
@@ -145,6 +145,90 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
              CMS.restore_page_version(page, %{version_id: other_version.id}, actor: admin)
   end
 
+  # #2532: `RestoreVersion` force-changes the version's values onto the held
+  # struct, and Ash drops a change equal to that struct. A struct read before
+  # a later edit made the restore report success and write nothing, and its
+  # state and slug fed the gates. The optimistic lock refuses it instead.
+  describe "a held struct the row has moved past (#2532)" do
+    test "a restore from a stale struct is refused and writes nothing" do
+      admin = admin()
+      page = CMS.create_page!(%{title: "One", slug: slug()}, actor: admin)
+      held = CMS.update_page!(page, %{title: "Two"}, actor: admin)
+      _latest = CMS.update_page!(held, %{title: "Three"}, actor: admin)
+
+      [create_version | _] = versions(page, admin)
+
+      assert {:error, error} =
+               CMS.restore_page_version(held, %{version_id: create_version.id}, actor: admin)
+
+      assert_stale(error)
+      assert raw(page).title == "Three"
+    end
+
+    test "the issue's case: the version equals the stale struct, so it was a silent no-op" do
+      admin = admin()
+      page = CMS.create_page!(%{title: "Before", slug: slug()}, actor: admin)
+      # The struct `page` still says "Before", which is also what the create
+      # version holds: every force-change would equal the data and be dropped.
+      CMS.update_page!(page, %{title: "After"}, actor: admin)
+      [create_version | _] = versions(page, admin)
+
+      assert {:error, error} =
+               CMS.restore_page_version(page, %{version_id: create_version.id}, actor: admin)
+
+      assert_stale(error)
+      assert raw(page).title == "After"
+      # No version row for a restore that did not happen.
+      assert length(versions(page, admin)) == 2
+    end
+
+    test "a restore from a fresh struct lands in the row and bumps lock_version" do
+      admin = admin()
+      page = CMS.create_page!(%{title: "Before", slug: slug()}, actor: admin)
+      page = CMS.update_page!(page, %{title: "After"}, actor: admin)
+      [create_version | _] = versions(page, admin)
+
+      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+
+      row = raw(page)
+      assert row.title == "Before"
+      assert row.lock_version == page.lock_version + 1
+      assert restored.lock_version == row.lock_version
+    end
+
+    test "of two holders of the same struct, the second to restore is refused" do
+      admin = admin()
+      page = CMS.create_page!(%{title: "One", slug: slug()}, actor: admin)
+      page = CMS.update_page!(page, %{title: "Two"}, actor: admin)
+      [create_version, second | _] = versions(page, admin)
+
+      assert {:ok, _} =
+               CMS.restore_page_version(page, %{version_id: create_version.id}, actor: admin)
+
+      assert {:error, error} =
+               CMS.restore_page_version(page, %{version_id: second.id}, actor: admin)
+
+      assert_stale(error)
+      assert raw(page).title == "One"
+    end
+
+    test "a save from a struct held before a restore is refused" do
+      admin = admin()
+      page = CMS.create_page!(%{title: "One", slug: slug()}, actor: admin)
+      page = CMS.update_page!(page, %{title: "Two"}, actor: admin)
+      [create_version | _] = versions(page, admin)
+
+      # Another tab holds `page`; this one restores from a fresh read of the
+      # same row. The restore used to leave `lock_version` alone, so the other
+      # tab's save went through and silently undid it.
+      CMS.restore_page_version!(raw(page), %{version_id: create_version.id}, actor: admin)
+
+      assert {:error, error} = CMS.update_page(page, %{title: "Overwrite"}, actor: admin)
+      assert_stale(error)
+      assert raw(page).title == "One"
+    end
+  end
+
   describe "field coverage (#691)" do
     test "every field the compare view calls restorable actually round-trips" do
       admin = admin()
@@ -161,13 +245,15 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
         seo_keywords: "original, keywords",
         seo_image: "/uploads/original.png",
         canonical_url: "https://example.com/original",
+        noindex: true,
+        nofollow: true,
         custom_fields: %{"price" => "9"}
       }
 
       page = CMS.create_page!(Map.put(original, :blocks, block("Original")), actor: admin)
       [create_version | _] = versions(page, admin)
 
-      _edited =
+      edited =
         CMS.update_page!(
           page,
           %{
@@ -181,13 +267,21 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
             seo_keywords: "edited, keywords",
             seo_image: "/uploads/edited.png",
             canonical_url: "https://example.com/edited",
+            noindex: false,
+            nofollow: false,
             custom_fields: %{"price" => "19"},
             blocks: block("Edited")
           },
           actor: admin
         )
 
-      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+      # Restored onto the edited record, not the struct from before the edit:
+      # a restore from that stale struct changes nothing Ash can see (every
+      # value already equals its data) and used to return the struct as if it
+      # had landed. With the trash guard's row filter (#2332) the no-op reads
+      # the row back, which still holds the edit.
+      restored =
+        CMS.restore_page_version!(edited, %{version_id: create_version.id}, actor: admin)
 
       for {field, value} <- original do
         assert Map.fetch!(restored, field) == value,
@@ -223,7 +317,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       # belongs in history, while restoring text must not relocate the document.
       assert VersionDiff.diffable_fields(KilnCMS.CMS.Post) ==
                ~w(title working_title slug path_alias excerpt state audience locale
-                  seo_title seo_description seo_keywords seo_image canonical_url
+                  seo_title seo_description seo_keywords seo_image canonical_url noindex nofollow
                   published_at scheduled_at proposed_publish_at unpublish_at expiry_action
                   review_after_days last_reviewed_at
                   author_id category_id featured_image_id custom_fields
@@ -231,7 +325,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       assert VersionFields.restorable_fields(KilnCMS.CMS.Post) ==
                ~w(title working_title slug path_alias excerpt audience locale
-                  seo_title seo_description seo_keywords seo_image canonical_url
+                  seo_title seo_description seo_keywords seo_image canonical_url noindex nofollow
                   category_id featured_image_id custom_fields blocks
                   working_base working_blocks working_copy_at working_fields)a
     end
@@ -306,14 +400,15 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       at_create = page.custom_fields
       refute at_create["sale"] == true
 
-      _page =
+      edited =
         CMS.update_page!(
           page,
           %{custom_fields: %{"price" => "19", "sale" => true}},
           actor: admin
         )
 
-      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+      restored =
+        CMS.restore_page_version!(edited, %{version_id: create_version.id}, actor: admin)
 
       # The compare view reports `sale` as *added* between these two versions; a
       # key-wise merge would leave it behind and make that report a lie.
@@ -339,9 +434,12 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
         )
 
       [create_version | _] = versions(page, admin)
-      _page = CMS.update_page!(page, %{category_id: nil, featured_image_id: nil}, actor: admin)
 
-      restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
+      edited =
+        CMS.update_page!(page, %{category_id: nil, featured_image_id: nil}, actor: admin)
+
+      restored =
+        CMS.restore_page_version!(edited, %{version_id: create_version.id}, actor: admin)
 
       assert restored.category_id == category.id
       assert restored.featured_image_id == image.id
@@ -395,7 +493,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       [create_version | _] = versions(page, admin)
 
       # Retire the definition, then restore the version that still carried its key.
-      CMS.update_page!(page, %{title: "P2"}, actor: admin)
+      page = CMS.update_page!(page, %{title: "P2"}, actor: admin)
       CMS.destroy_field_definition!(definition, actor: admin)
 
       restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
@@ -424,7 +522,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       [create_version | _] = versions(page, admin)
 
-      CMS.update_page!(page, %{custom_fields: %{"size" => "m"}}, actor: admin)
+      page = CMS.update_page!(page, %{custom_fields: %{"size" => "m"}}, actor: admin)
       CMS.update_field_definition!(size, %{options: ["s", "m"]}, actor: admin)
 
       # Without the registry pass the stale "l" was written back unchecked and the
@@ -445,7 +543,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       [create_version | _] = versions(page, admin)
 
-      CMS.update_page!(page, %{title: "P2"}, actor: admin)
+      page = CMS.update_page!(page, %{title: "P2"}, actor: admin)
       CMS.destroy_media_item!(item, actor: admin)
 
       # The dangling-reference check PR #709 added for `featured_image_id` now
@@ -472,7 +570,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       [create_version | _] = versions(page, admin)
 
-      CMS.update_page!(page, %{title: "P2"}, actor: admin)
+      page = CMS.update_page!(page, %{title: "P2"}, actor: admin)
       CMS.destroy_page!(target, actor: admin)
 
       assert_refuses(page, create_version, :custom_fields, admin)
@@ -492,7 +590,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
         compute: "{{ title }}"
       })
 
-      CMS.update_page!(page, %{title: "Beta"}, actor: admin)
+      page = CMS.update_page!(page, %{title: "Beta"}, actor: admin)
 
       restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
 
@@ -587,6 +685,16 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
   end
 
   defp block(content), do: typed_blocks([%{type: :heading, content: content, order: 0}])
+
+  # The row as stored, read past the actor's policies.
+  defp raw(page), do: CMS.get_page!(page.id, authorize?: false, tenant: page.org_id)
+
+  defp assert_stale(error) do
+    errors = Ash.Error.to_error_class(error).errors
+
+    assert Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)),
+           "expected a StaleRecord, got #{inspect(errors)}"
+  end
 
   defp assert_refuses(page, version, field, admin) do
     assert {:error, error} =

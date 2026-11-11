@@ -17,13 +17,19 @@ at runtime.** Two acquisition channels feed one esbuild bundle:
 
 ## Build pipeline
 
-Two Mix-managed runners produce exactly two artifacts:
+Two Mix-managed runners produce three artifacts:
 
 - **esbuild** (`0.25.4`, via the `:esbuild` hex package) bundles
   `assets/js/app.js` → `priv/static/assets/js/app.js`. Config:
   [`config/config.exs:858`](../config/config.exs). The `--alias:@=.` flag lets
   app.js import npm packages (e.g. `@tiptap/core`) resolved through
   `NODE_PATH`/`assets/node_modules`.
+- **esbuild**, a second profile, `kiln_challenge_embed` (#2249), bundles
+  `assets/js/challenge_static.js` → `priv/static/assets/js/challenge_static.js`
+  with no splitting. Only the embedded form iframe (`/forms/:slug/embed`)
+  loads it, to mount a human-verification widget; the embed never loads
+  `app.js`. Config: the `config :esbuild, kiln_challenge_embed:` block in
+  [`config/config.exs`](../config/config.exs).
 - **tailwind** (`4.3.3`, via the `:tailwind` hex package) compiles
   `assets/css/app.css` → `priv/static/assets/css/app.css`. Config:
   [`config/config.exs:871`](../config/config.exs).
@@ -32,7 +38,9 @@ Mix aliases tie it together ([`mix.exs:152`](../mix.exs)):
 
 - `mix assets.setup` — installs the tailwind/esbuild binaries (`--if-missing`)
   and runs `npm install` in `assets/`.
-- `mix assets.build` — `tailwind kiln_cms` + `esbuild kiln_cms`.
+- `mix assets.build` — `tailwind kiln_cms` + `esbuild kiln_cms` +
+  `esbuild kiln_challenge_embed`. A custom build or overlay `Dockerfile` that
+  runs the esbuild profiles itself must run both.
 - `mix assets.deploy` — the same with `--minify`, then `phx.digest` for
   cache-busting fingerprints. This is what the [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile)
   release build runs.

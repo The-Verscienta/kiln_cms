@@ -76,6 +76,7 @@ defmodule KilnCMSWeb.CalendarLive do
   alias KilnCMS.CMS.Changes.BroadcastCalendar
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.ContentEditor.NewDraft
+  alias KilnCMSWeb.WorkflowMessages
 
   # Chips per day cell before the month grid collapses the rest into "+N more".
   # The cell is a fixed height so the grid stays a grid; four is what fits.
@@ -305,15 +306,50 @@ defmodule KilnCMSWeb.CalendarLive do
         kind when kind in [:unpublish, :archive, :expire] -> %{unpublish_at: at_on(event, date)}
       end
 
-    with {:ok, record} <- fetch_record(event, socket),
-         {:ok, _record} <-
-           ContentTypes.update(event.type, record, attrs,
-             actor: socket.assigns.current_user,
-             tenant: socket.assigns.current_org
-           ) do
-      {:ok, moved_message(event, date)}
+    # Two steps, two failures: a record this actor can no longer read (trashed,
+    # or out of their scope since the window loaded) is gone from their view —
+    # said as `find_event/3` says it — not a publish they may not make (#2473).
+    case fetch_record(event, socket) do
+      {:ok, record} ->
+        case ContentTypes.update(event.type, record, attrs,
+               actor: socket.assigns.current_user,
+               tenant: socket.assigns.current_org
+             ) do
+          {:ok, _record} -> {:ok, moved_message(event, date)}
+          {:error, error} -> {:error, reschedule_error(event, record, error, socket)}
+        end
+
+      {:error, _error} ->
+        {:error, gettext("That item is no longer on the calendar — reload to see why.")}
+    end
+  end
+
+  # A publish date is a publish, and a live page's unpublish date an unpublish
+  # (#2134): the content policy refuses both to someone who may not publish.
+  # Said in those terms — but only to the editor that rule refused; anyone else
+  # was refused for another reason, and is told that (`WorkflowMessages`).
+  defp reschedule_error(event, record, error, socket) do
+    if forbidden?(error) do
+      gated = if event.kind == :publish, do: "publish", else: "unpublish"
+
+      context = [
+        actor: socket.assigns.current_user,
+        org: socket.assigns.current_org,
+        resource: record
+      ]
+
+      case {WorkflowMessages.refusal(gated, context), event.kind} do
+        {:needs_publisher, :publish} ->
+          gettext("Only an admin can move a publish date on this site.")
+
+        {:needs_publisher, _takedown} ->
+          gettext("Only an admin can move the unpublish date of a live page on this site.")
+
+        {refusal, _kind} ->
+          WorkflowMessages.refusal_message(refusal, gated)
+      end
     else
-      {:error, error} -> {:error, error_message(error)}
+      error_message(error)
     end
   end
 
@@ -438,7 +474,17 @@ defmodule KilnCMSWeb.CalendarLive do
   end
 
   defp error_message(message) when is_binary(message), do: message
-  defp error_message(%{} = error), do: Exception.message(error)
+
+  defp error_message(%{} = error) do
+    if forbidden?(error),
+      do: gettext("You don't have permission to do that."),
+      else: Exception.message(error)
+  end
+
+  defp forbidden?(error) when is_exception(error),
+    do: match?(%Ash.Error.Forbidden{}, Ash.Error.to_error_class(error))
+
+  defp forbidden?(_error), do: false
 
   # The screen-reader channel for a change that is otherwise only visible as a
   # chip moving. Assigned rather than flashed for the success case: a toast per

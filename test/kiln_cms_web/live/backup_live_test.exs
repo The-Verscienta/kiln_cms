@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Backups
   alias KilnCMS.Backups.Manifest
 
   @password "password123456"
@@ -89,6 +90,21 @@ defmodule KilnCMSWeb.BackupLiveTest do
       )
   end
 
+  describe "off-site remote" do
+    test "a connection-string remote's credentials never reach the page", %{conn: conn, dir: dir} do
+      seed_manifest!(dir, %{
+        offsite: ":s3,access_key_id=AKIAEXAMPLE,secret_access_key=hunter2hunter2:bucket/path"
+      })
+
+      {:ok, _lv, html} =
+        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert html =~ "Off-site"
+      refute html =~ "hunter2hunter2"
+      assert html =~ "secret_access_key=***"
+    end
+  end
+
   describe "authorization" do
     test "anonymous users are redirected", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/editor/backups")
@@ -130,7 +146,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       # refuses with `push_navigate/2`. Matching the loose `{:redirect, _}` here
       # would pass even if the mount guard were deleted and the route had
       # somehow turned them away instead.
-      assert {:error, {:live_redirect, %{to: "/"}}} =
+      assert {:error, {:live_redirect, %{to: "/access-denied?needs=platform"}}} =
                conn |> log_in(user) |> live(~p"/editor/backups")
     end
 
@@ -267,7 +283,14 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
         # Scoped to the backups queue (#1354): the single-element claim is
         # about THIS button's enqueue, not the whole shared table.
-        assert [%Oban.Job{worker: "KilnCMS.Backups.Worker", args: args, queue: "backups"}] =
+        # The chain's start step (#2218), through the lock.
+        assert [
+                 %Oban.Job{
+                   worker: "KilnCMS.Backups.StepWorker",
+                   args: args,
+                   queue: "backup_steps"
+                 }
+               ] =
                  Enum.filter(
                    KilnCMS.Repo.all(Oban.Job),
                    &String.starts_with?(&1.worker, "KilnCMS.Backups.")
@@ -275,6 +298,1004 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
         assert args["trigger"] == "manual"
       end
+    end
+  end
+
+  describe "history" do
+    defp admin_conn(conn), do: log_in(conn, authed_user(:admin))
+
+    # A run row with one artifact whose file is (optionally) on disk.
+    defp seed_run!(dir, n, opts \\ []) do
+      stamp = Keyword.get(opts, :stamp, "2026010#{rem(n, 10)}-0#{n}0000")
+      name = "kiln-db-#{stamp}.dump"
+      if Keyword.get(opts, :file?, true), do: write_artifact!(dir, name)
+
+      artifact = %{
+        kind: :db,
+        name: name,
+        bytes: Keyword.get(opts, :bytes, 2048),
+        verified: Keyword.get(opts, :verified, true),
+        destinations: Keyword.get(opts, :destinations, %{"local" => %{"status" => "ok"}})
+      }
+
+      Backups.import_run!(
+        %{
+          stamp: stamp,
+          trigger: Keyword.get(opts, :trigger, "manual"),
+          status: :succeeded,
+          components: [:db],
+          started_at: Keyword.get(opts, :started_at, ~U[2026-01-01 03:00:00.000000Z]),
+          finished_at: ~U[2026-01-01 03:05:00.000000Z],
+          artifacts: [artifact]
+        },
+        actor: Backups.system()
+      )
+    end
+
+    defp write_artifact!(dir, name) do
+      File.mkdir_p!(Path.join(dir, "db"))
+      File.write!(Path.join([dir, "db", name]), "x")
+    end
+
+    test "shows an empty state when nothing was ever recorded", %{conn: conn} do
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, "#backup-history-empty", "No backups have been recorded yet.")
+    end
+
+    test "lists a row with its trigger, size, verified badge and destinations", %{
+      conn: conn,
+      dir: dir
+    } do
+      seed_run!(dir, 1,
+        trigger: "manual",
+        destinations: %{
+          "local" => %{"status" => "ok"},
+          "rclone:offsite" => %{"status" => "ok"}
+        }
+      )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row = lv |> element("#backup-history li") |> render()
+      assert row =~ "2026-01-01 03:00 UTC"
+      assert row =~ "manual"
+      assert row =~ "Succeeded"
+      assert row =~ "Database"
+      assert row =~ "2.0 KB"
+      assert row =~ "Verified"
+      assert row =~ "Local"
+      assert row =~ "offsite"
+      assert row =~ "on disk"
+    end
+
+    test "a media part set is one row: summed size, an 'N parts' note, per-part presence",
+         %{conn: conn, dir: dir} do
+      stamp = "20260105-030000"
+      names = Backups.Artifact.set_names(stamp, 3)
+      File.mkdir_p!(Path.join(dir, "media"))
+      for name <- names, do: File.write!(Path.join([dir, "media", name]), "x")
+
+      run =
+        Backups.import_run!(
+          %{
+            stamp: stamp,
+            trigger: "manual",
+            status: :succeeded,
+            components: [:media],
+            started_at: ~U[2026-01-05 03:00:00.000000Z],
+            finished_at: ~U[2026-01-05 03:05:00.000000Z],
+            artifacts: [
+              %{
+                kind: :media,
+                name: "kiln-media-#{stamp}",
+                bytes: 3 * 1024,
+                verified: true,
+                parts: Enum.map(names, &%{"name" => &1, "bytes" => 1024, "sha256" => nil}),
+                destinations: %{"local" => %{"status" => "ok"}}
+              }
+            ]
+          },
+          actor: Backups.system()
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row = lv |> element("#backup-run-#{run.id}") |> render()
+      assert row =~ "3.0 KB"
+      assert row =~ "3 parts"
+      assert has_element?(lv, "#backup-run-#{run.id} [data-presence=present]", "on disk")
+
+      File.rm!(Path.join([dir, "media", Enum.at(names, 1)]))
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+      assert has_element?(lv, "#backup-run-#{run.id} [data-presence=missing]", "missing")
+    end
+
+    test "a file deleted out-of-band reads missing", %{conn: conn, dir: dir} do
+      run = seed_run!(dir, 1, started_at: DateTime.add(DateTime.utc_now(), -3600, :second))
+      File.rm!(Path.join([dir, "db", hd(run.artifacts).name]))
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, "#backup-run-#{run.id} [data-presence=missing]", "missing")
+    end
+
+    test "pruned, expired and off-site-only are told apart", %{conn: conn, dir: dir} do
+      pruned =
+        seed_run!(dir, 1,
+          file?: false,
+          destinations: %{"local" => %{"status" => "pruned"}}
+        )
+
+      off_site =
+        seed_run!(dir, 2,
+          file?: false,
+          destinations: %{
+            "local" => %{"status" => "ok"},
+            "rclone:offsite" => %{"status" => "ok"}
+          }
+        )
+
+      # Imported (cron-made), long past retention.
+      expired =
+        Backups.import_run!(
+          %{
+            stamp: "20250101-030000",
+            trigger: "cron",
+            status: :succeeded,
+            components: [:db],
+            started_at: ~U[2025-01-01 03:00:00.000000Z],
+            artifacts: [%{kind: :db, name: "kiln-db-20250101-030000.dump", bytes: 5}]
+          },
+          actor: Backups.system()
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(
+               lv,
+               "#backup-run-#{pruned.id} [data-presence=pruned]",
+               "pruned (retention)"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-run-#{off_site.id} [data-presence=off_site_only]",
+               "off-site only"
+             )
+
+      assert has_element?(lv, "#backup-run-#{expired.id} [data-presence=expired]", "expired")
+      assert has_element?(lv, "#backup-run-#{expired.id}", "unverified (imported)")
+    end
+
+    test "cron-made backups on disk are imported and shown", %{conn: conn, dir: dir} do
+      path = Path.join([dir, "db"])
+      File.mkdir_p!(path)
+      file = Path.join(path, "kiln-db-20260102-030000.dump")
+      File.write!(file, "dump")
+      File.touch!(file, System.os_time(:second) - 3600)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, "#backup-history li", "2026-01-02 03:00 UTC")
+      assert has_element?(lv, "#backup-history li", "cron")
+      assert has_element?(lv, "#backup-history li", "unverified (imported)")
+    end
+
+    test "pages 25 at a time, and an out-of-range page lands on the last one", %{
+      conn: conn,
+      dir: dir
+    } do
+      for n <- 1..27 do
+        stamp = "20260101-00#{String.pad_leading(Integer.to_string(n), 2, "0")}00"
+
+        seed_run!(dir, n,
+          stamp: stamp,
+          started_at: DateTime.add(~U[2026-01-01 00:00:00.000000Z], n * 3600, :second)
+        )
+      end
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
+      assert lv |> render() |> String.split("backup-run-") |> length() == 26
+
+      lv
+      |> element(~s|#backup-history button[phx-click="page"]:not([disabled])|)
+      |> render_click()
+
+      assert_patch(lv, ~p"/editor/backups?page=2")
+      assert lv |> element("#backup-history") |> render() =~ "Page 2 of 2"
+      assert lv |> render() |> String.split("backup-run-") |> length() == 3
+
+      assert {:error, {:live_redirect, %{to: "/editor/backups?page=2"}}} =
+               conn |> admin_conn() |> live(~p"/editor/backups?page=99")
+
+      # Garbage reads as page 1.
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups?page=abc")
+      assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
+    end
+
+    test "the import runs on the connected mount, not the disconnected render", %{
+      conn: conn,
+      dir: dir
+    } do
+      file = Path.join([dir, "db", "kiln-db-20260102-030000.dump"])
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "dump")
+      File.touch!(file, System.os_time(:second) - 3600)
+
+      conn = admin_conn(conn)
+      assert conn |> get(~p"/editor/backups") |> html_response(200) =~ "Backups"
+      assert Backups.list_runs!(actor: Backups.system()) == []
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/backups")
+      render_async(lv, 2_000)
+      assert [%{origin: :imported}] = Backups.list_runs!(actor: Backups.system())
+    end
+
+    test "a refused user starts no import", %{conn: conn, dir: dir} do
+      file = Path.join([dir, "db", "kiln-db-20260102-030000.dump"])
+      File.mkdir_p!(Path.dirname(file))
+      File.write!(file, "dump")
+      File.touch!(file, System.os_time(:second) - 3600)
+
+      for user <- [authed_user(:editor), org_admin()] do
+        assert {:error, {_kind, _}} = conn |> log_in(user) |> live(~p"/editor/backups")
+      end
+
+      assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/editor/backups")
+      assert Backups.list_runs!(actor: Backups.system()) == []
+    end
+
+    defp org_admin do
+      user = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      user
+    end
+
+    test "handle_params and the page event refuse a non-admin on their own" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{__changed__: %{}, current_user: %{role: :editor}}
+      }
+
+      assert {:noreply, ^socket} =
+               KilnCMSWeb.BackupLive.handle_event("page", %{"to" => "2"}, socket)
+
+      assert {:noreply, refused} = KilnCMSWeb.BackupLive.handle_params(%{}, "/", socket)
+      assert {:live, :redirect, %{to: "/access-denied?needs=platform"}} = refused.redirected
+    end
+
+    test "the history refreshes when a manual backup finishes", %{conn: conn, dir: dir} do
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+      assert has_element?(lv, "#backup-history-empty")
+
+      seed_run!(dir, 1)
+      send(lv.pid, :refresh)
+
+      assert render(lv) =~ "2026-01-01 03:00 UTC"
+    end
+  end
+
+  describe "resume (#2218)" do
+    alias KilnCMS.Backups.WorkState
+
+    # An in-app run in `status`, with (or without) the state file a resume needs.
+    defp app_run!(dir, n, status, opts \\ []) do
+      stamp = "2026110#{n}-101010"
+
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", components: [:db, :media]},
+          actor: Backups.system()
+        )
+
+      run =
+        case status do
+          :failed -> Backups.fail_run!(run, %{error: "tar exited 2"}, actor: Backups.system())
+          :succeeded -> Backups.finish_run!(run, %{}, actor: Backups.system())
+          :running -> run
+        end
+
+      if Keyword.get(opts, :state?, true) do
+        work = WorkState.path(dir, stamp)
+        File.mkdir_p!(work)
+        :ok = WorkState.write(work, WorkState.new(stamp))
+      end
+
+      run
+    end
+
+    defp backup_jobs do
+      Enum.filter(KilnCMS.Repo.all(Oban.Job), &String.starts_with?(&1.worker, "KilnCMS.Backups."))
+    end
+
+    test "a platform admin sees Resume on a failed run that kept its state", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = app_run!(dir, 1, :failed)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, ~s|#backup-run-#{run.id} button[data-role="resume"]|, "Resume")
+    end
+
+    test "only resumable runs get the button", %{conn: conn, dir: dir} do
+      succeeded = app_run!(dir, 2, :succeeded)
+      running = app_run!(dir, 3, :running)
+      no_state = app_run!(dir, 4, :failed, state?: false)
+      imported = seed_run!(dir, 5)
+      File.mkdir_p!(WorkState.path(dir, imported.stamp))
+      :ok = WorkState.write(WorkState.path(dir, imported.stamp), WorkState.new(imported.stamp))
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      for run <- [succeeded, running, no_state, imported] do
+        assert has_element?(lv, "#backup-run-#{run.id}")
+        refute has_element?(lv, ~s|#backup-run-#{run.id} [data-role="resume"]|)
+      end
+    end
+
+    @tag :pg_tools
+    test "clicking it enqueues a resume job for THAT run's stamp and says so", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = app_run!(dir, 1, :failed)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      html = lv |> element(~s|#backup-run-#{run.id} [data-role="resume"]|) |> render_click()
+
+      assert html =~ "Backup resumed"
+      assert [%Oban.Job{args: args, queue: "backup_steps"}] = backup_jobs()
+      assert args["step"] == "start"
+      assert args["resume"] == run.stamp
+      # The strip and the poll now follow it; "Back up now" stays enabled (a
+      # request while one runs queues).
+      assert has_element?(lv, "#backup-in-flight")
+      refute has_element?(lv, ~s|button[phx-click="backup_now"][disabled]|)
+    end
+
+    @tag :pg_tools
+    test "a forged event naming a succeeded or running run, or no run, is refused", %{
+      conn: conn,
+      dir: dir
+    } do
+      succeeded = app_run!(dir, 2, :succeeded)
+      running = app_run!(dir, 3, :running)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      for id <- [succeeded.id, running.id, Ecto.UUID.generate(), "not-a-uuid"] do
+        html = render_hook(lv, "resume_run", %{"id" => id})
+        assert html =~ "can&#39;t be resumed"
+      end
+
+      # A forged STAMP is not even a parameter the handler reads.
+      render_hook(lv, "resume_run", %{"id" => succeeded.id, "stamp" => "../../x"})
+      render_hook(lv, "resume_run", %{"stamp" => "../../x"})
+      render_hook(lv, "resume_run", %{"id" => 7})
+
+      assert backup_jobs() == []
+    end
+
+    @tag :pg_tools
+    test "a failed run whose state is gone is refused", %{conn: conn, dir: dir} do
+      run = app_run!(dir, 4, :failed, state?: false)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert render_hook(lv, "resume_run", %{"id" => run.id}) =~ "can&#39;t be resumed"
+      assert backup_jobs() == []
+    end
+
+    @tag :pg_tools
+    test "the handler re-checks platform admin: editor, org admin and anonymous get nothing", %{
+      dir: dir
+    } do
+      run = app_run!(dir, 1, :failed)
+
+      org_admin = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: org_admin.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      for user <- [authed_user(:editor), org_admin, authed_user(:viewer), nil] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+
+        assert {:noreply, ^socket} =
+                 KilnCMSWeb.BackupLive.handle_event("resume_run", %{"id" => run.id}, socket)
+      end
+
+      assert backup_jobs() == []
+    end
+
+    test "a run refused off-site shows the refusal, Not verified, and Resume", %{
+      conn: conn,
+      dir: dir
+    } do
+      stamp = "20261105-101010"
+      archive = "kiln-media-#{stamp}.tar.gz"
+
+      error =
+        "Off-site copy REFUSED for 1 file: #{archive} (changed on disk after this backup " <>
+          "verified it (sha256 expected 3b1f00000000…, found 8c0200000000…)). Something other " <>
+          "than this backup wrote to the backup directory: check the disk and anything with " <>
+          "access to BACKUP_DIR before trusting this backup. The local files are kept; Resume " <>
+          "retries the off-site copy and rebuilds any file that changed."
+
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", components: [:db, :media]},
+          actor: Backups.system()
+        )
+
+      artifacts = [
+        %{kind: :db, name: "kiln-db-#{stamp}.dump", bytes: 10, verified: true},
+        %{
+          kind: :media,
+          name: archive,
+          bytes: 10,
+          verified: false,
+          destinations: %{
+            "local" => %{"status" => "ok"},
+            "rclone:r2:kiln" => %{"status" => "failed", "error" => "Refused: changed on disk"}
+          }
+        }
+      ]
+
+      run =
+        Backups.fail_run!(run, %{error: error, artifacts: artifacts}, actor: Backups.system())
+
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+
+      :ok =
+        Manifest.write(dir, %Manifest{
+          started_at: DateTime.utc_now(),
+          finished_at: DateTime.utc_now(),
+          trigger: "manual",
+          ok: false,
+          artifacts: [
+            %{kind: "db", path: "db/kiln-db-#{stamp}.dump", bytes: 10, verified: true},
+            %{kind: "media", path: "media/#{archive}", bytes: 10, verified: false}
+          ],
+          error: error
+        })
+
+      {:ok, lv, html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      # The "Last run failed" box quotes the manifest's error.
+      assert html =~ "Last run failed"
+      assert html =~ "Off-site copy REFUSED for 1 file: #{archive}"
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, row, "Off-site copy REFUSED")
+      assert has_element?(lv, ~s|#{row} [data-role="verified"]|, "Not verified")
+      assert has_element?(lv, ~s|#{row} [data-role="destination"]|, "failed")
+      assert has_element?(lv, ~s|#{row} button[data-role="resume"]|, "Resume")
+    end
+  end
+
+  describe "in flight and cancel (#2218)" do
+    alias KilnCMS.Backups.{DirId, WorkState}
+    alias KilnCMS.Test.BackupChain
+
+    defp lock_row, do: Backups.backup_lock!(actor: Backups.system())
+
+    # A backup requested and its start step run: the lock holds a stamp, its
+    # Run is `running`, and the dump step waits.
+    defp started! do
+      {:ok, %{status: :started}} = Backups.request([], Backups.system())
+      %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      row = lock_row()
+      %{stamp: row.stamp, run: Backups.get_run_by_stamp!(row.stamp, actor: Backups.system())}
+    end
+
+    test "Back up now is guarded against a double click" do
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      assert has_element?(lv, ~s|button[phx-click="backup_now"][phx-disable-with]|)
+    end
+
+    test "a seeded canceled run reads Canceled, and Resume is offered when its files are kept",
+         %{dir: dir} do
+      stamp = "20261106-101010"
+      run = Ash.Seed.seed!(KilnCMS.Backups.Run, %{stamp: stamp, status: :canceled})
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Canceled")
+      assert has_element?(lv, ~s|#{row} button[data-role="resume"]|)
+      refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
+    end
+
+    @tag :pg_tools
+    test "the strip names the step; a platform admin cancels; the row reads Canceled and " <>
+           "offers Resume" do
+      %{stamp: stamp, run: run} = started!()
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Dumping the database")
+      assert has_element?(lv, "#backup-in-flight", stamp)
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="queued"]|)
+
+      strip = ~s|#backup-in-flight button[data-role="cancel"][data-confirm]|
+      assert has_element?(lv, strip)
+      refute render(lv) =~ "A queued backup will start next"
+      assert has_element?(lv, ~s|#backup-run-#{run.id} button[data-role="cancel"]|)
+
+      html = lv |> element(strip) |> render_click()
+
+      assert html =~ "Backup canceled"
+      assert Backups.in_flight() == nil
+      refute has_element?(lv, "#backup-in-flight")
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Canceled")
+      refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
+      assert has_element?(lv, ~s|#{row} button[data-role="resume"]|)
+
+      # Resume on the canceled row requests it again.
+      html = lv |> element(~s|#{row} button[data-role="resume"]|) |> render_click()
+      assert html =~ "Backup resumed"
+      assert %{stamp: ^stamp} = Backups.in_flight()
+    end
+
+    @tag :pg_tools
+    test "a queued request shows on the strip, with its folds, and the confirm says it starts next" do
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+      {:ok, %{status: :folded}} = Backups.request([], Backups.system())
+      {:ok, %{status: :folded}} = Backups.request([], Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      queued = ~s|#backup-in-flight [data-role="queued"]|
+      assert has_element?(lv, queued, "1 queued (requested ")
+      assert has_element?(lv, queued, "2 later requests folded into it")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight button[data-role="cancel"][data-confirm*="A queued backup will start next"]|
+             )
+    end
+
+    # #2219: what the queued backup covers.
+    @tag :pg_tools
+    test "the queued request says which components it covers", %{dir: dir} do
+      media = Path.join(dir, "uploads")
+      File.mkdir_p!(media)
+      config = Application.get_env(:kiln_cms, KilnCMS.Backups)
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(config, :media_dir, media))
+
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([components: [:db]], Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      components = ~s|#backup-in-flight [data-role="queued-components"]|
+      assert has_element?(lv, components, "Database")
+      refute has_element?(lv, components, "Media")
+
+      {:ok, %{status: :folded}} = Backups.request([components: [:media]], Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      assert has_element?(lv, components, "Database + Media")
+    end
+
+    @tag :pg_tools
+    test "Back up now while one runs queues it and says so" do
+      started!()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
+
+      assert html =~ "this one starts when it finishes"
+      assert has_element?(lv, ~s|#backup-in-flight [data-role="queued"]|)
+    end
+
+    # A failed in-app run that kept its state, so it offers Resume (#2540).
+    defp resumable_run!(dir, stamp) do
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", components: [:db, :media]},
+          actor: Backups.system()
+        )
+
+      run = Backups.fail_run!(run, %{error: "tar exited 2"}, actor: Backups.system())
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+      run
+    end
+
+    defp queue_state do
+      row = lock_row()
+
+      {row.waiting_resume_stamp, row.waiting_requested_at, row.waiting_folds,
+       length(Backups.list_runs!(actor: Backups.system()))}
+    end
+
+    @tag :pg_tools
+    test "Back up now folds into a queued fresh backup and says the queued one covers it" do
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
+
+      assert html =~ "that queued backup covers this request"
+      assert %{waiting: %{folds: 1}} = Backups.in_flight()
+    end
+
+    @tag :pg_tools
+    test "Resume folds into a queued resume of the same backup and says so", %{dir: dir} do
+      run = resumable_run!(dir, "20261101-101010")
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([resume: run.stamp], Backups.system())
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      html =
+        lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
+
+      assert html =~ "a resume of this backup is already queued; that queued resume covers"
+      assert %{waiting: %{folds: 1}} = Backups.in_flight()
+    end
+
+    @tag :pg_tools
+    test "Back up now while a resume is queued is refused and leaves the queue alone",
+         %{dir: dir} do
+      run = resumable_run!(dir, "20261101-101010")
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([resume: run.stamp], Backups.system())
+      before = queue_state()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
+
+      assert html =~
+               "A backup is running and a resume of 20261101-101010 is queued after it, so " <>
+                 "this backup was not queued. Try again once the queue clears."
+
+      assert queue_state() == before
+    end
+
+    @tag :pg_tools
+    test "Resume while a fresh backup is queued is refused and leaves the queue alone",
+         %{dir: dir} do
+      run = resumable_run!(dir, "20261101-101010")
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+      before = queue_state()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      html =
+        lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
+
+      assert html =~
+               "A backup is running and a new backup is queued after it, so this resume was " <>
+                 "not queued. Try again once the queue clears."
+
+      assert queue_state() == before
+    end
+
+    @tag :pg_tools
+    test "Resume while another backup's resume is queued is refused", %{dir: dir} do
+      queued = resumable_run!(dir, "20261101-101010")
+      run = resumable_run!(dir, "20261102-101010")
+      started!()
+      {:ok, %{status: :queued}} = Backups.request([resume: queued.stamp], Backups.system())
+      before = queue_state()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      html =
+        lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
+
+      assert html =~
+               "a resume of 20261101-101010 is queued after it, so this resume was not queued"
+
+      assert queue_state() == before
+    end
+
+    @tag :pg_tools
+    test "the archive step reads part i of N", %{dir: dir} do
+      %{stamp: stamp} = started!()
+      row = lock_row()
+      {:ok, dir_id} = DirId.local(dir)
+
+      Backups.move_backup_lock!(
+        row,
+        %{step: :archive, part: 2, step_job_id: row.step_job_id, dir_id: dir_id},
+        actor: Backups.system()
+      )
+
+      work = WorkState.path(dir, stamp)
+      {:ok, state} = WorkState.read(work)
+      :ok = WorkState.write(work, Map.put(state, "parts_total", 3))
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Archiving media: part 2 of 3"
+             )
+    end
+
+    @tag :pg_tools
+    test "a backup that is finishing has no Cancel on the strip, and a forced cancel is refused" do
+      %{run: run} = started!()
+      Backups.mark_backup_lock_finishing!(lock_row(), %{}, actor: Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="cancel"]|)
+
+      assert render_hook(lv, "cancel_run", %{"id" => run.id}) =~
+               "Too late to cancel: the backup is finishing."
+
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    test "a forged cancel of a finished run says it already finished", %{dir: dir} do
+      run = app_run!(dir, 2, :succeeded)
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      assert render_hook(lv, "cancel_run", %{"id" => run.id}) =~ "That backup already finished."
+
+      assert render_hook(lv, "cancel_run", %{"id" => Ecto.UUID.generate()}) =~
+               "can&#39;t be canceled"
+
+      render_hook(lv, "cancel_run", %{"id" => 7})
+
+      assert %{status: :succeeded} = Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    @tag :pg_tools
+    test "the handler re-checks platform admin: editor, org admin, viewer and anonymous get nothing" do
+      %{run: run} = started!()
+
+      org_admin = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: org_admin.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      for user <- [authed_user(:editor), org_admin, authed_user(:viewer), nil] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+
+        assert {:noreply, ^socket} =
+                 KilnCMSWeb.BackupLive.handle_event("cancel_run", %{"id" => run.id}, socket)
+      end
+
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+      assert Backups.in_flight() != nil
+    end
+  end
+
+  describe "one headline line per component (#2219)" do
+    setup %{dir: dir} do
+      media = Path.join(dir, "uploads")
+      File.mkdir_p!(media)
+      config = Application.get_env(:kiln_cms, KilnCMS.Backups)
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(config, :media_dir, media))
+      :ok
+    end
+
+    # A finished run covering `components`, `hours` ago.
+    defp component_run!(components, hours, status \\ :succeeded) do
+      at = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+      stamp = KilnCMS.Backups.Artifact.stamp(at)
+
+      artifacts =
+        for component <- components do
+          %{kind: component, name: "kiln-#{component}-#{stamp}", bytes: 10, verified: true}
+        end
+
+      Backups.import_run!(
+        %{
+          stamp: stamp,
+          trigger: "cron",
+          status: status,
+          components: components,
+          started_at: at,
+          finished_at: at,
+          artifacts: if(status == :succeeded, do: artifacts, else: []),
+          error: if(status == :failed, do: "boom")
+        },
+        actor: Backups.system()
+      )
+    end
+
+    test "a fresh database and stale media: each says its own, and the tone is the alarm", %{
+      conn: conn
+    } do
+      component_run!([:db, :media], 5 * 24)
+      component_run!([:db], 1)
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-headline-db", "Database")
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+      assert has_element?(lv, "#backup-headline-media", "Media")
+      assert has_element?(lv, "#backup-headline-media", "Last backup was")
+      assert has_element?(lv, "#backup-headline-media", "5 days")
+      assert html =~ "border-error/30"
+    end
+
+    test "a database-only backup after a full one leaves media's line on the full one", %{
+      conn: conn,
+      dir: dir
+    } do
+      component_run!([:db, :media], 3)
+      component_run!([:db], 1)
+
+      :ok =
+        Manifest.write(dir, %Manifest{
+          finished_at: DateTime.utc_now(),
+          trigger: "manual",
+          ok: true,
+          components: ["db"],
+          artifacts: [%{kind: "db", path: "db/kiln-db-x.dump", bytes: 1, verified: true}]
+        })
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+      assert has_element?(lv, "#backup-headline-media", "Backed up 3 hours ago")
+      assert html =~ "border-success/30"
+    end
+
+    # An in-app run, which says what it covered (an imported failed run counts
+    # against every component).
+    test "a failed media backup fails media's line only", %{conn: conn} do
+      component_run!([:db, :media], 3)
+      at = DateTime.add(DateTime.utc_now(), -3600, :second)
+
+      run =
+        Backups.start_run!(
+          %{
+            stamp: KilnCMS.Backups.Artifact.stamp(at),
+            trigger: "manual",
+            components: [:media],
+            started_at: at
+          },
+          actor: Backups.system()
+        )
+
+      Backups.fail_run!(run, %{error: "boom"}, actor: Backups.system())
+
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+      assert has_element?(lv, "#backup-headline-media", "The last backup failed")
+      assert html =~ "border-error/30"
+    end
+
+    test "the overview names the component that needs attention", %{conn: conn} do
+      component_run!([:db, :media], 3 * 24)
+      component_run!([:db], 1)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               ~s|#overview-backup-warning [data-role="backup-headline"]|,
+               "The last media backup was 3 days ago."
+             )
+
+      refute has_element?(lv, "#overview-backup-warning", "database")
+      refute has_element?(lv, "#overview-backup-setup")
+    end
+
+    test "media never backed up while the database is: the alarm, not the set-up notice", %{
+      conn: conn
+    } do
+      component_run!([:db], 1)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-backup-warning", "No media backup has been recorded.")
+      refute has_element?(lv, "#overview-backup-setup")
+    end
+
+    test "nothing ever backed up is still the set-up notice", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#overview-backup-setup")
+      refute has_element?(lv, "#overview-backup-warning")
+    end
+  end
+
+  describe "an off-site remote with no rclone in the image (#2218, #2482)" do
+    setup do
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(original, :rclone_remote, ":s3,secret_access_key=hunter2hunter2:bucket")
+      )
+
+      bin = Path.join(System.tmp_dir!(), "kiln_bklbin_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(bin)
+      path = System.get_env("PATH")
+
+      on_exit(fn ->
+        System.put_env("PATH", path)
+        File.rm_rf!(bin)
+      end)
+
+      %{bin: bin}
+    end
+
+    test "the panel says backups from this page fail at the off-site copy (#2482)", %{
+      conn: conn,
+      bin: bin
+    } do
+      # Only an empty directory on PATH: no rclone anywhere.
+      System.put_env("PATH", bin)
+      assert Backups.status().rclone_missing?
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-rclone-missing",
+               "rclone is not installed in this image, so backups taken from this page fail " <>
+                 "at the off-site copy. Install rclone in the image or unset BACKUP_RCLONE_REMOTE."
+             )
+
+      refute render(lv) =~ "hunter2hunter2"
+    end
+
+    test "with rclone installed it says nothing of the kind", %{conn: conn, bin: bin} do
+      File.write!(Path.join(bin, "rclone"), "#!/bin/sh\nexit 0\n")
+      File.chmod!(Path.join(bin, "rclone"), 0o755)
+      System.put_env("PATH", bin <> ":" <> System.get_env("PATH"))
+      refute Backups.status().rclone_missing?
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      refute has_element?(lv, "#backup-rclone-missing")
     end
   end
 
@@ -333,7 +1354,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
-      assert has_element?(lv, "#overview-backup-warning", "The last backup failed.")
+      assert has_element?(lv, "#overview-backup-warning", "The last database backup failed.")
       refute has_element?(lv, "#overview-backup-setup")
     end
 
@@ -343,7 +1364,12 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
-      assert has_element?(lv, "#overview-backup-warning", "The last backup was 30 days ago.")
+      assert has_element?(
+               lv,
+               "#overview-backup-warning",
+               "The last database backup was 30 days ago."
+             )
+
       refute has_element?(lv, "#overview-backup-setup")
     end
 

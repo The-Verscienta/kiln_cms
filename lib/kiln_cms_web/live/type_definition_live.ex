@@ -162,7 +162,14 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   defp edit_form(id, actor, org) do
     CMS.get_type_definition!(id, actor: actor, tenant: org)
-    |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "type_definition")
+    # A distinct `id` keeps the inputs' DOM ids (`edit_type_definition_label`)
+    # apart from the new-type form's, which is on the page at the same time.
+    |> AshPhoenix.Form.for_update(:update,
+      actor: actor,
+      tenant: org,
+      as: "type_definition",
+      id: "edit_type_definition"
+    )
     |> to_form()
   end
 
@@ -313,6 +320,28 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                 class="size-4 rounded border border-base-content/30 accent-primary"
               />
               {gettext("Has a public index of published entries")}
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="hidden" name="type_definition[noindex_default]" value="false" />
+              <input
+                type="checkbox"
+                name="type_definition[noindex_default]"
+                value="true"
+                checked={@form[:noindex_default].value in [true, "true"]}
+                class="size-4 rounded border border-base-content/30 accent-primary"
+              />
+              {gettext("New entries are hidden from search engines (noindex)")}
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <input type="hidden" name="type_definition[nofollow_default]" value="false" />
+              <input
+                type="checkbox"
+                name="type_definition[nofollow_default]"
+                value="true"
+                checked={@form[:nofollow_default].value in [true, "true"]}
+                class="size-4 rounded border border-base-content/30 accent-primary"
+              />
+              {gettext("New entries tell search engines not to follow links (nofollow)")}
             </label>
             <div class="sm:col-span-2">
               <.button type="submit" variant="primary">{gettext("Create content type")}</.button>
@@ -465,6 +494,28 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                     class="size-4 rounded border border-base-content/30 accent-primary"
                   />
                   {gettext("Has a public index")}
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="hidden" name="type_definition[noindex_default]" value="false" />
+                  <input
+                    type="checkbox"
+                    name="type_definition[noindex_default]"
+                    value="true"
+                    checked={@edit.form[:noindex_default].value in [true, "true"]}
+                    class="size-4 rounded border border-base-content/30 accent-primary"
+                  />
+                  {gettext("New entries are hidden from search engines (noindex)")}
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                  <input type="hidden" name="type_definition[nofollow_default]" value="false" />
+                  <input
+                    type="checkbox"
+                    name="type_definition[nofollow_default]"
+                    value="true"
+                    checked={@edit.form[:nofollow_default].value in [true, "true"]}
+                    class="size-4 rounded border border-base-content/30 accent-primary"
+                  />
+                  {gettext("New entries tell search engines not to follow links (nofollow)")}
                 </label>
                 <div class="flex gap-2 sm:col-span-2">
                   <.button type="submit" variant="primary">{gettext("Save")}</.button>

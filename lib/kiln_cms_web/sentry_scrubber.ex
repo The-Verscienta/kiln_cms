@@ -74,8 +74,14 @@ defmodule KilnCMSWeb.SentryScrubber do
   )
 
   # Matched as the whole key, case-insensitively — see the moduledoc. `unlock`
-  # is the passphrase grant's query parameter (#496).
-  @sensitive_exact ~w(code otp pin api_key apikey unlock)
+  # is the passphrase grant's query parameter (#496); `cf-turnstile-response`
+  # and `g-recaptcha-response` the built-in human-verification widgets' own
+  # fields and `_kiln_challenge` a public form's (#2249; `challenge_token` is
+  # already caught by `token`). A plugin provider's field is added from the
+  # registry (`KilnCMS.Challenge.Registry.response_fields/0`).
+  @sensitive_exact ~w(
+    code otp pin api_key apikey unlock cf-turnstile-response g-recaptcha-response _kiln_challenge
+  )
 
   # Credential headers beyond Sentry's own three (`authorization`,
   # `authentication`, `cookie`): the API key's alternative header and the two
@@ -109,7 +115,17 @@ defmodule KilnCMSWeb.SentryScrubber do
     downcased = key |> to_string() |> String.downcase()
 
     downcased in @sensitive_exact or
-      Enum.any?(@sensitive_substrings, &String.contains?(downcased, &1))
+      Enum.any?(@sensitive_substrings, &String.contains?(downcased, &1)) or
+      downcased in provider_fields()
+  end
+
+  # Memoised by the registry, so this is a `:persistent_term` read per key.
+  # A scrubber must never be the thing that fails: if the registry cannot
+  # answer, the static list above still applies.
+  defp provider_fields do
+    Enum.map(KilnCMS.Challenge.Registry.response_fields(), &String.downcase/1)
+  rescue
+    _error -> []
   end
 
   @doc """

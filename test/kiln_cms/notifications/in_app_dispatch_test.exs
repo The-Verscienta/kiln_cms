@@ -310,6 +310,34 @@ defmodule KilnCMS.Notifications.InAppDispatchTest do
       assert id == first.id
     end
 
+    @tag :capture_log
+    test "record_in_app_result/1 says which of the three happened" do
+      admin = user(:admin)
+      page = CMS.create_page!(%{title: "Outcomes", slug: slug()}, actor: admin)
+
+      attrs = %{
+        user_id: admin.id,
+        org_id: page.org_id,
+        event: :submitted_for_review,
+        content_type: "page",
+        content_id: page.id,
+        title: page.title
+      }
+
+      assert Notifications.record_in_app_result(attrs) == :recorded
+      assert Notifications.record_in_app_result(attrs) == :already_waiting
+
+      # A row the resource refuses (no title) is logged and dropped, never
+      # raised into the caller.
+      assert Notifications.record_in_app_result(%{attrs | title: nil, event: :comment_added}) ==
+               :not_recorded
+
+      # `record_in_app/1` keeps answering `:ok` whatever happened.
+      assert Notifications.record_in_app(attrs) == :ok
+      assert Notifications.record_in_app(%{attrs | title: nil, event: :comment_added}) == :ok
+      assert [_one] = inbox(admin)
+    end
+
     test "the collapse is per recipient, event and document" do
       admin = user(:admin)
       other = user(:admin)

@@ -60,7 +60,7 @@ defmodule KilnCMS.SchemaExportTest do
       # locale fallback chain, and this suite registers a block with a
       # `localized: :fallback` field (the fixture plugin's `product_card`).
       assert page["properties"] |> Map.keys() |> Enum.sort() ==
-               ~w(blocks custom_fields id inherited_fields locale slug title type)
+               ~w(blocks custom_fields id inherited_fields locale robots slug social title type)
 
       assert Enum.sort(page["required"]) == ~w(blocks custom_fields id locale slug title type)
 
@@ -117,6 +117,65 @@ defmodule KilnCMS.SchemaExportTest do
       # Open: a point-in-time read serves the values stored at that instant,
       # which may include fields since removed from the registry.
       assert fields["additionalProperties"] == true
+    end
+
+    test "value constraints are annotations, never JSON Schema assertions (#2276)",
+         %{actor: actor, org: org} do
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "sku",
+          label: "SKU",
+          field_type: :string,
+          validation: %{
+            "min_length" => 3,
+            "max_length" => 12,
+            "pattern" => "[A-Z]+-[0-9]+",
+            "pattern_message" => "Use LETTERS-123",
+            "unique" => true
+          }
+        },
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "rating",
+          label: "Rating",
+          field_type: :integer,
+          validation: %{"min" => 1, "max" => 5}
+        },
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "plain", label: "Plain", field_type: :string},
+        actor: actor,
+        tenant: org
+      )
+
+      properties = custom_fields(org, "content_page")["properties"]
+
+      sku = properties["sku"]
+
+      assert {sku["x-kiln-min-length"], sku["x-kiln-max-length"], sku["x-kiln-pattern"],
+              sku["x-kiln-unique"]} == {3, 12, "[A-Z]+-[0-9]+", true}
+
+      assert {properties["rating"]["x-kiln-minimum"], properties["rating"]["x-kiln-maximum"]} ==
+               {1, 5}
+
+      # A stored value may predate a constraint, so none is an assertion; the
+      # editor-facing message is not exported.
+      for key <- ~w(minLength maxLength pattern minimum maximum),
+          do: refute(Map.has_key?(sku, key) or Map.has_key?(properties["rating"], key))
+
+      refute Jason.encode!(sku) =~ "Use LETTERS-123"
+
+      # No constraint, no annotation.
+      assert properties["plain"] == %{"type" => ["string", "null"]}
     end
 
     test "a select's options are neither published nor pinned as an enum",
@@ -518,6 +577,219 @@ defmodule KilnCMS.SchemaExportTest do
       assert fields["symptoms"]["x-kiln-section"] == "Clinical"
       refute Map.has_key?(fields["code"], "x-kiln-section")
       refute Map.has_key?(fields["code"], "contentMediaType")
+    end
+  end
+
+  describe "editor layout annotations (#2280)" do
+    test "a non-full width and a fieldset or tab section are reported; defaults are not",
+         %{actor: actor, org: org} do
+      for attrs <- [
+            %{name: "dose", label: "Dose", section: "Clinical", width: :half},
+            %{name: "route", label: "Route", section: "Clinical", width: :third},
+            %{name: "note", label: "Note", section: "Notes"},
+            %{name: "loose", label: "Loose"}
+          ] do
+        CMS.create_field_definition!(Map.put(attrs, :content_type, :page),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      CMS.create_field_section!(%{content_type: :page, name: "Clinical", display: :tab},
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_section!(%{content_type: :page, name: "Notes", initially: :collapsed},
+        actor: actor,
+        tenant: org
+      )
+
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["dose"]["x-kiln-width"] == "half"
+      assert fields["dose"]["x-kiln-section-display"] == "tab"
+      assert fields["route"]["x-kiln-width"] == "third"
+      assert fields["route"]["x-kiln-section-display"] == "tab"
+
+      assert fields["note"]["x-kiln-section"] == "Notes"
+      refute Map.has_key?(fields["note"], "x-kiln-section-display")
+      refute Map.has_key?(fields["note"], "x-kiln-width")
+      refute Map.has_key?(fields["loose"], "x-kiln-section-display")
+    end
+
+    test "a dynamic type's fieldset is reported, and another site's layout is not",
+         %{actor: actor, org: org} do
+      name = type_name()
+      type = CMS.create_type_definition!(%{name: name, label: "W"}, actor: actor, tenant: org)
+
+      CMS.create_field_definition!(
+        %{type_definition_id: type.id, name: "size", label: "Size", section: "Specs"},
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_section!(
+        %{type_definition_id: type.id, name: "Specs", display: :fieldset},
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "dose", label: "Dose", section: "Clinical"},
+        actor: actor,
+        tenant: org
+      )
+
+      CMS.create_field_section!(%{content_type: :page, name: "Clinical", display: :tab},
+        actor: actor,
+        tenant: org("sx-other")
+      )
+
+      def_name = SchemaExport.content_def_name(name)
+
+      assert custom_fields(org, def_name)["properties"]["size"]["x-kiln-section-display"] ==
+               "fieldset"
+
+      refute Map.has_key?(
+               custom_fields(org, "content_page")["properties"]["dose"],
+               "x-kiln-section-display"
+             )
+    end
+
+    test "a refused layout read fails the export rather than dropping the annotation",
+         %{org: org} do
+      assert_raise Ash.Error.Forbidden, fn ->
+        SchemaExport.with_actor(KilnCMS.SystemActor.new(:firing), fn ->
+          SchemaExport.json_schema(org_id: org.id, types: ["page"])
+        end)
+      end
+    end
+  end
+
+  describe "a field's editor widget (#2284)" do
+    test "x-kiln-widget names a chosen widget and is absent for the default",
+         %{actor: actor, org: org} do
+      for attrs <- [
+            %{
+              name: "mood",
+              label: "Mood",
+              field_type: :select,
+              options: ["calm", "bright"],
+              widget: "radios"
+            },
+            %{name: "tone", label: "Tone", field_type: :select, options: ["a", "b"]},
+            %{
+              name: "line",
+              label: "Line",
+              field_type: :text,
+              format: :plain,
+              widget: "single_line"
+            }
+          ] do
+        CMS.create_field_definition!(Map.put(attrs, :content_type, :page),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["mood"]["x-kiln-widget"] == "radios"
+      assert fields["line"]["x-kiln-widget"] == "single_line"
+      refute Map.has_key?(fields["tone"], "x-kiln-widget")
+    end
+
+    test "a stored widget the field no longer offers is not advertised",
+         %{actor: actor, org: org} do
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "mood",
+          label: "Mood",
+          field_type: :select,
+          options: ["calm"]
+        },
+        actor: actor,
+        tenant: org
+      )
+
+      # As if a plugin had dropped the widget since it was chosen: no write
+      # path stores a name the field doesn't offer.
+      %{num_rows: 1} =
+        KilnCMS.Repo.query!(
+          "UPDATE field_definitions SET widget = 'gone' WHERE name = 'mood' AND org_id = $1",
+          [Ecto.UUID.dump!(org.id)]
+        )
+
+      fields = custom_fields(org, "content_page")["properties"]
+      refute Map.has_key?(fields["mood"], "x-kiln-widget")
+    end
+  end
+
+  describe "a typed list (#2289)" do
+    setup %{actor: actor, org: org} do
+      for attrs <- [
+            %{name: "scores", field_type: :integer, multiple: true},
+            %{name: "weights", field_type: :float, multiple: true},
+            %{name: "dates", field_type: :date, multiple: true, min_items: 1, max_items: 10},
+            %{name: "contacts", field_type: :email, multiple: true},
+            %{name: "colours", field_type: :color, multiple: true},
+            %{name: "launch", field_type: :date}
+          ] do
+        CMS.create_field_definition!(
+          Map.merge(attrs, %{content_type: :page, label: attrs.name}),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      :ok
+    end
+
+    test "an integer list is an array of integers that keeps repeats", %{org: org} do
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["scores"]["type"] == ["array", "null"]
+      assert fields["scores"]["items"] == %{"type" => "integer"}
+      refute Map.has_key?(fields["scores"], "uniqueItems")
+
+      assert fields["weights"]["items"] == %{"type" => "number"}
+      refute Map.has_key?(fields["weights"], "uniqueItems")
+    end
+
+    test "a date list carries the item format, uniqueItems and its bounds", %{org: org} do
+      dates = custom_fields(org, "content_page")["properties"]["dates"]
+
+      assert dates["items"] == %{"type" => "string", "format" => "date"}
+      assert dates["uniqueItems"] == true
+      assert dates["x-kiln-min-items"] == 1
+      assert dates["x-kiln-max-items"] == 10
+      refute Map.has_key?(dates, "minItems")
+      refute Map.has_key?(dates, "maxItems")
+    end
+
+    test "email and colour items keep their format and pattern", %{org: org} do
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["contacts"]["items"] == %{"type" => "string", "format" => "email"}
+      assert fields["contacts"]["uniqueItems"] == true
+      assert fields["colours"]["items"] == %{"type" => "string", "pattern" => "^#[0-9a-f]{6}$"}
+    end
+
+    test "a single field of the same type is unchanged", %{org: org} do
+      assert custom_fields(org, "content_page")["properties"]["launch"] ==
+               %{"type" => ["string", "null"], "format" => "date"}
+    end
+
+    test "the GraphQL annotation names a list", %{org: org} do
+      fields =
+        SchemaExport.json_schema(org_id: org.id, graphql: true)["$defs"]["content_page"][
+          "properties"
+        ]["custom_fields"]["properties"]
+
+      assert fields["dates"]["x-kiln-graphql-kind"] == "list"
+      assert fields["scores"]["x-kiln-graphql-kind"] == "list"
     end
   end
 

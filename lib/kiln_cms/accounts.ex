@@ -45,10 +45,23 @@ defmodule KilnCMS.Accounts do
       # passes `authorize?: false`.
       define :record_session_sign_in, action: :record_sign_in
       define :record_session_use, action: :record_session_use
+      define :bind_sessions_to_site, action: :bind_session_to_site
+      # The idle timeout and "sign out everyone" (#2246), system bookkeeping
+      # likewise: `KilnCMS.Accounts.IdleTimeout` and `KilnCMS.Accounts.Sessions`
+      # pass `authorize?: false`. The writes take a query (bulk updates).
+      define :get_session_activity, action: :session_activity, args: [:jti]
+      define :expire_idle_sessions, action: :expire_idle_session
+      define :revoke_stale_sessions, action: :revoke_stale_session
+      define :revoke_org_sessions, action: :revoke_org_session
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.
-    resource KilnCMS.Accounts.UserIdentity
+    # The two below are the invitation takeover's (#2453), as
+    # `SystemActor.new(:invitations)` only.
+    resource KilnCMS.Accounts.UserIdentity do
+      define :list_user_identities_for_takeover, action: :for_user, args: [:user_id]
+      define :forget_user_identity_on_takeover, action: :forget_on_takeover
+    end
 
     # WebAuthn credentials (#331 passkeys) — written only by the verified
     # ceremony (KilnCMS.Accounts.WebAuthn); self-managed from /editor/settings.
@@ -57,6 +70,8 @@ defmodule KilnCMS.Accounts do
       define :get_passkey, action: :read, get_by: [:id]
       define :get_passkey_by_credential_id, action: :read, get_by: [:credential_id]
       define :remove_passkey, action: :destroy
+      # The invitation takeover's (#2453), as `SystemActor.new(:invitations)`.
+      define :forget_passkey_on_takeover, action: :forget_on_takeover
       # Ceremony-only writes (KilnCMS.Accounts.WebAuthn, `authorize?: false`
       # after Wax verification).
       define :register_passkey_credential, action: :register
@@ -78,6 +93,8 @@ defmodule KilnCMS.Accounts do
 
       define :subscribe_to_push, action: :subscribe
       define :remove_push_subscription, action: :destroy
+      # The invitation takeover's (#2453), as `SystemActor.new(:invitations)`.
+      define :forget_push_subscription_on_takeover, action: :forget_on_takeover
     end
 
     # The tenant registry (epic #336) + the user↔org membership join. The org is
@@ -109,6 +126,49 @@ defmodule KilnCMS.Accounts do
       # the hourly sweep's write and takes no input.
       define :grant_membership_temporary_role, action: :grant_temporary_role
       define :expire_membership_role_grant, action: :expire_role_grant
+
+      # Registration approval (#2251) — see `KilnCMS.Accounts.Registrations`.
+      # `queue_registration` is system-only (`Changes.QueueRegistration`); the
+      # queue and the two decisions are an admin of the membership's own org.
+      define :queue_registration, action: :queue_registration
+      define :approve_registration, action: :approve_registration
+      define :reject_registration, action: :reject_registration
+
+      # An invitation honoured over a registration (#2514): system-only from
+      # `Invitations.grant_membership/4`, or a platform admin's direct add.
+      define :approve_registration_by_invitation, action: :approve_registration_by_invitation
+
+      # An accepted invitation raising a lower membership on its site (#2452):
+      # system-only, from `Invitations.grant_membership/4`.
+      define :raise_membership_role_by_invitation, action: :raise_role_by_invitation
+
+      define :list_registration_queue,
+        action: :registration_queue,
+        args: [:organization_id, {:optional, :status}]
+    end
+
+    # Site invitations by email (#2135) — see `KilnCMS.Accounts.Invitations`.
+    # Inviting, resending, revoking and listing are platform-admin actions: pass
+    # `actor: admin`. The Team page goes through `add_or_invite_member`, which
+    # adds an address that already has a confirmed account and invites any
+    # other.
+    resource KilnCMS.Accounts.Invitation do
+      define :add_or_invite_member, action: :add_or_invite
+      define :invite_to_org, action: :invite
+      define :resend_invitation, action: :resend
+      define :revoke_invitation, action: :revoke
+      define :list_invitations_for_org, action: :for_org, args: [:organization_id]
+      define :list_invitations, action: :read
+      # System-only (`forbid_if always()` above the admin bypass): the accept
+      # page passes `authorize?: false`, holding the emailed token.
+      define :get_invitation_by_token, action: :by_token, args: [:token]
+      define :accept_invitation_for_existing_account, action: :accept_existing, args: [:token]
+      define :consume_invitation, action: :consume
+      # A membership change superseding an invitation (#2452): system-only,
+      # from `Changes.RetirePendingInvitation`.
+      define :retire_invitation, action: :retire
+      # The daily sweep's write (AshOban trigger on the resource).
+      define :prune_expired_invitations, action: :prune_expired
     end
 
     # Custom roles (#332 slice 4) — named bundles of the grant axes, assigned
@@ -133,6 +193,11 @@ defmodule KilnCMS.Accounts do
       define :list_all_api_keys, action: :read
       define :get_api_key, action: :read, get_by: [:id]
       define :revoke_api_key, action: :revoke
+      # A `:draft_write` key exchanging itself for a fresh one: pass the actor
+      # the key authenticated as (`actor_from_api_key/1`). Takes no input.
+      define :rotate_api_key, action: :rotate
+      define :retire_rotated_api_key, action: :retire_rotated
+      define :list_live_api_keys_in_lineage, action: :live_in_lineage, args: [:lineage_id]
     end
 
     # The `Idempotency-Key` ledger (`KilnCMSWeb.Plugs.Idempotency`). Every
@@ -168,6 +233,15 @@ defmodule KilnCMS.Accounts do
       define :set_nav_preset, action: :set_nav_preset, args: [:nav_preset]
       # The content list's status marks — self only; pass `actor: user`.
       define :set_status_marks, action: :set_status_marks, args: [:status_marks]
+
+      define :set_content_list_columns,
+        action: :set_content_list_columns,
+        args: [:org_id, :type, :names]
+
+      # Self-service password change — pass `actor: user` (self). The settings
+      # page drives it through an AshPhoenix form.
+      define :change_password, action: :change_password
+
       # Two-factor (TOTP) self-service (issue #331) — pass `actor: user` (self).
       define :setup_totp, action: :setup_totp
       define :confirm_totp, action: :confirm_totp
@@ -182,6 +256,17 @@ defmodule KilnCMS.Accounts do
       # the ID token, the verified domain and the cross-site rule all passed).
       define :complete_site_sso_sign_in, action: :sign_in_with_site_sso, args: [:user_id]
       define :register_with_site_sso, action: :register_with_site_sso
+      # Accepting a site invitation (#2135) — both system-only
+      # (`authorize?: false` from `KilnCMSWeb.InviteLive`; the token is the
+      # credential): a new account, or a new password over an unconfirmed one.
+      define :register_with_invitation, action: :register_with_invitation
+
+      define :accept_invitation_with_password, action: :accept_invitation_with_password
+      # The emailed link that lifts a sign-in pause (#2250) — both system-only
+      # (`authorize?: false` from `KilnCMSWeb.SignInUnlockController`, with the
+      # request host's org in `context:`; an actor-carrying call is refused).
+      define :request_sign_in_unlock, action: :request_sign_in_unlock, args: [:email]
+      define :redeem_sign_in_unlock, action: :redeem_sign_in_unlock, args: [:token]
       # Admin-only: assign role + consumer audiences; pass `actor: admin`.
       define :manage_user_access, action: :manage_access
       # Time-boxed elevation above the standing role (KilnCMS.Accounts.RoleGrant).
@@ -354,7 +439,10 @@ defmodule KilnCMS.Accounts do
       notification_preferences: %{
         notify_on_review_request: user.notify_on_review_request,
         notify_on_publish: user.notify_on_publish,
-        notify_on_return_to_draft: user.notify_on_return_to_draft
+        notify_on_return_to_draft: user.notify_on_return_to_draft,
+        notify_on_comment: user.notify_on_comment,
+        notify_on_registration: user.notify_on_registration,
+        notify_on_security_alert: user.notify_on_security_alert
       },
       # Paid memberships (#337 Phase 2). The provider ids ARE included: they are
       # identifiers a subprocessor holds about this person, so GDPR Art. 15/20

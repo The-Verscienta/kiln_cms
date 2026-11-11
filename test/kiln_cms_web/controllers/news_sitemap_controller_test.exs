@@ -255,4 +255,26 @@ defmodule KilnCMSWeb.NewsSitemapControllerTest do
     on_exit(fn -> File.rm(path) end)
     String.to_charlist(path)
   end
+
+  test "noindex articles are left out; nofollow-only ones stay (#2256)", ctx do
+    publish(ctx, "plain-#{ctx.n}")
+
+    for {slug, attrs} <- [
+          {"hidden-#{ctx.n}", %{noindex: true}},
+          {"nofollow-#{ctx.n}", %{nofollow: true}}
+        ] do
+      entry =
+        ContentTypes.create!(ctx.news.name, Map.merge(%{title: "S", slug: slug}, attrs),
+          actor: ctx.admin
+        )
+
+      CMS.publish_entry!(entry, actor: ctx.admin)
+    end
+
+    body = news_sitemap()
+
+    refute body =~ "hidden-#{ctx.n}"
+    assert body =~ "nofollow-#{ctx.n}"
+    assert body =~ "plain-#{ctx.n}"
+  end
 end

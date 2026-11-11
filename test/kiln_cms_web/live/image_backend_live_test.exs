@@ -73,7 +73,8 @@ defmodule KilnCMSWeb.ImageBackendLiveTest do
         |> Phoenix.ConnTest.init_test_session(%{})
         |> AshAuthentication.Plug.Helpers.store_in_session(authed_user(:editor))
 
-      assert {:error, {:redirect, %{to: "/", flash: %{"error" => _}}}} = live(conn, @path)
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
+               live(conn, @path)
     end
 
     test "System links to it while a backend is installed", %{conn: conn} do

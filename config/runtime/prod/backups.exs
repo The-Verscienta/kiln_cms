@@ -49,6 +49,35 @@ backup_opts =
     stale_after_hours: backup_int.("BACKUP_STALE_AFTER_HOURS", 36)
   ]
 
+# Media archives are written as independent `.partNN.tar.gz` parts (#2218);
+# this is the target ceiling on one part's INPUT bytes, in MB. Bounded on both
+# sides: 16 MB is below what makes a part worth its sidecar and manifest
+# entry, 10240 MB (10 GB) is past what a single request to most off-site
+# stores survives. Out of range keeps the default and warns, never clamps.
+# Stored in BYTES so tests can use a few KiB.
+backup_opts =
+  case Env.integer_in("BACKUP_MEDIA_PART_MB", 16, 10_240) do
+    {:ok, mb} -> Keyword.put(backup_opts, :media_part_bytes, mb * 1_048_576)
+    _unset_or_unrecognized -> backup_opts
+  end
+
+# Comma-separated globs, matched against the path relative to the media
+# directory. Unset (or blank) leaves exclusions off.
+backup_opts =
+  case backup_env.("BACKUP_MEDIA_EXCLUDE") do
+    nil ->
+      backup_opts
+
+    raw ->
+      globs =
+        raw
+        |> String.split(",")
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+
+      if globs == [], do: backup_opts, else: Keyword.put(backup_opts, :media_exclude, globs)
+  end
+
 # Same variable the script uses, so the app path copies off-site too — a
 # backup that exists only on the machine being backed up is not a backup of
 # that machine.

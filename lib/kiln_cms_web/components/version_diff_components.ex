@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.VersionDiffComponents do
 
   import KilnCMSWeb.CoreComponents, only: [icon: 1, modal: 1]
 
+  alias KilnCMS.CMS.FieldDisplay
   alias KilnCMS.CMS.VersionDiff
 
   @doc """
@@ -32,116 +33,222 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   attr :left, :map, required: true
   attr :right, :map, required: true
 
+  # Custom-field rows (#2294): the definitions in scope, by field name, give a
+  # row its label and its typed value; `display` is the media / reference
+  # targets the diff names, resolved once by the caller as the reader.
+  attr :definitions, :map, default: %{}
+  attr :display, :map, default: nil
+
+  # Whether the Restore buttons are offered, and why not (#2294 follow-up). The
+  # `restore` handler enforces the same rule; this only keeps the UI honest.
+  attr :can_restore?, :boolean, default: true
+  attr :restore_refusal, :string, default: nil
+
   def version_compare(assigns) do
     ~H"""
     <.modal id="version-compare-dialog" on_close="close_compare">
       <:title>{gettext("Compare versions")}</:title>
       <:subtitle>
         <div class="flex flex-wrap items-center gap-2">
-          <.side_label side={@left} />
+          <.side_label side={@left} can_restore?={@can_restore?} restore_refusal={@restore_refusal} />
           <.icon name="hero-arrow-right" class="size-4 shrink-0" />
-          <.side_label side={@right} />
+          <.side_label side={@right} can_restore?={@can_restore?} restore_refusal={@restore_refusal} />
         </div>
       </:subtitle>
 
-      <div class="flex-1 overflow-y-auto p-4">
-        <p :if={!@diff.changed?} class="text-sm text-base-content/60">
-          {gettext("These two versions are identical.")}
+      <.diff_body diff={@diff} definitions={@definitions} display={@display} />
+    </.modal>
+    """
+  end
+
+  attr :diff, VersionDiff, required: true
+  attr :definitions, :map, default: %{}
+  attr :display, :map, default: nil
+  attr :identical, :string, default: nil
+
+  defp diff_body(assigns) do
+    ~H"""
+    <div class="flex-1 overflow-y-auto p-4">
+      <p :if={!@diff.changed?} class="text-sm text-base-content/60">
+        {@identical || gettext("These two versions are identical.")}
+      </p>
+
+      <section :if={@diff.fields != []} class="mb-6">
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
+          {gettext("Fields")}
+        </h3>
+        <ul class="space-y-3">
+          <li :for={field <- @diff.fields} class="rounded border border-base-content/10 p-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-medium">{field_label(field.name)}</span>
+              <.status_pill status={field.status} />
+              <%!-- Restore sits a few inches away in this same modal, and it
+                      moves editorial content only — workflow and attribution
+                      are left as they are. Saying so here is the difference
+                      between a documented rule and a silent no-op (#691). The
+                      rationale is a visible line rather than a `title=`
+                      tooltip: `/editor` ships as an installable PWA (#65),
+                      and a phone has no hover. --%>
+              <.pill :if={!field.restorable?} tone="bg-base-200 text-base-content/60">
+                {gettext("Not restored")}
+              </.pill>
+            </div>
+            <p :if={!field.restorable?} class="mt-1 text-xs text-base-content/60">
+              {gettext(
+                "Restoring a version reverts editorial content. Workflow state, schedule and author stay as they are."
+              )}
+            </p>
+            <.field_body field={field} definitions={@definitions} display={@display} />
+          </li>
+        </ul>
+      </section>
+
+      <%!-- Gated on `changed?`, not on the block list: an identical pair still
+              carries every block as `:unchanged`, and printing "No changes"
+              forty times under a banner saying the versions are identical is
+              noise, not context. --%>
+      <section :if={@diff.changed? && @diff.blocks != []}>
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
+          {gettext("Content blocks")}
+        </h3>
+        <ol class="space-y-2">
+          <li
+            :for={block <- @diff.blocks}
+            class={[
+              "rounded border p-3",
+              block_border(block)
+            ]}
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-medium">{block_label(block.type)}</span>
+              <.status_pill status={block.status} />
+              <.pill :if={block.moved?} tone="bg-info/20 text-info-ink">
+                {gettext("Moved %{from} → %{to}",
+                  from: block.old_index + 1,
+                  to: block.new_index + 1
+                )}
+              </.pill>
+            </div>
+
+            <p
+              :if={block.status == :unchanged && !block.moved?}
+              class="mt-1 text-xs text-base-content/50"
+            >
+              {gettext("No changes")}
+            </p>
+
+            <p :if={block.inline} class="mt-2 text-sm leading-relaxed">
+              <.runs runs={block.inline} />
+            </p>
+
+            <%!-- Rendered alongside the prose runs, not instead of them. A
+                    block whose text is untouched but whose `level`, `citation`
+                    or `alt` changed produces an all-`:eq` inline diff, and
+                    gating this on `inline == nil` hid the only thing that
+                    actually changed. `VersionDiff` drops the prose fields from
+                    `fields` when it emitted runs for them. --%>
+            <dl :if={block.fields != []} class="mt-2 space-y-1 text-sm">
+              <div :for={change <- block.fields} class="flex flex-wrap items-baseline gap-2">
+                <dt class="text-xs uppercase tracking-wide text-base-content/50">
+                  {change.name}
+                </dt>
+                <dd class="flex flex-wrap items-baseline gap-2">
+                  <.value_pair old={change.old} new={change.new} />
+                </dd>
+              </div>
+            </dl>
+          </li>
+        </ol>
+      </section>
+    </div>
+    """
+  end
+
+  @doc """
+  The restore preview (#2294): what restoring a version will change, shown
+  before it happens, with the confirm step.
+
+  `preview` is the map the editor builds from `RestoreVersion.preview/3`:
+  `:label` (the version), `:version_id`, `:diff` (the current document against
+  what the restore will leave; `nil` when the restore would fail), `:definitions`,
+  `:display`, `:dropped` (stored custom keys the restore discards) and `:error`
+  (why it would fail, or `nil`). Confirm is offered only when `:error` is `nil`.
+  """
+  attr :preview, :map, required: true
+
+  def restore_preview(assigns) do
+    ~H"""
+    <.modal id="restore-preview-dialog" on_close="cancel_restore">
+      <:title>{gettext("Restore this version?")}</:title>
+      <:subtitle>
+        <span class="truncate rounded bg-base-200 px-2 py-0.5 text-xs">{@preview.label}</span>
+      </:subtitle>
+
+      <div class="flex min-h-0 flex-1 flex-col">
+        <p
+          :if={@preview.error}
+          id="restore-preview-error"
+          role="alert"
+          class="m-4 rounded border border-error/40 bg-error/10 p-3 text-sm text-error-ink"
+        >
+          {@preview.error}
         </p>
 
-        <section :if={@diff.fields != []} class="mb-6">
-          <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
-            {gettext("Fields")}
+        <section
+          :if={@preview.dropped != []}
+          id="restore-preview-dropped"
+          class="m-4 rounded border border-warning/40 bg-warning/10 p-3"
+        >
+          <h3 class="text-sm font-medium text-warning-ink">
+            {gettext("These custom fields will be discarded")}
           </h3>
-          <ul class="space-y-3">
-            <li :for={field <- @diff.fields} class="rounded border border-base-content/10 p-3">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="text-sm font-medium">{field_label(field.name)}</span>
-                <.status_pill status={field.status} />
-                <%!-- Restore sits a few inches away in this same modal, and it
-                        moves editorial content only — workflow and attribution
-                        are left as they are. Saying so here is the difference
-                        between a documented rule and a silent no-op (#691). The
-                        rationale is a visible line rather than a `title=`
-                        tooltip: `/editor` ships as an installable PWA (#65),
-                        and a phone has no hover. --%>
-                <.pill :if={!field.restorable?} tone="bg-base-200 text-base-content/60">
-                  {gettext("Not restored")}
-                </.pill>
-              </div>
-              <p :if={!field.restorable?} class="mt-1 text-xs text-base-content/60">
-                {gettext(
-                  "Restoring a version reverts editorial content. Workflow state, schedule and author stay as they are."
-                )}
-              </p>
-              <.field_body field={field} />
+          <p class="mt-1 text-xs text-base-content/70">
+            {gettext(
+              "That version stored a value for each of these, but no field definition declares it any more."
+            )}
+          </p>
+          <ul class="mt-2 flex flex-wrap gap-2">
+            <li
+              :for={key <- @preview.dropped}
+              data-dropped-key={key}
+              class="rounded bg-base-200 px-2 py-0.5 font-mono text-xs"
+            >
+              {key}
             </li>
           </ul>
         </section>
 
-        <%!-- Gated on `changed?`, not on the block list: an identical pair still
-                carries every block as `:unchanged`, and printing "No changes"
-                forty times under a banner saying the versions are identical is
-                noise, not context. --%>
-        <section :if={@diff.changed? && @diff.blocks != []}>
-          <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/60">
-            {gettext("Content blocks")}
-          </h3>
-          <ol class="space-y-2">
-            <li
-              :for={block <- @diff.blocks}
-              class={[
-                "rounded border p-3",
-                block_border(block)
-              ]}
-            >
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="text-sm font-medium">{block_label(block.type)}</span>
-                <.status_pill status={block.status} />
-                <.pill :if={block.moved?} tone="bg-info/20 text-info-ink">
-                  {gettext("Moved %{from} → %{to}",
-                    from: block.old_index + 1,
-                    to: block.new_index + 1
-                  )}
-                </.pill>
-              </div>
+        <.diff_body
+          :if={@preview.diff}
+          diff={@preview.diff}
+          definitions={@preview.definitions}
+          display={@preview.display}
+          identical={gettext("Restoring this version would not change anything.")}
+        />
+      </div>
 
-              <p
-                :if={block.status == :unchanged && !block.moved?}
-                class="mt-1 text-xs text-base-content/50"
-              >
-                {gettext("No changes")}
-              </p>
-
-              <p :if={block.inline} class="mt-2 text-sm leading-relaxed">
-                <.runs runs={block.inline} />
-              </p>
-
-              <%!-- Rendered alongside the prose runs, not instead of them. A
-                      block whose text is untouched but whose `level`, `citation`
-                      or `alt` changed produces an all-`:eq` inline diff, and
-                      gating this on `inline == nil` hid the only thing that
-                      actually changed. `VersionDiff` drops the prose fields from
-                      `fields` when it emitted runs for them. --%>
-              <dl :if={block.fields != []} class="mt-2 space-y-1 text-sm">
-                <div :for={change <- block.fields} class="flex flex-wrap items-baseline gap-2">
-                  <dt class="text-xs uppercase tracking-wide text-base-content/50">
-                    {change.name}
-                  </dt>
-                  <dd class="flex flex-wrap items-baseline gap-2">
-                    <.value_pair old={change.old} new={change.new} />
-                  </dd>
-                </div>
-              </dl>
-            </li>
-          </ol>
-        </section>
+      <div class="flex justify-end gap-2 border-t border-base-content/10 p-4">
+        <button type="button" phx-click="cancel_restore" class="btn btn-sm btn-default">
+          {gettext("Cancel")}
+        </button>
+        <button
+          :if={!@preview.error}
+          type="button"
+          id="confirm-restore"
+          phx-click="confirm_restore"
+          phx-value-version_id={@preview.version_id}
+          class="btn btn-sm btn-primary"
+        >
+          {gettext("Restore this version")}
+        </button>
       </div>
     </.modal>
     """
   end
 
   attr :side, :map, required: true
+  attr :can_restore?, :boolean, default: true
+  attr :restore_refusal, :string, default: nil
 
   defp side_label(assigns) do
     ~H"""
@@ -150,10 +257,12 @@ defmodule KilnCMSWeb.VersionDiffComponents do
       <button
         :if={@side.version_id}
         type="button"
-        phx-click="restore"
+        phx-click={@can_restore? && "restore"}
         phx-value-version_id={@side.version_id}
-        data-confirm={gettext("Restore content to this version?")}
-        class="btn-link text-xs text-primary-ink hover:underline"
+        disabled={!@can_restore?}
+        aria-disabled={to_string(!@can_restore?)}
+        title={@restore_refusal}
+        class="btn-link text-xs text-primary-ink hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
       >
         {gettext("Restore")}
       </button>
@@ -161,19 +270,71 @@ defmodule KilnCMSWeb.VersionDiffComponents do
     """
   end
 
+  @doc """
+  The per-key detail of one whole-map conflict row (#2294): each custom field
+  that differs between the live value (`old`) and the draft's (`new`), with
+  its label, the typed value on each side and an added / removed / changed
+  pill. Renders nothing for an empty list, never an empty box.
+  """
+  attr :entries, :list, required: true
+  attr :definitions, :map, default: %{}
+  attr :display, :map, default: nil
+  attr :id, :string, required: true
+
+  def entry_detail(assigns) do
+    assigns = assign(assigns, :display, assigns.display || FieldDisplay.empty_context())
+
+    ~H"""
+    <dl :if={@entries != []} id={@id} class="w-full space-y-1 text-sm">
+      <div
+        :for={entry <- @entries}
+        class="flex flex-wrap items-baseline gap-2"
+        data-custom-field={entry.key}
+      >
+        <dt class="text-xs uppercase tracking-wide text-base-content/50">
+          {entry_label(@definitions, entry.key)}
+        </dt>
+        <dd class="flex flex-wrap items-baseline gap-2">
+          <.status_pill status={entry.status} />
+          <.value_pair
+            old={entry.old}
+            new={entry.new}
+            format={&FieldDisplay.display(Map.get(@definitions, entry.key), &1, @display)}
+          />
+        </dd>
+      </div>
+    </dl>
+    """
+  end
+
   attr :field, :map, required: true
+  attr :definitions, :map, default: %{}
+  attr :display, :map, default: nil
 
   defp field_body(assigns) do
+    assigns = assign(assigns, :display, assigns.display || FieldDisplay.empty_context())
+
     ~H"""
     <p :if={@field.inline} class="mt-1 text-sm leading-relaxed">
       <.runs runs={@field.inline} />
     </p>
 
     <dl :if={@field.entries != []} class="mt-1 space-y-1 text-sm">
-      <div :for={entry <- @field.entries} class="flex flex-wrap items-baseline gap-2">
-        <dt class="text-xs uppercase tracking-wide text-base-content/50">{entry.key}</dt>
+      <div
+        :for={entry <- @field.entries}
+        class="flex flex-wrap items-baseline gap-2"
+        data-custom-field={entry.key}
+      >
+        <dt class="text-xs uppercase tracking-wide text-base-content/50">
+          {entry_label(@definitions, entry.key)}
+        </dt>
         <dd class="flex flex-wrap items-baseline gap-2">
-          <.value_pair old={entry.old} new={entry.new} />
+          <.status_pill status={entry.status} />
+          <.value_pair
+            old={entry.old}
+            new={entry.new}
+            format={&FieldDisplay.display(Map.get(@definitions, entry.key), &1, @display)}
+          />
         </dd>
       </div>
     </dl>
@@ -186,13 +347,14 @@ defmodule KilnCMSWeb.VersionDiffComponents do
 
   attr :old, :any, required: true
   attr :new, :any, required: true
+  attr :format, :any, default: &FieldDisplay.format/1
 
   defp value_pair(assigns) do
     ~H"""
-    <del :if={present?(@old)} class="rounded bg-error/20 px-1 text-error-ink">{format(@old)}</del>
+    <del :if={present?(@old)} class="rounded bg-error/20 px-1 text-error-ink">{@format.(@old)}</del>
     <.icon :if={present?(@old) && present?(@new)} name="hero-arrow-right" class="size-3 shrink-0" />
     <ins :if={present?(@new)} class="rounded bg-success/20 px-1 text-success-ink no-underline">
-      {format(@new)}
+      {@format.(@new)}
     </ins>
     <span :if={!present?(@old) && !present?(@new)} class="text-base-content/50">—</span>
     """
@@ -259,24 +421,14 @@ defmodule KilnCMSWeb.VersionDiffComponents do
   defp present?(value) when is_list(value), do: value != []
   defp present?(_value), do: true
 
-  # Values are truncated, and structures rendered as compact JSON rather than
-  # `inspect/1`. A rich-text body or a nested column tree is thousands of
-  # characters of Elixir map syntax; dumped whole it is unreadable, and it is the
-  # editor's own content being echoed back into the page.
-  @value_limit 200
-
-  defp format(value) when is_binary(value), do: truncate(value)
-  defp format(value) when is_number(value), do: to_string(value)
-  defp format(value) when is_boolean(value), do: to_string(value)
-
-  defp format(value) do
-    truncate(Jason.encode!(value))
-  rescue
-    _error -> truncate(inspect(value))
+  # A field with no definition (retired, renamed or deleted since the version
+  # was saved) keeps its stored key, which is all that is left to name it.
+  defp entry_label(definitions, key) do
+    case Map.get(definitions, key) do
+      %{label: label} when is_binary(label) and label != "" -> label
+      _retired -> key
+    end
   end
-
-  defp truncate(text) when byte_size(text) <= @value_limit, do: text
-  defp truncate(text), do: String.slice(text, 0, @value_limit) <> "…"
 
   # The labels, keyed rather than ordered (#712). Display order is
   # `KilnCMS.CMS.VersionFields.field_order/0`'s business and is not restated
@@ -296,6 +448,8 @@ defmodule KilnCMSWeb.VersionDiffComponents do
     seo_keywords: "SEO keywords",
     seo_image: "SEO image",
     canonical_url: "Canonical URL",
+    noindex: "Hide from search engines",
+    nofollow: "Do not follow links",
     published_at: "Published at",
     scheduled_at: "Scheduled at",
     proposed_publish_at: "Proposed publish date",

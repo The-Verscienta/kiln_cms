@@ -116,6 +116,18 @@ defmodule KilnCMS.Accounts.PushSubscription do
       # endpoint, so a bad row is rejected where somebody can see it rather
       # than once per notification in a worker log.
       validate match(:endpoint, ~r{\Ahttps://})
+
+      # The account's row first, and refused when an invitation took the
+      # account over after the subscribing request loaded it (#2453).
+      change {KilnCMS.Accounts.Changes.GuardAccountTakeover, lock: :share}
+    end
+
+    # Accepting a site invitation over an unconfirmed account (#2453): a
+    # device whoever registered the address first subscribed must stop
+    # receiving the invitee's review notifications. System-only, as
+    # `SystemActor.new(:invitations)` from `Changes.ForgetPriorCredentials`.
+    destroy :forget_on_takeover do
+      description "Remove a device when an invitation takes over an unconfirmed account (system-only)."
     end
 
     # Delivery bookkeeping, and the only update this resource has. A general
@@ -128,25 +140,42 @@ defmodule KilnCMS.Accounts.PushSubscription do
   end
 
   policies do
+    # The invitation takeover's destroy (#2453) is the invitations system
+    # actor's alone, and above the admin bypass for that reason: a passing
+    # bypass skips every policy after it. The grant is repeated in the destroy
+    # policy below, which this action meets too.
+    policy action(:forget_on_takeover) do
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :invitations, action: :forget_on_takeover}
+    end
+
     bypass KilnCMS.Accounts.Checks.PlatformAdmin do
       authorize_if always()
     end
 
     # The system actor (`KilnCMS.Push.system/0`, #1659) reads for delivery:
     # `for_users` is the sender's lookup and `read` the worker's reload by id.
-    # Named, so `for_user` and `bound_to_key` are not admitted with them.
+    # Named, so `for_user` and `bound_to_key` are not admitted with them. The
+    # invitations system actor lists an unconfirmed account's devices
+    # (`for_user`) to forget them when an invitation takes it over (#2453);
+    # above the `forbid_unless`, which would refuse it.
     policy action_type(:read) do
       authorize_if expr(user_id == ^actor(:id))
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :invitations, action: :for_user}
       forbid_unless action([:read, :for_users])
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :push}
     end
 
     # The system actor prunes a device its push service reported gone, and the
-    # site-key rotation sweeps a rotated key's devices. `:destroy` is the only
-    # destroy action; a second one must be named here before system code gets it.
+    # site-key rotation sweeps a rotated key's devices, through `:destroy`
+    # only. `:forget_on_takeover` is admitted above; a third destroy must be
+    # named here before system code gets it.
     policy action_type(:destroy) do
       authorize_if expr(user_id == ^actor(:id))
-      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :push}
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :push, action: :destroy}
+
+      authorize_if {KilnCMS.Checks.SystemActor,
+                    subsystem: :invitations, action: :forget_on_takeover}
     end
 
     # A browser registers its own device: the row's `user_id` must be the

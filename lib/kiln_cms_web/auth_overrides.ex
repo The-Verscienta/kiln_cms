@@ -25,6 +25,13 @@ defmodule KilnCMSWeb.AuthOverrides do
   component explicitly and call this. Same reduce the macro expands to: the
   first module in the list that has an opinion wins, and `default` is what no
   opinion means.
+
+  The library renders Kiln copies stand in for, which
+  `KilnCMSWeb.AuthOverridesTest` re-renders against upstream's so a library
+  bump shows up there: `KilnCMSWeb.AuthSignInForm`,
+  `KilnCMSWeb.AuthRegisterForm`, `KilnCMSWeb.AuthResetForm`,
+  `KilnCMSWeb.AuthResetRequestForm`, and the input copies
+  `KilnCMSWeb.AuthPasswordInput` and `KilnCMSWeb.AuthIdentityInput` (#2162).
   """
   @spec override_for([module], module, atom, any) :: any
   def override_for(overrides, component, selector, default \\ nil) do
@@ -191,7 +198,9 @@ defmodule KilnCMSWeb.AuthOverrides do
     # Kiln's own sign-in form: upstream's, with an eye button beside the
     # password box (#1806). See `KilnCMSWeb.AuthSignInForm`.
     set :sign_in_form_module, KilnCMSWeb.AuthSignInForm
-    set :reset_form_module, AshAuthentication.Phoenix.Components.Password.ResetForm
+    # Kiln's own reset-request form: upstream's, with `autocomplete="email"` on
+    # the email box (#2162). See `KilnCMSWeb.AuthResetRequestForm`.
+    set :reset_form_module, KilnCMSWeb.AuthResetRequestForm
   end
 
   override Components.Password.SignInForm do

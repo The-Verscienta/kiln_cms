@@ -4,7 +4,7 @@ defmodule KilnCMS.Accounts.Changes.EvictRoleMembers do
 
   `KilnCMS.Accounts.Changes.EvictSessions` evicts the user a record names. A
   `Role` names none: `Scoping` resolves membership → role → user, so a role
-  carries `editable_types`, `readable_types` and `field_grants` on behalf of
+  carries `editable_types`, `readable_types`, `field_grants` and `field_read_grants` on behalf of
   every member pointing at it. Narrowing one role is therefore a narrowing for
   an unbounded set of people, and evicting "the record's user" reaches nobody.
 

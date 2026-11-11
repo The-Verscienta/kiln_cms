@@ -115,6 +115,15 @@ defmodule KilnCMS.Accounts.Changes.ThrottleSecondFactor do
         # signal cannot suppress it.
         alert(changeset.data)
 
+        # The security audit log (#2241). Never raises; one event per window.
+        KilnCMS.Security.AuthEvents.locked(
+          changeset.context,
+          changeset.data,
+          "second_factor",
+          "settings",
+          changeset.data.id
+        )
+
         Ash.Changeset.add_error(
           changeset,
           SecondFactorThrottled.exception(

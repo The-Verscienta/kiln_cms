@@ -62,6 +62,25 @@ defmodule KilnCMSWeb.PageControllerTest do
     assert html =~ ~s(href="https://github.com/The-Verscienta/kiln_cms")
   end
 
+  # The guide lives on GitHub because this template ships to every install, and
+  # a relative /docs link 404s on one that does not publish the guides (#2158).
+  test "the workflow and roles cards link to the editorial workflow guide", %{conn: conn} do
+    doc = conn |> get(~p"/") |> html_response(200) |> LazyHTML.from_document()
+    guide = "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/editorial-workflow.md"
+
+    links =
+      for card <- doc |> LazyHTML.query("#home-features ~ div article") |> Enum.to_list(),
+          link <- card |> LazyHTML.query("a[href]") |> Enum.take(1),
+          do: {LazyHTML.text(LazyHTML.query(card, "h3")), LazyHTML.attribute(link, "href")}
+
+    assert links == [
+             {"Editorial workflow", [guide]},
+             {"Roles and permissions", [guide <> "#who-can-do-what"]}
+           ]
+
+    assert File.exists?("docs/editorial-workflow.md")
+  end
+
   # The stock front page is a PUBLIC url, and it used to be the only one served
   # out of `Layouts.app` — the authoring chrome. That gave `/` alone a theme
   # toggle and an account menu no other delivery page has, and skipped the
@@ -122,16 +141,23 @@ defmodule KilnCMSWeb.PageControllerTest do
     end
   end
 
-  # The screenshots are static files captured by e2e/screenshots/home.spec.js;
-  # a renamed capture would otherwise ship as a row of broken images.
-  test "every screenshot the home page shows exists", %{conn: conn} do
+  # The shipped screenshots are variants derived by
+  # scripts/optimize_home_images.sh; a renamed or missing one would otherwise
+  # ship as a broken image. Weight and markup are asserted in
+  # KilnCMSWeb.HomeImageWeightTest.
+  test "every image and srcset candidate the home page shows exists", %{conn: conn} do
     html = conn |> get(~p"/") |> html_response(200)
-    srcs = Regex.scan(~r{src="(/images/home/[^"]+)"}, html, capture: :all_but_first)
 
-    assert length(srcs) == 4
+    urls =
+      for [_, value] <- Regex.scan(~r{(?:src|srcset)="([^"]*/images/home/[^"]+)"}, html),
+          url <- String.split(value, ","),
+          [path | _] = String.split(String.trim(url)),
+          do: path
 
-    for [src] <- srcs do
-      assert File.exists?(Path.join(:code.priv_dir(:kiln_cms), "static" <> src)), src
+    assert length(urls) >= 4
+
+    for path <- urls do
+      assert File.exists?(Path.join(:code.priv_dir(:kiln_cms), "static" <> path)), path
     end
   end
 

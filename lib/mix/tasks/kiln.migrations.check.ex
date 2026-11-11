@@ -40,6 +40,20 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
       `DROP COLUMN`, `DROP VIEW`, `DROP SCHEMA`, `DROP TYPE`, `RENAME`,
       `ALTER COLUMN ... TYPE` or `SET NOT NULL`. Dropping and re-creating a
       function or trigger is not flagged.
+    * A removed, renamed or retyped column that a `kiln_reporting_v1` view
+      references (#2295): a column of a viewed content table, or one of the
+      `field_definitions` / `type_definitions` columns the views read.
+      Postgres refuses to alter or drop a column a view reads, so the
+      migration fails at deploy even when the old release no longer reads the
+      column. The views are found in the migration history (`CREATE OR REPLACE
+      VIEW kiln_reporting_v1.<table>`). Both the `up` and the `down` of the
+      migration are checked, in the Ecto DSL and in raw `ALTER TABLE ... DROP
+      COLUMN / RENAME COLUMN / ALTER COLUMN ... TYPE`; each must drop the
+      table's view and its `_field_values` twin earlier in the same function
+      (and re-create them), which is a `kiln:contract-ok` change like any
+      other. A `kiln:contract-ok` marker does not excuse this rule: only
+      dropping the views does. For the definition tables, every viewed
+      table's pair must be dropped.
     * A non-concurrent `create index` / `create unique_index` on a table in
       `large_tables/0` — a plain `CREATE INDEX` blocks writes to the table for
       the whole build.
@@ -131,6 +145,23 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
     webhook_deliveries
   )
 
+  # The base-table columns the `kiln_reporting_v1` views reference
+  # (`KilnCMS.Reporting.ViewSql.pinned_columns/0`; a test keeps them equal).
+  # Hard-coded because this task reads the migrations with the standard
+  # library alone.
+  @reporting_pinned ~w(id org_id title slug locale audience state published_at inserted_at
+                       updated_at custom_fields archived_at access_password_hash
+                       type_definition_id)
+
+  # The columns the views read from tables that are not viewed content tables,
+  # keyed by table (`KilnCMS.Reporting.ViewSql.pinned_other_columns/0`).
+  @reporting_pinned_other %{
+    "field_definitions" =>
+      ~w(name org_id type_definition_id content_type private field_type multiple link_of_id
+         group_of_id),
+    "type_definitions" => ~w(id org_id name path_segment)
+  }
+
   @contract_marker "kiln:contract-ok"
   @lock_marker "kiln:lock-ok"
   @dash ~S"(?:—|–|--|-)"
@@ -184,13 +215,15 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
 
     version = project_version()
     history = history_index(Enum.uniq(all_files ++ files))
+    viewed = viewed_tables(Enum.uniq(all_files ++ files))
 
     findings =
       Enum.flat_map(files, fn file ->
         check_source(File.read!(file),
           file: file,
           version: version,
-          columns: columns_before(history, file)
+          columns: columns_before(history, file),
+          viewed_tables: viewed
         )
       end)
 
@@ -388,6 +421,30 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
   defp events({:__block__, _, stmts}, table), do: Enum.flat_map(stmts, &events(&1, table))
   defp events(_, _), do: []
 
+  @doc "The base-table columns the reporting views reference."
+  @spec reporting_pinned_columns() :: [String.t()]
+  def reporting_pinned_columns, do: @reporting_pinned
+
+  @doc "The columns the reporting views read from other tables, keyed by table."
+  @spec reporting_pinned_other_columns() :: %{String.t() => [String.t()]}
+  def reporting_pinned_other_columns, do: @reporting_pinned_other
+
+  @doc """
+  The tables that have a `kiln_reporting_v1` view, read from the SQL of the
+  migrations in `files`.
+  """
+  @spec viewed_tables([Path.t()]) :: [String.t()]
+  def viewed_tables(files) do
+    files
+    |> Enum.flat_map(fn file ->
+      ~r/VIEW\s+kiln_reporting_v1\.([a-z0-9_]+)\s+WITH/i
+      |> Regex.scan(File.read!(file), capture: :all_but_first)
+      |> List.flatten()
+    end)
+    |> Enum.map(&String.replace_suffix(&1, "_field_values", ""))
+    |> Enum.uniq()
+  end
+
   ## Checking one migration
 
   @doc """
@@ -413,16 +470,19 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
           own_events: own,
           new_tables: Map.new(for({:create_table, t, _} <- own, do: {t, true})),
           large: Keyword.get(opts, :large_tables, @large_tables),
+          executes: executes(bodies),
           no_transaction?: disables_ddl_transaction?(ast)
         }
 
+        viewed = Keyword.get(opts, :viewed_tables, [])
         raw = Enum.flat_map(bodies, &walk(&1, nil, ctx))
+        pins = Enum.flat_map(all_bodies(ast), &pin_findings(&1, ctx, viewed))
         units = Enum.flat_map(bodies, &units/1)
 
         {markers, marker_errors} =
           markers(comments, file, Keyword.get(opts, :version, Version.parse!("0.0.0")))
 
-        apply_markers(raw, markers, units, file) ++ marker_errors
+        apply_markers(raw, markers, units, file) ++ marker_errors ++ pins
 
       :error ->
         [%{file: file, line: 1, rule: :unparseable, message: "the migration does not parse"}]
@@ -454,6 +514,34 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
       end)
 
     Enum.reverse(bodies)
+  end
+
+  # Every function body that changes the schema: `up`, `down` and `change`.
+  defp all_bodies(ast) do
+    {_, bodies} =
+      Macro.prewalk(ast, [], fn
+        {:def, _, [{name, _, args}, [{:do, body} | _]]} = node, acc
+        when name in [:up, :down, :change] and (args == [] or is_nil(args)) ->
+          {node, [body | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reverse(bodies)
+  end
+
+  defp executes(bodies) do
+    {_, found} =
+      Macro.prewalk(bodies, [], fn
+        {:execute, meta, [sql | _]} = node, acc ->
+          {node, [{meta[:line] || 0, sql_text(sql)} | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found
   end
 
   defp disables_ddl_transaction?(ast) do
@@ -682,6 +770,125 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
 
   defp finding(ctx, meta, rule, message, hint: hint) do
     %{file: ctx.file, line: meta[:line] || 1, rule: rule, message: "#{message}; #{hint}"}
+  end
+
+  # A viewed column removed, renamed or retyped. Not a contract rule: a marker
+  # cannot excuse it, because the statement fails whatever the old release
+  # reads. Dropping the views earlier in the same function body is the way out
+  # (a drop in `up` does nothing for `down`, which runs on its own).
+  defp pin_findings(body, ctx, viewed) do
+    ctx = %{ctx | executes: executes([body])}
+
+    {_, found} =
+      Macro.prewalk(body, [], fn
+        {:alter, meta, [{:table, _, _} = t, [{:do, block} | _]]} = node, acc ->
+          table = table_name(t)
+          {node, pinned_changes(block, table, meta, ctx, viewed) ++ acc}
+
+        {:rename, meta, [{:table, _, _} = t, col, [to: _]]} = node, acc ->
+          {node, pinned_hit(table_name(t), to_string(col), "renames", meta, ctx, viewed) ++ acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    found ++ raw_pin_findings(ctx, viewed)
+  end
+
+  defp pinned_changes(block, table, meta, ctx, viewed) do
+    block
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      {:__block__, _, stmts} -> stmts
+      stmt -> [stmt]
+    end)
+    |> Enum.flat_map(fn
+      {op, m, [col | _]} when op in [:remove, :remove_if_exists] and is_atom(col) ->
+        pinned_hit(table, to_string(col), "removes", m, ctx, viewed, meta)
+
+      {:modify, m, [col, type | rest]} when is_atom(col) ->
+        opts = keyword(List.first(rest))
+
+        from =
+          case Keyword.fetch(opts, :from) do
+            {:ok, {t, _}} -> type_string(t)
+            {:ok, t} -> type_string(t)
+            :error -> previous_type(ctx, table, to_string(col), m[:line] || 0)
+          end
+
+        if from == type_string(type),
+          do: [],
+          else: pinned_hit(table, to_string(col), "retypes", m, ctx, viewed, meta)
+
+      _ ->
+        []
+    end)
+  end
+
+  @raw_alter ~r/\bALTER\s+TABLE\s+(?:ONLY\s+)?(?:IF\s+EXISTS\s+)?(?:"?public"?\.)?"?([a-z0-9_]+)"?\s+((?:(?!\bALTER\s+TABLE\b)[^;])*)/i
+  @raw_actions [
+    {~r/\bDROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?"?([a-z0-9_]+)"?/i, "removes"},
+    {~r/\bRENAME\s+(?:COLUMN\s+)?"?([a-z0-9_]+)"?\s+TO\b/i, "renames"},
+    {~r/\bALTER\s+(?:COLUMN\s+)?"?([a-z0-9_]+)"?\s+(?:SET\s+DATA\s+)?TYPE\b/i, "retypes"}
+  ]
+
+  # The same changes written as raw SQL in an `execute`.
+  defp raw_pin_findings(ctx, viewed) do
+    for {line, sql} <- ctx.executes,
+        [_, table, actions] <- Regex.scan(@raw_alter, sql),
+        {re, verb} <- @raw_actions,
+        [_, col] <- Regex.scan(re, actions),
+        hit <- pinned_hit(table, col, verb, [line: line], ctx, viewed) do
+      hit
+    end
+  end
+
+  defp pinned_hit(table, col, verb, meta, ctx, viewed, outer \\ nil) do
+    line = meta[:line] || (outer && outer[:line]) || 1
+
+    case pinned_views(table, col, viewed) do
+      [] ->
+        []
+
+      tables ->
+        if Enum.all?(tables, &view_dropped_before?(ctx, &1, line)) do
+          []
+        else
+          [
+            %{
+              file: ctx.file,
+              line: line,
+              rule: :reporting_view_pin,
+              message:
+                "#{verb} #{table}.#{col}, which the kiln_reporting_v1 views reference; " <>
+                  "Postgres refuses it while they exist. Drop kiln_reporting_v1." <>
+                  "#{Enum.join(tables, " and ")} (each with its _field_values twin) earlier " <>
+                  "in this function, re-create them after, and mark the contract change; " <>
+                  "see docs/reporting.md"
+            }
+          ]
+        end
+    end
+  end
+
+  # The viewed content tables whose views read `table.col`: the table itself
+  # for a content-table column, every viewed table for a definition-table one.
+  defp pinned_views(table, col, viewed) do
+    cond do
+      table in viewed and col in @reporting_pinned -> [table]
+      col in Map.get(@reporting_pinned_other, table, []) -> viewed
+      true -> []
+    end
+  end
+
+  # An `execute` ahead of `line`, in the same function body, that drops the
+  # table's view and its `_field_values` twin.
+  defp view_dropped_before?(ctx, table, line) do
+    Enum.all?([table, "#{table}_field_values"], fn view ->
+      Enum.any?(ctx.executes, fn {l, sql} ->
+        l < line and sql =~ ~r/DROP\s+VIEW\s+(IF\s+EXISTS\s+)?kiln_reporting_v1\.#{view}\b/i
+      end)
+    end)
   end
 
   ## Markers

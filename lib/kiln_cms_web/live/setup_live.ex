@@ -91,7 +91,7 @@ defmodule KilnCMSWeb.SetupLive do
            password: admin["password"],
            password_confirmation: admin["password_confirmation"]
          }) do
-      {:ok, user} ->
+      {:ok, user, notices} ->
         save_branding(socket, user)
         save_publishing(socket, user)
         create_starter_home(socket, user)
@@ -104,6 +104,7 @@ defmodule KilnCMSWeb.SetupLive do
              "Your site is ready — sign in with the account you just created. A draft home page is waiting for you."
            )
          )
+         |> put_breach_warning(notices)
          |> redirect(to: ~p"/sign-in")}
 
       {:error, :already_bootstrapped} ->
@@ -120,6 +121,14 @@ defmodule KilnCMSWeb.SetupLive do
            ash_error_message(error, fallback: gettext("The account could not be created."))
          )}
     end
+  end
+
+  # `:error`, not `:info`: the info flash dismisses itself, and this is a nudge
+  # to act on. It rides the redirect to /sign-in with the "site is ready" note.
+  defp put_breach_warning(socket, notices) do
+    if :password_breach in notices,
+      do: put_flash(socket, :error, KilnCMS.Accounts.PasswordNotice.message()),
+      else: socket
   end
 
   # Lightweight step gate so obvious problems surface next to the fields rather
@@ -158,7 +167,8 @@ defmodule KilnCMSWeb.SetupLive do
     if map_size(Map.drop(attrs, ["theme"])) > 0 or attrs["theme"] != "standard" do
       case CMS.save_site_branding(attrs,
              actor: user,
-             tenant: socket.assigns.current_org
+             tenant: socket.assigns.current_org,
+             context: socket.assigns.security_context
            ) do
         {:ok, _row} ->
           :ok
@@ -246,17 +256,20 @@ defmodule KilnCMSWeb.SetupLive do
     ~H"""
     <Layouts.flash_group flash={@flash} />
 
-    <div :if={KilnCMS.Environment.label()} class="mt-6 flex justify-center">
-      <Layouts.environment_banner />
-    </div>
-
-    <main id="main" class="mx-auto w-full max-w-xl px-4 py-12 sm:px-6">
+    <%!-- The banner and brand row are the page's `<header>` landmark, as in
+          `Layouts.auth/1`, so nothing sits outside a landmark (#2390). --%>
+    <header class="mx-auto w-full max-w-xl px-4 pt-12 sm:px-6">
+      <div :if={KilnCMS.Environment.label()} class="-mt-6 mb-6 flex justify-center">
+        <Layouts.environment_banner />
+      </div>
       <%!-- The same brand row as the sign-in pages this wizard hands off to
             (#1681). Before an admin exists no site has branding, so this is the
             stock mark — which is the point: a new install's first screen should
             look like the product it is setting up. --%>
-      <Layouts.auth_brand brand={@brand} class="mb-8" />
+      <Layouts.auth_brand brand={@brand} />
+    </header>
 
+    <main id="main" class="mx-auto w-full max-w-xl px-4 pt-8 pb-12 sm:px-6">
       <div class="mb-8 text-center">
         <h1 class="auth-title">{gettext("Set up your site")}</h1>
         <p class="mt-2 text-sm text-base-content/70">
@@ -391,7 +404,7 @@ defmodule KilnCMSWeb.SetupLive do
                 />
                 <span>
                   <span class="font-medium">{gettext("Editors publish their own work")}</span>
-                  <span class="block text-xs text-base-content/60">
+                  <span class="block text-xs text-base-content/70">
                     {gettext(
                       "Anyone with editor access can publish. Submitting for review stays available."
                     )}
@@ -408,12 +421,12 @@ defmodule KilnCMSWeb.SetupLive do
                 />
                 <span>
                   <span class="font-medium">{gettext("An admin approves everything")}</span>
-                  <span class="block text-xs text-base-content/60">
+                  <span class="block text-xs text-base-content/70">
                     {gettext("Editors submit for review, and an admin publishes.")}
                   </span>
                 </span>
               </label>
-              <p class="text-xs text-base-content/60">
+              <p class="text-xs text-base-content/70">
                 {gettext("Admins can always publish. You can change this later under Team.")}
               </p>
             </fieldset>

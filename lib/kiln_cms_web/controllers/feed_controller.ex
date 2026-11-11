@@ -321,7 +321,8 @@ defmodule KilnCMSWeb.FeedController do
   # today". An invariant a module claims to own needs a test that fails when it
   # is removed, not one that passes because something else happens to hold.
   def filter(scope),
-    do: [audience: :public, locale: scope.locale] ++ taxonomy_filter(scope.taxonomy)
+    do:
+      [audience: :public, noindex: false, locale: scope.locale] ++ taxonomy_filter(scope.taxonomy)
 
   defp taxonomy_filter({:category, category}), do: [category_id: category.id]
   defp taxonomy_filter({:tag, tag}), do: [tags: [id: tag.id]]

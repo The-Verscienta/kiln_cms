@@ -29,43 +29,58 @@ defmodule KilnCMSWeb.FormBuilderLive do
     "entries" => :entries
   }
 
+  # The options panel's inputs (`field[<key>]`) and the attribute each edits.
+  # A change event saves only the input it names (`_target`), so one refused
+  # value never blocks edits to the others (#2139).
+  @field_keys %{
+    "label" => :label,
+    "name" => :name,
+    "field_type" => :field_type,
+    "width" => :width,
+    "required" => :required,
+    "options" => :options,
+    "placeholder" => :placeholder,
+    "default_value" => :default_value,
+    "help_text" => :help_text,
+    "min_value" => :min_value,
+    "max_value" => :max_value,
+    "step" => :step
+  }
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     actor = socket.assigns.current_user
 
-    with :admin <- KilnCMSWeb.LiveUserAuth.effective_tier(socket),
-         {:ok, form} <-
-           CMS.get_form(id, actor: actor, tenant: socket.assigns.current_org) do
-      {:ok,
-       socket
-       |> assign(:actor, actor)
-       |> assign(:form, form)
-       |> assign(:page_title, form.name)
-       |> assign(:tab, :fields)
-       |> assign(:selected_id, nil)
-       |> assign(:submissions, [])
-       # Entries moderation (#477): nil = every status; a submission id set
-       # for the bulk mark actions, cleared on every filter change or reload
-       # so a stale selection can't act on rows no longer in view.
-       |> assign(:status_filter, nil)
-       |> assign(:selected_submissions, MapSet.new())
-       # The Embed tab's origins box as last typed, kept only while a save is
-       # being refused (#648); nil means "render what is stored".
-       |> assign(:embed_origins_draft, nil)
-       |> assign_embed_policy(form)
-       |> reload_fields()}
-    else
+    case CMS.get_form(id, actor: actor, tenant: socket.assigns.current_org) do
+      {:ok, form} ->
+        {:ok,
+         socket
+         |> assign(:actor, actor)
+         |> assign(:form, form)
+         |> assign(:page_title, form.name)
+         |> assign(:tab, :fields)
+         |> select_field(nil)
+         |> assign(:submissions, [])
+         # Entries moderation (#477): nil = every status; a submission id set
+         # for the bulk mark actions, cleared on every filter change or reload
+         # so a stale selection can't act on rows no longer in view.
+         |> assign(:status_filter, nil)
+         |> assign(:selected_submissions, MapSet.new())
+         # The Embed tab's origins box as last typed, kept only while a save is
+         # being refused (#648); nil means "render what is stored".
+         |> assign(:embed_origins_draft, nil)
+         |> assign(
+           :challenge_available,
+           KilnCMS.Challenge.forms_available?(KilnCMS.Challenge.config())
+         )
+         |> assign_embed_policy(form)
+         |> reload_fields()}
+
       {:error, _error} ->
         {:ok,
          socket
          |> put_flash(:error, gettext("That form doesn't exist."))
          |> push_navigate(to: ~p"/editor/forms")}
-
-      _tier ->
-        {:ok,
-         socket
-         |> put_flash(:error, gettext("You need admin access to view that page."))
-         |> push_navigate(to: ~p"/")}
     end
   end
 
@@ -127,7 +142,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
       case CMS.create_form_field(attrs, actor_opts(socket)) do
         {:ok, field} ->
-          {:noreply, socket |> reload_fields() |> assign(:selected_id, field.id)}
+          {:noreply, socket |> reload_fields() |> select_field(field.id)}
 
         {:error, error} ->
           {:noreply, put_flash(socket, :error, error_message(error))}
@@ -139,24 +154,25 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   def handle_event("select_field", %{"id" => id}, socket) when is_binary(id) do
     if Enum.any?(socket.assigns.fields, &(&1.id == id)) do
-      {:noreply, assign(socket, :selected_id, id)}
+      {:noreply, select_field(socket, id)}
     else
       {:noreply, socket}
     end
   end
 
   def handle_event("deselect_field", _params, socket) do
-    {:noreply, assign(socket, :selected_id, nil)}
+    {:noreply, select_field(socket, nil)}
   end
 
-  def handle_event("update_field", %{"field" => %{"id" => id} = params}, socket)
+  # Both the panel's `phx-change` and its `phx-submit` (the Save button, or
+  # Enter in any of its inputs) land here. A change event names the one input
+  # that changed in `_target` and saves only that; a submit carries no target
+  # and saves the whole panel.
+  def handle_event("update_field", %{"field" => %{"id" => id} = params} = event, socket)
       when is_binary(id) do
-    field = Enum.find(socket.assigns.fields, &(&1.id == id))
-
-    case field && CMS.update_form_field(field, field_params(params, field), actor_opts(socket)) do
+    case Enum.find(socket.assigns.fields, &(&1.id == id)) do
       nil -> {:noreply, socket}
-      {:ok, _field} -> {:noreply, reload_fields(socket)}
-      {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error))}
+      field -> {:noreply, save_field(socket, field, edited_params(params, event["_target"]))}
     end
   end
 
@@ -170,12 +186,19 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   def handle_event("delete_field", %{"id" => id}, socket) when is_binary(id) do
-    with %FormField{} = field <- Enum.find(socket.assigns.fields, &(&1.id == id)) do
-      CMS.destroy_form_field(field, actor_opts(socket))
-    end
+    with %FormField{} = field <- Enum.find(socket.assigns.fields, &(&1.id == id)),
+         # A refusal (the autoresponder still names the field, #2343) must
+         # say why the field is still there.
+         {:error, error} <- CMS.destroy_form_field(field, actor_opts(socket)) do
+      {:noreply, put_flash(socket, :error, error_message(error))}
+    else
+      _deleted_or_unknown ->
+        socket = reload_fields(socket)
 
-    selected = if socket.assigns.selected_id == id, do: nil, else: socket.assigns.selected_id
-    {:noreply, socket |> reload_fields() |> assign(:selected_id, selected)}
+        if socket.assigns.selected_id == id,
+          do: {:noreply, select_field(socket, nil)},
+          else: {:noreply, socket}
+    end
   end
 
   # Pushed by the Sortable hook with the canvas' new data-sort-id order.
@@ -277,6 +300,9 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   def handle_event("copied", _params, socket),
     do: {:noreply, put_flash(socket, :info, gettext("Embed code copied to clipboard."))}
+
+  # The form's public page (#2138), on the org's own host like the snippet.
+  defp public_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/forms/" <> form.slug
 
   # The one-line snippet an embedder pastes on their site (see `/embed.js`) —
   # on the org's own host (#557); shared with the forms list.
@@ -411,6 +437,19 @@ defmodule KilnCMSWeb.FormBuilderLive do
   defp status_label(:reviewed), do: gettext("Reviewed")
   defp status_label(:spam), do: gettext("Spam")
 
+  # What human verification decided for a submission (#2249).
+  defp challenge_label(:passed), do: gettext("Verified")
+  defp challenge_label(_held), do: gettext("Held")
+
+  defp challenge_title(:passed), do: gettext("Passed the human-verification check.")
+  defp challenge_title(:missing), do: gettext("Held: sent without completing the check.")
+
+  defp challenge_title(:wrong_host),
+    do: gettext("Held: the check was completed on a site this deployment doesn't serve.")
+
+  defp challenge_title(:unavailable),
+    do: gettext("Held: the verification service couldn't be reached.")
+
   # --- data --------------------------------------------------------------------
 
   defp copy_field(socket, field, fields) do
@@ -428,8 +467,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
         # Slot the copy right after its original, then renumber everything.
         order = fields |> Enum.map(& &1.id) |> insert_after(field.id, copy.id)
 
-        {:noreply,
-         socket |> apply_order(order) |> reload_fields() |> assign(:selected_id, copy.id)}
+        {:noreply, socket |> apply_order(order) |> reload_fields() |> select_field(copy.id)}
 
       {:error, error} ->
         {:noreply, put_flash(socket, :error, error_message(error))}
@@ -541,7 +579,212 @@ defmodule KilnCMSWeb.FormBuilderLive do
   defp retyped_options(type, options) when type in @choice_types,
     do: if(options in [nil, []], do: starter_options(), else: options)
 
-  defp retyped_options(_type, _options), do: []
+  # A non-choice type keeps the stored options (the renderer and validation
+  # ignore them), so switching back to a choice type restores the list instead
+  # of reseeding it.
+  defp retyped_options(_type, options), do: options || []
+
+  # Opening, switching or closing the options panel starts it clean: a
+  # refused value, its error and the last save's status belong to the field
+  # they were typed for.
+  defp select_field(socket, id) do
+    socket
+    |> assign(:selected_id, id)
+    # Values the admin typed that were refused, by input key — rendered in
+    # place of the stored value so a refusal never erases what was typed.
+    |> assign(:field_draft, %{})
+    # Inline error messages, by input key.
+    |> assign(:field_errors, %{})
+    # The panel's status line ("Saved.") and, after a rename, what it meant
+    # for the form's entries and its autoresponder (one line each).
+    |> assign(:field_status, nil)
+    |> assign(:rename_notice, [])
+  end
+
+  # The inputs that render their own errors (`<.setting_errors>` below).
+  @error_slots ~w(label name field_type options placeholder default_value help_text min_value max_value step)
+
+  defp edited_params(params, ["field", key]) when is_map_key(@field_keys, key),
+    do: Map.take(params, [key])
+
+  defp edited_params(params, _target), do: Map.take(params, Map.keys(@field_keys))
+
+  defp save_field(socket, field, params) do
+    keys = Map.keys(params)
+
+    case CMS.update_form_field(field, field_params(params, field), actor_opts(socket)) do
+      {:ok, updated} ->
+        # A new type changes which inputs exist (the options textarea is
+        # select-only), so a draft or error held for one of them would come
+        # back stale if the type switched back; drop them all.
+        cleared = if "field_type" in keys, do: :all, else: keys
+
+        socket
+        |> assign(:field_draft, drop_keys(socket.assigns.field_draft, cleared))
+        |> assign(:field_errors, drop_keys(socket.assigns.field_errors, cleared))
+        |> note_saved(field, updated, keys)
+        |> reload_fields()
+
+      {:error, error} ->
+        {slotted, unslotted} = Map.split(input_errors(error), @error_slots)
+
+        # The typed values stay on screen beside the errors an input shows.
+        socket =
+          if slotted == %{},
+            do: socket,
+            else:
+              socket
+              |> assign(:field_draft, Map.merge(socket.assigns.field_draft, params))
+              |> assign(
+                :field_errors,
+                socket.assigns.field_errors |> Map.drop(keys) |> Map.merge(slotted)
+              )
+              |> assign(:field_status, nil)
+
+        # An error no input shows (a policy refusal, or an attribute without
+        # an error slot such as width) must not vanish: say it in the flash.
+        if slotted == %{} or unslotted != %{},
+          do: put_flash(socket, :error, error_message(error)),
+          else: socket
+    end
+  end
+
+  defp drop_keys(_map, :all), do: %{}
+  defp drop_keys(map, keys), do: Map.drop(map, keys)
+
+  # Only a save that changed something says "Saved." — a debounce that sent
+  # the value already stored is not news.
+  defp note_saved(socket, field, updated, keys) do
+    changed? =
+      Enum.any?(keys, fn key ->
+        attribute = Map.fetch!(@field_keys, key)
+        Map.get(updated, attribute) != Map.get(field, attribute)
+      end)
+
+    cond do
+      !changed? ->
+        socket
+
+      updated.name != field.name ->
+        socket
+        |> assign(:field_status, gettext("Saved."))
+        |> note_rename(field.name, updated.name)
+
+      true ->
+        assign(socket, :field_status, gettext("Saved."))
+    end
+  end
+
+  # What a rename meant beyond the field itself, said at the moment it
+  # happens. One read of the form (as the admin) serves both lines, and becomes
+  # `@form`: the rename rewrote the autoresponder's tokens in the stored
+  # template (#2343), and a Confirmations tab still holding the old text would
+  # show — and on its next save write back — a token for a field that no
+  # longer exists.
+  defp note_rename(socket, old_name, new_name) do
+    opts = Keyword.put(actor_opts(socket), :load, [:submission_count])
+
+    case CMS.get_form(socket.assigns.form.id, opts) do
+      {:ok, form} ->
+        notices = [
+          entries_notice(form, old_name),
+          autoresponder_notice(socket.assigns.form, form, old_name, new_name)
+        ]
+
+        socket
+        |> assign(:form, form)
+        |> assign(:rename_notice, Enum.reject(notices, &is_nil/1))
+
+      {:error, _error} ->
+        assign(socket, :rename_notice, [])
+    end
+  end
+
+  # Entries already received are keyed by the name they were submitted under;
+  # a rename does not rewrite them. Only on a form that has entries to strand.
+  defp entries_notice(%{submission_count: count}, old_name)
+       when is_integer(count) and count > 0 do
+    # No count: `submission_count` includes entries received before this
+    # field existed, which never carried the old key.
+    gettext("Entries already received keep the old key “%{old}”.", old: old_name)
+  end
+
+  defp entries_notice(_form, _old_name), do: nil
+
+  # Whether or not the form has entries: told by the template itself changing.
+  defp autoresponder_notice(before, form, old_name, new_name) do
+    if {before.autoresponder_subject, before.autoresponder_body} !=
+         {form.autoresponder_subject, form.autoresponder_body} do
+      gettext("The autoresponder now uses [field:%{new}] where it used [field:%{old}].",
+        old: old_name,
+        new: new_name
+      )
+    end
+  end
+
+  # A refused update as `%{input_key => [message]}`, through AshPhoenix's own
+  # error protocol and `translate_error/1` (as the content editor does). The
+  # `[:form_id, :name]` identity reports on `form_id`, which no input edits —
+  # the name is what collided. Errors with no field (a policy refusal) map to
+  # nothing and fall back to the flash.
+  defp input_errors(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.flat_map(&field_error/1)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  end
+
+  defp field_error(error) do
+    if AshPhoenix.FormData.Error.impl_for(error) do
+      error
+      |> AshPhoenix.FormData.Error.to_form_error()
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        {field, message, vars} when not is_nil(field) and is_binary(message) ->
+          [{input_key(field), translate_error({message, error_vars(vars)})}]
+
+        _other ->
+          []
+      end)
+    else
+      []
+    end
+  end
+
+  defp input_key(:form_id), do: "name"
+  defp input_key(field), do: to_string(field)
+
+  defp error_vars(vars) when is_list(vars), do: vars
+  defp error_vars(vars) when is_map(vars), do: Map.to_list(vars)
+  defp error_vars(_vars), do: []
+
+  # What an input shows: the refused value while one is held, else the stored one.
+  defp shown(draft, key, stored), do: Map.get(draft, key, stored)
+
+  defp invalid(errors, key), do: if(Map.has_key?(errors, key), do: "true")
+
+  defp described_by(errors, key, hint_id \\ nil) do
+    ids = [hint_id, Map.has_key?(errors, key) && "fs-#{key}-error"]
+
+    case Enum.filter(ids, &is_binary/1) do
+      [] -> nil
+      ids -> Enum.join(ids, " ")
+    end
+  end
+
+  # One submission's data split for the Entries tab: values under a current
+  # field's name, in canvas order, and keys no current field has — left by a
+  # renamed or removed field, shown raw rather than passed off as current.
+  defp entry_rows(data, fields) when is_map(data) do
+    names = MapSet.new(fields, & &1.name)
+    current = for field <- fields, Map.has_key?(data, field.name), do: {field, data[field.name]}
+
+    orphaned =
+      data |> Enum.reject(fn {key, _value} -> key in names end) |> Enum.sort_by(&elem(&1, 0))
+
+    {current, orphaned}
+  end
 
   defp error_message(%{errors: errors}) when is_list(errors) and errors != [] do
     errors
@@ -574,6 +817,21 @@ defmodule KilnCMSWeb.FormBuilderLive do
   defp tab_label(:embed), do: gettext("Embed")
   defp tab_label(:entries), do: gettext("Entries")
 
+  # An options-panel input's inline errors, under it; `id` matches the
+  # input's `aria-describedby` (see `described_by/3`).
+  attr :key, :string, required: true
+  attr :errors, :map, required: true
+
+  defp setting_errors(assigns) do
+    ~H"""
+    <div :if={Map.has_key?(@errors, @key)} id={"fs-#{@key}-error"} class="mt-1 space-y-0.5">
+      <p :for={message <- @errors[@key]} class="flex items-start gap-1 text-xs text-error">
+        <.icon name="hero-exclamation-circle" class="mt-px size-4 shrink-0" />{message}
+      </p>
+    </div>
+    """
+  end
+
   # --- render ------------------------------------------------------------------
 
   @impl true
@@ -598,11 +856,27 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 {gettext("Inactive")}
               </span>
             </h1>
-            <code class="text-xs text-base-content/60">/forms/{@form.slug}</code>
+            <%!-- The form's public page (#2138). Only an active form answers
+                  there, so an inactive one says so instead of showing an
+                  address that 404s. --%>
+            <a
+              :if={@form.active}
+              id="form-public-url"
+              href={public_url(@form, @current_org)}
+              target="_blank"
+              rel="noopener"
+              class="break-all font-mono text-xs text-base-content/60 hover:underline"
+            >
+              {public_url(@form, @current_org)}
+              <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+            </a>
+            <p :if={!@form.active} id="form-public-url" class="text-xs text-base-content/60">
+              {gettext("Not public while inactive.")}
+            </p>
           </div>
           <a
             :if={@form.active}
-            href={"/forms/" <> @form.slug <> "/embed"}
+            href={public_url(@form, @current_org)}
             target="_blank"
             rel="noopener"
             class="btn btn-sm btn-default"
@@ -733,9 +1007,16 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <.public_form_field field={field} />
                   </fieldset>
                   <%!-- A hidden input draws nothing, so the card would be blank. --%>
-                  <p :if={field.field_type == :hidden} class="text-sm text-base-content/60">
+                  <p :if={field.field_type == :hidden} class="text-sm text-base-content/70">
                     <.icon name="hero-eye-slash" class="size-4 align-text-bottom" />
                     {gettext("Hidden field — %{label}", label: field.label)}
+                  </p>
+                  <%!-- The key entries are stored under — so a rename shows here. --%>
+                  <p
+                    id={"canvas-field-name-#{field.id}"}
+                    class="mt-1 font-mono text-xs text-base-content/50"
+                  >
+                    {field.name}
                   </p>
                 </div>
               </div>
@@ -776,6 +1057,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 <form
                   id={"field-settings-#{selected.id}"}
                   phx-change="update_field"
+                  phx-submit="update_field"
                   class="space-y-3 text-sm"
                 >
                   <input type="hidden" name="field[id]" value={selected.id} />
@@ -785,10 +1067,13 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <input
                       id="fs-label"
                       name="field[label]"
-                      value={selected.label}
+                      value={shown(@field_draft, "label", selected.label)}
                       phx-debounce="300"
+                      aria-invalid={invalid(@field_errors, "label")}
+                      aria-describedby={described_by(@field_errors, "label")}
                       class="field-input mt-1"
                     />
+                    <.setting_errors key="label" errors={@field_errors} />
                   </div>
 
                   <div>
@@ -796,13 +1081,16 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <input
                       id="fs-name"
                       name="field[name]"
-                      value={selected.name}
+                      value={shown(@field_draft, "name", selected.name)}
                       phx-debounce="blur"
+                      aria-invalid={invalid(@field_errors, "name")}
+                      aria-describedby={described_by(@field_errors, "name", "fs-name-hint")}
                       class="field-input mt-1 font-mono text-xs"
                     />
-                    <p class="mt-1 text-xs text-base-content/60">
+                    <.setting_errors key="name" errors={@field_errors} />
+                    <p id="fs-name-hint" class="mt-1 text-xs text-base-content/60">
                       {gettext(
-                        "Keys this field's value in submissions — renaming orphans old entries."
+                        "Keys this field's value in submissions. Entries already received keep the old key: the Entries tab and CSV export show it as a renamed field; API clients and webhooks use the new name from now on. The autoresponder's [field:…] tokens follow the rename."
                       )}
                     </p>
                   </div>
@@ -810,15 +1098,25 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   <div class="grid grid-cols-2 gap-2">
                     <div>
                       <label for="fs-type" class="font-medium">{gettext("Type")}</label>
-                      <select id="fs-type" name="field[field_type]" class="field-select mt-1">
+                      <select
+                        id="fs-type"
+                        name="field[field_type]"
+                        aria-invalid={invalid(@field_errors, "field_type")}
+                        aria-describedby={described_by(@field_errors, "field_type")}
+                        class="field-select mt-1"
+                      >
                         <option
                           :for={entry <- palette()}
                           value={entry.type}
-                          selected={entry.type == selected.field_type}
+                          selected={
+                            to_string(entry.type) ==
+                              to_string(shown(@field_draft, "field_type", selected.field_type))
+                          }
                         >
                           {entry.label}
                         </option>
                       </select>
+                      <.setting_errors key="field_type" errors={@field_errors} />
                     </div>
                     <div>
                       <label for="fs-width" class="font-medium">{gettext("Width")}</label>
@@ -857,8 +1155,11 @@ defmodule KilnCMSWeb.FormBuilderLive do
                       name="field[options]"
                       phx-debounce="300"
                       rows="4"
+                      aria-invalid={invalid(@field_errors, "options")}
+                      aria-describedby={described_by(@field_errors, "options")}
                       class="field-input mt-1 text-xs"
-                    >{Enum.join(selected.options, "\n")}</textarea>
+                    >{shown(@field_draft, "options", Enum.join(selected.options, "\n"))}</textarea>
+                    <.setting_errors key="options" errors={@field_errors} />
                   </div>
 
                   <div :if={selected.field_type == :number} class="grid grid-cols-3 gap-2">
@@ -922,10 +1223,13 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <input
                       id="fs-placeholder"
                       name="field[placeholder]"
-                      value={selected.placeholder}
+                      value={shown(@field_draft, "placeholder", selected.placeholder)}
                       phx-debounce="300"
+                      aria-invalid={invalid(@field_errors, "placeholder")}
+                      aria-describedby={described_by(@field_errors, "placeholder")}
                       class="field-input mt-1"
                     />
+                    <.setting_errors key="placeholder" errors={@field_errors} />
                   </div>
 
                   <div>
@@ -933,10 +1237,13 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <input
                       id="fs-default"
                       name="field[default_value]"
-                      value={selected.default_value}
+                      value={shown(@field_draft, "default_value", selected.default_value)}
                       phx-debounce="300"
+                      aria-invalid={invalid(@field_errors, "default_value")}
+                      aria-describedby={described_by(@field_errors, "default_value")}
                       class="field-input mt-1"
                     />
+                    <.setting_errors key="default_value" errors={@field_errors} />
                     <p :if={selected.field_type == :boolean} class="mt-1 text-xs text-base-content/60">
                       {gettext("Use \"true\" to pre-check the box.")}
                     </p>
@@ -947,10 +1254,28 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <input
                       id="fs-help"
                       name="field[help_text]"
-                      value={selected.help_text}
+                      value={shown(@field_draft, "help_text", selected.help_text)}
                       phx-debounce="300"
+                      aria-invalid={invalid(@field_errors, "help_text")}
+                      aria-describedby={described_by(@field_errors, "help_text")}
                       class="field-input mt-1"
                     />
+                    <.setting_errors key="help_text" errors={@field_errors} />
+                  </div>
+
+                  <div class="flex items-center gap-3 border-t border-base-content/10 pt-3">
+                    <button type="submit" class="btn btn-primary btn-sm">{gettext("Save")}</button>
+                    <%!-- Always present, so assistive tech hears each new status
+                         rather than a node that appeared and was missed. --%>
+                    <p
+                      id="field-settings-status"
+                      role="status"
+                      aria-live="polite"
+                      class="min-w-0 text-xs text-base-content/70"
+                    >
+                      <span :if={@field_status} class="text-success-ink">{@field_status}</span>
+                      <span :for={notice <- @rename_notice} class="block">{notice}</span>
+                    </p>
                   </div>
                 </form>
               </div>
@@ -1011,6 +1336,50 @@ defmodule KilnCMSWeb.FormBuilderLive do
                 />
                 {gettext("Active (accepting submissions)")}
               </label>
+              <%!-- Human verification (#2249). While no form can ask for it the
+                    box is disabled and not submitted at all, so a save of this
+                    tab leaves the setting as it is — unless it is on, when it
+                    stays editable so the admin can still switch it off (the
+                    validation only refuses switching it on). --%>
+              <div class="sm:col-span-2 space-y-1">
+                <label class="flex items-center gap-2 text-sm">
+                  <input
+                    :if={@challenge_available or @form.challenge == :always}
+                    type="hidden"
+                    name="form[challenge]"
+                    value="off"
+                  />
+                  <input
+                    id="gf-challenge"
+                    type="checkbox"
+                    name="form[challenge]"
+                    value="always"
+                    checked={@form.challenge == :always}
+                    disabled={!@challenge_available and @form.challenge != :always}
+                    aria-describedby="gf-challenge-help"
+                    class="size-4 rounded border border-base-content/30 accent-primary"
+                  />
+                  {gettext("Ask visitors to complete a human-verification check")}
+                </label>
+                <p
+                  :if={!@challenge_available}
+                  id="gf-challenge-help"
+                  class="text-xs text-base-content/70"
+                >
+                  {gettext(
+                    "Human verification isn't available on this deployment. Ask the operator to configure it."
+                  )}
+                </p>
+                <p
+                  :if={@challenge_available}
+                  id="gf-challenge-help"
+                  class="text-xs text-base-content/70"
+                >
+                  {gettext(
+                    "Submissions without a completed check are kept in Spam for review instead of being sent on. Headless sites must send the check's token as _kiln_challenge, and their hostnames must be listed by the operator, or everything they send lands in Spam. Submissions from pages loaded before you switch this on also land in Spam."
+                  )}
+                </p>
+              </div>
               <div class="sm:col-span-2">
                 <.button type="submit" variant="primary">{gettext("Save")}</.button>
               </div>
@@ -1321,6 +1690,13 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <span :if={submission.spam_score > 0} class="text-xs text-base-content/50">
                       {gettext("score %{score}", score: submission.spam_score)}
                     </span>
+                    <span
+                      :if={submission.challenge}
+                      class="inline-flex items-center rounded-full bg-base-content/10 px-2 py-0.5 text-xs font-medium text-base-content/70"
+                      title={challenge_title(submission.challenge)}
+                    >
+                      {challenge_label(submission.challenge)}
+                    </span>
                   </div>
                   <time
                     id={"submission-#{submission.id}"}
@@ -1331,14 +1707,37 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     {Calendar.strftime(submission.inserted_at, "%Y-%m-%d %H:%M")} UTC
                   </time>
                 </div>
+                <% {current, orphaned} = entry_rows(submission.data, @fields) %>
                 <dl class="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                  <div :for={{key, value} <- submission.data} class="flex gap-2">
-                    <dt class="font-medium">{key}</dt>
+                  <div :for={{field, value} <- current} class="flex gap-2">
+                    <dt class="font-medium">
+                      {field.label}
+                      <span class="font-mono text-xs font-normal text-base-content/50">
+                        {field.name}
+                      </span>
+                    </dt>
                     <dd class="min-w-0 break-words text-base-content/80">
                       {KilnCMS.Forms.display_value(value)}
                     </dd>
                   </div>
                 </dl>
+                <div
+                  :if={orphaned != []}
+                  id={"submission-#{submission.id}-orphaned"}
+                  class="mt-2 rounded border border-dashed border-base-content/20 p-2"
+                >
+                  <p class="text-xs font-medium text-base-content/70">
+                    {gettext("From a renamed or removed field")}
+                  </p>
+                  <dl class="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
+                    <div :for={{key, value} <- orphaned} class="flex gap-2">
+                      <dt class="font-mono text-xs">{key}</dt>
+                      <dd class="min-w-0 break-words text-base-content/80">
+                        {KilnCMS.Forms.display_value(value)}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
                 <div class="mt-2 flex items-center gap-2 text-xs">
                   <button
                     :if={submission.status != :spam}

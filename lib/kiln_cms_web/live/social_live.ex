@@ -25,23 +25,14 @@ defmodule KilnCMSWeb.SocialLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
-      {:ok,
-       socket
-       |> assign(:actor, socket.assigns.current_user)
-       |> assign(:page_title, gettext("Social accounts"))
-       |> assign(:edit, nil)
-       |> assign(:form, create_form(socket.assigns.current_user, socket.assigns.current_org))
-       |> load_accounts()
-       |> load_posts()}
-    else
-      # Defense in depth: `:live_admin_required` already redirects before mount,
-      # but the fallback stays consistent rather than silently bouncing.
-      {:ok,
-       socket
-       |> put_flash(:error, gettext("You need admin access to view that page."))
-       |> push_navigate(to: ~p"/")}
-    end
+    {:ok,
+     socket
+     |> assign(:actor, socket.assigns.current_user)
+     |> assign(:page_title, gettext("Social accounts"))
+     |> assign(:edit, nil)
+     |> assign(:form, create_form(socket.assigns.current_user, socket.assigns.current_org))
+     |> load_accounts()
+     |> load_posts()}
   end
 
   @impl true

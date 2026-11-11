@@ -3,6 +3,8 @@ defmodule KilnCMSWeb.FormEntriesExportControllerTest do
   Form entries CSV export (#477): admin-gated (unlike analytics' editor-gated
   export — `FormSubmission`'s own policy is admin-only), stable columns from
   the form's own field set, and a `?status=` filter matching the moderation UI.
+  Keys left behind by a renamed or removed field export under a marked
+  header rather than being dropped (#2342).
   """
   use KilnCMSWeb.ConnCase, async: true
 
@@ -205,6 +207,132 @@ defmodule KilnCMSWeb.FormEntriesExportControllerTest do
       conn = conn |> log_in(admin) |> get(~p"/editor/forms/#{form.id}/entries/export.csv")
 
       assert conn.resp_body =~ "'=cmd"
+    end
+  end
+
+  describe "renamed and removed fields (#2342)" do
+    defp email_field(form, admin) do
+      [field] = CMS.form_fields_for!(form.id, actor: admin)
+      field
+    end
+
+    defp submit!(form, data) do
+      CMS.create_form_submission!(%{form_id: form.id, data: data}, authorize?: false)
+    end
+
+    defp export(conn, admin, form, query \\ "") do
+      conn
+      |> log_in(admin)
+      |> get("/editor/forms/#{form.id}/entries/export.csv#{query}")
+      |> Map.fetch!(:resp_body)
+      |> String.split("\r\n", trim: true)
+    end
+
+    defp row_with(lines, value), do: Enum.find(lines, &String.contains?(&1, value))
+
+    test "a renamed field's old key gets its own marked column, values kept", %{conn: conn} do
+      admin = authed_user(:admin)
+      form = form!(admin)
+
+      submit!(form, %{"email" => "before@example.com"})
+      CMS.update_form_field!(email_field(form, admin), %{name: "work_email"}, actor: admin)
+      submit!(form, %{"work_email" => "after@example.com"})
+
+      [header | rows] = export(conn, admin, form)
+
+      assert header ==
+               "work_email,email (renamed or removed),status,spam_score,submitted_at"
+
+      assert row_with(rows, "before@example.com") =~ ~r/^,before@example\.com,new,0,/
+      assert row_with(rows, "after@example.com") =~ ~r/^after@example\.com,,new,0,/
+    end
+
+    test "a rename chain gives one sorted column per old name", %{conn: conn} do
+      admin = authed_user(:admin)
+      form = form!(admin)
+
+      submit!(form, %{"email" => "a@example.com"})
+      field = CMS.update_form_field!(email_field(form, admin), %{name: "b"}, actor: admin)
+      submit!(form, %{"b" => "b@example.com"})
+      CMS.update_form_field!(field, %{name: "c"}, actor: admin)
+
+      [header | rows] = export(conn, admin, form)
+
+      assert header ==
+               "c,b (renamed or removed),email (renamed or removed),status,spam_score,submitted_at"
+
+      assert row_with(rows, "a@example.com") =~ ~r/^,,a@example\.com,new,/
+      assert row_with(rows, "b@example.com") =~ ~r/^,b@example\.com,,new,/
+    end
+
+    test "a reused name is the current field's column, not an orphan", %{conn: conn} do
+      admin = authed_user(:admin)
+      form = form!(admin)
+
+      submit!(form, %{"email" => "old@example.com"})
+      CMS.update_form_field!(email_field(form, admin), %{name: "work_email"}, actor: admin)
+
+      CMS.create_form_field!(
+        %{form_id: form.id, name: "email", label: "Email", field_type: :email, position: 1},
+        actor: admin
+      )
+
+      [header | rows] = export(conn, admin, form)
+
+      assert header == "work_email,email,status,spam_score,submitted_at"
+      assert row_with(rows, "old@example.com") =~ ~r/^,old@example\.com,new,/
+    end
+
+    test "a removed field's values export under the marked header", %{conn: conn} do
+      admin = authed_user(:admin)
+      form = form!(admin)
+
+      CMS.create_form_field!(
+        %{form_id: form.id, name: "phone", label: "Phone", field_type: :string, position: 1},
+        actor: admin
+      )
+
+      submit!(form, %{"email" => "kept@example.com", "phone" => "555-0100"})
+
+      [phone] =
+        form.id |> CMS.form_fields_for!(actor: admin) |> Enum.filter(&(&1.name == "phone"))
+
+      CMS.destroy_form_field!(phone, actor: admin)
+
+      [header | rows] = export(conn, admin, form)
+
+      assert header == "email,phone (renamed or removed),status,spam_score,submitted_at"
+      assert row_with(rows, "kept@example.com") =~ ~r/^kept@example\.com,555-0100,new,/
+    end
+
+    test "orphan columns come from the exported rows only", %{conn: conn} do
+      admin = authed_user(:admin)
+      form = form!(admin)
+
+      submit!(form, %{"email" => "clean@example.com"})
+      CMS.update_form_field!(email_field(form, admin), %{name: "work_email"}, actor: admin)
+
+      submit!(form, %{"work_email" => "spammer@example.com"})
+      |> CMS.mark_form_submission_spam!(%{}, actor: admin)
+
+      [header | rows] = export(conn, admin, form, "?status=spam")
+
+      assert header == "work_email,status,spam_score,submitted_at"
+      assert [row] = rows
+      assert row =~ ~r/^spammer@example\.com,spam,/
+    end
+
+    test "a formula-prefixed value under an old key is still guarded", %{conn: conn} do
+      admin = authed_user(:admin)
+      form = form!(admin)
+
+      submit!(form, %{"email" => "=cmd|'/c calc'!A1"})
+      CMS.update_form_field!(email_field(form, admin), %{name: "work_email"}, actor: admin)
+
+      [_header | [row]] = export(conn, admin, form)
+
+      assert row =~ "'=cmd"
+      refute row =~ ~r/(^|,)=cmd/
     end
   end
 end

@@ -185,7 +185,7 @@ async function newDraftContent(page, kind = "page") {
   await page.waitForURL(new RegExp(`/editor/content/${kind}/new$`));
   await page.click("#new-draft-save");
   await page.waitForURL(new RegExp(`/editor/content/${kind}/[0-9a-f-]{36}$`));
-  await base.expect(page.locator('form[id$="-editor"] [role="tablist"]')).toBeVisible();
+  await base.expect(page.locator('form[id$="-editor"] #inspector-tabs')).toBeVisible();
   // Save draft says "Saved.", like any Save. Dismiss it the way `save()` does:
   // the flash group sits over the top-right of the page, so leaving it up
   // intercepts the caller's next click there (the image picker's first button
@@ -221,7 +221,7 @@ async function saveDraft(page, { title, slug }) {
 // still finds it visible.
 async function fillSlug(page, slug) {
   const input = page.locator('input[name$="[slug]"]');
-  const selected = page.locator('button[role="tab"][aria-selected="true"]');
+  const selected = page.locator('#inspector-tabs button[role="tab"][aria-selected="true"]');
   const tab = await selected.getAttribute("phx-value-tab");
   if (!(await input.isVisible())) await page.click("#edit-url");
   await base.expect(input).toBeVisible();
@@ -359,6 +359,25 @@ async function addBlock(page, type) {
     .click();
 }
 
+// A document's edit page: /editor/content/<type>/<uuid>, nothing after it.
+// Select edit links by this shape, never by an `/editor/content/` prefix: the
+// content list also links the CSV/JSON exports (/editor/content/export.csv,
+// downloads that abort a `page.goto`), New (/editor/content/<type>/new) and
+// the row menu's `?assign=1` variant, and an exclusion list fails open on the
+// next one (#2391).
+const EDIT_HREF = /^\/editor\/content\/[^/?#]+\/[0-9a-f-]{36}$/;
+
+// The first document edit link in `scope` (a page or a locator), by shape.
+// Fails the test, rather than returning nothing, when there is none.
+async function firstEditHref(scope) {
+  const hrefs = await scope
+    .locator('a[href^="/editor/content/"]')
+    .evaluateAll(links => links.map(link => link.getAttribute("href")));
+  const href = hrefs.find(h => h !== null && EDIT_HREF.test(h));
+  base.expect(href, `no edit link among ${JSON.stringify(hrefs)}`).toMatch(EDIT_HREF);
+  return /** @type {string} */ (href);
+}
+
 module.exports = {
   test,
   expect: base.expect,
@@ -380,4 +399,6 @@ module.exports = {
   deleteContentById,
   deleteTagByName,
   holdsAcross,
+  EDIT_HREF,
+  firstEditHref,
 };

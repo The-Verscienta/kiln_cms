@@ -116,7 +116,7 @@ decision from you, so it does not guess:
 | WordPress | What to do in Kiln |
 |---|---|
 | Comments | Not imported. Kiln has no reader comments; its [comments](../comments.md) are editors' notes on a draft. Keep them with an external comment service if you need them. |
-| Users | Not imported. Invite your team at `/editor/team`, ideally *before* the import, so authors match by email. |
+| Users | Not imported. [Invite your team](../account-administration.md#invite-someone-to-a-site) at `/editor/team`, ideally *before* the import, so authors match by email. An invitation creates the account only when it is accepted, so wait for people to accept. |
 | Menus | Rebuild under [navigation menus](../navigation-menus.md). |
 | Theme | Restyle with [public theming](../public-theming.md), or use a headless front end. |
 | Plugin data, shortcodes | `[caption]` and `[embed]` become captions and embeds. Other shortcodes are removed from the body, and plugin data is not read. Custom fields need a Kiln [content type](../extending-content.md) to go into. |

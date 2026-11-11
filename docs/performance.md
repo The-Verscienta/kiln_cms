@@ -32,7 +32,27 @@ metric "headless API p95 under 50 ms" (#1546).
   rate here means every concurrent request is hitting the database at once).
 - **CDN offload.** Published HTML sends `Cache-Control: public, max-age=60,
   stale-while-revalidate=300`, a content `ETag` (→ `304` on `If-None-Match`), and
-  `Vary: Accept-Language`. 404s send `Cache-Control: no-store`. The in-BEAM cache is
+  `Vary: Accept-Language`. The URL is the whole cache key: a public page,
+  the blog and event indexes (`/<plural>/index.json` too), the stock home and
+  a form's page and embed take their language from the path prefix, or the
+  site's default without one, never from the visitor's session (#2595). Kiln
+  does not read `Accept-Language` for these; the `Vary` header is kept
+  unchanged. The `ETag` names the URL's language
+  as well as the record's, so `/fr/x` and `/x`, which can be answered by one
+  English record in two different chromes, never `304` each other. The `ETag`
+  also names the running build
+  (`KilnCMSWeb.BuildFingerprint`: the code of Kiln, its overlay and plugins,
+  the version of every application they depend on, and the asset manifest), so a deploy
+  that changes markup is not `304`ed to a client holding the old page. Nodes
+  of one image agree; during a rolling deploy the tag flips between old and
+  new nodes until it finishes. A markup change made only by runtime
+  configuration does not move it. The tag also folds the site's head
+  generation, which a save of branding, code injection, feed settings or a
+  menu moves on every node. A site with no such save since a node started
+  carries a token that node drew at random, so without sticky sessions two
+  nodes can tag one page differently until the next save, and a restart moves
+  the tag: extra `200`s, never a stale `304` (#2502). 404s send
+  `Cache-Control: no-store`. The in-BEAM cache is
   single-node, so a CDN in front is what absorbs a viral spike.
 - **Flushing by hand.** Invalidation is automatic and precise on writes, so a
   manual purge is not part of publishing. For the states precise invalidation
@@ -40,8 +60,12 @@ metric "headless API p95 under 50 ms" (#1546).
   custom block — there is a **Flush delivery cache** button on `/editor/system`
   (admin-only) and `mix kiln.cache.flush` for local use (#483). Both clear the
   published-record cache *and* the fired-artifact cache: clearing one leaves the
-  site serving half-stale. Every request re-reads the database until the caches
-  warm again, and on a multi-node deployment the purge reaches **every** node
+  site serving half-stale. They leave each site's `<head>` and menus
+  generation tokens and its last-known admin allowlist in place, because those
+  live in a store no flush or eviction reaches (#2502): moving a token back
+  would answer `304` to a browser holding a page with the old `<head>`. Every
+  request re-reads the database until the caches warm again, and on a
+  multi-node deployment the purge reaches **every** node
   (#1138) — the count shown is from the node that served the request. On a
   release use
   `bin/kiln_cms rpc "KilnCMS.Cache.flush_delivery()"` — the `mix` task boots a
@@ -78,6 +102,8 @@ queues: [firing: 5, search: 5, mail: 3, media: 3, webhooks: 3, scheduling: 5, de
 | `webhooks`   | `DeliveryWorker`                                       |
 | `newsletter` | `SendWorker`, `MailWorker` (newsletter fan-out)        |
 | `billing`    | `WebhookWorker` (inbound payment webhooks)             |
+| `backup_steps` | `Backups.StepWorker`: one step of an in-app backup, concurrency 1 per node ([backups.md](backups.md#how-an-in-app-backup-runs-2218)) |
+| `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; removed in the next minor |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
 | `default`    | Daily AshOban triggers (trash purge, untitled sweep)   |
 
@@ -232,6 +258,13 @@ Two things make a single-machine load test measure the wrong thing:
   the run measured the limiter, not delivery. For a benchmark run, raise the limits on
   the node under test:
   `Application.put_env(:kiln_cms, KilnCMSWeb.RateLimit, limits: %{api: {100_000_000, 60_000}, delivery: {100_000_000, 60_000}})`.
+  Every client class inside `:delivery` is a percentage of that limit
+  ([bot-budgets.md](bot-budgets.md)), so raising it raises them all. Two things to
+  know: `curl` counts as another bot (150 a minute at the shipped limit, half a
+  browser's), while `hey`, `oha`, `k6` and `ab` count as browsers; and this
+  `put_env` replaces the whole `KilnCMSWeb.RateLimit` config, which drops the
+  `delivery_classes` key the `KILN_BOT_BUDGET_*_PERCENT` variables write, so the
+  built-in class defaults apply on that node until it restarts.
 - **The `Host` header.** Send the canonical `PHX_HOST`. A host that names no org (such as
   `127.0.0.1` when `PHX_HOST=localhost`) falls back to the default org through a database
   read on every request. Under load that read queues on the pool behind the view-tracking

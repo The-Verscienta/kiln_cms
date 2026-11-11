@@ -264,6 +264,35 @@ defmodule KilnCMS.CMS.WorkingCopyTest do
   end
 
   describe "leaving :published" do
+    # #2532: `:unpublish` keeps `lock_version`, so the lock alone let a struct
+    # held across the fold through. Its version equals the held title, so the
+    # force-change was dropped and the restore "succeeded" onto the folded
+    # text. `:restore_version` also filters on the held state.
+    test "a version restore from a struct held across the fold is refused" do
+      admin = user(:admin)
+      page = live_page(admin)
+      {:ok, held} = save_copy(page, "Folded words", [heading("Folded body")], admin)
+      assert held.title == "Live"
+
+      {:ok, _draft} = CMS.unpublish_page(held, %{}, actor: admin)
+      assert reload(page).lock_version == held.lock_version
+      assert reload(page).title == "Folded words"
+
+      [create_version | _] =
+        CMS.list_page_versions!(authorize?: false, tenant: page.org_id)
+        |> Enum.filter(&(&1.version_source_id == page.id))
+        |> Enum.sort_by(& &1.version_inserted_at, DateTime)
+
+      assert {:error, error} =
+               CMS.restore_page_version(held, %{version_id: create_version.id}, actor: admin)
+
+      assert stale?(error)
+      row = reload(page)
+      assert row.state == :draft
+      assert row.title == "Folded words"
+      assert heading_texts(row.blocks) == ["Folded body"]
+    end
+
     test "unpublishing folds the working copy into the draft" do
       admin = user(:admin)
       page = live_page(admin)

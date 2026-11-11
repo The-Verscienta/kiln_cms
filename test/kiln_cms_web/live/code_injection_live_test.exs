@@ -49,20 +49,16 @@ defmodule KilnCMSWeb.CodeInjectionLiveTest do
       # A *member* with the editor tier, not merely a stranger: the two reach
       # `effective_tier/2` down different branches, and only this one proves the
       # gate is on the tier rather than on affiliation.
-      assert {:error, {:redirect, %{to: "/", flash: flash}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn |> org_conn(org) |> log_in(user) |> live(~p"/editor/code-injection")
-
-      assert flash["error"] =~ "admin access"
     end
 
     test "turns away a signed-in account with no membership here", %{conn: conn, org: org} do
-      assert {:error, {:redirect, %{to: "/", flash: flash}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn
                |> org_conn(org)
                |> log_in(authed_user(:editor))
                |> live(~p"/editor/code-injection")
-
-      assert flash["error"] =~ "admin access"
     end
 
     test "turns away an org admin visiting a site they are not an admin of", %{conn: conn} do
@@ -72,13 +68,11 @@ defmodule KilnCMSWeb.CodeInjectionLiveTest do
       # Admin *somewhere* is not admin *here*: the hook resolves the tier
       # against the request's org, which is the whole reason this page can be
       # org-scoped at all.
-      assert {:error, {:redirect, %{to: "/", flash: flash}}} =
+      assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                conn
                |> org_conn(seed_org())
                |> log_in(user)
                |> live(~p"/editor/code-injection")
-
-      assert flash["error"] =~ "admin access"
     end
 
     test "loads for a platform admin, and says what the page does", %{conn: conn, org: org} do

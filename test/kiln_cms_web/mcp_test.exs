@@ -183,6 +183,42 @@ defmodule KilnCMSWeb.McpTest do
     assert MapSet.new(reloaded.tags, & &1.id) == MapSet.new([a.id, b.id])
   end
 
+  # A regression pin for #2332, not proof of it: this already passed before
+  # the fix, because the tool re-reads the record through the trash-filtered
+  # read. The read-to-write race #2332 closed is covered by the domain guard
+  # (`KilnCMS.CMS.TrashedRowGuardTest`).
+  test "update_post on a trashed post is an error and writes nothing (regression pin)",
+       %{conn: conn} do
+    admin = user(:admin)
+    plaintext = mint(admin, :read_write)
+
+    post =
+      KilnCMS.CMS.create_post!(
+        %{title: "Trashed", slug: "mcp-t-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    KilnCMS.CMS.destroy_post!(post, actor: admin)
+
+    row = fn ->
+      KilnCMS.Repo.query!(
+        "SELECT title, lock_version, updated_at, archived_at FROM posts WHERE id = $1",
+        [Ecto.UUID.dump!(post.id)]
+      ).rows
+    end
+
+    before = row.()
+
+    conn =
+      rpc(conn, plaintext, "tools/call", %{
+        name: "update_post",
+        arguments: %{id: post.id, input: %{title: "Into the trash"}}
+      })
+
+    assert %{"result" => %{"isError" => true}} = json_response(conn, 200)
+    assert row.() == before
+  end
+
   # #640. `remove_tag_ids` is `on_no_match: :ignore` so removal stays
   # idempotent, which means it is silent about an id matching no tag at all — a
   # hallucinated uuid returns the same 200 as a real detach. The tool result is
