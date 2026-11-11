@@ -11,8 +11,9 @@ and review submissions in the same builder.
   optional `notify_email`, optional submitter autoresponder (subject/body +
   on/off toggle — see Side effects below).
 - `FormField` — machine name (the key in each submission), label, type
-  (`string`, `text`, `email`, `integer`, `boolean`, `date`, `select`),
-  required flag, select options, help text, order.
+  (see [Field types](#field-types)), required flag, options (`select`,
+  `radio`, `checkboxes`), `min_value` / `max_value` / `step` (`number`,
+  `rating`), help text, order.
 - `FormSubmission` — the coerced `data` map, a moderation `status`
   (`new`/`reviewed`/`spam`) and `spam_score`, plus a timestamp.
   **Privacy-first: no IP, no user agent** (rate limiting uses the IP
@@ -28,6 +29,52 @@ Both are edited on **`/editor/forms/settings`** (`KilnCMSWeb.FormSettingsLive`,
 #1232), linked from the Forms page. They used to be reachable only through the
 generic Ash Admin resource UI, which `config/prod.exs` compiles out — so on a
 production deployment neither had any in-product UI at all.
+
+## Field types
+
+Every value is validated server-side whatever the client did, on the on-site
+form, the embed and `POST /api/forms/<slug>` alike. Blank optional values are
+dropped (nothing stored). A list or object sent for a single-value type is
+refused as "is not valid".
+
+| Type | Accepts | Stored in `data` (and in the `form.submitted` webhook) |
+| --- | --- | --- |
+| `string`, `text` | any text, trimmed | string |
+| `email` | an email address | string |
+| `integer` | a whole number | integer |
+| `number` | a decimal number, within `min_value`/`max_value`, on a `step` grid (counted from `min_value`, else 0) when set. `+5` and `-0` pass; `.5`, `5.`, `1_000`, `1e3`, `nan`, `inf` and over-long strings do not | integer when whole (`1.0` is stored as `1`), otherwise a float |
+| `rating` | a whole number from 1 to `max_value` (1 to 10, default 5); `"3"` or `3`, never `3.5`. Changing `max_value` later does not re-check stored answers | integer |
+| `boolean` | a checkbox | boolean |
+| `date` | an ISO 8601 date | string |
+| `select`, `radio` | exactly one of the field's `options` | string |
+| `checkboxes` | any of the field's `options`: a JSON array, repeated `name[]` pairs, or one string. Duplicates collapse and the order follows `options`. Required means at least one; `[]` and `[""]` count as blank | list of strings |
+| `phone` | digits with `+ ( ) - .` and spaces; 6 to 15 digits, at most 32 characters. Stored as typed, not normalised | string |
+| `url` | an `http` or `https` URL with a host, no credentials (`http://a@b` is refused), at most 2048 bytes. `javascript:` and `data:` are refused | string |
+| `hidden` | free text, trimmed | string |
+
+Things to know:
+
+- **`hidden` is submitter-controlled.** It is a plain input the visitor (or a
+  script) can change; the server does not require it to equal `default_value`.
+  Use it for tracking hints such as UTM parameters, never for anything you
+  would trust (a price, a role, an id). A hidden field cannot be `required`.
+- **Webhook and export shapes.** `form.submitted` `data` can now hold lists
+  (`checkboxes`) and numbers (`number`, `rating`, `integer`) as well as
+  strings and booleans: receivers that assumed every value is a string need
+  updating. The entries CSV joins a list with `, `, and its existing formula
+  guard prefixes a cell starting with `=`, `+`, `-` or `@` with `'`, so a phone
+  number such as `+1 555 0100` or an option beginning with `=` exports as
+  `'+1 555 0100`. Notification emails, the autoresponder and the Entries tab
+  show a list as `a, b`.
+- **Unknown future types.** The set of types grows additively. A client that
+  renders the schema should fall back to a plain text input for a `type` it
+  does not know.
+- **Upgrade: do not use the new types until every node runs this release.**
+  A node on the previous release cannot load a form field whose type it does
+  not know, so the public form fails to load there. Rolling back to the
+  previous release likewise breaks every form that uses a new type (remove
+  those fields first). Existing forms are unaffected: the new columns are
+  nullable and nothing is backfilled.
 
 ## Rendering
 
@@ -252,7 +299,7 @@ module, declared from the plugin's `spam_checks/0` callback — see
 Each accepted submission that wasn't scored `:spam` optionally mails
 `notify_email` (Oban `:mail` queue, HTML-escaped), optionally autoresponds to
 the submitter (below), and fires the `form.submitted` webhook event
-(selectable per endpoint at `/editor/webhooks`) with `{form: slug, data: {...}}`.
+(selectable per endpoint at `/editor/webhooks`) with `{form: slug, data: {...}}`; values are typed per the table under [Field types](#field-types), so a `checkboxes` answer is a list and a `number` or `rating` a number.
 
 ### Autoresponder (#468)
 

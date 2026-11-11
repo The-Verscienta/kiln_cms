@@ -123,6 +123,8 @@ dedupe key. `data` shape depends on the event:
   **`affected`**: the published documents whose fired artifacts embed this
   one, each as `{"type", "id", "slug", "locale"}` (see below).
 - **`form.submitted`** — `{"form": "<slug>", "data": {...submitted fields...}}`.
+  A value is a string, number, boolean or, for a `checkboxes` field, a list of
+  strings (see [Forms](forms.md#field-types)); don't assume every value is a string.
 - **`membership.activated`** / **`membership.canceled`** — the member (`user_id`,
   `email`), the tier (`id`, `slug`, `name`, `audience`), the transition
   (`status`, `previous_status`, `occurred_at`) and `event_id` to dedupe on; see

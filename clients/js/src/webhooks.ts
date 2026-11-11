@@ -30,6 +30,17 @@ export interface AffectedDocument {
   locale: string | null;
 }
 
+/**
+ * The `data` of a `form.submitted` delivery: the form's slug and the coerced
+ * answers by field name. A `checkboxes` answer is a list; `number`, `rating`
+ * and `integer` answers are numbers; `boolean` is a boolean; the rest strings.
+ * A `hidden` field's value is chosen by the submitter, so never trust it.
+ */
+export interface FormSubmittedData {
+  form: string;
+  data: Record<string, string | number | boolean | string[]>;
+}
+
 /** The JSON body of every delivery. */
 export interface WebhookDelivery<Data = Record<string, unknown>> {
   /** `"<type>.<verb>"`, e.g. `"page.published"`, or `"form.submitted"`, `"ping"`, … */

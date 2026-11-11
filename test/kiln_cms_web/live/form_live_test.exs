@@ -95,6 +95,20 @@ defmodule KilnCMSWeb.FormLiveTest do
       actor: admin
     )
 
+    CMS.create_form_field!(
+      %{
+        form_id: form.id,
+        name: "qty",
+        label: "Qty",
+        field_type: :number,
+        min_value: 1.0,
+        max_value: 9.0,
+        step: 2.0,
+        position: 1
+      },
+      actor: admin
+    )
+
     {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/forms")
 
     html =
@@ -118,10 +132,12 @@ defmodule KilnCMSWeb.FormLiveTest do
     assert copy.autoresponder_enabled
     assert copy.autoresponder_subject == "Thanks!"
 
-    assert [field] = CMS.form_fields_for!(copy.id, authorize?: false)
+    assert [field, qty] = CMS.form_fields_for!(copy.id, authorize?: false)
     assert field.name == "email"
     assert field.field_type == :email
     assert field.required
+    # The range attributes travel with the field (#2261).
+    assert {qty.min_value, qty.max_value, qty.step} == {1.0, 9.0, 2.0}
   end
 
   test "deleting a form removes it from the list", %{conn: conn} do

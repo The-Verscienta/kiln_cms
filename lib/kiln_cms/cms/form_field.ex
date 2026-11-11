@@ -15,7 +15,27 @@ defmodule KilnCMS.CMS.FormField do
 
   # Submission value types — JSON-native, public-input-friendly (no media /
   # reference pickers on anonymous forms).
-  @field_types [:string, :text, :email, :integer, :boolean, :date, :select]
+  #
+  # `:radio`/`:checkboxes`/`:phone`/`:url`/`:hidden`/`:number`/`:rating` were
+  # added in #2261. `field_type` is stored as text, so a new value needs no
+  # enum migration — but a node still running the previous release cannot
+  # load a row that uses one (see `docs/forms.md`).
+  @field_types [
+    :string,
+    :text,
+    :email,
+    :integer,
+    :boolean,
+    :date,
+    :select,
+    :radio,
+    :checkboxes,
+    :phone,
+    :url,
+    :hidden,
+    :number,
+    :rating
+  ]
 
   @doc "The value types a form field may declare."
   @spec field_types() :: [atom()]
@@ -50,7 +70,10 @@ defmodule KilnCMS.CMS.FormField do
       :position,
       :placeholder,
       :default_value,
-      :width
+      :width,
+      :min_value,
+      :max_value,
+      :step
     ]
 
     create :create, primary?: true
@@ -118,8 +141,10 @@ defmodule KilnCMS.CMS.FormField do
       message "must be lowercase letters, digits and underscores, starting with a letter"
     end
 
-    # A :select field is meaningless without choices.
-    validate KilnCMS.CMS.Validations.SelectOptions
+    # Choices for select/radio/checkboxes, the range attributes of
+    # number/rating, and the hidden-field rules (#2261). A FormField-specific
+    # module: `SelectOptions` stays as FieldDefinition's.
+    validate KilnCMS.CMS.Validations.FormFieldConfig
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as its form.
@@ -187,6 +212,13 @@ defmodule KilnCMS.CMS.FormField do
       allow_nil? false
       public? true
     end
+
+    # Range for `:number` (any of the three, all optional) and `:rating`
+    # (`max_value` = the star count, nil -> 5). Nullable, nil for every other
+    # type — `Validations.FormFieldConfig` enforces both.
+    attribute :min_value, :float, public?: true
+    attribute :max_value, :float, public?: true
+    attribute :step, :float, public?: true
 
     timestamps()
   end

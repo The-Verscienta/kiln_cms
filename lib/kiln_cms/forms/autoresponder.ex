@@ -16,6 +16,7 @@ defmodule KilnCMS.Forms.Autoresponder do
   """
 
   alias KilnCMS.CMS
+  alias KilnCMS.Forms
 
   @type field :: KilnCMS.CMS.FormField.t()
 
@@ -94,8 +95,8 @@ defmodule KilnCMS.Forms.Autoresponder do
   end
 
   defp h(value) do
-    value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+    value |> Forms.display_value() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
   end
 
-  defp plain(value), do: value |> to_string() |> String.replace(~r/[\r\n]+/, " ")
+  defp plain(value), do: value |> Forms.display_value() |> String.replace(~r/[\r\n]+/, " ")
 end

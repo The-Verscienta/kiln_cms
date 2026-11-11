@@ -96,6 +96,25 @@ defmodule KilnCMS.Forms.AutoresponderTest do
       assert body == "<p>Hi Ada &lt;script&gt;, from Contact &lt;Us&gt;.</p>"
     end
 
+    test "a checkboxes list and a decimal render as text in subject and body (#2261)" do
+      form = %{
+        name: "Contact",
+        autoresponder_subject: "Picked [field:topics]",
+        autoresponder_body: "<p>[field:topics] / [field:amount]</p>"
+      }
+
+      fields = [
+        %FormField{name: "topics", field_type: :checkboxes},
+        %FormField{name: "amount", field_type: :number}
+      ]
+
+      {subject, body} =
+        Autoresponder.render(form, fields, %{"topics" => ["a", "<b>"], "amount" => 2.5})
+
+      assert subject == "Picked a, <b>"
+      assert body == "<p>a, &lt;b&gt; / 2.5</p>"
+    end
+
     test "a submitted field value can't smuggle a CR/LF into the subject header" do
       # The subject is a mail header, not HTML — HTML-escaping wouldn't touch
       # a raw newline anyway. A submitter putting "Ada\r\nBcc: evil@x.com" in

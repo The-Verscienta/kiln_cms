@@ -62,19 +62,13 @@ defmodule KilnCMSWeb.FormLive do
            ) do
       for field <- CMS.form_fields_for!(form.id, opts) do
         CMS.create_form_field(
-          %{
+          field
+          |> KilnCMS.Forms.copyable_field_attrs()
+          |> Map.merge(%{
             form_id: copy.id,
             name: field.name,
-            label: field.label,
-            field_type: field.field_type,
-            required: field.required,
-            options: field.options,
-            help_text: field.help_text,
-            placeholder: field.placeholder,
-            default_value: field.default_value,
-            width: field.width,
             position: field.position
-          },
+          }),
           opts
         )
       end

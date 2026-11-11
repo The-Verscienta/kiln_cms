@@ -176,6 +176,197 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert updated.options != []
   end
 
+  describe "richer field types (#2261)" do
+    test "every new type can be added from the palette, valid on arrival", %{conn: conn} do
+      {form, [], lv, _html} = builder(conn, authed_user(:admin))
+
+      for type <- ~w(radio checkboxes phone url number rating hidden) do
+        lv
+        |> element(~s(button[phx-click="add_field"][phx-value-type="#{type}"]))
+        |> render_click()
+      end
+
+      fields = CMS.form_fields_for!(form.id, authorize?: false)
+      assert Enum.map(fields, & &1.name) == ~w(radio checkboxes phone url number rating hidden)
+
+      for f <- fields, f.field_type in [:radio, :checkboxes] do
+        assert length(f.options) == 2
+      end
+    end
+
+    test "the settings panel shows only the controls the type uses", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      {_form, fields, lv, _html} =
+        builder(conn, admin, %{}, [
+          %{name: "n", label: "N", field_type: :number, position: 0},
+          %{name: "r", label: "R", field_type: :rating, position: 1},
+          %{name: "c", label: "C", field_type: :checkboxes, options: ["a"], position: 2},
+          %{name: "h", label: "H", field_type: :hidden, position: 3}
+        ])
+
+      panel = fn f ->
+        lv
+        |> element(~s(button[phx-click="select_field"][phx-value-id="#{f.id}"]))
+        |> render_click()
+      end
+
+      [n, r, c, h] = fields
+
+      html = panel.(n)
+      assert html =~ ~s(name="field[min_value]")
+      assert html =~ ~s(name="field[step]")
+      assert html =~ ~s(id="fs-placeholder")
+
+      html = panel.(r)
+      assert html =~ ~s(id="fs-stars")
+      refute html =~ ~s(name="field[min_value]")
+      refute html =~ ~s(id="fs-placeholder")
+
+      html = panel.(c)
+      assert html =~ ~s(id="fs-options")
+      refute html =~ ~s(id="fs-placeholder")
+
+      html = panel.(h)
+      refute html =~ ~s(id="fs-options")
+      refute html =~ ~s(id="fs-placeholder")
+    end
+
+    test "min, max and step save on a number; stars save on a rating", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      {form, [n, r], lv, _html} =
+        builder(conn, admin, %{}, [
+          %{name: "n", label: "N", field_type: :number, position: 0},
+          %{name: "r", label: "R", field_type: :rating, position: 1}
+        ])
+
+      lv
+      |> element(~s(button[phx-click="select_field"][phx-value-id="#{n.id}"]))
+      |> render_click()
+
+      lv
+      |> form("#field-settings-#{n.id}", %{
+        field: %{min_value: "1", max_value: "10.5", step: "0.5"}
+      })
+      |> render_change()
+
+      lv
+      |> element(~s(button[phx-click="select_field"][phx-value-id="#{r.id}"]))
+      |> render_click()
+
+      lv |> form("#field-settings-#{r.id}", %{field: %{max_value: "7"}}) |> render_change()
+
+      by_name = form.id |> CMS.form_fields_for!(authorize?: false) |> Map.new(&{&1.name, &1})
+
+      assert {by_name["n"].min_value, by_name["n"].max_value, by_name["n"].step} ==
+               {1.0, 10.5, 0.5}
+
+      assert by_name["r"].max_value == 7.0
+    end
+
+    test "switching number -> rating clears the range so it saves", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      {form, [n], lv, _html} =
+        builder(conn, admin, %{}, [
+          %{
+            name: "n",
+            label: "N",
+            field_type: :number,
+            min_value: 1.0,
+            max_value: 1000.0,
+            step: 5.0,
+            placeholder: "p",
+            default_value: "10"
+          }
+        ])
+
+      lv
+      |> element(~s(button[phx-click="select_field"][phx-value-id="#{n.id}"]))
+      |> render_click()
+
+      lv
+      |> form("#field-settings-#{n.id}", %{
+        field: %{field_type: "rating", min_value: "1", max_value: "1000", step: "5"}
+      })
+      |> render_change()
+
+      updated = form.id |> CMS.form_fields_for!(authorize?: false) |> hd()
+      assert updated.field_type == :rating
+      assert {updated.min_value, updated.max_value, updated.step} == {nil, nil, nil}
+      assert updated.default_value == nil
+      assert updated.placeholder == nil
+    end
+
+    test "switching select -> text drops the options; text -> checkboxes seeds them", %{
+      conn: conn
+    } do
+      admin = authed_user(:admin)
+
+      {form, [f], lv, _html} =
+        builder(conn, admin, %{}, [
+          %{name: "t", label: "T", field_type: :select, options: ["x", "y"], default_value: "x"}
+        ])
+
+      lv
+      |> element(~s(button[phx-click="select_field"][phx-value-id="#{f.id}"]))
+      |> render_click()
+
+      lv
+      |> form("#field-settings-#{f.id}", %{field: %{field_type: "string", options: "x\ny"}})
+      |> render_change()
+
+      updated = form.id |> CMS.form_fields_for!(authorize?: false) |> hd()
+      assert updated.field_type == :string
+      assert updated.options == []
+      assert updated.default_value == nil
+
+      lv
+      |> form("#field-settings-#{f.id}", %{field: %{field_type: "checkboxes"}})
+      |> render_change()
+
+      updated = form.id |> CMS.form_fields_for!(authorize?: false) |> hd()
+      assert updated.field_type == :checkboxes
+      assert length(updated.options) == 2
+    end
+
+    test "switching a required field to hidden drops required", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      {form, [f], lv, _html} =
+        builder(conn, admin, %{}, [%{name: "t", label: "T", field_type: :string, required: true}])
+
+      lv
+      |> element(~s(button[phx-click="select_field"][phx-value-id="#{f.id}"]))
+      |> render_click()
+
+      lv
+      |> form("#field-settings-#{f.id}", %{field: %{field_type: "hidden", required: "true"}})
+      |> render_change()
+
+      updated = form.id |> CMS.form_fields_for!(authorize?: false) |> hd()
+      assert updated.field_type == :hidden
+      refute updated.required
+    end
+
+    test "duplicating a field copies its range", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      {form, [n], lv, _html} =
+        builder(conn, admin, %{}, [
+          %{name: "n", label: "N", field_type: :number, min_value: 1.0, max_value: 9.0, step: 2.0}
+        ])
+
+      lv
+      |> element(~s(button[phx-click="duplicate_field"][phx-value-id="#{n.id}"]))
+      |> render_click()
+
+      copy = form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "n_2"))
+      assert {copy.min_value, copy.max_value, copy.step} == {1.0, 9.0, 2.0}
+    end
+  end
+
   test "drag reorder persists positions", %{conn: conn} do
     admin = authed_user(:admin)
 
@@ -364,6 +555,20 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     |> render_click()
 
     assert CMS.recent_form_submissions!(form.id, authorize?: false) == []
+  end
+
+  test "the entries tab shows a checkboxes list and a decimal as text (#2261)", %{conn: conn} do
+    admin = authed_user(:admin)
+    {form, [], lv, _html} = builder(conn, admin)
+
+    CMS.create_form_submission!(
+      %{form_id: form.id, data: %{"topics" => ["red", "blue"], "amount" => 2.5}},
+      authorize?: false
+    )
+
+    html = lv |> element(~s(#form-builder-tabs button[phx-value-tab="entries"])) |> render_click()
+    assert html =~ "red, blue"
+    assert html =~ "2.5"
   end
 
   describe "entries moderation (#477)" do

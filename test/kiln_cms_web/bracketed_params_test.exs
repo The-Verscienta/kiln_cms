@@ -176,6 +176,47 @@ defmodule KilnCMSWeb.BracketedParamsTest do
       end
     end
 
+    test "a list or map posted to any form field type is refused, not a crash (#2261)" do
+      form =
+        Ash.Seed.seed!(KilnCMS.CMS.Form, %{
+          name: "Every type",
+          slug: "brackets-all-#{System.unique_integer([:positive])}",
+          active: true
+        })
+
+      types = KilnCMS.CMS.FormField.field_types()
+
+      for {type, position} <- Enum.with_index(types) do
+        Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+          form_id: form.id,
+          name: "f_#{type}",
+          label: "F #{type}",
+          field_type: type,
+          options: if(type in [:select, :radio, :checkboxes], do: ["a", "b"], else: []),
+          position: position
+        })
+      end
+
+      for type <- types, body <- [["a"], %{"a" => "b"}, [["a"]]] do
+        conn =
+          build_conn()
+          |> put_req_header("accept", "application/json")
+          |> post("/api/forms/#{form.slug}", %{"f_#{type}" => body})
+
+        refute conn.status == 500, "#{type} answered 500 for #{inspect(body)}"
+      end
+
+      for type <- types -- [:checkboxes], body <- [["a"], %{"a" => "b"}] do
+        conn =
+          build_conn()
+          |> put_req_header("accept", "application/json")
+          |> post("/api/forms/#{form.slug}", %{"f_#{type}" => body})
+
+        key = "f_#{type}"
+        assert %{"errors" => %{^key => "is not valid"}} = json_response(conn, 422)
+      end
+    end
+
     test "a bracketed newsletter email is refused, not a crash" do
       for body <- [%{"email" => ["a@b.test"]}, %{"email" => %{"a" => "a@b.test"}}] do
         conn = post(build_conn(), "/newsletter/subscribe", body)

@@ -64,7 +64,13 @@ defmodule KilnCMSWeb.FormEntriesExportController do
 
     rows =
       Enum.map(submissions, fn submission ->
-        values = Enum.map(field_names, &Map.get(submission.data, &1))
+        # A checkboxes value is a list: joined here, so `CSV.field/1` (and its
+        # formula guard) sees one string. A phone number starting `+` or an
+        # option starting `=` gets the guard's leading `'`.
+        values =
+          Enum.map(field_names, fn name ->
+            submission.data |> Map.get(name) |> KilnCMS.Forms.display_value()
+          end)
 
         CSV.line(
           values ++

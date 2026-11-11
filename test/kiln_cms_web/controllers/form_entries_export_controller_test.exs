@@ -151,6 +151,48 @@ defmodule KilnCMSWeb.FormEntriesExportControllerTest do
       assert spam.status == :spam
     end
 
+    test "a checkboxes list is joined into one cell; phone and option values keep the formula guard (#2261)",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      form = form!(admin)
+
+      for {name, type, position} <- [
+            {"topics", :checkboxes, 1},
+            {"tel", :phone, 2},
+            {"amount", :number, 3}
+          ] do
+        CMS.create_form_field!(
+          %{
+            form_id: form.id,
+            name: name,
+            label: name,
+            field_type: type,
+            position: position,
+            options: if(type == :checkboxes, do: ["a", "b", "=SUM(1)"], else: [])
+          },
+          actor: admin
+        )
+      end
+
+      CMS.create_form_submission!(
+        %{
+          form_id: form.id,
+          data: %{
+            "email" => "v@example.com",
+            "topics" => ["a", "=SUM(1)"],
+            "tel" => "+1 555 010 0199",
+            "amount" => 2.5
+          }
+        },
+        authorize?: false
+      )
+
+      conn = conn |> log_in(admin) |> get(~p"/editor/forms/#{form.id}/entries/export.csv")
+
+      assert conn.resp_body =~ "email,topics,tel,amount,status,spam_score,submitted_at\r\n"
+      assert conn.resp_body =~ "v@example.com,\"a, =SUM(1)\",'+1 555 010 0199,2.5,new,0,"
+    end
+
     test "a formula-prefixed field value is CSV-injection-guarded", %{conn: conn} do
       admin = authed_user(:admin)
       form = form!(admin)

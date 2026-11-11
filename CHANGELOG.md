@@ -60,6 +60,18 @@ Every summary line below that was shortened links to its own entry there.
   column, filled for every row by the migration (a table rewrite). Nothing else to run.**
   ([long form](docs/changelog/unreleased.md#search-name-lexemes-upgrade))
 
+- **Forms: don't use the new field types until every node runs this release. A node on the
+  previous release cannot load a form field with an unknown type, so the public form fails
+  to load; rolling the image back breaks any form that uses them.**
+  ([long form](docs/changelog/unreleased.md#form-field-types-upgrade))
+
+### Added
+
+- **Forms: new field types `radio`, `checkboxes`, `phone`, `url`, `hidden`, `number`
+  (min/max/step) and `rating`, validated server-side, in the builder, the public form, `GET /api/forms/<slug>`
+  (new `min`/`max`/`step` keys), mail, entries, CSV and the `form.submitted` payload.**
+  ([#2261](https://github.com/The-Verscienta/kiln_cms/issues/2261) · [long form](docs/changelog/unreleased.md#form-field-types))
+
 ### Changed
 
 - **Global search on a large catalogue: the alias and compound legs prefilter on stored

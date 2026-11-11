@@ -516,8 +516,13 @@ defmodule KilnClient do
   render it itself. Returns `%{"slug", "name", "description",
   "success_message", "submit_label", "honeypot_field", "submit_url",
   "fields"}`, each field with `"name"`, `"label"`, `"type"`, `"required"`,
-  `"options"`, `"help_text"`, `"placeholder"`, `"default_value"` and
-  `"width"`. An unknown or inactive form is `reason: :not_found`.
+  `"options"`, `"help_text"`, `"placeholder"`, `"default_value"`, `"width"`
+  and `"min"`, `"max"`, `"step"` (`nil` unless the field is a `"number"` or
+  `"rating"`). `"type"` is one of `"string"`, `"text"`, `"email"`,
+  `"integer"`, `"boolean"`, `"date"`, `"select"`, `"radio"`, `"checkboxes"`,
+  `"phone"`, `"url"`, `"hidden"`, `"number"` and `"rating"`; the list only
+  grows, so treat a type you do not know as `"text"`. An unknown or inactive
+  form is `reason: :not_found`.
   Options: `:req`.
   """
   @spec form(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
@@ -525,7 +530,7 @@ defmodule KilnClient do
 
   @doc """
   Submit a form: `POST /api/forms/:slug` with `values` (field name => value)
-  as JSON. Returns `{:ok, %{"ok" => true, "message" => success_message}}`.
+  as JSON. A `"checkboxes"` value is a list of option strings. Returns `{:ok, %{"ok" => true, "message" => success_message}}`.
 
   A refusal is `{:error, %KilnClient.Error{reason: :validation, status:
   422}}`; `KilnClient.Error.field_errors/1` reads the messages by field

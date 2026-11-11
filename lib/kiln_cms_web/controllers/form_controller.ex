@@ -130,12 +130,34 @@ defmodule KilnCMSWeb.FormController do
                 help_text: field.help_text,
                 placeholder: field.placeholder,
                 default_value: field.default_value,
-                width: field.width
+                width: field.width,
+                min: schema_min(field),
+                max: schema_max(field),
+                step: schema_step(field)
               }
             end)
         })
     end
   end
+
+  # `min`/`max`/`step` are additive (#2261): null for every type that has no
+  # such notion. A rating's `max` is its effective star count (5 when unset)
+  # and its `min` is always 1.
+  defp schema_min(%{field_type: :rating}), do: 1
+  defp schema_min(%{field_type: :number, min_value: min}), do: whole_or_float(min)
+  defp schema_min(_field), do: nil
+
+  defp schema_max(%{field_type: :rating, max_value: nil}), do: 5
+  defp schema_max(%{field_type: :rating, max_value: max}), do: trunc(max)
+  defp schema_max(%{field_type: :number, max_value: max}), do: whole_or_float(max)
+  defp schema_max(_field), do: nil
+
+  defp schema_step(%{field_type: :number, step: step}), do: whole_or_float(step)
+  defp schema_step(_field), do: nil
+
+  # A stored float `5.0` reads as `5` on the wire; `0.5` stays `0.5`.
+  defp whole_or_float(value) when is_float(value) and value == trunc(value), do: trunc(value)
+  defp whole_or_float(value), do: value
 
   # On-site (form-encoded) submission → a small thank-you page.
   #
@@ -233,13 +255,20 @@ defmodule KilnCMSWeb.FormController do
   defp submitted_values(form, params) do
     honeypot = Forms.honeypot_field()
 
-    for %{name: name} <- form.fields,
+    for %{name: name} = field <- form.fields,
         name != honeypot,
-        value = Map.get(params, name),
-        is_binary(value),
+        value = submitted_value(field, Map.get(params, name)),
         into: %{},
         do: {name, value}
   end
+
+  # A checkboxes group posts `name[]=a&name[]=b`: a list of strings is kept for
+  # it alone. Everything else must be a plain string.
+  defp submitted_value(%{field_type: :checkboxes}, list) when is_list(list),
+    do: if(Enum.all?(list, &is_binary/1), do: list)
+
+  defp submitted_value(_field, value) when is_binary(value), do: value
+  defp submitted_value(_field, _value), do: nil
 
   # The visitor's original fill-time token (#477), when it still verifies, so a
   # corrected re-submit is timed from when they first opened the form. Anything
