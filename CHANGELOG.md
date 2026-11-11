@@ -609,6 +609,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A valid `kiln_` API key is accepted when it is not the first `Authorization` value or is sent under a lower- or mixed-case scheme (`bearer kiln_…`); it was answered `401 invalid_token` as if it were a stale JWT. When several values carry a key, the first decides.**
+  ([#2633](https://github.com/The-Verscienta/kiln_cms/issues/2633) · [long form](docs/changelog/unreleased.md#api-key-any-authorization-value))
+
 - **A failed in-app backup no longer appears twice in Backups History, the second copy a second later: both backup paths write the run's `"stamp"` into `manifest.json` (an additive key), and the importer keys a failure manifest by it.**
   ([#2700](https://github.com/The-Verscienta/kiln_cms/pull/2700) · [long form](docs/changelog/unreleased.md#backup-failure-manifest-stamp))
 
