@@ -402,15 +402,45 @@ export interface RelatedResult {
 export interface FormField {
   name: string;
   label: string;
-  type: "string" | "text" | "email" | "integer" | "boolean" | "date" | "select";
+  /**
+   * The set only grows. Treat a `type` you do not recognise as `"text"`: a
+   * single-line text input is always an acceptable fallback.
+   */
+  type:
+    | "string"
+    | "text"
+    | "email"
+    | "integer"
+    | "boolean"
+    | "date"
+    | "select"
+    | "radio"
+    | "checkboxes"
+    | "phone"
+    | "url"
+    | "hidden"
+    | "number"
+    | "rating";
   required: boolean;
-  /** A `select` field's choices; `[]` for every other type. */
+  /** A `select`, `radio` or `checkboxes` field's choices; `[]` for every other type. */
   options: string[];
   help_text: string | null;
   placeholder: string | null;
   default_value: string | null;
   width: "full" | "half" | "third";
+  /** A `number`'s lower bound, or a `rating`'s `1`; `null` otherwise. */
+  min?: number | null;
+  /** A `number`'s upper bound, or a `rating`'s star count (5 when unset); `null` otherwise. */
+  max?: number | null;
+  /** A `number`'s step; `null` otherwise. */
+  step?: number | null;
 }
+
+/**
+ * One value in a form submission, or in a `form.submitted` webhook's `data`:
+ * a `checkboxes` answer is a list, `number`/`rating`/`integer` are numbers.
+ */
+export type FormValue = string | number | boolean | string[];
 
 /** An admin-defined form, as `GET /api/forms/:slug` describes it. */
 export interface FormSchema {

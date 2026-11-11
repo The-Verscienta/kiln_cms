@@ -27,6 +27,11 @@ tagged `client-js-vX.Y.Z` in the
   `sitekey` and, only when `action_option` is not `null`, `action` under
   that name. reCAPTCHA's `action_option` is `null`. Types only; the client
   passes the schema through unchanged.
+- **Richer form field types (kiln_cms#2261):** `FormField.type` gains `radio`,
+  `checkboxes`, `phone`, `url`, `hidden`, `number` and `rating`, and a field
+  carries `min`, `max` and `step`. New `FormValue` and `FormSubmittedData`
+  types: a `checkboxes` answer is a `string[]`, `number`/`rating` are numbers.
+  Treat a `type` you do not know as `"text"`.
 
 ## 0.4.0
 

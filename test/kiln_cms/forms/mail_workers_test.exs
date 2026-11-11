@@ -145,6 +145,22 @@ defmodule KilnCMS.Forms.MailWorkersTest do
       end)
     end
 
+    test "a checkboxes list and a decimal render as joined text (#2261)" do
+      form = form!(%{notify_email: "team@example.com"})
+
+      assert :ok =
+               perform_job(NotificationWorker, %{
+                 "form_id" => form.id,
+                 "org_id" => KilnCMS.Accounts.default_org_id(),
+                 "data" => %{"topics" => ["a", "b"], "amount" => 2.5}
+               })
+
+      assert_email_sent(fn email ->
+        assert email.html_body =~ "a, b"
+        assert email.html_body =~ "2.5"
+      end)
+    end
+
     test "a non-string value still renders (data comes back from Oban args as JSON)" do
       form = form!(%{notify_email: "team@example.com"})
 

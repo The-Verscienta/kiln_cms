@@ -216,6 +216,11 @@ Every summary line below that was shortened links to its own entry there.
   Same sweep and `--notify` choice as the code-block note above; no migration, safe to roll back.
   ([#2596](https://github.com/The-Verscienta/kiln_cms/pull/2596) · [long form](docs/changelog/unreleased.md#scrollable-tables-upgrade))
 
+- **Forms: don't use the new field types until every node runs this release. A node on the
+  previous release cannot load a form field with an unknown type, so the public form fails
+  to load; rolling the image back breaks any form that uses them.**
+  ([long form](docs/changelog/unreleased.md#form-field-types-upgrade))
+
 ### Breaking
 
 - **Public pages take their language from the URL only. On a fallback page `<html lang>` and `Content-Language` now name the reader's (URL) language; the new `x-kiln-locale` header and `<article lang>` name the record's. Style articles with `.public-article:lang(xx)`, not `html[lang]`.**
@@ -242,6 +247,11 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#registration-no-enumeration))
 
 ### Added
+
+- **Forms: new field types `radio`, `checkboxes`, `phone`, `url`, `hidden`, `number`
+  (min/max/step) and `rating`, validated server-side, in the builder, the public form, `GET /api/forms/<slug>`
+  (new `min`/`max`/`step` keys), mail, entries, CSV and the `form.submitted` payload.**
+  ([#2261](https://github.com/The-Verscienta/kiln_cms/issues/2261) · [long form](docs/changelog/unreleased.md#form-field-types))
 
 - **`GET /api/feed` streams the change feed as Server-Sent Events: `published`, `updated` and `withdrawn` with identifiers only, the anonymous view whatever the credential, resumable by `Last-Event-ID` (every id is a `/api/sync` cursor) for 24 hours or 1,000 events.**
   Refusals are a `200` with `event: busy` that `EventSource` retries; caps are per node. A boot job records the documents already public, so `/api/sync` deletes may now name those too. Guide: [docs/headless-consumer-guide.md](docs/headless-consumer-guide.md#live-updates-follow-the-change-feed).

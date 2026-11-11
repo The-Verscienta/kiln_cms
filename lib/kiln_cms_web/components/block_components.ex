@@ -418,7 +418,10 @@ defmodule KilnCMSWeb.BlockComponents do
       </div>
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
-        <div :for={field <- @form.fields} class={field_width_class(field)}>
+        <div
+          :for={field <- @form.fields}
+          class={[field_width_class(field), field.field_type == :hidden && "hidden"]}
+        >
           <.public_form_field
             field={field}
             id_prefix={@id_prefix}
@@ -535,6 +538,9 @@ defmodule KilnCMSWeb.BlockComponents do
 
     assigns =
       assign(assigns,
+        # These render their own caption (a legend, the checkbox's own text) or
+        # none at all (hidden), so the shared `<label for>` is skipped.
+        unlabelled: [:boolean, :radio, :checkboxes, :rating, :hidden],
         field_id: field_id,
         error_id: error_id,
         help_id: help_id,
@@ -544,7 +550,7 @@ defmodule KilnCMSWeb.BlockComponents do
 
     ~H"""
     <label
-      :if={@field.field_type != :boolean}
+      :if={@field.field_type not in @unlabelled}
       for={@field_id}
       class="field-label mb-1 block text-sm font-medium"
     >
@@ -600,10 +606,107 @@ defmodule KilnCMSWeb.BlockComponents do
             </span>
           </span>
         </label>
-      <% other -> %>
+      <% :radio -> %>
+        <fieldset
+          id={@field_id}
+          aria-invalid={@error && "true"}
+          aria-describedby={@described_by}
+          class="min-w-0 border-0 p-0"
+        >
+          <.field_legend field={@field} />
+          <div class="space-y-1">
+            <label
+              :for={{opt, i} <- Enum.with_index(@field.options)}
+              class="flex items-center gap-2 text-sm"
+            >
+              <input
+                id={"#{@field_id}-#{i}"}
+                type="radio"
+                name={@field.name}
+                value={opt}
+                required={@field.required}
+                checked={opt == @current}
+              />
+              <span>{opt}</span>
+            </label>
+          </div>
+        </fieldset>
+      <% :checkboxes -> %>
+        <%!-- No per-input `required`: it would demand EVERY box. The group's
+              requirement is on the fieldset, and the server enforces it. --%>
+        <fieldset
+          id={@field_id}
+          aria-required={@field.required && "true"}
+          aria-invalid={@error && "true"}
+          aria-describedby={@described_by}
+          class="min-w-0 border-0 p-0"
+        >
+          <.field_legend field={@field} />
+          <div class="space-y-1">
+            <label
+              :for={{opt, i} <- Enum.with_index(@field.options)}
+              class="flex items-center gap-2 text-sm"
+            >
+              <input
+                id={"#{@field_id}-#{i}"}
+                type="checkbox"
+                name={@field.name <> "[]"}
+                value={opt}
+                checked={opt in checked_options(@current)}
+              />
+              <span>{opt}</span>
+            </label>
+          </div>
+        </fieldset>
+      <% :rating -> %>
+        <fieldset
+          id={@field_id}
+          aria-invalid={@error && "true"}
+          aria-describedby={@described_by}
+          class="min-w-0 border-0 p-0"
+        >
+          <.field_legend field={@field} />
+          <div class="flex flex-wrap gap-3">
+            <label
+              :for={n <- 1..rating_max(@field)}
+              class="flex items-center gap-1 text-sm"
+            >
+              <input
+                id={"#{@field_id}-#{n}"}
+                type="radio"
+                name={@field.name}
+                value={n}
+                required={@field.required}
+                checked={to_string(n) == to_string(@current)}
+              />
+              <span aria-hidden="true">{n} ★</span>
+              <span class="sr-only">
+                {gettext("%{n} of %{max}", n: n, max: rating_max(@field))}
+              </span>
+            </label>
+          </div>
+        </fieldset>
+      <% :hidden -> %>
+        <input id={@field_id} type="hidden" name={@field.name} value={@current} />
+      <% :number -> %>
         <input
           id={@field_id}
-          type={form_input_type(other)}
+          type="number"
+          name={@field.name}
+          required={@field.required}
+          placeholder={@field.placeholder}
+          value={@current}
+          min={range_attr(@field.min_value)}
+          max={range_attr(@field.max_value)}
+          step={range_attr(@field.step) || "any"}
+          aria-invalid={@error && "true"}
+          aria-describedby={@described_by}
+          class="field-input w-full"
+        />
+      <% type when type in [:string, :email, :integer, :date, :phone, :url] -> %>
+        <input
+          id={@field_id}
+          type={form_input_type(type)}
           name={@field.name}
           required={@field.required}
           placeholder={@field.placeholder}
@@ -618,11 +721,43 @@ defmodule KilnCMSWeb.BlockComponents do
       <span class="sr-only">{gettext("Error:")}</span>
       {form_error_message(@error)}
     </p>
-    <p :if={@field.help_text} id={@help_id} class="mt-1 text-xs text-base-content/70">
+    <p
+      :if={@field.help_text && @field.field_type != :hidden}
+      id={@help_id}
+      class="mt-1 text-xs text-base-content/70"
+    >
       {@field.help_text}
     </p>
     """
   end
+
+  # The caption of a radio / checkboxes / rating group: a `<legend>` carries
+  # the label (and the required marker) for the whole fieldset.
+  attr :field, :map, required: true
+
+  defp field_legend(assigns) do
+    ~H"""
+    <legend class="field-label mb-1 block text-sm font-medium">
+      {@field.label}
+      <span :if={@field.required} class="text-error">
+        <span aria-hidden="true">*</span>
+        <span class="sr-only">{gettext("required")}</span>
+      </span>
+    </legend>
+    """
+  end
+
+  # The checked options of a checkboxes group: the re-rendered submission (a
+  # list) or the field's default (a single option).
+  defp checked_options(value) when is_list(value), do: value
+  defp checked_options(value) when is_binary(value), do: [value]
+  defp checked_options(_value), do: []
+
+  defp rating_max(%{max_value: max}) when is_number(max), do: trunc(max)
+  defp rating_max(_field), do: 5
+
+  defp range_attr(nil), do: nil
+  defp range_attr(number), do: KilnCMS.Forms.display_value(number)
 
   # The summary's lines (#1683), in the form's own field order so it reads top
   # to bottom like the form, keyed to each field's LABEL (the raw `name` is an
@@ -677,6 +812,14 @@ defmodule KilnCMSWeb.BlockComponents do
   defp form_error_message("is no longer accepting submissions"),
     do: gettext("This form is no longer accepting submissions.")
 
+  defp form_error_message("must be a phone number"),
+    do: gettext("Enter a phone number, like +1 555 010 0199.")
+
+  defp form_error_message("must be a URL starting with http:// or https://"),
+    do: gettext("Enter a web address starting with http:// or https://.")
+
+  defp form_error_message("must be a number"), do: gettext("Enter a number.")
+
   defp form_error_message("did not pass the human-verification check"),
     do:
       gettext("The human-verification check didn't pass. Complete it again, then send the form.")
@@ -715,7 +858,9 @@ defmodule KilnCMSWeb.BlockComponents do
   defp form_input_type(:email), do: "email"
   defp form_input_type(:integer), do: "number"
   defp form_input_type(:date), do: "date"
-  defp form_input_type(_), do: "text"
+  defp form_input_type(:phone), do: "tel"
+  defp form_input_type(:url), do: "url"
+  defp form_input_type(:string), do: "text"
 
   @doc """
   The maps `render_block/1` takes, built straight from typed blocks (anything

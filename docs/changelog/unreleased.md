@@ -1311,6 +1311,16 @@ carries the reasoning.
   Rolling the pin back is safe: the previous release ignores the extra
   attributes and the wrapper.
 
+<a id="form-field-types-upgrade"></a>
+
+- **Forms: the new field types need every node on this release.** `field_type`
+  is stored as text, so adding values needs no enum migration, but Ash casts a
+  stored atom with `String.to_existing_atom`: a node still running the previous
+  release cannot load a row naming `radio`, `rating` and the rest, and the public
+  form page fails to load. Rolling back the image therefore breaks any form that
+  uses a new type. Don't add one until the rollout has finished. The migration
+  itself is expand-only (three nullable float columns on `form_fields`).
+
 ## Breaking
 
 <a id="public-chrome-follows-url-locale"></a>
@@ -1528,6 +1538,19 @@ carries the reasoning.
     [threat model](../threat-model.md#account-enumeration-by-surface-2255).
 
 ## Added
+
+<a id="form-field-types"></a>
+
+- **Forms: `radio`, `checkboxes`, `phone`, `url`, `hidden`, `number` and `rating`
+  fields (#2261).** `select` and `boolean` are unchanged. Every value is
+  validated server-side: checkboxes store a list in option order (post
+  `name[]`), `number` takes optional min/max/step (whole values store as
+  integers), `rating` is an integer 1 to N stars (N up to 10, default 5), `url`
+  is http(s) with a host and no credentials, `phone` is 6 to 15 digits, and
+  `hidden` is submitter-controlled free text. `GET /api/forms/<slug>` gains
+  additive `min`, `max` and `step` keys. List values are joined with `", "` in
+  mail, autoresponder tokens, the Entries tab and the CSV export. See
+  [docs/forms.md](../forms.md).
 
 <a id="change-feed-sse"></a>
 

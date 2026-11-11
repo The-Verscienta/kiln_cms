@@ -380,13 +380,89 @@ defmodule KilnCMS.Forms do
 
   defp resolve(field, raw) do
     cond do
-      blank?(raw) and field.required -> {:error, "is required"}
-      blank?(raw) -> :skip
+      blank?(field, raw) and field.required -> {:error, "is required"}
+      blank?(field, raw) -> :skip
       true -> cast(field, raw)
     end
   end
 
+  # A checkboxes field posts a list (`name[]=a&name[]=b`), and an unticked
+  # group arrives as `[]` or as a list of empty sentinels — blank, so a
+  # required group says "is required" and an optional one stores nothing. A
+  # list for any other type is not blank: `cast/2` refuses it (#751).
+  defp blank?(%{field_type: :checkboxes}, raw) when is_list(raw), do: Enum.all?(raw, &blank?/1)
+  defp blank?(_field, raw), do: blank?(raw)
+
   defp blank?(value), do: value in [nil, ""] or (is_binary(value) and String.trim(value) == "")
+
+  @doc """
+  The attributes of a `KilnCMS.CMS.FormField` that a copy carries (field
+  duplicate, form duplicate): everything but identity (`form_id`, `name`,
+  `position`), which the caller sets. One list, so a new attribute can't be
+  copied by one site and dropped by the other.
+  """
+  @spec copyable_field_attrs(map()) :: map()
+  def copyable_field_attrs(field) do
+    Map.take(field, [
+      :label,
+      :field_type,
+      :required,
+      :options,
+      :help_text,
+      :placeholder,
+      :default_value,
+      :width,
+      :min_value,
+      :max_value,
+      :step
+    ])
+  end
+
+  @doc """
+  A submitted value as display text, for every surface that shows a
+  submission's `data` (notification mail, autoresponder tokens, the Entries
+  tab, the CSV export): a list (checkboxes) is joined with `", "`, a float is
+  written without an exponent, `nil` is `""`.
+  """
+  @spec display_value(term()) :: String.t()
+  def display_value(nil), do: ""
+  def display_value(value) when is_binary(value), do: value
+  def display_value(value) when is_list(value), do: Enum.map_join(value, ", ", &display_value/1)
+
+  def display_value(value) when is_float(value),
+    do: value |> Decimal.from_float() |> Decimal.to_string(:normal)
+
+  def display_value(value) when is_number(value) or is_boolean(value) or is_atom(value),
+    do: to_string(value)
+
+  def display_value(value), do: inspect(value)
+
+  # A checkboxes value is the one list a field accepts: `name[]=a&name[]=b`, a
+  # JSON array, or a lone string (one box). Every element must be a string
+  # naming an option; blanks (the empty sentinel an unticked group posts) and
+  # repeats are dropped, and the stored list follows the options' order.
+  defp cast(%{field_type: :checkboxes, options: options}, value)
+       when is_list(value) or is_binary(value) do
+    picked = value |> List.wrap() |> Enum.reject(&blank?/1)
+
+    cond do
+      not Enum.all?(picked, &is_binary/1) ->
+        {:error, "is not valid"}
+
+      length(picked) > length(options) ->
+        {:error, "is not valid"}
+
+      true ->
+        picked = picked |> Enum.map(&String.trim/1) |> MapSet.new()
+
+        if MapSet.subset?(picked, MapSet.new(options)),
+          do: {:ok, Enum.filter(options, &MapSet.member?(picked, &1))},
+          else: {:error, "is not one of the allowed options"}
+    end
+  end
+
+  # Any other shape (a map, a number, a boolean) is not a checkbox group.
+  defp cast(%{field_type: :checkboxes}, _value), do: {:error, "is not valid"}
 
   # A submitted value arrives from a query string or a JSON body, so the client
   # chooses its shape: `message[a]=hi` is a map. Nothing below has a clause for
@@ -443,8 +519,155 @@ defmodule KilnCMS.Forms do
     end
   end
 
-  defp cast(%{field_type: :select, options: options}, value) do
+  defp cast(%{field_type: type, options: options}, value) when type in [:select, :radio] do
     str = value |> to_string() |> String.trim()
     if str in options, do: {:ok, str}, else: {:error, "is not one of the allowed options"}
   end
+
+  # Digits and the separators people type; 6..15 digits (E.164's ceiling) in
+  # at most 32 characters. Stored as typed (trimmed), not normalised. The
+  # length is bounded before the pattern runs.
+  @phone_pattern ~r/\A[0-9+() .\-]+\z/
+
+  defp cast(%{field_type: :phone}, value) do
+    str = value |> to_string() |> String.trim()
+
+    if byte_size(str) <= 32 and Regex.match?(@phone_pattern, str) and
+         digit_count(str) in 6..15,
+       do: {:ok, str},
+       else: {:error, "must be a phone number"}
+  end
+
+  # http(s) only, with a host and no credentials: the value is echoed in the
+  # Entries tab and notification mail, so `javascript:`/`data:` and
+  # `user:pass@` forms never get stored.
+  defp cast(%{field_type: :url}, value) do
+    str = value |> to_string() |> String.trim()
+
+    if byte_size(str) <= KilnCMS.Limits.url() and url?(str),
+      do: {:ok, str},
+      else: {:error, "must be a URL starting with http:// or https://"}
+  end
+
+  # Free text by definition: the client sets it (a script fills utm params),
+  # so it is bounded and nothing more.
+  defp cast(%{field_type: :hidden}, value) do
+    str = value |> to_string() |> String.trim()
+
+    if String.length(str) <= KilnCMS.Limits.line(),
+      do: {:ok, str},
+      else: {:error, "is too long"}
+  end
+
+  defp cast(%{field_type: :number} = field, value) do
+    with {:ok, decimal} <- number_decimal(value),
+         :ok <- number_in_range(field, decimal) do
+      {:ok, number_value(decimal)}
+    end
+  end
+
+  defp cast(%{field_type: :rating} = field, value) do
+    max = rating_max(field)
+
+    case rating_integer(value) do
+      n when is_integer(n) and n >= 1 and n <= max -> {:ok, n}
+      _ -> {:error, "must be a rating from 1 to #{max}"}
+    end
+  end
+
+  defp digit_count(str), do: str |> :binary.bin_to_list() |> Enum.count(&(&1 in ?0..?9))
+
+  defp url?(str) do
+    with false <- String.match?(str, ~r/[\s\x00-\x1f\x7f]/),
+         %URI{scheme: scheme, host: host, userinfo: nil} <- URI.parse(str),
+         true <- is_binary(scheme) and String.downcase(scheme) in ["http", "https"] do
+      is_binary(host) and host != ""
+    else
+      _ -> false
+    end
+  end
+
+  # A whole-or-decimal literal, built as a Decimal from the text (never via a
+  # float): no exponent, `nan`/`inf`, `.5`, `5.` or `1_000`. JSON numbers
+  # arrive as integers/floats, which are finite by construction.
+  @number_pattern ~r/\A[+-]?[0-9]+(\.[0-9]+)?\z/
+
+  defp number_decimal(value) when is_integer(value), do: {:ok, Decimal.new(value)}
+  defp number_decimal(value) when is_float(value), do: {:ok, Decimal.from_float(value)}
+
+  defp number_decimal(value) when is_binary(value) do
+    str = String.trim(value)
+
+    with true <- byte_size(str) <= 64 and Regex.match?(@number_pattern, str),
+         {decimal, ""} <- Decimal.parse(str) do
+      {:ok, decimal}
+    else
+      _ -> {:error, "must be a number"}
+    end
+  end
+
+  defp number_decimal(_value), do: {:error, "must be a number"}
+
+  defp number_in_range(%{min_value: min, max_value: max, step: step}, decimal) do
+    with :ok <- check_min(min, decimal),
+         :ok <- check_max(max, decimal) do
+      check_step(step, min, decimal)
+    end
+  end
+
+  defp check_min(min, decimal) when is_number(min) do
+    if Decimal.lt?(decimal, bound(min)),
+      do: {:error, "must be at least #{bound_text(min)}"},
+      else: :ok
+  end
+
+  defp check_min(_min, _decimal), do: :ok
+
+  defp check_max(max, decimal) when is_number(max) do
+    if Decimal.gt?(decimal, bound(max)),
+      do: {:error, "must be at most #{bound_text(max)}"},
+      else: :ok
+  end
+
+  defp check_max(_max, _decimal), do: :ok
+
+  defp check_step(step, min, decimal) when is_number(step) and step > 0 do
+    if on_step?(decimal, bound(min || 0), bound(step)),
+      do: :ok,
+      else: {:error, "must be a multiple of #{bound_text(step)}"}
+  end
+
+  defp check_step(_step, _min, _decimal), do: :ok
+
+  defp bound(number) when is_integer(number), do: Decimal.new(number)
+  defp bound(number) when is_float(number), do: Decimal.from_float(number)
+
+  defp bound_text(number),
+    do: number |> bound() |> Decimal.normalize() |> Decimal.to_string(:normal)
+
+  defp on_step?(decimal, base, step) do
+    decimal |> Decimal.sub(base) |> Decimal.rem(step) |> Decimal.eq?(0)
+  end
+
+  # Whole values are stored as integers (`1.0` -> 1, `-0` -> 0), the rest as
+  # floats.
+  defp number_value(decimal) do
+    if Decimal.integer?(decimal),
+      do: Decimal.to_integer(decimal),
+      else: Decimal.to_float(decimal)
+  end
+
+  defp rating_max(%{max_value: max}) when is_number(max), do: trunc(max)
+  defp rating_max(_field), do: 5
+
+  defp rating_integer(value) when is_integer(value), do: value
+
+  defp rating_integer(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp rating_integer(_value), do: nil
 end
