@@ -1507,6 +1507,63 @@ carries the reasoning.
 
 ## Added
 
+<a id="schema-openapi-and-check"></a>
+
+- **The delivery schema is also served as OpenAPI 3.1 components
+  (`GET /api/schema?format=openapi`, `mix kiln.export.schema --format
+  openapi`), and `mix kiln.export.schema --check PATH` fails a build whose
+  committed types are out of date (#2274).** Typed clients could already be
+  generated from `GET /api/schema` in TypeScript, Swift and Kotlin; a team
+  whose toolchain reads OpenAPI had to restructure the JSON Schema first, and
+  nothing told a front end's CI that the committed types had gone stale.
+  Guides: [The same schemas as OpenAPI components](../api.md#the-same-schemas-as-openapi-components),
+  [Generate from OpenAPI components](../native-apps.md#generate-from-openapi-components)
+  and [Fail CI when the models are stale](../native-apps.md#fail-ci-when-the-models-are-stale).
+  - **The OpenAPI document.** The same schemas as `?format=json`, not a
+    translation: an OpenAPI 3.1 schema object is JSON Schema 2020-12. Every
+    `$defs` entry is a `components.schemas` entry of the same name and every
+    `$ref` follows it; the root `oneOf` is a `document` component tagged by
+    `type` (absent with `?blocks=only`); `$schema` becomes
+    `jsonSchemaDialect`; the root `$id` is dropped, since it names the JSON
+    Schema document. There are no `paths`. `?type=` and `?blocks=only` work as
+    for `json`, and the format is cached under its own key, evicted with the
+    others when a content type or field changes.
+  - **Explicit discriminator mappings.** The block union (`_type`) and the
+    `document` union (`type`) each carry a `mapping` from tag to component.
+    Without it an OpenAPI generator derives the tag from the component name
+    (`block_heading`), which is not the `_type` a fired artifact carries
+    (`heading`). The `json` format is unchanged.
+  - **`info.version` is the fired-artifact format version** (`"4"` today,
+    from `x-kiln.artifact_format_version`), not the Kiln version, so two
+    deployments serving the same shape agree and it moves only when the shape
+    does.
+  - **`mix kiln.export.schema`.** `--format openapi` writes the document
+    (`<org id>.openapi.json` under `--all-orgs`; `--pretty` applies).
+    `--check PATH` renders what the same flags would write, compares it with
+    the file and writes nothing; it exits non-zero naming the first differing
+    line when the file is out of date or missing. Pass the flags the file was
+    written with, `--pretty` included. It is refused with `--out` and with
+    `--all-orgs`.
+  - **The `400`.** An unknown `?format=` is still `400` `invalid_format`; its
+    message now lists `openapi` among the known formats.
+  - **Clients.** `@kiln-cms/client` gains `kiln.schemaComponents(options)`
+    and the exported type `OpenApiComponentsDocument`; `kiln_client`'s
+    `KilnClient.schema/1` takes `format: :openapi` (or `"openapi"`; `:json`
+    stays the default, any other value raises `ArgumentError`). Neither client
+    is released by this change.
+  - **Contributors.** The schema-export goldens under
+    `test/support/fixtures/schema_export/` are now enforced:
+    `KilnCMS.SchemaExport.DriftTest` runs on every `mix test` and fails when
+    the live export no longer matches `full.schema.json` or
+    `full.graphql.schema.json`, naming the regenerate command. The fixture now
+    includes an admin-defined content type with a plugin field type that
+    declares its own `json_schema/1` (the dependency fixture plugin's
+    `stars`), so every emitter golden covers compiled types, dynamic types and
+    plugin contributions. A change to the export or to a block now needs the
+    goldens regenerated in the same pull request.
+  - **No migration, no new environment variable.** Rolling the pin back
+    removes the format and the flag; `?format=openapi` then answers `400`.
+
 <a id="security-posture-json"></a>
 
 - **The Security posture report is available as JSON for monitoring, at

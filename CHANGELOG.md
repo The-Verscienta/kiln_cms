@@ -233,6 +233,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`GET /api/schema?format=openapi` and `mix kiln.export.schema --format openapi` serve the delivery schema as OpenAPI 3.1 components, with explicit discriminator mappings; `mix kiln.export.schema --check PATH` fails CI when committed types are stale.**
+  Clients: `kiln.schemaComponents()` (`@kiln-cms/client`), `KilnClient.schema(format: :openapi)`. Guide: [docs/native-apps.md](docs/native-apps.md#generate-from-openapi-components).
+  ([#2274](https://github.com/The-Verscienta/kiln_cms/issues/2274) · [long form](docs/changelog/unreleased.md#schema-openapi-and-check))
+
 - **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
   The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).
   ([#2521](https://github.com/The-Verscienta/kiln_cms/issues/2521) · [#2648](https://github.com/The-Verscienta/kiln_cms/pull/2648) · [long form](docs/changelog/unreleased.md#security-posture-json))

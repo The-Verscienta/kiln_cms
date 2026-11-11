@@ -1401,6 +1401,82 @@ public struct PostDocument: Codable, Hashable, Sendable {
     }
 }
 
+/// A published `Review` as fired to the `:json` surface.
+public struct ReviewDocument: Codable, Hashable, Sendable {
+    public let blocks: [Block]
+    /// Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a point-in-time read (`?as_of=`) serves the values stored at that instant, which may include fields since removed from the registry.
+    public let customFields: CustomFields
+    public let id: String
+    /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.
+    public let inheritedFields: [String: JSONValue]?
+    public let locale: String?
+    /// The document's robots flags. Absent when neither is set; absent means both false.
+    public let robots: Robots?
+    public let slug: String?
+    /// The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.
+    public let social: Social?
+    public let title: String?
+    public let type: String
+
+    public init(blocks: [Block], customFields: CustomFields, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, social: Social? = nil, title: String? = nil, type: String) {
+        self.blocks = blocks
+        self.customFields = customFields
+        self.id = id
+        self.inheritedFields = inheritedFields
+        self.locale = locale
+        self.robots = robots
+        self.slug = slug
+        self.social = social
+        self.title = title
+        self.type = type
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case blocks
+        case customFields = "custom_fields"
+        case id
+        case inheritedFields = "inherited_fields"
+        case locale
+        case robots
+        case slug
+        case social
+        case title
+        case type
+    }
+
+    public struct CustomFields: Codable, Hashable, Sendable {
+        public let score: Int?
+        public let verdict: String?
+
+        public init(score: Int? = nil, verdict: String? = nil) {
+            self.score = score
+            self.verdict = verdict
+        }
+    }
+
+    public struct Robots: Codable, Hashable, Sendable {
+        public let nofollow: Bool
+        public let noindex: Bool
+
+        public init(nofollow: Bool, noindex: Bool) {
+            self.nofollow = nofollow
+            self.noindex = noindex
+        }
+    }
+
+    public struct Social: Codable, Hashable, Sendable {
+        public let description: String?
+        public let image: String?
+        public let title: String?
+
+        public init(description: String? = nil, image: String? = nil, title: String? = nil) {
+            self.description = description
+            self.image = image
+            self.title = title
+        }
+    }
+}
+
 
 // MARK: - Document union
 
@@ -1408,6 +1484,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
 public indirect enum Document: Codable, Hashable, Sendable {
     case page(PageDocument)
     case post(PostDocument)
+    case review(ReviewDocument)
     /// A content type this build does not know — one added after it was generated.
     case unknown(type: String)
 
@@ -1419,6 +1496,7 @@ public indirect enum Document: Codable, Hashable, Sendable {
         switch self {
         case .page: return "page"
         case .post: return "post"
+        case .review: return "review"
         case .unknown(let type): return type
         }
     }
@@ -1428,6 +1506,7 @@ public indirect enum Document: Codable, Hashable, Sendable {
         switch type {
         case "page": self = .page(try PageDocument(from: decoder))
         case "post": self = .post(try PostDocument(from: decoder))
+        case "review": self = .review(try ReviewDocument(from: decoder))
         default: self = .unknown(type: type)
         }
     }
@@ -1436,6 +1515,7 @@ public indirect enum Document: Codable, Hashable, Sendable {
         switch self {
         case .page(let value): try value.encode(to: encoder)
         case .post(let value): try value.encode(to: encoder)
+        case .review(let value): try value.encode(to: encoder)
         case .unknown(let type):
             var container = encoder.container(keyedBy: TagKey.self)
             try container.encode(type, forKey: .tag)
@@ -1738,6 +1818,71 @@ public struct PostCustomFields: Codable, Hashable, Sendable {
           summary: customString(name: "summary")
           tier: customString(name: "tier")
           fields(names: ["contacts", "dosages", "event_dates", "extra", "gallery", "parent", "price_band", "properties", "related", "scores", "seo", "source", "specs", "synonyms", "where"]) {
+            __typename
+            name
+            ... on StringValue { asString: value }
+            ... on IntValue { asInt: value }
+            ... on FloatValue { asFloat: value }
+            ... on BooleanValue { asBoolean: value }
+            ... on DateValue { asDate: value }
+            ... on DateTimeValue { asDateTime: value }
+            ... on GeolocationValue { lat lng label zoom }
+            ... on JsonValue { asJson: value }
+            ... on ReferenceValue { ids }
+            ... on MediaValue { id url alt width height mimeType focal { x y } variants { label width height format url bytes cropped } }
+            ... on ListValue {
+              items {
+                __typename
+                name
+                ... on StringValue { asString: value }
+                ... on IntValue { asInt: value }
+                ... on FloatValue { asFloat: value }
+                ... on BooleanValue { asBoolean: value }
+                ... on DateValue { asDate: value }
+                ... on DateTimeValue { asDateTime: value }
+                ... on GeolocationValue { lat lng label zoom }
+                ... on JsonValue { asJson: value }
+                ... on ReferenceValue { ids }
+                ... on MediaValue { id url alt width height mimeType focal { x y } variants { label width height format url bytes cropped } }
+                ... on GroupValue { fields { __typename name ... on StringValue { asString: value } ... on IntValue { asInt: value } ... on FloatValue { asFloat: value } ... on BooleanValue { asBoolean: value } ... on DateValue { asDate: value } ... on DateTimeValue { asDateTime: value } ... on GeolocationValue { lat lng label zoom } ... on JsonValue { asJson: value } } }
+              }
+            }
+            ... on GroupValue {
+              fields {
+                __typename
+                name
+                ... on StringValue { asString: value }
+                ... on IntValue { asInt: value }
+                ... on FloatValue { asFloat: value }
+                ... on BooleanValue { asBoolean: value }
+                ... on DateValue { asDate: value }
+                ... on DateTimeValue { asDateTime: value }
+                ... on GeolocationValue { lat lng label zoom }
+                ... on JsonValue { asJson: value }
+                ... on ReferenceValue { ids }
+                ... on MediaValue { id url alt width height mimeType focal { x y } variants { label width height format url bytes cropped } }
+              }
+            }
+          }
+        }
+        """
+}
+
+/// The result of `ReviewCustomFields.fragment` — the site's custom fields. On `Entry` with `typeName: "review"`.
+public struct ReviewCustomFields: Codable, Hashable, Sendable {
+    public let verdict: String?
+    public let fields: [KilnCustomFieldValue]
+
+    public init(verdict: String? = nil, fields: [KilnCustomFieldValue]) {
+        self.verdict = verdict
+        self.fields = fields
+    }
+
+    /// The GraphQL fragment to spread into a query; it decodes into this type.
+    public static let fragment = """
+        fragment ReviewCustomFields on Entry {
+          verdict: customString(name: "verdict")
+          fields(names: ["score"]) {
             __typename
             name
             ... on StringValue { asString: value }

@@ -148,6 +148,24 @@ export interface SchemaOptions extends RequestOptions {
   blocksOnly?: boolean;
 }
 
+/**
+ * The delivery schema as OpenAPI 3.1 components, from
+ * `GET /api/schema?format=openapi`. The same schemas `schema()` returns, with
+ * `$defs` moved to `components.schemas` (and every `$ref` with them), the
+ * document union as `components.schemas.document`, and an explicit `_type`
+ * mapping on the block union's discriminator. Schema objects are JSON Schema
+ * 2020-12. No `paths`: it describes payloads, not routes.
+ */
+export interface OpenApiComponentsDocument {
+  openapi: string;
+  /** `version` is the fired-artifact format version, not the app version. */
+  info: { title: string; version: string; description?: string; [key: string]: unknown };
+  jsonSchemaDialect?: string;
+  components: { schemas: Record<string, Record<string, unknown>> };
+  "x-kiln"?: { artifact_format_version?: unknown; [key: string]: unknown };
+  [keyword: string]: unknown;
+}
+
 export interface HybridSearchOptions extends RequestOptions {
   /** Server caps at 25. */
   limit?: number;

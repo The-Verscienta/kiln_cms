@@ -97,6 +97,7 @@ import type {
   MediaMetadataUpdate,
   Menu,
   MenuList,
+  OpenApiComponentsDocument,
   RelatedOptions,
   RelatedResult,
   ReleaseListOptions,
@@ -567,6 +568,26 @@ export class KilnClient {
       options.signal,
       "application/json",
     )) as SchemaDocument;
+  }
+
+  /**
+   * The same delivery schema as OpenAPI 3.1 components:
+   * `GET /api/schema?format=openapi`. For a generator that reads OpenAPI
+   * (`components.schemas`) rather than bare JSON Schema. Takes the same
+   * `types` and `blocksOnly` filters as `schema()`; with `blocksOnly` there is
+   * no `document` component.
+   */
+  async schemaComponents(options: SchemaOptions = {}): Promise<OpenApiComponentsDocument> {
+    const params = new URLSearchParams();
+    params.append("format", "openapi");
+    appendIfPresent(params, "type", options.types?.join(","));
+    if (options.blocksOnly) params.append("blocks", "only");
+    return (await this.request(
+      "/api/schema",
+      params,
+      options.signal,
+      "application/json",
+    )) as OpenApiComponentsDocument;
   }
 
   // ── headless routing and site structure ───────────────────────────────────

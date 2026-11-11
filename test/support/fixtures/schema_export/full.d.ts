@@ -303,9 +303,24 @@ export interface PostDocument {
   type: "post";
 }
 
+/** A published `Review` as fired to the `:json` surface. */
+export interface ReviewDocument {
+  blocks: Array<KilnBlock>;
+  custom_fields: { score?: number | null; verdict?: string | null };
+  id: string;
+  inherited_fields?: Record<string, unknown>;
+  locale: string | null;
+  robots?: { nofollow: boolean; noindex: boolean };
+  slug: string | null;
+  social?: { description?: string; image?: string; title: string | null };
+  title: string | null;
+  type: "review";
+}
+
 
 // -- Document union ----------------------------------------------
 
 export type KilnDocument =
   | PageDocument
-  | PostDocument;
+  | PostDocument
+  | ReviewDocument;

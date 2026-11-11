@@ -9,6 +9,14 @@ tagged `kiln_client-vX.Y.Z` in the
 
 ### Added
 
+- **OpenAPI components (kiln_cms#2274):** `schema/1` takes `format:
+  :openapi` (or `"openapi"`), which asks for `GET /api/schema?format=openapi`,
+  the delivery schema as an OpenAPI 3.1 document; the result is a map either
+  way. `:json` (or `"json"`) is the default and sends no `format`. Any other
+  value raises `ArgumentError` before a request is made, since the text
+  formats (`typescript`, `swift-graphql`, ...) are not maps. Needs a server
+  with #2274; an older one answers `400` (`invalid_format`).
+
 - **Human verification on forms (kiln_cms#2249):** `form/2` and
   `submit_form/3` document the new response keys. A form's schema may carry
   `"challenge"`, `nil` or the widget's `"provider"`, `"site_key"`,

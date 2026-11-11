@@ -52,8 +52,22 @@ defmodule KilnCMS.SchemaExport do
 
   @typed_lists ScalarLists.typed()
 
+  @served_formats ~w(typescript typescript-graphql swift-graphql kotlin-graphql openapi)
+
   # See `with_actor/2`.
   @actor_override {__MODULE__, :actor_override}
+
+  @doc """
+  The renderings `GET /api/schema?format=` serves besides the default `json`.
+
+  One list for the two places that must agree on it: `KilnCMSWeb.SchemaController`
+  accepts exactly these, and `KilnCMS.Cache.bust_type_registry/1` evicts each
+  one's cache key (`KilnCMS.Cache.delivery_schema_key/2`). A format added to the
+  controller but not to the bust would serve a stale document for the TTL after
+  every registry write.
+  """
+  @spec served_formats() :: [String.t()]
+  def served_formats, do: @served_formats
 
   @doc """
   The actor the export reads a type's field definitions as (#1659): a

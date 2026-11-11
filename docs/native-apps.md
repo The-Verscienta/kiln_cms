@@ -315,7 +315,9 @@ changes when an admin edits them, without a redeploy.
   regenerate when the schema changes. Swift and Kotlin have built-in emitters
   ([Swift](#swift-models), [Kotlin](#kotlin-models)); TypeScript has
   `mix kiln.export.schema --format ts` and the `kiln-types` generator bundled
-  with `@kiln-cms/client`.
+  with `@kiln-cms/client`. For any other language, or a generator you already
+  use, `?format=openapi` serves the same schemas as OpenAPI 3.1 components
+  ([below](#generate-from-openapi-components)).
 - Use `?type=post,recipe` to export only the types the app reads. An unknown
   name is a `400`.
 - Decode **leniently**. `custom_fields` is an open object and nothing in it is
@@ -369,7 +371,64 @@ an admin changes fields; the names are the site's definitions *now*.
 The schema is cacheable (`public, max-age=300`). An app can fetch it at runtime
 to detect drift, but it can't change its compiled types. Use it in CI
 instead: fail the build when the live schema no longer matches the committed
-one.
+one ([Fail CI when the models are stale](#fail-ci-when-the-models-are-stale)).
+
+### Generate from OpenAPI components
+
+Many model generators (`openapi-generator`, Apple's
+`swift-openapi-generator`) read OpenAPI, not bare JSON Schema.
+`?format=openapi` gives them the same schemas as an OpenAPI 3.1 document
+(the details are in [api.md](api.md#the-same-schemas-as-openapi-components)):
+
+1. Download the components for the types the app reads:
+
+   ```bash
+   curl -s 'https://cms.example.com/api/schema?format=openapi&type=post' \
+     -o openapi/kiln.openapi.json
+   ```
+
+   or, from a Kiln checkout, write it with
+   `mix kiln.export.schema --format openapi --type post --org-id <site uuid> --out openapi/kiln.openapi.json --pretty`.
+2. Point your generator at the file and generate models only. The document
+   has no `paths`, so there are no API operations to generate; read through
+   the `json` artifact as before.
+3. Decode a delivered artifact as `document` and a block as `block`. Both
+   unions carry an explicit discriminator `mapping` (`"heading"` →
+   `#/components/schemas/block_heading`, `"post"` →
+   `#/components/schemas/content_post`), so a generator that honors the
+   mapping switches on the real `_type` and `type` values rather than on the
+   component names.
+
+The leniency rules above still apply: give the generated block and document
+unions a fallback for an unknown tag if your generator can, because a Kiln
+upgrade or a plugin can add a block kind your binary has never seen.
+
+`info.version` is the fired-artifact format version (`"4"` today), not the
+Kiln version, so it moves only when the delivered shape does.
+
+### Fail CI when the models are stale
+
+The models describe one site at the moment of export, so check them in CI.
+
+- **From a repository that runs Kiln** (an overlay, or a monorepo with the
+  app), `mix kiln.export.schema --check PATH` renders what the same flags
+  would write and compares it with the committed file, writing nothing.
+  Use exactly the flags the file was written with, `--pretty` included, with
+  `--check` in place of `--out`:
+
+  ```bash
+  mix kiln.export.schema --format swift --type post,recipe \
+    --org-id <site uuid> --check Sources/Kiln/Kiln.swift
+  ```
+
+  A match prints `Sources/Kiln/Kiln.swift is up to date (...)`. A stale file
+  exits non-zero with `Sources/Kiln/Kiln.swift is out of date: line N is
+  "...", the export has "..."` and the command to regenerate it; a missing
+  file fails too. `--check` can't be combined with `--out` or `--all-orgs`.
+- **From an app repository on its own**, which can't run the Mix task,
+  regenerate the file the way you first did (download it from
+  `GET /api/schema`, or run your generator over a fresh
+  `?format=openapi` download) and run `git diff --exit-code` on it.
 
 ### Swift models
 
@@ -436,8 +495,8 @@ regenerate it when an admin adds or changes a content type or custom field,
 and after a Kiln upgrade or plugin adds a block. An app built against an older
 file keeps decoding: new keys are ignored, and new block types and enum values
 land in `unknown`. So regenerating is about gaining the new fields, not about
-staying compatible. To catch drift in CI, regenerate and run
-`git diff --exit-code` on the file.
+staying compatible. To catch drift in CI, see
+[Fail CI when the models are stale](#fail-ci-when-the-models-are-stale).
 
 ### Kotlin models
 

@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.SchemaController do
       GET /api/schema?format=typescript-graphql  # + GraphQL custom-field fragments
       GET /api/schema?format=swift-graphql       # Swift models + the same fragments
       GET /api/schema?format=kotlin-graphql      # Kotlin models + the same fragments
+      GET /api/schema?format=openapi             # the same schemas as OpenAPI 3.1 components
 
   `format` is a closed set: `json` (the default, and what every request without
   it gets), `typescript` (`KilnCMS.SchemaExport.TypeScript.emit/1`) and
@@ -26,8 +27,11 @@ defmodule KilnCMSWeb.SchemaController do
   `Fields` type and a ready GraphQL fragment for the typed custom-field readers,
   #2290), and `swift-graphql` / `kotlin-graphql` (`KilnCMS.SchemaExport.Swift` /
   `Kotlin` `emit_graphql/1`: the native-app models of the `json` artifact plus
-  the same per-type result type and fragment, in package `kiln` for Kotlin).
-  Anything else is a 400. Each format is cached under its own key.
+  the same per-type result type and fragment, in package `kiln` for Kotlin),
+  and `openapi` (`KilnCMS.SchemaExport.OpenApi.emit/1`: the `json` document's
+  `$defs` as OpenAPI 3.1 `components.schemas`, #2274). Anything else is a 400.
+  Each format is cached under its own key; the list is
+  `KilnCMS.SchemaExport.served_formats/0`, which the cache bust reads too.
 
   ## What this discloses, and what it withholds
 
@@ -65,7 +69,6 @@ defmodule KilnCMSWeb.SchemaController do
   # TTL is a backstop, not the freshness signal.
   @cache_ttl :timer.minutes(5)
   @max_age_seconds 300
-  @text_formats ["typescript", "typescript-graphql", "swift-graphql", "kotlin-graphql"]
 
   # Rebuilding costs a registry scan plus one `field_definitions` read per
   # content type, so only the unparameterized document — the one a build step
@@ -100,6 +103,7 @@ defmodule KilnCMSWeb.SchemaController do
   end
 
   defp send_body(conn, "json", document), do: json(conn, document)
+  defp send_body(conn, "openapi", document), do: json(conn, document)
 
   # A literal content type per clause: a variable one reads to Sobelow as a
   # response whose type a request could choose.
@@ -119,13 +123,12 @@ defmodule KilnCMSWeb.SchemaController do
   defp format(params) do
     case Params.string(params, "format", "") do
       format when format in ["", "json"] -> {:ok, "json"}
-      format when format in @text_formats -> {:ok, format}
-      _unknown -> :error
+      format -> if format in SchemaExport.served_formats(), do: {:ok, format}, else: :error
     end
   end
 
   defp invalid_format_message,
-    do: "unknown format. Known: " <> Enum.join(["json" | @text_formats], ", ")
+    do: "unknown format. Known: " <> Enum.join(["json" | SchemaExport.served_formats()], ", ")
 
   # The unparameterized document takes no caller input that can be rejected, so
   # it needs no rescue — and only successes ever reach the cache.
@@ -155,6 +158,7 @@ defmodule KilnCMSWeb.SchemaController do
 
   defp format_document(document, "swift-graphql"), do: SchemaExport.Swift.emit_graphql(document)
   defp format_document(document, "kotlin-graphql"), do: SchemaExport.Kotlin.emit_graphql(document)
+  defp format_document(document, "openapi"), do: SchemaExport.OpenApi.emit(document)
 
   # The rescue is around this call alone, not the action body. `Tenant.current_org/1`
   # raises `ArgumentError` **by design** (#563) when the tenant did not resolve,

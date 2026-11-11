@@ -72,6 +72,7 @@ export type {
   MenuList,
   MenuNode,
   MenuSummary,
+  OpenApiComponentsDocument,
   PortableTextBlock,
   PortableTextMarkDef,
   PortableTextSpan,

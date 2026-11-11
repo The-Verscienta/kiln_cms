@@ -143,6 +143,28 @@ in `test/fixtures/` (see `test/parity.test.ts` and the ExUnit twin
 `test/kiln_cms/schema_export/type_script_parity_test.exs` in the Kiln repo),
 so the two emitters cannot drift silently.
 
+### OpenAPI components for another generator
+
+If your toolchain already generates from OpenAPI, fetch the same schemas as an
+OpenAPI 3.1 document instead. `schemaComponents()` takes the same `types` and
+`blocksOnly` options as `schema()` and returns an `OpenApiComponentsDocument`:
+
+```ts
+import { writeFile } from "node:fs/promises";
+
+const doc = await kiln.schemaComponents({ types: ["post"] });
+doc.info.version; // "4": the fired-artifact format version, not the Kiln version
+doc.components.schemas["block"]?.discriminator; // { propertyName: "_type", mapping: { heading: "#/components/schemas/block_heading", … } }
+await writeFile("openapi/kiln.openapi.json", JSON.stringify(doc, null, 2));
+```
+
+Every `$defs` entry of `schema()` is a `components.schemas` entry of the same
+name, the document union is `components.schemas.document` (absent with
+`blocksOnly`), and both unions carry an explicit discriminator `mapping`.
+There are no `paths`. The server's
+[API guide](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/api.md#the-same-schemas-as-openapi-components)
+has the details.
+
 ## Published-only by default
 
 Reads are published-only by default. Do not rely on the credential for that:
@@ -208,6 +230,7 @@ cold-cache 503 once before throwing; everything else that fails throws — see
 | `mintPreview(type, id)`              | `POST /api/content/:type/:id/preview-token`         | server side; `{token, url, expires_at, …}`                   |
 | `preview(token)`                     | `GET /preview/:token`                               | one draft, signed 15-minute token                            |
 | `schema(opts)`                       | `GET /api/schema`                                   | the live delivery schema; feed it to `emitTypes`             |
+| `schemaComponents(opts)`             | `GET /api/schema?format=openapi`                    | the same schemas as OpenAPI 3.1 components                   |
 | `resolvePath(path, opts)`            | `GET /api/resolve?path=`                            | `ok` / `moved` / `not_found` verdict; never throws a 404     |
 | `menus()`                            | `GET /api/menus`                                    | every menu's key, name and locale                            |
 | `menu(key, opts)`                    | `GET /api/menus/:key`                               | one resolved tree with live URLs                             |

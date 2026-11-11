@@ -1,14 +1,14 @@
 defmodule Mix.Tasks.Kiln.Export.Schema do
-  @shortdoc "Export the delivery JSON Schema (or .d.ts / Swift / Kotlin types) for blocks and content types"
+  @shortdoc "Export the delivery JSON Schema (or .d.ts / Swift / Kotlin types / OpenAPI) for blocks and content types"
   @moduledoc """
-  JSON Schema / TypeScript / Swift / Kotlin export of the block union and content types (#430).
+  JSON Schema / TypeScript / Swift / Kotlin / OpenAPI export of the block union and content types (#430).
 
   Describes the `:json` fired-artifact shape — what
   `GET /api/content/:type/:slug?surface=json` returns — so a typed client has
   something to generate against. See `KilnCMS.SchemaExport`.
 
-      mix kiln.export.schema [--format json|ts|swift|kotlin] [--out PATH] [--type NAME,NAME]
-                             [--package com.example.kiln]
+      mix kiln.export.schema [--format json|ts|swift|kotlin|openapi] [--out PATH | --check PATH]
+                             [--type NAME,NAME] [--package com.example.kiln]
                              [--org-id UUID | --all-orgs] [--blocks-only]
                              [--base-url URL] [--pretty]
 
@@ -19,6 +19,8 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
       mix kiln.export.schema --format ts --out assets/js/kiln.d.ts
       mix kiln.export.schema --format swift --out Sources/Kiln/Kiln.swift
       mix kiln.export.schema --format kotlin --package com.example.kiln --out app/src/main/java/com/example/kiln/Kiln.kt
+      mix kiln.export.schema --format openapi --out openapi/kiln.openapi.json --pretty
+      mix kiln.export.schema --format ts --check assets/js/kiln.d.ts
       mix kiln.export.schema --type post,page --org-id 018f…
       mix kiln.export.schema --all-orgs --out ./schemas --pretty
 
@@ -29,6 +31,23 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
 
   `--blocks-only` skips content types entirely and touches no database, which
   is what a CI job that only wants block types should use.
+
+  ## Checking a committed file
+
+  `--check PATH` renders exactly what the same flags would write and compares
+  it with the file at `PATH`, writing nothing. It exits non-zero, naming the
+  first line that differs, when the file is missing or out of date — for a
+  frontend or app repo's CI that commits its generated types and wants to fail
+  when the site's schema has moved. Pass the flags the file was written with
+  (`--pretty` included). Not with `--out` or `--all-orgs`.
+
+  ## OpenAPI
+
+  `--format openapi` writes the same schemas as an OpenAPI 3.1 document
+  (`KilnCMS.SchemaExport.OpenApi`): `$defs` become `components.schemas`, the
+  root union becomes a `document` component, and the block union's
+  discriminator gets an explicit `_type` mapping. For a generator that reads
+  OpenAPI components rather than bare JSON Schema. `--pretty` applies.
 
   ## Swift
 
@@ -61,6 +80,7 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
 
   alias KilnCMS.SchemaExport
   alias KilnCMS.SchemaExport.Kotlin
+  alias KilnCMS.SchemaExport.OpenApi
   alias KilnCMS.SchemaExport.Swift
   alias KilnCMS.SchemaExport.TypeScript
 
@@ -75,7 +95,8 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
     blocks_only: :boolean,
     base_url: :string,
     package: :string,
-    pretty: :boolean
+    pretty: :boolean,
+    check: :string
   ]
 
   @aliases [o: :out, f: :format]
@@ -90,12 +111,62 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
 
     format = parse_format(opts[:format])
     check_package!(format, opts[:package])
+    check_check!(opts)
     export_opts = export_opts(opts)
 
-    if opts[:all_orgs],
-      do: run_all_orgs(format, export_opts, opts),
-      else: run_one(format, export_opts, opts)
+    cond do
+      opts[:check] -> run_check(format, export_opts, opts)
+      opts[:all_orgs] -> run_all_orgs(format, export_opts, opts)
+      true -> run_one(format, export_opts, opts)
+    end
   end
+
+  defp check_check!(opts) do
+    cond do
+      is_nil(opts[:check]) -> :ok
+      opts[:all_orgs] -> Mix.raise("--check compares one site's export, so not with --all-orgs.")
+      opts[:out] -> Mix.raise("--check compares and writes nothing, so not with --out.")
+      true -> :ok
+    end
+  end
+
+  defp run_check(format, export_opts, opts) do
+    path = opts[:check]
+    {body, summary} = render(format, export_opts, opts)
+
+    case File.read(path) do
+      {:ok, ^body} ->
+        Mix.shell().info("#{path} is up to date (#{summary}).")
+
+      {:ok, current} ->
+        Mix.raise(
+          "#{path} is out of date: #{first_difference(current, body)}. " <>
+            "Re-export it with the same flags and --out #{path}."
+        )
+
+      {:error, reason} ->
+        Mix.raise("--check #{path}: #{:file.format_error(reason)}.")
+    end
+  end
+
+  # The first line that differs, so a CI log says where without dumping both
+  # files.
+  defp first_difference(current, expected) do
+    current_lines = String.split(current, "\n")
+    expected_lines = String.split(expected, "\n")
+    count = max(length(current_lines), length(expected_lines))
+
+    index =
+      Enum.find(0..(count - 1)//1, fn i ->
+        Enum.at(current_lines, i) != Enum.at(expected_lines, i)
+      end)
+
+    "line #{index + 1} is #{line_text(Enum.at(current_lines, index))}, " <>
+      "the export has #{line_text(Enum.at(expected_lines, index))}"
+  end
+
+  defp line_text(nil), do: "past the end"
+  defp line_text(line), do: inspect(String.slice(line, 0, 120))
 
   defp run_one(format, export_opts, opts) do
     {body, summary} = render(format, export_opts, opts)
@@ -138,6 +209,7 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   # same sorted encoder an export does.
   @doc false
   def encode(document, :ts, _opts), do: TypeScript.emit(document)
+  def encode(document, :openapi, opts), do: encode(OpenApi.emit(document), :json, opts)
   def encode(document, :swift, _opts), do: Swift.emit(document)
 
   def encode(document, :kotlin, opts),
@@ -189,9 +261,10 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   defp parse_format(format) when format in ~w(ts d.ts typescript), do: :ts
   defp parse_format(format) when format in ~w(swift), do: :swift
   defp parse_format(format) when format in ~w(kotlin kt), do: :kotlin
+  defp parse_format(format) when format in ~w(openapi), do: :openapi
 
   defp parse_format(other),
-    do: Mix.raise("Unknown format #{inspect(other)} (expected json|ts|swift|kotlin).")
+    do: Mix.raise("Unknown format #{inspect(other)} (expected json|ts|swift|kotlin|openapi).")
 
   defp check_package!(_format, nil), do: :ok
 
@@ -207,6 +280,7 @@ defmodule Mix.Tasks.Kiln.Export.Schema do
   defp extension(:swift), do: "swift"
   defp extension(:kotlin), do: "kt"
   defp extension(:json), do: "json"
+  defp extension(:openapi), do: "openapi.json"
 
   defp emit(body, nil), do: IO.write(body)
 

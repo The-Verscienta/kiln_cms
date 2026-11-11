@@ -135,6 +135,10 @@ its visibility follows the credential, which is why viewer-minted keys matter.
 # The live delivery schema, for generating typed models
 {:ok, json_schema} = KilnClient.schema(types: ["post"])
 
+# ...or the same schemas as OpenAPI 3.1 components, for an OpenAPI generator
+{:ok, %{"components" => %{"schemas" => schemas}}} =
+  KilnClient.schema(format: :openapi, types: ["post"])
+
 # Join relationships through the included lookup
 {:ok, %{items: [post | _], included: included}} =
   KilnClient.list("posts", include: ["tags"], limit: 1)

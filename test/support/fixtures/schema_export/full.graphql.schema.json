@@ -1810,6 +1810,127 @@
         "type": "Post"
       }
     },
+    "content_review": {
+      "additionalProperties": false,
+      "description": "A published `Review` as fired to the `:json` surface.",
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/block"
+          },
+          "type": "array"
+        },
+        "custom_fields": {
+          "additionalProperties": true,
+          "description": "Admin-defined custom fields (`KilnCMS.CMS.FieldDefinition`). Open: a point-in-time read (`?as_of=`) serves the values stored at that instant, which may include fields since removed from the registry.",
+          "properties": {
+            "score": {
+              "maximum": 5,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "x-kiln-graphql-kind": "json"
+            },
+            "verdict": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-kiln-graphql-kind": "string"
+            }
+          },
+          "type": "object"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "inherited_fields": {
+          "additionalProperties": true,
+          "description": "Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.",
+          "type": "object"
+        },
+        "locale": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "robots": {
+          "additionalProperties": false,
+          "description": "The document's robots flags. Absent when neither is set; absent means both false.",
+          "properties": {
+            "nofollow": {
+              "type": "boolean"
+            },
+            "noindex": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "noindex",
+            "nofollow"
+          ],
+          "type": "object"
+        },
+        "slug": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "social": {
+          "additionalProperties": false,
+          "description": "The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "type": "object"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "const": "review"
+        }
+      },
+      "required": [
+        "blocks",
+        "custom_fields",
+        "id",
+        "locale",
+        "slug",
+        "title",
+        "type"
+      ],
+      "title": "ReviewDocument",
+      "type": "object",
+      "x-kiln-content-type": "review",
+      "x-kiln-content-type-source": "dynamic",
+      "x-kiln-graphql": {
+        "type": "Entry",
+        "type_name": "review"
+      }
+    },
     "media_snapshot": {
       "additionalProperties": true,
       "properties": {
@@ -1999,6 +2120,9 @@
     },
     {
       "$ref": "#/$defs/content_page"
+    },
+    {
+      "$ref": "#/$defs/content_review"
     }
   ],
   "title": "KilnCMS delivery schema",
@@ -2033,7 +2157,8 @@
     ],
     "content_types": [
       "post",
-      "page"
+      "page",
+      "review"
     ],
     "surface": "json"
   }

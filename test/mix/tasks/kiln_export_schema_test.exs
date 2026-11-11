@@ -123,7 +123,82 @@ defmodule Mix.Tasks.Kiln.Export.SchemaTest do
   end
 
   test "an unknown format is rejected" do
-    assert_raise Mix.Error, ~r/expected json\|ts/, fn -> Schema.run(["--format", "yaml"]) end
+    assert_raise Mix.Error, ~r/expected json\|ts\|swift\|kotlin\|openapi/, fn ->
+      Schema.run(["--format", "yaml"])
+    end
+  end
+
+  test "--format openapi writes OpenAPI 3.1 components", %{dir: dir} do
+    path = Path.join(dir, "kiln.openapi.json")
+
+    capture_io(fn -> Schema.run(["--blocks-only", "--format", "openapi", "--out", path]) end)
+
+    document = path |> File.read!() |> Jason.decode!()
+    assert document["openapi"] == "3.1.0"
+
+    assert document["components"]["schemas"]["block"]["discriminator"]["mapping"]["heading"] ==
+             "#/components/schemas/block_heading"
+
+    # Blocks only: there is no document union to be a component.
+    refute Map.has_key?(document["components"]["schemas"], "document")
+  end
+
+  test "--all-orgs names an OpenAPI file .openapi.json", %{dir: dir} do
+    capture_io(fn ->
+      Schema.run(["--all-orgs", "--blocks-only", "--format", "openapi", "--out", dir])
+    end)
+
+    assert dir |> File.ls!() |> Enum.all?(&String.ends_with?(&1, ".openapi.json"))
+  end
+
+  describe "--check" do
+    test "passes on a file the same flags wrote, and writes nothing", %{dir: dir} do
+      path = Path.join(dir, "kiln.d.ts")
+      capture_io(fn -> Schema.run(["--blocks-only", "--format", "ts", "--out", path]) end)
+      %File.Stat{mtime: written} = File.stat!(path, time: :posix)
+
+      output =
+        capture_io(fn -> Schema.run(["--blocks-only", "--format", "ts", "--check", path]) end)
+
+      assert output =~ "is up to date"
+      assert File.stat!(path, time: :posix).mtime == written
+    end
+
+    test "fails on a stale file, naming the first differing line", %{dir: dir} do
+      path = Path.join(dir, "schema.json")
+      capture_io(fn -> Schema.run(["--blocks-only", "--pretty", "--out", path]) end)
+      stale = path |> File.read!() |> String.replace(~s("$defs"), ~s("$stale"))
+      File.write!(path, stale)
+
+      error =
+        assert_raise Mix.Error, fn ->
+          Schema.run(["--blocks-only", "--pretty", "--check", path])
+        end
+
+      assert error.message =~ "is out of date: line 2 is"
+      assert error.message =~ "$stale"
+      assert error.message =~ "--out #{path}"
+      # Nothing was rewritten.
+      assert File.read!(path) == stale
+    end
+
+    test "fails on a missing file", %{dir: dir} do
+      path = Path.join(dir, "missing.json")
+
+      assert_raise Mix.Error, ~r/missing\.json: no such file/, fn ->
+        Schema.run(["--blocks-only", "--check", path])
+      end
+    end
+
+    test "is refused with --out or --all-orgs", %{dir: dir} do
+      assert_raise Mix.Error, ~r/not with --out/, fn ->
+        Schema.run(["--blocks-only", "--check", "a.json", "--out", dir])
+      end
+
+      assert_raise Mix.Error, ~r/not with --all-orgs/, fn ->
+        Schema.run(["--blocks-only", "--check", "a.json", "--all-orgs"])
+      end
+    end
   end
 
   # `--all_orgs` looks right and parses as *unknown*; under `OptionParser.parse/2`

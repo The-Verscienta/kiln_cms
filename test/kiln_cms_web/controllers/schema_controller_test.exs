@@ -4,6 +4,7 @@ defmodule KilnCMSWeb.SchemaControllerTest do
   """
   use KilnCMSWeb.ConnCase, async: false
 
+  alias KilnCMS.Cache
   alias KilnCMS.CMS
 
   defp admin do
@@ -297,6 +298,74 @@ defmodule KilnCMSWeb.SchemaControllerTest do
       assert inspect(body) =~ "typescript-graphql"
       assert inspect(body) =~ "swift-graphql"
       assert inspect(body) =~ "kotlin-graphql"
+      assert inspect(body) =~ "openapi"
+    end
+
+    # The site's request carries a base URL, so the JSON document has an `$id`;
+    # it names that document, not this one, and must not leak across.
+    test "openapi serves the same schemas as OpenAPI 3.1 components", %{conn: conn} do
+      private_and_public_fields("o")
+      conn = get(conn, ~p"/api/schema?format=openapi")
+      raw = response(conn, 200)
+      body = Jason.decode!(raw)
+
+      assert ["application/json" <> _] = get_resp_header(conn, "content-type")
+      assert body["openapi"] == "3.1.0"
+      refute Map.has_key?(body, "$id")
+      refute Map.has_key?(body, "$schema")
+      refute raw =~ "#/$defs/"
+      refute raw =~ "x-kiln-graphql"
+
+      schemas = body["components"]["schemas"]
+
+      assert schemas["block"]["discriminator"]["mapping"]["heading"] ==
+               "#/components/schemas/block_heading"
+
+      assert "#/components/schemas/content_page" in Enum.map(
+               schemas["document"]["oneOf"],
+               & &1["$ref"]
+             )
+
+      fields = schemas["content_page"]["properties"]["custom_fields"]["properties"]
+      assert fields["gql_price_o"]["type"] == ["number", "null"]
+      refute Map.has_key?(fields, "gql_secret_o")
+    end
+
+    test "openapi with ?blocks=only has no document component", %{conn: conn} do
+      body = conn |> get(~p"/api/schema?format=openapi&blocks=only") |> json_response(200)
+
+      assert Map.has_key?(body["components"]["schemas"], "block")
+      refute Map.has_key?(body["components"]["schemas"], "document")
+    end
+
+    test "a cached openapi document is evicted by a registry write", %{conn: conn} do
+      warm = conn |> get(~p"/api/schema?format=openapi") |> response(200)
+      refute warm =~ "gql_price_p"
+
+      private_and_public_fields("p")
+
+      fresh =
+        build_conn() |> unique_ip() |> get(~p"/api/schema?format=openapi") |> response(200)
+
+      assert fresh =~ "gql_price_p"
+    end
+
+    # The controller and the bust read one list; a format only the controller
+    # knew would stay stale for the TTL after every registry write.
+    test "a registry bust evicts every served format's key" do
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      keys =
+        Enum.map(KilnCMS.SchemaExport.served_formats(), &Cache.delivery_schema_key(org_id, &1))
+
+      read = fn key -> Cache.fetch(key, :timer.minutes(1), fn -> :miss end) end
+
+      for key <- keys, do: Cache.put(key, :warm, :timer.minutes(1))
+      assert Enum.map(keys, read) == Enum.map(keys, fn _ -> :warm end)
+
+      Cache.bust_type_registry(org_id)
+
+      for key <- keys, do: assert(read.(key) == :miss, "#{key} survived the bust")
     end
 
     test "format combines with ?type= and 400s on an unknown type", %{conn: conn} do
