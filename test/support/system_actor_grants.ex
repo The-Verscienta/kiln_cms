@@ -181,29 +181,58 @@ defmodule KilnCMS.SystemActorGrants do
   for a read.
   """
   @spec decide(module(), atom(), atom()) :: term()
-  def decide(resource, action, subsystem) do
-    actor = SystemActor.new(subsystem)
+  def decide(resource, action, subsystem),
+    do: decide_subject(subject(resource, action, subsystem), subsystem)
+
+  # The query, changeset or action input `action` is decided against, built
+  # ONCE per action and then asked of every subsystem (`Ash.can/3` takes a
+  # built subject and sets the actor on it). Building it is most of the cost
+  # and doesn't depend on the label: `SiteFederation`'s `:enable` and `:rekey`
+  # mint an RSA-2048 keypair in a change, and building one per label made that
+  # resource alone ~40% of the test's time. A write is built as a system
+  # actor of `builder`, the label no grant names, so a change that reads the
+  # actor sees the same kind of actor it would in production; a read is built
+  # without one, as it always was.
+  defp subject(resource, action, builder) do
     tenant = KilnCMS.Accounts.default_org_id()
+    build = [actor: SystemActor.new(builder), tenant: tenant]
+
+    subject =
+      case Ash.Resource.Info.action(resource, action).type do
+        :read ->
+          Ash.Query.for_read(resource, action, arguments(resource, action), tenant: tenant)
+
+        :update ->
+          Ash.Changeset.for_update(record(resource, tenant), action, %{}, build)
+
+        :destroy ->
+          Ash.Changeset.for_destroy(record(resource, tenant), action, %{}, build)
+
+        # With the required arguments, as a read gets: a change that reads one
+        # while the changeset is built (`UserIdentity.upsert`) has it to read.
+        :create ->
+          Ash.Changeset.for_create(resource, action, arguments(resource, action), build)
+
+        _generic ->
+          Ash.ActionInput.for_action(resource, action, %{}, build)
+      end
+
+    {subject, tenant}
+  end
+
+  # Data an update or destroy is decided against (see `@records`).
+  defp record(resource, tenant),
+    do: struct(resource, Map.merge(%{org_id: tenant}, Map.get(@records, resource, %{})))
+
+  defp decide_subject({%Ash.Query{} = query, tenant}, subsystem) do
+    opts = [tenant: tenant, run_queries?: false, maybe_is: :maybe, alter_source?: true]
+    {:ok, answer, query} = Ash.can(query, SystemActor.new(subsystem), opts)
+    {answer, inspect(query.filter)}
+  end
+
+  defp decide_subject({subject, tenant}, subsystem) do
     opts = [tenant: tenant, run_queries?: false, maybe_is: :maybe]
-
-    case Ash.Resource.Info.action(resource, action).type do
-      :read ->
-        query = Ash.Query.for_read(resource, action, arguments(resource, action), tenant: tenant)
-        {:ok, answer, query} = Ash.can(query, actor, Keyword.put(opts, :alter_source?, true))
-        {answer, inspect(query.filter)}
-
-      type when type in [:update, :destroy] ->
-        record = struct(resource, Map.merge(%{org_id: tenant}, Map.get(@records, resource, %{})))
-        answer!(Ash.can({record, action}, actor, opts))
-
-      # With the required arguments, as a read gets: a change that reads one
-      # while the changeset is built (`UserIdentity.upsert`) has it to read.
-      :create ->
-        answer!(Ash.can({resource, action, arguments(resource, action)}, actor, opts))
-
-      _generic ->
-        answer!(Ash.can({resource, action}, actor, opts))
-    end
+    answer!(Ash.can(subject, SystemActor.new(subsystem), opts))
   end
 
   defp answer!({:ok, answer}), do: answer
@@ -258,12 +287,14 @@ defmodule KilnCMS.SystemActorGrants do
   """
   @spec admitted(module(), atom(), [atom()], atom()) :: [atom()] | :undecidable
   def admitted(resource, action, subsystems, probe \\ :__no_grant_names_this__) do
-    case decide(resource, action, probe) do
+    subject = subject(resource, action, probe)
+
+    case decide_subject(subject, probe) do
       open when open in [true, {true, "nil"}] ->
         :undecidable
 
       refused ->
-        Enum.filter(subsystems, &(decide(resource, action, &1) != refused))
+        Enum.filter(subsystems, &(decide_subject(subject, &1) != refused))
     end
   end
 end

@@ -56,6 +56,16 @@ defmodule KilnCMS.Backups.Manifest do
   manifest without the key (`scripts/backup.sh`, or Kiln before #2219) covers
   the kinds of its artifacts (`components/1`).
 
+  ## Stamp
+
+  The run's stamp (`"20260805-031700"`, the name its files and its Run carry)
+  is written as `"stamp"`. It is not derivable from `started_at`: Kiln takes
+  the stamp when the chain is leased and stamps the start a moment later, and
+  steps the stamp past one already in use, so the two can name different
+  seconds. A reader keys a run by `"stamp"` when it is there and by
+  `started_at` otherwise (a manifest written before the key existed). A stamp
+  that is not a real instant reads as absent.
+
   The keys are additive and the version stays 1: a manifest without them reads
   exactly as before (the keys are absent from the parsed entry, not `nil`), and
   a reader that doesn't know them ignores them. `total_bytes/1` and
@@ -81,6 +91,7 @@ defmodule KilnCMS.Backups.Manifest do
 
   @type t :: %__MODULE__{
           version: pos_integer(),
+          stamp: String.t() | nil,
           started_at: DateTime.t() | nil,
           finished_at: DateTime.t() | nil,
           trigger: String.t(),
@@ -93,6 +104,7 @@ defmodule KilnCMS.Backups.Manifest do
         }
 
   defstruct version: 1,
+            stamp: nil,
             started_at: nil,
             finished_at: nil,
             trigger: "unknown",
@@ -210,11 +222,13 @@ defmodule KilnCMS.Backups.Manifest do
       "error" => m.error
     }
     |> put_present("components", m.components)
+    |> put_present("stamp", m.stamp)
   end
 
   defp from_map(map) do
     %__MODULE__{
       version: integer(map["version"]) || 1,
+      stamp: stamp(map["stamp"]),
       started_at: datetime(map["started_at"]),
       finished_at: datetime(map["finished_at"]),
       trigger: string(map["trigger"]) || "unknown",
@@ -258,6 +272,15 @@ defmodule KilnCMS.Backups.Manifest do
 
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  defp stamp(value) when is_binary(value) do
+    case KilnCMS.Backups.Artifact.parse_stamp(value) do
+      {:ok, _at} -> value
+      :error -> nil
+    end
+  end
+
+  defp stamp(_value), do: nil
 
   defp sha256(value) when is_binary(value) do
     if value =~ ~r/\A[0-9a-fA-F]{64}\z/, do: String.downcase(value), else: nil

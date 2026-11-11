@@ -503,6 +503,15 @@ an additive `"components"` key in `manifest.json` (`["db"]`, `["media"]` or
 `scripts/backup.sh` does not write it, and a manifest without it (cron's, or
 one from an earlier release) covers the kinds of the files it lists.
 
+**The manifest's `"stamp"`.** Both backup paths write the run's stamp
+(`"20260805-031700"`, the one its file names and its History row carry) as an
+additive `"stamp"` key; the `version` stays 1. The importer keys a failed
+manifest that names no files by it. The stamp can't be recomputed from
+`"started_at"`: the app takes the stamp when the backup is queued and records
+the start a moment later, so the two can name different seconds. A manifest
+without the key (one from an earlier release) is keyed by its `"started_at"`,
+as before.
+
 ### The app path and the shell path share one format
 
 The in-app backup (`KilnCMS.Backups.Steps`) runs the same `pg_dump --format=custom --no-owner
