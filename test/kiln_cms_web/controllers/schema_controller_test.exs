@@ -358,14 +358,15 @@ defmodule KilnCMSWeb.SchemaControllerTest do
       keys =
         Enum.map(KilnCMS.SchemaExport.served_formats(), &Cache.delivery_schema_key(org_id, &1))
 
-      read = fn key -> Cache.fetch(key, :timer.minutes(1), fn -> :miss end) end
-
       for key <- keys, do: Cache.put(key, :warm, :timer.minutes(1))
-      assert Enum.map(keys, read) == Enum.map(keys, fn _ -> :warm end)
+      assert Enum.map(keys, &Cache.peek/1) == Enum.map(keys, fn _ -> :warm end)
 
       Cache.bust_type_registry(org_id)
 
-      for key <- keys, do: assert(read.(key) == :miss, "#{key} survived the bust")
+      # `peek/1`, not `fetch/3`: a fetch's fallback would store its value under
+      # the site's real key, and the next test to GET that format would be
+      # served it instead of a rendered document.
+      for key <- keys, do: assert(Cache.peek(key) == nil, "#{key} survived the bust")
     end
 
     test "format combines with ?type= and 400s on an unknown type", %{conn: conn} do
