@@ -7,6 +7,18 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="shared-cache-session-free-upgrade"></a>
+
+- **If a CDN caches the site's pages, purge it after deploying (#2630).**
+  Pages cached before the deploy were rendered with the CSRF token of
+  whichever visitor filled the cache, and a CDN keeps serving them until
+  `max-age=60, stale-while-revalidate=300` runs out, about six minutes. A
+  purge (`KilnCMS.CDN`, or the CDN's own console) clears them at once.
+  Nothing else to do: no migration, and the delivery ETag already moves on
+  every deploy (#2463), so a revalidating browser gets the new body. Rolling
+  back is safe.
+  ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630))
+
 <a id="instance-security-log-upgrade"></a>
 
 - **Run `mix ash.migrate` for the instance security log (#2541).** The
@@ -6297,6 +6309,28 @@ carries the reasoning.
     plugin block's own `:web` output carry whatever the plugin renders.
 
 ## Security
+
+<a id="shared-cache-session-free"></a>
+
+- **A public page a CDN or browser may cache (`cache-control: public`) no longer carries the visitor's CSRF token or anything from their session, and no longer sets a session cookie (#2630).**
+  The root layout rendered a per-session CSRF `<meta>` on every page,
+  including published pages, posts, the blog index, event indexes and the
+  standalone form page, which go out as `public, max-age=60,
+  stale-while-revalidate=300`. A CDN in front kept the first visitor's token
+  and served it to everyone after them, and minting a token for a visitor
+  with no session wrote one, so the cached response also tried to set a
+  cookie. Now a response marked `public` renders no CSRF `<meta>`, and every
+  public HTML response is marked through `KilnCMSWeb.SharedCache.put_public/2`,
+  which also clears `current_user` from what the templates see, so the
+  account and sign-out links `Layouts.public` draws for a signed-in reader
+  cannot reach a shared copy either. Signed in or signed out, these pages
+  now render the same body. Nothing on them needed the token: forms and the
+  newsletter signup post to routes that take none, and the pages mount no
+  LiveView (`app.js` no longer throws when the `<meta>` is absent). Pages
+  that do depend on the reader stay `private, no-store` and keep their
+  token: the passphrase lock page, paywall teasers, audience-gated and
+  experiment renders.
+  ([#2630](https://github.com/The-Verscienta/kiln_cms/issues/2630))
 
 <a id="rclone-remote-argv-credentials"></a>
 
