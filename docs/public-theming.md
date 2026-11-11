@@ -159,12 +159,21 @@ page after unlocking stays French. A stylesheet or script that selects these
 forms by `action` no longer matches; select `.kiln-form` and
 `.kiln-newsletter-signup` instead.
 
-Two gaps remain: the header's brand link always points to `/`, so it drops
-the reader's prefix
-([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)), and a
-locale that runs without a Gettext catalog shows English chrome under its
-own `<html lang>`
-([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)).
+The header's brand link keeps the reader's language too: `/` on a page in the
+default language, `/fr/home` under `/fr/`. A single segment such as `/fr` is a
+page slug, not a language, so the language's home lives at `/<locale>/home`.
+That address serves the site's published Home page (slug `home`) in that
+language, or the stock front page in it when the site has none
+([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636)).
+
+A regional locale with no catalog of its own uses its language's: a site
+that configures `fr-CA` while Kiln ships only `fr` shows French chrome under
+`<html lang="fr-CA">`. A message missing from `fr_CA` is looked up in `fr`,
+then shown as its English source text, so a regional catalog needs to
+translate only the words that differ
+([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637)). Kiln ships
+`en`, `fr` and `es`; a locale whose language has none of them (`de`, say)
+still shows English chrome until a `priv/gettext/de` catalog is added.
 
 ## Custom CSS
 

@@ -612,6 +612,12 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The public header's brand link keeps the reader's language: `/fr/home` under `/fr/`, which now serves the stock front page in French when the site has no published Home page, instead of `/`, the default language's home.**
+  ([#2636](https://github.com/The-Verscienta/kiln_cms/issues/2636) · [long form](docs/changelog/unreleased.md#brand-link-keeps-locale))
+
+- **A regional locale with no catalog of its own (`fr-CA` when only `fr` ships) now shows its language's chrome instead of English under `<html lang="fr-CA">`; a missing message falls back `fr-CA` → `fr_CA` → `fr` → English.**
+  ([#2637](https://github.com/The-Verscienta/kiln_cms/issues/2637) · [long form](docs/changelog/unreleased.md#regional-locale-chrome))
+
 - **A valid `kiln_` API key is accepted when it is not the first `Authorization` value or is sent under a lower- or mixed-case scheme (`bearer kiln_…`); it was answered `401 invalid_token` as if it were a stale JWT. When several values carry a key, the first decides.**
   ([#2633](https://github.com/The-Verscienta/kiln_cms/issues/2633) · [long form](docs/changelog/unreleased.md#api-key-any-authorization-value))
 

@@ -72,6 +72,21 @@ defmodule KilnCMSWeb.ContentController do
     end
   end
 
+  # `/home` with no published Home page — in practice `/<locale>/home`, where
+  # `Layouts.public`'s brand link points on a prefixed page (#2636) — answers
+  # with the stock template in the URL's locale, as `/` does. The prefix is the
+  # only way a reader reaches a non-default home (`/` is the default locale's,
+  # and `/fr` alone is a slug), and the layout cannot ask whether a Home page
+  # is published without a query on every cached render. So the address always
+  # answers, and a published Home page, an alias or a redirect still wins.
+  defp stock_home(conn, slug, params) do
+    if slug == StarterContent.home_slug() do
+      conn
+      |> put_view(KilnCMSWeb.PageHTML)
+      |> KilnCMSWeb.PageController.home(params)
+    end
+  end
+
   def show_page(conn, %{"slug" => slug} = params) do
     locale = locale(conn)
     ct = ContentTypes.get(:page)
@@ -103,7 +118,9 @@ defmodule KilnCMSWeb.ContentController do
         # `path_alias` of `/gigs` on some record, say, which nothing forbids.
         # It also leaves an operator a way to replace the generated listing with
         # a hand-built page at the same address.
-        follow_redirect_or_404(conn, "/" <> slug, ct, fn -> event_index(conn, slug, params) end)
+        follow_redirect_or_404(conn, "/" <> slug, ct, fn ->
+          event_index(conn, slug, params) || stock_home(conn, slug, params)
+        end)
 
       payload ->
         serve(conn, :show_page, "page", payload, ct, audiences)
