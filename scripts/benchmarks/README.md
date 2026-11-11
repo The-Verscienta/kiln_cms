@@ -185,6 +185,47 @@ network are 2.2 and are not measured here.
 | `POOL_SIZE` | 10 | the Repo pool |
 | corpus | as `api_latency.sh` | `BENCH_PAGES`, `BENCH_POSTS`, `BENCH_DRAFTS` |
 
+# Change feed over SSE
+
+The fan-out cost of `GET /api/feed` (#2275, `KilnCMSWeb.FeedStream`): N real
+SSE connections over loopback, and the time from a publish to the last of
+them receiving it.
+
+```bash
+export PATH="/opt/homebrew/opt/erlang/bin:/opt/homebrew/bin:$PATH"
+scripts/benchmarks/feed_sse.sh                                          # 1,000 connections
+BENCH_CONNECTIONS=1000,5000,10000 scripts/benchmarks/feed_sse.sh       # three legs
+```
+
+Same prerequisites and the same throwaway database as `api_latency.sh`, but no
+corpus: the feed's per-event work does not read one. A prod server
+(`mix phx.server`, `POOL_SIZE=10`) runs as one named node; `feed_sse.exs` runs
+as a second node on the same machine and opens the connections with Mint, one
+process each, as an `EventSource` would (`Accept: text/event-stream`, no
+credential, so the anonymous view). Every connection comes from 127.0.0.1, so
+the script raises the `:feed_join` and `:api` buckets and the per-client and
+per-node stream caps on the running server first, through the same
+configuration keys a deployment sets.
+
+| Number | How |
+|---|---|
+| Open | wall time to open every connection and read each one's `event: ready` |
+| Publish call | the RPC that creates and publishes a post through `CMS.create_post!/2` and `CMS.publish_post!/3` as an admin; the feed's work (anonymous decision, exposure write, SSE frame) runs inside it, after the commit |
+| Publish → first / last client | from just before that RPC to the first and the last connection parsing the post's `event: published` frame. Both nodes read the same wall clock |
+| Memory per connection | the server's `:erlang.memory(:total)` with N streams open, less before, over N; and the mean `Process.info(pid, :memory)` of the request processes the streams run in |
+
+| Variable | Default | |
+|---|---|---|
+| `BENCH_CONNECTIONS` | `1000` | one leg per value |
+| `BENCH_PUBLISHES` | 30 | publishes per leg |
+| `BENCH_INTERVAL_MS` | 1000 | ms between publishes |
+| `BENCH_OPEN_CONCURRENCY` | 50 | connections opened before waiting for their `ready`; keep it under the listen backlog (`kern.ipc.somaxconn`, 128 on macOS), or the kernel resets the overflow |
+| `BENCH_PORT` | 4100 | the server's port |
+| `BENCH_WORK` | a `mktemp -d` | where logs, `results.json` and `results.md` go |
+| `POOL_SIZE` | 10 | the Repo pool |
+
+The client's file-descriptor limit (`ulimit -n`) bounds N.
+
 # Subtree-move benchmark
 
 What moving a section with a large subtree costs (#1903), on a type with many

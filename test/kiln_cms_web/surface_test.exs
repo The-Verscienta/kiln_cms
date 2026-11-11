@@ -33,7 +33,8 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/forms/:id /editor/forms/:id/entries/export.csv /editor/forms/settings
     /editor/funnels /editor/funnels/:id /editor/governance /editor/governance/:type/:id
     /editor/governance/:type/:id/export.csv /editor/governance/:type/:id/export.json
-    /editor/governance/health.csv /editor/inbox /editor/ip-blocks
+    /editor/governance/health.csv /editor/inbox /editor/instance-security-log
+    /editor/instance-security-log/export.csv /editor/ip-blocks
     /editor/links /editor/locales /editor/mail /editor/menus /editor/menus/:id /editor/newsletter /editor/organize
     /editor/overview /editor/pages/:id /editor/password-policy /editor/posts/:id /editor/presentation/:type/:slug
     /editor/preview/:kind/:id /editor/redirects /editor/registrations /editor/releases /editor/releases/:id /editor/safety-fields
@@ -52,7 +53,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /api/content/:type/:id/revisions/:version_id
     /api/content/:type/:id/revisions/:version_id/restore /api/content/:type/:slug
     /api/content/:type/:slug/related /api/content/:type/:slug/unlock /api/forms/:slug
-    /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/keys/rotate /api/locales /api/media
+    /api/feed /api/graphql/schema.graphql /api/json /api/json/swaggerui /api/keys/rotate /api/locales /api/media
     /api/media/import-url /api/media/uploads /api/media/uploads/complete /api/menus
     /api/menus/:key /api/provenance/:type/:slug /api/provenance/:type/:slug/verify
     /api/provenance/public-key /api/provenance/verify/:type/:slug /api/resolve /api/schema /api/search

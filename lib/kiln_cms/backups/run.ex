@@ -183,16 +183,17 @@ defmodule KilnCMS.Backups.Run do
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize
 
-      # The backup directory is the instance's, but the security log is per
-      # org; the event goes to the default org's log.
+      # The backup directory is the instance's, so the event goes to the
+      # instance log, which only platform admins read (#2541) - never a
+      # site's, whose admins need not be platform admins.
       change {KilnCMS.Security.Changes.Record,
               type: :backup_canceled,
+              scope: :instance,
               mode: :in_transaction,
               target: fn record, _changeset -> {"backup_run", record.id} end,
               metadata: fn record, changeset ->
                 %{"stamp" => record.stamp, "step" => changeset.context[:backup_step]}
-              end,
-              tenant: fn _record, _changeset -> KilnCMS.Accounts.default_org_id() end}
+              end}
     end
 
     # A cron-made backup becomes a row, once. `upsert_fields []` makes a

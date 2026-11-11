@@ -15,6 +15,10 @@ cannot be edited: no person, an admin included, can create, change or delete an
 event. Events leave the log in exactly two ways, both automatic: the retention
 prune and the erasure of a person's account.
 
+Events about the installation as a whole rather than one site, such as a
+canceled backup, are not in any site's log: they go to the
+[instance log](#the-instance-log), which only platform admins can read (#2541).
+
 ## Read the log
 
 You need the admin role on the site. Editors and viewers do not see the page
@@ -102,7 +106,62 @@ Shortening the window deletes the older events at the next run, and that cannot
 be undone. If the retention setting cannot be read at that moment the site is
 skipped, so a fault never deletes on a window nobody confirmed.
 
+## The instance log
+
+Some events are about the whole installation, not one site: today, a platform
+admin canceling a backup (`backup_canceled`). A site's log is readable by that
+site's admins, who need not be platform admins, so these go to a separate
+**instance security log** instead (#2541).
+
+**Who can read it.** Platform admins only: an account whose own role is admin,
+or one holding a temporary platform admin grant (which reads the whole log,
+older events included, until it expires). A site admin, the default site's
+included, cannot open the page or download the CSV, and the log's rows never
+appear in any site's log.
+
+To read it:
+
+1. Open **Security log**, then select **Instance log** at the top (the button is
+   there for platform admins only), or go to `/editor/instance-security-log`.
+   The **Backups** page links to it too.
+2. The table, filters (**Event**, **Who (email)**, **From (UTC)**, **To (UTC)**),
+   **Load more** and **Download CSV** work as on a site's log. **Who** matches
+   only addresses already in the instance log; if none matches you see "No one
+   with that email address is in this log."
+3. The CSV is `instance-security-log-<date>.csv`, from
+   `GET /editor/instance-security-log/export.csv`, with the same columns, rate
+   limit and row cap as a site's.
+
+If you are not a platform admin, the page sends you to the access-denied page
+and the CSV answers `403`. If your grant expires while the page is open, the
+next filter or **Load more** shows "Only platform administrators can view the
+instance security log."
+
+**Retention.** The instance log has no site, so no site's retention setting
+applies. It keeps events for `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS` days
+(default 365; `0` keeps them forever, raw IP addresses included), set in the
+environment ([environment-variables.md](environment-variables.md)). The page
+shows the window. The same daily job (`KILN_SECURITY_LOG_PRUNE_CRON`) prunes it,
+before the sites.
+
+**Events recorded before this log existed.** Until #2541, `backup_canceled`
+went to the default site's log. The migration
+`20261110235044_add_instance_security_events` moves those rows (same id, time,
+person and details) to the instance log, so the default site's admins no longer
+see them.
+
+**Not here yet.** A few other events are about an account's platform role or
+the installation's API keys but are still written to a site's log: a platform
+role granted, raised or removed (`role_granted`, `role_revoked` and
+`elevation_granted` with `level` `platform`, in the log of the site the
+platform admin was viewing), and `api_key_reuse_detected` for a key whose owner
+has no single site (the default site's). See "Which site's log" below.
+No instance event raises a [security alert](security-alerts.md).
+
 ## What is recorded
+
+Every type below goes to a site's log except `backup_canceled`, which goes to
+the [instance log](#the-instance-log).
 
 Every event has a time, a type, the person who acted (an email snapshot and
 their id, only for a known account), an optional target (a user, an API key, a
@@ -134,7 +193,7 @@ a type may carry only the keys below; anything else is dropped.
 | `session_idle_expired` | Signed out after inactivity | A browser session (with its remember-me cookie) was signed out by the site's [idle timeout](account-administration.md#sign-people-out-when-idle). The person is the account signed out | `timeout_minutes`, `tier`, `surface` |
 | `all_sessions_revoked` | Everyone signed out | An admin used [Sign out everyone](account-administration.md#sign-everyone-out); the target is the site (target type `organization`) | `count`, `except_self` |
 | `admin_access_refused` | Refused outside the admin allowlist | A request, page connection or collaboration connect from an address the site's [admin allowlist](admin-allowlist.md) does not list was refused. No person (the gate runs before anyone is known); the address is the event's IP. Sampled: see below | `surface` |
-| `admin_allowlist_changed` | Admin allowlist changed | An admin saved the site's [admin allowlist](admin-allowlist.md), including turning it off. The target is the list (target type `site_admin_allowlist`) | `state`, `count`, `added`, `removed` |
+| `admin_allowlist_changed` | Admin allowlist changed | An admin saved the site's [admin allowlist](admin-allowlist.md), including turning it off. The target is the list (target type `site_admin_allowlist`) | `state`, `count`, `added`, `removed`, `sign_in` |
 | `admin_allowlist_overridden` | Admin allowlist changed from the server | An operator widened or cleared the list with [`KilnCMS.Release.admin_allowlist/1`](admin-allowlist.md#recovering-from-a-lock-out). No person and no IP address; the target is the site (target type `organization`) | `change`, `count` |
 | `sign_in_unlock_requested` | Sign-in unlock link sent | An [unlock link](account-administration.md#lift-a-sign-in-pause-by-email) was mailed to a paused account. Only once the mail is queued: a request that sends nothing records nothing. The person is the account mailed | `surface` |
 | `sign_in_unlocked` | Sign-in pause lifted by email | An unlock link was redeemed and the account's sign-in pause cleared. The person is the account | `was_locked` |
@@ -142,7 +201,7 @@ a type may carry only the keys below; anything else is dropped.
 | `registration_queued` | Registration awaiting approval | A password sign-up on a site that [requires approval](account-administration.md#approving-registrations) was queued, or a new account from the site's own single sign-on on a site that [holds those](account-administration.md#hold-new-single-sign-on-accounts-too). No acting person (the registration's own system write); the target is the new account | `method` |
 | `registration_approved` | Registration approved | A waiting or rejected registration was approved: by a site admin on Registrations, by the applicant accepting an invitation to the site (no person), or by a platform admin adding the address on Team. The target is the applicant | `role`, `via` |
 | `registration_rejected` | Registration rejected | A site admin rejected a waiting registration. The person is the admin; the target is the applicant, or none when the account was erased | `outcome` |
-| `backup_canceled` | Backup canceled | A platform admin [canceled a running backup](backups.md#cancel-a-running-backup). Always in the default site's log. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `step` |
+| `backup_canceled` | Backup canceled | A platform admin [canceled a running backup](backups.md#cancel-a-running-backup). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `step` |
 | `api_key_reuse_detected` | Rotated API key used again | A draft-write key that had been rotated away was presented to `POST /api/keys/rotate` more than 120 seconds after its rotation, so two parties held it, and the live key of its lineage was revoked ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)). No person; the target is the presented key (target type `api_key`), the IP the request's. Raises the platform's `api_key_abuse` [alert](security-alerts.md) | `name`, `revoked` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
@@ -198,8 +257,10 @@ is not an event; it is only counted (see
 [admin-allowlist.md](admin-allowlist.md#when-the-list-cannot-be-read)).
 
 For `admin_allowlist_changed`, `state` is `on` or `off` after the save, `count`
-the number of entries after it, and `added` and `removed` how many entries the
-save added and removed. The entries themselves are never recorded: an allowlist
+the number of entries after it, `added` and `removed` how many entries the
+save added and removed, and `sign_in` whether the list also gates sign-in
+after it (`restricted` or `open`, "Also restrict sign-in", #2493; absent on
+events from before that setting). The entries themselves are never recorded: an allowlist
 is often the admins' own home and office addresses, and the log keeps what it
 records for its whole retention. The page shows the current entries. This
 event replaces `org_setting_changed` for this setting, so a save is still
@@ -316,8 +377,8 @@ role is written to the site the request ran on. Invitation events likewise go to
 the invited site's log. Registration events go to the log of the site the registration
 waits on, which may be the default site for a sign-up on another site's host,
 whichever host the deciding admin was on. A canceled backup belongs to the
-whole installation, not to a site, so `backup_canceled` always goes to the
-default site's log. A reused API key (`api_key_reuse_detected`) goes to the log
+whole installation, not to a site, so `backup_canceled` goes to the
+[instance log](#the-instance-log), never a site's. A reused API key (`api_key_reuse_detected`) goes to the log
 of the key owner's site when the owner has exactly one active membership, and
 to the default site's otherwise; the host the request named never decides,
 since whoever presents the key chooses it.
@@ -369,7 +430,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in_unlocked` | `sign_in_unlock.ex`: `redeem/2`, after the token's atomic revoke succeeded and the counter was cleared (`AuthEvents.sign_in_unlocked/3`) | after commit; `was_locked` |
 | `sign_in_unlock_refused` | `sign_in_unlock.ex`: `redeem/2` on every refusal, including the loser of two concurrent redeems (`AuthEvents.sign_in_unlock_refused/3`) | sampled, after commit; `reason` |
 | `registration_queued`, `registration_approved`, `registration_rejected` | `lib/kiln_cms/security/changes/record_registration.ex`, on `OrgMembership` `:queue_registration` (from `Changes.QueueRegistration` inside `User` `:register_with_password`, and from `SiteSso.Admission` for a new site single sign-on account), `:approve_registration`, `:approve_registration_by_invitation` (from `Invitations.grant_membership/4` when an invitation is accepted, and from `Invitations.AddOrInvite`) and `:reject_registration` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; tenant is the membership's site |
-| `backup_canceled` | `KilnCMS.Security.Changes.Record` on `Backups.Run` `:cancel` (`lib/kiln_cms/backups/run.ex`), called from the Backups page | in txn, with the cancel: if the event cannot be written the backup is not canceled; tenant is the default site |
+| `backup_canceled` | `KilnCMS.Security.Changes.Record` on `Backups.Run` `:cancel` (`lib/kiln_cms/backups/run.ex`), called from the Backups page | in txn, with the cancel: if the event cannot be written the backup is not canceled; `scope: :instance`, so it goes to the instance log (`KilnCMS.Security.InstanceEvent`) |
 | `api_key_reuse_detected` | `lib/kiln_cms/accounts/api_key_reuse.ex`: `check/2`, called by `KilnCMSWeb.ApiKeyRotationController` with the request context, after the lineage's live keys are revoked | `Recorder.record/2` outside any transaction, with `alert_required: true`: if its `api_key_abuse` alert cannot be claimed the event is not written either, and when the event is not written the platform admins get the plain reuse email instead |
 
 `org_setting_changed` covers every resource built with `use
@@ -426,14 +487,16 @@ each event the user acted in, `actor_id`, `actor_label`, `ip` and `user_agent`
 are cleared; for each event that names them as its target, `target_id` is
 cleared; and `metadata` is emptied on every event touched, because a passkey's
 or API key's name can be the person's own words. The event itself, its type and
-its time remain, so the log still shows that something happened. It is
-idempotent, and it **fails closed**: a failure in any site is logged, the
-sweep continues, and the erasure then raises so it can be retried, rather than
+its time remain, so the log still shows that something happened. The instance
+log is scrubbed the same way, in the same sweep. It is
+idempotent, and it **fails closed**: a failure in any site (or in the instance
+log) is logged, the sweep continues, and the erasure then raises so it can be retried, rather than
 reporting a partial erasure as done.
 
 **Staging.** `KilnCMS.Staging.Scrub` (`mix kiln.staging.scrub`, see
 [deploy-staging.md](deploy-staging.md)) deletes every row of `security_events`
-from a clone of production and reports `security_events_purged`.
+and `instance_security_events` from a clone of production and reports
+`security_events_purged` and `instance_security_events_purged`.
 
 **Not an API.** The log is not on JSON:API, GraphQL or MCP, so there is no
 token that can read it. The only reads are the console page and the CSV above,
@@ -486,7 +549,17 @@ person sees the usual error, so a credential change is never unrecorded.
   `@types`, and an `UnknownAtom` too. Adding a type is safe for an older release only if
   that release already has this column as `KnownAtom`; see
   [New values in an atom column](releasing.md#new-values-in-an-atom-column).
-- Authorization: reads are org-admin only. The recorder, the erasure sweep and
+- An event about the installation rather than a site goes to the instance log:
+  add `scope: :instance` to the `Changes.Record` change (or to
+  `Recorder.record/2` / `record_after_commit/2`), and put the type in
+  `KilnCMS.Security.InstanceEvent` (`@types`, `metadata` keys) instead of
+  `Event`. No tenant is resolved for it. A scope other than `:site` or
+  `:instance` raises when the action runs (never a silent skip), and `record_sampled/2` refuses
+  `:instance`. Reads go through `KilnCMS.Security.list_instance_events/1`;
+  retention is `KilnCMS.Security.prune_instance/1` and
+  `instance_retention_days/0`.
+- Authorization: reads are org-admin only (the instance log's, platform-admin
+  only). The recorder, the erasure sweep and
   the prune run as `KilnCMS.Security.system/0`. See
   *Security audit log* in [policy-matrix.md](policy-matrix.md).
 
@@ -495,6 +568,8 @@ person sees the usual error, so a credential change is never unrecorded.
 | You see | Meaning |
 |---|---|
 | The **Security log** entry is missing from the sidebar | You are not an admin on this site. |
+| A canceled backup is not in the site's **Security log** | It is in the [instance log](#the-instance-log) (#2541), which only platform admins can read. |
+| "Only platform administrators can view the instance security log." | Your platform admin grant expired while the page was open. |
 | "You don't have permission to view or change this site's security log." | Your role was lowered while the page was open. Reload. |
 | "The log could not be loaded." | The read failed; try again, and check the application log. |
 | "No member of this site has that email address." | The **Who** filter matched no actor label in this site's log. Check the spelling, or that the person has an event on this site. |

@@ -109,7 +109,7 @@ defmodule KilnCMS.Security.EventTest do
 
     test "every type has an allowlist entry" do
       for type <- Event.types(), do: assert(is_list(Event.metadata_keys(type)))
-      assert length(Event.types()) == 31
+      assert length(Event.types()) == 30
     end
   end
 

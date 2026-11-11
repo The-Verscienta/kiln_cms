@@ -57,6 +57,7 @@ the router so preflights are answered before route matching).
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | API landing | `GET /api` (302 to `/developers`) | none | none (`:browser` pipeline) |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug`, `/api/sync`, `/api/schema`, `/api/menus/**`, `/api/content/:type/:id/revisions/**` | optional JWT / API key | `:api` |
+| Change feed (SSE) | `GET /api/feed` | optional JWT / API key; the stream is the anonymous view whatever the credential, like `/api/sync` | `:feed_join` (connects, per address, charged first and refused as a `200` + `event: busy`), then `:api`; open streams capped per API key or address (50) and per node (20,000), resumes replaying at once per node (8) |
 | OpenAPI & explorer | `/api/json/open_api`, `/api/json/swaggerui` | none — and **not served in prod** unless `API_DOCS_ENABLED` (#567); the document (never the explorer) also answers any valid API key | `:docs` |
 | GraphQL SDL | `GET /api/graphql/schema.graphql` | none where introspection is on; **API key required** in prod unless `GRAPHQL_INTROSPECTION_ENABLED` | `:docs` |
 | Headless sign-in | `POST /api/auth/sign_in` | credentials → JWT, or a pending token for a 2FA account | `:auth` + per-account (#478) |
@@ -670,7 +671,9 @@ sign-in route to listed networks at `/editor/admin-allowlist`; see
   password over its LiveView socket (`SignInLive`), so the socket join is gated
   as well as the HTTP request; otherwise an outsider could test passwords.
 - **Gated by route, not by path.** The HTTP gate is the router pipelines
-  `:admin_allowlist` and `:admin_allowlist_api`, first in each gated
+  `:admin_allowlist` and `:admin_allowlist_api` (the console's surface) and
+  `:sign_in_allowlist` and `:sign_in_allowlist_api` (sign-in's, #2493), first
+  in each gated
   `pipe_through`, ahead of `fetch_session`: a refused request reads no session
   and is never signed in by a remember-me cookie. The socket gate is an
   `on_mount` hook on every LiveView module and in every gated `live_session`,
@@ -729,9 +732,17 @@ sign-in route to listed networks at `/editor/admin-allowlist`; see
      The direct SQL recovery is not recorded either.
   7. **Rolling back turns the control off silently.** A release before #2248
      has no gate; the table stays and is ignored. The upgrade notes say so.
-  8. **Members are gated with admins.** While a list is on, members, readers
+  8. **Members are gated with admins, unless the site opts out.** While a list
+     is on and "Also restrict sign-in" is on (the default), members, readers
      and apps that sign people in from their own devices can only sign in from
-     listed networks. Gating only the console host is a follow-up.
+     listed networks.
+  9. **With "Also restrict sign-in" off (#2493), passwords work from
+     anywhere.** The sign-in routes and `POST /api/auth/sign_in*` answer every
+     network, so an outsider can test a password and, with an admin's, get a
+     full-role JWT that JSON:API, GraphQL and MCP accept from anywhere. The
+     console, `/setup`, `/ws/collab` and the posture endpoint stay gated. The
+     setting is the site admin's, audited as `sign_in` on
+     `admin_allowlist_changed`; the page recommends two-factor sign-in.
 
 ### Scanner 404 blocking (#2253)
 

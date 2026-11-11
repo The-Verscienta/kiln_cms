@@ -112,10 +112,16 @@ defmodule KilnCMS.Security.RetentionTest do
       o = org("ret-grant")
       seed_at(o.id, 400)
 
-      assert_raise Ash.Error.Forbidden, fn ->
-        Security.with_actor(nil, fn -> PruneWorker.perform(%Oban.Job{}) end)
-      end
+      # Every log is attempted (#2541), then the job raises naming the failed
+      # ones, the instance log among them.
+      error =
+        assert_raise RuntimeError, fn ->
+          Security.with_actor(nil, fn -> PruneWorker.perform(%Oban.Job{}) end)
+        end
 
+      assert error.message =~ "security log prune failed"
+      assert error.message =~ ":instance"
+      assert error.message =~ o.id
       assert count(o.id) == 1
     end
 

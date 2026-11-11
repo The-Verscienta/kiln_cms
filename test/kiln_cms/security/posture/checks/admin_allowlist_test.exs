@@ -66,6 +66,26 @@ defmodule KilnCMS.Security.Posture.Checks.AdminAllowlistTest do
              AdminAllowlist.run(context(site))
   end
 
+  test "a list that leaves sign-in open passes, and says so (#2493)", %{
+    site: site,
+    admin: admin
+  } do
+    list!(site, admin, ["203.0.113.0/24"])
+    assert %{facts: %{sign_in_restricted: true}} = AdminAllowlist.run(context(site))
+
+    {:ok, _row} =
+      CMS.save_site_admin_allowlist(%{cidrs: ["203.0.113.0/24"], restrict_sign_in: false},
+        actor: admin,
+        tenant: site.id,
+        context: %{client_ip: @me}
+      )
+
+    assert %{status: :pass, facts: %{sign_in_restricted: false}} =
+             result = AdminAllowlist.run(context(site))
+
+    assert result.summary =~ "Sign-in is open to every network"
+  end
+
   test "a list that cannot be read is unknown", %{site: site} do
     # A site this node has never read: nothing cached, no last-known value.
     result = KilnCMS.OrgSettings.with_actor(nil, fn -> AdminAllowlist.run(context(site)) end)

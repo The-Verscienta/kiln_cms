@@ -15,6 +15,7 @@ defmodule KilnCMS.Security.SiteAdminAllowlistTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.SiteAdminAllowlist
   alias KilnCMS.Security
+  alias KilnCMS.Security.AdminAllowlist
 
   @me {203, 0, 113, 7}
 
@@ -298,6 +299,75 @@ defmodule KilnCMS.Security.SiteAdminAllowlistTest do
     test "a refused save records nothing", %{site: site, admin: admin} do
       assert {:error, _} = save(["198.51.100.0/24"], admin, site)
       assert events(site, :admin_allowlist_changed) == []
+    end
+  end
+
+  describe "Also restrict sign-in (#2493)" do
+    defp save_with(attrs, actor, site) do
+      CMS.save_site_admin_allowlist(attrs,
+        actor: actor,
+        tenant: site.id,
+        context: %{client_ip: @me}
+      )
+    end
+
+    test "is on by default, and the gates' two surfaces then agree", %{site: site, admin: admin} do
+      assert {:ok, row} = save(["203.0.113.0/24"], admin, site)
+      assert row.restrict_sign_in == true
+
+      assert {:on, _} = AdminAllowlist.policy(site.id, :console)
+      assert {:on, _} = AdminAllowlist.policy(site.id, :sign_in)
+    end
+
+    test "turned off, sign-in is off for the gates while the console keeps the list", %{
+      site: site,
+      admin: admin
+    } do
+      assert {:ok, row} =
+               save_with(%{cidrs: ["203.0.113.0/24"], restrict_sign_in: false}, admin, site)
+
+      refute row.restrict_sign_in
+
+      assert AdminAllowlist.policy(site.id, :sign_in) == :off
+      assert {:on, [_]} = AdminAllowlist.policy(site.id, :console)
+      assert {:on, [_]} = AdminAllowlist.policy(site.id)
+      assert AdminAllowlist.check(site.id, {198, 51, 100, 9}, :sign_in) == :allowed
+      assert AdminAllowlist.check(site.id, {198, 51, 100, 9}) == :not_listed
+    end
+
+    test "only an admin may change it", %{site: site, admin: admin} do
+      assert {:ok, _} = save(["203.0.113.0/24"], admin, site)
+
+      for actor <- [
+            member!(user(:viewer), site, :editor),
+            member!(user(:viewer), site, :viewer),
+            nil
+          ] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 save_with(%{cidrs: ["203.0.113.0/24"], restrict_sign_in: false}, actor, site)
+      end
+
+      assert {:on, _} = AdminAllowlist.policy(site.id, :sign_in)
+    end
+
+    test "a save that leaves it out turns it back on: every writer passes both", %{
+      site: site,
+      admin: admin
+    } do
+      assert {:ok, _} =
+               save_with(%{cidrs: ["203.0.113.0/24"], restrict_sign_in: false}, admin, site)
+
+      assert {:ok, row} = save(["203.0.113.0/24"], admin, site)
+      assert row.restrict_sign_in == true
+    end
+
+    test "the audit event says whether sign-in is restricted", %{site: site, admin: admin} do
+      assert {:ok, _} =
+               save_with(%{cidrs: ["203.0.113.0/24"], restrict_sign_in: false}, admin, site)
+
+      assert [event] = events(site, :admin_allowlist_changed)
+      assert event.metadata["sign_in"] == "open"
+      assert event.metadata["state"] == "on"
     end
   end
 

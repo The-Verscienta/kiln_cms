@@ -70,8 +70,13 @@ defmodule KilnCMSWeb.Telemetry do
 
     [
       # Phoenix Metrics
+      # Neither duration counts `GET /api/feed` (#2275): an SSE stream's
+      # "request" lasts as long as the client stays, hours at a time, and
+      # would swamp the latency histograms the SLOs are read from. Its own
+      # `[:kiln_cms, :delivery, :feed, :sse, …]` events count streams.
       distribution("phoenix.endpoint.stop.duration",
         unit: {:native, :millisecond},
+        drop: &feed_stream_request?/1,
         description: "Time to serve a request through the endpoint"
       ),
       # `route` is the router's pattern (`/api/content/:type/:slug`), never the
@@ -80,6 +85,7 @@ defmodule KilnCMSWeb.Telemetry do
       distribution("phoenix.router_dispatch.stop.duration",
         tags: [:route],
         unit: {:native, :millisecond},
+        drop: &feed_stream_request?/1,
         description: "Time to serve a request, by matched route"
       ),
       distribution("phoenix.router_dispatch.exception.duration",
@@ -393,4 +399,10 @@ defmodule KilnCMSWeb.Telemetry do
       # {KilnCMSWeb, :count_users, []}
     ]
   end
+
+  @doc false
+  # The change feed's SSE route (see the request-duration metrics above).
+  def feed_stream_request?(%{route: "/api/feed"}), do: true
+  def feed_stream_request?(%{conn: %Plug.Conn{path_info: ["api", "feed"]}}), do: true
+  def feed_stream_request?(_metadata), do: false
 end

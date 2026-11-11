@@ -148,7 +148,14 @@ defmodule KilnCMS.Firing.Sync do
   outage.
 
   Options: `:limit` (items per page), `:surface` (the artifact surface to
-  embed, default `:json`), `:now` and `:commit_lag` (seconds) for tests.
+  embed, default `:json`), `:bodies` (default `true`), `:now` and
+  `:commit_lag` (seconds).
+
+  `bodies: false` answers upserts without `artifact`, `latest_edit_severity`
+  and `latest_edit_at`: no artifact is read and none is queued, so the page is
+  never `:backfilling`. Exposures are recorded as for any page. The change
+  feed's resume (`GET /api/feed`, `KilnCMSWeb.FeedStream`) reads this way: it
+  sends identifiers and nothing else.
   """
   @spec page(Ash.UUID.t(), String.t() | nil, position(), keyword()) :: result()
   def page(org_id, type, position, opts \\ []) do
@@ -157,6 +164,7 @@ defmodule KilnCMS.Firing.Sync do
         org_id: org_id,
         limit: Keyword.get(opts, :limit, 100),
         surface: Keyword.get(opts, :surface, :json),
+        bodies?: Keyword.get(opts, :bodies, true),
         live_definitions: live_definitions(org_id),
         now: Keyword.get(opts, :now) || DateTime.utc_now(),
         lag: Keyword.get(opts, :commit_lag) || commit_lag_seconds()
@@ -169,7 +177,13 @@ defmodule KilnCMS.Firing.Sync do
       if Delivery.db_unavailable?(e), do: :unavailable, else: reraise(e, __STACKTRACE__)
   end
 
-  defp commit_lag_seconds do
+  @doc """
+  The commit lag, in seconds: how far a delta's `until` trails the clock
+  (config `config :kiln_cms, KilnCMS.Firing.Sync, commit_lag_seconds: n`,
+  default 10). See "Consistency".
+  """
+  @spec commit_lag_seconds() :: non_neg_integer()
+  def commit_lag_seconds do
     :kiln_cms
     |> Application.get_env(__MODULE__, [])
     |> Keyword.get(:commit_lag_seconds, @default_commit_lag_seconds)
@@ -487,6 +501,9 @@ defmodule KilnCMS.Firing.Sync do
   #
   # An outage answers `:unavailable` for the page: there is no queue to write
   # to either.
+  defp upserts(records, %{bodies?: false} = ctx),
+    do: {:ok, Enum.map(records, &identity(&1, ctx))}
+
   defp upserts(records, ctx) do
     case artifacts(records, ctx) do
       :unavailable ->
@@ -583,6 +600,17 @@ defmodule KilnCMS.Firing.Sync do
   # safety edit mattered and when it was made, `nil` when it has none
   # (`KilnCMS.CMS.LatestEdit`; one version query per type for the page).
   defp upsert(record, body, edit, ctx) do
+    record
+    |> identity(ctx)
+    |> Map.merge(%{
+      latest_edit_severity: edit && edit.severity,
+      latest_edit_at: edit && edit.at,
+      artifact: body
+    })
+  end
+
+  # An upsert without its body (`bodies: false`).
+  defp identity(record, ctx) do
     %{
       op: "upsert",
       type: type_name(record, ctx),
@@ -590,10 +618,7 @@ defmodule KilnCMS.Firing.Sync do
       slug: record.slug,
       locale: record.locale,
       published_at: record.published_at,
-      updated_at: record.updated_at,
-      latest_edit_severity: edit && edit.severity,
-      latest_edit_at: edit && edit.at,
-      artifact: body
+      updated_at: record.updated_at
     }
   end
 

@@ -3036,6 +3036,7 @@ msgstr "Todos los tipos de contenido"
 msgid "All endpoints delivered by"
 msgstr "Todos los endpoints entregados a las"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "All events"
@@ -3172,6 +3173,11 @@ msgstr "También se entrega como texto plano (custom_fields_plain)"
 #, elixir-autogen, elixir-format
 msgid "Also included"
 msgstr "También incluye"
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also restrict sign-in"
+msgstr "Restringir también el inicio de sesión"
 
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
@@ -3556,6 +3562,7 @@ msgstr "Solo se aplica si este sitio tiene su propio inicio de sesión único. Q
 msgid "Applies to people who sign up with a password on this site. Invitations and existing accounts are not affected, and this site's single sign-on has its own switch below. Turning it off doesn't approve anyone already waiting."
 msgstr "Se aplica a quienes se registran con una contraseña en este sitio. Las invitaciones y las cuentas existentes no se ven afectadas, y el inicio de sesión único de este sitio tiene su propio ajuste más abajo. Desactivarlo no aprueba a nadie que ya esté esperando."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
@@ -4361,6 +4368,7 @@ msgstr "Referencias rotas"
 msgid "Browse the blog"
 msgstr "Explorar el blog"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Browser"
@@ -4574,6 +4582,11 @@ msgstr "Cancelar subida"
 #, elixir-autogen, elixir-format
 msgid "Canceled"
 msgstr "Cancelada"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Canceled backups are recorded in the instance security log."
+msgstr "Las copias de seguridad canceladas se registran en el registro de seguridad de la instancia."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -5134,6 +5147,7 @@ msgid "Claim released; the release can be retried."
 msgstr "Reserva liberada; el lanzamiento se puede reintentar."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -7579,6 +7593,7 @@ msgid "Done: %{changed} renamed, %{pinned} hand-picked skipped, %{scanned} scann
 msgstr "Listo: %{changed} renombrados, %{pinned} definidos manualmente omitidos, %{scanned} analizados."
 
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Download CSV"
@@ -8560,6 +8575,7 @@ msgstr "Lo esencial: Inicio, Contenido, Medios, Calendario, Tareas y Bandeja de 
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -8571,11 +8587,13 @@ msgstr "Evento"
 msgid "Events"
 msgstr "Eventos"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Events are deleted %{days} days after they happen."
 msgstr "Los eventos se eliminan %{days} días después de producirse."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Events are kept forever."
@@ -9544,6 +9562,7 @@ msgstr "Origen"
 msgid "From %{min} to %{max}."
 msgstr "De %{min} a %{max}."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "From (UTC)"
@@ -9574,6 +9593,11 @@ msgstr "Dirección del remitente"
 #, elixir-autogen, elixir-format
 msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
 msgstr "Desde cualquier otra red, la consola y todas las páginas de inicio de sesión responden «No disponible desde esta red», y las páginas de la consola abiertas se cierran en cuanto guardas. El sitio público, las claves de API, los tokens de aplicaciones existentes, las vistas previas y los medios no se ven afectados, salvo el endpoint de supervisión de la postura de seguridad (GET /api/security/posture), que también responde solo a las redes de la lista."
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "From any other network, the console answers \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, sign-in, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
+msgstr "Desde cualquier otra red, la consola responde «No disponible desde esta red», y las páginas de la consola abiertas se cierran en cuanto guardas. El sitio público, el inicio de sesión, las claves de API, los tokens de aplicaciones existentes, las vistas previas y los medios no se ven afectados, salvo el endpoint de supervisión de la postura de seguridad (GET /api/security/posture), que también responde solo a las redes de la lista."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -10390,6 +10414,7 @@ msgstr "Los he guardado"
 msgid "ID"
 msgstr "ID"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "IP address"
@@ -10834,6 +10859,16 @@ msgstr "Instalado, no seleccionado"
 #, elixir-autogen, elixir-format
 msgid "Instance URL"
 msgstr "URL de la instancia"
+
+#: lib/kiln_cms_web/live/security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Instance log"
+msgstr "Registro de la instancia"
+
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Instance security log"
+msgstr "Registro de seguridad de la instancia"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
@@ -11613,6 +11648,7 @@ msgstr "Publicado, sin cambios sin publicar — nada que publicar"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/registrations_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
@@ -11628,6 +11664,7 @@ msgstr "Cargando la comprobación de verificación humana…"
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
@@ -13008,6 +13045,7 @@ msgstr "No hay ninguna cuenta de %{network} activada: no se publicaría nada. Di
 msgid "No endpoints subscribed"
 msgstr "Ningún endpoint suscrito"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "No events to show"
@@ -13185,6 +13223,11 @@ msgstr "Aún no hay menús"
 #, elixir-autogen, elixir-format
 msgid "No minimum"
 msgstr "Sin mínimo"
+
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "No one with that email address is in this log."
+msgstr "Nadie con esa dirección de correo electrónico aparece en este registro."
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -13820,6 +13863,7 @@ msgstr "Nada enlaza aquí"
 msgid "Nothing matches the current filter."
 msgstr "Nada coincide con el filtro actual."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nothing matches these filters, or nothing has been recorded yet."
@@ -14123,6 +14167,18 @@ msgid_plural "On: %{count} networks can open the console and sign in."
 msgstr[0] "Activada: %{count} red puede abrir la consola e iniciar sesión."
 msgstr[1] "Activada: %{count} redes pueden abrir la consola e iniciar sesión."
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "On: %{count} network can open the console. Anyone can sign in from any network."
+msgid_plural "On: %{count} networks can open the console. Anyone can sign in from any network."
+msgstr[0] "Activada: %{count} red puede abrir la consola. Cualquiera puede iniciar sesión desde cualquier red."
+msgstr[1] "Activada: %{count} redes pueden abrir la consola. Cualquiera puede iniciar sesión desde cualquier red."
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "On: signing in, on this site's sign-in pages and through the API, works only from the networks above. Off: members can sign in from anywhere, and the console still opens only from the networks above."
+msgstr "Activado: el inicio de sesión, en las páginas de inicio de sesión de este sitio y mediante la API, solo funciona desde las redes de arriba. Desactivado: los miembros pueden iniciar sesión desde cualquier lugar, y la consola sigue abriéndose solo desde las redes de arriba."
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Once it's published, your home page is what visitors see at your site's address."
@@ -14249,6 +14305,13 @@ msgid_plural "Only %{count} listed networks can reach the console and sign-in."
 msgstr[0] "Solo %{count} red de la lista puede llegar a la consola y al inicio de sesión."
 msgstr[1] "Solo %{count} redes de la lista pueden llegar a la consola y al inicio de sesión."
 
+#: lib/kiln_cms/security/posture/checks/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "Only %{count} listed network can reach the console. Sign-in is open to every network."
+msgid_plural "Only %{count} listed networks can reach the console. Sign-in is open to every network."
+msgstr[0] "Solo %{count} red de la lista puede acceder a la consola. El inicio de sesión está abierto a todas las redes."
+msgstr[1] "Solo %{count} redes de la lista pueden acceder a la consola. El inicio de sesión está abierto a todas las redes."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "Only %{count} words — pages under %{min} rarely rank well."
@@ -14338,6 +14401,11 @@ msgstr "Un solo registro de %{source}"
 #, elixir-autogen, elixir-format
 msgid "Only one locale is configured — add locales to config :kiln_cms, :i18n."
 msgstr "Solo hay un idioma configurado: añada idiomas en config :kiln_cms, :i18n."
+
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only platform administrators can view the instance security log."
+msgstr "Solo los administradores de la plataforma pueden ver el registro de seguridad de la instancia."
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
@@ -17028,6 +17096,7 @@ msgid "Resume"
 msgstr "Reanudar"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Retention"
@@ -18116,6 +18185,11 @@ msgstr "Alertas de seguridad — enviarme un correo sobre eventos de seguridad e
 msgid "Security contact"
 msgstr "Contacto de seguridad"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Security events about this whole installation rather than one site, such as a canceled backup. Only platform administrators can see it; site administrators cannot."
+msgstr "Eventos de seguridad de toda la instalación, no de un sitio, como una copia de seguridad cancelada. Solo los administradores de la plataforma pueden verlo; los administradores de sitio no."
+
 #: lib/kiln_cms/security/posture/checks/release.ex
 #, elixir-autogen, elixir-format
 msgid "Security fixes reach an installation only when it is updated."
@@ -18489,6 +18563,11 @@ msgstr "Definido para este sitio"
 #, elixir-autogen, elixir-format
 msgid "Set it up"
 msgstr "Configúrala"
+
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set it with KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS in the environment."
+msgstr "Se configura con KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS en el entorno."
 
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
@@ -18917,6 +18996,11 @@ msgstr "Inicio de sesión y acceso"
 #, elixir-autogen, elixir-format
 msgid "Sign-in could not be completed right now. Try again in a moment."
 msgstr "No se pudo completar el inicio de sesión en este momento. Inténtelo de nuevo en unos instantes."
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in is not restricted: members, readers, and apps that sign people in through the API can sign in from any network. Signing in from elsewhere still doesn't open the console. Anyone with an admin's password can get an API token from anywhere, so use two-factor sign-in."
+msgstr "El inicio de sesión no está restringido: los miembros, los lectores y las aplicaciones que inician sesión de usuarios mediante la API pueden iniciar sesión desde cualquier red. Iniciar sesión desde otro lugar sigue sin abrir la consola. Cualquiera con la contraseña de un administrador puede obtener un token de API desde cualquier lugar, así que usa el inicio de sesión en dos pasos."
 
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
 #, elixir-autogen, elixir-format
@@ -19963,6 +20047,7 @@ msgstr "Tomar el control"
 msgid "Take over “%{field}” from %{name}?"
 msgstr "¿Tomar el control de “%{field}” a %{name}?"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Target"
@@ -21109,6 +21194,7 @@ msgstr "Se alcanzó el límite. Quita uno para conectar otro."
 msgid "The list can hold at most %{max} entries."
 msgstr "La lista admite como máximo %{max} entradas."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "The log could not be loaded."
@@ -21778,8 +21864,8 @@ msgstr "Esta dirección ya tiene una cuenta. Acepta para añadirle este sitio, o
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
-msgid "This also applies to members and readers who sign in to this site, and to sign-in through the API: a website's own sign-in form or a mobile app that signs people in only works from listed networks too."
-msgstr "Esto también se aplica a los miembros y lectores que inician sesión en este sitio, y al inicio de sesión mediante la API: el formulario de inicio de sesión propio de un sitio web o una aplicación móvil que inicia sesión de usuarios solo funciona también desde las redes de la lista."
+msgid "This also applies to members and readers who sign in to this site, and to sign-in through the API: a website's own sign-in form or a mobile app that signs people in only works from listed networks too. Turn off \"Also restrict sign-in\" to let them sign in from anywhere."
+msgstr "Esto también se aplica a los miembros y lectores que inician sesión en este sitio, y al inicio de sesión mediante la API: el formulario de inicio de sesión propio de un sitio web o una aplicación móvil que inicia sesión de usuarios solo funciona también desde las redes de la lista. Desactiva «Restringir también el inicio de sesión» para que puedan iniciar sesión desde cualquier lugar."
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -22558,6 +22644,7 @@ msgstr "Nivel eliminado."
 msgid "Tier saved."
 msgstr "Nivel guardado."
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Time"
@@ -22606,6 +22693,7 @@ msgstr "El título contiene «%{text}»"
 msgid "To"
 msgstr "Hasta"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "To (UTC)"
@@ -24268,11 +24356,13 @@ msgid "White-label this site: its name, logo and brand colour appear on the publ
 msgstr "Personalice la marca de este sitio: su nombre, logotipo y color aparecen en las páginas públicas, el editor y la pantalla de inicio de sesión. Deje un campo en blanco para heredar el valor predeterminado del servidor."
 
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Who"
 msgstr "Quién"
 
+#: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Who (email)"

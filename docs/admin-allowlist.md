@@ -9,28 +9,36 @@ The list belongs to one site (organization). It is **off** until you add an
 entry, and an empty list means off. A list on one site does not apply to
 another site on the same installation.
 
+By default the list gates sign-in too, for everyone. A site whose members or
+apps sign in from anywhere can turn **Also restrict sign-in** off (#2493): the
+console stays behind the list, and sign-in opens to every network. See
+"Let members sign in from anywhere".
+
 ## What it covers, and what it does not
 
 While the list is on, everything in the first column is refused from an
-address that is not on it. The second column is never affected.
+address that is not on it. The second column is never affected. The rows
+marked † follow **Also restrict sign-in**: with it off, they are not affected
+either.
 
 | Refused from outside the list | Not affected |
 |---|---|
 | The console: every `/editor/**` page, `/media` (the media library), editor previews under `/editor/preview/...`, and plugin console pages | The public site, `/membership`, forms, feeds and search |
 | The console's downloads: the content, fields, translations, forms entries, analytics, governance and security-log exports, and `/editor/account/export.json` | `/account` (a reader's own settings page) and `/sign-out` |
 | `/setup` (the first-run wizard) | Media downloads, transforms and streams (`/media/:id/...`), `/uploads/*` and static assets |
-| Every sign-in route, for **everyone**, members included: `/sign-in`, `/register`, password reset, magic links, passkeys, single sign-on (`/auth/*`), the two-factor prompt `/sign-in/verify`, sign-in unlock links (`/sign-in/unlock`, `/auth/unlock/...`), account confirmation and invitations (`/auth/invite/...`) | `/preview/...` links (token preview) |
-| Headless sign-in: `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` | JSON:API, GraphQL (`/gql`, `/ws/gql`), MCP, REST and `/ws/bridge`, with an API key or a token already issued (except the security posture endpoint, left) |
+| † Every sign-in route, for **everyone**, members included: `/sign-in`, `/register`, password reset, magic links, passkeys, single sign-on (`/auth/*`), the two-factor prompt `/sign-in/verify`, sign-in unlock links (`/sign-in/unlock`, `/auth/unlock/...`), account confirmation and invitations (`/auth/invite/...`) | `/preview/...` links (token preview) |
+| † Headless sign-in: `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` | JSON:API, GraphQL (`/gql`, `/ws/gql`), MCP, REST and `/ws/bridge`, with an API key or a token already issued (except the security posture endpoint, left) |
 | The security posture for monitoring, `GET /api/security/posture`, with any credential, API keys included (#2521) | |
-| Opening a console or sign-in page's live connection (LiveView), and pages already open when the list changes | `/up` and `/ready` health checks |
+| Opening a console page's live connection (LiveView), and pages already open when the list changes; † the same for a sign-in page | `/up` and `/ready` health checks |
 | The collaborative-editing socket, `/ws/collab` | |
 
-Two consequences to plan for before you turn it on:
+Consequences to plan for before you turn it on:
 
 - **Members and readers sign in through the same pages.** If your site has
   members who sign in for gated content, they can only sign in from listed
-  networks while the list is on. People already signed in keep reading.
-- **Apps that sign people in are restricted too.** A single-page app, a native
+  networks while the list is on and **Also restrict sign-in** is on (the
+  default). People already signed in keep reading.
+- **Apps that sign people in are restricted too**, under the same setting. A single-page app, a native
   or mobile app, or a website's own sign-in form that calls
   `POST /api/auth/sign_in` from the user's device only works from listed
   networks. A front end that signs in from its own server needs that server's
@@ -90,6 +98,50 @@ range it means, and duplicates are dropped. So the list above is saved as
 To turn the list off, select **Turn off** and confirm "Turn the admin allowlist
 off? Anyone will be able to sign in from any network." You see "Admin
 allowlist turned off." Emptying the text box and saving does the same.
+
+## Let members sign in from anywhere
+
+**Also restrict sign-in** is a checkbox in the same form, on by default, so a
+list saved before the setting existed keeps gating sign-in after an upgrade.
+
+To let members, readers and apps sign in from any network while the console
+stays behind the list:
+
+1. Open `/editor/admin-allowlist`.
+2. Clear **Also restrict sign-in**.
+3. Select **Save**. The status line reads, for example, "On: 3 networks can
+   open the console. Anyone can sign in from any network."
+
+With it off:
+
+- Every sign-in route (the † rows above) and the headless
+  `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` answer from any
+  network. The two always follow the same setting.
+- The console, `/setup`, `/ws/collab` and `GET /api/security/posture` are
+  still refused from outside the list. An admin who signs in from elsewhere is
+  signed in, and the console still answers "Not available from this network".
+- Console pages that are open keep their live connection only while their
+  address is listed, as before. Sign-in pages that are open are not sent away
+  by a save unless it turns **Also restrict sign-in** back on and their address
+  is not listed.
+
+**What this gives up.** With sign-in restricted, a stolen password is useless
+from outside the list. With it off, a password (and its second factor, if the
+account has one) works from anywhere. For an admin, that is a token from
+`POST /api/auth/sign_in` with the admin's full role, which JSON:API, GraphQL
+and MCP accept from any network: those APIs are not gated by the list. Require
+two-factor sign-in for admins before turning it off.
+
+The Security posture page (and `GET /api/security/posture`) still passes the
+admin allowlist check, and says "Sign-in is open to every network"; its facts
+carry `sign_in_restricted: false`. If the list cannot be read (see "When the
+list cannot be read"), sign-in answers `503` too, even with the setting off:
+the last-known "off" that keeps a site without a list working through a
+database blip applies only to a list that is off entirely.
+
+Only a site admin can change the setting, the same as the list. It has no
+effect while the list is empty. **Turn off** keeps it as it was, so turning
+the list back on later starts from your last choice.
 
 ### Entries the form refuses
 
@@ -332,8 +384,9 @@ production build; in development set the same thing from IEx.
 | "Temporarily unavailable" (`503`) on the console and sign-in | The list could not be read. Check the database and the log line above. The public site is unaffected. |
 | A console page reloads by itself every few minutes, on Fly.io or App Platform | Expected: the live connection is re-checked by a page load after 5 minutes (see "On Fly.io and DigitalOcean App Platform"). |
 | Collaborative editing will not connect while the list is on, on Fly.io or App Platform | Expected: that socket cannot see your address there. |
-| A member says they cannot sign in any more | Member sign-in is restricted too. Add their network, or turn the list off. |
-| A mobile app or a site front end gets `403` `network_not_allowed` from `/api/auth/sign_in` | Headless sign-in is restricted too. See "What it covers". |
+| A member says they cannot sign in any more | Member sign-in is restricted too. Add their network, or clear **Also restrict sign-in** (see "Let members sign in from anywhere"). |
+| A mobile app or a site front end gets `403` `network_not_allowed` from `/api/auth/sign_in` | Headless sign-in is restricted too. Clear **Also restrict sign-in**, or add the app's network. |
+| An admin signs in from home and the console says "Not available from this network" | Expected with **Also restrict sign-in** off: sign-in is open, the console is not. |
 | A security monitor gets `403` `network_not_allowed` from `/api/security/posture` | The posture endpoint is restricted too, whatever the key. Add the monitor's network to the list. |
 | "This needs the running application ... Run it against the live node with `bin/kiln_cms rpc '...'`, not `bin/kiln_cms eval`." | You used `eval`. Use `rpc` against the running release. |
 | `rpc` says "No organization with slug ..." | The `org:` slug is wrong. Leave it out for the default site. |
@@ -345,7 +398,8 @@ production build; in development set the same thing from IEx.
   operator commands above.
 - **Security log.** Saving the list records **Admin allowlist changed**
   (`admin_allowlist_changed`) with whether it is on, the number of entries,
-  and how many were added and removed; never the entries themselves. Refusals
+  how many were added and removed, and whether sign-in is restricted
+  (`sign_in`: `restricted` or `open`); never the entries themselves. Refusals
   record **Refused outside the admin allowlist** (`admin_access_refused`),
   sampled at five per address per 15 minutes. See
   [security-events.md](security-events.md).
@@ -358,7 +412,9 @@ production build; in development set the same thing from IEx.
 - **Upgrading** adds a table, `site_admin_allowlist`; nothing changes until an
   admin saves a list. **Rolling back** to an earlier release leaves the table
   in place and turns the allowlist off without a word: the older release does
-  not know about it.
+  not know about it. Upgrading to the release with **Also restrict sign-in**
+  adds a column that defaults to on, so sign-in stays restricted; rolling back
+  from it restricts sign-in again on every site that had turned it off.
 
 See also the [threat model](threat-model.md#admin-allowlist-2248), the
 [policy matrix](policy-matrix.md) and

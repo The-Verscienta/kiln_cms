@@ -37,9 +37,14 @@ defmodule KilnCMS.Security.Recorder do
 
   ## Options (all three)
 
-    * `:tenant` - the org id. **Required**: with none, the event is not
-      recorded and `:skipped` is returned (a request to an unknown host has no
-      org to attribute it to).
+    * `:tenant` - the org id. **Required** unless `:scope` is `:instance`:
+      with none, the event is not recorded and `:skipped` is returned (a
+      request to an unknown host has no org to attribute it to).
+    * `:scope` - `:site` (default) or `:instance` (#2541). An instance event
+      is about the installation, not a site: it goes to
+      `KilnCMS.Security.InstanceEvent`, which only platform admins can read,
+      takes no tenant (one given is ignored) and raises no alert. Only
+      `record/2` and `record_after_commit/2` take it.
     * `:user` - the person who acted, a `KilnCMS.Accounts.User`, or `nil`.
       `actor_id` and `actor_label` (the email) are filled only for a known
       user; an unknown-account failure stores neither, so the log is not an
@@ -188,18 +193,33 @@ defmodule KilnCMS.Security.Recorder do
   `{:error, error}`, or `:skipped` (no tenant, or the acting user is being
   erased). See the moduledoc for `opts`.
   """
-  @spec record(atom(), keyword()) :: {:ok, Security.Event.t()} | {:error, term()} | :skipped
+  @spec record(atom(), keyword()) ::
+          {:ok, Security.Event.t() | Security.InstanceEvent.t()} | {:error, term()} | :skipped
   def record(type, opts) when is_atom(type) do
     case attrs(type, opts) do
       :skipped ->
         :skipped
 
       attrs ->
-        Security.record(attrs,
-          actor: Security.system(),
-          tenant: Keyword.fetch!(opts, :tenant),
-          context: alert_context(opts)
-        )
+        if instance?(opts) do
+          Security.record_instance_event(attrs, actor: Security.system())
+        else
+          Security.record(attrs,
+            actor: Security.system(),
+            tenant: Keyword.fetch!(opts, :tenant),
+            context: alert_context(opts)
+          )
+        end
+    end
+  end
+
+  # Anything but the two scopes raises: a skipped event reads as success to
+  # the caller, so a typo would lose the audit silently.
+  defp instance?(opts) do
+    case Keyword.get(opts, :scope, :site) do
+      :instance -> true
+      :site -> false
+      other -> raise ArgumentError, "scope must be :site or :instance, got: #{inspect(other)}"
     end
   end
 
@@ -236,6 +256,9 @@ defmodule KilnCMS.Security.Recorder do
   """
   @spec record_sampled(atom(), keyword()) :: :ok | :skipped
   def record_sampled(type, opts) when is_map_key(@sample_buckets, type) do
+    if instance?(opts),
+      do: raise(ArgumentError, "a sampled event type is never an instance event")
+
     run_after_commit(type, opts, fn -> record_if_admitted(type, opts) end)
   end
 
@@ -323,7 +346,7 @@ defmodule KilnCMS.Security.Recorder do
       end
 
     cond do
-      !is_binary(Keyword.get(opts, :tenant)) -> :skipped
+      !instance?(opts) and !is_binary(Keyword.get(opts, :tenant)) -> :skipped
       erased?(user, Keyword.get(opts, :erasing_user_id)) -> :skipped
       true -> build(type, user, opts)
     end

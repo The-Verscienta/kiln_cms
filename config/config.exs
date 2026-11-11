@@ -651,6 +651,12 @@ config :kiln_cms, :security_log_prune_cron, "20 3 * * *"
 # run `mix kiln.occurrences.backfill` on its own terms.
 config :kiln_cms, :occurrence_backfill_on_boot, true
 
+# Whether booting enqueues the one-off sync-exposure backfill (#2275,
+# `KilnCMS.Firing.SyncExposureBackfill`): every document public at that moment
+# is recorded as disclosed, so the change feed may name it when it is later
+# withdrawn. Deduplicated for a day; a redundant run writes nothing new.
+config :kiln_cms, :sync_exposure_backfill_on_boot, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero

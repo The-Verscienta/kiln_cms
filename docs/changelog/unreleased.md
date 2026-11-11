@@ -7,6 +7,29 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="instance-security-log-upgrade"></a>
+
+- **Run `mix ash.migrate` for the instance security log (#2541).** The
+  migration `20261110235044_add_instance_security_events` creates
+  `instance_security_events` and **moves** every `backup_canceled` row out of
+  `security_events` (the default site's log) into it, keeping its id, time,
+  person and details. Platform admins read it on
+  `/editor/instance-security-log`; the default site's admins no longer see
+  those rows.
+  - **Retention.** `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS` (default 365,
+    `0` keeps forever) sets the instance log's window; no site's setting does.
+    The daily prune (`KILN_SECURITY_LOG_PRUNE_CRON`) runs it first.
+  - **During a rolling deploy.** A node on the older build still writes a
+    canceled backup to the default site's log; a new node reads such a row as
+    "Unrecognized event (backup_canceled)" there. Cancel nothing until every
+    node runs this release, or move a stray row afterwards with the same SQL as
+    the migration.
+  - **Rolling back.** The down migration moves the `backup_canceled` rows back
+    into the default site's log, then drops the table. Export the instance log
+    (**Download CSV**) first if you want a copy.
+  See also [the Added entry](#instance-security-log).
+  ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541))
+
 <a id="rclone-in-image-upgrade"></a>
 
 - **The official image ships `rclone`, and a set `BACKUP_RCLONE_REMOTE`
@@ -44,10 +67,10 @@ carries the reasoning.
     copying off-site on this deploy. Name a remote (`r2:kiln-backups`) and
     configure it with `RCLONE_CONFIG_<NAME>_*` variables in the app's
     environment, or mount an `rclone.conf` and point `RCLONE_CONFIG` at it:
-    the app runs as `nobody`, whose home directory does not exist. Don't use
-    a connection-string remote (`:s3,secret_access_key=…:bucket`) here: the
-    app passes the remote to `rclone` as an argument, where other users on
-    the host can read it. Until the remote is configured, the copy fails and
+    the app runs as `nobody`, whose home directory does not exist. A
+    connection-string remote (`:s3,secret_access_key=…:bucket`) also works:
+    its parameters reach `rclone` as environment variables, not as an
+    argument (#2690). Until the remote is configured, the copy fails and
     so does the run.
   - **Rolling the pin back** is safe: nothing is migrated. v1.8.0's image has
     no `rclone`, and v1.8.0 skips the off-site copy silently.
@@ -481,12 +504,9 @@ carries the reasoning.
       to load while that run is on the page (it cannot read a `canceled`
       run), and its retention deletes nothing (it fails closed on a status it
       doesn't know).
-    - The new `backup_canceled` security event cannot be loaded by an older
-      build that has the security log: that site's **Security log** page and
-      CSV fail there, and erasing the admin named in one fails and retries
-      ([#2509](https://github.com/The-Verscienta/kiln_cms/issues/2509)). The
-      event always goes to the default site's log.
-    All three last only until every node runs this release.
+    Both last only until every node runs this release. (A canceled backup
+    is recorded in the instance security log, #2541, which an older build
+    ignores.)
   - **Before rolling back**, on the new release:
     1. Cancel the running backup, if any (**Backups** → **Cancel**). If one
        was queued, it starts next; cancel that one too. The in-flight strip
@@ -495,14 +515,12 @@ carries the reasoning.
 
        ```sql
        UPDATE backup_runs SET status = 'failed' WHERE status = 'canceled';
-       DELETE FROM security_events WHERE type = 'backup_canceled';
        ```
 
-       The first keeps the canceled runs, as `Failed`; the second removes
-       audit history, so export the log first if you need it. The `UPDATE` is also what lets the down migration
+       This keeps the canceled runs, as `Failed`. It is also what lets the down migration
        restore the narrower status check, which fails while a `canceled` row
        exists.
-    Rolling back to v1.8.0 needs neither statement: it has no backup history
+    Rolling back to v1.8.0 does not need it: it has no backup history
     and no security log. Otherwise rolling the pin back is safe: the older
     release ignores the two new tables and the new column. Or roll forward.
   See also [the Added entry](#backup-step-chain) and
@@ -773,6 +791,9 @@ carries the reasoning.
   - **What the migration does.** `20261109005539_add_site_admin_allowlist`
     creates `site_admin_allowlist` (one row per site, `cidrs text[] NOT NULL
     DEFAULT '{}'`, unique on `org_id`). Additive; no existing table changes.
+    `20261110232206_add_admin_allowlist_restrict_sign_in` then adds
+    `restrict_sign_in boolean NOT NULL DEFAULT true` (#2493), so a list saved
+    before it keeps gating sign-in.
   - **Rolling back is not neutral.** An earlier release has no gate and
     ignores the table: every site that turned the allowlist on is open to
     every network again, with nothing on the page or in the log to say so. Roll
@@ -781,7 +802,8 @@ carries the reasoning.
     not only the console's: members and readers who sign in on the public site,
     and `POST /api/auth/sign_in`, which single-page apps and native or mobile
     apps call from the user's device. Those sign-ins work only from listed
-    networks. Tokens already issued and API keys are not affected.
+    networks, unless the site clears **Also restrict sign-in** (#2493). Tokens
+    already issued and API keys are not affected.
   - **Behind a proxy, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER` on Fly.io,
     Railway and App Platform) first.** The allowlist page refuses to save a
     list while forwarded requests arrive that nothing trusts.
@@ -1530,6 +1552,131 @@ carries the reasoning.
   mail, autoresponder tokens, the Entries tab and the CSV export. See
   [docs/forms.md](../forms.md).
 
+<a id="change-feed-sse"></a>
+
+- **`GET /api/feed`: the change feed as Server-Sent Events, with resume
+  through the sync cursor (#2275, the SSE half of path forward 2.2).** A
+  front end or a native app that wants to react to a publish no longer has
+  to poll `/api/sync` or run a webhook receiver: it opens one `EventSource`
+  and hears `published`, `updated` and `withdrawn` as they commit. Reference:
+  [api.md → Change feed (SSE)](../api.md#change-feed-sse); how-to:
+  [Live updates](../headless-consumer-guide.md#live-updates-follow-the-change-feed);
+  native apps: [While the app is open](../native-apps.md#while-the-app-is-open-the-change-feed).
+  - **What a stream carries.** Exactly what an anonymous `GET /api/sync` may
+    learn, whoever connects: an editor's or administrator's key gets the
+    same stream as no credential. `published` / `updated` carry `type`, `id`,
+    `slug`, `locale`, `published_at` and `affected`, which is always `[]`
+    because the publisher's list is not filtered by audience; `withdrawn`
+    carries `type` and `id` only. Members-only, locked and draft documents
+    are never sent; a public document that is locked, moved to members,
+    unpublished or deleted becomes `withdrawn`. `?type=` narrows the stream
+    to one content type. Control events: `ready` (`{"resumed": bool}`),
+    `reset`, `busy`, `shutdown`, and a `: ping` comment every 25 seconds.
+  - **Resume.** Every `id:` is a signed `/api/sync` delta cursor starting
+    10 seconds (the commit lag) before the event, so it resumes either
+    transport. On a reconnect with `Last-Event-ID` (or `?last_event_id=`),
+    the stream subscribes, replays the changes since the id from the version
+    history (replayed events carry no id; `ready` carries the new one), then
+    goes live. Events can repeat; every one is idempotent. Past 24 hours or
+    1,000 events the client gets `event: reset` with reason
+    `too_far_behind`, and an id that does not verify gets `invalid_cursor`:
+    the client re-syncs with `/api/sync?initial=true` and keeps the stream.
+    A resume inherits the sync API's 10-second commit-lag assumption, so a
+    transaction held open longer (a long release go-live) can write changes
+    a reconnecting client misses; live events are not affected.
+  - **Refusals an `EventSource` survives.** A native `EventSource` stops for
+    good on any non-`200`, so the stream's own refusals are a `200`, a
+    jittered `retry:` and `event: busy` with a reason: `rate_limited` (the
+    new `feed_join` bucket, 60 connects a minute per address, charged before
+    anything else), `too_many_streams` (50 open streams per API key, or per
+    address without one), `node_full` (20,000 per node), `replay_busy` (8
+    resumes replaying at once per node) and `shutting_down`. The caps are
+    per node, not per cluster. A connect is also charged to the `api` bucket,
+    whose refusal stays the usual `429`, as do a bad credential (`401`) and an
+    unknown type (`404`).
+  - **Deploys.** On shutdown, a node refuses new streams and ends each open
+    one with `event: shutdown` and a jittered `retry:`, so clients reconnect
+    to another node with their last id, spread over up to 10 seconds, rather
+    than all at once.
+  - **The publisher records what it shows.** A public `published` /
+    `updated` event discloses the document's id to anonymous streams, so
+    `KilnCMS.Delivery.Feed` now records it in `KilnCMS.Firing.SyncExposure`
+    (as the new `:feed` system actor) before showing it, the way `/api/sync`
+    records an upsert it serves; a later withdrawal may then be named, live
+    or on a resume. The event's anonymous view and its SSE frame are decided
+    and encoded once, in the publisher, not per stream. That work, and the
+    hand-off to subscribers, now runs after the outermost transaction
+    commits (`KilnCMS.AfterCommit`), so a release's go-live publishes its
+    feed events only once it has committed. `Feed.Event` gains `anonymous`
+    (`:show` / `:withdraw` / `:hide`) and `sse` (left out of its JSON
+    encoding), and the `[:kiln_cms, :delivery, :feed, :event]` telemetry
+    gains `anonymous` metadata. Each document event costs about two or three
+    extra queries after the commit.
+  - **A one-off backfill on boot.** Documents published before this release
+    and never served by `/api/sync` have no exposure, so their withdrawal
+    would be hidden from the stream. Booting enqueues
+    `KilnCMS.Firing.SyncExposureBackfill`, an Oban job deduplicated for a
+    day, which walks every site's sync snapshot without bodies and records
+    each public document. Nothing to run by hand; to run it again,
+    `bin/kiln_cms rpc "KilnCMS.Firing.SyncExposureBackfill.run()"`.
+    `config :kiln_cms, :sync_exposure_backfill_on_boot, false` turns the boot
+    enqueue off.
+  - **`/api/sync` deletes may name more ids.** A delete used to name only a
+    document `/api/sync` itself had served; it now names any document the
+    feed or the backfill recorded, which are all documents that were public.
+    A mirror already ignores a delete for an id it does not hold.
+  - **Operators.** No migration and no environment variable. The limits are
+    `config :kiln_cms, KilnCMSWeb.FeedStream` (`max_per_client`,
+    `max_per_node`, `max_replays`, `heartbeat_ms`, `retry_ms`,
+    `busy_retry_ms`, `shutdown_retry_ms`, `replay_limit`, `replay_page`,
+    `resume_window_seconds`, `max_queue`) and the `feed_join` bucket. A
+    stream holds one request process for as long as the client stays; the
+    Phoenix request-duration metrics skip `/api/feed`, which emits
+    `[:kiln_cms, :delivery, :feed, :sse, :connect | :disconnect | :replay | :refused]`
+    instead. Behind a proxy, turn response buffering off for `/api/feed`
+    (Kiln sends `x-accel-buffering: no` for nginx) and keep the idle timeout
+    above 25 seconds. During a rolling deploy, events published by a node
+    still on the older release reach no stream. Rolling the pin back is
+    safe: the exposure rows it wrote name only documents that were public.
+  - **Fan-out.** On one 18-core laptop, 10,000 open streams cost about
+    24 KB each, and a publish reached the last of them in p95 196 ms:
+    [benchmarks.md](../benchmarks.md#change-feed-over-sse-fan-out).
+  - **Not in this change.** The `/ws/feed` Phoenix Channel (the other half
+    of 2.2), `subscribe` in the official clients (2.3), an
+    audience-filtered `affected`, and cluster-wide caps.
+
+<a id="instance-security-log"></a>
+
+- **An instance security log, readable by platform admins only (#2541).**
+  Events about the whole installation rather than one site, starting with
+  `backup_canceled`, which until now went to the default site's log, where that
+  site's admins (who need not be platform admins) saw the platform admin's
+  email address and the backup's stamp.
+  - **Where.** **Security log** → **Instance log** (shown to platform admins),
+    the link on **Backups**, or `/editor/instance-security-log`. Same filters,
+    **Load more** and **Download CSV**
+    (`/editor/instance-security-log/export.csv`) as a site's log.
+  - **Who.** The effective platform role: a standing platform admin, or a
+    temporary platform admin grant until it expires. Every site admin,
+    the default site's included, is refused the page, the CSV and the read.
+  - **Design.** A separate resource and table
+    (`KilnCMS.Security.InstanceEvent`, `instance_security_events`) with no
+    tenant, gated on `PlatformAdmin` like the backup history, rather than a
+    nullable or sentinel `org_id` on `security_events`, which no site read
+    could then be proven never to reach. `backup_canceled` leaves
+    `KilnCMS.Security.Event.types/0`. The `kiln_reporting_v1` views are
+    unaffected.
+  - **For developers.** `Changes.Record` and `Recorder.record/2` take
+    `scope: :instance`; a mistyped scope raises rather than skipping the event. Erasure
+    (`Security.anonymize_actor/1`), retention (`Security.prune_instance/1`,
+    `instance_retention_days/0`) and the staging scrub
+    (`instance_security_events_purged`) cover it.
+  - **Not moved yet.** Platform-level role changes and
+    `api_key_reuse_detected` still go to a site's log, and no instance event
+    raises a security alert.
+  Guide: [security-events.md](../security-events.md#the-instance-log).
+  ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541))
+
 <a id="security-posture-json"></a>
 
 - **The Security posture report is available as JSON for monitoring, at
@@ -1993,7 +2140,8 @@ carries the reasoning.
     not only the page). It stops the step jobs and the `pg_dump`, `tar` or
     `rclone` they started, releases the lock (a queued backup starts next),
     marks the run `Canceled`, and records a **Backup canceled** event in the
-    default site's security log. It writes no `manifest.json` and keeps every
+    default site's security log (in the instance security log since #2541).
+    It writes no `manifest.json` and keeps every
     file, so **Resume** continues a canceled backup. A backup that has reached
     `finish` can't be canceled.
   - **Nodes that stop.** Every node beats every 30 seconds (database clock).
@@ -2845,6 +2993,36 @@ carries the reasoning.
     the OpenAPI document and `clients/` are unchanged.
   Guide: [Make a field hold a list of values](../extending-content.md#make-a-field-hold-a-list-of-values);
   filters: [json-api.md](../json-api.md#lists-of-values).
+
+<a id="admin-allowlist-sign-in-toggle"></a>
+
+- **The admin allowlist can leave sign-in open: "Also restrict sign-in"
+  (#2493).** A checkbox under the list at `/editor/admin-allowlist`, on by
+  default, so nothing changes on upgrade.
+  - **Cleared.** Every sign-in route (password, registration, reset, magic
+    link, passkeys, single sign-on, the two-factor prompt, unlock links,
+    confirmation and invitations) and the headless `POST /api/auth/sign_in`
+    and `/api/auth/sign_in/verify` answer from any network; their LiveView
+    joins too. The console, `/setup`, their LiveView joins, `/ws/collab` and
+    `GET /api/security/posture` stay behind the list: an admin who signs in
+    from elsewhere is signed in, and the console answers "Not available from
+    this network".
+  - **Open pages.** Console pages leave on a save that excludes them, as
+    before. Sign-in pages leave only when a save turns the setting back on and
+    their address is not listed.
+  - **What it gives up.** The password check is no longer behind the list, and
+    an admin's password yields a full-role API token from anywhere (JSON:API,
+    GraphQL and MCP were never gated). The page says so; require two-factor
+    sign-in for admins first.
+  - **Who may change it.** Site admins, as for the list; the same
+    `admin_allowlist_changed` event records it as `sign_in` (`restricted` or
+    `open`). **Turn off** keeps the choice for the next time the list is on.
+  - **Code.** The gates now ask for a surface (`:console` or `:sign_in`):
+    two new router pipelines, `:sign_in_allowlist` and
+    `:sign_in_allowlist_api`, an `on_mount` `{KilnCMSWeb.AdminAllowlist,
+    :gated_sign_in}`, and `KilnCMS.Security.AdminAllowlist.policy/2`,
+    `check/3` and `for_surface/2`. `policy/1` and `check/2` keep meaning the
+    console. See [ADR 0019, "Amendment"](../decisions/0019-the-admin-allowlist-fails-closed-and-only-the-operator-lifts-it-from-outside.md#amendment-2026-11-10-2493-also-restrict-sign-in).
 
 <a id="admin-allowlist"></a>
 
@@ -5915,6 +6093,28 @@ carries the reasoning.
     plugin block's own `:web` output carry whatever the plugin renders.
 
 ## Security
+
+<a id="rclone-remote-argv-credentials"></a>
+
+- **A connection-string `BACKUP_RCLONE_REMOTE` (`:s3,access_key_id=…,secret_access_key=…:bucket`) no longer puts its credentials in `rclone`'s arguments; the app and `scripts/backup.sh` pass them as `RCLONE_CONFIG_*` variables of that `rclone` process only (#2690).**
+  Arguments are world-readable in `/proc/<pid>/cmdline`, shown by `ps` on the
+  host and scraped by monitoring agents, for the whole transfer. Now
+  `:backend,k=v,…:path` becomes the remote `kiln_offsite:path` with
+  `RCLONE_CONFIG_KILN_OFFSITE_TYPE=backend` and one
+  `RCLONE_CONFIG_KILN_OFFSITE_<KEY>` per parameter, and `name,k=v,…:path`
+  becomes `name:path` with `RCLONE_CONFIG_<NAME>_<KEY>`, mirroring how the
+  database password already moves into `PGPASSWORD`. Quoted values, doubled
+  quotes and bare `true` keys follow rclone's rules. A named remote
+  (`r2:kiln-backups`) is passed unchanged. Left as written: an overridden
+  named remote whose name is not letters, digits and `_` only (rclone cannot
+  look it up as a variable), and a string neither side can parse.
+  `backup.sh` now prints the translated remote in its progress line instead
+  of the string; its `manifest.json` still records the string, redacted when
+  the app imports it. The name `kiln_offsite` is reserved: a `[kiln_offsite]`
+  section in `rclone.conf` would fill in keys the string leaves unset. No
+  setting changes; update the host's copy of `scripts/backup.sh`.
+  See [backups.md](../backups.md#off-site-credentials-stay-out-of-the-rclone-command-line-2690).
+  ([#2690](https://github.com/The-Verscienta/kiln_cms/issues/2690))
 
 <a id="invitation-takeover-credentials"></a>
 

@@ -80,6 +80,7 @@ config :kiln_cms,
 # VM, which halts underneath it).
 config :kiln_cms, :occurrence_backfill_on_boot, false
 config :kiln_cms, :legacy_audiences_migration_on_boot, false
+config :kiln_cms, :sync_exposure_backfill_on_boot, false
 
 config :kiln_cms, token_signing_secret: "e2eTokenSigningSecretForBrowserTests0"
 

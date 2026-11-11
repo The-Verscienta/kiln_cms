@@ -9,6 +9,12 @@ defmodule KilnCMS.Delivery.Feed.RelayTest do
   # would stall with it.
   use ExUnit.Case, async: false
 
+  # No database here: the publisher's anonymous-view read of an event without
+  # an audience (#2275) fails, is logged, and hides the event from SSE
+  # streams; the relay's delivery, which is what these tests are about, is
+  # unaffected.
+  @moduletag :capture_log
+
   import ExUnit.CaptureLog
 
   alias KilnCMS.Delivery.Feed
