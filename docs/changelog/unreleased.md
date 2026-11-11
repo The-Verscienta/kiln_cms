@@ -1561,6 +1561,32 @@ carries the reasoning.
   Guide: [security-events.md](../security-events.md#the-instance-log).
   ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541))
 
+<a id="release-documentation"></a>
+
+- **Every minor release now gets a documentation pass, and the changelog can
+  say what is still broken.** Each pull request documented its own change, but
+  nothing at release time checked that guides written for an earlier change
+  were still true, nobody wrote an overview of the release with examples, and
+  a bug the release shipped with lived only in its issue.
+  - **`### Known issues`** is a changelog section, between Breaking and
+    Added. Each entry is a note: the symptom in bold, who is affected, the
+    workaround, and the tracking issue. `mix kiln.changelog --check` accepts
+    it and `--condense` treats it like Upgrade notes.
+  - **`mix kiln.update` prints the target release's Known issues** after its
+    Upgrade notes and Breaking sections. An intermediate release's known
+    issues are not printed: by the target, each has been fixed or is listed
+    again.
+  - **What's new guides.** `docs/whats-new/vX.Y.md`, written from
+    `docs/whats-new/TEMPLATE.md`, covers the headline features with working
+    examples, the breaking changes with code before and after, deprecations
+    and known issues. `mix.exs` lists every `docs/whats-new/v*.md` under a
+    new *What's new* group, newest first, and the docs publisher puts that
+    group on kilncms.dev/docs.
+  - **The process** is `docs/releasing.md` → "Documenting a release", which
+    step 1 of "Cutting a release" now requires. The `/release-docs` command
+    runs it with the `documenter` agent, one batch of areas per agent, and
+    asks the maintainer which known issues to publish.
+
 <a id="security-posture-json"></a>
 
 - **The Security posture report is available as JSON for monitoring, at

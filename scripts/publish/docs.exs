@@ -20,6 +20,7 @@ defmodule PublishDocs do
   # The sections of the /docs index, in their mix.exs order.
   @public_groups [
     "Getting started",
+    "What's new",
     "Compare & migrate",
     "Authoring & editorial",
     "Modeling & extending",

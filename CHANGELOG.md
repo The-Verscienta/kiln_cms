@@ -15,25 +15,31 @@ CMS core that downstream projects overlay:
 ## How downstream projects read this file
 
 Each release entry is a **summary**: one line per change, under
-**Upgrade notes**, **Breaking**, **Added**, **Changed**, **Fixed**,
-**Security** and **Removed**, in that order. Every line links to the pull
-request that shipped it, and — where the entry was shortened — to its own
+**Upgrade notes**, **Breaking**, **Known issues**, **Added**, **Changed**,
+**Fixed**, **Security** and **Removed**, in that order. A minor or major
+release opens with a link to its **What's new** guide under
+[`docs/whats-new/`](https://github.com/The-Verscienta/kiln_cms/tree/main/docs/whats-new),
+which walks through the release with examples and migration steps. Every
+line links to the pull request that shipped it, and — where the entry was shortened — to its own
 long-form entry under [`docs/changelog/`](https://github.com/The-Verscienta/kiln_cms/tree/main/docs/changelog), which holds the
 reasoning as it was written when the change merged. A handful of entries argue
 a choice that outlives their release; those live in
 [`docs/decisions/`](https://github.com/The-Verscienta/kiln_cms/tree/main/docs/decisions) instead.
 
-The two sections that decide whether you can upgrade today are the first two:
+The sections that decide whether you can upgrade today are the first three:
 
 - **Upgrade notes** — steps to perform against a *deployed* instance, and
   anything not reversible by rolling the pin back (a destructive migration, a
   rewritten column, a dropped config key).
 - **Breaking** — an observable contract changed, or your overlay or deployment
   has to change to keep working.
+- **Known issues** — bugs the release ships with: the symptom, who is
+  affected, the workaround and the tracking issue.
 
-`mix kiln.update` prints **only those two**, for every release between your
-current pin and the target. A release with neither is "bump the pin, rebuild,
-redeploy" and nothing else.
+`mix kiln.update` prints **only those**: the first two for every release
+between your current pin and the target, and the target's known issues. A
+release with none of them is "bump the pin, rebuild, redeploy" and nothing
+else.
 
 <!--
   Releases are cut from `main`; see docs/releasing.md.
@@ -240,6 +246,10 @@ Every summary line below that was shortened links to its own entry there.
 - **An instance security log, for platform admins only: events about the whole installation rather than one site, starting with canceled backups, which no longer appear in the default site's Security log. Security log → Instance log, or `/editor/instance-security-log`, with filters and CSV.**
   Guide: [docs/security-events.md](docs/security-events.md#the-instance-log).
   ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541) · [long form](docs/changelog/unreleased.md#instance-security-log))
+
+- **Releases document themselves: a `### Known issues` changelog section, which `mix kiln.update` prints for the target release, and a What's new guide per minor release under `docs/whats-new/`, listed on /docs.**
+  Process: [docs/releasing.md](docs/releasing.md#documenting-a-release); `/release-docs` runs it.
+  ([long form](docs/changelog/unreleased.md#release-documentation))
 
 - **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
   The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).

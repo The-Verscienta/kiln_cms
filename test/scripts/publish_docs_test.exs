@@ -16,6 +16,7 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
 
   @public_groups [
     "Getting started",
+    "What's new",
     "Compare & migrate",
     "Authoring & editorial",
     "Modeling & extending",
@@ -46,7 +47,38 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
     test "publishes only the public groups and Contributing to Kiln", %{catalogue: catalogue} do
       groups = catalogue |> Enum.map(& &1.group) |> Enum.uniq()
 
-      assert groups == @public_groups ++ [@contributing]
+      # "What's new" holds one guide per minor release (docs/whats-new/v*.md),
+      # so it is empty until the first one is written, and an empty group
+      # publishes nothing.
+      expected =
+        if Path.wildcard("docs/whats-new/v*.md") == [],
+          do: @public_groups -- ["What's new"],
+          else: @public_groups
+
+      assert groups == expected ++ [@contributing]
+    end
+
+    test "lists the What's new guides newest first, by version", %{catalogue: catalogue} do
+      whats_new = for doc <- catalogue, doc.group == "What's new", do: doc.path
+
+      assert whats_new ==
+               Enum.sort_by(
+                 whats_new,
+                 &(&1
+                   |> Path.basename(".md")
+                   |> String.trim_leading("v")
+                   |> Kernel.<>(".0")
+                   |> Version.parse!()),
+                 {:desc, Version}
+               )
+
+      refute "docs/whats-new/TEMPLATE.md" in Enum.map(catalogue, & &1.path)
+    end
+
+    test "gives every published guide a slug the site accepts", %{catalogue: catalogue} do
+      for doc <- catalogue do
+        assert doc.slug =~ ~r/^[a-z0-9]+(-[a-z0-9]+)*$/, "#{doc.path} → #{inspect(doc.slug)}"
+      end
     end
 
     test "puts the maintainer pages under Contributing to Kiln, and nothing else", %{
