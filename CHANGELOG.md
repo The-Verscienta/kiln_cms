@@ -130,7 +130,7 @@ Every summary line below that was shortened links to its own entry there.
   It clears `multiple` on such a field's definition when saved, keeping each list's first item, and stringifies a list written there.
   ([long form](docs/changelog/unreleased.md#scalar-list-fields-upgrade))
 
-- **Run `mix ash.migrate` (new table `site_admin_allowlist`). Rolling the pin back turns every site's admin allowlist off without a word; while a list is on, members and apps calling `/api/auth/sign_in` sign in only from listed networks.**
+- **Run `mix ash.migrate` (new table `site_admin_allowlist`, then its `restrict_sign_in` column, `NOT NULL DEFAULT true`). Rolling the pin back turns every site's admin allowlist off without a word; while a list is on, members and apps calling `/api/auth/sign_in` sign in only from listed networks unless the site clears "Also restrict sign-in" (#2493).**
   Nothing changes until a site admin saves a list. Lock-out: `bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'`.
   ([long form](docs/changelog/unreleased.md#admin-allowlist-upgrade))
 
@@ -324,6 +324,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Integer, float, date, date-time, time, URL, email, telephone, colour and slug custom fields can hold a list (Holds → A list in `/editor/fields`).**
   Stored as a JSON array of tidied values, one typed input per item in the editor; `custom_filter` takes `eq`/`in`/`has`/`has_all`/`has_none`/`count`. Guide: [docs/extending-content.md](docs/extending-content.md#make-a-field-hold-a-list-of-values).
   ([long form](docs/changelog/unreleased.md#scalar-list-fields))
+
+- **The admin allowlist has an "Also restrict sign-in" checkbox, on by default: cleared, members, readers and apps sign in from any network, at `/sign-in` and `POST /api/auth/sign_in` alike, while the console, `/setup` and their live pages stay behind the list.**
+  Admins only; recorded as `sign_in` on `admin_allowlist_changed`. An admin's password then yields an API token anywhere, so require two-factor sign-in first. Guide: [Let members sign in from anywhere](docs/admin-allowlist.md#let-members-sign-in-from-anywhere).
+  ([#2493](https://github.com/The-Verscienta/kiln_cms/issues/2493) · [long form](docs/changelog/unreleased.md#admin-allowlist-sign-in-toggle))
 
 - **Site admins can restrict the console and every sign-in route, members' and `/api/auth/sign_in` included, to listed IPv4/IPv6 networks, at Configure → Sign-in & access → Admin allowlist.**
   Off by default; fails closed; API keys and issued tokens are not affected. Guide: [docs/admin-allowlist.md](docs/admin-allowlist.md).

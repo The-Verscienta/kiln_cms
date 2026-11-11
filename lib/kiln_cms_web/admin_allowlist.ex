@@ -8,8 +8,12 @@ defmodule KilnCMSWeb.AdminAllowlist do
 
   The ones whose routes the HTTP gate covers: every `live_session` in a scope
   behind the router's `:admin_allowlist` pipeline, each of which declares
-  `{KilnCMSWeb.AdminAllowlist, :gated}` (`gated_live_sessions/0`;
-  `admin_allowlist_routes_test.exs` pins that the two agree, route by route). The sign-in page checks the password over its socket
+  `{KilnCMSWeb.AdminAllowlist, :gated}`, and every one behind
+  `:sign_in_allowlist`, which declares `{KilnCMSWeb.AdminAllowlist,
+  :gated_sign_in}` (`gated_live_sessions/0`, `live_session_surface/1`;
+  `admin_allowlist_routes_test.exs` pins that they agree, route by route). The
+  second kind is judged on the `:sign_in` surface, which a site can open while
+  its console stays behind the list (#2493). The sign-in page checks the password over its socket
   (`KilnCMSWeb.SignInLive`), so without this an outsider could test passwords
   from anywhere; the console pages need it because a socket outlives the HTTP
   request that opened it.
@@ -21,7 +25,8 @@ defmodule KilnCMSWeb.AdminAllowlist do
       cannot skip. It acts only for a gated `live_session`
       (`socket.private[:live_session_name]`, signed; see
       `KilnCMSWeb.LiveRouteGuard`);
-    * as `{KilnCMSWeb.AdminAllowlist, :gated}` in each gated `live_session`, for a
+    * as `{KilnCMSWeb.AdminAllowlist, :gated}` (or `:gated_sign_in`) in each
+      gated `live_session`, for a
       plugin LiveView that uses `Phoenix.LiveView` directly and so carries no
       module hook. It stands aside for a view that has one.
 
@@ -58,9 +63,11 @@ defmodule KilnCMSWeb.AdminAllowlist do
 
   ## Pages already open
 
-  An admitted page keeps its addresses and listens on the site's topic. A save
-  broadcasts the new list (`KilnCMS.CMS.Changes.AdminAllowlistChanged`), and a
-  page whose addresses it no longer admits is sent to `/editor` by a full page
+  An admitted page keeps its addresses and surface, and listens on the site's
+  topic. A save broadcasts the new setting
+  (`KilnCMS.CMS.Changes.AdminAllowlistChanged`), and a page whose addresses it
+  no longer admits for the page's surface (so a sign-in page also leaves when
+  "Also restrict sign-in" is turned back on) is sent to `/editor` by a full page
   load, which the HTTP gate refuses. A dropped connection re-joins through the
   hook, and a `live_session` cannot be crossed without an HTTP request, so a
   page cannot move outside what the gates saw.
@@ -95,7 +102,7 @@ defmodule KilnCMSWeb.AdminAllowlist do
   @private :kiln_admin_allowlist
   @stamp_key :kiln_admin_allowlist
   @session_key "kiln_admin_allowlist"
-  @gated_key {__MODULE__, :gated_live_sessions}
+  @gated_key {__MODULE__, :gated_live_session_surfaces}
 
   # How long a stamp vouches for a join when the socket cannot see the client.
   # A dead render's own join comes within a second; reconnects after a blip and
@@ -162,36 +169,46 @@ defmodule KilnCMSWeb.AdminAllowlist do
   # --- which live sessions ------------------------------------------------------
 
   @doc """
-  The `live_session`s that declare `{KilnCMSWeb.AdminAllowlist, :gated}`, read
-  from the router once per node. They are the ones whose routes sit behind the
-  `:admin_allowlist` pipeline, which `admin_allowlist_routes_test.exs` pins
-  route by route, so the join is gated wherever the HTTP request is.
+  The `live_session`s that declare `{KilnCMSWeb.AdminAllowlist, :gated}` or
+  `:gated_sign_in`, read from the router once per node. They are the ones
+  whose routes sit behind the `:admin_allowlist` or `:sign_in_allowlist`
+  pipeline, which `admin_allowlist_routes_test.exs` pins route by route, so the
+  join is gated wherever the HTTP request is.
   """
   @spec gated_live_sessions() :: [atom()]
-  def gated_live_sessions do
+  def gated_live_sessions, do: gated_surfaces() |> Map.keys() |> Enum.sort()
+
+  @doc """
+  The surface a gated `live_session` is judged on: `:console` for one that
+  declares `:gated`, `:sign_in` for `:gated_sign_in`, `nil` for one that is
+  not gated.
+  """
+  @spec live_session_surface(atom() | nil) :: AdminAllowlist.surface() | nil
+  def live_session_surface(name), do: Map.get(gated_surfaces(), name)
+
+  defp gated_surfaces do
     # Keyed on the router's build, so a recompiled router (dev) is read again.
     key = {@gated_key, KilnCMSWeb.Router.module_info(:md5)}
 
     case :persistent_term.get(key, nil) do
       nil ->
-        names =
-          KilnCMSWeb.Router.__routes__()
-          |> Enum.flat_map(&gated_session/1)
-          |> Enum.uniq()
-          |> Enum.sort()
+        surfaces = KilnCMSWeb.Router.__routes__() |> Enum.flat_map(&gated_session/1) |> Map.new()
+        :persistent_term.put(key, surfaces)
+        surfaces
 
-        :persistent_term.put(key, names)
-        names
-
-      names ->
-        names
+      surfaces ->
+        surfaces
     end
   end
 
   defp gated_session(route) do
     case get_in(route, [Access.key(:metadata, %{}), :phoenix_live_view]) do
       {_view, _action, _opts, %{name: name, extra: %{on_mount: hooks}}} ->
-        if Enum.any?(hooks, &match?(%{id: {__MODULE__, :gated}}, &1)), do: [name], else: []
+        Enum.flat_map(hooks, fn
+          %{id: {__MODULE__, :gated}} -> [{name, :console}]
+          %{id: {__MODULE__, :gated_sign_in}} -> [{name, :sign_in}]
+          _other -> []
+        end)
 
       _not_live ->
         []
@@ -202,15 +219,20 @@ defmodule KilnCMSWeb.AdminAllowlist do
 
   @doc false
   def on_mount(:default, _params, session, socket) do
-    if root_join?(socket) and socket.private[:live_session_name] in gated_live_sessions(),
-      do: admit(socket, session),
+    surface = live_session_surface(socket.private[:live_session_name])
+
+    if root_join?(socket) and not is_nil(surface),
+      do: admit(socket, session, surface),
       else: {:cont, socket}
   end
 
   # The live_session's copy: only for a view with no module hook of its own.
-  def on_mount(:gated, _params, session, socket) do
+  def on_mount(:gated, _params, session, socket), do: gated(socket, session, :console)
+  def on_mount(:gated_sign_in, _params, session, socket), do: gated(socket, session, :sign_in)
+
+  defp gated(socket, session, surface) do
     if root_join?(socket) and not module_hook?(socket.view),
-      do: admit(socket, session),
+      do: admit(socket, session, surface),
       else: {:cont, socket}
   end
 
@@ -222,10 +244,10 @@ defmodule KilnCMSWeb.AdminAllowlist do
       Enum.any?(view.__live__().lifecycle.mount, &match?(%{id: {__MODULE__, _}}, &1))
   end
 
-  defp admit(socket, session) do
+  defp admit(socket, session, surface) do
     case KilnCMSWeb.Tenant.fetch_org_from_connect_info(%{uri: get_connect_info(socket, :uri)}) do
       {:ok, org} ->
-        judge(socket, session, org.id)
+        judge(socket, session, org.id, surface)
 
       # Unlike the block list, a host that names no site, or a site that cannot
       # be looked up, refuses: this is the console and sign-in.
@@ -235,13 +257,13 @@ defmodule KilnCMSWeb.AdminAllowlist do
     end
   end
 
-  defp judge(socket, session, org_id) do
+  defp judge(socket, session, org_id, surface) do
     socket_ip = ClientIp.socket_client_from(socket)
     ips = [vouching_ip(session, org_id, socket_ip) | List.wrap(socket_ip)]
 
-    case AdminAllowlist.verdict(AdminAllowlist.policy(org_id), ips) do
+    case AdminAllowlist.verdict(AdminAllowlist.policy(org_id, surface), ips) do
       :allowed ->
-        {:cont, watch(socket, org_id, ips)}
+        {:cont, watch(socket, org_id, ips, surface)}
 
       reason ->
         count_refusal(:live, reason)
@@ -272,16 +294,19 @@ defmodule KilnCMSWeb.AdminAllowlist do
 
   defp vouching_ip(session, org_id, _socket_ip), do: stamped_ip(session, org_id)
 
-  defp watch(socket, org_id, ips) do
+  defp watch(socket, org_id, ips, surface) do
     Phoenix.PubSub.subscribe(KilnCMS.PubSub, AdminAllowlist.topic(org_id))
 
     socket
-    |> Phoenix.LiveView.put_private(@private, %{org_id: org_id, ips: ips})
+    |> Phoenix.LiveView.put_private(@private, %{org_id: org_id, ips: ips, surface: surface})
     |> Phoenix.LiveView.attach_hook(:admin_allowlist, :handle_info, &handle_info/2)
   end
 
-  defp handle_info({:admin_allowlist_changed, policy}, %{private: %{@private => state}} = socket) do
-    policy = if AdminAllowlist.disabled?(), do: :off, else: policy
+  defp handle_info({:admin_allowlist_changed, stored}, %{private: %{@private => state}} = socket) do
+    policy =
+      if AdminAllowlist.disabled?(),
+        do: :off,
+        else: AdminAllowlist.for_surface(stored, Map.get(state, :surface, :console))
 
     case AdminAllowlist.verdict(policy, state.ips) do
       :allowed ->

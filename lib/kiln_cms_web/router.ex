@@ -411,19 +411,30 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.RateLimit, :delivery
   end
 
-  # The site's admin allowlist (#2248): the console, `/setup` and every
-  # sign-in route are refused outside the networks a site admin listed. FIRST
-  # in each gated `pipe_through`, ahead of `fetch_session`, so a refused
-  # request reads no session and is never signed in by a remember-me cookie.
-  # Which routes carry it is pinned by `admin_allowlist_routes_test.exs`.
+  # The site's admin allowlist (#2248): the console and `/setup` are refused
+  # outside the networks a site admin listed. FIRST in each gated
+  # `pipe_through`, ahead of `fetch_session`, so a refused request reads no
+  # session and is never signed in by a remember-me cookie. Which routes carry
+  # which gate is pinned by `admin_allowlist_routes_test.exs`.
   pipeline :admin_allowlist do
     plug KilnCMSWeb.Plugs.AdminAllowlist, :html
   end
 
-  # The same gate on the headless password sign-in and the security posture,
-  # answering in JSON.
+  # The same gate on the security posture, answering in JSON.
   pipeline :admin_allowlist_api do
     plug KilnCMSWeb.Plugs.AdminAllowlist, :json
+  end
+
+  # The same list on every sign-in route, unless the site turned "Also
+  # restrict sign-in" off (#2493): then members sign in from anywhere, and the
+  # console behind `:admin_allowlist` still refuses them off the list.
+  pipeline :sign_in_allowlist do
+    plug KilnCMSWeb.Plugs.AdminAllowlist, {:html, :sign_in}
+  end
+
+  # The headless password sign-in follows the same setting, answering in JSON.
+  pipeline :sign_in_allowlist_api do
+    plug KilnCMSWeb.Plugs.AdminAllowlist, {:json, :sign_in}
   end
 
   # Every answer of an admin JSON surface is per-caller, refusals from later
@@ -854,10 +865,11 @@ defmodule KilnCMSWeb.Router do
   # is redeemed at the second route. Same `:auth` bucket, and the code itself is
   # charged the per-account second-factor budget the browser prompt charges.
   #
-  # Behind the admin allowlist (#2248): it exchanges a password for a token with
-  # the account's full role, so leaving it open would undo the list.
+  # Behind the admin allowlist (#2248) on the sign-in surface: it exchanges a
+  # password for a token with the account's full role, so it follows the same
+  # "Also restrict sign-in" setting as `/sign-in` (#2493).
   scope "/api/auth", KilnCMSWeb do
-    pipe_through [:admin_allowlist_api, :api_auth]
+    pipe_through [:sign_in_allowlist_api, :api_auth]
 
     post "/sign_in", ApiAuthController, :sign_in
     post "/sign_in/verify", ApiAuthController, :verify
@@ -1277,9 +1289,10 @@ defmodule KilnCMSWeb.Router do
 
   # Every sign-in route, behind the admin allowlist (#2248): an outsider reaches
   # no password form, magic link, passkey, single sign-on, second factor, reset
-  # or invitation.
+  # or invitation — unless the site turned "Also restrict sign-in" off (#2493).
+  # Each live session here declares `:gated_sign_in`, the same choice for joins.
   scope "/", KilnCMSWeb do
-    pipe_through [:admin_allowlist, :browser_auth]
+    pipe_through [:sign_in_allowlist, :browser_auth]
 
     # Passkey (WebAuthn) sign-in ceremony (#331) — JSON two-step driven by
     # progressive-enhancement JS on /sign-in; same :auth rate limit + CSRF.
@@ -1305,7 +1318,7 @@ defmodule KilnCMSWeb.Router do
       layout: {KilnCMSWeb.Layouts, :auth},
       session: {KilnCMSWeb.AdminAllowlist, :live_session, []},
       on_mount: [
-        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.AdminAllowlist, :gated_sign_in},
         {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
       ] do
       live "/auth/invite/:invite_token", InviteLive, :show
@@ -1349,7 +1362,7 @@ defmodule KilnCMSWeb.Router do
                     live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
-                      {KilnCMSWeb.AdminAllowlist, :gated},
+                      {KilnCMSWeb.AdminAllowlist, :gated_sign_in},
                       {KilnCMSWeb.LiveUserAuth,
                        [:restore_locale, :assign_current_org, :live_no_user]}
                     ],
@@ -1360,7 +1373,7 @@ defmodule KilnCMSWeb.Router do
                     live_view: KilnCMSWeb.SignInLive,
                     layout: {KilnCMSWeb.Layouts, :auth},
                     on_mount: [
-                      {KilnCMSWeb.AdminAllowlist, :gated},
+                      {KilnCMSWeb.AdminAllowlist, :gated_sign_in},
                       {KilnCMSWeb.LiveUserAuth,
                        [:restore_locale, :assign_current_org, :live_no_user]}
                     ],
@@ -1379,7 +1392,7 @@ defmodule KilnCMSWeb.Router do
                 live_view: KilnCMSWeb.ResetLive,
                 layout: {KilnCMSWeb.Layouts, :auth},
                 on_mount: [
-                  {KilnCMSWeb.AdminAllowlist, :gated},
+                  {KilnCMSWeb.AdminAllowlist, :gated_sign_in},
                   {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
                 ],
                 overrides: [KilnCMSWeb.AuthOverrides]
@@ -1389,7 +1402,7 @@ defmodule KilnCMSWeb.Router do
       live_view: KilnCMSWeb.ConfirmLive,
       layout: {KilnCMSWeb.Layouts, :auth},
       on_mount: [
-        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.AdminAllowlist, :gated_sign_in},
         {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
       ],
       overrides: [KilnCMSWeb.AuthOverrides]
@@ -1399,7 +1412,7 @@ defmodule KilnCMSWeb.Router do
       live_view: KilnCMSWeb.MagicSignInLive,
       layout: {KilnCMSWeb.Layouts, :auth},
       on_mount: [
-        {KilnCMSWeb.AdminAllowlist, :gated},
+        {KilnCMSWeb.AdminAllowlist, :gated_sign_in},
         {KilnCMSWeb.LiveUserAuth, [:restore_locale, :assign_current_org]}
       ],
       overrides: [KilnCMSWeb.AuthOverrides]

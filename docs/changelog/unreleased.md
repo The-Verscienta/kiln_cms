@@ -773,6 +773,9 @@ carries the reasoning.
   - **What the migration does.** `20261109005539_add_site_admin_allowlist`
     creates `site_admin_allowlist` (one row per site, `cidrs text[] NOT NULL
     DEFAULT '{}'`, unique on `org_id`). Additive; no existing table changes.
+    `20261110232206_add_admin_allowlist_restrict_sign_in` then adds
+    `restrict_sign_in boolean NOT NULL DEFAULT true` (#2493), so a list saved
+    before it keeps gating sign-in.
   - **Rolling back is not neutral.** An earlier release has no gate and
     ignores the table: every site that turned the allowlist on is open to
     every network again, with nothing on the page or in the log to say so. Roll
@@ -781,7 +784,8 @@ carries the reasoning.
     not only the console's: members and readers who sign in on the public site,
     and `POST /api/auth/sign_in`, which single-page apps and native or mobile
     apps call from the user's device. Those sign-ins work only from listed
-    networks. Tokens already issued and API keys are not affected.
+    networks, unless the site clears **Also restrict sign-in** (#2493). Tokens
+    already issued and API keys are not affected.
   - **Behind a proxy, set `TRUSTED_PROXIES` (or `CLIENT_IP_HEADER` on Fly.io,
     Railway and App Platform) first.** The allowlist page refuses to save a
     list while forwarded requests arrive that nothing trusts.
@@ -2822,6 +2826,36 @@ carries the reasoning.
     the OpenAPI document and `clients/` are unchanged.
   Guide: [Make a field hold a list of values](../extending-content.md#make-a-field-hold-a-list-of-values);
   filters: [json-api.md](../json-api.md#lists-of-values).
+
+<a id="admin-allowlist-sign-in-toggle"></a>
+
+- **The admin allowlist can leave sign-in open: "Also restrict sign-in"
+  (#2493).** A checkbox under the list at `/editor/admin-allowlist`, on by
+  default, so nothing changes on upgrade.
+  - **Cleared.** Every sign-in route (password, registration, reset, magic
+    link, passkeys, single sign-on, the two-factor prompt, unlock links,
+    confirmation and invitations) and the headless `POST /api/auth/sign_in`
+    and `/api/auth/sign_in/verify` answer from any network; their LiveView
+    joins too. The console, `/setup`, their LiveView joins, `/ws/collab` and
+    `GET /api/security/posture` stay behind the list: an admin who signs in
+    from elsewhere is signed in, and the console answers "Not available from
+    this network".
+  - **Open pages.** Console pages leave on a save that excludes them, as
+    before. Sign-in pages leave only when a save turns the setting back on and
+    their address is not listed.
+  - **What it gives up.** The password check is no longer behind the list, and
+    an admin's password yields a full-role API token from anywhere (JSON:API,
+    GraphQL and MCP were never gated). The page says so; require two-factor
+    sign-in for admins first.
+  - **Who may change it.** Site admins, as for the list; the same
+    `admin_allowlist_changed` event records it as `sign_in` (`restricted` or
+    `open`). **Turn off** keeps the choice for the next time the list is on.
+  - **Code.** The gates now ask for a surface (`:console` or `:sign_in`):
+    two new router pipelines, `:sign_in_allowlist` and
+    `:sign_in_allowlist_api`, an `on_mount` `{KilnCMSWeb.AdminAllowlist,
+    :gated_sign_in}`, and `KilnCMS.Security.AdminAllowlist.policy/2`,
+    `check/3` and `for_surface/2`. `policy/1` and `check/2` keep meaning the
+    console. See [ADR 0019, "Amendment"](../decisions/0019-the-admin-allowlist-fails-closed-and-only-the-operator-lifts-it-from-outside.md#amendment-2026-11-10-2493-also-restrict-sign-in).
 
 <a id="admin-allowlist"></a>
 

@@ -3168,6 +3168,11 @@ msgstr "También se entrega como texto plano (custom_fields_plain)"
 msgid "Also included"
 msgstr "También incluye"
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also restrict sign-in"
+msgstr "Restringir también el inicio de sesión"
+
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Also search for"
@@ -9550,6 +9555,11 @@ msgstr "Dirección del remitente"
 msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
 msgstr "Desde cualquier otra red, la consola y todas las páginas de inicio de sesión responden «No disponible desde esta red», y las páginas de la consola abiertas se cierran en cuanto guardas. El sitio público, las claves de API, los tokens de aplicaciones existentes, las vistas previas y los medios no se ven afectados, salvo el endpoint de supervisión de la postura de seguridad (GET /api/security/posture), que también responde solo a las redes de la lista."
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "From any other network, the console answers \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, sign-in, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
+msgstr "Desde cualquier otra red, la consola responde «No disponible desde esta red», y las páginas de la consola abiertas se cierran en cuanto guardas. El sitio público, el inicio de sesión, las claves de API, los tokens de aplicaciones existentes, las vistas previas y los medios no se ven afectados, salvo el endpoint de supervisión de la postura de seguridad (GET /api/security/posture), que también responde solo a las redes de la lista."
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "From date"
@@ -14073,6 +14083,18 @@ msgid_plural "On: %{count} networks can open the console and sign in."
 msgstr[0] "Activada: %{count} red puede abrir la consola e iniciar sesión."
 msgstr[1] "Activada: %{count} redes pueden abrir la consola e iniciar sesión."
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "On: %{count} network can open the console. Anyone can sign in from any network."
+msgid_plural "On: %{count} networks can open the console. Anyone can sign in from any network."
+msgstr[0] "Activada: %{count} red puede abrir la consola. Cualquiera puede iniciar sesión desde cualquier red."
+msgstr[1] "Activada: %{count} redes pueden abrir la consola. Cualquiera puede iniciar sesión desde cualquier red."
+
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "On: signing in, on this site's sign-in pages and through the API, works only from the networks above. Off: members can sign in from anywhere, and the console still opens only from the networks above."
+msgstr "Activado: el inicio de sesión, en las páginas de inicio de sesión de este sitio y mediante la API, solo funciona desde las redes de arriba. Desactivado: los miembros pueden iniciar sesión desde cualquier lugar, y la consola sigue abriéndose solo desde las redes de arriba."
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Once it's published, your home page is what visitors see at your site's address."
@@ -14198,6 +14220,13 @@ msgid "Only %{count} listed network can reach the console and sign-in."
 msgid_plural "Only %{count} listed networks can reach the console and sign-in."
 msgstr[0] "Solo %{count} red de la lista puede llegar a la consola y al inicio de sesión."
 msgstr[1] "Solo %{count} redes de la lista pueden llegar a la consola y al inicio de sesión."
+
+#: lib/kiln_cms/security/posture/checks/admin_allowlist.ex
+#, elixir-autogen, elixir-format
+msgid "Only %{count} listed network can reach the console. Sign-in is open to every network."
+msgid_plural "Only %{count} listed networks can reach the console. Sign-in is open to every network."
+msgstr[0] "Solo %{count} red de la lista puede acceder a la consola. El inicio de sesión está abierto a todas las redes."
+msgstr[1] "Solo %{count} redes de la lista pueden acceder a la consola. El inicio de sesión está abierto a todas las redes."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -18857,6 +18886,11 @@ msgstr "Inicio de sesión y acceso"
 msgid "Sign-in could not be completed right now. Try again in a moment."
 msgstr "No se pudo completar el inicio de sesión en este momento. Inténtelo de nuevo en unos instantes."
 
+#: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in is not restricted: members, readers, and apps that sign people in through the API can sign in from any network. Signing in from elsewhere still doesn't open the console. Anyone with an admin's password can get an API token from anywhere, so use two-factor sign-in."
+msgstr "El inicio de sesión no está restringido: los miembros, los lectores y las aplicaciones que inician sesión de usuarios mediante la API pueden iniciar sesión desde cualquier red. Iniciar sesión desde otro lugar sigue sin abrir la consola. Cualquiera con la contraseña de un administrador puede obtener un token de API desde cualquier lugar, así que usa el inicio de sesión en dos pasos."
+
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
 #, elixir-autogen, elixir-format
 msgid "Sign-in is temporarily unavailable. Try again in a minute."
@@ -21711,8 +21745,8 @@ msgstr "Esta dirección ya tiene una cuenta. Acepta para añadirle este sitio, o
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
-msgid "This also applies to members and readers who sign in to this site, and to sign-in through the API: a website's own sign-in form or a mobile app that signs people in only works from listed networks too."
-msgstr "Esto también se aplica a los miembros y lectores que inician sesión en este sitio, y al inicio de sesión mediante la API: el formulario de inicio de sesión propio de un sitio web o una aplicación móvil que inicia sesión de usuarios solo funciona también desde las redes de la lista."
+msgid "This also applies to members and readers who sign in to this site, and to sign-in through the API: a website's own sign-in form or a mobile app that signs people in only works from listed networks too. Turn off \"Also restrict sign-in\" to let them sign in from anywhere."
+msgstr "Esto también se aplica a los miembros y lectores que inician sesión en este sitio, y al inicio de sesión mediante la API: el formulario de inicio de sesión propio de un sitio web o una aplicación móvil que inicia sesión de usuarios solo funciona también desde las redes de la lista. Desactiva «Restringir también el inicio de sesión» para que puedan iniciar sesión desde cualquier lugar."
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format

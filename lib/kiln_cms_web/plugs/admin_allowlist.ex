@@ -6,9 +6,14 @@ defmodule KilnCMSWeb.Plugs.AdminAllowlist do
   listed. The socket half is `KilnCMSWeb.AdminAllowlist`; the list is
   `KilnCMS.Security.AdminAllowlist`.
 
-  It is a router pipeline, `:admin_allowlist` (HTML) and `:admin_allowlist_api`
-  (JSON: `POST /api/auth/sign_in*` and `GET /api/security/posture`), not an
-  endpoint plug with path prefixes: which routes are gated is a fact on each
+  It is a router pipeline, not an endpoint plug with path prefixes, in four
+  flavors: `:admin_allowlist` (the console and `/setup`, HTML),
+  `:admin_allowlist_api` (`GET /api/security/posture`, JSON),
+  `:sign_in_allowlist` (the sign-in family, HTML) and `:sign_in_allowlist_api`
+  (`POST /api/auth/sign_in*`, JSON). The sign-in pair asks for the `:sign_in`
+  surface, which the site can open while its console stays behind the list
+  ("Also restrict sign-in", #2493; `KilnCMS.Security.AdminAllowlist`). The
+  option is the format, or `{format, surface}`: which routes are gated is a fact on each
   route (`pipe_through`), pinned by
   `test/kiln_cms_web/admin_allowlist_routes_test.exs`, and public delivery
   never runs it. It comes **first** in each gated `pipe_through`, ahead of the
@@ -52,12 +57,16 @@ defmodule KilnCMSWeb.Plugs.AdminAllowlist do
          "form-action 'none'; frame-ancestors 'none'"
 
   @impl true
-  def init(format) when format in [:html, :json], do: format
+  def init(format) when format in [:html, :json], do: {format, :console}
+
+  def init({format, surface} = opts)
+      when format in [:html, :json] and surface in [:console, :sign_in],
+      do: opts
 
   @impl true
-  def call(%Plug.Conn{assigns: %{current_org: %{id: org_id} = org}} = conn, format)
+  def call(%Plug.Conn{assigns: %{current_org: %{id: org_id} = org}} = conn, {format, surface})
       when is_binary(org_id) do
-    case AdminAllowlist.check(org_id, conn.remote_ip) do
+    case AdminAllowlist.check(org_id, conn.remote_ip, surface) do
       :allowed -> Gate.stamp_conn(conn, org_id)
       reason -> refuse(conn, format, reason, org)
     end
