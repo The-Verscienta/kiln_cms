@@ -30,6 +30,7 @@ defmodule KilnCMS.Security do
   require Ash.Query
 
   alias KilnCMS.Security.Event
+  alias KilnCMS.Security.InstanceEvent
 
   resources do
     resource Event do
@@ -47,6 +48,16 @@ defmodule KilnCMS.Security do
       define :alert_window_events,
         action: :alert_window,
         args: [:types, :since, :until]
+    end
+
+    # The instance log (#2541): events about the installation, not a site.
+    # Platform admins read `list`; everything that writes is `:security`'s.
+    resource KilnCMS.Security.InstanceEvent do
+      define :record_instance_event, action: :record
+      define :list_instance_events, action: :list
+      define :instance_events_by_actor, action: :by_actor, args: [:user_id]
+      define :instance_events_older_than, action: :older_than, args: [:cutoff]
+      define :get_instance_event, action: :read, get_by: [:id]
     end
 
     # Security alerts (#2245): claimed in raw SQL by `AlertGate`, delivered by
@@ -98,15 +109,15 @@ defmodule KilnCMS.Security do
 
   @doc """
   Scrub every event a now-erased user is the actor or the target of, across all
-  orgs, retaining the events themselves (GDPR erasure, #2241). Runs as
-  `system/0`.
+  orgs and the instance log (#2541), retaining the events themselves (GDPR
+  erasure, #2241). Runs as `system/0`.
 
   Per event: `actor_id` / `target_id` naming the user are nilled, and for an
   event the user acted in `actor_label`, `ip` and `user_agent` are cleared too.
   `metadata` is emptied on every touched event. Idempotent.
 
-  **Fails closed**, and per org: one org's failure is logged and the sweep
-  continues, then raises at the end so the caller retries (a partial erasure is
+  **Fails closed**, and per org (the instance log counts as one): one org's
+  failure is logged and the sweep continues, then raises at the end so the caller retries (a partial erasure is
   a compliance gap). Same shape as `KilnCMS.History.anonymize_actor/1`.
   """
   @spec anonymize_actor(Ecto.UUID.t()) :: :ok
@@ -138,11 +149,35 @@ defmodule KilnCMS.Security do
         end
       end)
 
+    failures = failures ++ anonymize_instance_actor(user_id)
+
     unless failures == [] do
       raise "security anonymize_actor incomplete for orgs #{inspect(failures)} — retry the erasure"
     end
 
     :ok
+  end
+
+  # The instance log (#2541) has no tenant: one sweep, reported as `:instance`
+  # among the failures so the erasure retries it like a site's.
+  defp anonymize_instance_actor(user_id) do
+    InstanceEvent
+    |> Ash.Query.for_read(:by_actor, %{user_id: user_id}, actor: system())
+    |> Ash.bulk_update!(:anonymize_actor, %{user_id: user_id},
+      actor: system(),
+      authorize_query_with: :error,
+      authorize_changeset_with: :error,
+      strategy: :stream,
+      return_records?: false,
+      return_errors?: true
+    )
+
+    []
+  rescue
+    error ->
+      require Logger
+      Logger.error("security anonymize_actor failed for the instance log: #{inspect(error)}")
+      [:instance]
   end
 
   @doc """
@@ -237,10 +272,46 @@ defmodule KilnCMS.Security do
     end
   end
 
-  defp prune_org(org_id, cutoff, chunk, after_id, deleted) do
+  @doc """
+  The instance log's retention window, in days (#2541):
+  `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS`, else
+  #{KilnCMS.CMS.SiteSecurityLog.default_days()}. `0` means keep forever.
+  The instance log has no site, so no site admin's setting decides it.
+  """
+  @spec instance_retention_days() :: non_neg_integer()
+  def instance_retention_days do
+    Application.get_env(
+      :kiln_cms,
+      :instance_security_log_retention_days,
+      KilnCMS.CMS.SiteSecurityLog.default_days()
+    )
+  end
+
+  @doc """
+  Delete instance log events (#2541) past their window. Runs as `system/0`.
+  Takes `:retention_days`, `:older_than` and `:chunk_size` as `prune/1`
+  does, and fails closed the same way. Returns `{:ok, deleted_count}`.
+  """
+  @spec prune_instance(keyword()) :: {:ok, non_neg_integer()}
+  def prune_instance(opts \\ []) do
+    case cutoff(opts) do
+      nil ->
+        {:ok, 0}
+
+      cutoff ->
+        chunk = Keyword.get(opts, :chunk_size, @default_chunk)
+        {:ok, prune_chunks(InstanceEvent, nil, cutoff, chunk, nil, 0)}
+    end
+  end
+
+  defp prune_org(org_id, cutoff, chunk, after_id, deleted),
+    do: prune_chunks(Event, org_id, cutoff, chunk, after_id, deleted)
+
+  # `tenant` is nil for the instance log, which has none.
+  defp prune_chunks(resource, tenant, cutoff, chunk, after_id, deleted) do
     page =
-      Event
-      |> Ash.Query.for_read(:older_than, %{cutoff: cutoff}, actor: system(), tenant: org_id)
+      resource
+      |> Ash.Query.for_read(:older_than, %{cutoff: cutoff}, actor: system(), tenant: tenant)
       |> then(&if after_id, do: Ash.Query.filter(&1, id > ^after_id), else: &1)
       |> Ash.Query.sort([id: :asc], prepend?: true)
       |> Ash.Query.limit(chunk)
@@ -255,12 +326,12 @@ defmodule KilnCMS.Security do
         Ash.bulk_destroy!(page, :prune, %{},
           actor: system(),
           authorize_changeset_with: :error,
-          tenant: org_id,
+          tenant: tenant,
           strategy: :stream,
           return_errors?: true
         )
 
-        prune_org(org_id, cutoff, chunk, List.last(page).id, deleted + length(page))
+        prune_chunks(resource, tenant, cutoff, chunk, List.last(page).id, deleted + length(page))
     end
   end
 end

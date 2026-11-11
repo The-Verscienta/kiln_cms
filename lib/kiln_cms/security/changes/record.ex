@@ -24,6 +24,10 @@ defmodule KilnCMS.Security.Changes.Record do
     * `:tenant` - `(record, changeset -> org id | nil)`; overrides the org the
       event belongs to (below), for a record whose org is not its tenant, such as
       a membership, which names its org in `organization_id`.
+    * `:scope` - `:site` (default) or `:instance`: an event about the
+      installation rather than a site goes to the instance log
+      (`KilnCMS.Security.InstanceEvent`, platform admins only, #2541), and no
+      tenant is resolved for it.
 
   The request context is read from the changeset context under
   `KilnCMS.Security.Recorder.context_key/0`, and the tenant from the changeset,
@@ -35,6 +39,16 @@ defmodule KilnCMS.Security.Changes.Record do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.Security.Recorder
+
+  @impl true
+  # A mistyped scope would otherwise route nowhere: `Recorder` skips an event
+  # with no tenant, and a skipped event does not fail the action (#2541).
+  def init(opts) do
+    case Keyword.get(opts, :scope, :site) do
+      scope when scope in [:site, :instance] -> {:ok, opts}
+      other -> {:error, "scope must be :site or :instance, got: #{inspect(other)}"}
+    end
+  end
 
   @impl true
   def change(changeset, opts, _context) do
@@ -96,8 +110,14 @@ defmodule KilnCMS.Security.Changes.Record do
   defp options(opts, changeset, record) do
     {target_type, target_id} = call(opts[:target], record, changeset) || {nil, nil}
 
+    scope = Keyword.get(opts, :scope, :site)
+
     [
-      tenant: call(opts[:tenant], record, changeset) || tenant(changeset, record),
+      scope: scope,
+      tenant:
+        if(scope == :site,
+          do: call(opts[:tenant], record, changeset) || tenant(changeset, record)
+        ),
       user: user(opts, changeset, record),
       target_type: target_type,
       target_id: target_id,

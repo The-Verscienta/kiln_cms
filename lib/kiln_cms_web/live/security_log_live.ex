@@ -190,6 +190,17 @@ defmodule KilnCMSWeb.SecurityLogLive do
           )}
         </:subtitle>
         <:actions>
+          <%!-- Instance-wide events (a canceled backup) are not in a site's log;
+                only a platform admin can open the log they are in (#2541). --%>
+          <.button
+            :if={KilnCMSWeb.LiveUserAuth.platform_admin_user?(@current_user)}
+            id="security-log-instance-link"
+            navigate={~p"/editor/instance-security-log"}
+            variant="ghost"
+            size="sm"
+          >
+            <.icon name="hero-server-stack" class="size-4" /> {gettext("Instance log")}
+          </.button>
           <.button
             id="security-log-export"
             href={export_path(@filters)}

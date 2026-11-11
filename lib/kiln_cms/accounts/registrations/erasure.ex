@@ -92,7 +92,9 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
     {"saved_views", "owner_id"},
     {"user_identities", "user_id"},
     {"security_events", "actor_id"},
-    {"security_events", "target_id"}
+    {"security_events", "target_id"},
+    {"instance_security_events", "actor_id"},
+    {"instance_security_events", "target_id"}
   ]
 
   @checks [

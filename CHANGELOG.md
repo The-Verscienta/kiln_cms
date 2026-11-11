@@ -56,6 +56,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new table `instance_security_events`; moves existing `backup_canceled` events out of the default site's security log into it). Optional: `KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS` (default 365).**
+  Rolling back moves them back to the default site's log before dropping the table; export the instance log first if you need it.
+  ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541) · [long form](docs/changelog/unreleased.md#instance-security-log-upgrade))
+
 - **If the app's environment sets `BACKUP_RCLONE_REMOTE`, check it before deploying: the official image now ships `rclone` (pinned, checksum-verified), so in-app backups start copying there, and an unreachable or unconfigured remote fails them. On a custom image without `rclone`, the variable now fails every in-app backup: install `rclone` or unset it.**
   No migration; rolling the pin back is safe. The image grows by about 82 MiB.
   ([#2482](https://github.com/The-Verscienta/kiln_cms/issues/2482) · [long form](docs/changelog/unreleased.md#rclone-in-image-upgrade))
@@ -94,7 +98,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2562](https://github.com/The-Verscienta/kiln_cms/pull/2562) · [long form](docs/changelog/unreleased.md#plugin-health-egress-upgrade))
 
 - **Run `mix ash.migrate` (new tables `backup_locks`, `backup_node_beats`; `backup_runs` gains `chain_id` and status `canceled`). Backups run on a new Oban queue `backup_steps` (1 per node; add 1 to `POOL_SIZE`); drain the `backups` queue before the next minor. Node names must be unique.**
-  Mid-deploy, don't start backups from an old node. Before rolling back, cancel running backups, then relabel `canceled` runs and delete `backup_canceled` events (#2509), or roll forward.
+  Mid-deploy, don't start backups from an old node. Before rolling back, cancel running backups and relabel `canceled` runs, or roll forward.
   ([#2537](https://github.com/The-Verscienta/kiln_cms/pull/2537) · [long form](docs/changelog/unreleased.md#backup-step-chain-upgrade))
 
 - **Run `mix ash.migrate` (new column `field_definitions.width`, new table `field_sections`). Field sync files exported from now on carry `width`, which builds from before this change refuse.** Rolling the pin back is safe.
@@ -130,7 +134,7 @@ Every summary line below that was shortened links to its own entry there.
   It clears `multiple` on such a field's definition when saved, keeping each list's first item, and stringifies a list written there.
   ([long form](docs/changelog/unreleased.md#scalar-list-fields-upgrade))
 
-- **Run `mix ash.migrate` (new table `site_admin_allowlist`). Rolling the pin back turns every site's admin allowlist off without a word; while a list is on, members and apps calling `/api/auth/sign_in` sign in only from listed networks.**
+- **Run `mix ash.migrate` (new table `site_admin_allowlist`, then its `restrict_sign_in` column, `NOT NULL DEFAULT true`). Rolling the pin back turns every site's admin allowlist off without a word; while a list is on, members and apps calling `/api/auth/sign_in` sign in only from listed networks unless the site clears "Also restrict sign-in" (#2493).**
   Nothing changes until a site admin saves a list. Lock-out: `bin/kiln_cms rpc 'KilnCMS.Release.admin_allowlist(clear: true)'`.
   ([long form](docs/changelog/unreleased.md#admin-allowlist-upgrade))
 
@@ -237,6 +241,10 @@ Every summary line below that was shortened links to its own entry there.
   Clients: `kiln.schemaComponents()` (`@kiln-cms/client`), `KilnClient.schema(format: :openapi)`. Guide: [docs/native-apps.md](docs/native-apps.md#generate-from-openapi-components).
   ([#2274](https://github.com/The-Verscienta/kiln_cms/issues/2274) · [long form](docs/changelog/unreleased.md#schema-openapi-and-check))
 
+- **An instance security log, for platform admins only: events about the whole installation rather than one site, starting with canceled backups, which no longer appear in the default site's Security log. Security log → Instance log, or `/editor/instance-security-log`, with filters and CSV.**
+  Guide: [docs/security-events.md](docs/security-events.md#the-instance-log).
+  ([#2541](https://github.com/The-Verscienta/kiln_cms/issues/2541) · [long form](docs/changelog/unreleased.md#instance-security-log))
+
 - **`GET /api/security/posture` returns the Security posture checks as JSON for monitoring: an administrator's JWT or API key (never `draft_write`), behind the site's admin allowlist, no details, cached 30 s per node.**
   The allowlist's JSON refusals now read "Not available from this network" / "Temporarily unavailable" (codes unchanged). Guide: [docs/api.md](docs/api.md#security-posture-monitoring).
   ([#2521](https://github.com/The-Verscienta/kiln_cms/issues/2521) · [#2648](https://github.com/The-Verscienta/kiln_cms/pull/2648) · [long form](docs/changelog/unreleased.md#security-posture-json))
@@ -328,6 +336,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Integer, float, date, date-time, time, URL, email, telephone, colour and slug custom fields can hold a list (Holds → A list in `/editor/fields`).**
   Stored as a JSON array of tidied values, one typed input per item in the editor; `custom_filter` takes `eq`/`in`/`has`/`has_all`/`has_none`/`count`. Guide: [docs/extending-content.md](docs/extending-content.md#make-a-field-hold-a-list-of-values).
   ([long form](docs/changelog/unreleased.md#scalar-list-fields))
+
+- **The admin allowlist has an "Also restrict sign-in" checkbox, on by default: cleared, members, readers and apps sign in from any network, at `/sign-in` and `POST /api/auth/sign_in` alike, while the console, `/setup` and their live pages stay behind the list.**
+  Admins only; recorded as `sign_in` on `admin_allowlist_changed`. An admin's password then yields an API token anywhere, so require two-factor sign-in first. Guide: [Let members sign in from anywhere](docs/admin-allowlist.md#let-members-sign-in-from-anywhere).
+  ([#2493](https://github.com/The-Verscienta/kiln_cms/issues/2493) · [long form](docs/changelog/unreleased.md#admin-allowlist-sign-in-toggle))
 
 - **Site admins can restrict the console and every sign-in route, members' and `/api/auth/sign_in` included, to listed IPv4/IPv6 networks, at Configure → Sign-in & access → Admin allowlist.**
   Off by default; fails closed; API keys and issued tokens are not affected. Guide: [docs/admin-allowlist.md](docs/admin-allowlist.md).
@@ -714,6 +726,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2596](https://github.com/The-Verscienta/kiln_cms/pull/2596) · [long form](docs/changelog/unreleased.md#scrollable-tables))
 
 ### Security
+
+- **A connection-string `BACKUP_RCLONE_REMOTE` no longer puts its credentials in `rclone`'s arguments; they go to that `rclone` process as `RCLONE_CONFIG_*` variables (#2690).**
+  ([#2690](https://github.com/The-Verscienta/kiln_cms/issues/2690) · [long form](docs/changelog/unreleased.md#rclone-remote-argv-credentials))
 
 - **Accepting an invitation over an unconfirmed account now also removes its two-step verification, passkeys, identity-provider links and push devices, and revokes its API keys (#2453).**
   ([#2593](https://github.com/The-Verscienta/kiln_cms/pull/2593) · [long form](docs/changelog/unreleased.md#invitation-takeover-credentials))

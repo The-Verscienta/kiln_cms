@@ -4,7 +4,9 @@ defmodule KilnCMS.CMS.Changes.RecordAdminAllowlistChange do
   `admin_allowlist_changed`, in the transaction, attributed to the admin.
 
   It says how the list moved — `state` (`on` or `off` after the save), `count`
-  (entries after), `added` and `removed` (how many) — and never which entries:
+  (entries after), `added` and `removed` (how many), and `sign_in`
+  (`restricted` or `open` after the save: "Also restrict sign-in", #2493) — and
+  never which entries:
   an allowlist is often a list of the admins' own home and office addresses,
   and the log keeps what it records for its whole retention. The entries
   themselves are on the settings page.
@@ -62,7 +64,8 @@ defmodule KilnCMS.CMS.Changes.RecordAdminAllowlistChange do
       "state" => if(after_save == [], do: "off", else: "on"),
       "count" => length(after_save),
       "added" => length(after_save -- before),
-      "removed" => length(before -- after_save)
+      "removed" => length(before -- after_save),
+      "sign_in" => if(Map.get(record, :restrict_sign_in) == false, do: "open", else: "restricted")
     }
   end
 end

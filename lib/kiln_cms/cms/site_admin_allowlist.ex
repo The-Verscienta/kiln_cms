@@ -4,6 +4,12 @@ defmodule KilnCMS.CMS.SiteAdminAllowlist do
   and IPv6 addresses and ranges, such as an office or a VPN. An empty list (the
   default, and a site with no row) means off: every network is admitted.
 
+  `restrict_sign_in` (#2493, on by default) says whether the list also gates
+  sign-in: `/sign-in` and the rest of the sign-in family, and the headless
+  `POST /api/auth/sign_in`. Turned off, members sign in from anywhere while the
+  console, `/setup` and their live sessions stay behind the list. It has no
+  effect while the list is empty.
+
   `KilnCMS.Security.AdminAllowlist` reads it for the gates; see that module for
   what is covered, what it costs and why it fails closed. The site decides:
   there is no operator ceiling (ADR 0018 constrains a site against one only
@@ -38,14 +44,14 @@ defmodule KilnCMS.CMS.SiteAdminAllowlist do
   """
   use KilnCMS.CMS.OrgSettings,
     table: "site_admin_allowlist",
-    accept: [:cidrs],
+    accept: [:cidrs, :restrict_sign_in],
     save_changes: [
       KilnCMS.CMS.Changes.NormalizeAdminAllowlist,
       KilnCMS.CMS.Changes.RefuseAdminLockout
     ],
     read: :admin,
     audit: {:change, KilnCMS.CMS.Changes.RecordAdminAllowlistChange},
-    admin_columns: [:cidrs, :updated_at],
+    admin_columns: [:cidrs, :restrict_sign_in, :updated_at],
     system_actions: [read: [:admin_allowlist, :operator], operator_override: :operator]
 
   @max_entries 100
@@ -101,6 +107,16 @@ defmodule KilnCMS.CMS.SiteAdminAllowlist do
       # message) by `NormalizeAdminAllowlist`; this is only a backstop, set
       # well above it so Ash's generic message never pre-empts that one.
       constraints max_length: @max_entries * 10, items: [max_length: 64]
+    end
+
+    # Does the list gate sign-in too (#2493)? On by default, so a site that
+    # had a list before this setting existed keeps what it had. `:save` is an
+    # upsert, and a defaulted column is always carried on its create side: a
+    # save that leaves this out resets it to `true`. Every writer passes both.
+    attribute :restrict_sign_in, :boolean do
+      allow_nil? false
+      default true
+      public? true
     end
   end
 end

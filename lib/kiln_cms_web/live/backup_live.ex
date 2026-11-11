@@ -492,6 +492,15 @@ defmodule KilnCMSWeb.BackupLive do
             <p class="mt-1 text-sm text-base-content/70">
               {gettext("The database and, on local storage, your uploaded media.")}
             </p>
+            <p class="mt-1 text-sm text-base-content/70">
+              <.link
+                id="backups-instance-log-link"
+                navigate={~p"/editor/instance-security-log"}
+                class="underline hover:no-underline"
+              >
+                {gettext("Canceled backups are recorded in the instance security log.")}
+              </.link>
+            </p>
           </div>
 
           <%!-- Enabled while a backup runs: a request then queues behind it.

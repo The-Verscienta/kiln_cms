@@ -105,6 +105,16 @@ defmodule KilnCMS.Backups.CancelTest do
   end
 
   defp canceled_events do
+    Security.list_instance_events!(actor: user(:admin), page: [limit: 100])
+    |> then(fn
+      %{results: results} -> results
+      list -> list
+    end)
+    |> Enum.filter(&(&1.type == :backup_canceled))
+  end
+
+  # The default site's own log, as one of its site admins would read it.
+  defp default_site_events do
     Security.list_events!(
       actor: user(:admin),
       tenant: KilnCMS.Accounts.default_org_id(),
@@ -114,7 +124,6 @@ defmodule KilnCMS.Backups.CancelTest do
       %{results: results} -> results
       list -> list
     end)
-    |> Enum.filter(&(&1.type == :backup_canceled))
   end
 
   defp aged(path) do
@@ -311,7 +320,7 @@ defmodule KilnCMS.Backups.CancelTest do
   end
 
   describe "audit (D5)" do
-    test "records backup_canceled in the default org's log, with the stamp and step", %{
+    test "records backup_canceled in the instance log, with the stamp and step (#2541)", %{
       admin: admin
     } do
       {:ok, %{status: :started}} = request()
@@ -326,6 +335,9 @@ defmodule KilnCMS.Backups.CancelTest do
       assert event.target_type == "backup_run"
       assert event.target_id == run.id
       assert event.metadata == %{"stamp" => stamp, "step" => "archive part 2"}
+
+      # Never in a site's log, where that site's admins could read it.
+      refute Enum.any?(default_site_events(), &(&1.target_id == run.id))
     end
   end
 end
