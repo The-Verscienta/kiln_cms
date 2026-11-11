@@ -141,6 +141,21 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   fields resolve in a second pass, after the editable ones, from the document
   and the values just coerced — and the payload is never consulted, so posting
   a value under a computed field's key can't overwrite it.
+
+  ## A field type this release does not know
+
+  A definition whose `field_type` this release does not register (#2605: a
+  newer release's type after a rollback, a removed plugin's) is left out of
+  every ordinary read (`KilnCMS.CMS.Preparations.RegisteredFieldTypes`), so
+  the editor never shows it and freshly computed delivery leaves it out
+  (the content API's raw `custom_fields` still returns a non-private value).
+  Its values are still what a record holds, and erasing them on the next title edit would be
+  the very loss described above. So this change reads the definitions with
+  those rows included and **holds** their values: a held key counts as
+  declared, is never coerced, checked or seen by a formula, and is written
+  back as stored. Under `:strict`, a supplied value must equal the stored one
+  (a whole-map round-trip); under `:drop`, a supplied value is carried
+  verbatim. `definitions/3` still answers the registered definitions only.
   """
   use Ash.Resource.Change
 
@@ -360,7 +375,13 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
   defp apply_definitions(changeset, existing, mode, context, supplied \\ nil) do
-    defs = definitions_for(changeset)
+    {defs, held} = scope_for(changeset)
+
+    # A content import carries ANOTHER site's map (`custom_fields_held:
+    # :drop`): a value under a held name was written by that site's field,
+    # which may share only the name with this one. Not carried — dropped with
+    # a warning like any key this site does not declare.
+    held = if changeset.context[:custom_fields_held] == :drop, do: [], else: held
 
     # The writing org (epic #336). `:media`/`:reference` fields resolve a snapshot
     # by id under this tenant, so a value pointing at another site's media/content
@@ -428,12 +449,16 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
     {cleaned, errors} = apply_computed(computed, changeset, cleaned, errors)
 
-    {refused, dropped} = undefined(defs, supplied, existing, mode)
+    # After the formulas, so none of them reads a held value (#2605).
+    {cleaned, errors} = hold(held, changeset, supplied, mode, {cleaned, errors})
+
+    {refused, dropped} = undefined(defs ++ held, supplied, existing, mode)
     errors = Enum.map(refused, &undefined_error(&1, defs)) ++ errors
 
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
     |> stash(defs)
+    |> stash_held(held)
     |> stash_supplied(supplied)
     |> stash_defaulted(defaulted)
     |> note_dropped(dropped)
@@ -516,16 +541,16 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # derives nothing new stays byte-identical to before — no spurious version
   # diff, no phantom "changed" attribute for anything downstream to react to.
   defp refresh_computed(changeset) do
-    defs = definitions_for(changeset)
-    changeset = stash(changeset, defs)
+    {defs, held} = scope_for(changeset)
+    changeset = changeset |> stash(defs) |> stash_held(held)
 
     case Enum.filter(defs, &(&1.field_type == :computed)) do
       [] -> changeset
-      computed -> recompute(changeset, defs, computed)
+      computed -> recompute(changeset, {defs, held}, computed)
     end
   end
 
-  defp recompute(changeset, defs, computed) do
+  defp recompute(changeset, {defs, held}, computed) do
     stored =
       changeset.data.custom_fields
       |> Kernel.||(%{})
@@ -541,10 +566,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # so. A record should not be in this state at all: `Changes.SyncFieldValues`
     # scrubs the key when the definition is destroyed and moves the values when
     # it is renamed, so what is left is a row written before that existed.
-    {defined, undefined} = Map.split(stored, Enum.map(defs, & &1.name))
+    #
+    # A held field's value (#2605) is kept as stored, out of the formulas' sight.
+    {defined, undefined} = Map.split(stored, Enum.map(defs ++ held, & &1.name))
+    {held_values, defined} = Map.split(defined, Enum.map(held, & &1.name))
 
     editable = Map.drop(defined, Enum.map(computed, & &1.name))
     {cleaned, errors} = apply_computed(computed, changeset, editable, [])
+    cleaned = Map.merge(cleaned, held_values)
 
     if cleaned == stored and errors == [] do
       changeset
@@ -612,12 +641,22 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # the cleaned map is folded out of the definitions — so "no definitions"
   # would drop every stored value on the record, skip every `required`, and
   # refuse every key the caller sent. A refusal raises instead.
-  defp definitions_for(%{resource: resource} = changeset) do
-    definitions(
-      resource,
+  defp definitions_for(changeset), do: changeset |> scope_for() |> elem(0)
+
+  # The definitions in scope, and the "held" ones beside them (#2605): rows
+  # whose `field_type` this release does not register. One read that includes
+  # them (`FieldDefinition.all_types_context/0`), split here. A held field is
+  # not coerced, checked, computed over or offered to anything — its stored
+  # value is only carried through the write (module doc, "A field type this
+  # release does not know").
+  defp scope_for(%{resource: resource} = changeset) do
+    resource
+    |> read_definitions(
       Ash.Changeset.get_attribute(changeset, :type_definition_id),
-      changeset.to_tenant
+      changeset.to_tenant,
+      FieldDefinition.all_types_context()
     )
+    |> Enum.split_with(&(not FieldDefinition.unknown_type?(&1)))
   end
 
   @doc """
@@ -628,11 +667,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   the same schema for a loaded record.
   """
   @spec definitions(module(), Ash.UUID.t() | nil, term()) :: [KilnCMS.CMS.FieldDefinition.t()]
-  def definitions(resource, type_definition_id, tenant) do
+  def definitions(resource, type_definition_id, tenant),
+    do: read_definitions(resource, type_definition_id, tenant, %{})
+
+  defp read_definitions(resource, type_definition_id, tenant, context) do
     opts = [
       actor: KilnCMS.CMS.Bookkeeping.system(),
       authorize_with: :error,
-      tenant: tenant
+      tenant: tenant,
+      context: context
     ]
 
     if function_exported?(resource, :__kiln_dynamic_entry__, 0) do
@@ -655,6 +698,71 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   defp stash(changeset, defs),
     do: Ash.Changeset.set_context(changeset, %{kiln_field_definitions: defs})
+
+  @doc """
+  The names of the held fields this change carried for `changeset` (#2605):
+  defined, but of a field type this release does not know, so their stored
+  values were kept rather than coerced. `[]` if the change did not run.
+  """
+  @spec held_names(Ash.Changeset.t()) :: [String.t()]
+  def held_names(changeset), do: changeset.context[:kiln_held_fields] || []
+
+  defp stash_held(changeset, held),
+    do: Ash.Changeset.set_context(changeset, %{kiln_held_fields: Enum.map(held, & &1.name)})
+
+  # Carry each held field's value through the write (#2605). Its type is one
+  # this release cannot coerce or check, so the value is never re-derived,
+  # only kept:
+  #
+  #   * absent from the payload, the stored value stays (an update);
+  #   * `:strict`: a supplied value must equal the stored one (a client
+  #     writing back the map it read), anything else is refused;
+  #   * `:drop` (a restore, a promote, a copy): a supplied value is carried
+  #     verbatim — it is a whole map from somewhere this site wrote. (Not an
+  #     import, which passes `custom_fields_held: :drop` and holds nothing.)
+  #
+  # A duplicate leaves a held field that is unique blank, as it does any
+  # other unique field (#2276).
+  defp hold([], _changeset, _supplied, _mode, acc), do: acc
+
+  defp hold(held, changeset, supplied, mode, acc) do
+    stored = held_base(changeset)
+    blank_unique? = changeset.context[:custom_fields_unique] == :blank
+
+    Enum.reduce(held, acc, fn def, {cleaned, errors} = acc ->
+      name = def.name
+
+      cond do
+        blank_unique? and UniqueValues.unique_def?(def) ->
+          acc
+
+        Map.has_key?(supplied, name) and mode == :drop ->
+          {Map.put(cleaned, name, supplied[name]), errors}
+
+        Map.has_key?(supplied, name) and supplied[name] != Map.get(stored, name) ->
+          {cleaned, [held_error(def) | errors]}
+
+        Map.has_key?(stored, name) ->
+          {Map.put(cleaned, name, stored[name]), errors}
+
+        true ->
+          acc
+      end
+    end)
+  end
+
+  # What a held field holds now: a restore's `existing` is `%{}`, so this is
+  # read off the record, not the merge base.
+  defp held_base(%{action_type: :create}), do: %{}
+  defp held_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
+
+  defp held_error(def) do
+    error(
+      def,
+      "can't be changed: its field type (#{def.field_type}) is not one this release " <>
+        "knows. Upgrade Kiln or reinstall the plugin that provides it, or delete the field"
+    )
+  end
 
   # The keys the caller actually sent, before the merge and the defaults
   # filled the rest in. `KilnCMS.I18n.Validations.SharedFieldsReadOnly` judges

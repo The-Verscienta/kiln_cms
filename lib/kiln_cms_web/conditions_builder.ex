@@ -23,7 +23,8 @@ defmodule KilnCMSWeb.ConditionsBuilder do
   @type rule_state :: %{
           mode: String.t(),
           rows: [row()],
-          nested?: boolean()
+          nested?: boolean(),
+          held?: boolean()
         }
   @type t :: %{String.t() => rule_state()}
 
@@ -74,7 +75,25 @@ defmodule KilnCMSWeb.ConditionsBuilder do
   defp display(list) when is_list(list), do: Enum.map_join(list, ", ", &display/1)
   defp display(value), do: to_string(value)
 
-  defp empty, do: %{mode: "all", rows: [], nested?: false}
+  defp empty, do: %{mode: "all", rows: [], nested?: false, held?: false}
+
+  @doc """
+  Keep as stored every rule that names one of `names`: siblings of a field
+  type this release does not know (#2605). The field picker offers no such
+  field, so showing the rule as rows would rewrite it on the next save; it is
+  shown as a note instead, like a nested rule, and left out of
+  `rule_params/2` until the admin removes it.
+  """
+  @spec hold(t(), [String.t()]) :: t()
+  def hold(state, []), do: state
+
+  def hold(state, names) do
+    Map.new(state, fn {rule, rs} ->
+      if Enum.any?(rs.rows, &(&1["field"] in names)),
+        do: {rule, %{rs | nested?: true, held?: true}},
+        else: {rule, rs}
+    end)
+  end
 
   @doc "An empty row, for \"Add a condition\"."
   def blank_row(siblings) do
@@ -88,7 +107,7 @@ defmodule KilnCMSWeb.ConditionsBuilder do
   @doc "Add a blank row to `rule`."
   def add(state, rule, siblings) when rule in @rules do
     update_in(state[rule], fn rs ->
-      %{rs | rows: rs.rows ++ [blank_row(siblings)], nested?: false}
+      %{rs | rows: rs.rows ++ [blank_row(siblings)], nested?: false, held?: false}
     end)
   end
 
