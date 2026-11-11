@@ -131,7 +131,7 @@ The same token authenticates GraphQL (`POST /gql` and its WebSocket) — see the
 
 Anonymous means **no `Authorization` header**. A bearer token that does not
 verify (malformed, expired, or signed by another instance), a bare `Bearer`,
-or the scheme spelled `bearer` is answered `401` `invalid_token` with
+or a JWT under the scheme spelled `bearer` is answered `401` `invalid_token` with
 `WWW-Authenticate: Bearer error="invalid_token"` on `/api/json`, `/gql` and
 the other `/api` routes, not served as an anonymous read (#2161). Treat it as
 "sign in again", and send no header when you mean to read as the public.
