@@ -660,9 +660,10 @@ defmodule KilnCMS.Backups do
   @doc """
   Whether `rclone_remote/0` is set but this image has no `rclone` (#2218).
 
-  Not a reason to refuse or fail a backup: the official image ships without
-  rclone, and cron on the host may be copying the same files off-site. It
-  does mean a backup taken from the app is local-only, which the panel says.
+  The official image ships rclone, so this is a custom image without it. A
+  backup taken from the app then fails at its off-site step (#2482), which the
+  panel says ahead of time. Not a reason to refuse to start one: its local
+  files are kept and can be resumed once rclone is installed.
   """
   @spec rclone_missing?() :: boolean()
   def rclone_missing?,
