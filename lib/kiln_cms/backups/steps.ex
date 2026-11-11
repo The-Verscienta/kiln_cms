@@ -83,6 +83,7 @@ defmodule KilnCMS.Backups.Steps do
     Lock,
     Manifest,
     MediaArchive,
+    RcloneRemote,
     Recorder,
     Redact,
     Retention,
@@ -1383,19 +1384,22 @@ defmodule KilnCMS.Backups.Steps do
 
         exe ->
           files = artifacts ++ expected_sidecars(artifacts)
-          {remote, for(file <- files, do: {file, upload(exe, dir, file, remote)})}
+          # A connection-string remote's parameters go to rclone as
+          # `RCLONE_CONFIG_*` variables, never as an argument (#2690).
+          target = RcloneRemote.split_credentials(remote)
+          {remote, for(file <- files, do: {file, upload(exe, dir, file, target)})}
       end
     end
   end
 
-  defp upload(exe, dir, file, remote) do
+  defp upload(exe, dir, file, {remote, env}) do
     path = Path.join(dir, file.path)
 
     case precheck(path, file) do
       :ok ->
         # Mirrors the script's `rclone copy <file> <remote>/<subdir>`.
         subdir = file.path |> Path.dirname() |> Path.basename()
-        cmd(exe, ["copy", path, "#{remote}/#{subdir}"])
+        cmd(exe, ["copy", path, "#{remote}/#{subdir}"], env)
 
       {:error, reason} ->
         {:refused, reason}

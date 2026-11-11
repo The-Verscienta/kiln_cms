@@ -1111,6 +1111,50 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert manifest!(ctx)["offsite"] == "r2:kiln"
     end
 
+    test "a connection-string remote's credentials reach rclone through its environment only (#2690)",
+         ctx do
+      stub!(ctx.bin, "rclone", """
+      #!/bin/sh
+      printf '%s %s %s\\n' "$1" "$(basename "$2")" "$3" >> "#{ctx.log}"
+      env | grep '^RCLONE_CONFIG_' | sort >> "#{ctx.log}.env"
+      echo -- >> "#{ctx.log}.env"
+      """)
+
+      remote =
+        ":s3,provider=Cloudflare,access_key_id=AKIAEXAMPLE1,secret_access_key='SUPER,SECRET:VAL':kiln"
+
+      assert {out, 0} =
+               backup(ctx, "all", [
+                 {"BACKUP_MEDIA_PART_MB", "16"},
+                 {"BACKUP_RCLONE_REMOTE", remote}
+               ])
+
+      lines = ctx.log |> File.read!() |> String.split("\n", trim: true)
+      assert [_ | _] = lines
+
+      for line <- lines do
+        assert line =~ ~r{ kiln_offsite:kiln/(db|media)\z}
+        refute line =~ "SECRET"
+        refute line =~ "AKIAEXAMPLE1"
+      end
+
+      blocks = (ctx.log <> ".env") |> File.read!() |> String.split("--\n", trim: true)
+      assert length(blocks) == length(lines)
+
+      for block <- blocks do
+        assert String.split(block, "\n", trim: true) == [
+                 "RCLONE_CONFIG_KILN_OFFSITE_ACCESS_KEY_ID=AKIAEXAMPLE1",
+                 "RCLONE_CONFIG_KILN_OFFSITE_PROVIDER=Cloudflare",
+                 "RCLONE_CONFIG_KILN_OFFSITE_SECRET_ACCESS_KEY=SUPER,SECRET:VAL",
+                 "RCLONE_CONFIG_KILN_OFFSITE_TYPE=s3"
+               ]
+      end
+
+      # The progress line names the remote rclone was given, not the string.
+      assert out =~ "Off-site copy → kiln_offsite:kiln"
+      refute out =~ "SECRET"
+    end
+
     test "a failed copy of part 2 fails the run but keeps the finished local set", ctx do
       stub!(ctx.bin, "rclone", """
       #!/bin/sh

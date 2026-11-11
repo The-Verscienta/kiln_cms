@@ -82,6 +82,21 @@ defmodule KilnCMS.Security.AdminAllowlistTest do
     assert AdminAllowlist.verdict(:unavailable, [@me]) == :unavailable
   end
 
+  test "a stored setting with sign-in open is the list for the console and off for sign-in (#2493)" do
+    {:on, cidrs} = AdminAllowlist.from_cidrs(["203.0.113.0/24"])
+    stored = AdminAllowlist.from_row(%{cidrs: ["203.0.113.0/24"], restrict_sign_in: false})
+
+    assert stored == {:console_only, cidrs}
+    assert AdminAllowlist.for_surface(stored, :console) == {:on, cidrs}
+    assert AdminAllowlist.for_surface(stored, :sign_in) == :off
+    # An empty list is off whatever the setting; a missing setting restricts.
+    assert AdminAllowlist.from_row(%{cidrs: [], restrict_sign_in: false}) == :off
+    assert AdminAllowlist.from_row(%{cidrs: ["203.0.113.0/24"]}) == {:on, cidrs}
+    # Reaching a gate unprojected, it is judged as the console would judge it.
+    assert AdminAllowlist.verdict(stored, [@other]) == :not_listed
+    assert AdminAllowlist.verdict(stored, [@me]) == :allowed
+  end
+
   test "a stored entry that does not parse admits nothing, and does not turn the list off" do
     assert AdminAllowlist.from_cidrs(["not an address"]) == {:on, []}
     assert AdminAllowlist.verdict({:on, []}, [@me]) == :not_listed
@@ -149,6 +164,25 @@ defmodule KilnCMS.Security.AdminAllowlistTest do
 
       assert KilnCMS.OrgSettings.with_actor(nil, fn -> AdminAllowlist.policy(site.id) end) ==
                :unavailable
+    end
+
+    test "a site last read with sign-in open stays closed on both surfaces (#2493)" do
+      site = org("aal-last-console-only")
+
+      CMS.save_site_admin_allowlist!(%{cidrs: ["203.0.113.0/24"], restrict_sign_in: false},
+        actor: admin(site),
+        tenant: site.id,
+        context: %{client_ip: @me}
+      )
+
+      assert AdminAllowlist.policy(site.id, :sign_in) == :off
+      expire_cache(site)
+
+      for surface <- [:console, :sign_in] do
+        assert KilnCMS.OrgSettings.with_actor(nil, fn ->
+                 AdminAllowlist.policy(site.id, surface)
+               end) == :unavailable
+      end
     end
 
     test "a save forgets the last-known value, so a list turned on is never read as off" do

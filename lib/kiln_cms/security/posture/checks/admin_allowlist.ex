@@ -10,6 +10,10 @@ defmodule KilnCMS.Security.Posture.Checks.AdminAllowlist do
   read with `AdminAllowlist.configured/1`, the gates' own read with the switch
   left out, so the page can see a list the switch is hiding. A list that could
   not be read is `:unknown`.
+
+  A list that leaves sign-in open ("Also restrict sign-in" off, #2493) still
+  passes, since the site chose it, but says so: sign-in is open to every
+  network, and `facts.sign_in_restricted` is `false`.
   """
   use Kiln.Security.Check
   use Gettext, backend: KilnCMSWeb.Gettext
@@ -56,14 +60,33 @@ defmodule KilnCMS.Security.Posture.Checks.AdminAllowlist do
         )
 
       {:on, cidrs} ->
-        pass(
-          ngettext(
-            "Only %{count} listed network can reach the console and sign-in.",
-            "Only %{count} listed networks can reach the console and sign-in.",
-            length(cidrs)
-          ),
-          Keyword.put(opts, :facts, %{entries: length(cidrs), operator_disabled: false})
-        )
+        if AdminAllowlist.configured(org_id, :sign_in) == :off do
+          pass(
+            ngettext(
+              "Only %{count} listed network can reach the console. Sign-in is open to every network.",
+              "Only %{count} listed networks can reach the console. Sign-in is open to every network.",
+              length(cidrs)
+            ),
+            Keyword.put(opts, :facts, %{
+              entries: length(cidrs),
+              operator_disabled: false,
+              sign_in_restricted: false
+            })
+          )
+        else
+          pass(
+            ngettext(
+              "Only %{count} listed network can reach the console and sign-in.",
+              "Only %{count} listed networks can reach the console and sign-in.",
+              length(cidrs)
+            ),
+            Keyword.put(opts, :facts, %{
+              entries: length(cidrs),
+              operator_disabled: false,
+              sign_in_restricted: true
+            })
+          )
+        end
 
       :unavailable ->
         unknown(gettext("The site's admin allowlist could not be read."), opts)

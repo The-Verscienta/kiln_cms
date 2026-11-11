@@ -59,7 +59,8 @@ defmodule KilnCMS.Security.Event do
     :registration_queued,
     :registration_approved,
     :registration_rejected,
-    :backup_canceled,
+    # `:backup_canceled` lived here until #2541; it is an instance event now
+    # (`KilnCMS.Security.InstanceEvent`), and the migration moved its rows.
     # A drafts-only API key presented again after it was rotated (#2245):
     # two parties held one secret, and the whole lineage was revoked.
     :api_key_reuse_detected
@@ -95,7 +96,7 @@ defmodule KilnCMS.Security.Event do
     session_idle_expired: ~w(timeout_minutes tier surface),
     all_sessions_revoked: ~w(count except_self),
     admin_access_refused: ~w(surface),
-    admin_allowlist_changed: ~w(state count added removed),
+    admin_allowlist_changed: ~w(state count added removed sign_in),
     admin_allowlist_overridden: ~w(change count),
     sign_in_unlock_requested: ~w(surface),
     sign_in_unlocked: ~w(was_locked),
@@ -103,7 +104,6 @@ defmodule KilnCMS.Security.Event do
     registration_queued: ~w(method),
     registration_approved: ~w(role via),
     registration_rejected: ~w(outcome),
-    backup_canceled: ~w(stamp step),
     # `revoked`: how many keys of the lineage the detection revoked.
     api_key_reuse_detected: ~w(name revoked)
   }
