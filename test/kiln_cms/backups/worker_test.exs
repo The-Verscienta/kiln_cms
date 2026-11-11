@@ -451,8 +451,11 @@ defmodule KilnCMS.Backups.WorkerTest do
       raw = File.read!(Manifest.path(dir))
       decoded = Jason.decode!(raw)
 
+      # `components` is #2219's, additive like #2218's keys.
       assert decoded |> Map.keys() |> Enum.sort() ==
-               ~w(artifacts error finished_at keep_days offsite ok started_at trigger version)
+               ~w(artifacts components error finished_at keep_days offsite ok started_at trigger version)
+
+      assert decoded["components"] == ["db", "media"]
 
       # The original four keys are still there, unchanged (#2218 only adds).
       assert [db, media] = decoded["artifacts"]

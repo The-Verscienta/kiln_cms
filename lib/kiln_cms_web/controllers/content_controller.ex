@@ -752,29 +752,46 @@ defmodule KilnCMSWeb.ContentController do
         else:
           KilnCMS.Search.facets(query, authorize?: true, tenant: org_id, locale: locale).categories
 
-    # A sparse result set gets a trigram "did you mean" (published titles
-    # only) — the fuzzy hybrid leg may have rescued a typo's hits, and the
-    # suggestion then names the corrected term. Exact-match queries never
-    # suggest (`Search.suggest/2` skips exact word matches).
-    total = length(results.posts) + length(results.pages) + length(results.entries)
-
-    suggestion =
-      if query != "" and total < 3,
-        do: KilnCMS.Search.suggest(query, authorize?: true, tenant: org_id, locale: locale)
+    suggestion = search_suggestion(query, results, filters, org_id, locale)
 
     conn
     # Don't cache personalized/empty query result pages on shared caches.
     |> put_resp_header("cache-control", "private, no-cache")
     |> assign(:locale, locale)
     |> assign(:page_title, gettext("Search"))
-    |> assign(:locale_links, search_locale_links(locale, query, KilnCMSWeb.Tenant.base_url(org)))
+    |> assign(
+      :locale_links,
+      search_locale_links(locale, query, category_slug(category), KilnCMSWeb.Tenant.base_url(org))
+    )
     |> render(:search,
       query: query,
       results: results,
       suggestion: suggestion,
       facets: facets,
-      active_category: if(is_struct(category), do: category)
+      active_category: if(is_struct(category), do: category),
+      unknown_category?: category == :unknown
     )
+  end
+
+  # A sparse result set gets a trigram "did you mean" (published titles
+  # only) — the fuzzy hybrid leg may have rescued a typo's hits, and the
+  # suggestion then names the corrected term. Exact-match queries never
+  # suggest (`Search.suggest/2` skips exact word matches). Scoped like the
+  # search, so the suggestion's link (which keeps the category) leads
+  # somewhere (#2457).
+  defp search_suggestion("", _results, _filters, _org_id, _locale), do: nil
+
+  defp search_suggestion(query, results, filters, org_id, locale) do
+    total = length(results.posts) + length(results.pages) + length(results.entries)
+
+    if total < 3 do
+      KilnCMS.Search.suggest(query,
+        authorize?: true,
+        tenant: org_id,
+        locale: locale,
+        category_id: filters[:category_id]
+      )
+    end
   end
 
   # Resolve a `?category=` slug world-readably: nil when absent, the category
@@ -787,6 +804,11 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   defp category_filter(_absent, _org_id), do: nil
+
+  # The slug links on the page carry forward (#2457): only a category that
+  # resolved. An unknown one is dropped, so a resubmit searches everything.
+  defp category_slug(%{slug: slug}), do: slug
+  defp category_slug(_none_or_unknown), do: nil
 
   # Dynamic-entry hits as plain view maps: resolve each result's type through
   # the registry for its URL segment and label, dropping hits whose type no
@@ -813,8 +835,8 @@ defmodule KilnCMSWeb.ContentController do
   end
 
   # Language-switcher links to the search page (preserving the query) per locale.
-  defp search_locale_links(current, query, base_url) do
-    suffix = if query == "", do: "", else: "?q=#{URI.encode_www_form(query)}"
+  defp search_locale_links(current, query, category_slug, base_url) do
+    suffix = KilnCMSWeb.ContentHTML.search_params(query, category_slug)
 
     for locale <- I18n.locales() do
       prefix = if locale == I18n.default_locale(), do: "", else: "/#{locale}"

@@ -35,6 +35,26 @@ defmodule KilnCMS.Backups.Chain do
   `reap/0` releases a lock whose step job finished without moving the chain on
   (killed by its timeout, discarded, canceled, deleted). Both run before every
   request and on every heartbeat tick.
+
+  ## What a backup covers (#2219)
+
+  A request may name its components (`:db`, `:media`; nil is everything). The
+  start job's args carry them (`"components"`, with `"scheduled"` and
+  `"schedule_ids"`), and the start step writes what it settled on into the
+  chain's `state.json`. From there on **`state.json` is the only record of the
+  holder's components**: later steps, and `in_flight/0`, read them there. They
+  are never on the Lock row, whose `:hold` and `:clear` an older node runs
+  without knowing such columns.
+
+  A queued request's are on the row (`waiting_components`, ...), and count only
+  while their scope is that request's (`waiting_scope/1`). A fresh request that
+  folds into a queued fresh one widens it to the union of the two; folding into
+  a queued request whose scope is not valid makes it cover everything. A fresh
+  request and a resume: a resume folding into a queued fresh request widens it
+  to everything. A queued resume records its run's components, and a fresh
+  request folds into it only when they cover the request; otherwise the
+  request is refused, `{:error, :resume_queued}`, and nothing is written. A
+  resume queued by a node from before #2219 covers everything.
   """
   import Ecto.Query
 
@@ -106,16 +126,28 @@ defmodule KilnCMS.Backups.Chain do
   `{:ok, %{status: :started | :queued | :folded, chain: chain | nil}}`, where
   `chain` is the new chain for `:started` and the running one otherwise; or
   `{:error, reason}`: `availability/0`'s reason, a resume refusal
-  (`Backups.resumable_run/2`), or `:in_flight` when the stamp to resume is the
-  one the running chain holds.
+  (`Backups.resumable_run/2`), `:in_flight` when the stamp to resume is the
+  one the running chain holds, or `:resume_queued` when a queued resume
+  doesn't cover a fresh request (#2219).
   """
   @spec request(map()) :: {:ok, map()} | {:error, term()}
   def request(attrs) do
     trigger = Normalize.trigger(Map.get(attrs, :trigger) || "manual")
     resume = Map.get(attrs, :resume)
 
+    req = %{
+      trigger: trigger,
+      resume: resume,
+      by: Map.get(attrs, :requested_by),
+      components: Map.get(attrs, :components),
+      scheduled: Map.get(attrs, :scheduled) || [],
+      schedule_ids: Map.get(attrs, :schedule_ids) || []
+    }
+
     with :ok <- Backups.availability(),
-         :ok <- precheck_resume(resume) do
+         {:ok, resume_components} <- precheck_resume(resume) do
+      req = Map.put(req, :resume_components, resume_components)
+
       # Best-effort housekeeping first, each in its own transaction: a holder
       # that is gone must not make this request queue behind it forever.
       # Reclaim judges a node by its heartbeat rows: with the heartbeat off
@@ -124,53 +156,162 @@ defmodule KilnCMS.Backups.Chain do
       _ = if heartbeat?(), do: reclaim_stale()
       _ = reap()
 
-      result =
-        with_lock(fn row ->
-          decide(row, trigger, resume, Map.get(attrs, :requested_by))
-        end)
+      result = with_lock(fn row -> decide(row, req) end)
 
-      with {:ok, %{status: :folded}} <- result, do: announce_fold(trigger, resume)
+      with {:ok, %{status: :folded}} <- result, do: announce_fold(req)
       result
     end
   end
 
-  defp precheck_resume(nil), do: :ok
+  defp precheck_resume(nil), do: {:ok, nil}
 
+  # The run's components travel with the queued resume (#2219), so a fresh
+  # request can tell whether the resume covers it.
   defp precheck_resume(stamp) do
-    with {:ok, _run} <- Backups.resumable_run(stamp), do: :ok
+    with {:ok, run} <- Backups.resumable_run(stamp) do
+      {:ok, if(run.components == [], do: nil, else: run.components)}
+    end
   end
 
-  defp decide(%{chain_id: nil} = row, trigger, resume, _by) do
+  defp decide(%{chain_id: nil} = row, req) do
     chain = Ash.UUID.generate()
 
-    with {:ok, job} <- insert_step(start_args(chain, trigger, resume, 0, nil)) do
-      hold!(row, chain, trigger, resume, job.id)
+    with {:ok, job} <- insert_step(start_args(chain, req, 0, nil)) do
+      hold!(row, chain, req.trigger, req.resume, job.id)
       {:ok, %{status: :started, chain: chain}}
     end
   end
 
-  defp decide(row, trigger, resume, by) do
+  defp decide(row, req) do
     cond do
-      resume != nil and resume in [row.stamp, row.resume_stamp] ->
+      req.resume != nil and req.resume in [row.stamp, row.resume_stamp] ->
         {:error, :in_flight}
 
       is_nil(row.waiting_requested_at) ->
-        write!(
-          &Backups.queue_backup_request!/3,
-          row,
-          %{waiting_trigger: trigger, waiting_resume_stamp: resume, waiting_requested_by: by}
-        )
+        write!(&Backups.queue_backup_request!/3, row, %{
+          waiting_trigger: req.trigger,
+          waiting_resume_stamp: req.resume,
+          waiting_requested_by: req.by,
+          waiting_components: if(req.resume, do: req.resume_components, else: req.components),
+          waiting_scheduled: req.scheduled,
+          waiting_schedule_ids: req.schedule_ids
+        })
 
         {:ok, %{status: :queued, chain: row.chain_id}}
 
+      is_binary(row.waiting_resume_stamp) and is_nil(req.resume) and
+          not resume_covers?(row, req) ->
+        {:error, :resume_queued}
+
       true ->
-        write!(&Backups.fold_backup_request!/3, row, %{})
+        write!(&Backups.fold_backup_request!/3, row, fold_fields(row, req))
         {:ok, %{status: :folded, chain: row.chain_id}}
     end
   end
 
-  defp announce_fold(trigger, resume) do
-    what = if resume, do: "a resume of #{resume}", else: "a backup (#{trigger})"
+  # A queued resume backs up what its run did. A fresh request folds into it
+  # only when that covers the request (everything, for one that names no
+  # components, is what this deployment backs up); otherwise it is refused
+  # (`:resume_queued`) rather than reported folded and never run. A resume
+  # queued by a node from before #2219 (scope not valid) is of a run that
+  # backed up everything, as every run did then: it covers anything.
+  defp resume_covers?(row, req) do
+    case waiting_scope(row) do
+      %{valid?: false} -> true
+      %{components: nil} -> true
+      %{components: covered} -> Enum.all?(asked(req), &(&1 in covered))
+    end
+  end
+
+  # What a fresh request would back up here: everything is what this
+  # deployment has.
+  defp asked(%{components: nil}), do: Backups.expected_components()
+  defp asked(%{components: components}), do: components
+
+  # What the queued request covers once `req` folds into it. A queued resume
+  # keeps its run's components (`decide/2` folds only a request it covers);
+  # anything folding into a queued fresh request widens it, and one whose
+  # scope is not valid covers everything (`waiting_scope/1`).
+  defp fold_fields(%{waiting_resume_stamp: stamp} = row, req) when is_binary(stamp) do
+    case waiting_scope(row) do
+      %{valid?: true} = scope ->
+        %{
+          waiting_components: scope.components,
+          waiting_scheduled: Enum.uniq(scope.scheduled ++ req.scheduled),
+          waiting_schedule_ids: Enum.uniq(scope.schedule_ids ++ req.schedule_ids)
+        }
+
+      %{valid?: false} ->
+        %{
+          waiting_components: nil,
+          waiting_scheduled: req.scheduled,
+          waiting_schedule_ids: req.schedule_ids
+        }
+    end
+  end
+
+  defp fold_fields(row, req) do
+    case waiting_scope(row) do
+      %{valid?: true} = scope ->
+        %{
+          waiting_components: widen(scope.components, req_components(req)),
+          waiting_scheduled: Enum.uniq(scope.scheduled ++ req.scheduled),
+          waiting_schedule_ids: Enum.uniq(scope.schedule_ids ++ req.schedule_ids)
+        }
+
+      %{valid?: false} ->
+        %{
+          waiting_components: nil,
+          waiting_scheduled: req.scheduled,
+          waiting_schedule_ids: req.schedule_ids
+        }
+    end
+  end
+
+  # A resume covers what its run did, which a fresh request's list can't
+  # name: as components, everything.
+  defp req_components(%{resume: resume}) when is_binary(resume), do: nil
+  defp req_components(req), do: req.components
+
+  defp widen(nil, _other), do: nil
+  defp widen(_one, nil), do: nil
+  defp widen(one, other), do: Enum.filter(Lock.components(), &(&1 in one or &1 in other))
+
+  @doc """
+  What the queued request on `row` covers (#2219): `components` (nil is
+  everything), `scheduled`, `schedule_ids`, and whether the row's fields for
+  them are `valid?`. They count only while `waiting_scope_at` equals
+  `waiting_requested_at` and `waiting_scope_folds` equals `waiting_folds`: a
+  node from before #2219 that queued or folded a request wrote neither, and
+  then the request covers everything.
+  """
+  @spec waiting_scope(Lock.t()) :: %{
+          valid?: boolean(),
+          components: [atom()] | nil,
+          scheduled: [atom()],
+          schedule_ids: [String.t()]
+        }
+  def waiting_scope(row) do
+    valid? =
+      match?(%DateTime{}, row.waiting_scope_at) and
+        match?(%DateTime{}, row.waiting_requested_at) and
+        DateTime.compare(row.waiting_scope_at, row.waiting_requested_at) == :eq and
+        row.waiting_scope_folds == row.waiting_folds
+
+    if valid? do
+      %{
+        valid?: true,
+        components: row.waiting_components,
+        scheduled: row.waiting_scheduled || [],
+        schedule_ids: row.waiting_schedule_ids || []
+      }
+    else
+      %{valid?: false, components: nil, scheduled: [], schedule_ids: []}
+    end
+  end
+
+  defp announce_fold(req) do
+    what = if req.resume, do: "a resume of #{req.resume}", else: "a backup (#{req.trigger})"
 
     Logger.info(
       "Backup request folded: #{what} was asked for while one runs and another is queued; " <>
@@ -178,8 +319,9 @@ defmodule KilnCMS.Backups.Chain do
     )
 
     :telemetry.execute([:kiln_cms, :backups, :request, :folded], %{count: 1}, %{
-      trigger: trigger,
-      resume: resume
+      trigger: req.trigger,
+      resume: req.resume,
+      components: req.components
     })
   end
 
@@ -349,13 +491,20 @@ defmodule KilnCMS.Backups.Chain do
 
       requested_at ->
         chain = Ash.UUID.generate()
-        trigger = row.waiting_trigger || "manual"
-        resume = row.waiting_resume_stamp
+        scope = waiting_scope(row)
 
-        args = start_args(chain, trigger, resume, row.waiting_folds, requested_at)
+        req = %{
+          trigger: row.waiting_trigger || "manual",
+          resume: row.waiting_resume_stamp,
+          components: scope.components,
+          scheduled: scope.scheduled,
+          schedule_ids: scope.schedule_ids
+        }
+
+        args = start_args(chain, req, row.waiting_folds, requested_at)
 
         with {:ok, job} <- insert_step(args) do
-          hold!(row, chain, trigger, resume, job.id)
+          hold!(row, chain, req.trigger, req.resume, job.id)
           {:ok, chain}
         end
     end
@@ -382,13 +531,18 @@ defmodule KilnCMS.Backups.Chain do
 
   defp write_opts, do: [actor: Backups.system(), return_notifications?: true]
 
-  defp start_args(chain, trigger, resume, folded, requested_at) do
+  # `"components"` nil is everything. A node from before #2219 ignores the
+  # three keys, and backs up everything.
+  defp start_args(chain, req, folded, requested_at) do
     %{
       "chain" => chain,
       "step" => "start",
       "part" => nil,
-      "trigger" => trigger,
-      "resume" => resume,
+      "trigger" => req.trigger,
+      "resume" => req.resume,
+      "components" => req.components && Enum.map(req.components, &Atom.to_string/1),
+      "scheduled" => Enum.map(req.scheduled, &to_string/1),
+      "schedule_ids" => req.schedule_ids,
       "folded" => folded,
       "requested_at" => requested_at && DateTime.to_iso8601(requested_at)
     }
@@ -632,6 +786,7 @@ defmodule KilnCMS.Backups.Chain do
           step: row.step,
           part: row.part,
           parts_total: parts_total(row),
+          components: holder_components(row),
           phase: row.phase,
           acquired_at: row.acquired_at,
           waiting:
@@ -639,6 +794,7 @@ defmodule KilnCMS.Backups.Chain do
               %{
                 trigger: row.waiting_trigger,
                 resume: row.waiting_resume_stamp,
+                components: waiting_scope(row).components,
                 requested_at: row.waiting_requested_at,
                 folds: row.waiting_folds
               }
@@ -663,6 +819,22 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   defp parts_total(_row), do: nil
+
+  # The holder's components, from its `state.json` (their only record; see the
+  # moduledoc): readable only on a node that has the chain's backup directory,
+  # once the start step has handed over. Nil elsewhere.
+  defp holder_components(%{stamp: stamp, dir_id: dir_id})
+       when is_binary(stamp) and is_binary(dir_id) do
+    with {:ok, ^dir_id} <- DirId.current(),
+         {:ok, %{"components" => names}} when is_list(names) <-
+           WorkState.read(Backups.work_dir(stamp)) do
+      Enum.filter(Lock.components(), &(Atom.to_string(&1) in names))
+    else
+      _ -> nil
+    end
+  end
+
+  defp holder_components(_row), do: nil
 
   @doc "The stamp the lock holds (or is about to: a resume not yet begun), or nil."
   @spec held_stamp() :: String.t() | nil

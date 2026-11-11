@@ -47,6 +47,13 @@ defmodule PublishDocs do
   # alias answers at `/docs` before the 404 does.
   @index_slug "documentation"
   @index_alias "/docs"
+  # The category every guide is filed under (#2457), so the index's search
+  # link can scope `/search` to the guides with the `?category=` filter the
+  # page already has, rather than a new, permanent search argument. Its slug
+  # is that link's, so the two cannot drift. The script finds it but does not
+  # create it (the JSON:API has no write route for categories), and writing
+  # it on every upsert overwrites a category an editor set on a guide.
+  @category_slug "documentation"
 
   # ── Catalogue (from mix.exs) ──────────────────────────────────────────────
 
@@ -249,9 +256,9 @@ defmodule PublishDocs do
 
   @doc """
   The `/docs` index page body: one "Start here" section (the wedge guide, the
-  role tracks from docs/reading-paths.md, a link to site search), then every
-  public guide under its mix.exs section, then the Contributing to Kiln
-  guides, set apart after a rule.
+  role tracks from docs/reading-paths.md, a link to a search of the guides),
+  then every public guide under its mix.exs section, then the Contributing to
+  Kiln guides, set apart after a rule.
   """
   def index_html(docs) do
     {contributing, public} = Enum.split_with(docs, &(&1.group == @contributing_group))
@@ -299,8 +306,8 @@ defmodule PublishDocs do
       body ->
         "<h2>Start here</h2>" <>
           body <>
-          ~s(<p><a href="/search">Search kilncms.dev</a> to look for a word or ) <>
-          "a feature across every guide and page on the site.</p>"
+          ~s(<p><a href="/search?category=#{@category_slug}">Search the docs</a> ) <>
+          "to look for a word or a feature across every guide.</p>"
     end
   end
 
@@ -430,7 +437,8 @@ defmodule PublishDocs do
 
   @doc """
   Publishes `to_publish` and the index through `req`: `:ok`, or `:error` when
-  any page failed. Raises before writing any page when the type lookup or a
+  any page failed. Every guide is filed under the `#{@category_slug}` category.
+  Raises before writing any page when the type or category lookup or a
   screenshot upload fails, so a guide is never published pointing at an image
   that is not there.
   """
@@ -442,6 +450,7 @@ defmodule PublishDocs do
     # Resolved up front even when every guide already exists: a missing type is
     # a setup mistake worth failing on before any page is touched.
     type_id = type_id(req, type_name)
+    category_id = category_id(req)
     create_entry = &%{"slug" => &1, "type_definition_id" => type_id}
     media = upload_images!(req, to_publish)
 
@@ -453,7 +462,9 @@ defmodule PublishDocs do
             req,
             entries,
             doc.slug,
-            Map.merge(guide_body(doc, media), seo_attrs(doc)),
+            guide_body(doc, media)
+            |> Map.merge(seo_attrs(doc))
+            |> Map.put("category_id", category_id),
             create_entry
           )
         )
@@ -509,6 +520,22 @@ defmodule PublishDocs do
     case System.get_env("KILN_DOCS_TYPE_ID") do
       unset when unset in [nil, ""] -> look_up_type(req, type_name)
       id -> id
+    end
+  end
+
+  defp category_id(req) do
+    case API.request(req, :get, "/categories/by-slug/#{@category_slug}", []) do
+      {:ok, %{"data" => %{"id" => id}}} ->
+        id
+
+      {:error, message} ->
+        raise """
+        could not look up the "#{@category_slug}" category: #{message}
+
+        Create it at /editor/taxonomy (name "Documentation", slug
+        "#{@category_slug}"). Every guide is filed under it, and the /docs
+        index's search link is /search?category=#{@category_slug}.
+        """
     end
   end
 
