@@ -1574,6 +1574,161 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     end
   end
 
+  # A field of a type this release does not know (#2605): a newer release's,
+  # after a rollback, or a removed plugin's.
+  describe "a field of an unknown type" do
+    setup do
+      admin = authed_user(:admin)
+      recipe = type_definition!(admin, "Recipe")
+      a = create_dynamic_field!(admin, recipe, "a", 0)
+      b = create_dynamic_field!(admin, recipe, "b", 1)
+
+      held =
+        KilnCMS.NewerReleaseRows.field_definition!(%{
+          content_type: nil,
+          type_definition_id: recipe.id,
+          name: "specs",
+          position: 1
+        })
+
+      %{admin: admin, recipe: recipe, a: a, b: b, held: held}
+    end
+
+    test "the screen lists it apart, with only a delete", %{conn: conn} = ctx do
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      assert has_element?(lv, "#unknown-type-fields #field-#{ctx.held}", "specs")
+
+      assert has_element?(
+               lv,
+               "#unknown-type-fields #field-#{ctx.held}",
+               KilnCMS.NewerReleaseRows.unknown_field_type()
+             )
+
+      assert has_element?(lv, "#unknown-type-fields", "Fields of an unknown type")
+      refute has_element?(lv, "#field-#{ctx.held} button[phx-click=edit]")
+      refute has_element?(lv, "#fields-def-#{ctx.recipe.id} li[data-sort-id='#{ctx.held}']")
+
+      # A hand-made edit event for it changes nothing.
+      render_click(lv, "edit", %{"id" => ctx.held})
+      assert render(lv) =~ "That field can&#39;t be edited."
+    end
+
+    test "an admin deletes it from the screen", %{conn: conn} = ctx do
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#unknown-type-fields #field-#{ctx.held} button[phx-click=delete]")
+      |> render_click()
+
+      refute has_element?(lv, "#unknown-type-fields")
+      assert render(lv) =~ "Field deleted."
+
+      assert {:error, _} =
+               CMS.get_field_definition(ctx.held,
+                 actor: ctx.admin,
+                 context: FieldDefinition.all_types_context()
+               )
+    end
+
+    test "editing a field whose condition reads it keeps that condition",
+         %{conn: conn} = ctx do
+      rule = %{"field" => "specs", "op" => "not_empty"}
+
+      KilnCMS.Repo.query!(
+        "UPDATE field_definitions SET visible_when = $1 WHERE id = $2",
+        [rule, Ecto.UUID.dump!(ctx.a.id)]
+      )
+
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      lv |> element("#field-#{ctx.a.id} button[phx-click=edit]") |> render_click()
+      assert render(lv) =~ "reads a field of a type this version of Kiln"
+
+      lv
+      |> form("#edit-field-#{ctx.a.id}", field_definition: %{label: "Renamed"})
+      |> render_submit()
+
+      saved = CMS.get_field_definition!(ctx.a.id, actor: ctx.admin)
+      assert saved.label == "Renamed"
+      assert saved.visible_when == rule
+    end
+
+    test "a sub-field of an unknown type is listed under its group, with a delete",
+         %{conn: conn} = ctx do
+      group =
+        CMS.create_field_definition!(
+          %{
+            type_definition_id: ctx.recipe.id,
+            name: "dosages",
+            label: "Dosages",
+            field_type: :group
+          },
+          actor: ctx.admin
+        )
+
+      sub =
+        KilnCMS.NewerReleaseRows.field_definition!(%{
+          content_type: nil,
+          group_of_id: group.id,
+          name: "rated"
+        })
+
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      assert has_element?(lv, "#unknown-type-fields #field-#{sub}", "rated")
+      assert has_element?(lv, "#unknown-type-fields #field-#{sub}", "On Dosages")
+
+      lv
+      |> element("#unknown-type-fields #field-#{sub} button[phx-click=delete]")
+      |> render_click()
+
+      assert render(lv) =~ "Field deleted."
+
+      assert {:error, _} =
+               CMS.get_field_definition(sub,
+                 actor: ctx.admin,
+                 context: FieldDefinition.all_types_context()
+               )
+    end
+
+    test "a delete another field's condition refuses says which field", %{conn: conn} = ctx do
+      KilnCMS.Repo.query!(
+        "UPDATE field_definitions SET visible_when = $1 WHERE id = $2",
+        [%{"field" => "specs", "op" => "not_empty"}, Ecto.UUID.dump!(ctx.a.id)]
+      )
+
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#unknown-type-fields #field-#{ctx.held} button[phx-click=delete]")
+      |> render_click()
+
+      assert render(lv) =~ "a reads this field in a condition: remove that condition first."
+      assert has_element?(lv, "#unknown-type-fields #field-#{ctx.held}")
+    end
+
+    test "a drag on its type reorders the known fields and leaves it alone",
+         %{conn: conn} = ctx do
+      {:ok, lv, _html} = conn |> log_in(ctx.admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#fields-def-#{ctx.recipe.id}")
+      |> render_hook("reorder", %{"order" => [ctx.b.id, ctx.a.id]})
+
+      assert recipe_order(ctx.recipe) == ["b", "a"]
+      assert list_order(lv, ctx.recipe) == [ctx.b.id, ctx.a.id]
+
+      held =
+        CMS.get_field_definition!(ctx.held,
+          actor: ctx.admin,
+          context: FieldDefinition.all_types_context()
+        )
+
+      assert held.position == 1
+    end
+  end
+
   defp insert_orphan!(content_type, name) do
     id = Ecto.UUID.generate()
 

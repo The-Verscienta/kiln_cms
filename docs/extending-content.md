@@ -1642,6 +1642,69 @@ What to know before relying on it:
 | `this field has no choice of editor input` | The field takes no widget at all (rich text, a list of references, a link field or group sub-field, most types). Send `nil`. |
 | `checkboxes can't take terms of their own: use tags, or turn off new terms` | `checkboxes` on a select with `allow_custom: true`. |
 
+### Delete a field of an unknown type
+
+A field can name a field type this version of Kiln doesn't know. That
+happens after a rollback, for a type a newer version added, or after a
+plugin that provided the type was removed from `config :kiln_cms, :plugins`.
+Kiln can't check or render such a value, so it hides the field instead of
+failing (#2605):
+
+- the content editor doesn't show it, and saving a record keeps the value
+  it holds unchanged;
+- delivery (`/api/content`, `/api/sync`, webhooks, static export), the
+  JSON:API `type-definitions` include, the schema export and the field sync
+  export leave it out;
+- a private one stays hidden from readers below editor. A public one is
+  still in the raw `custom_fields` of a JSON:API read, as it is in the
+  reporting views;
+- a computed field, or a slug or SEO pattern, that reads it sees nothing, so
+  its value can change the next time the record is saved;
+- a condition (**Show when**, **Required when**) that reads it stays as it
+  is, and the field carrying it can still be edited and reordered. Its edit
+  form shows the condition as a note with **Remove condition**, since the
+  field picker can't offer the hidden field;
+- a content import doesn't bring a value in under its name: the value came
+  from the other site's field, so it is dropped like any field this site
+  doesn't define.
+
+You have two ways out: bring the type back (upgrade Kiln again, or reinstall
+the plugin), and the field works as before with its values intact; or delete
+the field. You need the admin role.
+
+1. Open **Fields** (`/editor/fields`). Below the fields of every content
+   type you see **Fields of an unknown type**. Each row shows the field's
+   label, its machine name, an *unknown type* badge, and a line such as "On
+   *Recipe*, of type *star_rating*." (the content type that owns it, and the
+   type name as stored). A group sub-field or link field of an unknown type
+   is listed here too, "On" the group or reference field it belongs to.
+2. Choose **Delete** on the field. The browser asks *Delete this field and
+   the values records hold in it? This can't be undone.*
+3. Confirm. You see *Field deleted.*, the row is gone, and the value is
+   removed from every record of that type. The section disappears with its
+   last field.
+
+The section offers nothing but Delete, and Kiln refuses any other change to
+such a field, from any client (except that renaming a field its condition
+reads rewrites that condition, as it does for any field). To keep the values, back up the database
+first: deleting a field can't be undone, and a field export
+(`/editor/fields/export.json`) leaves these fields out.
+
+**What can go wrong**
+
+| You see | Meaning |
+|---|---|
+| *… reads this field in a condition: remove that condition first.* | Another field's condition (**Show when** or **Required when**) reads this field; the message names that field. Edit it, choose **Remove condition**, and delete again. If the field named is listed under **Fields of an unknown type**, it can't be edited: delete it first (or bring its type back), then delete this one. A field-definition destroy from code says the same: `is used in the conditions of …; remove those conditions first`. |
+| *Couldn't delete that field.* | The delete was refused for another reason, or the field is already gone. Reload the page. |
+| *That field can't be edited.* | The field was deleted, or its type became unknown, since the page loaded. The list reloads. |
+| `is not a field type this release knows, so the field can't be changed: delete it, or upgrade Kiln or reinstall the plugin that provides it` | An update of the field from code. Only a destroy is allowed. |
+| `can't be changed: its field type (…) is not one this release knows. …` | A content write (JSON:API, a code interface call) sent the field with a value other than the one stored. Leave the key out, or send back exactly the value you read. |
+
+For developers: a read of field definitions leaves these rows out unless it
+passes `context: KilnCMS.CMS.FieldDefinition.all_types_context()`, and
+`KilnCMS.CMS.FieldDefinition.unknown_type?/1` tells them apart. Relationship
+loads (`link_fields`, `group_fields`) stay filtered either way.
+
 ## 2. Relations that carry data
 
 `KilnCMS.CMS.ContentLink` links any two content records by id with a named
@@ -1964,6 +2027,17 @@ end
   widget a later version of the plugin stops offering falls back to the
   first, and the stored name is cleared the next time an admin saves the
   field.
+
+**Removing a plugin that provides a field type.** The fields that use its
+type stay in the database, and their values stay on every record. Kiln hides
+them: the editor, fired delivery and the exports leave them out (the
+JSON:API's raw `custom_fields` still returns a public one), and the Fields
+screen lists them under **Fields of an unknown type** with only a Delete.
+Reinstall the plugin and they work again; delete them (which deletes their
+values) if they are gone for good. See
+[Delete a field of an unknown type](#delete-a-field-of-an-unknown-type).
+Renaming a type's `name/0` has the same effect, since the stored type is the
+name.
 
 **Full-text search needs one migration per type.** The `:search` action
 filters on a trigger-maintained `search_vector` column that is not an Ash

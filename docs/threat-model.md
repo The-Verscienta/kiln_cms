@@ -801,8 +801,10 @@ see [bot-budgets.md](bot-budgets.md).
 - **What it does not.** Anything that lies about being a browser, an AI
   crawler or a script. The user agent is spoofable, so those classes grant
   nothing: AI crawlers default to 100%, the same as a browser, and raising that
-  class by environment raises it for every spoofer too. Search engines also
-  default to 100%, but their claims are checked (next point).
+  class by environment raises it for every spoofer too. Search engines default
+  to 200% (#2587), but their claims are checked (next point), and the part
+  above 100% goes only to verified addresses; with verification off the
+  default is 100%.
 - **Search-engine claims are checked by DNS (#2254).**
   `KilnCMS.CrawlerVerification` looks up the address's PTR name, requires it
   under the engine's published domain (label-aligned, so `evilgooglebot.com`
@@ -811,8 +813,9 @@ see [bot-budgets.md](bot-budgets.md).
   no user agent. Everything not proven either way (lookup pending, skipped, DNS
   error or timeout, DuckDuckBot, a non-public address, untrusted forwarding)
   keeps the search-engine class but held to the `:delivery` limit, so a
-  search-engine value above 100% is spent only on verified addresses, and with
-  the defaults the outcome is #2243's until a spoof is proven. A DNS outage or a
+  search-engine value above 100% (the default 200% included) is spent only on
+  verified addresses: a spoofer typing "Googlebot" never gets more than a
+  browser. A DNS outage or a
   busy verifier therefore never refuses a real crawler; the cost is that a
   spoofer whose claim cannot be settled gets what a browser gets. The lookup
   runs off the request path, so a request never waits on DNS.

@@ -71,7 +71,8 @@ defmodule KilnCMSWeb.BotBudgetsLiveTest do
     assert has_element?(lv, "#bot-budget-empty-effective", "60 requests a minute")
     assert has_element?(lv, "#bot-budget-empty-effective", "Default")
     assert has_element?(lv, "#bot-budget-declared_bot-ceiling", "at most 50% here")
-    assert has_element?(lv, "#bot-budget-search_engine-ceiling", "at most 100% here")
+    assert has_element?(lv, "#bot-budget-search_engine-ceiling", "at most 200% here")
+    assert has_element?(lv, "#bot-budget-search_engine-effective", "600 requests a minute")
     assert has_element?(lv, ~s(#bot-budget-declared_bot input[max="50"]))
     refute has_element?(lv, "#bot-budgets-search-warning")
     refute has_element?(lv, "button", "Use the server's values")
@@ -147,6 +148,61 @@ defmodule KilnCMSWeb.BotBudgetsLiveTest do
                "#bot-budget-search_engine-unchecked",
                "does not check search-engine claims"
              )
+
+      assert has_element?(
+               lv,
+               "#bot-budget-search_engine-enable-checking",
+               "The server operator can turn checking on with KILN_CRAWLER_VERIFICATION."
+             )
+
+      # Nothing is verified, so the default is the browser limit (#2587) and
+      # the verified-only line would not be true.
+      assert has_element?(lv, "#bot-budget-search_engine-effective", "100%")
+      assert has_element?(lv, "#bot-budget-search_engine-ceiling", "at most 100% here")
+      refute has_element?(lv, "#bot-budget-search_engine-verified-only")
+    end
+
+    test "the search-engine hint links to how claims are checked", %{conn: conn, org: org} do
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      assert has_element?(
+               lv,
+               ~s(#bot-budget-search_engine-docs[href$="bot-budgets.md#verified-search-engines"]),
+               "How claims are checked"
+             )
+    end
+  end
+
+  describe "a search-engine figure above 100% (#2587)" do
+    test "the default 200% says it applies only to verified addresses", %{
+      conn: conn,
+      org: org
+    } do
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      assert has_element?(
+               lv,
+               "#bot-budget-search_engine-verified-only",
+               "Above 100%, this applies only to addresses verified as the search engine they name. Any other claim gets at most 300 requests a minute per address, like a browser."
+             )
+    end
+
+    test "an operator figure above 100% says so too", %{conn: conn, org: org} do
+      put_classes(%{search_engine: 400})
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      assert has_element?(lv, "#bot-budget-search_engine-verified-only", "Above 100%")
+    end
+
+    test "a figure of 100% or less does not", %{conn: conn, org: org} do
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      lv
+      |> form("#bot-budgets-form", bot_budgets: %{"search_engine_percent" => "100"})
+      |> render_submit()
+
+      assert has_element?(lv, "#bot-budget-search_engine-effective", "Set for this site")
+      refute has_element?(lv, "#bot-budget-search_engine-verified-only")
     end
   end
 

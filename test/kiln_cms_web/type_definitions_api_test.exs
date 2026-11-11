@@ -150,6 +150,32 @@ defmodule KilnCMSWeb.TypeDefinitionsApiTest do
       assert attrs["field_type"] == "integer"
       refute Map.has_key?(attrs, "org_id")
     end
+
+    # #2605: a field whose type this release does not know (a newer release's,
+    # after a rollback) is left out, rather than failing the whole response.
+    test "include=field_definitions leaves out a field of an unknown type",
+         %{admin: admin, definition: d} do
+      field =
+        CMS.create_field_definition!(
+          %{type_definition_id: d.id, name: "torque", label: "Torque", field_type: :integer},
+          actor: admin
+        )
+
+      KilnCMS.NewerReleaseRows.field_definition!(%{
+        content_type: nil,
+        type_definition_id: d.id,
+        name: "specs"
+      })
+
+      key = mint(user(:editor), :read)
+
+      {200, %{"data" => data, "included" => included}} =
+        req(:get, "/api/json/type-definitions/#{d.id}?include=field_definitions", key: key)
+
+      assert %{"relationships" => %{"field_definitions" => %{"data" => [ref]}}} = data
+      assert ref == %{"type" => "field_definition", "id" => field.id}
+      assert [%{"attributes" => %{"name" => "torque"}}] = included
+    end
   end
 
   describe "what never lists" do

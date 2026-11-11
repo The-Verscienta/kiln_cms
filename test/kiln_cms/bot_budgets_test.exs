@@ -39,7 +39,7 @@ defmodule KilnCMS.BotBudgetsTest do
 
   test "with nothing set, the built-in defaults apply", %{org: org} do
     assert BotBudgets.percent(org, :browser) == 100
-    assert BotBudgets.percent(org, :search_engine) == 100
+    assert BotBudgets.percent(org, :search_engine) == 200
     assert BotBudgets.percent(org, :ai_crawler) == 100
     assert BotBudgets.percent(org, :declared_bot) == 50
     assert BotBudgets.percent(org, :empty) == 20
@@ -66,7 +66,7 @@ defmodule KilnCMS.BotBudgetsTest do
   test "an operator value out of range is ignored, not trusted", %{org: org} do
     put_classes(%{search_engine: 0, ai_crawler: 5_000, declared_bot: "abc"})
 
-    assert BotBudgets.percent(org, :search_engine) == 100
+    assert BotBudgets.percent(org, :search_engine) == 200
     assert BotBudgets.percent(org, :ai_crawler) == 100
     assert BotBudgets.percent(org, :declared_bot) == 50
   end
@@ -84,7 +84,7 @@ defmodule KilnCMS.BotBudgetsTest do
     assert BotBudgets.percent(org, :empty) == 5
     assert BotBudgets.limit(org, :empty) == 15
     assert BotBudgets.percent(org, :declared_bot) == 50
-    assert BotBudgets.percent(org, :search_engine) == 100
+    assert BotBudgets.percent(org, :search_engine) == 200
     assert %{source: :site, site_percent: 5} = BotBudgets.effective(org).empty
     assert %{source: :default, site_percent: nil} = BotBudgets.effective(org).declared_bot
 
@@ -224,6 +224,67 @@ defmodule KilnCMS.BotBudgetsTest do
     assert BotBudgets.limit(org, :declared_bot) == 5
     assert BotBudgets.limit(org, :browser) == 10
     assert BotBudgets.operator_limit(:empty) == 2
+  end
+
+  describe "the search-engine default (#2587)" do
+    test "is 200%, twice the browser limit, with verification on", %{org: org} do
+      assert BotBudgets.defaults().search_engine == 200
+      assert BotBudgets.operator_percent(:search_engine) == 200
+      assert BotBudgets.operator_limit(:search_engine) == 600
+      assert BotBudgets.limit(org, :search_engine) == 600
+
+      assert %{percent: 200, limit: 600, source: :default, operator_source: :default} =
+               BotBudgets.effective(org).search_engine
+
+      # An unproven claim is still held to what a browser gets.
+      assert BotBudgets.unverified_search_limit() == 300
+    end
+
+    test "is 100% with verification off, so no claim gets more than a browser", %{org: org} do
+      put_verification(false)
+
+      assert BotBudgets.operator_percent(:search_engine) == 100
+      assert BotBudgets.operator_limit(:search_engine) == 300
+      assert BotBudgets.limit(org, :search_engine) == 300
+
+      assert %{percent: 100, operator_percent: 100, source: :default} =
+               BotBudgets.effective(org).search_engine
+
+      # The other defaults do not depend on verification.
+      assert BotBudgets.percent(org, :ai_crawler) == 100
+      assert BotBudgets.percent(org, :empty) == 20
+    end
+
+    test "with verification off, an operator value is still used as given", %{org: org} do
+      put_verification(false)
+      put_classes(%{search_engine: 200})
+
+      assert BotBudgets.operator_limit(:search_engine) == 600
+      assert BotBudgets.percent(org, :search_engine) == 200
+    end
+
+    test "with verification off, a site may not save more than 100%", %{org: org} do
+      put_verification(false)
+
+      assert {:error, _} = save(org, %{search_engine_percent: 101})
+      assert {:ok, _} = save(org, %{search_engine_percent: 100})
+    end
+  end
+
+  defp put_verification(enabled?) do
+    previous = Application.get_env(:kiln_cms, KilnCMS.CrawlerVerification)
+
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.CrawlerVerification,
+      Keyword.put(previous || [], :enabled, enabled?)
+    )
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:kiln_cms, KilnCMS.CrawlerVerification, previous),
+        else: Application.delete_env(:kiln_cms, KilnCMS.CrawlerVerification)
+    end)
   end
 
   describe "unverified_search_limit/0 (#2254)" do
