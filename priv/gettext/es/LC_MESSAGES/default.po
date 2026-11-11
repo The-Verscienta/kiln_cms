@@ -1343,6 +1343,7 @@ msgstr "(sin enlace)"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -2233,6 +2234,11 @@ msgstr "Acerca de los carriles"
 #, elixir-autogen, elixir-format
 msgid "About task anchoring"
 msgstr "Acerca del anclaje de tareas"
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "Above 100%, this applies only to addresses verified as the search engine they name. Any other claim gets at most %{browser} per address, like a browser."
+msgstr "Por encima del 100 %, esto solo se aplica a las direcciones verificadas como el buscador que nombran. Cualquier otra se queda en %{browser} por dirección como máximo, igual que un navegador."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -10183,6 +10189,11 @@ msgstr "Pase el cursor sobre un bloque y haga clic en Editar, o llegue con Tab, 
 #, elixir-autogen, elixir-format
 msgid "How URLs are built, and bulk regeneration."
 msgstr "Cómo se construyen las URL, y regeneración masiva."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "How claims are checked"
+msgstr "Cómo se comprueba"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -21264,6 +21275,11 @@ msgstr "La selección no es una lista de ids de contenido."
 #, elixir-autogen, elixir-format
 msgid "The server allows at most %{percent}% here."
 msgstr "El servidor permite como máximo %{percent}% aquí."
+
+#: lib/kiln_cms_web/live/bot_budgets_live.ex
+#, elixir-autogen, elixir-format
+msgid "The server operator can turn checking on with %{variable}."
+msgstr "El operador del servidor puede activar la comprobación con %{variable}."
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format

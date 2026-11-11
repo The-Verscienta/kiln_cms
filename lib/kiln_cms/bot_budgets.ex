@@ -20,10 +20,16 @@ defmodule KilnCMS.BotBudgets do
 
   ## Who sets the percentage
 
-    * **Built-in defaults**: search engines and AI crawlers 100% (what they had
-      before classes existed: the user agent is spoofable, and a higher default
-      would loosen the flood ceiling for anyone typing "Googlebot"), declared
-      bots 50%, an empty user agent 20%. Browsers are always 100%.
+    * **Built-in defaults**: search engines 200% (#2587), AI crawlers 100%,
+      declared bots 50%, an empty user agent 20%. Browsers are always 100%.
+      The search-engine 200% is spent only on addresses
+      `KilnCMS.CrawlerVerification` has proven to be the engine's: a claim not
+      proven either way is held to the browser limit
+      (`unverified_search_limit/0`), and one proven false is charged as
+      `:empty`. With verification off nothing is proven, so the search-engine
+      default is 100% instead (what it was before #2587): a higher default
+      would loosen the flood ceiling for anyone typing "Googlebot". An operator
+      value is used as given either way.
     * **The operator** (`KILN_BOT_BUDGET_*_PERCENT`, written to
       `config :kiln_cms, KilnCMSWeb.RateLimit, delivery_classes: %{...}`)
       replaces a default, 1-1000.
@@ -63,7 +69,11 @@ defmodule KilnCMS.BotBudgets do
   @min_percent 1
   @max_percent 1000
 
-  @defaults %{search_engine: 100, ai_crawler: 100, declared_bot: 50, empty: 20}
+  @defaults %{search_engine: 200, ai_crawler: 100, declared_bot: 50, empty: 20}
+
+  # The search-engine default while crawler verification is off (#2587): no
+  # claim can be proven, so the default stays at the browser limit.
+  @unchecked_search_default 100
 
   # The classes a percentage can be set for, and the `SiteBotBudgets` column of
   # each. `:browser` is absent: its ceiling is the `:delivery` limit.
@@ -84,7 +94,10 @@ defmodule KilnCMS.BotBudgets do
   @spec fields() :: [{class(), atom()}]
   def fields, do: @fields
 
-  @doc "The built-in percentage of each configurable class."
+  @doc """
+  The built-in percentage of each configurable class, with crawler verification
+  on. With it off, the search-engine default is 100 (see `operator_percent/1`).
+  """
   @spec defaults() :: %{class() => pos_integer()}
   def defaults, do: @defaults
 
@@ -95,16 +108,28 @@ defmodule KilnCMS.BotBudgets do
   @doc """
   The operator's percentage for `class`: the `delivery_classes` config value
   when it is an integer in range, else the built-in default. 100 for a browser.
+
+  The search-engine default is 200 while `KilnCMS.CrawlerVerification` is on and
+  100 while it is off, so an unset variable never lets an unchecked claim spend
+  more than a browser (#2587).
   """
   @spec operator_percent(class()) :: pos_integer()
   def operator_percent(:browser), do: 100
 
   def operator_percent(class) when class in @configurable do
     case operator_value(class) do
-      nil -> Map.fetch!(@defaults, class)
+      nil -> default_percent(class)
       value -> value
     end
   end
+
+  defp default_percent(:search_engine) do
+    if KilnCMS.CrawlerVerification.enabled?(),
+      do: Map.fetch!(@defaults, :search_engine),
+      else: @unchecked_search_default
+  end
+
+  defp default_percent(class), do: Map.fetch!(@defaults, class)
 
   @doc """
   The effective percentage for `class` on `org` (an `Organization`, an org id,

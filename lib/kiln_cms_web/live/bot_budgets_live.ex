@@ -15,8 +15,10 @@ defmodule KilnCMSWeb.BotBudgetsLive do
   default), and the server's value, which is the most a site may set
   (`KilnCMS.BotBudgets`). A blank field inherits the server's value. The
   search-engine hint says that a claim is checked against DNS
-  (`KilnCMS.CrawlerVerification`, #2254), or that it is not when the operator
-  turned verification off.
+  (`KilnCMS.CrawlerVerification`, #2254) and links to how, or that it is not
+  when the operator turned verification off (and which variable turns it on).
+  While verification is on and the search-engine figure is above 100%, the page
+  says the excess applies only to verified addresses (#2587).
   """
   use KilnCMSWeb, :live_view
 
@@ -322,20 +324,53 @@ defmodule KilnCMSWeb.BotBudgetsLive do
             label={class_label(class) <> " (%)"}
             placeholder={to_string(@effective[class].operator_percent)}
           />
-          <p class="-mt-1 text-xs text-base-content/70">{class_hint(class)}</p>
-          <p
+          <p id={"bot-budget-#{class}-hint"} class="-mt-1 text-xs text-base-content/70">
+            {class_hint(class)}
+            <a
+              :if={class == :search_engine}
+              id="bot-budget-search_engine-docs"
+              href={docs_url("bot-budgets.md#verified-search-engines")}
+              target="_blank"
+              rel="noopener"
+              class="link inline-flex items-center gap-1 font-medium text-primary-ink"
+            >
+              {gettext("How claims are checked")}
+              <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
+              <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+            </a>
+          </p>
+          <div
             :if={class == :search_engine and not @crawler_verification?}
             id="bot-budget-search_engine-unchecked"
-            class="mt-1 text-xs text-base-content/70"
+            class="mt-1 space-y-0.5 text-xs text-base-content/70"
           >
-            {gettext(
-              "This server does not check search-engine claims, so any client naming one gets this budget."
-            )}
-          </p>
+            <p>
+              {gettext(
+                "This server does not check search-engine claims, so any client naming one gets this budget."
+              )}
+            </p>
+            <p id="bot-budget-search_engine-enable-checking">
+              {gettext("The server operator can turn checking on with %{variable}.",
+                variable: "KILN_CRAWLER_VERIFICATION"
+              )}
+            </p>
+          </div>
           <p id={"bot-budget-#{class}-effective"} class="mt-2 text-sm">
             <span class="font-medium">{@effective[class].percent}%</span>
             - {per_window(@effective[class].limit, @window_ms)} {gettext("per address")}
             <span class="text-base-content/70">({source_label(@effective[class])})</span>
+          </p>
+          <p
+            :if={
+              class == :search_engine and @crawler_verification? and @effective[class].percent > 100
+            }
+            id="bot-budget-search_engine-verified-only"
+            class="mt-1 text-xs text-base-content/70"
+          >
+            {gettext(
+              "Above 100%, this applies only to addresses verified as the search engine they name. Any other claim gets at most %{browser} per address, like a browser.",
+              browser: per_window(@delivery_limit, @window_ms)
+            )}
           </p>
           <p id={"bot-budget-#{class}-ceiling"} class="mt-1 text-xs text-base-content/70">
             {gettext("The server allows at most %{percent}% here.",

@@ -461,6 +461,9 @@ Every summary line below that was shortened links to its own entry there.
 - **While a backup runs, a request folds into the queued one only when it is the same kind: Back up now into a queued fresh backup, Resume into a queued resume of the same backup. Any other request is refused with "Try again once the queue clears", and the queue is left as it was.**
   ([#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) · [long form](docs/changelog/unreleased.md#backup-fold-like-into-like))
 
+- **Search engines whose address DNS has verified now get 200% of the `:delivery` limit by default (600 requests a minute per address instead of 300); unverified claims stay at the browser limit, and with `KILN_CRAWLER_VERIFICATION=false` the default stays 100%. Set `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100` to go back.**
+  ([#2587](https://github.com/The-Verscienta/kiln_cms/issues/2587) · [long form](docs/changelog/unreleased.md#verified-search-engine-default))
+
 - **Release images no longer ship `priv/static/images/logo-lockup.png` (234 KB), which nothing in Kiln referenced. An overlay that linked `/images/logo-lockup.png` must ship its own copy.**
   ([#2401](https://github.com/The-Verscienta/kiln_cms/issues/2401))
 

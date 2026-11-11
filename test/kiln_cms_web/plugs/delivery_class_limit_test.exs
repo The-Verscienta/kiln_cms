@@ -132,8 +132,10 @@ defmodule KilnCMSWeb.Plugs.DeliveryClassLimitTest do
       assert allowed_of(conn, @gptbot, 12) == 10
     end
 
-    test "a search engine: 10", %{conn: conn} do
-      assert allowed_of(conn, @googlebot, 12) == 10
+    # The setup plants the address as Google's, so this is a verified claim
+    # at the default 200% (#2587).
+    test "a verified search engine: 20", %{conn: conn} do
+      assert allowed_of(conn, @googlebot, 22) == 20
     end
 
     test "an unknown user agent is a browser", %{conn: conn} do
@@ -397,14 +399,49 @@ defmodule KilnCMSWeb.Plugs.DeliveryClassLimitTest do
       refute_received {:unverified_crawler, _, _}
     end
 
-    test "with verification off, a claim is a search engine as before",
+    test "with verification off, a claim is a search engine at the browser limit",
          %{conn: conn, address: address} do
       put_verification(:enabled, false)
       CrawlerVerification.put_result(:google, address, {:rejected, :no_ptr})
 
-      assert allowed_of(conn, @googlebot, 12) == 10
+      # The default is 100% while nothing is checked (#2587), not 200%.
+      assert allowed_of(conn, @googlebot, 22) == 10
       assert StubCrawlerResolver.calls(:ptr, address) == 0
       refute_received {:unverified_crawler, _, _}
+    end
+
+    test "with verification off, an operator's raised value is believed, as before",
+         %{conn: conn} do
+      put_verification(:enabled, false)
+      put_classes(%{search_engine: 200})
+
+      {unchecked_conn, _address} = public_conn(conn)
+      assert allowed_of(unchecked_conn, @googlebot, 22) == 20
+    end
+
+    test "the default 200% goes only to a verified address (#2587)",
+         %{conn: conn, address: address} do
+      # Verified: 200% of 10. (This describe's setup forgets the outer plant.)
+      CrawlerVerification.put_result(:google, address, :verified)
+      assert allowed_of(conn, @googlebot, 22) == 20
+      assert_received {:client_class, _, %{class: :search_engine}}
+      refute_received {:unverified_crawler, _, _}
+
+      # No DNS answer: held to the browser limit.
+      {error_conn, error_address} = public_conn(conn)
+      CrawlerVerification.put_result(:google, error_address, {:error, :servfail})
+      assert allowed_of(error_conn, @googlebot, 22) == 10
+
+      # Unverifiable engine: the same hold.
+      {ddg_conn, _ddg_address} = public_conn(conn)
+      assert allowed_of(ddg_conn, @duckduckbot, 22) == 10
+
+      # Proven false: no user agent.
+      {spoof_conn, spoof_address} = public_conn(conn)
+      CrawlerVerification.put_result(:google, spoof_address, {:rejected, :wrong_domain})
+      assert allowed_of(spoof_conn, @googlebot, 4) == 2
+
+      assert StubCrawlerResolver.calls(:ptr, address) == 0
     end
 
     test "above 100%, only a verified address gets the operator's raised ceiling",

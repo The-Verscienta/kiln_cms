@@ -5,7 +5,8 @@ minute from one address before it is refused (the `:delivery` limit). Since
 #2243 a request that says it is something other than a browser (a search
 engine, an AI crawler, a script, or nothing at all) is refused at its own share
 of that limit. By default scripts get half and clients with no user agent a
-fifth; search engines and AI crawlers keep the full limit. A site admin can
+fifth; AI crawlers keep the full limit, and search engines whose address DNS
+has verified get twice it. A site admin can
 lower those shares for their site; the operator sets the most any site may have.
 
 **This is cost control, not security.** The class comes from the `User-Agent`
@@ -81,18 +82,28 @@ With the shipped limit of 300 a minute, the built-in defaults give:
 | Class | Default | Requests a minute per address |
 |---|---|---|
 | Browser | 100% (always) | 300 |
-| Search engine | 100% | 300 |
+| Search engine | 200% | 600 if DNS has verified the address, otherwise at most 300 |
 | AI crawler | 100% | 300 |
 | Other bot | 50% | 150 |
 | No user agent | 20% | 60 |
 
-Search engines and AI crawlers keep exactly what they had before classes
-existed. Because the user agent can be spoofed, a higher default would raise the
-flood ceiling for anyone who types "Googlebot". A search-engine claim proven
-false by DNS gets the **No user agent** ceiling instead, and a search-engine
-value above 100% is spent only on addresses DNS has verified (see
-[Verified search engines](#verified-search-engines)). Browsers are throttled
-exactly as before.
+A real search engine crawls a site in bursts, often from a few addresses, and
+an indexing backlog costs the site more than the extra requests do. So since
+#2587 a search engine gets twice what a browser gets, but only from an address
+DNS has proven to be the engine's (see
+[Verified search engines](#verified-search-engines)). Typing "Googlebot" earns
+nothing: a claim not yet checked, or one DNS could not answer, is held to the
+browser limit, and a claim proven false gets the **No user agent** ceiling. With
+verification off, nothing is proven, so the search-engine default is 100%
+instead. AI crawlers keep exactly what they had before classes existed, and
+browsers are throttled exactly as before.
+
+The extra 300 a minute is per verified address and, like every ceiling here,
+per node. Only the engines' own addresses can spend it, and only by crawling
+the site's public pages. To keep the browser limit, set
+`KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100` (see
+[Set the deployment values](#set-the-deployment-values)), or lower it for one
+site on the **Bot budgets** page.
 
 **All classes share one counter per address.** A request is counted once, and
 refused if the count is past its own class's ceiling. So switching user agents
@@ -127,9 +138,15 @@ You need the admin role. An editor does not see the page.
    then "The server allows at most 50% here." Under **Search engines (%)** the
    page says the class holds those crawlers "when the address checks out as
    theirs", and under **No user agent (%)** that it also holds "claimed search
-   engines proven not to be them". If the operator has turned verification off,
-   **Search engines (%)** also says "This server does not check search-engine
-   claims, so any client naming one gets this budget."
+   engines proven not to be them". The **How claims are checked** link under
+   **Search engines (%)** opens [Verified search engines](#verified-search-engines).
+   While the search-engine figure is above 100% (it is by default), the page also
+   says "Above 100%, this applies only to addresses verified as the search engine
+   they name. Any other claim gets at most 300 requests a minute per address,
+   like a browser." If the operator has turned verification off,
+   **Search engines (%)** instead says "This server does not check search-engine
+   claims, so any client naming one gets this budget." and "The server operator
+   can turn checking on with KILN_CRAWLER_VERIFICATION."
 3. Type a whole-number percentage, lower than or equal to the server's value.
    Leave a field blank to use the server's value for that class.
 4. Select **Save**. You see "Bot budgets saved." and the line under the field
@@ -174,7 +191,7 @@ per class. Each replaces the built-in default and is the most any site may set.
 
 | Variable | Class | Default |
 |---|---|---|
-| `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` | Search engine | `100` |
+| `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` | Search engine | `200` (`100` with `KILN_CRAWLER_VERIFICATION=false`) |
 | `KILN_BOT_BUDGET_AI_CRAWLER_PERCENT` | AI crawler | `100` |
 | `KILN_BOT_BUDGET_DECLARED_BOT_PERCENT` | Other bot | `50` |
 | `KILN_BOT_BUDGET_EMPTY_UA_PERCENT` | No user agent | `20` |
@@ -183,20 +200,26 @@ Each must be a whole number from 1 to 1000. Anything else (`0`, `abc`, `2.5`,
 `5000`) keeps the default and warns at boot. They are read in every environment
 except `:test`, at boot, so a change needs a restart.
 
-For example, to let search engines spend twice the browser limit and give clients
-with no user agent only 10%:
+For example, to let search engines spend four times the browser limit and give
+clients with no user agent only 10%:
 
 ```sh
-KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=200
+KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=400
 KILN_BOT_BUDGET_EMPTY_UA_PERCENT=10
 ```
 
-With the shipped limit, that is 600 and 30 requests a minute per address. Other
-bots and AI crawlers keep their defaults. The 600 goes only to addresses DNS has
-verified as the search engine they claim: a claim not yet checked, or one DNS
-could not answer, is held to 300, and one proven false gets the No user agent
-ceiling, 30 here. With `KILN_CRAWLER_VERIFICATION=false`, 200% is 200% for
-anyone who claims to be a search engine.
+With the shipped limit, that is 1200 and 30 requests a minute per address. Other
+bots and AI crawlers keep their defaults. The 1200 goes only to addresses DNS
+has verified as the search engine they claim: a claim not yet checked, or one
+DNS could not answer, is held to 300, and one proven false gets the No user
+agent ceiling, 30 here.
+
+To give search engines no more than browsers, as before #2587, set
+`KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100`.
+
+With `KILN_CRAWLER_VERIFICATION=false`, an unset search-engine variable means
+100%, so an unchecked claim never gets more than a browser. A value you set is
+used as given: 400% is then 400% for anyone who claims to be a search engine.
 
 **Precedence.** The built-in default, then the operator's variable, then the
 site's value, which can only lower it: the value in force is
@@ -272,15 +295,13 @@ never triggers a lookup.
 
 | What DNS says about the claim | Charged as | Ceiling with the defaults |
 |---|---|---|
-| **Verified**: the name is under the engine's domain and resolves back to the address | Search engine | 300 a minute |
+| **Verified**: the name is under the engine's domain and resolves back to the address | Search engine | 600 a minute |
 | **Proven false**: no PTR record, a PTR name outside the engine's domain, or a name that does not resolve back to the address | No user agent | 60 a minute |
 | **Not proven either way**: the lookup has only just started, could not start (the node is busy, the network used its lookup budget, the verifier is restarting), timed out or got a DNS error; the engine is DuckDuckBot; or the address is private, a `TRUSTED_PROXIES` address, or arrived through a forwarding header nothing trusts | Search engine, but never above the browser limit | 300 a minute |
-| Verification is off (`KILN_CRAWLER_VERIFICATION=false`) | Search engine | 300 a minute |
+| Verification is off (`KILN_CRAWLER_VERIFICATION=false`) | Search engine | 300 a minute (the default is 100% while verification is off) |
 
-So with the shipped defaults nothing changes until DNS proves a claim false.
-The difference shows when the operator raises
-`KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` above 100: only verified addresses get
-more than a browser. A site's lower value applies in every row.
+So only a verified address gets more than a browser, whatever the
+search-engine percentage. A site's lower value applies in every row.
 
 **A request never waits for DNS.** The first request from a new address is
 judged as "not proven" while a lookup starts in the background, and later
@@ -367,7 +388,9 @@ KILN_CRAWLER_VERIFICATION=false
 
 and restart. Every search-engine claim is then believed for rate limiting, as
 before #2254, and the console's **Bot budgets** page says so under **Search
-engines (%)**. The smart 404 guard also goes back to exempting the six search
+engines (%)**. Because no claim is proven, the search-engine default drops from
+200% to 100%, the browser limit; a `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` you
+set still applies, to every claim. The smart 404 guard also goes back to exempting the six search
 engines by name (see [Block scanners automatically](ip-blocking.md#block-scanners-automatically)).
 The variable is read at boot in every environment except `:test`; there is no
 per-site switch.
@@ -421,15 +444,20 @@ a search engine.
   A claim proven false drops to 60 requests a minute; real crawlers and
   unchecked claims keep 300. No migration; rolling the pin back is safe and
   goes back to believing every claim.
+- **Verified search engines get twice the browser limit by default (#2587).**
+  An address DNS has verified as Googlebot, Google-InspectionTool, bingbot,
+  Applebot, YandexBot or Baiduspider may make 600 requests a minute instead of 300; nothing else
+  changes. Behind a proxy without `TRUSTED_PROXIES` no address is verified, so
+  nothing changes there either. To keep 300, set
+  `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100` and restart. Rolling the pin back
+  goes back to 300.
 
 ## What this is not
 
 - **Not access control.** Every class but the search-engine one is reachable by
   typing its user agent, and a search-engine claim keeps its ceiling (up to the
   browser limit) until DNS proves it false. Verification only decides how much
-  an address may spend; it never lets anyone in. Higher defaults for verified
-  crawlers are not part of #2254: the shipped search-engine value is still
-  100%, and raising it is a separate capacity decision.
+  an address may spend; it never lets anyone in.
 - **Not verification by IP range.** DuckDuckBot publishes only IP addresses, so
   it is never verified, and the published ranges of the other engines are not
   read either. A DuckDuckBot claim keeps the search-engine ceiling, up to the
