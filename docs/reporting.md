@@ -197,7 +197,7 @@ A migration that changes a column a view reads must drop the views first;
 
 Overlay projects: existing `mix kiln.gen.content` types do not have views yet.
 Run `mix ash.codegen` and commit the migration it writes before deploying; see
-the Unreleased changelog.
+the upgrade notes for v1.9.0 in `CHANGELOG.md`.
 
 ## What can go wrong
 

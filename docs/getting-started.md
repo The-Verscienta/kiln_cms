@@ -71,8 +71,10 @@ Once it boots, the surfaces worth opening:
   and the component kit.
 - **`sdk/kiln_plugin/`** — the extension points a downstream project or plugin
   builds against: `Kiln.Plugin`, `Kiln.Block`, `Kiln.FieldType`,
-  `Kiln.Advisory`, published to Hex as `kiln_plugin`. **`lib/kiln/`** holds the
-  core side: the plugin registry, `Kiln.Version`, `Kiln.Updates`.
+  `Kiln.Advisory`, and since `kiln_plugin` 1.4 `Kiln.Challenge.Provider` and
+  `Kiln.Security.Check`, published to Hex as `kiln_plugin`. **`lib/kiln/`**
+  holds the core side: the plugin registry and its health checks,
+  `Kiln.Version`, `Kiln.Updates`, `Kiln.SecurityNotices`.
 - **`projects/`** — downstream overlays. `projects/example/` is the worked
   example. A plugin shipped as a Mix dependency is installed through the
   overlay's git-ignored `config/project_deps.exs`, not the core's `mix.exs`

@@ -15,7 +15,7 @@ has three values:
 |-----------|-------------------------------------------------------------------|
 | `:admin`  | Full access. A `bypass` clause on every resource short-circuits all checks. |
 | `:editor` | Authors content, manages taxonomy/media, runs draft→review transitions. |
-| `:viewer` | Default on registration. Reads published content only; no authoring. |
+| `:viewer` | Default on registration (on a site that holds sign-ups for approval, only once approved: until then the account holds no tier anywhere). Reads published content only; no authoring. |
 
 ### Audiences (the read axis)
 
@@ -1053,6 +1053,38 @@ because the row carries the watermark, and deleting it would let every session
 the watermark still catches back in; "Never" on the page saves empty timeouts
 instead. `except_session_jti` must be one of the caller's own sessions on the
 site, or nothing is revoked.
+
+## Password policy — `SitePasswordPolicy` (#2240)
+
+| Action | org admin (incl. platform admin) | editor | viewer | anonymous | `:accounts` system actor |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `read` | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `save`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+A site's breached-password stance (off, warn or block for administrators), at
+`/editor/password-policy`
+([guide](account-administration.md#breached-passwords)). The `OrgSettings`
+macro's read and write policies, both `Checks.OrgAdmin`. `destroy` is the
+page's **Use the default**: it drops the row, so the operator's
+`BREACHED_PASSWORD_POLICY` applies again. The `:accounts` system actor may only
+read, for a registration, reset or first-run setup that has no admin actor.
+
+## Registrations — `SiteRegistration` (#2251)
+
+| Action | org admin (incl. platform admin) | editor | viewer | anonymous | `:registrations` system actor |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `read` | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `save`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+Whether password sign-ups and new accounts from the site's own single sign-on
+wait for approval, and what rejecting does to an unconfirmed account, at
+`/editor/registrations` ([guide](account-administration.md#approving-registrations)).
+The same `OrgSettings` shape as Password policy. The `:registrations` system
+actor reads it during a sign-up, which has no admin actor. The decisions
+themselves are `OrgMembership` actions (`approve_registration`,
+`reject_registration`), admitted for an admin of the membership's site and
+for a platform admin; see the `OrgMembership` table under Platform accounts
+above.
 
 ## Admin allowlist — `SiteAdminAllowlist` (#2248)
 

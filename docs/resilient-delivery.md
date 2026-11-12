@@ -68,5 +68,21 @@ any query raises exactly as an outage would:
   (resolution). A cache eviction (TTL, LRW cap, or an invalidating write) means
   the next request re-warms from the DB — so the guarantee covers a *hot* working
   set, which is exactly the traffic that matters during an incident.
+- The request guards in front of delivery do not take it down with the
+  database:
+  - **Blocked addresses** ([ip-blocking.md](ip-blocking.md)) keep a site's
+    rules in a cache for one minute. Once that runs out during an outage,
+    each request tries to read the rules, fails, logs
+    `IpBlocklist: could not read the block rules; failing open` and is let
+    through. A failed read is not cached, so every dynamic request makes that
+    one attempt until the database is back: the warm path is no longer free
+    of database access after the first minute, though it still answers.
+  - **The `:delivery` rate limit** counts in each node's memory (ETS), not in
+    Postgres. **Bot budgets** ([bot-budgets.md](bot-budgets.md)) fall back to
+    the operator's ceilings when a site's own values can't be read, and
+    remember that answer for 20 seconds; browsers never read them.
+  - **Smart 404 blocking** counts off the request path and fails open: the
+    404 renders and nothing is blocked. **Crawler verification** asks DNS,
+    never the database.
 - A shared multi-node cache (Redis/Dragonfly) behind the existing tier-2 seam
   would extend warmth across a rolling restart; deferred until measured (D2).

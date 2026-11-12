@@ -51,7 +51,7 @@ you*).
 | The `__kiln_*__/0` functions the macro injects | The seam between a resource and every core registry. The double underscores read private; they are contract |
 | Workflow action names on a content resource | `:read`, `:published`, `:public_by_slug`, `:trashed`, `:create`, `:update`, `:autosave`, `:submit_for_review`, `:return_to_draft`, `:publish`, `:unpublish`, `:archive`, `:unarchive`, `:restore`, `:destroy`. Note `:restore` undoes trashing and `:unarchive` undoes `:archive` — they are not the same inverse |
 | The merge-argument convention | `tag_ids` / `add_tag_ids` / `remove_tag_ids`, and `related_<type>_ids` with the same three forms; `remove_*` stays idempotent |
-| `Kiln.Plugin` callbacks | All seventeen (`plug_routes/0` since `kiln_plugin` 1.4), their arities and their return shapes, plus the `nav_item`, `admin_route` and `plug_route` types |
+| `Kiln.Plugin` callbacks | All nineteen (`plug_routes/0`, `challenge_providers/0` and `security_checks/0` since `kiln_plugin` 1.4), their arities and their return shapes, plus the `nav_item`, `admin_route` and `plug_route` types |
 | `Kiln.Block` and its DSL | The `block`, `field` and `migrate` entities, their options, the declared field-type vocabulary, and the Kiln-to-Ash type mapping |
 | The `_type` and `_version` attributes | Injected on every block, and the discriminator a stored block map is resolved by |
 | `Kiln.Block.Renderer` | The `:web`, `:json` and `:json_ld` surfaces, and that an implementation returning `nil` for an unhandled surface is correct |
@@ -73,15 +73,17 @@ you*).
 | `mix kiln.update`, `mix kiln.plugins.doctor`, `mix kiln.search.check` | The task names and their documented flags: the checks *Protecting your overlay in CI* below tells your pipeline to run. Every other `mix kiln.*` task is operator or developer tooling, and is not |
 
 Since #1909, `Kiln.Plugin`, `Kiln.Block` and its `Kiln.Block.*` modules,
-`Kiln.FieldType`, `Kiln.Tokens`, `Kiln.Forms.SpamCheck` (with its `Context`),
-`Kiln.ImageBackend` and, since `kiln_plugin` 1.3, `Kiln.SafeFetch` ship in the [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md)
+`Kiln.FieldType`, `Kiln.Tokens`, `Kiln.Advisory` (with its `Context`,
+`Finding` and `Body`), `Kiln.Forms.SpamCheck` (with its `Context`),
+`Kiln.ImageBackend`, since `kiln_plugin` 1.3 `Kiln.SafeFetch`, and since
+`kiln_plugin` 1.4 `Kiln.Challenge.Provider` and `Kiln.Security.Check` ship in the [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md)
 package, which the core takes as a `path:` dependency, so that a plugin can
 depend on them without depending on the core. The names did not change and
 the promises above apply unchanged; an overlay compiles exactly as before.
 The package versions on its own (`kiln_plugin-vX.Y.Z`) under the same rule:
 minors add, and a major comes only with a core major. `Kiln.Plugins`,
-`Kiln.Advisory`, `Kiln.Version`, `Kiln.Updates` and the three registries stay
-in the core.
+`Kiln.Version`, `Kiln.Updates` and the registries (`Kiln.Advisory.Registry`
+among them) stay in the core.
 
 Delivery URLs, GraphQL field names and JSON:API routes are derived from `:type`
 and `:plural`, so they inherit the promise above — but the HTTP contract has
@@ -99,7 +101,22 @@ that counting as a major.
   `KilnCMSWeb.AshJsonApiRouter` — LiveViews, components, the component kit's
   class names, and the `/editor/...` admin paths themselves.
 - **`KilnCMS.*` internals not named above** — changes, calculations, workers,
-  firing internals, and anything marked `@doc false`.
+  firing internals, and anything marked `@doc false`. 1.9 changed several that
+  overlay code calls, each listed under Breaking in its changelog:
+  - `restore_<type>_version` filters on the record's `lock_version` and
+    `state` and increments `lock_version`, so restoring from a struct read
+    before a later write fails with `Ash.Error.Changes.StaleRecord`. Read the
+    record again before restoring, and keep the struct the restore returns.
+  - `purge_<type>` and `purge_media_item` refuse a record that is not in the
+    trash (`StaleRecord`); trash it first with `destroy_<type>`.
+  - `KilnCMS.Backups.enqueue/1` returns `{:ok, %{status: status, chain: chain}}`
+    (`status` is `:started`, `:queued` or `:folded`), not an `Oban.Job`, and
+    `KilnCMS.Backups.Worker.run/3` requests a backup and waits for it instead
+    of running it inline. Both are deprecated for `KilnCMS.Backups.request/2`,
+    which takes the actor asking.
+  - `KilnCMS.Accounts.Bootstrap.create_first_admin/1` returns
+    `{:ok, user, notices}` (`notices` is `[]` or `[:password_breach]`), not
+    `{:ok, user}`.
 - **Which image the built-in logo and the home page screenshots are served
   as.** Core renders the stock logo through `KilnCMSWeb.Layouts.brand_mark/1`
   as a right-sized WebP/PNG pair, and the home page screenshots as WebP
@@ -308,7 +325,9 @@ Stated rather than discovered later.
   the renderer behaviour. Treat it as unstable until it is.
 - **The hand-rolled `@behaviour` path is fragile against additions, on every
   behaviour here.** `Kiln.Plugin` declares no optional callbacks at all, and
-  `Kiln.FieldType` marks only its three late additions optional — the rest are
+  `Kiln.FieldType` marks only its late additions optional (`input_parts/1`,
+  `tokens/1`, `json_schema/1`, `graphql_kind/1`, `description/0`,
+  `input_hook/1`, `handle_input_event/3`, `widgets/1`) — the rest are
   required-but-defaulted, exactly like `Kiln.Plugin`'s. So a module that
   declares `@behaviour` instead of using the `use` form gets missing-callback
   warnings when a callback is added, which `--warnings-as-errors` turns into a

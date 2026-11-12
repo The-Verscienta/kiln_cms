@@ -265,6 +265,14 @@ warning about it on the first proxied request. Render sits behind Cloudflare,
 which sends `True-Client-IP`, but Render doesn't document or promise that
 header, so Kiln doesn't offer it.
 
+The same address decides **search-engine verification** (#2254). Kiln checks
+a request that claims to be Googlebot or another search engine against DNS for
+the client's address; where that address is the proxy's (Render, or any
+platform without `CLIENT_IP_HEADER` or `TRUSTED_PROXIES`), no claim can be
+verified, so search engines are held to the browser rate instead of the
+`KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT` default of 200%. Nothing errors. See
+[Verified search engines](bot-budgets.md#verified-search-engines).
+
 ## Upgrading
 
 Each template pins an image tag. To upgrade:
@@ -306,7 +314,8 @@ cover:
 - **`SECRET_KEY_BASE`.** Encrypted columns (DKIM keys and other secrets) can't
   be read without the same value, so keep it wherever you keep the database
   backups. See [backups.md](backups.md#what-must-be-backed-up).
-- **Media on a volume.** The in-app backup (Backups in the console) archives
+- **Media on a volume.** The in-app backup (**Backups** in the console,
+  platform admins only) archives
   `KILN_MEDIA_ROOT`, but it writes the archive to `BACKUP_DIR` on the
   container's own disk, which the platform wipes. Snapshot the volume with the
   platform's tools, or set `BACKUP_RCLONE_REMOTE`: the official image ships

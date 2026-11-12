@@ -41,9 +41,12 @@ services. To run the published image instead of a checkout, see
 minors: webhooks that name the other pages a change touched (1.3), retractions that cannot be silently lost (1.4), every publish and
 withdrawal timed end to end (1.5; first number p95 0.58 s, unpublish to last
 endpoint, on [benchmarks](docs/benchmarks.md#live-delivery-unpublish-to-last-endpoint)),
-a "what readers saw" trail per document (1.6), and every published page
-signed by default (1.7). The public change feed and client subscribe helpers
-are not shipped yet; the
+a "what readers saw" trail per document (1.6), every published page
+signed by default (1.7), and a public change feed over Server-Sent Events,
+`GET /api/feed`, that resumes from a `/api/sync` cursor (1.9;
+[live updates](docs/headless-consumer-guide.md#live-updates-follow-the-change-feed)).
+The Phoenix Channels transport and the client subscribe helpers are not
+shipped yet; the
 [guide](docs/right-everywhere-provably.md#what-is-not-built-yet) lists what
 is still to come.
 
@@ -176,11 +179,17 @@ problems never go in an issue** — report them privately
 Resources live in `lib/kiln_cms/cms/`:
 
 - **`Page`** / **`Post`** — strongly-modeled content carrying an **embedded block tree**
-  (`blocks` is an array of the embedded `Block` resource — decision **D3**, not a separate
-  table). Both have paper-trail history and the publishing state machine.
-- **`Block`** — an embedded resource with a `type` (`:rich_text`, `:heading`, `:image`,
-  `:quote`, `:embed`, `:divider`, `:columns`, `:custom`), `content`, a flexible `data` map,
-  `order`, and nested `children` for composable slices.
+  (`blocks` is an array of typed blocks, `KilnCMS.CMS.BlockUnion` — decision **D3**, not a
+  separate table). Both have paper-trail history and the publishing state machine, from
+  `use KilnCMS.CMS.Content`, which an overlay's own content types use too.
+- **`Entry`** — the generic record behind every content type an admin defines in the
+  console (D17), with the same block tree, history and workflow.
+- **Blocks** — one `Kiln.Block` module per type in `lib/kiln_cms/blocks/` (rich text,
+  heading, image, gallery, quote, embed, columns, form and more), each discriminated by its
+  `_type` attribute; plugins add their own.
+- **Custom fields** — admin-defined fields on any content type, with validation, layout
+  (tabs, fieldsets, columns) and a choice of editor input; see
+  [Extending the content model](docs/extending-content.md).
 - **`MediaItem`** — media-library metadata (binary lives in object storage).
 
 ## Getting started
@@ -243,8 +252,9 @@ Then visit:
 
 The `role` attribute (`:admin`/`:editor`/`:viewer`) can **not** be set through
 self-registration — `register_with_password` always lands on `:viewer` so signup
-can never escalate privileges. Admins are seeded directly or promoted by an
-existing admin.
+can never escalate privileges. Registering does not sign the person in either:
+everyone who registers is told to check their email and sent to `/sign-in`.
+Admins are seeded directly or promoted by an existing admin.
 
 **Development.** The seed script ([`priv/repo/seeds.exs`](priv/repo/seeds.exs))
 creates a pre-confirmed admin and editor. It runs automatically as part of
@@ -416,6 +426,14 @@ the front-end integration guide.
   once per node the first time a forwarded request arrives while this is unset (#564).
 - **Invite-only mode:** set `config :kiln_cms, :registration_enabled, false` to disable
   open `/register` self-signup (the registration action is gated, not just the UI link).
+  To keep sign-up open but decide who gets in, a site admin turns on registration
+  approval instead ([Approving registrations](docs/account-administration.md#approving-registrations)).
+- **Check what is still off.** **Organization → Security posture** lists which security
+  settings are on for a site and what to fix first; platform admins also see the
+  installation's checks ([`docs/security-posture.md`](docs/security-posture.md)).
+  **Organization → Security alerts** chooses which events email a site's admins
+  ([`docs/security-alerts.md`](docs/security-alerts.md)), and the security log records
+  them ([`docs/security-events.md`](docs/security-events.md)).
 
 ## Security
 
@@ -458,8 +476,19 @@ Bootstrapped & verified (compiling, migrating, serving):
 Now wired: **magic-link** auth, **Ash policies** enforcing the RBAC roles on every
 resource, the media upload/variant pipeline (libvips), the **TipTap LiveView editor**
 with real-time visual preview and collaborative locking, and headless GraphQL + JSON:API
-delivery. Remaining cleanup: replace the temporary DaisyUI auth-override scaffolding in
-`router.ex`/`auth_overrides.ex` with custom components (the plan specifies no DaisyUI).
+delivery. The sign-in screens use Kiln's own components (`KilnCMSWeb.AuthOverrides`);
+DaisyUI is gone.
+
+Since 1.9, also: a security posture page, a security log and security alerts
+for each site ([`docs/security-posture.md`](docs/security-posture.md)); registration
+approval and email invitations
+([`docs/account-administration.md`](docs/account-administration.md)); in-app backups
+with a History view, cancel and resume ([`docs/backups.md`](docs/backups.md)); custom
+fields with value constraints, layout and editor inputs
+([`docs/extending-content.md`](docs/extending-content.md)); human verification on
+sign-in, registration and public forms ([`docs/human-verification.md`](docs/human-verification.md));
+and the delivery schema as OpenAPI components
+([`docs/native-apps.md`](docs/native-apps.md#generate-from-openapi-components)).
 
 > **Note:** clone this project to a path **without spaces**. One dependency,
 > `picosat_elixir`, cannot compile under a spaced path such as iCloud Drive's

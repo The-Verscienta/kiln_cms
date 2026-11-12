@@ -15,6 +15,13 @@ counted there. It is another way to sign in, and it does not protect the
 account's password sign-in: someone who has the password signs in with the
 password and, without TOTP, needs nothing else.
 
+Turning a second factor on or off is recorded in the site's
+[security log](security-events.md) (`second_factor_enrolled`,
+`second_factor_removed`), and removing one alerts the site's admins by bell and
+email unless they turned off "Two-factor authentication turned off"
+([Security alerts](security-alerts.md#what-raises-an-alert)). A factor removed
+because an invitee took the account over is logged but raises no alert.
+
 ## How it works
 
 - **Self-service enrolment** at `/editor/settings` → "Two-factor authentication":

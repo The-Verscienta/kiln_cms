@@ -420,7 +420,9 @@ log for these: no ping or exit code reports them.
 
 ## In-app backups (#484)
 
-The console has a **Backups** page (`/editor/backups`, admin only) showing when
+The console has a **Backups** page (`/editor/backups`, platform admins only:
+a backup covers every site on the deployment, so a site admin cannot open it)
+showing when
 the database and the media were last backed up, how big the last backup was,
 which files it produced and whether each verified — plus a **Back up now**
 button. For platform admins, the overview grid grows a red strip when either
@@ -638,8 +640,8 @@ queued").
 
 Folding them would lose work: a resume finishes the old backup's stamp, so a
 fresh backup folded into it would never be taken, and a resume folded into a
-fresh backup would never resume. In-app schedules (#2219, not yet released)
-get the same answer: a scheduled tick is never folded into a queued Resume,
+fresh backup would never resume. In-app schedules (#2219, planned and not in
+v1.9) will get the same answer: a scheduled tick is never folded into a queued Resume,
 and is retried on a later tick once the queue clears.
 
 **What the queued backup covers after a fold.** A request that folds into a
@@ -1525,9 +1527,10 @@ Record each drill here:
 
 ## Environment reference
 
-The `backup` rows are read by **both** paths — `scripts/backup.sh` and the app
-(`config/runtime.exs` → `KilnCMS.Backups`), by the same names, so a deployment
-configured for cron needs nothing extra for the console.
+The rows marked **backup + app** are read by both paths, `scripts/backup.sh`
+and the app (`config/runtime/prod/backups.exs` → `KilnCMS.Backups`), by the same
+names, so a deployment configured for cron needs nothing extra for the console.
+The app reads them in production only.
 
 | Variable | Script | Meaning |
 |---|---|---|
@@ -1543,6 +1546,8 @@ configured for cron needs nothing extra for the console.
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused or failed copy fails the run. The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
+| `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo |
+| `RCLONE_CONFIG`, `RCLONE_CONFIG_<NAME>_*`, `RCLONE_RETRIES` | rclone | read by `rclone` itself, which inherits the environment of whichever path runs it: the named remote's configuration file or settings, and rclone's retry count (default 3). Kiln does not read them. `kiln_offsite` is reserved ([above](#off-site-credentials-stay-out-of-the-rclone-command-line-2690)) |
 | `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill` |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |
 | `RESTORE_CONFIRM=yes` | restore | skip the interactive confirmation |

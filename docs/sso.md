@@ -51,8 +51,11 @@ The sign-in page then offers "Sign in with Sso" alongside password/magic-link.
   library's hijack prevention).
 - **Linking, not privilege.** An existing account signs in as-is (role,
   audiences, display name untouched). A new user lands as `:viewer` with no
-  audiences — identical to password self-registration; an admin grants access
-  afterwards.
+  audiences; an admin grants access afterwards. A site's
+  [registration approval](account-administration.md#approving-registrations)
+  does not hold accounts created through this provider: only password sign-ups
+  and, with its own switch, a site's own provider ([below](#per-site-providers))
+  wait for an admin.
 - **Invite-only respected.** With `:registration_enabled` false, SSO signs in
   existing accounts only; unknown emails are refused, not auto-provisioned.
   To let a new person in, a platform admin invites their address from **Team**
@@ -139,6 +142,11 @@ read, the sign-in page says "Single sign-on isn't available on this site right
 now. Sign in another way." It never sends
 people to the operator's provider instead.
 
+A change to the site's provider or its email domains is recorded in the
+[security log](security-events.md) and alerts the site's admins ("Single
+sign-on changed" in [Security alerts](security-alerts.md)) unless they
+turned that alert off.
+
 Not yet: turning password sign-in off for a site, SAML, and more than one
 provider per site.
 
@@ -147,7 +155,7 @@ provider per site.
 - **SAML** — needs a dependency decision (`esaml`/`samly`); OIDC covers most
   modern IdPs (including Entra/Okta/Google) so SAML is deferred until a
   concrete need.
-- **Passkeys / WebAuthn** — a separate, browser-API-heavy effort; deferred.
+- **Passkeys / WebAuthn** — shipped; see [Passkeys](passkeys.md).
 - **Multiple simultaneous IdPs** — the operator's strategy is singular
   (`:sso`); each site can add one of its own
   ([above](#per-site-providers)).

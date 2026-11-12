@@ -210,6 +210,18 @@ The write itself is then subject to the record's own policy, so an editor
 scoped by `editable_types` to other types cannot move what they cannot edit,
 and the calendar route is editor-gated, so a viewer never reaches it at all.
 
+What a refused move says (the chip snaps back each time):
+
+| Message | Meaning |
+|---|---|
+| *Can't reschedule into the past.* | The move would land before now. The chip keeps its time of day, so a 09:00 chip dropped on today in the afternoon counts too. |
+| *That day is not on this calendar — nothing moved.* | The target day is outside the loaded window. |
+| *That item can't be moved by dragging.* | The chip is in a lane that does not drag (see the table above). |
+| *That item is no longer on the calendar — reload to see why.* | The chip is not among the events the page loaded, or the record could not be read again (deleted, trashed, or no longer yours to read). |
+| *Only an admin can move a publish date on this site.* / *Only an admin can move the unpublish date of a live page on this site.* | You are an editor on a site where only admins publish (#2134). |
+| *You can't edit this content type.* | Your role is scoped away from the record's type. |
+| *You don't have permission to do that.* | Any other refusal by the record's policy. |
+
 ## Turning staleness into work
 
 Health tells you something has gone stale. The remediation loop is what puts it

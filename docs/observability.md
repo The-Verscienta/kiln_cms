@@ -74,6 +74,7 @@ happening and where, not who. The underlying telemetry event is
 `[:kiln_cms, :ip_block, :refused]` (measurement `count`, metadata `surface`).
 
 Useful Grafana panel: `sum(rate(kiln_cms_ip_block_refused_count[5m])) by (surface)`.
+
 `kiln_cms.scanner_guard.blocked.count` counts addresses the scanner guard
 blocked by itself ([ip-blocking.md](ip-blocking.md#block-scanners-automatically),
 #2253), tagged `reason`: `miss_threshold` or `bait_path`. The underlying event is
@@ -362,6 +363,28 @@ and the [API guide](api.md#security-posture-monitoring). A run for that
 endpoint emits the same events, at most once per site and scope set every
 30 seconds on each node.
 
+## Security log and alerts
+
+Writing to the [security log](security-events.md) and claiming a
+[security alert](security-alerts.md) never fail the sign-in or action they
+report on, so a lost write is visible only in the application log and on
+these events. None is in `KilnCMSWeb.Telemetry.metrics/0`, so none reaches
+Prometheus: attach a `:telemetry` handler to count them, or alert on the log
+lines.
+
+| Event | Emitted when | Measurements | Metadata |
+|-------|--------------|--------------|----------|
+| `[:kiln_cms, :security, :event_failed]` | A security event could not be written. Also logged at `error`: `security event <type> not recorded: ...` | `count` (always `1`) | `type` |
+| `[:kiln_cms, :security, :event_sampled_out]` | An event was dropped on purpose: a failed sign-in, an admin allowlist refusal or a refused unlock link over its per-address cap, or a repeat lockout in the same window | `count` (always `1`) | `type` |
+| `[:kiln_cms, :security, :alert_failed]` | An alert could not be claimed and will not be sent. Also logged at `error`: `Security alert <kind> for <scope> could not be claimed and will not be sent: ...` | `count` (always `1`) | `scope`, `kind`, `reason` |
+| `[:kiln_cms, :api_key, :reuse_detected]` | A rotated-away API key was presented again and its lineage revoked (#2245). Also logged at `warning` | `count` (always `1`) | `key_id`, `lineage_id`, `user_id`, `revoked_ids` |
+
+Wire an alert to `event_failed` and `alert_failed`: either means something
+that happened is missing from the record or reached nobody. A sustained rate
+of `event_sampled_out` with `type: :sign_in_failed` is a password-guessing
+attack. `reuse_detected` carries ids: keep it out of an external sink that
+must not hold them.
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in
@@ -612,6 +635,24 @@ With the [exporter](#prometheus-and-grafana) on, two more come straight from
   for: 10m
   labels: { severity: warning }
 ```
+
+Two more watch the security gates described above:
+
+```yaml
+- alert: KilnCMSAdminAllowlistUnreadable
+  expr: sum(rate(kiln_cms_admin_allowlist_refused_count{reason="unavailable"}[5m])) > 0
+  for: 5m
+  labels: { severity: critical }
+- alert: KilnCMSCrawlerDnsFailing
+  expr: sum(rate(kiln_cms_crawler_verification_lookup_count{result=~"timeout|error"}[15m])) / sum(rate(kiln_cms_crawler_verification_lookup_count[15m])) > 0.5
+  for: 30m
+  labels: { severity: warning }
+```
+
+The first means a site's console and sign-in are answering `503` because
+its [admin allowlist](admin-allowlist.md) can't be read. The second means the
+node can't reach its DNS resolver, so search-engine claims stay unverified
+([bot-budgets.md](bot-budgets.md#check-that-a-node-can-verify-crawlers)).
 
 The thresholds are placeholders. Set them from a week of your own traffic.
 

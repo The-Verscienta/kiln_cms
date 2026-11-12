@@ -129,6 +129,15 @@ Authorization: Bearer <token>
 The same token authenticates GraphQL (`POST /gql` and its WebSocket) — see the
 `bearerAuth` security scheme in the OpenAPI spec.
 
+Anonymous means **no `Authorization` header**. A bearer token that does not
+verify (malformed, expired, or signed by another instance), a bare `Bearer`,
+or a JWT under the scheme spelled `bearer` is answered `401` `invalid_token` with
+`WWW-Authenticate: Bearer error="invalid_token"` on `/api/json`, `/gql` and
+the other `/api` routes, not served as an anonymous read (#2161). Treat it as
+"sign in again", and send no header when you mean to read as the public.
+Details, and the one-release opt-out `KILN_API_REJECT_INVALID_BEARER=false`:
+[headless-consumer-guide.md](headless-consumer-guide.md#a-bad-bearer-token-is-a-401).
+
 ### Obtaining a token
 
 Tokens are AshAuthentication user JWTs. Headless clients get one by posting
@@ -1382,6 +1391,13 @@ Notable properties:
   added after a document was last saved has no stored value and publishing does
   not invent one, while a point-in-time read (`?as_of=`) serves the values
   stored at that instant — which may include fields since removed;
+- a `range` custom field keeps one merged object (`min` / `max`, each a
+  number or a `YYYY-MM-DD` date) for generators that read only `properties`,
+  and adds an `anyOf` beside it: number bounds, date bounds (each object
+  closed, with `minProperties: 1`), or `null`. A validator therefore refuses
+  `{"min": 1, "max": "2026-12-31"}` and `{}`, as a save does. The TypeScript
+  formats emit the two shapes as a union; the Swift and Kotlin models keep
+  one struct with optional bounds (#2548);
 - `social`, the document's link-preview title, description and absolute image
   ([headless-consumer-guide.md](headless-consumer-guide.md#link-previews-the-social-object)),
   is optional: an artifact fired before `format_version` 4 lacks it until it
@@ -1611,7 +1627,10 @@ post is in the feed on the next fetch rather than after the TTL.
 ## Webhooks
 
 Admins register receivers in the editor UI (`/editor/webhooks`); each endpoint
-has its own signing secret, stored encrypted. On publish/unpublish/update KilnCMS
+has its own signing secret, stored encrypted, shown masked until an admin
+reveals it, and replaced with **Rotate secret**
+([webhooks.md](webhooks.md#rotate-a-webhook-signing-secret)). The API never
+exposes a secret. On publish/unpublish/update KilnCMS
 dispatches `<type>.published`, `<type>.unpublished` and `<type>.updated` events;
 `<type>.archived`, `<type>.deleted` (trashed) and `<type>.restored` tell a mirror
 when a document leaves or comes back, and opt-in `<type>.created` announces new
@@ -2352,7 +2371,7 @@ Over the limit returns **429** with a `retry-after` header.
 | `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search`, `GET /api/security/posture` | 120 requests / minute |
 | `feed_join` | `GET /api/feed` connects (and `HEAD`) — charged **first**, then `api` too. Over it, the answer is a `200` with `event: busy`, not a `429` ([§ Change feed](#change-feed-sse)) | 60 connects / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
-| `auth` | sign-in / auth  | 40 requests / minute  |
+| `auth` | sign-in / auth, and `POST /api/keys/rotate` | 40 requests / minute  |
 | `docs` | `/api/json/swaggerui` | 60 requests / minute |
 | `unlock` | `POST /api/content/:type/:slug/unlock` (and the built-in site's lock form) | 10 requests / minute |
 | `media_transform` | `GET /media/:id/t/:ops` (every request) | 1,200 requests / minute |
@@ -2454,11 +2473,15 @@ You get it from the headless sign-in, fired-artifact (`not_found` /
 `artifact_compiling`), related-content, provenance, form-schema and
 form-submission, visual-editing, media-upload ([§ Upload errors](#upload-errors)),
 version-history (`unauthenticated`, `invalid_id`, `invalid_cursor`,
-`forbidden`, `not_found`, `restore_failed`, `invalid_state_transition`), security-posture
+`forbidden`, `not_found`, `restore_failed`, `invalid_state_transition`), schema
+(`invalid_format`, `invalid_package`, `invalid_type`), key-rotation
+(`invalid_api_key`, `forbidden`, `not_rotatable`), security-posture
 (`network_not_allowed`, `temporarily_unavailable`, `invalid_token`,
 `unauthenticated`, `forbidden`; [§ Posture status codes](#posture-status-codes)) and preview-token (`invalid_preview`)
 endpoints — **and from the 429 when you exceed a rate-limit bucket**
-(`too_many_requests`, alongside `retry-after`). All of them render through one
+(`too_many_requests`, alongside `retry-after`), and from the `401`
+`invalid_token` a bearer token that does not verify gets on any `/api` route
+([Authentication](#authentication)). All of them render through one
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
 new endpoint writes its own (#190, #744).
 

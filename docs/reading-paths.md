@@ -34,7 +34,8 @@ You write, review and publish content in the Kiln editor.
 You read Kiln's content from your own site or app, or extend Kiln itself.
 
 1. [Headless consumer guide](headless-consumer-guide.md): which API to use
-   for your front end, and where to go next.
+   for your front end, how to follow the change feed live, and where to go
+   next.
 2. [JSON:API](json-api.md): reading and writing content over HTTP.
 3. [GraphQL](headless-graphql-api.md): the same content as a GraphQL schema.
 4. [Webhooks](webhooks.md): hearing about a change as soon as it is
@@ -43,8 +44,9 @@ You read Kiln's content from your own site or app, or extend Kiln itself.
    and fields.
 6. [The overlay contract](overlay-contract.md): what your own project may rely
    on across Kiln releases.
-7. [Plugins](plugin-extensibility.md): adding behaviour at runtime with a
-   plugin.
+7. [Plugins](plugin-extensibility.md): adding blocks, field types,
+   endpoints and checks with a plugin, which is compiled in, never loaded at
+   run time.
 
 ## Operator
 
@@ -61,13 +63,14 @@ You install, run and upgrade a Kiln site.
    back.
 5. [Observability](observability.md): telemetry and performance profiling
    for the editor, with an optional Prometheus exporter.
-6. [Account administration](account-administration.md): adding people and
-   giving them roles. [Granular RBAC](granular-rbac.md) covers finer-grained
-   permissions.
+6. [Account administration](account-administration.md): adding people,
+   inviting them by email, approving who registers, and giving them roles.
+   [Granular RBAC](granular-rbac.md) covers finer-grained permissions.
 7. [Secrets rotation](secrets-rotation.md): replacing each secret a
    deployment depends on, and what breaks while you do.
 8. [Threat model](threat-model.md): what the public APIs expose, and how each
-   risk is handled.
+   risk is handled. [Security posture](security-posture.md) then checks which
+   security settings a running site has on, and what to fix first.
 
 Upgrade steps live in the release guide, under Contributing to Kiln:
 [Updating a project to a release](releasing.md#updating-a-project-to-a-release).

@@ -93,7 +93,8 @@ You need the platform admin role.
 
 ### Check a team member's role on this site
 
-You need the admin tier on the site.
+You need the platform admin role: **Team** is a platform-admin screen, and an
+admin of one site is sent to the access-denied page.
 
 1. Open **Team** (`/editor/team`). Each member row shows **On this site:** and
    the tier that applies now, with the grant line when a temporary tier is
@@ -126,6 +127,37 @@ Anyone who can reach the console (editor or admin on the site) can do this.
 - **The accounts list says *Viewer*, but the person edits a site.** **Platform:**
   is the platform role. Their tier on a site is under **Sites** on the account
   page, or on that site's **Team** page.
+
+### When someone is turned away from a console page
+
+A console page someone lacks the role for sends them to `/access-denied`, a
+page answered with `403`, rather than to the home page with a passing message.
+It says which role the page needs, what their own role on this site is, and
+whom to ask:
+
+- The heading reads "This page needs editor access", "This page needs admin
+  access" or "This page needs platform admin access". Platform admin pages are
+  the ones backed by the whole installation (Team, Accounts, Billing, Mail,
+  API keys, Backups, System): an admin of one site cannot open them either.
+- "You are signed in as (role) on (site)." with a line on what that role can
+  do. An account with no role on the site (a member of another site, or a
+  registration still [waiting for approval](#approving-registrations)) reads
+  "You are signed in, but your account has no role on (site)." and is offered
+  **Sign out**, to sign in with another account.
+- "To get access, ask an admin of (site) to change your role." (or "... to give
+  your account a role.", or, for a platform admin page, "ask the person who
+  administers this installation.").
+
+To let them in, raise their tier on **Team** or their platform role on
+**Accounts** ([See which role applies now](#see-which-role-applies-now)). They
+reload the page they wanted; nothing else needs clearing.
+
+`access-denied` is a reserved root slug. A page slugged `access-denied`, or a
+path alias under `/access-denied`, made before the upgrade that added this
+page is shadowed by it. Operators list such records with
+`mix kiln.reserved_paths` (in a release,
+`bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) and give each a new
+slug or alias.
 
 Paging is `limit`/`offset` with one extra row read to decide whether "Next"
 exists — the authentication resource's primary read carries no `pagination`, and
@@ -501,6 +533,30 @@ On the invitation page:
 
 Accepting *through* single sign-on is not supported: the invitee accepts with a
 password or with an account they already have.
+
+## What happens when someone registers
+
+Registering creates an account but does not sign anyone in. The answer is the
+same for every address, so the sign-up page can't be used to find out who has
+an account here.
+
+1. On `/register`, the person enters their email address and a password twice,
+   and submits the form.
+2. Whatever address they used, they are sent to `/sign-in` with "Check your
+   email - we have sent instructions for what to do next."
+3. **A new address** gets its account and a confirmation email. The person
+   signs in at `/sign-in` with their password (confirming first is not
+   required to sign in), or waits for approval on a site that
+   [holds sign-ups](#approving-registrations).
+4. **An address that already has an account** gets no new account and no
+   change to the existing one. Its owner is emailed "Someone tried to create a
+   (site) account with your address", with links to sign in or reset their
+   password.
+
+A mistake in the form itself, such as a password shorter than 8 characters or
+two passwords that don't match, is still shown on the page, the same way for
+every address. If [human verification](human-verification.md) is on, the form
+may ask for a check first.
 
 ## Approving registrations
 
@@ -1463,9 +1519,13 @@ removal, and the cascades that would make it succeed are exactly the audit trail
 
 So removal is `User.:anonymize`, the GDPR Art. 17 path: the email becomes a
 non-routable tombstone, the name is blanked, the password hash is destroyed,
-the role drops to `:viewer`, audiences are cleared, passkeys and IdP links are
-deleted, every token is revoked, paid memberships are cancelled locally, and
-live sockets are dropped. Nothing personal remains and nothing can sign in
+the role drops to `:viewer`, audiences are cleared (even when a stale copy of
+the account was loaded with none), passkeys and IdP links are deleted, every
+token is revoked, paid memberships are canceled locally, and live sockets are
+dropped. It also deletes what reaches only that person: their Web Push
+subscriptions (the device endpoints review notifications go to), their private
+saved views (shared views are the team's and stay), and the notifications
+addressed to them. Nothing personal remains and nothing can sign in
 again. What remains is a referenced id, and the console says so rather than
 claiming a delete it did not do.
 

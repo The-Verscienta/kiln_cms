@@ -51,7 +51,7 @@ for this purpose. The hooks have no styles of their own:
 | `public-header`, `public-site-name`, `public-main`, `public-footer-nav`, `public-attribution` | The public chrome (`Layouts.public/1`) |
 | `public-article`, `public-masthead`, `public-title`, `public-meta`, `public-lede`, `public-body` | The document templates (`show*`), the editor's live preview and the shared preview link |
 | `public-article`, `public-title` | The in-context editor, which leaves `public-body` off its drag-to-reorder list: a preset that sets it to `display: contents` would take away the box the drag needs |
-| `public-title` | Every other public page's `<h1>` (blog, events, search, lock, teaser) |
+| `public-title` | The `<h1>` of the blog and event indexes, search, and the locked-page and members-only screens. Not the form's own page (`/forms/<slug>`) or the newsletter pages, whose headings carry no hook |
 | `public-byline`, `public-byline-name` | A document's public byline inside `public-meta` (`show*`, #2044): each "By …" / "With …" run, and each person's name or profile link |
 | `public-index` | The blog index list |
 | `public-search-submit` | The search form's submit button |
@@ -204,6 +204,10 @@ reader without a mouse can Tab to it and scroll it with the arrow keys:
 - a table sits in
   `<div class="kiln-table-wrap" tabindex="0" role="group" aria-label="Scrollable table">`
   ([#2464](https://github.com/The-Verscienta/kiln_cms/issues/2464)).
+
+A `:web` artifact fired before the upgrade that added these attributes keeps
+its old HTML until the document is edited or re-fired; `mix kiln.refire_all`
+after deploying brings them all up to date.
 
 The outline each one draws on `:focus-visible` is the only sign of where
 focus went. Custom CSS and presets may change its color, but must not remove
