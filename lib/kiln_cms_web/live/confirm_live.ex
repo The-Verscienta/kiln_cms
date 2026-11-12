@@ -16,8 +16,8 @@ defmodule KilnCMSWeb.ConfirmLive do
 
   The form posts to the strategy's own route, as upstream's does; the password
   is checked by `User.:confirm_new_user`, and a wrong one comes back here
-  through `KilnCMSWeb.AuthController.failure/3` with the link's token, which a
-  failed confirmation does not use up.
+  through `KilnCMSWeb.AuthController`'s failure callback with the link's
+  token, which a failed confirmation does not use up.
   """
   use KilnCMSWeb.AuthLive, upstream: AshAuthentication.Phoenix.ConfirmLive
 
