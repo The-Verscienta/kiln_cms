@@ -218,3 +218,15 @@ carries the reasoning.
   app is not serving (`read_through_unless_serving/1`), so any `eval` task
   reads the database directly. Called over `rpc` on a running node, the live
   cache is untouched. Found on Verscienta's production upgrade to 1.9.2.
+
+<a id="featured-image-older-than-picker-window"></a>
+
+- **The editor's Featured image field shows an image older than the org's 500 most recent uploads, with its Remove link.**
+  The Settings tab looked the attached image up only in the media picker's
+  window (the 500 newest images), so on a large library an older featured
+  image showed **None selected**, with no thumbnail and no **Remove** link,
+  though the record, the API and the site all had it. Editors could take the
+  record for imageless and pick a duplicate, and could not clear the image
+  without first choosing another. The field now resolves the image the way
+  the editor's preview already did: the window first, then the database.
+  Saving never lost the image; only the display was wrong.

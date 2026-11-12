@@ -104,6 +104,9 @@ Every summary line below that was shortened links to its own entry there.
   `eval` read through the content cache, which only a serving node starts, instead of crashing.**
   ([long form](docs/changelog/unreleased.md#release-eval-read-through))
 
+- **The content editor's Featured image field shows an image older than the org's 500 most recent uploads, with its Remove link, instead of "None selected".**
+  ([long form](docs/changelog/unreleased.md#featured-image-older-than-picker-window))
+
 ## [1.9.2] - 2026-11-12
 
 Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —

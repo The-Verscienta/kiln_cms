@@ -199,6 +199,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:restore_refusal, nil)
     |> assign(:page_title, gettext("New %{type}", type: String.downcase(content_type.label)))
     |> assign(:form, to_form(%{"title" => ""}, as: :form))
+    |> assign(:featured_media, nil)
   end
 
   # The writer's first commit on `/editor/content/:type/new`: create the row
@@ -964,6 +965,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
     )
     |> assign(:form, build_form(view, socket.assigns.actor))
+    |> refresh_featured_media()
     |> refresh_tag_index()
     |> seed_block_children(view)
     |> refresh_preview()
@@ -2335,6 +2337,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply,
        socket
        |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+       |> refresh_featured_media()
        |> mark_dirty(:settings)}
     end
   end
@@ -4268,6 +4271,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       socket
       |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+      |> refresh_featured_media()
       |> mark_dirty(:settings)
     end
   end
@@ -6612,6 +6616,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # The featured image's `@media`-shaped row, for the Settings tab's field
+  # (`featured_image_field/1`), resolved like `media_url/2`: the picker window
+  # first, then the database. The window holds only the `@max_media` most
+  # recent images, so on a large library an older featured image is not in it,
+  # and a lookup in the window alone showed "None selected" with no Remove
+  # link for a record that has one. Refreshed wherever the featured image can
+  # change: a record assign (mount, reload, restore), a pick, a clear.
+  defp refresh_featured_media(socket) do
+    row =
+      case AshPhoenix.Form.value(socket.assigns.form, :featured_image_id) do
+        id when id in [nil, ""] -> nil
+        id -> resolve_media_row(socket, to_string(id))
+      end
+
+    assign(socket, :featured_media, row)
+  end
+
+  defp resolve_media_row(socket, id) do
+    case Enum.find(socket.assigns.media, &(to_string(&1.id) == id)) do
+      %{} = row ->
+        row
+
+      nil ->
+        case CMS.get_media_item(id,
+               actor: socket.assigns.actor,
+               tenant: socket.assigns.current_org
+             ) do
+          {:ok, item} -> media_row(item)
+          _ -> nil
+        end
+    end
+  end
+
   defp media_url(socket, id) do
     case Enum.find(socket.assigns.media, &(to_string(&1.id) == id)) do
       %{url: url} ->
@@ -8126,6 +8163,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               tags={@tags}
               max_tags={@max_tags}
               media={@media}
+              featured_media={@featured_media}
               related_field={@related_field}
               related_current={@related_current}
               related_definition={@related_definition}
