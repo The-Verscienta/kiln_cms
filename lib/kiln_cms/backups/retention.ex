@@ -49,9 +49,13 @@ defmodule KilnCMS.Backups.Retention do
   `kiln-<stamp>.good` (`Artifact.good_name/1`) in `db/` or `media/` names the
   newest verified unit of that kind (rule 3), for `backup.sh prune`, which has
   no run history to find it by. This module writes it and is the only thing
-  that removes it: `sync_last_good/1` after a run succeeds, and `run/2` before
-  its first delete (never on a dry run). Per kind, the new marker is written
-  first and the other `.good` entries of that directory are removed only once
+  that removes it, at three moments: `sync_last_good/2` after a run succeeds,
+  `run/2` before its first delete (never on a dry run), and
+  `sync_last_good/2` again from `KilnCMS.Backups.Chain.sync_last_good/2`,
+  which `KilnCMS.Backups.MarkerSyncWorker` runs every 15 minutes for
+  deployments that back up with cron only (#2554). Per kind, the new marker
+  is written first and the other `.good` entries of that directory are
+  removed only once
   it is there, so a failed write (a warning and a
   `[:kiln_cms, :backups, :last_good, :failed]` event) leaves the old marker
   pinning the previous backup. A kind with no verified unit keeps whatever
