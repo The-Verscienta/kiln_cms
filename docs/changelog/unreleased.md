@@ -26,7 +26,7 @@ carries the reasoning.
   renamed `.png` is refused rather than becoming a featured image. Closing
   the picker cancels an upload that hasn't finished. Only editors who can
   edit the document see the upload area. The Branding page's image drawer is
-  unchanged.
+  unchanged. (#2791)
 
 ## Changed
 
