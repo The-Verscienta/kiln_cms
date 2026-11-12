@@ -5,7 +5,7 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `client-js-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
-## Unreleased
+## 0.5.0
 
 - **`kiln-types --check <file>` (kiln_cms#2274):** fetches the live schema (or
   reads `--from`), renders the declarations `--out <file>` would write, and
