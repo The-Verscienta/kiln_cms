@@ -171,6 +171,41 @@ defmodule KilnCMSWeb.BridgeSocketTest do
     assert {:ok, _} = BridgeSocket.connect(%{params: %{"type" => "post", "id" => post.id}})
   end
 
+  # The broadcast carries the editor's UNSAVED title and excerpt. A published
+  # row is world-readable, so an anonymous watcher passes the connect check;
+  # it must get the signal to re-fetch, not the next headline.
+  test "an anonymous or viewer watcher of a published document gets the bare signal" do
+    admin = user(:admin)
+    post = draft(admin)
+    KilnCMS.CMS.publish_post!(post, %{}, actor: admin)
+    payload = %{title: "Unannounced headline", excerpt: "Embargoed", blocks: []}
+
+    for params <- [
+          %{"type" => "post", "id" => post.id},
+          %{"type" => "post", "id" => post.id, "api_key" => key(user(:viewer))}
+        ] do
+      assert {:ok, state} = BridgeSocket.connect(%{params: params})
+
+      assert {:push, {:text, json}, ^state} =
+               BridgeSocket.handle_info({:preview_update, payload}, state)
+
+      assert Jason.decode!(json) == %{"event" => "update", "type" => "post", "id" => post.id}
+      refute json =~ "Unannounced"
+      refute json =~ "Embargoed"
+    end
+
+    # An editor's key still gets the fields.
+    assert {:ok, state} =
+             BridgeSocket.connect(%{
+               params: %{"type" => "post", "id" => post.id, "api_key" => key(admin)}
+             })
+
+    assert {:push, {:text, json}, ^state} =
+             BridgeSocket.handle_info({:preview_update, payload}, state)
+
+    assert %{"title" => "Unannounced headline"} = Jason.decode!(json)
+  end
+
   test "unknown type or missing params are refused" do
     assert :error =
              BridgeSocket.connect(%{params: %{"type" => "bogus", "id" => Ash.UUID.generate()}})
