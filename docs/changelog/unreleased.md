@@ -79,3 +79,71 @@ carries the reasoning.
   an embed's iframe is unchanged. The **Back** link is also left out when
   the referring path starts with `//` or `/\`, which a browser reads as
   another host. (#2338)
+
+<a id="dynamic-type-site-lookup"></a>
+
+- **Custom content types on a site other than the default one are delivered again.**
+  Several read paths resolved a content type by name without saying which
+  site was asking, and a custom (admin-defined) type then resolves against
+  the default site. On any other site that defines a type the default site
+  lacks, `GET /api/content/<type>/<slug>` answered 404 for published
+  entries, the headless and HTML passphrase unlock could not find the
+  document, `/related` and `/api/provenance` answered 404, the visual-editing
+  socket refused the connection, and **Visual** in the content editor said
+  *No such content to edit*. Each of those now passes the request's site.
+  Built-in and overlay-compiled types were never affected.
+
+<a id="storage-copy-and-backup-verify"></a>
+
+- **A copy from storage that fails partway is an error, and `backup.sh verify` fails on a corrupt dump.**
+  `KilnCMS.Storage.copy_to_file/3` answered `:ok` when a read failed after
+  the first chunk, and ignored a failed write, leaving a short file on
+  disk. The direct-upload completion and the audio/video metadata strip took
+  that file as the whole upload. It now returns `{:error, reason}` for a
+  failed read or write at any offset. Separately, `scripts/backup.sh verify`
+  ran `pg_restore --list … && echo "dump: ok"`, which `set -e` does not
+  treat as a failure, so a truncated dump with no checksum sidecar verified
+  clean with exit 0; it now stops with an error naming the dump.
+
+<a id="sweep-crash-fixes"></a>
+
+- **Crash fixes in the console and the public API.**
+  `ContentTypes.get_record/3` raised for a type that no longer resolves (an
+  archived custom type, a removed plugin), which took down the Tasks page,
+  the calendar and a menu item's Edit for anything still pointing at such an
+  entry; it now returns `{:error, :unknown_content_type}`. A nested value in
+  a custom-field filter (`custom_filter[name][eq][x]=1`) answered 500 and
+  now answers 400. Creating a redirect from `/` crashed the Redirects form.
+  A federation inbox body that is valid JSON but not an object is answered
+  400. A `return_to` path containing a backslash, a tab or a newline falls
+  back to the default instead of answering 500. Moving a block that is no
+  longer on the page in the in-context editor is ignored instead of
+  crashing the editor.
+
+<a id="sweep-wrong-results"></a>
+
+- **Wrong results fixed.**
+  The Home health panel and its CSV export ordered rows by comparing
+  `DateTime` structs field by field, so "most overdue first" could list a
+  March deadline ahead of a January one and drop the worst rows from the top
+  ten. A mention such as `@josé` was cut at the first non-ASCII letter and
+  could notify a different member. A form rating field with a maximum below
+  1 rendered a descending range of options. Saving in the Presentation
+  console broadcast a block shape the pop-out and token previews cannot
+  render, crashing them. Group caps on custom-field filters (`_or`/`_and`
+  depth and member count) were skipped when the filter was passed with atom
+  keys from Elixir or MCP. Links and rich text refuse a relative path that
+  hides a `//host` behind a tab or newline.
+
+<a id="sweep-federation-release"></a>
+
+- **A federation delivery whose ledger row could not be read is retried, and the release schedule confirmation moved to the button.**
+  The delivery worker treated every failed read of its ledger row as "the
+  row was pruned" and finished successfully, so a database timeout dropped
+  the activity and left the row pending. Only a not-found is treated that
+  way now. On a release with blocked items, the "Schedule anyway?"
+  confirmation was attached to the whole form, so clicking the date field
+  asked it and cancelling kept the picker from opening; it now asks when
+  **Schedule** is pressed. In the editor, a rich-text block's pending
+  autosave is cancelled when the block is rebuilt after a conflict reload or
+  a version restore, so it can no longer write the pre-reload text back.

@@ -79,6 +79,21 @@ Every summary line below that was shortened links to its own entry there.
 - **The on-site thank-you page and "Form not found" page after a form submission render in the site's layout and language; the Back link refuses `//` and `/\` paths.**
   ([long form](docs/changelog/unreleased.md#form-thank-you-site-layout))
 
+- **Custom content types on a site other than the default one are delivered again: `/api/content`, the passphrase unlock, related content, provenance and the visual-editing socket looked the type up on the default site.**
+  ([long form](docs/changelog/unreleased.md#dynamic-type-site-lookup))
+
+- **A copy from storage that fails partway is now an error, not a short file treated as complete (direct uploads, audio/video metadata stripping), and `backup.sh verify` fails on a dump `pg_restore` cannot list.**
+  ([long form](docs/changelog/unreleased.md#storage-copy-and-backup-verify))
+
+- **Console and API crash fixes: a task, menu item or calendar entry pointing at an archived content type; a nested custom-field filter value; a redirect from `/`; a non-object federation inbox body; a `return_to` with a backslash.**
+  ([long form](docs/changelog/unreleased.md#sweep-crash-fixes))
+
+- **Wrong results fixed: the Home health panel's "most overdue" order, `@mentions` of names with accented letters, rating fields with a maximum below 1, and saved Presentation edits crashing an open preview.**
+  ([long form](docs/changelog/unreleased.md#sweep-wrong-results))
+
+- **A federation delivery whose ledger row could not be read is retried instead of dropped, and scheduling a release with blocked items asks for confirmation on Schedule, not on a click of the date field.**
+  ([long form](docs/changelog/unreleased.md#sweep-federation-release))
+
 ## [1.9.2] - 2026-11-12
 
 Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —
