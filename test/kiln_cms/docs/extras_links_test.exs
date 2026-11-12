@@ -182,6 +182,9 @@ defmodule KilnCMS.Docs.ExtrasLinksTest do
            """
   end
 
+  # Slugs every heading of every extra twice: CPU-bound, and past the default
+  # 60 s on a 2-core CI runner running a project overlay's suite alongside.
+  @tag timeout: 180_000
   test "every #fragment link between extras lands on a heading in the docs and on GitHub" do
     links =
       for extra <- @extras,
