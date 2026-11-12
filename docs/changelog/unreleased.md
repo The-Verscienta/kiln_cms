@@ -80,6 +80,65 @@ carries the reasoning.
   the referring path starts with `//` or `/\`, which a browser reads as
   another host. (#2338)
 
+<a id="backup-marker-sync-cron-only"></a>
+
+- **A deployment that backs up only with host cron now gets the last-good marker, so `backup.sh prune` keeps the newest verified backup there too.**
+  The app wrote `kiln-<stamp>.good` only at the end of an in-app backup or
+  before an in-app prune, so a deployment whose backups all come from
+  `scripts/backup.sh` never had one, and its prune kept only the newest
+  complete set, even when that set came from a failed run (an off-site copy
+  that was refused, say). A scheduled job, `KilnCMS.Backups.MarkerSyncWorker`,
+  now imports cron's backups into History and moves the markers to the newest
+  verified backup of each component, under the backup lock, every 15 minutes.
+  While an in-app backup runs it skips the slot, since that backup moves the
+  markers itself. A cron backup is marked at the first run that can import it:
+  any run once `manifest.json` names its stamp, otherwise once its newest file
+  is 10 minutes old, so allow up to about 25 minutes.
+
+  Operators:
+
+  - **Nothing to set** on a single host or a shared volume, as long as the app
+    sees the same `BACKUP_DIR` as cron. A node with no backup directory does
+    nothing and logs nothing.
+  - **The schedule** is `KILN_BACKUP_MARKER_SYNC_CRON` (default
+    `*/15 * * * *`, read in every environment). `false` turns it off; an
+    unparseable value warns on stderr at boot and turns it off.
+    `BACKUP_ENABLED=false` does not stop it: that switch is for the in-app
+    backup path, and the marker is for the cron path.
+  - **Several hosts, each with its own `BACKUP_DIR`**: with no
+    `.kiln-dir-id` (only an in-app backup creates one), each slot syncs the
+    directory of the node that picked up the job. With ids, one sync per id
+    waits for a node that reads it, for up to about 10 minutes, then logs
+    "Backup last-good marker sync for backup directory `<id>` gave up: no
+    node with that directory picked it up".
+  - **Watch it** with the new `[:kiln_cms, :backups, :last_good, :synced]`
+    event (`%{count: 1}`; metadata `dir`, `db`, `media`). A failed run emits
+    the existing `[:kiln_cms, :backups, :last_good, :failed]` and logs
+    "Backup last-good marker not updated: …", writes and removes no marker, and
+    is not retried; the next slot runs the same sync.
+  - **Rolling back** to 1.9.x is safe: there is no migration. The job stops,
+    and on a cron-only deployment the markers it wrote stay until deleted by
+    hand, keeping those units past `BACKUP_KEEP_DAYS`.
+
+  Developers: `KilnCMS.Backups.Chain.sync_last_good/2` runs one sync and
+  returns `{:ok, %{db: stamp | nil, media: stamp | nil}}`, `:busy` or
+  `{:error, reason}`, never raising. `KilnCMS.Backups.Retention.sync_last_good/2`
+  takes a new `import: false` option for a caller that already ran the
+  importer. See [The last-good marker](../backups.md#the-last-good-marker).
+  (#2554)
+
+<a id="resume-behind-queued-resume-already-fixed"></a>
+
+- **The 1.9.0 known issue "Resume on a failed backup says it is queued but never runs" was already fixed in 1.9.0.**
+  1.9.0 listed it as open, but #2688 in that release made a Resume asked for
+  while a backup runs and another run's resume is queued be refused with
+  *A backup is running and a resume of `<stamp>` is queued after it, so this
+  resume was not queued. Try again once the queue clears.* It names the
+  queued run, and the queue is left as it was. Once the queued resume starts,
+  the refused one can be asked for again. Nothing changes on upgrade; a test
+  now pins the whole sequence. (#2671)
+
+
 <a id="release-eval-read-through"></a>
 
 - **`bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'` runs again: release tasks under `eval` read through the content cache instead of crashing.**

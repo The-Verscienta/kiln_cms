@@ -298,8 +298,18 @@ When the app writes it:
   in-app backup (the backup in progress is in flight, so the marker names the
   previous one at that point), and when you call
   `KilnCMS.Backups.Retention.run/2` yourself.
-- **Never on a dry run, and never by cron.** `backup.sh` reads markers and
-  writes none.
+- **Every 15 minutes, from a scheduled job** (`KilnCMS.Backups.MarkerSyncWorker`,
+  #2554), for the backups cron makes. It imports cron's backups into History,
+  then moves the markers under the backup lock, so it never moves them at the
+  same time as an in-app backup. While an in-app backup runs, the job writes
+  nothing that slot: that backup moves the markers itself. The schedule is
+  `KILN_BACKUP_MARKER_SYNC_CRON` (default `*/15 * * * *`; `false` turns it
+  off). It runs in the app, so it needs the app to be running and to see
+  `BACKUP_DIR`; on a node with no backup directory it does nothing and logs
+  nothing. `BACKUP_ENABLED=false` does not stop it: that switch turns off the
+  in-app backup path, and the marker exists for the cron path.
+- **Never on a dry run, and never by `backup.sh`.** The script reads markers
+  and writes none.
 
 The new marker is written first, and the component's other `.good` markers are
 removed only once it is there, so a cron prune that runs in between keeps both
@@ -307,15 +317,24 @@ units, never neither. The app itself does not read `.good` markers: it works out
 the newest verified backup from History every time, so a stale marker pins
 nothing in the app, and its unit ages there like any other.
 
-**Turn it on.** Nothing to configure; you only need the new script on the host.
+**Turn it on.** Nothing to configure; you only need the new script on the host,
+and the app able to see the backup directory.
 
 1. Replace the host's copy of `scripts/backup.sh` (the one your cron line
    runs, `/opt/kiln_cms/scripts/backup.sh` in the cron line at the top of
    this guide) with this release's. An older copy
    ignores `.good` markers and can still delete the newest verified backup.
-2. Take an in-app backup, or wait for the next one. No marker exists before
-   the first one finishes.
-3. List the backup directories. Each component with a verified backup has one
+2. Check that the app sees the same `BACKUP_DIR` as cron (the same volume
+   mounted at the path `BACKUP_DIR` names in the app's environment). A cron-only
+   host whose app can't see the directory gets no marker.
+3. Take an in-app backup, or wait for the scheduled job. With in-app backups
+   the marker is there when the backup finishes. With cron only, it appears
+   at the first scheduled run that can import the backup into History: any
+   run once `manifest.json` names the backup's stamp (`backup.sh all` writes
+   it), otherwise a run after the stamp's newest file is 10 minutes old (see
+   *Cron's backups appear in History* below). With the default schedule,
+   allow up to about 25 minutes after a cron backup finishes.
+4. List the backup directories. Each component with a verified backup has one
    marker:
 
    ```bash
@@ -327,38 +346,76 @@ nothing in the app, and its unit ages there like any other.
    # kiln-20261107-031700.good  kiln-media-20261107-031700.sha256  kiln-media-20261107-031700.tar.gz  …
    ```
 
-A deployment that backs up only with cron never runs an in-app backup, so it
-gets no marker, and its prune keeps only the newest complete set, as before.
+With the job turned off, or an app that can't see the directory, a deployment
+that backs up only with cron gets no marker, and its prune keeps only the
+newest complete set, as before.
+
+**Several nodes.** The job runs once per slot across the cluster, and which
+directory it syncs depends on whether the directories have an id
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)). Only
+an in-app backup creates `.kiln-dir-id`; `backup.sh` and this job never do.
+
+- **No directory has an id** (the usual cron-only deployment): the node that
+  picks up the job syncs its own directory. One shared volume is covered every
+  slot. With a `BACKUP_DIR` per host, each slot syncs one host's directory,
+  whichever node picked the job up, so a host can go several slots without a
+  sync.
+- **Some node reports a directory id** in its heartbeat: the job queues one
+  sync per id, which waits for a node that reads that id, putting itself back every 30 seconds up to
+  20 times (about 10 minutes). If none picks it up, the server log says
+  "Backup last-good marker sync for backup directory `<id>` gave up: no node
+  with that directory picked it up", and the next slot tries again. The node
+  that queued them also syncs its own directory when that one has no id.
 
 Things to know:
 
-- **Don't delete a `.good` by hand while in-app backups run.** The app moves
-  it at the next backup anyway, and until then cron can delete the backup it
-  named.
-- **If you stop taking in-app backups**, the last marker of each component
-  stays, and cron keeps that unit past `BACKUP_KEEP_DAYS` indefinitely.
-  Delete the marker by hand when you want cron to age that backup.
+- **Don't delete a `.good` by hand while the app keeps it in step.** The app
+  writes it again at the next backup or scheduled run anyway, and until then
+  cron can delete the backup it named.
+- **If you turn the job off and stop taking in-app backups**, the last marker
+  of each component stays, and cron keeps that unit past `BACKUP_KEEP_DAYS`
+  indefinitely. Delete the marker by hand when you want cron to age that
+  backup. While the job runs, the marker moves to each newer verified backup
+  on its own.
 - **A marker the app cannot remove** (a directory or symlink of that name, or a
   file it has no permission to delete) pins its unit for cron indefinitely.
   The app leaves it, logs a warning, and emits the telemetry event below.
   Remove it by hand.
-- **Rolling back to a release before this one.** Its in-app prune ignores
+- **Rolling back to a release before 1.9.0.** Its in-app prune ignores
   `.good` markers and deletes each one as a stray once the marker file is older
   than `BACKUP_KEEP_DAYS`; harmless. If the host's `backup.sh` stays at this
   release, cron keeps honoring the markers that remain until then.
+- **Rolling back to 1.9.x** stops the scheduled sync (those releases write the
+  marker only from in-app backups and prunes). On a cron-only deployment the
+  markers it wrote stay where they are, so cron keeps those two units past
+  `BACKUP_KEEP_DAYS` until you delete the markers by hand.
 
-**When a marker can't be moved.** The backup or prune still succeeds; the
-marker is housekeeping. Each of these logs a warning, and all but the last
+**Watch it.** Each scheduled run that gets through (markers written, moved,
+already right, or none to write because no backup is verified yet) emits
+`[:kiln_cms, :backups, :last_good, :synced]` with measurements `%{count: 1}`
+and metadata `%{dir: dir, db: stamp | nil, media: stamp | nil}`: the newest
+verified stamp of each component, or `nil` for one with none (its marker, if
+any, is left alone). A run skipped because an
+in-app backup holds the lock emits nothing. On a cron-only deployment, an
+alert on this event going quiet for an hour tells you the markers have stopped
+moving.
+
+**When a marker can't be moved.** The backup, prune or scheduled run still
+succeeds or fails on its own terms; the marker is housekeeping, and the next
+scheduled run tries again. Each of these logs a warning, and the first four
 emit `[:kiln_cms, :backups, :last_good, :failed]` with measurements
 `%{count: 1}`:
 
 | Server log | Telemetry metadata | Meaning |
 |---|---|---|
-| `Backup last-good marker not updated: <reason>` | `%{reason: reason}` | After an in-app backup or before an in-app prune, importing cron's backups, listing `db/`, `media/` or `.work/`, reading a file in them, or reading History failed. No marker was written or removed. The reasons read as in [When retention is skipped or stops](#when-retention-is-skipped-or-stops). |
+| `Backup last-good marker not updated: <reason>` | `%{reason: reason}` | After an in-app backup, before an in-app prune, or in a scheduled run: importing cron's backups, listing `db/`, `media/` or `.work/`, reading a file in them, or reading History failed. From a scheduled run it also covers the wait for the backup lock or one of its queries failing (`it crashed (…)`). No marker was written or removed. The reasons read as in [When retention is skipped or stops](#when-retention-is-skipped-or-stops). |
 | `Backup last-good marker db/kiln-<stamp>.good couldn't be written (<reason>); the previous marker stays` | `%{kind: :db, stamp: stamp, reason: posix}` | The new marker could not be created, so the old one was left pinning the previous backup. A `reason` of `:eacces` is a permission problem on that directory. |
 | `Couldn't remove old last-good marker db/kiln-<stamp>.good (<reason>)` | `%{marker: "db/kiln-<stamp>.good", reason: {:remove, posix}}` | The new marker is in place, but an old one could not be deleted. Cron keeps both units. |
 | `Left db/kiln-<stamp>.good in place: a directory, not a regular file` | `%{marker: "db/kiln-<stamp>.good", reason: {:not_regular, type}}` | Something other than a regular file has an old marker's name. The app removes only regular files. |
 | `Couldn't list db/ to remove old last-good markers (<reason>)` | none | The new marker is in place; old ones stay until the next sync. |
+| `Backup last-good marker sync skipped: couldn't read the node heartbeats (<message>)` | none | A scheduled run couldn't tell which nodes report a directory id, so it synced nothing. |
+| `Couldn't queue the last-good marker sync for backup directory <id> (<reason>)` | none | A scheduled run couldn't queue the sync for that directory; the next slot tries again. |
+| `Backup last-good marker sync for backup directory <id> gave up: no node with that directory picked it up` | none | No running node reads that directory id; see **Several nodes** above. A node that has just stopped can cause it: its id counts until its last heartbeat is 10 minutes old. |
 
 ### What the cron prune cannot see
 
@@ -369,8 +426,10 @@ emit `[:kiln_cms, :backups, :last_good, :failed]` with measurements
   complete set on disk came from a run that failed (for example its off-site
   copy was refused), cron keeps both that set and the older verified one. This
   holds only while the app keeps the marker in step: a host whose copy of
-  `backup.sh` predates the marker, a deployment where the app has not yet run
-  a backup or a prune, and a marker deleted by hand all leave cron keeping the
+  `backup.sh` predates the marker, an app that can't see the backup directory
+  or has the scheduled sync turned off (and takes no in-app backups), a backup
+  the app has not yet imported, and a marker deleted by hand all leave cron
+  keeping the
   newest complete set alone, and deleting the verified one once it is past
   `BACKUP_KEEP_DAYS` ([The last-good marker](#the-last-good-marker)).
 - **It cannot see an in-app backup that is `Running`.** It relies on that
@@ -1274,8 +1333,9 @@ Failing to write a row never fails the backup itself.
 ### Cron's backups appear in History
 
 `KilnCMS.Backups.Importer.run/0` turns files cron wrote into rows. It runs when
-a platform admin opens the page, at the end of every in-app backup, and on
-demand:
+a platform admin opens the page, at the end of every in-app backup, in every
+run of the [last-good marker](#the-last-good-marker) sync (every 15 minutes by
+default), and on demand:
 
 ```bash
 bin/kiln eval "KilnCMS.Backups.Importer.run()"
@@ -1539,6 +1599,7 @@ The app reads them in production only.
 | `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set |
 | `BACKUP_KEEP_DAYS` | backup + app | local retention (default 14): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)) |
 | `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
+| `KILN_BACKUP_MARKER_SYNC_CRON` | app | when the app moves the [last-good markers](#the-last-good-marker) for cron's backups (default `*/15 * * * *`; `false` turns it off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
 | `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36) |
 | `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |

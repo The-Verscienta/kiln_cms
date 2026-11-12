@@ -338,6 +338,33 @@ defmodule KilnCMS.Backups.ChainTest do
       assert snapshot() == before
     end
 
+    # #2671's whole repro: the refused resume is not lost to a fold. When the
+    # running backup ends, the queued resume is the one that runs, and the
+    # refused one can then be asked for again.
+    test "a resume behind a queued resume of another run is refused, then accepted (#2671)",
+         %{dir: dir} do
+      b = resumable!(dir, "20261101-101010")
+      c = resumable!(dir, "20261102-101010")
+      {:ok, %{status: :started, chain: a}} = request()
+      {:ok, %{status: :queued, chain: ^a}} = request(resume: b)
+      before = snapshot()
+
+      assert {:error, {:queue_busy, {:resume, ^b}}} = request(resume: c)
+      assert snapshot() == before
+      assert %{chain: ^a, waiting: %{resume: ^b, folds: 0}} = Backups.in_flight()
+
+      # Run A ends: B's resume is promoted, and nothing waits behind it.
+      assert {:ok, promoted} = Chain.with_lock(&Chain.release_in_txn/1)
+      assert promoted != a
+      assert %{chain: ^promoted, stamp: ^b, waiting: nil} = Backups.in_flight()
+
+      # C's resume is now accepted, queued behind B's.
+      assert {:ok, %{status: :queued, chain: ^promoted}} = request(resume: c)
+
+      assert %{chain: ^promoted, stamp: ^b, waiting: %{resume: ^c, folds: 0}} =
+               Backups.in_flight()
+    end
+
     test "once the queue clears, the refused request is accepted", %{dir: dir} do
       stamp = resumable!(dir, "20261101-101010")
       {:ok, %{status: :started}} = request()
