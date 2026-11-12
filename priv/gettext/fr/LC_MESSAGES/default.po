@@ -961,6 +961,7 @@ msgstr "%{name} (type introuvable)"
 msgid "%{name} could not be checked."
 msgstr "%{name} n’a pas pu être vérifié."
 
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} couldn't be uploaded: %{reason}"
@@ -4547,6 +4548,7 @@ msgstr "Vérification impossible"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -5201,6 +5203,11 @@ msgstr "Vider la copie en cache de cette page, le plan du site et llms.txt."
 #, elixir-autogen, elixir-format
 msgid "Click a highlighted region in your site to edit it here."
 msgstr "Cliquez sur une zone mise en évidence de votre site pour la modifier ici."
+
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
+#, elixir-autogen, elixir-format
+msgid "Click to choose, or drop a file here · JPG, PNG, WebP or GIF up to %{mb} MB"
+msgstr "Cliquez pour choisir, ou déposez un fichier ici · JPG, PNG, WebP ou GIF jusqu’à %{mb} Mo"
 
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
@@ -7506,6 +7513,7 @@ msgid "Discussions on removed blocks"
 msgstr "Discussions sur des blocs supprimés"
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -13209,6 +13217,11 @@ msgstr "Aucun délai d’inactivité n’est défini : les navigateurs restent c
 #, elixir-autogen, elixir-format
 msgid "No image backend is selected. New images go to this server's storage."
 msgstr "Aucun service d’images n’est sélectionné. Les nouvelles images vont dans le stockage de ce serveur."
+
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
+#, elixir-autogen, elixir-format
+msgid "No images in the library yet — upload one above."
+msgstr "Aucune image dans la médiathèque pour l’instant — importez-en une ci-dessus."
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
@@ -23562,6 +23575,11 @@ msgstr[1] "Téléverser %{count} fichiers"
 msgid "Upload a file above to start building your library."
 msgstr "Importez un fichier ci-dessus pour commencer à constituer votre médiathèque."
 
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
+#, elixir-autogen, elixir-format
+msgid "Upload an image"
+msgstr "Importer une image"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Upload and manage images, documents, video and audio."
@@ -23571,6 +23589,11 @@ msgstr "Importez et gérez images, documents, vidéo et audio."
 #, elixir-autogen, elixir-format
 msgid "Upload failed: %{detail}"
 msgstr "Échec du téléversement : %{detail}"
+
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
+#, elixir-autogen, elixir-format
+msgid "Upload images"
+msgstr "Importer des images"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -23609,6 +23632,7 @@ msgstr "Téléversé à partir du"
 msgid "Uploaded until"
 msgstr "Téléversé jusqu'au"
 
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Uploading %{name}… %{pct}%"
@@ -26504,6 +26528,7 @@ msgstr "n'est pas un fichier pris en charge"
 msgid "not an XLIFF 2.0 file"
 msgstr "ce n'est pas un fichier XLIFF 2.0"
 
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "not an image type this editor accepts"
@@ -27112,6 +27137,7 @@ msgstr "aujourd'hui"
 msgid "told later"
 msgstr "informé plus tard"
 
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -27119,6 +27145,7 @@ msgstr "informé plus tard"
 msgid "too large (max %{mb} MB)"
 msgstr "trop volumineux (max %{mb} Mo)"
 
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "too many files at once (max %{count})"
@@ -27227,6 +27254,7 @@ msgstr "non vérifiée (importée)"
 msgid "up to %{max}"
 msgstr "jusqu’à %{max}"
 
+#: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format

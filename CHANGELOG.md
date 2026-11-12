@@ -60,6 +60,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **The editor's image picker (featured image, social image, image and gallery blocks, media fields) has its own Upload button and drop zone; the uploaded image is used right away.**
+  ([long form](docs/changelog/unreleased.md#image-picker-upload))
+
 ### Changed
 
 - **No form field of any type can be named `website` (the spam trap's input) on add, rename or type change; a field that already is keeps working and is flagged "Reserved name" in the builder until renamed.**
