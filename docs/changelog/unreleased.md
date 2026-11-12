@@ -5,6 +5,60 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="slack-webhooks-upgrade"></a>
+
+- **Run `mix ash.migrate`; before rolling back to 1.9, deactivate every Slack-format webhook endpoint.**
+  One additive migration: `webhook_endpoints.format` (`text NOT NULL DEFAULT
+  'kiln'`, so every existing endpoint stays Kiln-format) and
+  `notifications.details` (a nullable map on the bell rows of security
+  alerts). Neither is read by 1.9, so the columns can stay after a rollback.
+  What a mixed or rolled-back cluster does with a Slack-format endpoint:
+  - **During a rolling deploy**, a node still on 1.9 that runs a delivery to a
+    Slack endpoint posts Kiln's JSON envelope; Slack answers 400 and the job
+    is retried, normally by a node on the new release. A 1.9 console can also
+    tick content events on a Slack endpoint, which the new release refuses;
+    the new release never queues content events for it, and one queued by a
+    1.9 node is posted as a neutral line naming the event.
+  - **After rolling back to 1.9**, every Slack endpoint is sent the Kiln
+    envelope, Slack refuses each delivery, and after 10 exhausted deliveries
+    the endpoint is auto-disabled with a `webhook_auto_disabled` silencing
+    notice to the site's admins. Untick **Active** on (or delete) each Slack
+    endpoint first.
+  - **Rolling forward again** after a newer release added a format this one
+    doesn't know, such an endpoint's deliveries fail with "endpoint format
+    not supported by this release" rather than being sent.
+  Platform security alerts raised after the upgrade carry `content_type`
+  `platform_security_alert`; 1.9 shows them in the default site's bell as
+  before. (Part of #2245.)
+
+## Added
+
+<a id="slack-webhook-format"></a>
+
+- **A webhook endpoint can be Slack-format: it posts the site's security alerts and silencing notices into a chat channel as a readable message.**
+  Choose **Format** → **Slack (incoming webhook)** under **Add a webhook**
+  on `/editor/webhooks`; the event list narrows to the `security` group with
+  every event ticked. The body is an incoming-webhook message (`text`,
+  `blocks`, unfurling off), so Mattermost, Rocket.Chat and Discord's `/slack`
+  URL take it too. It says the alert's English headline, the site, when, and
+  links to the security log, with the site name, address and event name in
+  code spans and Slack's control characters escaped, so a site name cannot
+  `@channel` or add a link. A ping says "KilnCMS webhook test for (site)" and
+  carries no URL; a Kiln-format ping is unchanged and still carries
+  `endpoint_url`. The format is set when the endpoint is added and can't be
+  changed (`format` is accepted by `:create` only). A Slack endpoint takes
+  `security.*` events only (refused otherwise with "Slack endpoints can only
+  receive security events") and never receives content events or
+  retractions. Deliveries are still signed over the body sent, but Slack
+  checks no signature, so the URL is the credential: the row shows no signing
+  secret and no **Rotate secret**, and URLs are now masked (next entry).
+  `WebhookEndpoint` gains a public `format` attribute (`:kiln` | `:slack`),
+  and `url` and `WebhookDelivery.endpoint_url` are now `sensitive?`. See
+  [Send alerts to Slack](../security-alerts.md#send-alerts-to-slack). (Part
+  of #2245.)
+
 ## Changed
 
 <a id="form-field-name-website-reserved"></a>
@@ -29,7 +83,66 @@ carries the reasoning.
   or `update_form_field` with that name sees the new refusal, *is reserved
   for spam protection* on `name`. (#2267)
 
+<a id="webhook-url-masking"></a>
+
+- **Webhook URLs are shown masked wherever Kiln shows, exports or logs them, and the edit form no longer pre-fills the URL.**
+  An incoming-webhook URL (Slack, Teams, Discord, Zapier) carries its own
+  token, so the URL itself is a credential. Every endpoint's URL, whatever its
+  format, is now shown as `scheme://host[:port]` followed by `/…/` and the last
+  four characters of the path and query, or the host alone when those are
+  shorter than 16 characters; a user name and password are never shown
+  (`KilnCMS.Webhooks.display_url/1`). This covers the Webhooks list, Recent
+  deliveries, the secret buttons' accessible labels, the governance trail's
+  propagation endpoints and **Retractions not delivered** panel, the trail's
+  JSON and CSV exports (same keys, masked values; the JSON now adds
+  `endpoint_id` to each propagation endpoint and lost retraction, so two
+  endpoints that mask alike can be told apart), the "Retraction not
+  delivered" notice and its log line, and URL validation errors. **Reveal
+  URL** on a row, or under **Current URL:** in the edit form, re-reads the
+  endpoint as the admin and shows the full URL for the open page. The edit
+  form's **Endpoint URL** starts blank: leave it blank to keep the URL, or type
+  a new one. The database and the delivery ledger keep the full URL, and a
+  redelivery is sent to it. A script that read full URLs out of the
+  governance exports must now read them from the endpoint itself. Notices
+  written before the upgrade keep the full URL in their excerpt.
+  (Part of #2245.)
+
+<a id="webhook-select-all-skips-security"></a>
+
+- **Select all in a webhook's event list no longer ticks the `security.*` events.**
+  It is there to mirror content, and an endpoint that took every event that
+  way also received security alerts (client addresses, user ids) at a
+  receiver nobody chose for them, and every later edit of it sent each admin
+  a notice that can't be muted. Select all now ticks every other event and
+  keeps a security event only if it was already ticked; the `security`
+  group's own **Select all** still ticks them all. On a Slack-format form,
+  which offers only security events, Select all ticks them all. (#2642)
+
 ## Fixed
+
+<a id="security-alert-gaps-2642"></a>
+
+- **Four gaps in security alerts after 1.9: the inbox's language, exhausted deliveries, platform alerts outside the default console, and IPv6 in the help text.**
+  - The inbox showed a translated "Security alert" over an English
+    description. Bell rows of security alerts now store the facts behind the
+    line (`notifications.details`), and the inbox says it in the reader's
+    language; rows from before keep their English line. The email stays
+    English by decision: an account stores no preferred language and one
+    admin can hold sites in several.
+  - An alert that used its 10 delivery attempts was only stamped
+    `failed_at`. It now also logs at `error` and emits
+    `[:kiln_cms, :security, :alert_failed]` with `reason: :delivery_exhausted`
+    and a new `phase` key (`:alert` or `:summary`), once per alert.
+  - Platform alerts live in the default site, so a platform admin working in
+    another site's console never saw them. The bell and inbox there now show
+    one entry, "N unread platform alerts", linking to the default site's
+    unread inbox. It is a count and nothing else: another site's console is
+    that site's origin (threat model residual risk 16, decision record 0011).
+    Platform alerts from before the upgrade are not counted.
+  - The **Show the full IP address in alerts** help text now reads "Off, an
+    alert shows only the address's network: its /24 for IPv4, its /48 for
+    IPv6. The security log keeps the full address either way." (#2642)
+
 
 <a id="form-duplicate-autoresponder"></a>
 

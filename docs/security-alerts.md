@@ -63,7 +63,7 @@ Platform alerts (always on):
 | | Bell | Email | Webhook |
 |---|---|---|---|
 | Site alert | Each **member admin** of the site (the platform admins when it has none), unless the site switched admin notifications off | The same people, except those who muted the email | The site's endpoints subscribed to `security.<kind>` |
-| Platform alert | Every platform admin, in the **default site's** bell | Every platform admin; no mute applies | None in this release |
+| Platform alert | Every platform admin, in the **default site's** bell; other sites' consoles show only how many are unread | Every platform admin; no mute applies | None in this release |
 | Silencing notice | Each member admin of the site (the platform admins when it has none) | The same people; no setting or mute applies | The site's endpoints subscribed to `security.alerts_silenced` |
 
 A **member admin** is an account with an active membership on the site whose
@@ -84,21 +84,40 @@ Security alerts page says so: "This site has no admins of its own." As soon as
 the site has a member admin, alerts go to its member admins only.
 
 A platform alert's bell row lives in the default site, because the bell is per
-site. A platform admin sees it in the bell while working in the default site's
-console.
+site. A platform admin sees it in the bell and inbox while working in the
+default site's console. In any other site's console, the bell and the inbox
+show one entry instead, "3 unread platform alerts", with the line "Open them
+in the default site's console". The entry links to the default site's unread
+inbox, on that site's console host, where the alerts can be read and marked
+read. The count is included in the bell's badge.
+
+The entry is a number and nothing else: no site name, headline or address,
+and no way to open or mark an alert from there. Another site's console is
+that site's origin, where its own admin may be able to run script when no
+console host is set (threat model residual risk 16, decision record 0011),
+and platform alerts are about every site. The count is worked out from your
+account as it is now, so a platform admin demoted while the page is open
+sees no count at the next refresh, and an admin of the site who is not a
+platform admin never sees one. Platform alerts raised before this release
+are not counted: they are only in the default site's bell.
 
 ## How an alert arrives
 
 - **Within about a minute.** The alert is claimed when the event is written,
   and a job that runs every minute delivers it.
 - **The bell.** Headline "Security alert" (or "Security alerts were turned
-  down" for a notice), titled with the site's name, with a one-line
-  description such as "An account was locked out (from 203.0.113.0/24)". It
+  down" for a notice), titled with the site's name. It
   links to **Security log** (`/editor/security-log`); a notice links to
   **Security alerts** (`/editor/security-alerts`).
+- **The inbox** (`/editor/inbox`) shows the same row with a one-line
+  description such as "An account was locked out (from 203.0.113.0/24)", in
+  the language of the console you read it in. A row written before this
+  wording was translated shows its English line.
 - **The email.** Subject "Security alert on (site): (what happened)". It says
   when (UTC), links to the security log on the site's own console host (a
-  notice links to the Security alerts page), and says why you got it. Emails are in English and go through the
+  notice links to the Security alerts page), and says why you got it. Emails
+  are in English, whatever language the console is in: an account stores no
+  preferred language, and one admin can hold sites in several. They go through the
   installation's own mail relay, never a site's (see
   [For operators](#for-operators)).
 - **Never a name or address of a person.** Neither the bell, the email nor the
@@ -250,7 +269,8 @@ webhook in this release.
    `security.two_factor_disabled`, `security.sso_config_changed` and
    `security.alerts_silenced`. **Select all** in the group ticks them all.
    None of them is in the defaults, so an existing endpoint receives nothing
-   until you tick them.
+   until you tick them. The **Select all** above the whole list leaves them
+   out, so an endpoint never picks them up by accident.
 4. Save. The next alert of a ticked kind is delivered to the endpoint within
    about a minute, and is listed in its delivery history.
 
@@ -358,6 +378,78 @@ A **notice** (`security.alerts_silenced`) adds `change` (one of the values in
 `delivery_id` is the dedupe key, as for every event. An alert and its summary
 are two deliveries.
 
+## Send alerts to Slack
+
+A Slack-format endpoint posts the site's alerts and silencing notices into a
+channel as a readable message. It also works with Mattermost, Rocket.Chat
+and Discord's `/slack` URL, which accept the same body. You need the admin
+role on the site, and an incoming-webhook URL for the channel from your chat
+tool (in Slack, an app with **Incoming Webhooks** turned on, then **Add New
+Webhook** for the channel).
+
+1. Open **Webhooks** (`/editor/webhooks`) and go to **Add a webhook**.
+2. Set **Format** to **Slack (incoming webhook)**. Under it you see "Slack
+   endpoints receive security alerts only.", and the event list narrows to
+   the `security` group with every event ticked.
+3. Paste the channel's URL into **Endpoint URL**. A warning under it reads
+   "Slack doesn't check signatures: the URL is the credential. After saving,
+   Kiln shows only its host."
+4. Untick any events the channel should not get. **Select all** and
+   **Reset to defaults** both tick every security event again.
+5. Click **Add webhook**. The page says "Slack webhook added." The new row
+   shows the URL masked (`https://hooks.slack.com/…/9xQz`) and a **Slack**
+   badge. It has no signing secret and no **Rotate secret**: Slack checks no
+   signature.
+6. Click **Ping** on the row. The page says "Test ping queued — see
+   deliveries below.", and the channel shows "KilnCMS
+   webhook test for `Example`", with your site's name.
+
+From then on each alert of a ticked kind is posted within about a minute.
+A lockout on a site named Example arrives as this body:
+
+```json
+{
+  "text": "Security alert on `Example`: An account was locked out (from `203.0.113.0/24`) · Open the security log: https://example.org/editor/security-log",
+  "blocks": [
+    {"type": "section", "text": {"type": "mrkdwn", "text": "*An account was locked out (from `203.0.113.0/24`)* on `Example`\n2026-11-10 14:03 UTC"}},
+    {"type": "context", "elements": [{"type": "mrkdwn", "text": "<https://example.org/editor/security-log|Open the security log> · `security.lockout`"}]}
+  ],
+  "unfurl_links": false,
+  "unfurl_media": false
+}
+```
+
+A summary's second line says "From (start) to (end)" of the window, and a
+notice links to the security alerts settings instead of the log and, when
+alert kinds were turned off, lists them after "Turned off:". The message is
+in English, like the email. It carries the address only as the site's
+[IP setting](#ip-addresses-in-alerts) allows, and no user id. The full
+rules for the body are in
+[Slack-format endpoints](webhooks.md#slack-format-endpoints).
+
+The format can't be changed after the endpoint is added. To move a channel
+to the signed JSON format, or the other way, add a new endpoint and delete
+the old one.
+
+What can go wrong:
+
+- **"Slack endpoints can only receive security events"** under the events:
+  a non-security event is ticked, for example on an endpoint saved through
+  code. Untick it.
+- **The ping's delivery says `endpoint returned HTTP 404` or `410`**: the
+  channel or the webhook is gone in Slack (`channel_not_found`,
+  `channel_is_archived`). `403` means the app lost access. Make a new
+  incoming webhook, add it as a new endpoint, and delete this one.
+- **`endpoint returned HTTP 400`**: the receiver did not accept the body
+  (`invalid_payload`). During a rolling upgrade or after a rollback a node
+  running 1.9 sends the Kiln envelope instead; see the upgrade notes in
+  [For operators](#for-operators).
+- **The URL leaked** (pasted into a ticket, a screenshot): anyone with it can
+  post to the channel. Regenerate it in Slack and put the new URL in
+  **Edit** → **Endpoint URL** (which sends the site's admins a
+  [silencing notice](#silencing-notices), as any URL change does), then
+  delete the old webhook in Slack.
+
 ## For operators
 
 - **Upgrade.** One additive migration: new tables `security_alert_dispatches`
@@ -368,6 +460,17 @@ are two deliveries.
   rollback: an older release without #2509 cannot load the new
   `security_alert` and `security_notice` notifications or the
   `api_key_reuse_detected` event.
+- **Upgrade to the Slack format.** One additive migration:
+  `webhook_endpoints.format` (`NOT NULL DEFAULT 'kiln'`) and
+  `notifications.details` (nullable). Existing endpoints stay Kiln-format.
+  During a rolling deploy a node still on 1.9 may post the Kiln envelope to
+  a Slack endpoint (Slack answers 400 and the delivery is retried, usually on
+  a new node), and a 1.9 console can tick content events on a Slack endpoint
+  (they are posted as a neutral line). **Before rolling back to 1.9**,
+  deactivate or delete every Slack-format endpoint: 1.9 sends them the Kiln
+  envelope, Slack refuses it, and after 10 exhausted deliveries the endpoint
+  is auto-disabled with a silencing notice to the site's admins. The new
+  columns can stay; 1.9 ignores them.
 - **Mail goes through the instance relay** (the `KilnCMS.Mailer`
   configuration), never a site's own SMTP relay: a site admin can change that
   relay, and an alert about the site must not depend on it. Alert mail is
@@ -377,10 +480,17 @@ are two deliveries.
   delivery is retried up to 10 times; one that still fails is marked failed
   and not tried again. Rows are deleted a day after their window ends, and an
   alert older than a day is never sent.
-- **Watch** `[:kiln_cms, :security, :alert_failed]`, emitted when an alert
-  could not be claimed (metadata `scope`, `kind`, `reason`), with the log
-  line "Security alert … could not be claimed and will not be sent". The
-  event and the change that raised it still commit; only the alert is lost.
+- **Watch** `[:kiln_cms, :security, :alert_failed]`. It is emitted in two
+  cases, each with an `error` log line:
+  - an alert could not be claimed (metadata `scope`, `kind`, `reason`), with
+    "Security alert … could not be claimed and will not be sent". The event
+    and the change that raised it still commit; only the alert is lost.
+  - a delivery used its 10 attempts and was stamped failed (metadata
+    `scope`, `kind`, `reason: :delivery_exhausted` and `phase`: `:alert`
+    when the alert itself was never sent, `:summary` when its window's
+    summary was not), with "Security alert (id) ((kind), (phase)) was not
+    delivered after its last attempt; it is stamped failed and will not be
+    retried." It fires once per dispatch.
 - **A reused API key** is recorded as `api_key_reuse_detected` in the key
   owner's site when the owner has exactly one active membership, else in the
   default site; the request's host never chooses. If the event cannot be
@@ -408,6 +518,19 @@ are two deliveries.
   `CMS.update_site_security_alerts/2` and `CMS.reset_site_security_alerts/1`
   (admin only). `:save` writes every field it is not given back to its
   default, so pass all three.
+- `KilnCMS.Security.AlertText`: the kind and change labels and the
+  one-line headline, gettext'd. The inbox renders it in the reader's locale
+  from `Notification.details` (the values `AlertText.details/1` keeps: phase,
+  kind, channel, change, kinds, count, display IP, event type);
+  `KilnCMS.Security.AlertMail` and `KilnCMS.Webhooks.SlackFormat` pin English.
+  `KilnCMSWeb.NotificationText.excerpt/1` picks the line for a row.
+- `KilnCMS.Notifications.unread_platform_alert_count/2`: the number behind
+  the "unread platform alerts" entry. Platform alert rows carry
+  `content_type` `"platform_security_alert"`
+  (`KilnCMS.Notifications.platform_alert_content_type/0`); site alert rows
+  keep `"security_alert_dispatch"`.
+- `KilnCMS.Webhooks.SlackFormat.render/2` builds a Slack-format endpoint's
+  body; `KilnCMS.Webhooks.display_url/1` masks a webhook URL for display.
 - `KilnCMS.Webhooks.enqueue_security!/4` delivers one `security.*` event to
   one endpoint; `KilnCMS.Webhooks.dispatch/4` never sends them, so they do
   not reach automation, federation, the CDN purge or the change feed.
@@ -426,7 +549,9 @@ are two deliveries.
 |---|---|
 | No alerts at all on a site | **Notify this site's admins by bell and email** is off, or the kind is off. (A site with no member admins sends its alerts to the platform admins.) |
 | An alert email is missing, the bell row is there | You muted the email in **Your settings**. Platform alerts and notices ignore the mute. |
-| A platform alert is not in the bell | Platform alerts are in the default site's bell. Switch to the default site. |
+| A platform alert is not in the bell | Platform alerts are listed in the default site's bell and inbox. In another site's console the bell shows only "N unread platform alerts": select it to open the default site's inbox. Alerts raised before this release are not counted there. |
+| "Couldn't reveal that URL." on Webhooks | The endpoint was deleted after the page loaded, or you are no longer an admin of the site. Reload. |
+| A Slack endpoint was auto-disabled after an upgrade or rollback | A node running 1.9 sent it the Kiln envelope and Slack refused it. Once every node runs this release, tick **Active** on the endpoint. |
 | Several events, one alert | They fell in one 15-minute window. The summary follows about a minute after the window closes. |
 | "You don't have permission to change this site's security alerts." | Your role on the site was lowered while the page was open. Reload. |
 | "The security alert settings could not be saved." | The save failed, for example because its notice could not be written; nothing changed. Try again, and check the application log. |

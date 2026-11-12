@@ -9,9 +9,9 @@ defmodule KilnCMS.CMS.Validations.WebhookFormatEvents do
   membership of `KilnCMS.CMS.WebhookEndpoint.security_events/0`, so a kind a
   later release adds is allowed too, as the console's picker treats it.
 
-  On `:create` always; on `:update` only when `events` is changing (`format`
-  is not accepted there), so an endpoint saved before this rule can still be
-  switched on or off.
+  On `:create` always; on `:update` only when `events` (or `format`, which
+  `:update` does not accept) is changing, so an endpoint saved before this
+  rule can still be switched on or off.
   """
   use Ash.Resource.Validation
   use Gettext, backend: KilnCMSWeb.Gettext

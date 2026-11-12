@@ -39,7 +39,7 @@ your deployment.
 | Display name | `users.name` | Yes (optional) | Shown to other editors (presence) and as the JSON-LD author byline. Blank by default. |
 | RBAC role | `users.role` | No | `:admin` / `:editor` / `:viewer`. |
 | Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46): review requested, published, returned to draft, comments, new registrations (`notify_on_registration`, #2251, offered to site admins), and site security alert email (`notify_on_security_alert`, #2245, offered to site member admins; only the account holder can change it). All are included in the self-export and reset to on by erasure. |
-| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted when the recipient is erased (#2514); `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. A "registrations waiting" row (#2251) is titled with the site's name and carries no applicant data: no address, name, excerpt or actor. A security alert or notice row (#2245) is titled with the site's name and has no actor; its excerpt names what happened and, for an alert, the client's network (`/24`, `/48`), or the full IP address when the site opted in. |
+| In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted when the recipient is erased (#2514); `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. A "registrations waiting" row (#2251) is titled with the site's name and carries no applicant data: no address, name, excerpt or actor. A security alert or notice row (#2245) is titled with the site's name and has no actor; its excerpt names what happened and, for an alert, the client's network (`/24`, `/48`), or the full IP address when the site opted in. Its `details` map holds the same facts as the excerpt (phase, kind, change, count, that address, the event type) so the inbox can say it in the reader's language. |
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family, last use and the site it signed in on; for a revoked one, why. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. See [Security log](security-events.md). |
@@ -98,6 +98,16 @@ address cut to the network (`/24`, `/48`), or in full when the site turned on
 for its retention window (30 days by default) so it can be redelivered; GDPR
 erasure does not rewrite that log. See
 [Paid memberships](memberships.md#webhook-events).
+
+A **Slack-format endpoint** (#2245) receives only `security.*` events, as a
+chat message: the alert's headline, the site's name, the time, the address as
+above and a link to the console, without user ids. The message lands in a
+chat workspace, under that tool's retention, not Kiln's.
+
+Endpoint URLs are stored in full in `webhook_endpoints.url` and in each
+delivery row's `endpoint_url`, in the clear. The console, the governance
+trail and its exports, notices and logs show them masked
+([Webhooks](webhooks.md#see-or-change-an-endpoint-url)).
 
 - **Disable:** delete the webhook endpoint(s) in `/editor/webhooks` (admin only).
   No endpoints configured ⇒ nothing is sent.

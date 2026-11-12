@@ -68,7 +68,10 @@ history (#338) together per content item. Admin-only.
     its retries, which means a consumer may still be serving what the site
     withdrew. Each row has its endpoint and error, a Redeliver button, and
     the time a later retraction of the document reached that endpoint, once
-    one has. A row whose endpoint has since been deleted keeps the URL,
+    one has. The endpoint is named by its URL masked to its host and the
+    last four characters of its path
+    ([webhooks.md](webhooks.md#see-or-change-an-endpoint-url)). A row whose
+    endpoint has since been deleted keeps the masked URL,
     marked "(deleted endpoint)", and has no Redeliver button. See
     [webhooks.md](webhooks.md#retractions-are-exempt). A trashed document's
     trail is still reachable for this reason.
@@ -83,7 +86,11 @@ history (#338) together per content item. Admin-only.
     every other row leaves empty: `cdn_purge`, `cdn_enqueued_at`,
     `cdn_settled_at`, `endpoints` (`<url> delivered <at>` /
     `<url> failed <at> (<error>)`, `; `-separated, led by a count of the endpoints whose delivery rows were
-    pruned), `as_of` and `chain`.
+    pruned), `as_of` and `chain`. Both exports carry each endpoint's URL
+    masked, as the page shows it, never the full URL, which can be the
+    receiver's credential. The JSON adds `endpoint_id` to each propagation
+    endpoint and each lost retraction, since two endpoints on one host can
+    mask to the same text (`null` once the endpoint has been deleted).
 
 ## How it's built
 
