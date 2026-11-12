@@ -150,6 +150,91 @@ defmodule KilnCMSWeb.FormFieldTypesRenderTest do
     refute LazyHTML.text(doc) =~ "secret help"
   end
 
+  # #2268: following a summary link focuses its target only when the target
+  # can take focus, and a group's fieldset cannot.
+  describe "error summary links" do
+    defp render_summary(fields, errors) do
+      form = %KilnCMS.CMS.Form{slug: "s", fields: fields, description: nil, submit_label: nil}
+
+      (&BlockComponents.public_form/1)
+      |> render_component(form: form, errors: errors)
+      |> LazyHTML.from_fragment()
+    end
+
+    defp summary_hrefs(doc), do: attr(doc, "#kiln-form-s-error-summary a", "href")
+
+    test "radio and checkboxes link to their first input, rating to its first star" do
+      fields = [
+        field(:radio, name: "size"),
+        field(:checkboxes, name: "colours"),
+        field(:rating, name: "stars")
+      ]
+
+      doc =
+        render_summary(fields, %{
+          "size" => "is required",
+          "colours" => "is required",
+          "stars" => "must be a rating from 1 to 5"
+        })
+
+      assert summary_hrefs(doc) == [
+               "#kiln-form-s-size-0",
+               "#kiln-form-s-colours-0",
+               "#kiln-form-s-stars-1"
+             ]
+    end
+
+    test "single-input fields keep linking to their own input" do
+      fields =
+        for type <- [:string, :email, :select, :boolean, :text, :number, :date, :phone, :url] do
+          field(type, name: "#{type}")
+        end
+
+      errors = Map.new(fields, &{&1.name, "is not valid"})
+      doc = render_summary(fields, errors)
+
+      assert summary_hrefs(doc) == Enum.map(fields, &"#kiln-form-s-#{&1.name}")
+    end
+
+    test "a hidden field's error is listed without a link" do
+      doc = render_summary([field(:hidden, name: "ref")], %{"ref" => "is too long"})
+
+      assert summary_hrefs(doc) == []
+
+      assert doc |> q("#kiln-form-s-error-summary li") |> LazyHTML.text() =~
+               "Label: This value is too long."
+    end
+
+    test "a choice group with no options (legacy data) links to its fieldset" do
+      doc = render_summary([field(:radio, name: "old", options: [])], %{"old" => "is required"})
+      assert summary_hrefs(doc) == ["#kiln-form-s-old"]
+    end
+
+    test "every link targets a form control that exists in the markup" do
+      types = FormField.field_types() -- [:hidden]
+      fields = for type <- types, do: field(type, name: "#{type}")
+      doc = render_summary(fields, Map.new(fields, &{&1.name, "is not valid"}))
+
+      hrefs = summary_hrefs(doc)
+      assert length(hrefs) == length(types)
+
+      for "#" <> id <- hrefs do
+        assert count(doc, "input##{id}, select##{id}, textarea##{id}") == 1,
+               "##{id} is not a form control in the rendered form"
+      end
+    end
+
+    test "the first input of a group keeps its legend in view when scrolled to" do
+      for {type, first} <- [radio: "0", checkboxes: "0", rating: "1"] do
+        doc = render_field(field(type))
+        assert [class] = attr(doc, "#p-f-#{first}", "class"), "#{type}"
+        assert class =~ "scroll-mt-"
+        # Only the link target carries it.
+        assert count(doc, ~s(fieldset input[class*="scroll-mt-"])) == 1
+      end
+    end
+  end
+
   describe "invalid re-render through the controller" do
     test "keeps checked boxes, the selected radio and the rating" do
       form = form!()

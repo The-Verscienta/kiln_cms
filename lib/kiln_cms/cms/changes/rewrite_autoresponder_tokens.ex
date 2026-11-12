@@ -25,6 +25,7 @@ defmodule KilnCMS.CMS.Changes.RewriteAutoresponderTokens do
   use Ash.Resource.Change
 
   alias KilnCMS.CMS
+  alias KilnCMS.Forms.Autoresponder
 
   @impl true
   def change(changeset, _opts, context) do
@@ -48,21 +49,11 @@ defmodule KilnCMS.CMS.Changes.RewriteAutoresponderTokens do
         })
 
       with {:ok, form} <- CMS.get_form(field.form_id, opts),
-           {:ok, _form} <- write(form, rewritten(form, from, field.name), opts) do
+           changes = Autoresponder.rename_field_tokens(form, %{from => field.name}),
+           {:ok, _form} <- write(form, changes, opts) do
         {:ok, field}
       end
     end
-  end
-
-  defp rewritten(form, from, to) do
-    old = "[field:#{from}]"
-    new = "[field:#{to}]"
-
-    for attribute <- [:autoresponder_subject, :autoresponder_body],
-        value = Map.get(form, attribute),
-        is_binary(value) and String.contains?(value, old),
-        into: %{},
-        do: {attribute, String.replace(value, old, new)}
   end
 
   # Nothing to carry over: no write, so the form's `updated_at` stays put.

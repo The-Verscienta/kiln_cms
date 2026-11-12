@@ -396,6 +396,41 @@ defmodule KilnCMS.Forms.FieldTypesTest do
     end
   end
 
+  # #2269: the HTML form translates the bounded refusals by parsing them back;
+  # the JSON API returns the same English strings verbatim.
+  describe "error_detail/1" do
+    test "round-trips every bounded number refusal submit/3 produces" do
+      cases = [
+        {%{min_value: 3.0}, "2", {:min, "3"}},
+        {%{min_value: 0.25}, "0.2", {:min, "0.25"}},
+        {%{min_value: -3.0}, "-4", {:min, "-3"}},
+        {%{max_value: 10.0}, "11", {:max, "10"}},
+        {%{max_value: -0.5}, "0", {:max, "-0.5"}},
+        {%{step: 0.25}, "0.3", {:step, "0.25"}},
+        {%{min_value: 1.0, step: 2.0}, "4", {:step, "2"}}
+      ]
+
+      for {range, value, expected} <- cases do
+        form = form!(Map.put(range, :field_type, :number))
+        message = error(form, value)
+        assert Forms.error_detail(message) == expected, inspect({range, value, message})
+      end
+    end
+
+    test "round-trips the rating refusal, default and custom star count" do
+      assert {:rating_max, "5"} == Forms.error_detail(error(form!(%{field_type: :rating}), "6"))
+
+      ten = form!(%{field_type: :rating, max_value: 10.0})
+      assert {:rating_max, "10"} == Forms.error_detail(error(ten, "11"))
+    end
+
+    test "any other message comes back as itself" do
+      for message <- ["is required", "is too long", "must be a number", "must be at least ", "x"] do
+        assert {:message, message} == Forms.error_detail(message)
+      end
+    end
+  end
+
   describe "display_value/1" do
     test "lists join, floats lose their exponent, nil is empty" do
       assert Forms.display_value(["a", "b"]) == "a, b"

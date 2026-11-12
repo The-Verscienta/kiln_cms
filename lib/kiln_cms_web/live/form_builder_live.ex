@@ -133,7 +133,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
     if entry do
       attrs = %{
         form_id: socket.assigns.form.id,
-        name: unique_name(Atom.to_string(entry.type), fields),
+        name: KilnCMS.Forms.unique_field_name(Atom.to_string(entry.type), fields),
         label: entry.label,
         field_type: entry.type,
         options: if(entry.type in @choice_types, do: starter_options(), else: []),
@@ -458,7 +458,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
       |> KilnCMS.Forms.copyable_field_attrs()
       |> Map.merge(%{
         form_id: field.form_id,
-        name: unique_name(field.name, fields),
+        name: KilnCMS.Forms.unique_field_name(field.name, fields),
         position: field.position
       })
 
@@ -517,14 +517,6 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   defp next_position([]), do: 0
   defp next_position(fields), do: Enum.max_by(fields, & &1.position).position + 1
-
-  # A machine name not yet taken on this form: `email`, `email_2`, `email_3`, …
-  defp unique_name(base, fields) do
-    taken = MapSet.new(fields, & &1.name)
-
-    [base | Enum.map(2..1000, &"#{base}_#{&1}")]
-    |> Enum.find(&(!MapSet.member?(taken, &1)))
-  end
 
   # Options-panel params → update attrs. Options arrive newline-separated (only
   # while the textarea is rendered, i.e. the field is a select/radio/checkboxes).
@@ -764,8 +756,25 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   defp invalid(errors, key), do: if(Map.has_key?(errors, key), do: "true")
 
-  defp described_by(errors, key, hint_id \\ nil) do
-    ids = [hint_id, Map.has_key?(errors, key) && "fs-#{key}-error"]
+  # What a default value does for the types where the bare input doesn't say
+  # (#2269): the public form pre-selects only an exact option match, and a
+  # rating only a whole star count (`BlockComponents.public_form_field/1`).
+  defp default_value_hint(:boolean), do: gettext("Use \"true\" to pre-check the box.")
+
+  defp default_value_hint(type) when type in [:select, :radio],
+    do: gettext("Must match one of the options exactly to pre-select it.")
+
+  defp default_value_hint(:checkboxes),
+    do: gettext("Must match one of the options exactly; that one box starts checked.")
+
+  defp default_value_hint(:rating),
+    do: gettext("A whole number of stars, from 1 to the maximum, to pre-select that rating.")
+
+  defp default_value_hint(_type), do: nil
+
+  # `hint_ids`: one id or a list of them (a `nil` in it is skipped).
+  defp described_by(errors, key, hint_ids \\ nil) do
+    ids = List.wrap(hint_ids) ++ [Map.has_key?(errors, key) && "fs-#{key}-error"]
 
     case Enum.filter(ids, &is_binary/1) do
       [] -> nil
@@ -1018,6 +1027,15 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   >
                     {field.name}
                   </p>
+                  <%!-- A name the honeypot uses (#2267): kept working, but flagged. --%>
+                  <p
+                    :if={KilnCMS.Forms.reserved_field_name?(field.name)}
+                    id={"canvas-field-reserved-#{field.id}"}
+                    class="mt-1 flex items-center gap-1 text-xs font-medium text-warning-ink"
+                  >
+                    <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
+                    {gettext("Reserved name")}
+                  </p>
                 </div>
               </div>
 
@@ -1084,10 +1102,27 @@ defmodule KilnCMSWeb.FormBuilderLive do
                       value={shown(@field_draft, "name", selected.name)}
                       phx-debounce="blur"
                       aria-invalid={invalid(@field_errors, "name")}
-                      aria-describedby={described_by(@field_errors, "name", "fs-name-hint")}
+                      aria-describedby={
+                        described_by(@field_errors, "name", [
+                          KilnCMS.Forms.reserved_field_name?(selected.name) && "fs-name-reserved",
+                          "fs-name-hint"
+                        ])
+                      }
                       class="field-input mt-1 font-mono text-xs"
                     />
                     <.setting_errors key="name" errors={@field_errors} />
+                    <p
+                      :if={KilnCMS.Forms.reserved_field_name?(selected.name)}
+                      id="fs-name-reserved"
+                      role="note"
+                      class="mt-1 flex items-start gap-1 text-xs text-warning-ink"
+                    >
+                      <.icon name="hero-exclamation-triangle" class="mt-px size-4 shrink-0" />
+                      {gettext(
+                        "“%{name}” is reserved for spam protection: a visitor who fills this field has their submission discarded. Give it another machine name.",
+                        name: selected.name
+                      )}
+                    </p>
                     <p id="fs-name-hint" class="mt-1 text-xs text-base-content/60">
                       {gettext(
                         "Keys this field's value in submissions. Entries already received keep the old key: the Entries tab and CSV export show it as a renamed field; API clients and webhooks use the new name from now on. The autoresponder's [field:…] tokens follow the rename."
@@ -1240,12 +1275,22 @@ defmodule KilnCMSWeb.FormBuilderLive do
                       value={shown(@field_draft, "default_value", selected.default_value)}
                       phx-debounce="300"
                       aria-invalid={invalid(@field_errors, "default_value")}
-                      aria-describedby={described_by(@field_errors, "default_value")}
+                      aria-describedby={
+                        described_by(
+                          @field_errors,
+                          "default_value",
+                          default_value_hint(selected.field_type) && "fs-default-hint"
+                        )
+                      }
                       class="field-input mt-1"
                     />
                     <.setting_errors key="default_value" errors={@field_errors} />
-                    <p :if={selected.field_type == :boolean} class="mt-1 text-xs text-base-content/60">
-                      {gettext("Use \"true\" to pre-check the box.")}
+                    <p
+                      :if={default_value_hint(selected.field_type)}
+                      id="fs-default-hint"
+                      class="mt-1 text-xs text-base-content/60"
+                    >
+                      {default_value_hint(selected.field_type)}
                     </p>
                   </div>
 

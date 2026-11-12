@@ -93,7 +93,10 @@ The `:form` content block references a form by slug:
 
 - **On-site** pages render the live form server-side (inputs per field, a
   visually-hidden honeypot) POSTing to `/forms/<slug>`; a successful
-  submission shows the form's success message. An inactive form renders
+  submission shows the form's success message on a thank-you page in the
+  site's layout (header, footer, branding), for the same site and in the same
+  language as the form. A submission to a form that is unknown or no longer
+  active gets a 404 in the same layout. An inactive form renders
   nothing (a form or field edit drops the site's cached pages on every node
   at once, and a page that renders a form carries the form in its `ETag`, so
   a revalidating client sees the edit too). Kiln's own text in the form (the
@@ -273,6 +276,59 @@ Moving a field to another form (changing its `form_id`, which the builder does
 not offer) is refused the same way while the old form's autoresponder is on and
 uses the field's token, with an error on `form_id`.
 
+### Pre-select an option with a default value
+
+**Default value** fills the field in before the visitor touches it. For a
+text field that is whatever you type; for the types below, the builder says
+under the input what the public form does with it:
+
+| Type | Default value | Hint under the input |
+| --- | --- | --- |
+| Checkbox | `true` checks the box | *Use "true" to pre-check the box.* |
+| Dropdown, radio buttons | one option, spelled exactly as in **Options**; that option starts selected | *Must match one of the options exactly to pre-select it.* |
+| Checkbox group | one option, spelled exactly as in **Options**; that one box starts checked | *Must match one of the options exactly; that one box starts checked.* |
+| Rating | a whole number of stars, from 1 to **Stars**; that rating starts selected | *A whole number of stars, from 1 to the maximum, to pre-select that rating.* |
+
+A default that matches nothing (`Red` for an option `red`, `3.5` stars) is
+saved but pre-selects nothing.
+
+### Fix a field named website
+
+The public form carries a hidden spam trap, an input named `website` that
+people never see and spam bots fill in. A submission that fills it is thrown
+away while the sender is told it went through. A field of your own with the
+machine name `website` is filled by real visitors, so every submission that
+answers it is thrown away the same way, and nothing tells you.
+
+Kiln no longer lets a field take that name. A form that already has one
+keeps rendering it, and its label, order, **Required** and other settings
+still save, but the builder flags it until you rename it. You need the
+**admin** role.
+
+1. Open **Forms** (`/editor/forms`) and click the form's name. On the
+   preview, the field shows **Reserved name**, with a warning icon, under its
+   machine name.
+2. Click the field. Under **Machine name**, **Field settings** says *“website”
+   is reserved for spam protection: a visitor who fills this field has their
+   submission discarded. Give it another machine name.*
+3. Change **Machine name** to another name, for example `company_website`,
+   and leave the input (or press Enter). The panel says **Saved.**, the new
+   name appears under the field on the preview, and the **Reserved name** flag
+   and the note go away.
+
+The rename behaves like any other
+([above](#edit-and-rename-form-fields)): `[field:website]` tokens in the
+**Confirmations** template become `[field:company_website]`, and a headless
+frontend that posts the old key needs the new one. The visitor's answers
+that were thrown away before the rename are not stored anywhere, so there is
+nothing to recover.
+
+Until the field is renamed, Kiln refuses to change its **Type** (the
+message is *is reserved for spam protection*, under **Machine name**), and a
+renamed field cannot be named `website` again. Nothing changes for the spam
+trap itself: `GET /api/forms/<slug>` still reports `"honeypot_field":
+"website"`, and the public form still renders the hidden input.
+
 ### Errors you can see
 
 | Message | Meaning |
@@ -287,11 +343,47 @@ uses the field's token, with an error on `form_id`.
 | must be greater than zero | A **Number (range)** field's **Step** is zero or negative. |
 | must be a whole number from 1 to 10 | A rating's **Stars** is not a whole number from 1 to 10. |
 | a hidden field can't be required | Hidden fields are filled by the page or a script, never by the visitor, so **Required** is refused on them. |
-| is reserved for spam protection | The machine name `website` is the honeypot input's. A field of one of the types added in 1.9 (radio buttons, checkbox group, phone, web address, hidden, number (range), rating) can't use it. |
+| is reserved for spam protection | The machine name `website` is the honeypot input's, so no field of any type can take it, whether you add, rename or retype a field. A field that already has it is refused a change of **Type** too; give it another machine name first. See [Fix a field named website](#fix-a-field-named-website). |
 | The autoresponder uses [field:email]: remove it from the Confirmations template first. | Shown when you delete a field: the autoresponder is on and its subject or body uses this field's token. See [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses). |
 
 An error that belongs to no input in the panel, such as a permission error,
 shows as a message at the corner of the screen instead.
+
+## Duplicate a form
+
+A duplicate copies a form's settings and fields into a new, inactive form, so
+you can start a similar form without building it again. Its entries are not
+copied. You need the **admin** role.
+
+1. Open **Forms** (`/editor/forms`). Under *Your forms*, find the form and
+   click the copy icon on its row (its tooltip reads **Duplicate** and the
+   form's name).
+2. A message says *Form duplicated (inactive until you activate it).*, and a
+   new row appears: the name with ` (copy)` after it, marked **Inactive**,
+   with the slug `<slug>-copy` (`<slug>-copy-2` and so on when that is
+   taken).
+3. Click the copy's name to open it in the builder, change what differs, and
+   tick **Active (accepting submissions)** on its **General** tab when it is
+   ready.
+
+The copy's **Confirmations** template, and whether it is switched on, follow
+the original's.
+
+What the message can say besides:
+
+- *… The field “website” was renamed “website_2” in the copy: that name is
+  reserved for spam protection.* The original has a field named `website`
+  ([Fix a field named website](#fix-a-field-named-website)). The copy's field
+  is `website_2` (or the next free name), and its `[field:website]` tokens
+  read `[field:website_2]`. The original is not changed.
+- *Form duplicated, but a field couldn't be copied: topic.* A field
+  of the original is no longer valid, for example a dropdown with no options,
+  so the copy was made without it. Add it to the copy by hand.
+- *The copy's autoresponder stays off: …* The original's
+  autoresponder is on, but the copy could not switch it on, usually because
+  its template names a field that could not be copied. A renamed `website`
+  token is still rewritten. Fix the template in the copy's
+  **Confirmations** tab and switch it on there.
 
 ## Share a form at its own address
 
@@ -315,9 +407,12 @@ You need the **admin** role: the Forms pages are admin-only.
    now shows the address. A new form is active from the start.
 4. Click the address, or **Preview** beside it. The page opens in a new tab,
    the way a visitor sees it.
-5. Copy the address and share it. A visitor who submits the form sees the
-   form's success message on a thank-you page; a submission with mistakes
-   comes back to the form page with each error shown against its field.
+5. Copy the address and share it. A visitor who submits the form sees a
+   thank-you page inside the site's header and footer: the heading **Thank
+   you**, the form's success message (or *Thanks — we got your message.*
+   when it has none) and a **Back** link to the page they came from. A
+   submission with mistakes comes back to the form page with each error
+   shown against its field.
 
 The address follows the form's **Slug** (General tab). Change the slug and
 the old address stops answering, so shared links break; Kiln does not add a
@@ -362,10 +457,15 @@ What can go wrong:
 - **A different page at the address.** Something else answers at
   `/forms/<slug>` first (above). Give the form another slug, or remove the
   alias or redirect.
-- **The thank-you page has no site header or footer.** It is a plain card
-  with a **Back** link, the same as after a form block's submission. Only the
-  form page itself and a refused submission's re-render carry the site's
-  layout.
+- **"Form not found" after sending.** The form was deactivated, deleted or
+  given a new slug between the visitor opening the page and sending it. The
+  answer is a 404 inside the site's header and footer, headed **Form not
+  found**, saying *This form doesn't exist or no longer takes submissions.*
+  Nothing is stored.
+- **No Back link on the thank-you page.** The link goes back to the page the
+  visitor sent the form from, taken from the browser's `Referer`. It is left
+  out when the browser sent none, when it names another host, or when its
+  path starts with `//` or `/\`, which a browser would read as another host.
 
 ## Embedding on another site
 
@@ -563,6 +663,29 @@ document: the visitor's values for the form's own fields filled back in, each
 error shown against its field (`aria-invalid`, `aria-describedby`), and a
 focused summary on top that links to each field by its label. The honeypot is
 always rendered empty. The JSON endpoint still answers `{ok: false, errors}`.
+
+Following a summary link moves focus to the field, so the visitor can type or
+choose straight away. For radio buttons, a checkbox group or a rating, the
+link goes to the group's first option, and the page keeps the group's
+question in view above it. A hidden field's error ("This value is too long.")
+is listed without a link, because a hidden input cannot take focus.
+
+The messages in the HTML form are Kiln's own sentences, in the form's
+language. The JSON endpoint keeps returning the short English fragments as its
+`errors` values, because clients match on them:
+
+| HTML form says | `POST /api/forms/<slug>` returns |
+| --- | --- |
+| Enter a number of at least 0.5. | `must be at least 0.5` |
+| Enter a number of at most 10. | `must be at most 10` |
+| Enter a number in steps of 0.25. | `must be a multiple of 0.25` |
+| Choose a rating from 1 to 5. | `must be a rating from 1 to 5` |
+| This value is too long. | `is too long` |
+
+The number keeps the server's form (`0.5`, never `0,5`) in every language,
+because it is the value the visitor has to type and a number input takes a
+period. A step counts from the field's minimum, so the HTML says "in steps
+of".
 
 ## Spam moderation (#477)
 

@@ -53,9 +53,14 @@ defmodule KilnCMSWeb.FormEmbedTest do
     test "an unknown slug 404s but still renders inside the iframe", %{conn: conn} do
       conn = conn |> unique_ip() |> get("/forms/does-not-exist/embed")
 
-      assert html_response(conn, 404) =~ "Form not found"
+      html = html_response(conn, 404)
+      assert html =~ "Form not found"
       # The error page must be framable too, else it renders blank for the embedder.
       assert String.ends_with?(csp(conn), "frame-ancestors 'self' https://embedder.test")
+      # Chrome-free: the site's public layout is for on-site pages only (#2338).
+      assert html =~ "kiln-embed-body"
+      assert html =~ "/embed-frame.js"
+      refute html =~ "public-shell"
     end
 
     test "an inactive form is not embeddable", %{conn: conn} do
@@ -112,6 +117,24 @@ defmodule KilnCMSWeb.FormEmbedTest do
       # Loads the height reporter so the iframe shrinks to the short message
       # rather than keeping the (much taller) form's height.
       assert html =~ "/embed-frame.js"
+      # Still the iframe's own document, not the site's chrome (#2338).
+      assert html =~ "kiln-embed-body"
+      refute html =~ "public-shell"
+    end
+
+    test "an embedded submission to an unknown slug 404s inside the iframe", %{conn: conn} do
+      conn =
+        conn
+        |> unique_ip()
+        |> post("/forms/does-not-exist", %{"email" => "a@b.com", "_kiln_embed" => "1"})
+
+      html = html_response(conn, 404)
+      assert html =~ "Form not found."
+      assert html =~ "kiln-embed-body"
+      assert html =~ "/embed-frame.js"
+      refute html =~ "public-shell"
+      # No form, so the deployment-wide framing policy (#648).
+      assert String.ends_with?(csp(conn), "frame-ancestors 'self' https://embedder.test")
     end
 
     test "a normal on-site submission keeps the strict CSP and no resizer", %{conn: conn} do
@@ -126,6 +149,8 @@ defmodule KilnCMSWeb.FormEmbedTest do
       assert html =~ "Merci!"
       assert csp(conn) =~ "frame-ancestors 'self'"
       refute html =~ "/embed-frame.js"
+      refute html =~ "kiln-embed-body"
+      assert html =~ "public-shell"
     end
 
     # #1673, then #1683. An embed omits the referer Back link (it would reload
