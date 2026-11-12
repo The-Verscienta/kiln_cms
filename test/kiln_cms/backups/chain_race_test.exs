@@ -100,4 +100,48 @@ defmodule KilnCMS.Backups.ChainRaceTest do
     assert [{:error, :superseded}, {:ok, %{chain: ^chain}}] =
              Enum.sort_by(results, &match?({:ok, _}, &1))
   end
+
+  # #2554: the marker sync takes the same advisory lock, so a request that
+  # arrives while it moves the markers waits for it, and a backup can never
+  # start (and later sync markers of its own) in the middle of it.
+  test "a request that arrives during a marker sync waits until the sync commits" do
+    dir = Backups.dir()
+    File.mkdir_p!(Path.join(dir, "db"))
+    File.write!(Path.join([dir, "db", "kiln-db-20260801-031700.dump"]), "dump")
+
+    File.touch!(
+      Path.join([dir, "db", "kiln-db-20260801-031700.dump"]),
+      System.os_time(:second) - 3600
+    )
+
+    parent = self()
+
+    # Stands in for creating the marker file: says it is inside the lock, and
+    # holds it there until the test lets go.
+    create = fn path ->
+      send(parent, {:in_sync, self()})
+
+      receive do
+        :go -> File.write(path, "")
+      end
+    end
+
+    sync =
+      Task.async(fn -> unboxed(fn -> Chain.sync_last_good(dir, create_marker: create) end) end)
+
+    assert_receive {:in_sync, syncer}, 10_000
+
+    request =
+      Task.async(fn ->
+        unboxed(fn -> Backups.request([trigger: "manual"], Backups.system()) end)
+      end)
+
+    # Blocked on the advisory lock the sync holds.
+    assert Task.yield(request, 500) == nil
+
+    send(syncer, :go)
+    assert {:ok, %{db: "20260801-031700"}} = Task.await(sync, 10_000)
+    assert {:ok, %{status: :started}} = Task.await(request, 10_000)
+    assert File.exists?(Path.join([dir, "db", "kiln-20260801-031700.good"]))
+  end
 end

@@ -100,3 +100,12 @@ end
 if user_agent = System.get_env("KILN_LINK_CHECK_USER_AGENT") do
   config :kiln_cms, KilnCMS.Links.External, user_agent: user_agent
 end
+
+# ## Backups: the last-good marker (#2554)
+#
+# When the app brings `kiln-<stamp>.good` in step with the newest verified
+# backup, for host-cron backups (`scripts/backup.sh prune` keeps that one).
+# Every 15 minutes by default; `false` turns it off.
+if cron = System.get_env("KILN_BACKUP_MARKER_SYNC_CRON") do
+  config :kiln_cms, :backup_marker_sync_cron, cron
+end
