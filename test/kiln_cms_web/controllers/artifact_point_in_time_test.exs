@@ -232,6 +232,19 @@ defmodule KilnCMSWeb.ArtifactPointInTimeTest do
       |> Enum.map(& &1["slug"])
     end
 
+    # `as_of` (to the microsecond) and `limit` are the caller's, so a shared
+    # cache slot keyed on them was one new entry per anonymous request.
+    test "the collection view stores nothing under a caller-chosen cache key", %{conn: conn} do
+      for n <- 1..3 do
+        as_of = DateTime.utc_now() |> DateTime.add(n, :microsecond) |> DateTime.to_iso8601()
+        assert is_list(index_slugs(conn, as_of))
+        conn |> get("/api/content/page?as_of=#{as_of}&limit=#{n}") |> json_response(200)
+      end
+
+      {:ok, keys} = Cachex.keys(KilnCMS.Cache.cache_name())
+      assert Enum.filter(keys, &match?({:pit_index, _, _, _, _}, &1)) == []
+    end
+
     defp graphql_slugs(conn, as_of) do
       conn
       |> post("/gql", %{
