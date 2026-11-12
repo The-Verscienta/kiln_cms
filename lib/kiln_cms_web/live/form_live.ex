@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.FormLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMS.Forms.Autoresponder
 
   @impl true
   def mount(_params, _session, socket) do
@@ -41,6 +42,13 @@ defmodule KilnCMSWeb.FormLive do
 
   # A full copy — settings and fields — created inactive so the duplicate
   # doesn't instantly render publicly under its new slug.
+  #
+  # The copy's autoresponder is created off and turned on (when the original's
+  # is) only once the fields exist: its token check reads the copy's own
+  # fields, so an enabled template using `[field:…]` would otherwise refuse
+  # the copy outright. A field named like the honeypot (#2267) can't be
+  # created any more, so the copy takes the next free name and its tokens
+  # follow; a field that still fails is reported rather than dropped silently.
   def handle_event("duplicate_form", %{"id" => id}, socket) when is_binary(id) do
     opts = actor_opts(socket)
 
@@ -50,27 +58,19 @@ defmodule KilnCMSWeb.FormLive do
              Map.merge(copied_settings(form), %{
                name: gettext("%{name} (copy)", name: form.name),
                slug: unique_slug(form.slug, socket.assigns.forms),
-               active: false
+               active: false,
+               autoresponder_enabled: false
              }),
              opts
            ) do
-      for field <- CMS.form_fields_for!(form.id, opts) do
-        CMS.create_form_field(
-          field
-          |> KilnCMS.Forms.copyable_field_attrs()
-          |> Map.merge(%{
-            form_id: copy.id,
-            name: field.name,
-            position: field.position
-          }),
-          opts
-        )
-      end
+      {renames, failed} = copy_fields(form, copy, opts)
+      autoresponder = finish_autoresponder(form, copy, renames, opts)
 
       {:noreply,
        socket
        |> load_forms()
-       |> put_flash(:info, gettext("Form duplicated (inactive until you activate it)."))}
+       |> put_flash(:info, duplicated_message(renames))
+       |> put_duplicate_errors(failed, autoresponder)}
     else
       {:error, error} -> {:noreply, put_flash(socket, :error, error_message(error))}
       _other -> {:noreply, put_flash(socket, :error, gettext("Couldn't duplicate that form."))}
@@ -120,6 +120,90 @@ defmodule KilnCMSWeb.FormLive do
   # embed snippet (#557).
   defp hosted_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/forms/#{form.slug}"
   defp api_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/api/forms/#{form.slug}"
+
+  # Copies `form`'s fields onto `copy`, renaming a reserved name to the first
+  # free `website_2`, `website_3`, … Returns the renames made (`[{old, new}]`)
+  # and the source names of the fields that couldn't be created.
+  defp copy_fields(form, copy, opts) do
+    fields = CMS.form_fields_for!(form.id, opts)
+
+    {renames, failed} =
+      Enum.reduce(fields, {[], []}, fn field, {renames, failed} ->
+        name =
+          if KilnCMS.Forms.reserved_field_name?(field.name),
+            do: KilnCMS.Forms.unique_field_name(field.name, fields),
+            else: field.name
+
+        attrs =
+          field
+          |> KilnCMS.Forms.copyable_field_attrs()
+          |> Map.merge(%{form_id: copy.id, name: name, position: field.position})
+
+        case CMS.create_form_field(attrs, opts) do
+          {:ok, _field} when name != field.name -> {[{field.name, name} | renames], failed}
+          {:ok, _field} -> {renames, failed}
+          {:error, _error} -> {renames, [field.name | failed]}
+        end
+      end)
+
+    {Enum.reverse(renames), Enum.reverse(failed)}
+  end
+
+  # One write once the fields exist: the renamed tokens, and the original's
+  # autoresponder switch, checked against the copy's fields.
+  defp finish_autoresponder(form, copy, renames, opts) do
+    changes = Autoresponder.rename_field_tokens(form, Map.new(renames))
+
+    changes =
+      if form.autoresponder_enabled,
+        do: Map.put(changes, :autoresponder_enabled, true),
+        else: changes
+
+    if changes == %{} do
+      :ok
+    else
+      case CMS.update_form(copy, changes, opts) do
+        {:ok, _copy} -> :ok
+        {:error, error} -> {:error, error}
+      end
+    end
+  end
+
+  defp duplicated_message([]), do: gettext("Form duplicated (inactive until you activate it).")
+
+  defp duplicated_message(renames) do
+    gettext(
+      "Form duplicated (inactive until you activate it). The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for spam protection.",
+      old: Enum.map_join(renames, ", ", &elem(&1, 0)),
+      new: Enum.map_join(renames, ", ", &elem(&1, 1))
+    )
+  end
+
+  defp put_duplicate_errors(socket, failed, autoresponder) do
+    messages =
+      Enum.reject(
+        [failed_fields_message(failed), autoresponder_message(autoresponder)],
+        &is_nil/1
+      )
+
+    if messages == [], do: socket, else: put_flash(socket, :error, Enum.join(messages, " "))
+  end
+
+  defp failed_fields_message([]), do: nil
+
+  defp failed_fields_message(names) do
+    ngettext(
+      "Form duplicated, but a field couldn't be copied: %{names}.",
+      "Form duplicated, but %{count} fields couldn't be copied: %{names}.",
+      length(names),
+      names: Enum.join(names, ", ")
+    )
+  end
+
+  defp autoresponder_message(:ok), do: nil
+
+  defp autoresponder_message({:error, error}),
+    do: gettext("The copy's autoresponder stays off: %{reason}", reason: error_message(error))
 
   # A slug not yet taken by any listed form: `contact-copy`, `contact-copy-2`, …
   # Every attribute the create action accepts, read off the resource rather than

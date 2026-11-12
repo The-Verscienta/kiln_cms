@@ -7,7 +7,10 @@ defmodule KilnCMS.Forms do
 
     * **honeypot** — the rendered form carries a visually-hidden `website`
       input; bots that fill it get a *fake success* (the submission is
-      silently discarded, giving spam software nothing to learn from);
+      silently discarded, giving spam software nothing to learn from). No
+      admin field may take that name (`reserved_field_names/0`, #2267): a
+      field that already had it keeps working, but a visitor who fills it
+      trips the honeypot, so the builder flags it;
     * **coercion + validation** per `FormField` (required, type coercion to
       JSON-native values, select membership, email shape), unknown keys
       dropped;
@@ -109,6 +112,33 @@ defmodule KilnCMS.Forms do
   @doc "The honeypot input name rendered into public forms."
   @spec honeypot_field() :: String.t()
   def honeypot_field, do: @honeypot_field
+
+  @doc """
+  The machine names no `KilnCMS.CMS.FormField` may take (#2267): the honeypot
+  input's. A field named like it would discard every submission that fills
+  it. `KilnCMS.CMS.Validations.ReservedFieldName` refuses them, the form
+  builder flags a field that already carries one, and a form duplicate
+  renames it in the copy.
+  """
+  @spec reserved_field_names() :: [String.t()]
+  def reserved_field_names, do: [@honeypot_field]
+
+  @doc "Whether `name` is one of `reserved_field_names/0`."
+  @spec reserved_field_name?(term()) :: boolean()
+  def reserved_field_name?(name), do: name in reserved_field_names()
+
+  @doc """
+  A machine name based on `base` that none of `fields` carries: `base` itself,
+  else `base_2`, `base_3`, … (field duplicate and form duplicate). A reserved
+  `base` is never returned as is.
+  """
+  @spec unique_field_name(String.t(), [map()]) :: String.t()
+  def unique_field_name(base, fields) do
+    taken = MapSet.new(fields, & &1.name)
+
+    [base | Enum.map(2..1000, &"#{base}_#{&1}")]
+    |> Enum.find(&(!MapSet.member?(taken, &1) and !reserved_field_name?(&1)))
+  end
 
   @doc "The human-verification token's input name on public forms (#2249)."
   @spec challenge_field() :: String.t()

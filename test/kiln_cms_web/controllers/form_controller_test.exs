@@ -110,6 +110,71 @@ defmodule KilnCMSWeb.FormControllerTest do
     assert CMS.recent_form_submissions!(form.id, authorize?: false) == []
   end
 
+  # A field named like the honeypot from before #2267 can't be created any
+  # more, but a form that already has one keeps working exactly as before
+  # (the owner's decision): it renders, an empty value submits, and a filled
+  # one trips the honeypot. The honeypot's name is unchanged for headless
+  # clients.
+  describe "a form with a legacy field named like the honeypot (#2267)" do
+    defp legacy_form! do
+      form = form!()
+
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: KilnCMS.Forms.honeypot_field(),
+        label: "Your website",
+        field_type: :string,
+        position: 2
+      })
+
+      form
+    end
+
+    test "the page renders the field", %{conn: conn} do
+      form = legacy_form!()
+
+      html = conn |> get("/forms/#{form.slug}") |> html_response(200)
+
+      assert html =~ "Your website"
+    end
+
+    test "a submission that leaves it empty is stored", %{conn: conn} do
+      form = legacy_form!()
+
+      html =
+        conn
+        |> unique_ip()
+        |> post("/forms/#{form.slug}", %{"email" => "a@b.co", "website" => ""})
+        |> html_response(200)
+
+      assert html =~ "Merci!"
+      assert [submission] = CMS.recent_form_submissions!(form.id, authorize?: false)
+      assert submission.data == %{"email" => "a@b.co"}
+    end
+
+    test "a submission that fills it is a fake success, nothing stored", %{conn: conn} do
+      form = legacy_form!()
+
+      html =
+        conn
+        |> unique_ip()
+        |> post("/forms/#{form.slug}", %{"email" => "a@b.co", "website" => "https://a.example"})
+        |> html_response(200)
+
+      assert html =~ "Merci!"
+      assert CMS.recent_form_submissions!(form.id, authorize?: false) == []
+    end
+
+    test "GET /api/forms/:slug keeps the honeypot's name and lists the field", %{conn: conn} do
+      form = legacy_form!()
+
+      body = conn |> get("/api/forms/#{form.slug}") |> json_response(200)
+
+      assert body["honeypot_field"] == "website"
+      assert Enum.map(body["fields"], & &1["name"]) == ["email", "message", "website"]
+    end
+  end
+
   test "POST /api/forms/:slug accepts JSON and returns field errors", %{conn: conn} do
     form = form!()
 
