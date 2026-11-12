@@ -471,6 +471,9 @@ defmodule KilnCMS.Application do
        "events. See docs/content-lifecycles.md."},
     {:security_log_prune_cron, KilnCMS.Security.PruneWorker, "KILN_SECURITY_LOG_PRUNE_CRON",
      "security events will NOT be deleted at the end of their retention window. See #2241."},
+    {:backup_marker_sync_cron, KilnCMS.Backups.MarkerSyncWorker, "KILN_BACKUP_MARKER_SYNC_CRON",
+     "backups made by host cron will NOT get a last-good marker, so backup.sh prune keeps " <>
+       "only the newest complete set. See #2554."},
     # Only ever set when KILN_DEMO_RESET=confirm (config/runtime.exs).
     {:demo_reset_cron, KilnCMS.Demo.ResetWorker, "KILN_DEMO_RESET_CRON",
      "the demo will NOT reset on a schedule. See docs/demo-mode.md."}

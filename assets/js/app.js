@@ -466,6 +466,11 @@ const Hooks = {
     },
     destroyed() {
       this._destroyed = true
+      // A pending debounced push would otherwise fire after a remount (conflict
+      // reload, version restore) and send the PRE-reload document under the
+      // same block id.
+      clearTimeout(this._debounce)
+      clearTimeout(this._blurTimer)
       window.removeEventListener("kiln:collab-published", this._collabPublished)
       this._flushRef && this.removeHandleEvent(this._flushRef)
       this.slash && this.slash.destroy()
@@ -550,6 +555,8 @@ const Hooks = {
     },
     destroyed() {
       this._destroyed = true
+      clearTimeout(this._debounce)
+      clearTimeout(this._blurTimer)
       this.slash && this.slash.destroy()
       this.linkPrompt && this.linkPrompt.destroy()
       this.toolbar && this.toolbar.remove()

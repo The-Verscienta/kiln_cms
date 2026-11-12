@@ -454,9 +454,11 @@ defmodule KilnCMS.Storage do
   item's blob, and `at:` (`t:at/0`) for a file in a site's own store — it is
   resolved once, not per chunk.
 
-  A zero-length blob copies successfully as an empty file; only a failure on
-  the FIRST read is an error, since a later one means a short file is already
-  on disk and whatever reads it next will reject it on its own terms.
+  A zero-length blob copies successfully as an empty file. A failed read or
+  write at ANY offset is an error: `:ok` means the whole blob is on disk. (A
+  mid-copy failure used to answer `:ok` and leave a short file for the caller
+  to notice; the callers — direct-upload ingest, the metadata strip — took it
+  as complete.)
   """
   # `dest` is server-built (System.tmp_dir! + a UUID) at every call site, never
   # user input — the File traversal warning is a false positive.
@@ -481,21 +483,22 @@ defmodule KilnCMS.Storage do
   defp copy_chunks(read, key, io, offset) do
     case read.(key, offset, offset + @copy_chunk - 1) do
       {:ok, %{bytes: bytes, total: total}} ->
-        IO.binwrite(io, bytes)
-        next = offset + byte_size(bytes)
-        if next >= total, do: :ok, else: copy_chunks(read, key, io, next)
+        # `:file.write/2`, not `IO.binwrite/2`: the latter raises on a failed
+        # write (a full disk) instead of returning it.
+        write_chunk(read, key, io, offset + byte_size(bytes), total, :file.write(io, bytes))
 
       # An empty blob has no satisfiable range; an empty file is the right copy.
       {:error, {:range_not_satisfiable, 0}} ->
-        :ok
-
-      {:error, _reason} when offset > 0 ->
         :ok
 
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  defp write_chunk(_read, _key, _io, next, total, :ok) when next >= total, do: :ok
+  defp write_chunk(read, key, io, next, _total, :ok), do: copy_chunks(read, key, io, next)
+  defp write_chunk(_read, _key, _io, _next, _total, {:error, reason}), do: {:error, reason}
 
   @doc """
   Builds a collision-resistant storage key from an upload's filename, keeping

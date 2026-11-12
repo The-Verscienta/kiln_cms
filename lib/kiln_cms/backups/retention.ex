@@ -49,9 +49,13 @@ defmodule KilnCMS.Backups.Retention do
   `kiln-<stamp>.good` (`Artifact.good_name/1`) in `db/` or `media/` names the
   newest verified unit of that kind (rule 3), for `backup.sh prune`, which has
   no run history to find it by. This module writes it and is the only thing
-  that removes it: `sync_last_good/1` after a run succeeds, and `run/2` before
-  its first delete (never on a dry run). Per kind, the new marker is written
-  first and the other `.good` entries of that directory are removed only once
+  that removes it, at three moments: `sync_last_good/2` after a run succeeds,
+  `run/2` before its first delete (never on a dry run), and
+  `sync_last_good/2` again from `KilnCMS.Backups.Chain.sync_last_good/2`,
+  which `KilnCMS.Backups.MarkerSyncWorker` runs every 15 minutes for
+  deployments that back up with cron only (#2554). Per kind, the new marker
+  is written first and the other `.good` entries of that directory are
+  removed only once
   it is there, so a failed write (a warning and a
   `[:kiln_cms, :backups, :last_good, :failed]` event) leaves the old marker
   pinning the previous backup. A kind with no verified unit keeps whatever
@@ -285,8 +289,15 @@ defmodule KilnCMS.Backups.Retention do
   before the sync fails.
 
   Call it only while holding the backup lock (as the chain's `succeed` and
-  `prune` steps do): two syncs racing on different stamps can each remove
-  the other's marker.
+  `prune` steps do, and `Chain.sync_last_good/2`): two syncs racing on
+  different stamps can each remove the other's marker.
+
+  Options:
+
+    * `:import` - run the importer first (default `true`). `false` is for a
+      caller that already ran it outside a transaction
+      (`Chain.sync_last_good/2`), since the importer writes Run rows.
+    * `:now` - posix seconds (default: now).
   """
   @spec sync_last_good(Path.t(), keyword()) ::
           {:ok, %{db: String.t() | nil, media: String.t() | nil}} | {:error, term()}
@@ -295,7 +306,7 @@ defmodule KilnCMS.Backups.Retention do
 
     result =
       try do
-        with {:ok, _summary} <- import_first(dir),
+        with {:ok, _summary} <- maybe_import(dir, Keyword.get(opts, :import, true)),
              {:ok, inventory} <- scan(dir),
              {:ok, runs} <- read_runs(stamps(inventory)) do
           {_units, newest} = newest_slots(inventory, runs, now)
@@ -311,12 +322,22 @@ defmodule KilnCMS.Backups.Retention do
         kind, _reason -> {:error, {:crashed, kind}}
       end
 
-    with {:error, reason} <- result do
-      Logger.warning("Backup last-good marker not updated: #{describe(reason)}")
-      marker_failed(%{reason: reason})
-      {:error, reason}
-    end
+    with {:error, reason} <- result, do: sync_failed(reason)
   end
+
+  @doc false
+  # A sync that wrote and removed nothing: the warning and the
+  # `[:kiln_cms, :backups, :last_good, :failed]` event. Also for
+  # `Chain.sync_last_good/2`, whose import and lock come before this module.
+  @spec sync_failed(term()) :: {:error, term()}
+  def sync_failed(reason) do
+    Logger.warning("Backup last-good marker not updated: #{describe(reason)}")
+    marker_failed(%{reason: reason})
+    {:error, reason}
+  end
+
+  defp maybe_import(dir, true), do: import_first(dir)
+  defp maybe_import(_dir, false), do: {:ok, :skipped}
 
   defp last_good(newest) do
     Map.new([:db, :media], fn kind -> {kind, get_in(newest, [kind, :verified])} end)

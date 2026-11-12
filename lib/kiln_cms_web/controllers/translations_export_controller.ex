@@ -114,6 +114,7 @@ defmodule KilnCMSWeb.TranslationsExportController do
   defp fetch_record(kind, id, scope) do
     case ContentTypes.get_record(kind, id, scope) do
       {:ok, found} -> {:ok, found}
+      {:error, :unknown_content_type} -> {:error, {:unknown_type, kind}}
       {:error, _reason} -> {:error, {:record_not_found, "#{kind}:#{id}"}}
     end
   rescue

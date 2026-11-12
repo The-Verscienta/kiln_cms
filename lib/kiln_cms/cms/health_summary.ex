@@ -121,7 +121,11 @@ defmodule KilnCMS.CMS.HealthSummary do
   # which has no review deadline) sorts before dated rows in the same state
   # rather than to the end — it is already the more urgent kind.
   defp sort_key(row) do
-    {Enum.find_index(@unhealthy, &(&1 == row.health)), row.due_at || ~U[1970-01-01 00:00:00Z]}
+    # Unix time, not the struct: tuples of `DateTime`s compare field by field in
+    # term order (day before month before year), which is not chronological.
+    due = if row.due_at, do: DateTime.to_unix(row.due_at, :microsecond), else: 0
+
+    {Enum.find_index(@unhealthy, &(&1 == row.health)), due}
   end
 
   defp row_count(rows, ct), do: Enum.count(rows, &(&1.type == ct.type))

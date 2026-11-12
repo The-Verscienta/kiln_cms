@@ -102,8 +102,10 @@ defmodule KilnCMSWeb.BridgeSocket do
     with :ok <- KilnCMSWeb.IpBlock.check_connect(:bridge, info[:connect_info] || %{}),
          :ok <- KilnCMSWeb.SocketJoinBudget.charge(:bridge_join, info[:connect_info] || %{}),
          true <- KilnCMS.VisualEditing.enabled?(),
-         {:ok, ct, id} <- fetch_target(params),
+         # The org first: a dynamic type resolves per site, so the target can
+         # only be looked up once the site is known.
          {:ok, org} <- fetch_org(info),
+         {:ok, ct, id} <- fetch_target(params, org),
          {:ok, credential} <- authorize_connect(ct, id, org, params) do
       # The actor rides along so `init/1` can subscribe to that user's eviction
       # topic. A raw transport has no `id/1` callback, so this socket cannot be
@@ -201,14 +203,14 @@ defmodule KilnCMSWeb.BridgeSocket do
     end
   end
 
-  defp fetch_target(%{"type" => type, "id" => id}) when is_binary(type) and is_binary(id) do
-    case ContentTypes.get(type) do
+  defp fetch_target(%{"type" => type, "id" => id}, org) when is_binary(type) and is_binary(id) do
+    case ContentTypes.get(type, org) do
       nil -> :error
       ct -> {:ok, ct, id}
     end
   end
 
-  defp fetch_target(_), do: :error
+  defp fetch_target(_params, _org), do: :error
 
   # `nil` actor = anonymous (published-only visibility); a `kiln_…` key resolves
   # to its owning user. An invalid key falls back to anonymous rather than
@@ -318,7 +320,7 @@ defmodule KilnCMSWeb.BridgeSocket do
   # "a leaked token can't stream forever": once it is past its 15 minutes this
   # refuses, and the connection closes.
   defp reauthorize(%{preview_token: reveal} = state) when is_function(reveal, 0) do
-    with ct when not is_nil(ct) <- ContentTypes.get(state.type),
+    with ct when not is_nil(ct) <- ContentTypes.get(state.type, state.org),
          :ok <- authorize_token(ct, state.id, reveal.(), state.org) do
       {:ok, state}
     else
@@ -328,7 +330,7 @@ defmodule KilnCMSWeb.BridgeSocket do
 
   defp reauthorize(state) do
     with {:ok, actor} <- SocketReauth.reload_actor(state.actor),
-         ct when not is_nil(ct) <- ContentTypes.get(state.type),
+         ct when not is_nil(ct) <- ContentTypes.get(state.type, state.org),
          :ok <- authorize_read(ct, state.id, actor, state.org) do
       {:ok, %{state | actor: actor}}
     else

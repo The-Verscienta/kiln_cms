@@ -1025,9 +1025,12 @@ defmodule KilnCMSWeb.BackupLiveTest do
       html =
         lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
 
+      # The whole flash (#2671): it names the queued run, not the refused one.
       assert html =~
-               "a resume of 20261101-101010 is queued after it, so this resume was not queued"
+               "A backup is running and a resume of 20261101-101010 is queued after it, so " <>
+                 "this resume was not queued. Try again once the queue clears."
 
+      refute html =~ "a resume of 20261102-101010 is queued"
       assert queue_state() == before
     end
 

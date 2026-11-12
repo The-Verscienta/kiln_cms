@@ -80,6 +80,133 @@ carries the reasoning.
   the referring path starts with `//` or `/\`, which a browser reads as
   another host. (#2338)
 
+<a id="dynamic-type-site-lookup"></a>
+
+- **Custom content types on a site other than the default one are delivered again.**
+  Several read paths resolved a content type by name without saying which
+  site was asking, and a custom (admin-defined) type then resolves against
+  the default site. On any other site that defines a type the default site
+  lacks, `GET /api/content/<type>/<slug>` answered 404 for published
+  entries, the headless and HTML passphrase unlock could not find the
+  document, `/related` and `/api/provenance` answered 404, the visual-editing
+  socket refused the connection, and **Visual** in the content editor said
+  *No such content to edit*. Each of those now passes the request's site.
+  Built-in and overlay-compiled types were never affected.
+
+<a id="storage-copy-and-backup-verify"></a>
+
+- **A copy from storage that fails partway is an error, and `backup.sh verify` fails on a corrupt dump.**
+  `KilnCMS.Storage.copy_to_file/3` answered `:ok` when a read failed after
+  the first chunk, and ignored a failed write, leaving a short file on
+  disk. The direct-upload completion and the audio/video metadata strip took
+  that file as the whole upload. It now returns `{:error, reason}` for a
+  failed read or write at any offset. Separately, `scripts/backup.sh verify`
+  ran `pg_restore --list … && echo "dump: ok"`, which `set -e` does not
+  treat as a failure, so a truncated dump with no checksum sidecar verified
+  clean with exit 0; it now stops with an error naming the dump.
+
+<a id="sweep-crash-fixes"></a>
+
+- **Crash fixes in the console and the public API.**
+  `ContentTypes.get_record/3` raised for a type that no longer resolves (an
+  archived custom type, a removed plugin), which took down the Tasks page,
+  the calendar and a menu item's Edit for anything still pointing at such an
+  entry; it now returns `{:error, :unknown_content_type}`. A nested value in
+  a custom-field filter (`custom_filter[name][eq][x]=1`) answered 500 and
+  now answers 400. Creating a redirect from `/` crashed the Redirects form.
+  A federation inbox body that is valid JSON but not an object is answered
+  400. A `return_to` path containing a backslash, a tab or a newline falls
+  back to the default instead of answering 500. Moving a block that is no
+  longer on the page in the in-context editor is ignored instead of
+  crashing the editor.
+
+<a id="sweep-wrong-results"></a>
+
+- **Wrong results fixed.**
+  The Home health panel and its CSV export ordered rows by comparing
+  `DateTime` structs field by field, so "most overdue first" could list a
+  March deadline ahead of a January one and drop the worst rows from the top
+  ten. A mention such as `@josé` was cut at the first non-ASCII letter and
+  could notify a different member. A form rating field with a maximum below
+  1 rendered a descending range of options. Saving in the Presentation
+  console broadcast a block shape the pop-out and token previews cannot
+  render, crashing them. Group caps on custom-field filters (`_or`/`_and`
+  depth and member count) were skipped when the filter was passed with atom
+  keys from Elixir or MCP. Links and rich text refuse a relative path that
+  hides a `//host` behind a tab or newline.
+
+<a id="sweep-federation-release"></a>
+
+- **A federation delivery whose ledger row could not be read is retried, and the release schedule confirmation moved to the button.**
+  The delivery worker treated every failed read of its ledger row as "the
+  row was pruned" and finished successfully, so a database timeout dropped
+  the activity and left the row pending. Only a not-found is treated that
+  way now. On a release with blocked items, the "Schedule anyway?"
+  confirmation was attached to the whole form, so clicking the date field
+  asked it and cancelling kept the picker from opening; it now asks when
+  **Schedule** is pressed. In the editor, a rich-text block's pending
+  autosave is cancelled when the block is rebuilt after a conflict reload or
+  a version restore, so it can no longer write the pre-reload text back.
+
+<a id="backup-marker-sync-cron-only"></a>
+
+- **A deployment that backs up only with host cron now gets the last-good marker, so `backup.sh prune` keeps the newest verified backup there too.**
+  The app wrote `kiln-<stamp>.good` only at the end of an in-app backup or
+  before an in-app prune, so a deployment whose backups all come from
+  `scripts/backup.sh` never had one, and its prune kept only the newest
+  complete set, even when that set came from a failed run (an off-site copy
+  that was refused, say). A scheduled job, `KilnCMS.Backups.MarkerSyncWorker`,
+  now imports cron's backups into History and moves the markers to the newest
+  verified backup of each component, under the backup lock, every 15 minutes.
+  While an in-app backup runs it skips the slot, since that backup moves the
+  markers itself. A cron backup is marked at the first run that can import it:
+  any run once `manifest.json` names its stamp, otherwise once its newest file
+  is 10 minutes old, so allow up to about 25 minutes.
+
+  Operators:
+
+  - **Nothing to set** on a single host or a shared volume, as long as the app
+    sees the same `BACKUP_DIR` as cron. A node with no backup directory does
+    nothing and logs nothing.
+  - **The schedule** is `KILN_BACKUP_MARKER_SYNC_CRON` (default
+    `*/15 * * * *`, read in every environment). `false` turns it off; an
+    unparseable value warns on stderr at boot and turns it off.
+    `BACKUP_ENABLED=false` does not stop it: that switch is for the in-app
+    backup path, and the marker is for the cron path.
+  - **Several hosts, each with its own `BACKUP_DIR`**: with no
+    `.kiln-dir-id` (only an in-app backup creates one), each slot syncs the
+    directory of the node that picked up the job. With ids, one sync per id
+    waits for a node that reads it, for up to about 10 minutes, then logs
+    "Backup last-good marker sync for backup directory `<id>` gave up: no
+    node with that directory picked it up".
+  - **Watch it** with the new `[:kiln_cms, :backups, :last_good, :synced]`
+    event (`%{count: 1}`; metadata `dir`, `db`, `media`). A failed run emits
+    the existing `[:kiln_cms, :backups, :last_good, :failed]` and logs
+    "Backup last-good marker not updated: …", writes and removes no marker, and
+    is not retried; the next slot runs the same sync.
+  - **Rolling back** to 1.9.x is safe: there is no migration. The job stops,
+    and on a cron-only deployment the markers it wrote stay until deleted by
+    hand, keeping those units past `BACKUP_KEEP_DAYS`.
+
+  Developers: `KilnCMS.Backups.Chain.sync_last_good/2` runs one sync and
+  returns `{:ok, %{db: stamp | nil, media: stamp | nil}}`, `:busy` or
+  `{:error, reason}`, never raising. `KilnCMS.Backups.Retention.sync_last_good/2`
+  takes a new `import: false` option for a caller that already ran the
+  importer. See [The last-good marker](../backups.md#the-last-good-marker).
+  (#2554)
+
+<a id="resume-behind-queued-resume-already-fixed"></a>
+
+- **The 1.9.0 known issue "Resume on a failed backup says it is queued but never runs" was already fixed in 1.9.0.**
+  1.9.0 listed it as open, but #2688 in that release made a Resume asked for
+  while a backup runs and another run's resume is queued be refused with
+  *A backup is running and a resume of `<stamp>` is queued after it, so this
+  resume was not queued. Try again once the queue clears.* It names the
+  queued run, and the queue is left as it was. Once the queued resume starts,
+  the refused one can be asked for again. Nothing changes on upgrade; a test
+  now pins the whole sequence. (#2671)
+
+
 <a id="release-eval-read-through"></a>
 
 - **`bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'` runs again: release tasks under `eval` read through the content cache instead of crashing.**

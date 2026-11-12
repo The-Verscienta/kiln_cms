@@ -85,7 +85,7 @@ defmodule KilnCMSWeb.ArtifactController do
     # Resolution and body reads go through KilnCMS.Firing.Delivery, which is
     # cache-first and DB-error-tolerant: a warm request touches no database at
     # all, so delivery keeps answering through a Postgres outage (#341).
-    with ct when not is_nil(ct) <- ContentTypes.get(type),
+    with ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          surface when not is_nil(surface) <- Map.get(@surfaces, params["surface"] || "json"),
          {:ok, expand} <- parse_expand(params, surface),
          {:ok, fields} <- parse_fields(params, surface),
@@ -227,7 +227,7 @@ defmodule KilnCMSWeb.ArtifactController do
   defp unlock_document(conn, type, slug, %{locale: locale, mode: mode}, params) do
     org_id = current_org_id(conn)
 
-    with ct when not is_nil(ct) <- ContentTypes.get(type),
+    with ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          {:ok, record} <- Delivery.locked(org_id, ct.type, slug, locale, mode),
          true <- ContentPassword.verify(record.access_password_hash, params["passphrase"]) do
       conn
@@ -297,7 +297,7 @@ defmodule KilnCMSWeb.ArtifactController do
   end
 
   defp locked_or_not_found(conn, org_id, type, slug, locale, mode) do
-    with ct when not is_nil(ct) <- ContentTypes.get(type),
+    with ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          {:ok, _record} <- Delivery.locked(org_id, ct.type, slug, locale, mode) do
       conn
       # Never shared-cached: this response is a function of the caller's grant,

@@ -118,7 +118,7 @@ defmodule KilnCMSWeb.ProvenanceController do
       org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
       with false <- is_nil(surface),
-           ct when not is_nil(ct) <- ContentTypes.get(type),
+           ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
            {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale),
            {:ok, artifact} <- artifact_row(record, surface) do
         fun.(record, artifact)

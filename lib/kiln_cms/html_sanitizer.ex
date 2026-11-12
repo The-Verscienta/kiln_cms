@@ -60,9 +60,12 @@ defmodule KilnCMS.HTMLSanitizer do
     # different hat. Nothing legitimate puts a raw `\` in a URL path (it
     # encodes as `%5C`), so reject it outright rather than trying to spot the
     # positions that matter.
+    # Tab, LF and CR are stripped by the same parser wherever they appear, so
+    # `/\t/evil.com` is `//evil.com` by the time a browser resolves it.
     String.starts_with?(url, "/") and
       not String.starts_with?(url, "//") and
       not String.contains?(url, "\\") and
+      not String.contains?(url, ["\t", "\n", "\r"]) and
       not String.contains?(url, "..")
   end
 

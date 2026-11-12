@@ -806,15 +806,6 @@ defmodule KilnCMSWeb.ReleaseLive do
                 for={@schedule_form}
                 id="schedule-form"
                 phx-submit="schedule"
-                data-confirm={
-                  @blocked_count > 0 &&
-                    ngettext(
-                      "1 item can't ship as it stands. Schedule anyway? Unless it is fixed first, the release will fail and nothing will go live.",
-                      "%{count} items can't ship as they stand. Schedule anyway? Unless they are fixed first, the release will fail and nothing will go live.",
-                      @blocked_count,
-                      count: @blocked_count
-                    )
-                }
               >
                 <div id="release-scheduled-at" phx-hook="UtcDatetimeInput" phx-update="ignore">
                   <label for="release-scheduled-at-local" class="field-label">
@@ -836,7 +827,22 @@ defmodule KilnCMSWeb.ReleaseLive do
                     {gettext("Shown in your local timezone; stored as UTC.")}
                   </p>
                 </div>
-                <.button size="sm" class="mt-2">
+                <%!-- The confirm sits on the submit button, not the form:
+                      phoenix_html asks on a click anywhere inside an element
+                      that carries it, the date input included. --%>
+                <.button
+                  size="sm"
+                  class="mt-2"
+                  data-confirm={
+                    @blocked_count > 0 &&
+                      ngettext(
+                        "1 item can't ship as it stands. Schedule anyway? Unless it is fixed first, the release will fail and nothing will go live.",
+                        "%{count} items can't ship as they stand. Schedule anyway? Unless they are fixed first, the release will fail and nothing will go live.",
+                        @blocked_count,
+                        count: @blocked_count
+                      )
+                  }
+                >
                   {gettext("Schedule")}
                 </.button>
               </.form>

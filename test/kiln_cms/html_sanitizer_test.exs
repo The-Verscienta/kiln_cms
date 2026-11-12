@@ -196,6 +196,16 @@ defmodule KilnCMS.HTMLSanitizerTest do
     # separators. Delegating drops that regex, so prove the replacement fails
     # closed on the same inputs: `safe_href/1` is an allowlist of URL *shapes*,
     # and none of these parse into one.
+    # Browsers strip tab, LF and CR from a URL before resolving it, so these
+    # are `//evil.example` wearing a same-origin path's clothes.
+    test "a relative path hiding a protocol-relative URL is refused" do
+      for href <- ["/\t/evil.example/x", "/\n/evil.example", "/\r/evil.example"] do
+        assert HTMLSanitizer.safe_href(href) == nil, "kept #{inspect(href)}"
+      end
+
+      assert HTMLSanitizer.safe_href("/about/team") == "/about/team"
+    end
+
     test "entity-encoded schemes are refused, not pattern-matched" do
       for href <- [
             "java&#58;script" <> @colon <> "alert(1)",
