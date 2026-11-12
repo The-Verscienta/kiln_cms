@@ -66,6 +66,39 @@ defmodule KilnCMS.Webhooks.SafeUrlTest do
       end)
     end
 
+    test "rejects multicast and reserved IPv4 literals" do
+      with_config([require_https: false, resolve_dns: false], fn ->
+        assert {:error, _} = SafeUrl.validate("http://224.0.0.1/hook")
+        assert {:error, _} = SafeUrl.validate("http://239.255.255.250/hook")
+        assert {:error, _} = SafeUrl.validate("http://240.0.0.1/hook")
+        assert {:error, _} = SafeUrl.validate("http://255.255.255.255/hook")
+        assert :ok = SafeUrl.validate("http://223.255.255.1/hook")
+      end)
+    end
+
+    # An IPv6 address that a translator or tunnel turns into an IPv4 one is
+    # judged as that IPv4 address: `[64:ff9b::a00:5]` reaches 10.0.0.5.
+    test "rejects IPv6 literals that translate or tunnel to an internal IPv4 address" do
+      with_config([require_https: false, resolve_dns: false], fn ->
+        # NAT64 → 10.0.0.5, 169.254.169.254
+        assert {:error, _} = SafeUrl.validate("https://[64:ff9b::a00:5]/hook")
+        assert {:error, _} = SafeUrl.validate("https://[64:ff9b::a9fe:a9fe]/hook")
+        # local-use NAT64
+        assert {:error, _} = SafeUrl.validate("https://[64:ff9b:1::1]/hook")
+        # 6to4 → 192.168.1.1
+        assert {:error, _} = SafeUrl.validate("https://[2002:c0a8:101::1]/hook")
+        # Teredo, documentation, multicast
+        assert {:error, _} = SafeUrl.validate("https://[2001:0:4136:e378::1]/hook")
+        assert {:error, _} = SafeUrl.validate("https://[2001:db8::1]/hook")
+        assert {:error, _} = SafeUrl.validate("https://[ff02::1]/hook")
+
+        # A public address behind NAT64 or 6to4, and ordinary global IPv6, stay allowed.
+        assert :ok = SafeUrl.validate("https://[64:ff9b::808:808]/hook")
+        assert :ok = SafeUrl.validate("https://[2002:808:808::1]/hook")
+        assert :ok = SafeUrl.validate("https://[2606:2800:220:1::1]/hook")
+      end)
+    end
+
     test "rejects internal IPv6 literals" do
       with_config([require_https: false, resolve_dns: false], fn ->
         assert {:error, _} = SafeUrl.validate("https://[fd00::1]/hook")
