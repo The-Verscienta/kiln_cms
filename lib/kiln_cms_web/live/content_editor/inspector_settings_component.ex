@@ -273,6 +273,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorSettingsComponent do
         <.featured_image_field
           form={@form}
           media={@media}
+          featured_media={@featured_media}
           locked={Localization.locked?(@localization, {:attribute, :featured_image_id})}
         />
         <Localization.localization_note
