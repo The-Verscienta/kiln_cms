@@ -380,6 +380,25 @@ defmodule KilnCMS.CMS.ComputedTest do
       assert eval(~s|{{ format_date(from, "") }}|, ctx) == "2026-02-27"
       assert eval(~s|{{ format_date(junk, "%Y") }}|, ctx) == nil
     end
+
+    # The pattern is the author's. `Calendar.strftime/2` refuses a padding
+    # width over 1024 (Elixir 1.20), so a pattern cannot ask for gigabytes of
+    # padding; this pins that the refusal is what a formula sees, at once.
+    test "a format_date pattern cannot request unbounded padding" do
+      ctx = %{fields: %{"from" => "2026-02-27"}}
+
+      {micros, result} =
+        :timer.tc(fn ->
+          try do
+            eval(~s|{{ format_date(from, "%09999999999d") }}|, ctx)
+          rescue
+            error in ArgumentError -> {:refused, Exception.message(error)}
+          end
+        end)
+
+      assert micros < 1_000_000
+      refute is_binary(result) and byte_size(result) > 2_000
+    end
   end
 
   describe "today() and the dates it's compared with" do
