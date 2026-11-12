@@ -84,6 +84,29 @@ defmodule KilnCMS.Forms.Autoresponder do
     end
   end
 
+  @doc """
+  `form`'s subject and body with each `[field:<old>]` token of `renames`
+  (`%{old => new}`) replaced by `[field:<new>]`, as a map of only the
+  attributes that changed (empty when none did). The whole bracketed token is
+  replaced, so renaming `email` leaves `[field:email2]` alone.
+
+  Used by a field rename (`KilnCMS.CMS.Changes.RewriteAutoresponderTokens`)
+  and by a form duplicate that renames a reserved field name in the copy.
+  """
+  @spec rename_field_tokens(map(), %{optional(String.t()) => String.t()}) :: map()
+  def rename_field_tokens(form, renames) when is_map(renames) do
+    for attribute <- [:autoresponder_subject, :autoresponder_body],
+        value = Map.get(form, attribute),
+        is_binary(value),
+        renamed = Enum.reduce(renames, value, &rename_token/2),
+        renamed != value,
+        into: %{},
+        do: {attribute, renamed}
+  end
+
+  defp rename_token({from, to}, value),
+    do: String.replace(value, "[field:#{from}]", "[field:#{to}]")
+
   @doc "Expand `form`'s configured subject/body against a submission's `data`."
   @spec render(KilnCMS.CMS.Form.t(), [field()], map()) :: {String.t(), String.t()}
   def render(form, fields, data) do

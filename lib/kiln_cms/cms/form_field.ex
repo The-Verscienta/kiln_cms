@@ -149,6 +149,11 @@ defmodule KilnCMS.CMS.FormField do
     # module: `SelectOptions` stays as FieldDefinition's.
     validate KilnCMS.CMS.Validations.FormFieldConfig
 
+    # The honeypot's name, on every type (#2267). Only when the name is being
+    # chosen (create, rename, retype): a field that already carries it keeps
+    # its label edits and reorders. See the module.
+    validate KilnCMS.CMS.Validations.ReservedFieldName
+
     # Deleting a field (or moving it to another form) that an enabled
     # autoresponder still names would blank that token in every
     # confirmation (#2343).

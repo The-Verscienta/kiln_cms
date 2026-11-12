@@ -274,6 +274,145 @@ defmodule KilnCMSWeb.FormInvalidRerenderTest do
            }
   end
 
+  # The fixture's form plus one field per refusal that carries a bound
+  # (#2269) and one per group shape (#2268).
+  defp bounded_form! do
+    form = form!()
+    actor = admin()
+
+    for {attrs, position} <-
+          Enum.with_index(
+            [
+              %{name: "qty_min", label: "At least", field_type: :number, min_value: 3.0},
+              %{name: "qty_max", label: "At most", field_type: :number, max_value: 10.0},
+              %{name: "qty_step", label: "Stepped", field_type: :number, step: 0.5},
+              %{name: "stars", label: "Stars", field_type: :rating},
+              %{name: "ref", label: "Ref", field_type: :hidden},
+              %{
+                name: "size",
+                label: "Size",
+                field_type: :radio,
+                options: ["S", "L"],
+                required: true
+              },
+              %{
+                name: "colours",
+                label: "Colours",
+                field_type: :checkboxes,
+                options: ["R", "G"],
+                required: true
+              }
+            ],
+            1
+          ) do
+      CMS.create_form_field!(Map.merge(attrs, %{form_id: form.id, position: position}),
+        actor: actor
+      )
+    end
+
+    form
+  end
+
+  defp post_bounded(conn, form, path, extra \\ %{}) do
+    params =
+      Map.merge(
+        %{
+          "email" => "a@b.co",
+          "qty_min" => "1",
+          "qty_max" => "11",
+          "qty_step" => "0.3",
+          "stars" => "9",
+          "ref" => String.duplicate("x", KilnCMS.Limits.line() + 1)
+        },
+        extra
+      )
+
+    conn |> unique_ip() |> post(path <> form.slug, params)
+  end
+
+  describe "bounded refusals and group links (#2268, #2269)" do
+    for {locale, sentences} <- [
+          {"en",
+           [
+             "Enter a number of at least 3.",
+             "Enter a number of at most 10.",
+             "Enter a number in steps of 0.5.",
+             "Choose a rating from 1 to 5.",
+             "This value is too long."
+           ]},
+          {"fr",
+           [
+             "Saisissez un nombre supérieur ou égal à 3.",
+             "Saisissez un nombre inférieur ou égal à 10.",
+             "Saisissez un nombre par pas de 0.5.",
+             "Choisissez une note de 1 à 5.",
+             "Cette valeur est trop longue."
+           ]},
+          {"es",
+           [
+             "Introduce un número mayor o igual que 3.",
+             "Introduce un número menor o igual que 10.",
+             "Introduce un número en incrementos de 0.5.",
+             "Elige una valoración del 1 al 5.",
+             "Este valor es demasiado largo."
+           ]}
+        ] do
+      @locale locale
+      @sentences sentences
+
+      test "#{locale}: shown inline and in the summary as whole sentences", %{conn: conn} do
+        form = bounded_form!()
+        prefix = if @locale == "en", do: "/forms/", else: "/#{@locale}/forms/"
+        d = conn |> post_bounded(form, prefix) |> html_response(422) |> doc()
+        p = "kiln-form-#{form.slug}"
+
+        inline =
+          for name <- ~w(qty_min qty_max qty_step stars ref),
+              do: d |> text("##{p}-#{name}-error") |> String.trim()
+
+        for {line, sentence} <- Enum.zip(inline, @sentences) do
+          assert line =~ sentence
+        end
+
+        summary = text(d, "##{p}-error-summary")
+        for sentence <- @sentences, do: assert(summary =~ sentence)
+        refute summary =~ "must be"
+        refute summary =~ "Ref: is too long"
+      after
+        Gettext.put_locale(KilnCMSWeb.Gettext, "en")
+      end
+    end
+
+    test "summary links target each group's first input; hidden has none" do
+      form = bounded_form!()
+
+      for {extra, embedded?} <- [{%{}, false}, {%{"_kiln_embed" => "1"}, true}] do
+        html = build_conn() |> post_bounded(form, "/forms/", extra) |> html_response(422)
+        d = doc(html)
+        p = "kiln-form-#{form.slug}"
+        assert html =~ "/embed-frame.js" == embedded?
+
+        hrefs = d |> LazyHTML.query("##{p}-error-summary a") |> LazyHTML.attribute("href")
+
+        assert hrefs == [
+                 "##{p}-qty_min",
+                 "##{p}-qty_max",
+                 "##{p}-qty_step",
+                 "##{p}-stars-1",
+                 "##{p}-size-0",
+                 "##{p}-colours-0"
+               ]
+
+        for "#" <> id <- hrefs do
+          assert LazyHTML.query(d, "input##{id}") |> Enum.count() == 1, id
+        end
+
+        # The hidden field's refusal is still listed, as text.
+        assert text(d, "##{p}-error-summary span") =~ "Ref: This value is too long."
+      end
+    end
+  end
+
   test "error messages follow the request locale", %{conn: conn} do
     form = full_form!()
 

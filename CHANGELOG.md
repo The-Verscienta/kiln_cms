@@ -60,7 +60,24 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Changed
+
+- **No form field of any type can be named `website` (the spam trap's input) on add, rename or type change; a field that already is keeps working and is flagged "Reserved name" in the builder until renamed.**
+  ([long form](docs/changelog/unreleased.md#form-field-name-website-reserved))
+
 ### Fixed
+
+- **Duplicating a form whose autoresponder is on and uses `[field:…]` tokens works again; a `website` field is copied as `website_2`, and a field that can't be copied is named.**
+  ([long form](docs/changelog/unreleased.md#form-duplicate-autoresponder))
+
+- **Public forms show number and rating errors as translated sentences (the JSON API keeps its English), and the builder explains default values for choice fields and ratings.**
+  ([long form](docs/changelog/unreleased.md#form-errors-translated))
+
+- **A public form's error summary links move focus to radio buttons, checkbox groups and ratings (their first option); a hidden field's error is listed without a link.**
+  ([long form](docs/changelog/unreleased.md#form-error-summary-focus))
+
+- **The on-site thank-you page and "Form not found" page after a form submission render in the site's layout and language; the Back link refuses `//` and `/\` paths.**
+  ([long form](docs/changelog/unreleased.md#form-thank-you-site-layout))
 
 - **`bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'` runs again: release tasks under
   `eval` read through the content cache, which only a serving node starts, instead of crashing.**

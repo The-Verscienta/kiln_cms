@@ -366,9 +366,12 @@ defmodule KilnCMSWeb.Router do
   # bounded by the honeypot + the tight :form rate bucket.
   pipeline :public_form do
     plug :accepts, ["html", "json"]
-    # The thank-you page is static server HTML (no scripts) — the strict
-    # browser CSP applies as-is, no per-request nonce needed. (An *embedded*
-    # submission swaps in the embed CSP; see FormController.submit/2.)
+    # The on-site answers (thank-you, not-found, the 422 re-render) render the
+    # site's public layout (#2338) under this static CSP, which sets no nonce:
+    # the root layout's inline theme script doesn't run here, so these pages
+    # always render light, whatever the visitor's system or chosen theme. (An
+    # *embedded* submission swaps in the embed CSP; a form that draws a
+    # challenge widget widens it on the re-render; see FormController.submit/2.)
     plug :put_secure_browser_headers, @browser_csp_headers
     plug :put_static_browser_csp
     plug KilnCMSWeb.Plugs.RateLimit, :form

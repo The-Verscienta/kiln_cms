@@ -10,9 +10,10 @@ defmodule KilnCMS.CMS.Validations.FormFieldConfig do
       number `min_value <= max_value` and `step > 0`; a rating's `max_value`
       is a whole number from 1 to 10;
     * a `:hidden` field is never `required` (the visitor never sees it, and
-      its value is whatever the client sends);
-    * a field of any type added in #2261 can't be named like the honeypot
-      input (`website`), which would discard every submission that fills it.
+      its value is whatever the client sends).
+
+  The honeypot-name rule is `KilnCMS.CMS.Validations.ReservedFieldName`'s
+  (#2267), for every type.
 
   Kept apart from `KilnCMS.CMS.Validations.SelectOptions`, which
   `FieldDefinition` reuses with its own `allow_custom` semantics.
@@ -25,9 +26,6 @@ defmodule KilnCMS.CMS.Validations.FormFieldConfig do
   @choice_types [:select, :radio, :checkboxes]
   @max_checkbox_options 50
   @max_rating 10
-  # Types added in #2261 — the honeypot-name rule is not retrofitted onto the
-  # older ones, whose existing forms may already carry such a name.
-  @honeypot_checked [:radio, :checkboxes, :phone, :url, :hidden, :number, :rating]
 
   @doc "The most options a `:checkboxes` field may list."
   @spec max_checkbox_options() :: pos_integer()
@@ -45,14 +43,13 @@ defmodule KilnCMS.CMS.Validations.FormFieldConfig do
       type: type,
       options: Ash.Changeset.get_attribute(changeset, :options) || [],
       required: Ash.Changeset.get_attribute(changeset, :required),
-      name: Ash.Changeset.get_attribute(changeset, :name),
       min: Ash.Changeset.get_attribute(changeset, :min_value),
       max: Ash.Changeset.get_attribute(changeset, :max_value),
       step: Ash.Changeset.get_attribute(changeset, :step)
     }
 
     Enum.find_value(
-      [&options/1, &range/1, &hidden/1, &name/1],
+      [&options/1, &range/1, &hidden/1],
       :ok,
       fn check ->
         case check.(attrs) do
@@ -139,18 +136,10 @@ defmodule KilnCMS.CMS.Validations.FormFieldConfig do
     error(:min_value, gettext("only a number or rating field takes a range"))
   end
 
-  # --- hidden + name ------------------------------------------------------------
+  # --- hidden -------------------------------------------------------------------
 
   defp hidden(%{type: :hidden, required: true}),
     do: error(:required, gettext("a hidden field can't be required"))
 
   defp hidden(_attrs), do: :ok
-
-  defp name(%{type: type, name: name}) when type in @honeypot_checked do
-    if name == KilnCMS.Forms.honeypot_field(),
-      do: error(:name, gettext("is reserved for spam protection")),
-      else: :ok
-  end
-
-  defp name(_attrs), do: :ok
 end
