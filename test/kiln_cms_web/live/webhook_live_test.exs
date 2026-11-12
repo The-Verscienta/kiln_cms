@@ -462,7 +462,8 @@ defmodule KilnCMSWeb.WebhookLiveTest do
 
     test "Select all, Clear and Reset to defaults", %{conn: conn} do
       {lv, _html} = open(conn)
-      all = WebhookEndpoint.events()
+      # Select all leaves the security alert events out (#2642).
+      all = Enum.reject(WebhookEndpoint.events(), &String.starts_with?(&1, "security."))
 
       html = bulk(lv, "new", "all")
       assert Enum.sort(checked(html, "new-webhook-form")) == Enum.sort(all)
@@ -484,6 +485,56 @@ defmodule KilnCMSWeb.WebhookLiveTest do
 
       assert [endpoint] = CMS.list_webhook_endpoints!(authorize?: false)
       assert Enum.sort(endpoint.events) == Enum.sort(all)
+    end
+
+    test "Select all ticks no security event (#2642)", %{conn: conn} do
+      {lv, _html} = open(conn)
+      security = WebhookEndpoint.security_events()
+      assert security != []
+
+      html = bulk(lv, "new", "all")
+      selected = checked(html, "new-webhook-form")
+
+      for event <- security, do: refute(event in selected)
+      assert "page.published" in selected
+      assert "page.in_review" in selected
+
+      assert has_element?(
+               lv,
+               ~s(button[phx-value-op="all"][title="Select all events except security alerts"])
+             )
+    end
+
+    test "the security group toggle still ticks them all, and Clear clears them", %{conn: conn} do
+      {lv, _html} = open(conn)
+      security = WebhookEndpoint.security_events()
+
+      html = bulk(lv, "new", "group", "security")
+      selected = checked(html, "new-webhook-form")
+      for event <- security, do: assert(event in selected)
+
+      # Select all after that keeps them.
+      html = bulk(lv, "new", "all")
+      for event <- security, do: assert(event in checked(html, "new-webhook-form"))
+
+      html = bulk(lv, "new", "none")
+      assert checked(html, "new-webhook-form") == []
+    end
+
+    test "Select all on an edit keeps a security event already ticked", %{conn: conn} do
+      endpoint = Ash.Seed.update!(seed_endpoint(), %{events: ["security.lockout"]})
+      {lv, _html} = open(conn)
+
+      lv
+      |> element(~s(button[phx-click="edit"][phx-value-id="#{endpoint.id}"]))
+      |> render_click()
+
+      html = bulk(lv, "edit", "all")
+      selected = checked(html, "edit-webhook-#{endpoint.id}")
+
+      assert "security.lockout" in selected
+      refute "security.new_admin" in selected
+      assert "page.published" in selected
     end
 
     test "bulk controls keep the URL typed so far", %{conn: conn} do

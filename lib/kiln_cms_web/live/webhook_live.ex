@@ -361,8 +361,16 @@ defmodule KilnCMSWeb.WebhookLive do
 
   # Events the list does not offer (a type deleted since) are kept by every
   # operation except Clear; the offered ones come back in the list's order.
-  defp bulk_select("all", _group, current, available, _defaults),
-    do: available ++ (current -- available)
+  #
+  # Select all leaves the security alert events out (#2642), keeping any
+  # already ticked. It exists to mirror content: an endpoint that took every
+  # event that way would ship client addresses and actor ids to a receiver
+  # nobody chose for them, and every later edit of it would send each admin
+  # an un-mutable notice. The security group's own toggle still ticks them.
+  defp bulk_select("all", _group, current, available, _defaults) do
+    Enum.filter(available, &(&1 in current or not security_event?(&1))) ++
+      (current -- available)
+  end
 
   defp bulk_select("none", _group, _current, _available, _defaults), do: []
 
@@ -379,6 +387,9 @@ defmodule KilnCMSWeb.WebhookLive do
   end
 
   defp bulk_select(_op, _group, current, _available, _defaults), do: current
+
+  # By prefix, like the delivery side: a kind a later release adds is one too.
+  defp security_event?(event), do: String.starts_with?(event, "security.")
 
   # `page.published` → `page`; `form.submitted` → `form`.
   defp event_group(event), do: event |> String.split(".", parts: 2) |> hd()
@@ -805,6 +816,7 @@ defmodule KilnCMSWeb.WebhookLive do
         phx-click="select_events"
         phx-value-target={@target}
         phx-value-op="all"
+        title={gettext("Select all events except security alerts")}
         class="btn btn-sm btn-default"
       >
         {gettext("Select all")}

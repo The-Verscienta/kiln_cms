@@ -74,6 +74,8 @@ defmodule KilnCMS.Notifications do
   require Ash.Query
   require Logger
 
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.RoleGrant
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS.ContentTypes
@@ -168,6 +170,67 @@ defmodule KilnCMS.Notifications do
         0
     end
   end
+
+  @platform_alert_content_type "platform_security_alert"
+
+  @doc """
+  The `content_type` of a platform security alert's bell row (#2642). The
+  rows live in the default org, like every platform alert's; the anchor tells
+  them apart from a site alert's (`"security_alert_dispatch"`), so
+  `unread_platform_alert_count/2` is one exact filter.
+  """
+  @spec platform_alert_content_type() :: String.t()
+  def platform_alert_content_type, do: @platform_alert_content_type
+
+  @doc """
+  How many unread platform security alerts `user` has waiting in the default
+  org, counted for a console that is **not** the default org's (#2642). Zero
+  in the default console, whose bell lists those rows itself, and zero for
+  anyone who is not a platform admin right now.
+
+  A number and nothing else, on purpose. Another site's console shows "N
+  unread platform alerts" with a link to the default console, and never a
+  row's title, excerpt or site name, nor a way to open or mark one there:
+  that console is the origin of a site whose own admin may inject script into
+  it when no console host is set (threat model residual risk 16, decision
+  record 0011), and the alerts are about every site.
+
+  Read as `user`, under the default org, through the same self-only
+  `:unread_for_user` read the bell's own count uses. Whether `user` is a
+  platform admin is decided in the query, on the account row as it is now
+  (`KilnCMS.Accounts.RoleGrant.expression/1`), not on the struct the
+  session loaded: an admin demoted mid-session counts zero at the next
+  re-read. A failed read counts zero, like `unread_count/2`.
+  """
+  @spec unread_platform_alert_count(struct(), term()) :: non_neg_integer()
+  def unread_platform_alert_count(%{id: user_id} = user, org) do
+    default_org_id = Accounts.default_org_id()
+
+    if Accounts.org_id(org) == default_org_id do
+      0
+    else
+      admin = RoleGrant.expression([:admin])
+
+      Notification
+      |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id},
+        actor: user,
+        tenant: default_org_id
+      )
+      |> Ash.Query.filter(content_type == ^@platform_alert_content_type and exists(user, ^admin))
+      |> Ash.Query.unset(:sort)
+      |> Ash.count(actor: user, tenant: default_org_id)
+      |> case do
+        {:ok, count} ->
+          count
+
+        {:error, error} ->
+          Logger.warning("unread platform alert count failed: #{Exception.message(error)}")
+          0
+      end
+    end
+  end
+
+  def unread_platform_alert_count(_user, _org), do: 0
 
   @doc """
   The `limit` most recent notifications for `user` on `org`, newest first —

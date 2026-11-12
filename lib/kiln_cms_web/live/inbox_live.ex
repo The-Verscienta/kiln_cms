@@ -131,9 +131,13 @@ defmodule KilnCMSWeb.InboxLive do
     user = socket.assigns.current_user
     org = socket.assigns.current_org
 
+    platform_alerts = Notifications.unread_platform_alert_count(user, org)
+
     socket
     |> assign(:notifications, visible(user, org, socket.assigns.filter))
     |> assign(:unread_count, Notifications.unread_count(user, org))
+    |> assign(:platform_alert_count, platform_alerts)
+    |> assign(:platform_alerts_url, platform_alerts > 0 && Link.platform_alerts_url())
   end
 
   # The unread filter reads the unread action rather than filtering the window
@@ -185,6 +189,27 @@ defmodule KilnCMSWeb.InboxLive do
             {label}
           </.link>
         </div>
+
+        <%!-- Platform alerts, outside the default console: a count and a
+              link there, never a row (#2642; see
+              `Notifications.unread_platform_alert_count/2`). --%>
+        <a
+          :if={@platform_alert_count > 0}
+          id="inbox-platform-alerts"
+          href={@platform_alerts_url}
+          class="card flex items-center gap-3 p-4 hover:bg-base-200"
+        >
+          <.icon name="hero-shield-exclamation" class="size-5 shrink-0 text-warning-ink" />
+          <span class="min-w-0 flex-1 space-y-0.5">
+            <span class="block text-sm font-medium">
+              {KilnCMSWeb.NotificationBell.platform_alerts_label(@platform_alert_count)}
+            </span>
+            <span class="block text-xs text-base-content/60">
+              {gettext("Open them in the default site's console")}
+            </span>
+          </span>
+          <.icon name="hero-arrow-top-right-on-square" class="size-4 shrink-0" />
+        </a>
 
         <.empty_state
           :if={@notifications == []}
@@ -240,8 +265,13 @@ defmodule KilnCMSWeb.InboxLive do
           </time>
         </p>
         <p class="truncate text-sm text-base-content/70">{@notification.title}</p>
-        <p :if={@notification.excerpt} class="line-clamp-2 text-xs text-base-content/60 italic">
-          {@notification.excerpt}
+        <%!-- A security row's excerpt is said in the reader's language
+              from its `details` (#2642); every other row's is as stored. --%>
+        <p
+          :if={NotificationText.excerpt(@notification)}
+          class="line-clamp-2 text-xs text-base-content/60 italic"
+        >
+          {NotificationText.excerpt(@notification)}
         </p>
       </.link>
 

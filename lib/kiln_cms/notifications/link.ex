@@ -142,6 +142,23 @@ defmodule KilnCMS.Notifications.Link do
   def editor_url(%{content_type: content_type, content_id: content_id} = subject),
     do: editor_url(content_type, content_id, Map.get(subject, :block_id))
 
+  @doc """
+  Where the "N unread platform alerts" entry another site's console shows
+  links to (#2642): the unread inbox of the default org's console, on that
+  console's own host, where the rows are and can be read. An absolute URL,
+  so the console it is shown in follows it with a full page load
+  (`KilnCMS.Notifications.unread_platform_alert_count/2`).
+  """
+  @spec platform_alerts_url() :: String.t()
+  def platform_alerts_url do
+    path = ~p"/editor/inbox?filter=unread"
+
+    case KilnCMS.Accounts.default_org() do
+      %KilnCMS.Accounts.Organization{} = org -> KilnCMSWeb.Plugs.ConsoleHost.org_url(path, org)
+      _unreadable -> KilnCMSWeb.Endpoint.url() <> path
+    end
+  end
+
   @doc "The absolute URL, from the three parts."
   @spec editor_url(String.t() | atom(), String.t(), String.t() | nil) :: String.t()
   def editor_url(content_type, content_id, block_id \\ nil),

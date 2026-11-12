@@ -259,10 +259,12 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   end
 
   # AshAdmin: keep system config out of the content groups (issue #25). The
-  # encrypted secret is sensitive? and stays redacted by default.
+  # encrypted secret is sensitive? and stays redacted by default. The URL is
+  # not a column either (#2245): a Slack-style incoming webhook URL is itself
+  # the credential, and a table lists every endpoint's at once.
   admin do
     resource_group :system
-    table_columns [:url, :active, :inserted_at]
+    table_columns [:format, :active, :inserted_at]
   end
 
   postgres do
@@ -284,6 +286,12 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
     create :create do
       primary? true
+      # `format` is set here and nowhere else (#2245): turning a receiver that
+      # verifies Kiln's signed JSON into one that gets Slack text would break
+      # it, so a different format is a new endpoint. `:update` keeps
+      # `default_accept`, which leaves `format` out.
+      accept [:url, :events, :active, :format]
+
       # No `events` given: subscribe to the defaults for THIS tenant's types.
       # The attribute default can only see the default org's (see
       # `default_events/1`).
@@ -440,10 +448,23 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       public? false
     end
 
+    # `sensitive?` (#2245): kept out of `inspect`, changeset logs and error
+    # reports. An incoming-webhook URL (Slack, Teams, Discord) carries its own
+    # token, so for those receivers the URL is the credential.
     attribute :url, :string,
       allow_nil?: false,
       public?: true,
+      sensitive?: true,
       constraints: [max_length: KilnCMS.Limits.url()]
+
+    # The body a delivery is rendered as (#2245): `:kiln`, the signed JSON
+    # envelope, or `:slack`, an incoming-webhook message. Set at create only.
+    attribute :format, :atom do
+      allow_nil? false
+      default :kiln
+      public? true
+      constraints one_of: [:kiln, :slack]
+    end
 
     # Subscribed event names; defaults to the published-content lifecycle only
     # (`default_events/1`) — draft-carrying review events are explicit opt-in.
