@@ -4032,7 +4032,7 @@ msgstr "Jetons disponibles : %{tokens}"
 msgid "Awaiting admin approval"
 msgstr "En attente d'approbation"
 
-#: lib/kiln_cms_web/controllers/form_controller.ex
+#: lib/kiln_cms_web/controllers/form_html.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Back"
@@ -9529,6 +9529,11 @@ msgid "Form duplicated, but a field couldn't be copied: %{names}."
 msgid_plural "Form duplicated, but %{count} fields couldn't be copied: %{names}."
 msgstr[0] "Formulaire dupliqué, mais un champ n’a pas pu être copié : %{names}."
 msgstr[1] "Formulaire dupliqué, mais %{count} champs n’ont pas pu être copiés : %{names}."
+
+#: lib/kiln_cms_web/controllers/form_html.ex
+#, elixir-autogen, elixir-format
+msgid "Form not found"
+msgstr "Formulaire introuvable"
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format
@@ -20386,6 +20391,7 @@ msgid "Text, a number, a date, an image — typed or picked on each record."
 msgstr "Du texte, un nombre, une date, une image — saisis ou choisis sur chaque enregistrement."
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
+#: lib/kiln_cms_web/controllers/form_html.ex
 #, elixir-autogen, elixir-format
 msgid "Thank you"
 msgstr "Merci"
@@ -22173,6 +22179,11 @@ msgid "This field needs at least one row."
 msgid_plural "This field needs at least %{count} rows."
 msgstr[0] "Ce champ demande au moins une ligne."
 msgstr[1] "Ce champ demande au moins %{count} lignes."
+
+#: lib/kiln_cms_web/controllers/form_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This form doesn't exist or no longer takes submissions."
+msgstr "Ce formulaire n’existe pas ou n’accepte plus de réponses."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format

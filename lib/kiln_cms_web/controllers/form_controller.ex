@@ -7,7 +7,9 @@ defmodule KilnCMSWeb.FormController do
       placeholders themselves;
     * `GET /forms/:slug/embed` — the iframe document `/embed.js` frames;
     * `POST /forms/:slug` — the on-site browser submission (form-encoded),
-      rendering a thank-you page;
+      rendering a thank-you page inside the site's public chrome
+      (`KilnCMSWeb.FormHTML.message/1`, #2338), or the iframe's own when the
+      submission came from an embed;
     * `POST /api/forms/:slug` — the same pipeline for JSON submissions.
 
   The form's own public page, `GET /forms/:slug` (#2138), is not served here:
@@ -78,9 +80,9 @@ defmodule KilnCMSWeb.FormController do
   Serves the framing-friendly CSP (`KilnCMSWeb.Embed`) in place of the site-wide
   one, whose `frame-ancestors 'self'` would otherwise block cross-origin embeds.
   """
-  # Same false positive as `submit/2`: the only `page/2` call here passes a
-  # literal, translated string and a nil back-href, and `page/2` HTML-escapes
-  # every interpolation anyway. No request data reaches the markup raw.
+  # Same false positive as `submit/2`: the only `embed_page/2` call here passes
+  # a literal, translated string, and `embed_page/2` HTML-escapes every
+  # interpolation anyway. No request data reaches the markup raw.
   # sobelow_skip ["XSS.HTML"]
   def embed(conn, %{"slug" => slug}) do
     # The deployment-wide policy goes on FIRST, then the form's replaces it once
@@ -108,7 +110,7 @@ defmodule KilnCMSWeb.FormController do
       nil ->
         conn
         |> put_status(404)
-        |> html(page(gettext("Form not found."), nil, embed: true, kind: :error))
+        |> html(embed_page(gettext("Form not found."), :error))
 
       form ->
         conn
@@ -228,17 +230,16 @@ defmodule KilnCMSWeb.FormController do
     end
   end
 
-  # On-site (form-encoded) submission → a small thank-you page.
+  # Form-encoded submission → a thank-you page: on-site inside the site's
+  # chrome (`FormHTML.message/1`), embedded as the iframe's own document.
   #
-  # The XSS.HTML warning is a false positive: `page/2` HTML-escapes every
-  # interpolated value (the message via `h/1`, the back href via
-  # `Phoenix.HTML.html_escape/1`) — no request data lands in the markup raw.
+  # The XSS.HTML warning is about the embedded branches' `html/2` and is a
+  # false positive: `embed_page/2` HTML-escapes every interpolated value (the
+  # admin's success message and the translated heading, via `h/1`) — no
+  # request data lands in the markup raw. The on-site pages are HEEx.
   # sobelow_skip ["XSS.HTML"]
   def submit(conn, %{"slug" => slug} = params) do
     embedded? = embedded?(params)
-    # Inside an iframe the referer is the embed page itself, so a "Back" link
-    # would just reload the empty form — omit it there.
-    back_href = if embedded?, do: nil, else: back(conn)
 
     # Deployment-wide policy up front, the form's over the top of it once known.
     # The first one is what a raise inside `run/3` — a DB error, a failed notify
@@ -254,21 +255,30 @@ defmodule KilnCMSWeb.FormController do
     conn = if embedded?, do: put_embed_csp(conn, submitted_form(result)), else: conn
 
     case result do
-      :not_found ->
+      :not_found when embedded? ->
         conn
         |> put_status(404)
-        |> html(page(gettext("Form not found."), nil, embed: embedded?, kind: :error))
+        |> html(embed_page(gettext("Form not found."), :error))
 
-      {:ok, form, _submission} ->
-        html(
+      :not_found ->
+        render_message(
           conn,
-          page(
-            form.success_message || gettext("Thanks — we got your message."),
-            back_href,
-            embed: embedded?,
-            kind: :ok
-          )
+          404,
+          :not_found,
+          gettext("This form doesn't exist or no longer takes submissions."),
+          nil
         )
+
+      # A tripped honeypot lands here too, and must read exactly like the real
+      # thing.
+      {:ok, form, _submission} ->
+        message = form.success_message || gettext("Thanks — we got your message.")
+
+        # Inside an iframe the referer is the embed page itself, so a "Back"
+        # link would just reload the empty form — omit it there.
+        if embedded?,
+          do: html(conn, embed_page(message, :ok)),
+          else: render_message(conn, 200, :ok, message, back(conn))
 
       {:error, form, errors} ->
         render_invalid(conn, form, errors, params, embedded?)
@@ -315,6 +325,27 @@ defmodule KilnCMSWeb.FormController do
           ]
       )
     end
+  end
+
+  # The on-site thank-you and not-found pages (#2338): the same root layout and
+  # `Layouts.public` chrome, org and locale as the 422 re-render, under the
+  # strict CSP the `:public_form` pipeline set. They used to be a bare string
+  # page with no site header, footer or branding. No challenge widening: these
+  # pages draw no widget.
+  defp render_message(conn, status, kind, message, back_href) do
+    conn
+    |> put_status(status)
+    |> put_view(KilnCMSWeb.FormHTML)
+    |> put_root_layout(html: {KilnCMSWeb.Layouts, :root})
+    |> put_layout(false)
+    |> render(:message,
+      kind: kind,
+      message: message,
+      back_href: back_href,
+      current_org: conn.assigns[:current_org],
+      locale: Gettext.get_locale(KilnCMSWeb.Gettext),
+      page_title: KilnCMSWeb.FormHTML.message_heading(kind)
+    )
   end
 
   # Where a served form posts back to. Posted from `/fr/forms/<slug>` (#2138),
@@ -446,21 +477,13 @@ defmodule KilnCMSWeb.FormController do
 
   defp client_ip(_conn), do: nil
 
-  # Thank-you / error page. Loads `app.css` so success/error share the site kit
-  # (ember tokens, `.btn`) with the embed form — previously a bare system-font
-  # `<p>` that abandoned brand after submit. `embed: true` keeps the height
-  # reporter and tight padding so the iframe shrinks to the message.
-  defp page(message, back_href, opts) do
-    embed? = Keyword.get(opts, :embed, false)
-    kind = Keyword.get(opts, :kind, :ok)
-    {tone_class, heading} = page_tone(kind)
-    back = page_nav_html(back_href)
-    resizer = if embed?, do: ~s(<script defer src="/embed-frame.js"></script>), else: ""
-
-    body_class =
-      if embed?,
-        do: "kiln-embed-body bg-transparent p-4",
-        else: "mx-auto max-w-xl px-4 py-16"
+  # The embedded thank-you / not-found page: a chrome-free iframe document. It
+  # loads `app.css` so the message shares the site kit (ember tokens, `.card`)
+  # with the embed form, and `/embed-frame.js` so the iframe shrinks to the
+  # message. External script only, so the embed CSP stays `script-src 'self'`.
+  # The on-site equivalents are `FormHTML.message/1` (#2338).
+  defp embed_page(message, kind) do
+    {tone_class, heading} = embed_tone(kind)
 
     """
     <!DOCTYPE html>
@@ -470,29 +493,20 @@ defmodule KilnCMSWeb.FormController do
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>#{h(message)}</title>
       <link rel="stylesheet" href="/assets/css/app.css">
-      #{resizer}
+      <script defer src="/embed-frame.js"></script>
     </head>
-    <body class="#{body_class}">
+    <body class="kiln-embed-body bg-transparent p-4">
       <div class="card card-pad">
         <h1 class="text-lg font-semibold tracking-tight #{tone_class}">#{h(heading)}</h1>
         <p class="mt-2 text-sm text-base-content/80">#{h(message)}</p>
-        #{back}
       </div>
     </body>
     </html>
     """
   end
 
-  defp page_tone(:error), do: {"text-error", gettext("Something needs fixing")}
-  defp page_tone(_), do: {"text-base-content", gettext("Thank you")}
-
-  defp page_nav_html(back_href) when is_binary(back_href) do
-    href = Phoenix.HTML.html_escape(back_href) |> Phoenix.HTML.safe_to_string()
-
-    ~s(<p class="mt-4"><a href="#{href}" class="btn btn-default btn-sm">&larr; #{h(gettext("Back"))}</a></p>)
-  end
-
-  defp page_nav_html(_), do: ""
+  defp embed_tone(:error), do: {"text-error", gettext("Something needs fixing")}
+  defp embed_tone(:ok), do: {"text-base-content", gettext("Thank you")}
 
   # Only same-origin referers are offered as a back link (an open redirect
   # otherwise). Anything else falls back to no link.

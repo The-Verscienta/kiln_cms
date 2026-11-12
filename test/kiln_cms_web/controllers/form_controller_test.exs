@@ -7,6 +7,8 @@ defmodule KilnCMSWeb.FormControllerTest do
   """
   use KilnCMSWeb.ConnCase, async: true
 
+  import KilnCMS.OrgFixtures, only: [org: 1]
+
   alias KilnCMS.CMS
 
   defp admin do
@@ -18,27 +20,31 @@ defmodule KilnCMSWeb.FormControllerTest do
     })
   end
 
-  defp form! do
+  defp form!(attrs \\ %{}, opts \\ []) do
     actor = admin()
+    opts = Keyword.put(opts, :actor, actor)
 
     form =
       CMS.create_form!(
-        %{
-          name: "Contact",
-          slug: "fc-#{System.unique_integer([:positive])}",
-          success_message: "Merci!"
-        },
-        actor: actor
+        Map.merge(
+          %{
+            name: "Contact",
+            slug: "fc-#{System.unique_integer([:positive])}",
+            success_message: "Merci!"
+          },
+          attrs
+        ),
+        opts
       )
 
     CMS.create_form_field!(
       %{form_id: form.id, name: "email", label: "Email", field_type: :email, required: true},
-      actor: actor
+      opts
     )
 
     CMS.create_form_field!(
       %{form_id: form.id, name: "message", label: "Message", field_type: :text},
-      actor: actor
+      opts
     )
 
     form
@@ -172,6 +178,150 @@ defmodule KilnCMSWeb.FormControllerTest do
 
       assert body["honeypot_field"] == "website"
       assert Enum.map(body["fields"], & &1["name"]) == ["email", "message", "website"]
+    end
+  end
+
+  # #2338: the on-site thank-you and not-found pages render inside the site's
+  # public chrome, for the request's org and locale, like the 422 re-render.
+  # The embedded variants stay chrome-free (form_embed_test.exs).
+  describe "the on-site thank-you and not-found pages (#2338)" do
+    defp doc(html), do: LazyHTML.from_document(html)
+    defp text(doc, selector), do: doc |> LazyHTML.query(selector) |> LazyHTML.text()
+    defp csp(conn), do: get_resp_header(conn, "content-security-policy")
+
+    test "a successful submission answers inside the public chrome", %{conn: conn} do
+      form = form!()
+
+      conn = conn |> unique_ip() |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+
+      html = html_response(conn, 200)
+      d = doc(html)
+      assert LazyHTML.query(d, ".public-shell main#main h1") |> Enum.count() == 1
+      assert String.trim(text(d, "main#main h1")) == "Thank you"
+      assert text(d, "main#main") =~ "Merci!"
+      assert text(d, ".public-site-name") =~ KilnCMS.Branding.for_org(nil).site_name
+      assert text(d, "title") =~ "Thank you"
+      refute html =~ "kiln-embed-body"
+      refute html =~ "/embed-frame.js"
+    end
+
+    test "a tripped honeypot renders the identical page", %{conn: conn} do
+      form = form!()
+
+      real =
+        conn
+        |> unique_ip()
+        |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+        |> html_response(200)
+
+      fake =
+        build_conn()
+        |> unique_ip()
+        |> post("/forms/#{form.slug}", %{"email" => "a@b.co", "website" => "http://spam.example"})
+        |> html_response(200)
+
+      assert main_html(fake) == main_html(real)
+      assert text(doc(fake), "title") == text(doc(real), "title")
+      assert [_stored] = CMS.recent_form_submissions!(form.id, authorize?: false)
+    end
+
+    test "an unknown slug 404s inside the public chrome with a 404 heading", %{conn: conn} do
+      html =
+        conn
+        |> unique_ip()
+        |> post("/forms/fc-none-#{System.unique_integer([:positive])}", %{"email" => "a@b.co"})
+        |> html_response(404)
+
+      d = doc(html)
+      assert LazyHTML.query(d, ".public-shell main#main h1") |> Enum.count() == 1
+      assert String.trim(text(d, "main#main h1")) == "Form not found"
+      refute html =~ "Something needs fixing"
+      refute html =~ "kiln-embed-body"
+      refute html =~ "/embed-frame.js"
+    end
+
+    test "an inactive form 404s the same way", %{conn: conn} do
+      form = form!(%{active: false})
+
+      html =
+        conn
+        |> unique_ip()
+        |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+        |> html_response(404)
+
+      assert String.trim(text(doc(html), "main#main h1")) == "Form not found"
+      refute html =~ "Merci!"
+    end
+
+    test "the Back link appears only for a same-origin referer" do
+      form = form!()
+
+      post_with = fn referer ->
+        build_conn()
+        |> unique_ip()
+        |> then(&if(referer, do: put_req_header(&1, "referer", referer), else: &1))
+        |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+        |> html_response(200)
+        |> doc()
+        |> LazyHTML.query("main#main a.btn")
+        |> LazyHTML.attribute("href")
+      end
+
+      assert post_with.("http://www.example.com/contact?x=1") == ["/contact"]
+      assert post_with.("https://evil.example/contact") == []
+      assert post_with.(nil) == []
+    end
+
+    test "under /fr/, the page is French", %{conn: conn} do
+      form = form!(%{success_message: nil})
+
+      html =
+        conn
+        |> unique_ip()
+        |> post("/fr/forms/#{form.slug}", %{"email" => "a@b.co"})
+        |> html_response(200)
+
+      d = doc(html)
+      assert d |> LazyHTML.query("html") |> LazyHTML.attribute("lang") == ["fr"]
+      assert String.trim(text(d, "main#main h1")) == "Merci"
+      assert text(d, "main#main") =~ "Merci — nous avons bien reçu votre message."
+      # The chrome is French too (the stock header links).
+      assert text(d, ".public-header nav") =~ "Rechercher"
+    after
+      Gettext.put_locale(KilnCMSWeb.Gettext, "en")
+    end
+
+    test "on another site's host, the page carries that site's branding", %{conn: conn} do
+      other = org("fc-other")
+      Ash.Seed.seed!(KilnCMS.CMS.SiteBranding, %{org_id: other.id, site_name: "Other Press"})
+      KilnCMS.Cache.bust_branding(other.id)
+      on_exit(fn -> KilnCMS.Cache.bust_branding(other.id) end)
+
+      form = form!(%{}, tenant: other.id)
+
+      html =
+        conn
+        |> unique_ip()
+        |> org_conn(other)
+        |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+        |> html_response(200)
+
+      d = doc(html)
+      assert String.trim(text(d, ".public-site-name")) == "Other Press"
+      assert text(d, "main#main") =~ "Merci!"
+    end
+
+    test "the thank-you page carries the same CSP as the 422 re-render", %{conn: conn} do
+      form = form!()
+
+      ok = conn |> unique_ip() |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+      bad = build_conn() |> unique_ip() |> post("/forms/#{form.slug}", %{"email" => "nope"})
+
+      assert ok.status == 200
+      assert bad.status == 422
+      assert [policy] = csp(ok)
+      assert csp(bad) == [policy]
+      assert policy =~ "frame-ancestors 'self'"
     end
   end
 
