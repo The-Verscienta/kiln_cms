@@ -17,7 +17,10 @@ defmodule KilnCMSWeb.RateLimit do
 
   Both answer the same way: `check/3` returns `:allow` or `{:deny, ms}`.
   """
+
   use Hammer, backend: :ets
+
+  import Bitwise
 
   alias KilnCMS.Accounts.ThrottleStore
 
@@ -209,11 +212,31 @@ defmodule KilnCMSWeb.RateLimit do
   keys on `conn.remote_ip`, and `KilnCMSWeb.SignInLive` keys on an address
   resolved from a socket handshake (#715). Those two must produce the same
   string for the same client, or the shared `:auth` bucket is two buckets.
+
+  An IPv4 address is itself; an IPv6 address is its `/64` (`"2001:db8:1:2::/64"`),
+  and an IPv4-mapped one is the IPv4 address.
   """
   @spec client_key(:inet.ip_address() | nil) :: String.t()
   def client_key(nil), do: @unknown_client
 
-  def client_key(address) do
+  # An IPv4-mapped IPv6 address is the IPv4 client it wraps: one bucket for
+  # both spellings.
+  def client_key({0, 0, 0, 0, 0, 0xFFFF, high, low}) when high in 0..0xFFFF and low in 0..0xFFFF,
+    do: client_key({high >>> 8, high &&& 0xFF, low >>> 8, low &&& 0xFF})
+
+  # Any other IPv6 client is its /64. A host is handed a whole /64 and can
+  # source a request from any address in it, so a bucket per address was no
+  # bucket at all: the `:unlock`, `:auth` and `:register` limits never filled.
+  def client_key({a, b, c, d, _e, _f, _g, _h} = address) do
+    case :inet.ntoa({a, b, c, d, 0, 0, 0, 0}) do
+      formatted when is_list(formatted) -> to_string(formatted) <> "/64"
+      _invalid -> format(address)
+    end
+  end
+
+  def client_key(address), do: format(address)
+
+  defp format(address) do
     # `:inet.ntoa/1` answers `{:error, :einval}` rather than raising on anything
     # that is not an address tuple. This runs on a public page's hot path, so
     # the miss shares the unknown bucket instead of 500ing the request.
