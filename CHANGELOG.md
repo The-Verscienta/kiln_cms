@@ -60,6 +60,12 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Fixed
+
+- **`bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'` runs again: release tasks under
+  `eval` read through the content cache, which only a serving node starts, instead of crashing.**
+  ([long form](docs/changelog/unreleased.md#release-eval-read-through))
+
 ## [1.9.2] - 2026-11-12
 
 Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —
