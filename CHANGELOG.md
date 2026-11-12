@@ -60,16 +60,19 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.9.1] - 2026-11-11
+
+Long form: [docs/changelog/v1.9.1.md](docs/changelog/v1.9.1.md) —
+the 1.9.1 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Security
 
-- **The image's `rclone` is now 1.76.0, which fixes two HIGH vulnerabilities in the 1.75.2 binary that 1.9.0 shipped: a denial of service in `golang.org/x/net/html` (CVE-2026-78661) and Go's `crypto/x509` accepting untrusted intermediate certificates (CVE-2026-111943).**
-  Only in-app backups with `BACKUP_RCLONE_REMOTE` set run `rclone`, for the
-  off-site copy. Trivy found both in the published 1.9.0 image before its
-  GitHub release went out, so 1.9.0 was never announced and 1.9.1 is the
-  first 1.9 release. 1.76.0's `SHA256SUMS` was checked against rclone's
-  release key, as the `Dockerfile` describes, and Trivy reports no fixable
-  HIGH or CRITICAL issue in its binary. A custom image that pins its own
-  `rclone` should move to 1.76.0 too.
+- **The image's `rclone` is now 1.76.0, which fixes two HIGH vulnerabilities in
+  the 1.75.2 binary that 1.9.0 shipped: a denial of service in
+  `golang.org/x/net/html` (CVE-2026-78661) and Go's `crypto/x509` accepting
+  untrusted intermediate certificates (CVE-2026-111943).**
+  ([long form](docs/changelog/v1.9.1.md#the-images-rclone-is-now-1760-which-fixes-two-high-vulnerabilities-in-the-1752))
 
 ## [1.9.0] - 2026-11-11
 
