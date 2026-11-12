@@ -483,7 +483,9 @@ defmodule KilnCMS.Storage do
   defp copy_chunks(read, key, io, offset) do
     case read.(key, offset, offset + @copy_chunk - 1) do
       {:ok, %{bytes: bytes, total: total}} ->
-        write_chunk(read, key, io, offset + byte_size(bytes), total, IO.binwrite(io, bytes))
+        # `:file.write/2`, not `IO.binwrite/2`: the latter raises on a failed
+        # write (a full disk) instead of returning it.
+        write_chunk(read, key, io, offset + byte_size(bytes), total, :file.write(io, bytes))
 
       # An empty blob has no satisfiable range; an empty file is the right copy.
       {:error, {:range_not_satisfiable, 0}} ->
