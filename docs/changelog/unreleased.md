@@ -5,6 +5,29 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Added
+
+<a id="image-picker-upload"></a>
+
+- **The editor's image picker has its own Upload button and drop zone.**
+  The picker could only choose an image already in the media library, or
+  import one from Unsplash. To use a new photo as a featured image, an editor
+  had to leave the document for **Media**, upload it, come back, open the
+  picker again and find it. The Library tab now starts with an upload area:
+  click it to choose a file, or drop one on it. The finished upload is used
+  the same way a library pick is. For the featured image, the social image,
+  an image block or a media field, it is set and the picker closes. For a
+  gallery, the input takes several files, each joins the selection in upload
+  order, and the picker stays open until **Add to gallery**. Every upload is
+  also added to the media library. Uploads use the same pipeline as the
+  media library's own (`Ingest`: size cap, metadata strip, derivatives), with
+  the same image types and size limit as pasting into a text block. The file
+  is checked as an image on the server before anything is stored, so a PDF
+  renamed `.png` is refused rather than becoming a featured image. Closing
+  the picker cancels an upload that hasn't finished. Only editors who can
+  edit the document see the upload area. The Branding page's image drawer is
+  unchanged.
+
 ## Changed
 
 <a id="form-field-name-website-reserved"></a>
