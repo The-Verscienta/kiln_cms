@@ -609,6 +609,18 @@ defmodule KilnCMS.Accounts.RegistrationErasureTest do
                "(Changes.AnonymizeUser scrubs or deletes it)."
     end
 
+    # Read off the registry, so a project overlay's own content types block an
+    # erasure without listing anything.
+    test "block on every content type's author and its versions' user" do
+      for {_type, resource} <- KilnCMS.CMS.ContentTypes.blocks_resources() do
+        table = AshPostgres.DataLayer.Info.table(resource)
+        versions = AshPostgres.DataLayer.Info.table(Module.concat(resource, Version))
+
+        assert {table, "author_id"} in Erasure.blocking()
+        assert {versions, "user_id"} in Erasure.blocking()
+      end
+    end
+
     test "name only columns that exist" do
       %{rows: rows} =
         Repo.query!("""

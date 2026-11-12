@@ -472,8 +472,11 @@ defmodule KilnCMS.CMS.UnknownFieldTypeTest do
       assert inspect(page) =~ "page_motto"
 
       {:ok, doc} = KilnCMS.CMS.FieldSync.export(actor: ctx.admin)
-      refute inspect(doc) =~ ~s("specs")
-      assert inspect(doc) =~ ~s("motto")
+      # Untruncated: a project overlay's own definitions push the page's past
+      # inspect's default 50 items.
+      doc = inspect(doc, limit: :infinity)
+      refute doc =~ ~s("specs")
+      assert doc =~ ~s("motto")
     end
   end
 

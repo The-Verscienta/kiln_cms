@@ -126,6 +126,9 @@ defmodule Mix.Tasks.Kiln.Export.SchemaTest do
   describe "the native and GraphQL formats match the goldens" do
     alias KilnCMS.SchemaExport.GoldenFixture
 
+    # Excluded under a project overlay, whose blocks the goldens cannot hold.
+    @describetag :core_registry
+
     setup do
       GoldenFixture.setup!()
     end
