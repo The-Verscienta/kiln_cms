@@ -79,9 +79,11 @@ defmodule KilnCMS.Backups.RetentionRunTest do
         do: "#{sub}/#{name}"
   end
 
+  # Sorted: `File.ls!/1` returns directory order, which ext4 hashes, so an
+  # unsorted list matched only on some filesystems.
   defp goods(dir) do
     for sub <- ["db", "media"],
-        name <- File.ls!(Path.join(dir, sub)),
+        name <- Enum.sort(File.ls!(Path.join(dir, sub))),
         String.ends_with?(name, ".good"),
         do: "#{sub}/#{name}"
   end
@@ -411,10 +413,10 @@ defmodule KilnCMS.Backups.RetentionRunTest do
       assert_received {:last_good_failed, %{count: 1}, %{reason: {:not_regular, :symlink}}}
 
       assert goods(dir) == [
-               "db/kiln-#{@new}.good",
                "db/kiln-#{@old}.good",
-               "media/kiln-#{@new}.good",
-               "media/kiln-#{@old}.good"
+               "db/kiln-#{@new}.good",
+               "media/kiln-#{@old}.good",
+               "media/kiln-#{@new}.good"
              ]
 
       assert File.dir?(Path.join([dir, "db", Artifact.good_name(@old)]))
