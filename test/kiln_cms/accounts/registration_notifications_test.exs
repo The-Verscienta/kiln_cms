@@ -81,7 +81,12 @@ defmodule KilnCMS.Accounts.RegistrationNotificationsTest do
         user
       )
 
-    AshAuthentication.Strategy.action(strategy, :confirm, %{"confirm" => token}, [])
+    AshAuthentication.Strategy.action(
+      strategy,
+      :confirm,
+      %{"confirm" => token, "password" => @password},
+      []
+    )
   end
 
   defp reset_password(user) do
@@ -201,11 +206,11 @@ defmodule KilnCMS.Accounts.RegistrationNotificationsTest do
       assert notices(ctx.admin, ctx.site.id) == []
     end
 
-    # Pins today's behaviour (#2516): `:sign_in_with_magic_link` is a read
-    # (magic-link registration is off) and is not among the confirmation
-    # add-on's `auto_confirm_actions`, so it confirms nothing, and no notice
-    # follows a magic-link sign-in. Confirming there is #2594's.
-    test "a magic-link sign-in neither confirms the address nor announces", ctx do
+    # A magic-link sign-in to an unconfirmed account takes it over for the
+    # address's owner and confirms it (#2594, `:take_over_by_magic_link`), an
+    # update like the other three, so the admins hear about it as they do
+    # for a confirmation.
+    test "a magic-link sign-in confirms the address and announces it", ctx do
       {applicant, _row} = applicant(ctx.site.id)
       strategy = AshAuthentication.Info.strategy!(User, :magic_link)
       {:ok, token} = AshAuthentication.Strategy.MagicLink.request_token_for(strategy, applicant)
@@ -213,8 +218,8 @@ defmodule KilnCMS.Accounts.RegistrationNotificationsTest do
       assert {:ok, %User{}} =
                AshAuthentication.Strategy.action(strategy, :sign_in, %{"token" => token}, [])
 
-      assert is_nil(reload(applicant).confirmed_at)
-      assert notices(ctx.admin, ctx.site.id) == []
+      assert %DateTime{} = reload(applicant).confirmed_at
+      assert [_notice] = notices(ctx.admin, ctx.site.id)
     end
 
     test "an invalid confirmation token announces nothing", ctx do

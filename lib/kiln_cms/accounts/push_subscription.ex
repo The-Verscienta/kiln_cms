@@ -125,7 +125,7 @@ defmodule KilnCMS.Accounts.PushSubscription do
     # Accepting a site invitation over an unconfirmed account (#2453): a
     # device whoever registered the address first subscribed must stop
     # receiving the invitee's review notifications. System-only, as
-    # `SystemActor.new(:invitations)` from `Changes.ForgetPriorCredentials`.
+    # `SystemActor.new(:account_takeover)` from `Changes.ForgetPriorCredentials`.
     destroy :forget_on_takeover do
       description "Remove a device when an invitation takes over an unconfirmed account (system-only)."
     end
@@ -146,7 +146,7 @@ defmodule KilnCMS.Accounts.PushSubscription do
     # policy below, which this action meets too.
     policy action(:forget_on_takeover) do
       authorize_if {KilnCMS.Checks.SystemActor,
-                    subsystem: :invitations, action: :forget_on_takeover}
+                    subsystem: :account_takeover, action: :forget_on_takeover}
     end
 
     bypass KilnCMS.Accounts.Checks.PlatformAdmin do
@@ -156,12 +156,12 @@ defmodule KilnCMS.Accounts.PushSubscription do
     # The system actor (`KilnCMS.Push.system/0`, #1659) reads for delivery:
     # `for_users` is the sender's lookup and `read` the worker's reload by id.
     # Named, so `for_user` and `bound_to_key` are not admitted with them. The
-    # invitations system actor lists an unconfirmed account's devices
+    # account-takeover system actor lists an unconfirmed account's devices
     # (`for_user`) to forget them when an invitation takes it over (#2453);
     # above the `forbid_unless`, which would refuse it.
     policy action_type(:read) do
       authorize_if expr(user_id == ^actor(:id))
-      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :invitations, action: :for_user}
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :account_takeover, action: :for_user}
       forbid_unless action([:read, :for_users])
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :push}
     end
@@ -175,7 +175,7 @@ defmodule KilnCMS.Accounts.PushSubscription do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :push, action: :destroy}
 
       authorize_if {KilnCMS.Checks.SystemActor,
-                    subsystem: :invitations, action: :forget_on_takeover}
+                    subsystem: :account_takeover, action: :forget_on_takeover}
     end
 
     # A browser registers its own device: the row's `user_id` must be the

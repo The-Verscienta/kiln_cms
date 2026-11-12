@@ -51,7 +51,7 @@ defmodule KilnCMSWeb.EnumerationConfirmationTest do
   defp post_confirm(token) do
     build_conn()
     |> Plug.Test.init_test_session(%{})
-    |> post(~p"/auth/user/confirm_new_user", %{"confirm" => token})
+    |> post(~p"/auth/user/confirm_new_user", %{"confirm" => token, "password" => @password})
   end
 
   test "a made-up token, a used one and one for a deleted account are refused alike" do

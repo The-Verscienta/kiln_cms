@@ -472,7 +472,12 @@ defmodule KilnCMS.Accounts.SignInUnlockTest do
                AshAuthentication.Strategy.action(magic_link, :sign_in, %{"token" => token}, [])
 
       assert {:error, _} =
-               AshAuthentication.Strategy.action(confirm, :confirm, %{"confirm" => token}, [])
+               AshAuthentication.Strategy.action(
+                 confirm,
+                 :confirm,
+                 %{"confirm" => token, "password" => @password},
+                 []
+               )
 
       # And none of them spent it.
       assert :ok = redeem(token)

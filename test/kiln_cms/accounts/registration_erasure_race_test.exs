@@ -287,7 +287,14 @@ defmodule KilnCMS.Accounts.RegistrationErasureRaceTest do
           user
         )
 
-      fn -> AshAuthentication.Strategy.action(strategy, :confirm, %{"confirm" => token}, []) end
+      fn ->
+        AshAuthentication.Strategy.action(
+          strategy,
+          :confirm,
+          %{"confirm" => token, "password" => @password},
+          []
+        )
+      end
     end
 
     defp reset(user) do
@@ -329,15 +336,18 @@ defmodule KilnCMS.Accounts.RegistrationErasureRaceTest do
 
       assert {:ok, %{__metadata__: %{registration_outcome: :erased}}} = Task.await(reject)
 
-      # Refused before it reaches the account lock: the erasure revoked every
-      # token the account held, the confirmation token among them, and the
-      # confirmation waits on that revocation row before it checks it. (The
-      # reset below gets as far as the lock, and is refused there.)
-      assert {:error, %Ash.Error.Forbidden{errors: errors}} = Task.await(confirm)
+      # Refused: the erasure revoked every token the account held, the
+      # confirmation token among them, and scrambled the password the
+      # confirmation checked (#2594), so the account's row no longer holds the
+      # password it was given (`GuardAccountTakeover`). Whichever check gets
+      # there first refuses it. (The reset below gets as far as the lock, and
+      # is refused there.)
+      assert {:error, error} = Task.await(confirm)
 
       assert Enum.any?(
-               errors,
-               &match?(%AshAuthentication.Errors.InvalidToken{type: :revocation}, &1)
+               error.errors,
+               &(match?(%AshAuthentication.Errors.InvalidToken{type: :revocation}, &1) or
+                   match?(%KilnCMS.Accounts.Errors.AccountTakenOver{}, &1))
              )
 
       account = reload_user(applicant)

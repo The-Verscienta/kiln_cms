@@ -63,7 +63,7 @@ defmodule KilnCMS.Accounts.Passkey do
     # Accepting a site invitation over an unconfirmed account (#2453): a
     # passkey whoever registered the address first enrolled must not survive
     # the invitee setting the account up. System-only, as
-    # `SystemActor.new(:invitations)` from `Changes.ForgetPriorCredentials`,
+    # `SystemActor.new(:account_takeover)` from `Changes.ForgetPriorCredentials`,
     # inside the accept's transaction. Recorded with no actor (the invitee did
     # not remove it; the system did, because of what the invitee proved).
     destroy :forget_on_takeover do
@@ -73,8 +73,11 @@ defmodule KilnCMS.Accounts.Passkey do
       change {KilnCMS.Security.Changes.Record,
               type: :passkey_removed,
               target: fn record, _changeset -> {"user", record.user_id} end,
-              metadata: fn record, _changeset ->
-                %{"name" => record.name, "via" => "invitation"}
+              metadata: fn record, changeset ->
+                %{
+                  "name" => record.name,
+                  "via" => Map.get(changeset.context, :takeover_via, "invitation")
+                }
               end}
     end
 
@@ -108,11 +111,11 @@ defmodule KilnCMS.Accounts.Passkey do
   policies do
     # System-only, and above the admin bypass: a passing bypass skips every
     # policy after it, so below it a platform admin would be admitted. Only the
-    # invitations system actor may run it; an admin removes a passkey with
+    # account-takeover system actor may run it; an admin removes a passkey with
     # `:destroy` (#2453).
     policy action(:forget_on_takeover) do
       authorize_if {KilnCMS.Checks.SystemActor,
-                    subsystem: :invitations, action: :forget_on_takeover}
+                    subsystem: :account_takeover, action: :forget_on_takeover}
     end
 
     bypass KilnCMS.Accounts.Checks.PlatformAdmin do
@@ -124,7 +127,7 @@ defmodule KilnCMS.Accounts.Passkey do
     # invitation takes the account over (#2453).
     policy action_type(:read) do
       authorize_if expr(user_id == ^actor(:id))
-      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :invitations, action: :for_user}
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :account_takeover, action: :for_user}
     end
 
     policy action(:destroy) do

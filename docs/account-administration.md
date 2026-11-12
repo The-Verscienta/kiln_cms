@@ -38,8 +38,8 @@ under it, because none of it changes what the role allows.
 
 **Email not confirmed is not a sign-in block.** Password sign-in, magic links
 and the instance's own SSO all work for an unconfirmed account. A magic-link
-sign-in does not confirm the address: the account stays unconfirmed until its
-owner follows the confirmation link or resets their password. The one thing that
+sign-in to one confirms the address and takes the account over, password
+included ([Confirming an address](#confirming-an-address)). The one thing that
 waits on confirmation is a site's **own** single sign-on: it refuses to sign
 its provider's user into an existing account whose address was never
 confirmed, because someone else may have registered that address in advance
@@ -365,8 +365,10 @@ Accepting an invitation with a password over an account that was registered
 but never confirmed (step 5) treats everything on that account as set up by a
 stranger, because it may have been: whoever registered the address first could
 sign in with their own password, and an admin may since have raised the
-account's role or minted it a key. In the same write as the new password, the
-accept:
+account's role or minted it a key. A password reset finished on such an
+account, and a magic-link sign-in to one, do the same
+([Confirming an address](#confirming-an-address)). In the same write as the
+new password, the takeover:
 
 - turns off **two-step verification**: the authenticator secret, its recovery
   codes, and any enrollment that was started but not confirmed;
@@ -388,8 +390,8 @@ admin who minted an API key for the account mints a new one under **API keys**
 if it is still wanted; the old key stays listed as revoked.
 
 The security log of the site the page was opened on records *Second factor
-removed* and *Passkey removed* (with `via` `invitation`) and *API key
-revoked*, each with no person
+removed* and *Passkey removed* (with `via` `invitation`, `password_reset` or
+`magic_link`) and *API key revoked*, each with no person
 ([The security log](security-events.md)). Identity links and push devices are
 removed without an entry.
 
@@ -403,7 +405,8 @@ again." for two-step verification and recovery codes, or "Couldn't change
 your password. Check your current password and try again."), and their
 sessions end as the accept commits.
 
-A **confirmed** account accepting with one click keeps all of it.
+A **confirmed** account accepting with one click keeps all of it, as does a
+confirmed account resetting its password or signing in by magic link.
 
 ### Resend or revoke an invitation
 
@@ -663,8 +666,10 @@ account is waiting. While their registration waits:
   (`/reset`) and "Or use the link in the confirmation email we sent, if it's
   still valid." A password reset always works: every unconfirmed account
   signed up with a password, and finishing the reset confirms the address.
-  The confirmation link lasts 3 days and can't be sent again. Signing in with
-  a magic link does not confirm the address, so it doesn't get them unstuck.
+  The confirmation link lasts 3 days and can't be sent again, and asks for the
+  password they signed up with. Signing in with a magic link confirms the
+  address too, but replaces their password
+  ([Confirming an address](#confirming-an-address)).
 - **They read only what an anonymous visitor reads**, on every surface: pages,
   JSON:API, GraphQL, MCP and media. No members-only content and no drafts,
   whatever audiences the waiting row holds.
@@ -1114,6 +1119,43 @@ Accounts.approve_registration(entry.membership, %{}, actor: admin)
   commit. `recipients/1` returns who that notifies. The notice is the
   `:registration_pending` notification event, with `content_type`
   `"registration_queue"` and `content_id` the site's id.
+
+## Confirming an address
+
+Anyone can register an account for any address, and the account stays
+unconfirmed until someone proves they read that address's mail. Each way of
+proving it treats the account differently, because each proves something
+different (#2594):
+
+- **The confirmation link** asks for the password chosen at sign-up as well:
+  "Confirm your email address. Enter the password you chose when you signed
+  up." Whoever both reads the mail and chose the password is the account's own
+  registrant, so confirming keeps everything on the account: its password, its
+  two-step verification, passkeys and API keys. A wrong password returns to the
+  same page with "That isn't the password this account was signed up with. Try
+  again, or reset the password instead.", and the link still works. Under the
+  form, "Didn't sign up, or don't remember the password? Reset the password
+  instead." links to the reset page.
+- **A password reset** finished on an unconfirmed account confirms it and takes
+  it over: the new password replaces the old one, every session is signed out,
+  and every other credential on the account is removed
+  ([What taking over an account removes](#what-taking-over-an-account-removes)).
+  A reset on a **confirmed** account changes the password and signs out every
+  session, and keeps two-step verification, passkeys and API keys, so a reset
+  is never a way around a second factor.
+- **A magic-link sign-in** to an unconfirmed account confirms it and takes it
+  over the same way, and replaces the password with a random one nobody knows.
+  The link proves the mailbox, not the password, so the password goes with
+  everything else. The display name is cleared too. To sign in with a password
+  afterwards, the owner resets it. A genuine registrant who signs in by magic
+  link before confirming therefore loses the password they chose; the
+  confirmation link is the way to confirm and keep it. A magic link to a
+  **confirmed** account signs in and changes nothing.
+- **Accepting an invitation** with a password over an unconfirmed account
+  takes it over as well ([Invite someone to a site](#invite-someone-to-a-site)).
+
+Every takeover is recorded in the security log, with `via` saying which of
+these it was ([The security log](security-events.md)).
 
 ## Password resets
 

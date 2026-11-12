@@ -7,7 +7,12 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   On the account row it: replaces the email with a unique non-routable tombstone,
   clears the display name, scrambles the password hash (so the credentials can
   never sign in again), resets the role to the least-privileged `:viewer`,
-  restores default notification preferences, and stamps `anonymized_at`.
+  restores default notification preferences, and stamps `anonymized_at`. It
+  also clears two-step verification (#2594): the live secret, the recovery-code
+  hashes and any staged re-enrollment. Those columns are read from the row
+  under a lock in a `before_action` first, as `Changes.ForgetPriorCredentials`
+  reads them, because Ash drops a forced change equal to the caller's struct,
+  and a struct read before the factor was enrolled holds `nil` there.
 
   After the row is written it: revokes every stored auth token for the subject
   (logging the account out everywhere and removing token PII via the existing
@@ -21,13 +26,25 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   """
   use Ash.Resource.Change
 
+  require Ash.Query
+
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.User
   alias KilnCMS.History
+
+  @totp_cleared [
+    totp_secret: nil,
+    totp_confirmed_at: nil,
+    totp_pending_secret: nil,
+    totp_recovery_hashes: []
+  ]
 
   @impl true
   def change(changeset, _opts, _context) do
     id = Ash.Changeset.get_attribute(changeset, :id)
 
     changeset
+    |> Ash.Changeset.before_action(&clear_totp/1)
     |> Ash.Changeset.force_change_attributes(%{
       email: "anonymized-#{id}@deleted.invalid",
       name: nil,
@@ -139,6 +156,31 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       return_records?: false,
       return_errors?: true
     )
+  end
+
+  # The TOTP columns, against the row read under a lock rather than the
+  # caller's struct (see the moduledoc).
+  defp clear_totp(changeset) do
+    # authorize?: false — erasure is authorized once, as the `:anonymize`
+    # action (or the staging scrub); only the TOTP columns are read, and only
+    # to be cleared.
+    case Accounts.get_user(changeset.data.id,
+           authorize?: false,
+           not_found_error?: false,
+           query: Ash.Query.lock(User, "FOR NO KEY UPDATE")
+         ) do
+      {:ok, %User{} = row} ->
+        fresh = Map.take(row, Keyword.keys(@totp_cleared))
+
+        %{changeset | data: struct(changeset.data, fresh)}
+        |> Ash.Changeset.force_change_attributes(@totp_cleared)
+
+      {:ok, nil} ->
+        Ash.Changeset.force_change_attributes(changeset, @totp_cleared)
+
+      {:error, error} ->
+        Ash.Changeset.add_error(changeset, error)
+    end
   end
 
   # Clear the account's own temporary grant. `role: :viewer` alone did nothing

@@ -1407,7 +1407,7 @@ creates an account and grants a site tier.
   unconfirmed account's role (`:manage_access`, `:grant_temporary_role`) to one
   that reaches `/editor/settings`, or mint it an API key. So "a self-registered
   viewer cannot enroll a factor" is no defense. The removals run inside the accept's transaction, as
-  `SystemActor.new(:invitations)` (each action admits that actor and no
+  `SystemActor.new(:account_takeover)` (each action admits that actor and no
   person; the passkey and push-device removals sit above the platform-admin
   bypass), with reads that fail closed, so any error rolls the whole accept
   back rather than handing over an account a stranger can still get into. The
@@ -1435,6 +1435,32 @@ creates an account and grants a site tier.
   only clear columns the takeover already cleared. Only a confirmed account accepts
   with one click, and it keeps its password and every credential. An erased
   account cannot accept.
+- **The other ways the mailbox's owner reaches an unconfirmed account
+  (#2594).** Every route that proves the mailbox either proves the password
+  too, or takes the account over as the invitation does. The *confirmation
+  link* (`User.:confirm_new_user`, declared in Kiln rather than generated)
+  asks for the password chosen at sign-up as well as the emailed token:
+  whoever gives both is the registrant, and the account keeps everything.
+  Whoever cannot is pointed to a reset; a wrong password returns to the page
+  without spending the token, which tells only the holder of a valid link
+  that the password was wrong. `GuardAccountTakeover` refuses a confirmation
+  whose checked password is no longer the row's. A *password reset* finished
+  on an unconfirmed account (`:reset_password_with_token`) runs
+  `ForgetPriorCredentials` with `unconfirmed_only?`, decided on the row
+  locked in the reset's transaction, so a reset of a **confirmed** account
+  keeps its factors and is no way past two-step verification. A *magic-link
+  sign-in* to an unconfirmed account (`:sign_in_with_magic_link`, declared in
+  Kiln so `Preparations.ClaimUnconfirmedAccount` runs before the library's
+  `SignInPreparation`) takes the account over through the system-only
+  `:take_over_by_magic_link`: confirmed, password replaced with a random hash
+  (the owner sets one by reset), display name cleared, every token but the
+  link revoked, every other credential forgotten, sessions evicted. It runs
+  before the session is minted, so that session survives the sweep and is
+  not held at a code prompt only the stranger could answer. An account
+  confirmed by the time its row is locked (`Errors.AlreadyConfirmed`) signs in
+  untouched; any other failure fails the sign-in. All three paths share the
+  `:account_takeover` grant and record `via` `password_reset` or
+  `magic_link`.
 - **Who can send, and for how long it counts.** Only a standing platform admin
   can invite or resend (`StandingAdminOnly`): a temporary admin's invitation
   would outlast the grant. An `:admin` invitation is honoured at accept time
@@ -1493,18 +1519,16 @@ creates an account and grants a site tier.
   A tier change or removal made on a build that had invitations but not #2452
   did not retire the member's pending invitation, so for up to 7 days after
   upgrading such a link raises a demoted member back (and, as before, re-adds
-  a removed one). Admins check **Pending invitations** on Team. (6) *The
-  same takeover by another route keeps the stranger's credentials.*
-  `:confirm_new_user` and `:reset_password_with_token` confirm an
-  unconfirmed account without running the wipe above. A magic-link sign-in
-  (`:sign_in_with_magic_link`, a read) neither confirms the account nor takes
-  it over (#2516), so the stranger keeps a working password on an account the
-  address's owner now shares and that stays unconfirmed. Both are the general
-  pre-hijack residual, tracked in #2594. (7) *What the takeover does not touch:* memberships on
+  a removed one). Admins check **Pending invitations** on Team. (6) *A
+  genuine registrant who signs in by magic link before confirming loses the
+  password they chose* (#2594): the link cannot tell them from the address's
+  owner, so the takeover replaces it, and they set a new one by reset. The
+  confirmation link, which asks for the password, is the way to keep it. A
+  holder of a valid confirmation link can guess the sign-up password on that
+  page without a throttle; holding the link already lets them reset it. (7) *What the takeover does not touch:* memberships on
   other sites, billing, and newsletter subscriptions stay as the first
-  registrant left them. (8) *Erasure leaves the TOTP columns.*
-  `Changes.AnonymizeUser` removes passkeys and identities but not
-  `totp_*`; a follow-up.
+  registrant left them. Erasure clears the TOTP columns too
+  (#2594).
 
 ### Account unlock (#2250)
 

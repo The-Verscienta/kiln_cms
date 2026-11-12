@@ -229,7 +229,7 @@ defmodule KilnCMS.Accounts.ApiKey do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
 
       authorize_if {KilnCMS.Checks.SystemActor,
-                    subsystem: :invitations, action: [:for_user, :revoke]}
+                    subsystem: :account_takeover, action: [:for_user, :revoke]}
     end
 
     policy action(:create) do

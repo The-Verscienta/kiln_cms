@@ -7,6 +7,23 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="pre-hijack-takeover-upgrade"></a>
+
+- **Confirmation links mailed before the upgrade keep working, but the page now asks for the password chosen at sign-up (#2594).**
+  The token is unchanged, so a link already in someone's inbox opens the new
+  page: they enter the password they signed up with and click **Confirm**.
+  Anyone who no longer knows it follows "Reset the password instead.", which
+  confirms the address as well. A client that posts to
+  `/auth/user/confirm_new_user` itself (rather than through the page) must
+  now send `password` (or `user[password]`) with `confirm`; without it the
+  confirmation is refused and the token is not spent. A magic-link sign-in to
+  an unconfirmed account now replaces its password with a random one, so an
+  applicant who signed up with a password and then used a magic link sets a
+  new password by reset. Nothing for operators to run; no migration, and
+  rolling back is safe (the previous release confirms on the token alone).
+  See [Confirming an address](../account-administration.md#confirming-an-address).
+  ([#2594](https://github.com/The-Verscienta/kiln_cms/issues/2594))
+
 <a id="shared-cache-session-free-upgrade"></a>
 
 - **If a CDN caches the site's pages, purge it after deploying (#2630).**
@@ -6417,6 +6434,55 @@ carries the reasoning.
   confirmation, password reset and magic-link sign-in of an unconfirmed
   account as a follow-up. No migration; rolling the pin back is safe.
   See [What taking over an account removes](../account-administration.md#what-taking-over-an-account-removes).
+
+<a id="pre-hijack-takeover"></a>
+
+- **Confirming, resetting or signing in by magic link to an account someone else registered for your address now leaves them no way in (#2594).**
+  Anyone can register an unconfirmed account for any address and sign in to
+  it with the password they chose. Until now the address's owner could
+  confirm the account, reset its password or sign in to it by magic link and
+  still share it with that stranger: the confirmation link kept their
+  password, two-step verification and sessions, a reset replaced only the
+  password and sessions, and a magic link changed nothing. Now:
+  - **The confirmation link asks for the password chosen at sign-up.** The
+    page reads "Confirm your email address" with a password field. Whoever
+    gives it read the mail and chose the password, so the account keeps
+    everything. A wrong password returns to the page ("That isn't the
+    password this account was signed up with. Try again, or reset the
+    password instead.") without spending the link. A link to the reset page
+    sits under the form. `User` `:confirm_new_user` is now declared in Kiln,
+    with a required `password` argument; a client that posts to
+    `/auth/user/confirm_new_user` sends `user[password]` (or `password`)
+    with `user[confirm]`.
+  - **A password reset finished on an unconfirmed account** confirms it and
+    also clears two-step verification (secret, recovery codes, pending
+    enrollment), deletes passkeys, identity-provider links and push devices,
+    and revokes live API keys, as an invitation's takeover does (#2453). The
+    decision is made on the account's row, locked in the reset's
+    transaction: a reset of a **confirmed** account keeps all of these, so a
+    reset is never a way around a second factor.
+  - **A magic-link sign-in to an unconfirmed account** confirms it and takes
+    it over the same way, through the new system-only `User`
+    `:take_over_by_magic_link`, before the session is minted: the password is
+    replaced with a random one (the owner sets theirs by reset), the display
+    name is cleared, every other token is revoked and live sessions are
+    evicted. A registrant who signs in by magic link before confirming loses
+    the password they chose. A magic link to a confirmed account changes
+    nothing. Confirming this way notifies the site's admins of a waiting
+    registration, as the other confirmations do.
+  - **Erasure** (`User` `:anonymize`) now clears the two-step verification
+    columns too, read from the locked row.
+
+  The removals run as the new `SystemActor.new(:account_takeover)`, which
+  replaces `:invitations` on the takeover's `Passkey`, `UserIdentity`,
+  `PushSubscription` and `ApiKey` grants. The security log records
+  `second_factor_removed` and `passkey_removed` with `via` `password_reset`
+  or `magic_link`, and `api_key_revoked`, each with no person. Fixed on the
+  way: the confirmation add-on had been generating its own `:confirm` action,
+  so `Changes.LockAccount`'s entry for `:confirm_new_user` (#2514) never
+  ran; it now does. No migration; rolling back is safe.
+  See [Confirming an address](../account-administration.md#confirming-an-address).
+  ([#2594](https://github.com/The-Verscienta/kiln_cms/issues/2594))
 
 <a id="account-enumeration-audit"></a>
 
