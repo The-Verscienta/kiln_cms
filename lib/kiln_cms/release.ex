@@ -708,5 +708,20 @@ defmodule KilnCMS.Release do
     # Many platforms require SSL when connecting to the database
     Application.ensure_all_started(:ssl)
     Application.ensure_loaded(@app)
+    read_through_unless_serving(serving?())
+  end
+
+  @doc false
+  # Under `bin/kiln_cms eval` only the repo runs (`Ecto.Migrator.with_repo/2`),
+  # not the content cache, so any read through `KilnCMS.Cache` crashed on the
+  # missing Cachex table (`reserved_paths/0` did, via `Slugs`). Such a VM reads
+  # straight from the database instead. Called over `rpc` on a serving node,
+  # the live cache is left as it is.
+  @spec read_through_unless_serving(boolean()) :: :ok
+  def read_through_unless_serving(true), do: :ok
+
+  def read_through_unless_serving(false) do
+    config = Application.get_env(@app, KilnCMS.Cache, [])
+    Application.put_env(@app, KilnCMS.Cache, Keyword.put(config, :enabled, false))
   end
 end
