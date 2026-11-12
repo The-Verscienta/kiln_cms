@@ -55,7 +55,7 @@ defmodule KilnCMSWeb.InContextEditLive do
     # Each failure has its own answer, so they are tagged rather than collapsed
     # into one "no such content": an unwritable record is not a missing one, and
     # the reader is sent somewhere useful.
-    with ct when not is_nil(ct) <- ContentTypes.get(type),
+    with ct when not is_nil(ct) <- ContentTypes.get(type, socket.assigns.current_org),
          record when not is_nil(record) <-
            fetch_by_slug(ct.type, slug, locale, actor, socket.assigns.current_org),
          {true, _ct, _record} <-
@@ -491,7 +491,9 @@ defmodule KilnCMSWeb.InContextEditLive do
     i = Enum.find_index(ids, &(&1 == id))
     j = if dir == "up", do: i && i - 1, else: i && i + 1
 
-    if (i && j && j >= 0) and j < length(ids) do
+    # `is_integer/1` first: an id that is no longer in the working set gives a
+    # nil index, and `nil and …` raises rather than answering false.
+    if is_integer(i) and j >= 0 and j < length(ids) do
       {ids |> List.replace_at(i, Enum.at(ids, j)) |> List.replace_at(j, id), j}
     end
   end

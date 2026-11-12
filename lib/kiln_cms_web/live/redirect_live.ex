@@ -260,8 +260,15 @@ defmodule KilnCMSWeb.RedirectLive do
 
   defp normalize_path(path) do
     case String.trim(path) do
-      "/" <> _ = trimmed -> {:ok, String.trim_trailing(trimmed, "/")}
-      _ -> {:error, gettext("The path must start with /.")}
+      # The root itself: it would trim to "", which the resource refuses by
+      # raising out of the bang create below.
+      "/" <> rest = trimmed ->
+        if String.trim(rest, "/") == "",
+          do: {:error, gettext("Enter a path starting with /.")},
+          else: {:ok, String.trim_trailing(trimmed, "/")}
+
+      _ ->
+        {:error, gettext("The path must start with /.")}
     end
   end
 

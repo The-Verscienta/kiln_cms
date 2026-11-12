@@ -38,7 +38,10 @@ defmodule KilnCMS.CMS.Mentions do
   # `@` then a run of name characters. Deliberately no spaces: "@Alice Smith"
   # would make "@Alice Smith wrote" ambiguous with the prose after it, and the
   # normalised forms above already cover multi-word names.
-  @handle ~r/(?<![\w@])@([a-z0-9][a-z0-9._-]{0,63})/i
+  #
+  # Unicode letters, not `[a-z]`: the normalised forms keep them, so an ASCII
+  # class cut `@josé` to `jos` — a different member's handle, or nobody's.
+  @handle ~r/(?<![\w@])@([\p{L}\p{N}][\p{L}\p{N}._-]{0,63})/u
 
   @doc """
   The handles a body mentions, lowercased and de-duplicated, in first-seen

@@ -329,7 +329,9 @@ defmodule KilnCMSWeb.ContentController do
     path = local_path(Params.string(params, "path", ""))
     type = Params.string(params, "type", "")
     locale = Params.string(params, "locale", I18n.default_locale())
-    ct = path && ContentTypes.get(type)
+    # With the request's org: a dynamic type resolves per site, and a bare
+    # `get/1` reads the default org's registry.
+    ct = path && ContentTypes.get(type, KilnCMSWeb.Tenant.current_org_id(conn))
 
     with ct when not is_nil(ct) <- ct,
          {ct, record} when not is_nil(record) <- locked_at(conn, path, ct, locale) do

@@ -150,7 +150,7 @@ defmodule KilnCMSWeb.FederationController do
 
     with {:ok, settings} <- site(conn),
          {:ok, raw_body} <- raw_body(conn),
-         {:ok, activity} <- Jason.decode(raw_body),
+         {:ok, activity} <- decode_activity(raw_body),
          :ok <-
            Inbox.handle(
              settings,
@@ -168,6 +168,9 @@ defmodule KilnCMSWeb.FederationController do
         not_found(conn)
 
       {:error, %Jason.DecodeError{}} ->
+        send_resp(conn, 400, "")
+
+      {:error, :not_an_object} ->
         send_resp(conn, 400, "")
 
       # The replay store could not record the signature, so a replay cannot be
@@ -270,6 +273,16 @@ defmodule KilnCMSWeb.FederationController do
   # Stashed by `KilnCMSWeb.Plugs.RawBodyReader` in `conn.private`. It must be the
   # exact bytes: the `Digest` header covers them, and a re-encoded parse differs
   # in key order, whitespace and unicode escaping.
+  # An activity is a JSON object. `[]` or `1` is valid JSON and nothing the
+  # inbox can read a `"type"` from, so it is refused here as malformed.
+  defp decode_activity(raw_body) do
+    case Jason.decode(raw_body) do
+      {:ok, %{} = activity} -> {:ok, activity}
+      {:ok, _other} -> {:error, :not_an_object}
+      {:error, error} -> {:error, error}
+    end
+  end
+
   defp raw_body(conn) do
     case conn.private[:raw_body] do
       body when is_binary(body) -> {:ok, body}

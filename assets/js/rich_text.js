@@ -810,6 +810,10 @@ async function mountCollab(hook, {token, topic, fragment}) {
       import("@tiptap/extension-collaboration-caret"),
     ])
 
+  // Destroyed while the chunks loaded: `destroyed()` found no `hook.collab` to
+  // release, so acquiring now would hold the channel open for the page's life.
+  if (hook._destroyed) return
+
   const handle = acquireDoc(topic, token)
   hook.collab = handle
   const {firstPeer} = await handle.whenReady

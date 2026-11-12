@@ -34,7 +34,7 @@ defmodule KilnCMSWeb.RelatedController do
   defp show_related(conn, type, slug, %{locale: locale, mode: mode}, params) do
     org_id = KilnCMSWeb.Tenant.current_org_id(conn)
 
-    with ct when not is_nil(ct) <- ContentTypes.get(type),
+    with ct when not is_nil(ct) <- ContentTypes.get(type, org_id),
          {:ok, record} <- Delivery.published(org_id, ct.type, slug, locale, [], mode) do
       related =
         record

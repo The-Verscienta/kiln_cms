@@ -41,13 +41,28 @@ defmodule KilnCMS.Federation.DeliveryWorker do
   def perform(%Oban.Job{args: args, attempt: attempt, max_attempts: max_attempts}) do
     %{"org_id" => org_id, "delivery_id" => delivery_id} = args
 
-    case Ash.get(Delivery, delivery_id, actor: Federation.system(), tenant: org_id) do
-      {:ok, delivery} -> attempt(delivery, org_id, attempt, attempt >= max_attempts)
-      # The ledger row was pruned out from under the job. Nothing to deliver and
-      # nothing to record — succeeding is the honest outcome.
-      _other -> :ok
+    case Ash.get(Delivery, delivery_id,
+           actor: Federation.system(),
+           tenant: org_id,
+           authorize_with: :error
+         ) do
+      {:ok, delivery} ->
+        attempt(delivery, org_id, attempt, attempt >= max_attempts)
+
+      {:error, error} ->
+        # The ledger row was pruned out from under the job: nothing to deliver
+        # and nothing to record, so succeeding is the honest outcome. Any OTHER
+        # failed read (a timeout, a refused read) is not that — retry it rather
+        # than drop the activity and leave the row `:pending` forever.
+        if not_found?(error), do: :ok, else: {:error, error}
     end
   end
+
+  defp not_found?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.all?(errors, &match?(%Ash.Error.Query.NotFound{}, &1))
+
+  defp not_found?(%Ash.Error.Query.NotFound{}), do: true
+  defp not_found?(_error), do: false
 
   # Mastodon-ish backoff: quick early retries for a restart, then hours. Capped
   # so a dead instance does not hold a job for a week.

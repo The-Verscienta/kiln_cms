@@ -21,6 +21,15 @@ defmodule KilnCMSWeb.SafeRedirectTest do
       refute SafeRedirect.safe_local_path?(nil)
       refute SafeRedirect.safe_local_path?("")
     end
+
+    # What `Phoenix.Controller.redirect/2` raises on. A path that passed here
+    # and carried one of these was a 500 (`/locale/en?return_to=/a%5Cb`).
+    test "rejects what redirect/2 itself refuses" do
+      for path <- ["/a\\b", "/x\ny", "/x\ry", "/\t/evil.com", "/%09/evil.com"] do
+        refute SafeRedirect.safe_local_path?(path), "accepted #{inspect(path)}"
+        assert Phoenix.URL.classify_local_path(path) != :ok
+      end
+    end
   end
 
   describe "local_path/2" do

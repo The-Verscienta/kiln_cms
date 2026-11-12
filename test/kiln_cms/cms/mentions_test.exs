@@ -28,6 +28,11 @@ defmodule KilnCMS.CMS.MentionsTest do
     end
 
     # An email address in a comment body is not a mention of "example".
+    # An ASCII-only class cut `@josé` to `jos`: another member's handle.
+    test "keeps the letters of a non-ASCII handle" do
+      assert Mentions.handles("ping @josé and @zoë.b") == ["josé", "zoë.b"]
+    end
+
     test "an email address is not a handle" do
       assert Mentions.handles("mail alice@example.com about it") == []
     end

@@ -5,6 +5,15 @@ before 1.0 a minor bump may change behaviour and says so here. Releases are
 tagged `kiln_client-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Fixed
+
+- **`by_ids/3` keeps the caller's `:filter`.** It replaced the filter with
+  the id list, so `by_ids("entries", ids, filter: %{locale: "fr"})` returned
+  entries in every locale. The id condition is now merged into the caller's
+  filter, as the JavaScript client already did.
+
 ## 0.8.0
 
 ### Added
