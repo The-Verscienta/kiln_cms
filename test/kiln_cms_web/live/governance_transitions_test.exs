@@ -479,6 +479,11 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
       assert is_binary(failed_at)
       assert error =~ "503"
       refute Jason.encode!(body) =~ "T0SECRET"
+
+      # Masked URLs can collide on one host; the endpoint id tells them apart.
+      ids = Enum.map(withdrawal["propagation"]["endpoints"], & &1["endpoint_id"])
+      assert Enum.all?(ids, &is_binary/1)
+      assert length(Enum.uniq(ids)) == length(ids)
     end
 
     test "the CSV export carries the same columns", %{conn: conn} do

@@ -204,7 +204,7 @@ defmodule KilnCMSWeb.InboxLive do
             <span class="block text-sm font-medium">
               {KilnCMSWeb.NotificationBell.platform_alerts_label(@platform_alert_count)}
             </span>
-            <span class="block text-xs text-base-content/60">
+            <span class="block text-xs text-base-content/70">
               {gettext("Open them in the default site's console")}
             </span>
           </span>
@@ -269,7 +269,7 @@ defmodule KilnCMSWeb.InboxLive do
               from its `details` (#2642); every other row's is as stored. --%>
         <p
           :if={NotificationText.excerpt(@notification)}
-          class="line-clamp-2 text-xs text-base-content/60 italic"
+          class="line-clamp-2 text-xs text-base-content/70 italic"
         >
           {NotificationText.excerpt(@notification)}
         </p>
