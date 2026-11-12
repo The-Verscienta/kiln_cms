@@ -60,16 +60,22 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.9.2] - 2026-11-12
+
+Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —
+the 1.9.2 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
 ### Fixed
 
 - **Rejecting a registration with erasure now keeps an account that authored content of a
   project overlay's own types (or their versions): those columns are read off the content
   registry, not a list naming entries, pages and posts.**
-  ([long form](docs/changelog/unreleased.md#erasure-overlay-content))
+  ([#2710](https://github.com/The-Verscienta/kiln_cms/issues/2710) · [long form](docs/changelog/v1.9.2.md#erasure-overlay-content))
 
 - **The core suite passes under a project overlay: eight tests no longer assume the core
   registry, and the schema goldens are excluded (`:core_registry`) when one is compiled in.**
-  ([long form](docs/changelog/unreleased.md#overlay-safe-suite))
+  ([#2710](https://github.com/The-Verscienta/kiln_cms/issues/2710) · [long form](docs/changelog/v1.9.2.md#overlay-safe-suite))
 
 ## [1.9.1] - 2026-11-11
 
