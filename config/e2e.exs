@@ -72,7 +72,8 @@ config :kiln_cms,
   media_quarantine_reaper_cron: false,
   federation_nonce_sweep_cron: false,
   health_sweep_cron: false,
-  security_log_prune_cron: false
+  security_log_prune_cron: false,
+  backup_marker_sync_cron: false
 
 # Same reasoning as config/test.exs: application boot is outside any journey,
 # and with queues now running a boot-time backfill enqueue would execute

@@ -58,7 +58,7 @@ defmodule KilnCMS.Backups.Chain do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, DirId, Lock, Steps, StepWorker, WorkState}
+  alias KilnCMS.Backups.{Artifact, DirId, Importer, Lock, Retention, Steps, StepWorker, WorkState}
   alias KilnCMS.Backups.Run.Changes.Normalize
   alias KilnCMS.Repo
 
@@ -559,6 +559,84 @@ defmodule KilnCMS.Backups.Chain do
       {:ok, %Oban.Job{}} -> {:error, :step_conflict}
       {:error, _} = error -> error
     end
+  end
+
+  ## The last-good marker (#2554)
+
+  @doc """
+  Bring the `.good` markers in `dir` in step with its newest verified backups
+  (`Retention.sync_last_good/2`), for a deployment whose backups come from host
+  cron, where no chain ever runs to do it. What `MarkerSyncWorker` runs.
+
+  The importer runs first, outside the lock: it writes Run rows, and no Run
+  write happens inside the lock transaction (see the moduledoc). Then, under
+  the lock and only while no chain holds it, the scan, the Run read and the
+  marker writes. While this holds the advisory lock no request can start a
+  chain (`request/1` waits for it), so a sync and an in-app backup never move
+  the markers at the same time. While a chain holds the lock this writes
+  nothing and returns `:busy`: that chain syncs the markers itself when it
+  succeeds or prunes.
+
+  The critical section is local work: listing `db/`, `media/` and `.work/`,
+  an `lstat` per file, one Run query, and creating or removing marker files.
+  Nothing bounds how long a stalled filesystem keeps it there; the
+  transaction's timeout applies to its queries, not to the file calls.
+
+  `{:ok, %{db: stamp | nil, media: stamp | nil}}`, `:busy`, or
+  `{:error, reason}` with no marker written or removed (logged, with a
+  `[:kiln_cms, :backups, :last_good, :failed]` event). Never raises.
+  """
+  @spec sync_last_good(Path.t(), keyword()) ::
+          {:ok, %{db: String.t() | nil, media: String.t() | nil}} | :busy | {:error, term()}
+  def sync_last_good(dir \\ Backups.dir(), opts \\ []) do
+    opts = Keyword.put(opts, :import, false)
+
+    result =
+      with {:ok, _summary} <- import_for_sync(dir) do
+        with_lock(fn
+          %{chain_id: nil} -> locked_sync(dir, opts)
+          _held -> {:ok, :busy}
+        end)
+      end
+
+    case result do
+      {:ok, :busy} -> :busy
+      {:ok, last_good} -> synced(dir, last_good)
+      # `Retention.sync_last_good/2` reported its own failure; the rollback
+      # only undoes the lock row's ensure.
+      {:error, {:retention, reason}} -> {:error, reason}
+      {:error, reason} -> Retention.sync_failed(reason)
+    end
+  rescue
+    error -> Retention.sync_failed({:crashed, error.__struct__})
+  catch
+    # The lock wait or a query timing out exits; a periodic job must log it
+    # and try again next time, not crash.
+    kind, _reason -> Retention.sync_failed({:crashed, kind})
+  end
+
+  defp locked_sync(dir, opts) do
+    case Retention.sync_last_good(dir, opts) do
+      {:ok, last_good} -> {:ok, last_good}
+      {:error, reason} -> {:error, {:retention, reason}}
+    end
+  end
+
+  defp import_for_sync(dir) do
+    case Importer.run(dir) do
+      {:ok, summary} -> {:ok, summary}
+      {:error, reason} -> {:error, {:import, reason}}
+    end
+  end
+
+  defp synced(dir, last_good) do
+    :telemetry.execute([:kiln_cms, :backups, :last_good, :synced], %{count: 1}, %{
+      dir: dir,
+      db: last_good.db,
+      media: last_good.media
+    })
+
+    {:ok, last_good}
   end
 
   ## Reclaim and reap

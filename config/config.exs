@@ -992,6 +992,15 @@ config :kiln_cms, KilnCMSWeb.Metrics, enabled: false, port: 9568, bind: :loopbac
 
 config :opentelemetry, traces_exporter: :none
 
+# When the backup last-good markers are brought in step with the newest
+# verified backup (#2554, `KilnCMS.Backups.MarkerSyncWorker`), for deployments
+# that back up with host cron only. Cheap: a directory listing and one query.
+# `false` disables it; `backup.sh prune` then keeps only the newest complete
+# set unless an in-app backup writes the marker. Down here rather than with
+# the other cron defaults so it shifts none of the line anchors
+# docs/environment-variables.md keeps into this file.
+config :kiln_cms, :backup_marker_sync_cron, "*/15 * * * *"
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

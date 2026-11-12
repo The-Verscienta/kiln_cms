@@ -94,6 +94,12 @@ Every summary line below that was shortened links to its own entry there.
 - **A federation delivery whose ledger row could not be read is retried instead of dropped, and scheduling a release with blocked items asks for confirmation on Schedule, not on a click of the date field.**
   ([long form](docs/changelog/unreleased.md#sweep-federation-release))
 
+- **Cron-only deployments now get the last-good backup marker: the app writes `kiln-<stamp>.good` every 15 minutes (`KILN_BACKUP_MARKER_SYNC_CRON`), so `backup.sh prune` keeps the newest verified backup.**
+  ([long form](docs/changelog/unreleased.md#backup-marker-sync-cron-only))
+
+- **The 1.9.0 known issue "Resume on a failed backup says it is queued but never runs" was fixed in 1.9.0 itself (#2688); the resume is refused with a message instead.**
+  ([long form](docs/changelog/unreleased.md#resume-behind-queued-resume-already-fixed))
+
 - **`bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'` runs again: release tasks under
   `eval` read through the content cache, which only a serving node starts, instead of crashing.**
   ([long form](docs/changelog/unreleased.md#release-eval-read-through))
