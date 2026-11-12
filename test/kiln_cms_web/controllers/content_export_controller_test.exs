@@ -648,7 +648,17 @@ defmodule KilnCMSWeb.ContentExportControllerTest do
           conn |> csv(%{"type" => "page", "q" => prefix, "from" => "2999-01-01"}) |> table()
         end)
 
-      assert count < small + 3 * 12, "#{count} queries for 205 rows vs #{small} for none"
+      # Per page: reference labels read each content resource once
+      # (`LinkEndsReadable.readable_labels/3`), so the allowance follows the
+      # registry, which a project overlay grows: 12 for core's three.
+      resources =
+        KilnCMS.CMS.ContentTypes.blocks_resources() |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+
+      per_page = 9 + length(resources)
+
+      assert count < small + 3 * per_page,
+             "#{count} queries for 205 rows vs #{small} for none"
+
       assert count < 205
     end
   end

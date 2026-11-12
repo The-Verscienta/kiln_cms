@@ -801,7 +801,14 @@ defmodule KilnCMSWeb.TeamLiveTest do
                "No restriction from this role"
 
       assert AccessibleNames.name(html, "#new-role-editable-mode-only") == "Only these types"
-      assert AccessibleNames.name(html, "#new-role-editable-type-0") == "Page"
+      # Found by value, not position: a project overlay's own types sort first.
+      [page_type] =
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query(~s([id^="new-role-editable-type-"][value="page"]))
+        |> LazyHTML.attribute("id")
+
+      assert AccessibleNames.name(html, "##{page_type}") == "Page"
       assert AccessibleNames.name(html, "#new-role-grant-#{post}-field-0") == "Title title"
 
       assert AccessibleNames.name(html, "#new-role-grant-#{post}-mode") =~

@@ -74,7 +74,11 @@ defmodule KilnCMS.ReportingRole do
   """
   @spec leaks(String.t(), [String.t()]) :: [{String.t(), String.t()}]
   def leaks(role, needles) do
-    for {view, text} <- dump(role), needle <- needles, String.contains?(text, needle) do
+    # Sorted: `dump/1` is a map, which iterates in key order only up to 32
+    # keys, and a project overlay's own content types add views past that.
+    for {view, text} <- Enum.sort(dump(role)),
+        needle <- needles,
+        String.contains?(text, needle) do
       {view, needle}
     end
   end

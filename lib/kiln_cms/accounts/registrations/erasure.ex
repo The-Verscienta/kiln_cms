@@ -34,6 +34,12 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
   holds the two lists to the database instead: every foreign key to `users`
   must be on one of them, and every column on them must exist.
 
+  The one part not written out is content: every compiled content type (and
+  the `Entry` tier) gets `author_id` and its versions' `user_id` from
+  `KilnCMS.CMS.Content`, so those two columns are read off the registry
+  (`ContentTypes.blocks_resources/0`). A project overlay's own types block an
+  erasure exactly as pages and posts do, with nothing for the overlay to list.
+
   ## Under the lock
 
   `check/1` is one query, run after the account's row is locked
@@ -44,10 +50,12 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
   """
 
   alias KilnCMS.Accounts.Scoping
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.Repo
 
   # Point at an account and stop its erasure. The account is more than an
-  # application while any of these has a row for it.
+  # application while any of these has a row for it. Content tables and their
+  # versions are added from the registry (`content_blocking/0`).
   @blocking [
     # Accounts and billing
     {"api_keys", "user_id"},
@@ -57,13 +65,7 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
     {"billing_membership_events", "actor_id"},
     {"newsletter_subscribers", "user_id"},
     {"newsletter_sends", "sent_by_id"},
-    # Content and its history
-    {"entries", "author_id"},
-    {"pages", "author_id"},
-    {"posts", "author_id"},
-    {"entries_versions", "user_id"},
-    {"pages_versions", "user_id"},
-    {"posts_versions", "user_id"},
+    # Content history beyond each type's own versions
     {"document_events", "actor_id"},
     {"history_anchors", "actor_id"},
     {"content_consents", "recorded_by_id"},
@@ -110,17 +112,6 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
       "EXISTS (SELECT 1 FROM org_memberships o WHERE o.user_id = u.id AND o.id <> m.id)"
   ]
 
-  @reasons Keyword.keys(@checks) ++
-             Enum.map(@blocking, fn {t, c} -> {:referenced, "#{t}.#{c}"} end)
-
-  @sql """
-  SELECT
-  #{Enum.map_join(Keyword.values(@checks) ++ Enum.map(@blocking, fn {t, c} -> ~s|EXISTS (SELECT 1 FROM "#{t}" x WHERE x."#{c}" = u.id)| end), ",\n", &"  (#{&1})")}
-  FROM users u
-  JOIN org_memberships m ON m.user_id = u.id
-  WHERE u.id = $1 AND m.id = $2
-  """
-
   @typedoc "Why an account is kept rather than erased."
   @type reason ::
           :confirmed
@@ -135,7 +126,20 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
 
   @doc "Every `{table, column}` whose rows keep an account from being erased."
   @spec blocking() :: [{String.t(), String.t()}]
-  def blocking, do: @blocking
+  def blocking, do: Enum.uniq(@blocking ++ content_blocking())
+
+  # Every content table's `author_id` and its versions table's `user_id`, in
+  # registry order. Both columns come from `KilnCMS.CMS.Content`, so every
+  # compiled type has them; the registry is fixed at compile time.
+  defp content_blocking do
+    for {_type, resource} <- ContentTypes.blocks_resources(),
+        {table_of, column} <- [
+          {resource, "author_id"},
+          {Module.concat(resource, Version), "user_id"}
+        ] do
+      {AshPostgres.DataLayer.Info.table(table_of), column}
+    end
+  end
 
   @doc "Every `{table, column}` an erasure scrubs or deletes itself, so it does not block."
   @spec handled() :: [{String.t(), String.t()}]
@@ -149,22 +153,44 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
   @spec check(KilnCMS.Accounts.OrgMembership.t()) :: :erasable | {:keep, reason()}
   # sobelow_skip ["SQL.Query"]
   def check(%{id: membership_id, user_id: user_id}) do
-    # The statement is built at compile time from the two module attributes
-    # above; only the two ids are parameters.
+    # The statement is built from `@checks` and `blocking/0` (names this
+    # module and the compiled registry supply, never input); only the two ids
+    # are parameters.
     #
     # Most `@blocking` columns have no index, so this scans those tables while
     # the account's row is locked. It runs only on an admin's rejection that
     # will erase (the site's setting, `erase: true`, a standing admin), never
     # on an ordinary reject; indexing them is a follow-up of its own.
-    case Repo.query!(@sql, [Ecto.UUID.dump!(user_id), Ecto.UUID.dump!(membership_id)]) do
-      %{rows: [flags]} -> verdict(flags)
+    blocking = blocking()
+
+    case Repo.query!(sql(blocking), [Ecto.UUID.dump!(user_id), Ecto.UUID.dump!(membership_id)]) do
+      %{rows: [flags]} -> verdict(reasons(blocking), flags)
       %{rows: []} -> {:keep, :not_found}
     end
   end
 
-  # The first reason whose flag is set, in `@reasons` order.
-  defp verdict(flags) do
-    case Enum.find(Enum.zip(@reasons, flags), fn {_reason, set?} -> set? end) do
+  defp reasons(blocking),
+    do: Keyword.keys(@checks) ++ Enum.map(blocking, fn {t, c} -> {:referenced, "#{t}.#{c}"} end)
+
+  defp sql(blocking) do
+    flags =
+      Keyword.values(@checks) ++
+        Enum.map(blocking, fn {t, c} ->
+          ~s|EXISTS (SELECT 1 FROM "#{t}" x WHERE x."#{c}" = u.id)|
+        end)
+
+    """
+    SELECT
+    #{Enum.map_join(flags, ",\n", &"  (#{&1})")}
+    FROM users u
+    JOIN org_memberships m ON m.user_id = u.id
+    WHERE u.id = $1 AND m.id = $2
+    """
+  end
+
+  # The first reason whose flag is set, in `reasons/1` order.
+  defp verdict(reasons, flags) do
+    case Enum.find(Enum.zip(reasons, flags), fn {_reason, set?} -> set? end) do
       nil -> :erasable
       {reason, true} -> {:keep, reason}
     end

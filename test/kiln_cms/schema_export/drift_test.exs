@@ -21,6 +21,8 @@ defmodule KilnCMS.SchemaExport.DriftTest do
   end
 
   for {name, opts} <- [{"full.schema.json", []}, {"full.graphql.schema.json", [graphql: true]}] do
+    # Excluded under a project overlay, whose blocks the goldens cannot hold.
+    @tag :core_registry
     test "#{name} matches the live export" do
       golden = File.read!(Path.join(GoldenFixture.dir(), unquote(name)))
       live = GoldenFixture.encode(GoldenFixture.document(unquote(opts)))

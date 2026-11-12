@@ -157,6 +157,25 @@ backup_scale_exclusion = [:backup_scale]
 # `--only regenerate_schema_goldens` (see its moduledoc).
 regenerate_exclusion = [:regenerate_schema_goldens]
 
+# Tests whose expected value is the core registry itself: the schema goldens
+# describe every compiled block and field type, so a project overlay that adds
+# its own plugin or content domain changes the document and can never match
+# them. Everywhere else the suite is meant to pass under an overlay, so this is
+# excluded only when one is compiled in, and says so.
+core_registry_exclusion =
+  if Kiln.Plugins.all() -- [KilnCMS.FixturePlugin, KilnDepFixture.Plugin] == [] and
+       Application.get_env(:kiln_cms, :content_domains, [KilnCMS.CMS]) == [KilnCMS.CMS] do
+    []
+  else
+    IO.puts(
+      :stderr,
+      "note: excluding :core_registry tests — a project overlay's plugins or content " <>
+        "domains are compiled in, and the schema goldens describe the core registry"
+    )
+
+    [:core_registry]
+  end
+
 if KilnCMS.Config.StrictTestFlag.strict?(System.get_env("KILN_STRICT_TEST")) do
   ExUnit.start(include: [strict_tenancy: true], exclude: [:test])
 else
@@ -169,7 +188,9 @@ else
         no_ffmpeg_exclusion ++
         calibration_exclusion ++
         table_lock_exclusion ++
-        swiftc_exclusion ++ kotlinc_exclusion ++ regenerate_exclusion ++ backup_scale_exclusion
+        swiftc_exclusion ++
+        kotlinc_exclusion ++
+        regenerate_exclusion ++ backup_scale_exclusion ++ core_registry_exclusion
   )
 end
 
