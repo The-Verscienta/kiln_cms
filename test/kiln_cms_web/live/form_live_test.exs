@@ -288,6 +288,47 @@ defmodule KilnCMSWeb.FormLiveTest do
       refute copy.autoresponder_enabled
       assert copy.autoresponder_subject == "About [field:topic]"
     end
+
+    test "a refused autoresponder switch keeps the copy's renamed tokens", %{conn: conn} do
+      admin = authed_user(:admin)
+      form = CMS.create_form!(%{name: "Both", slug: "fl-dup-both"}, actor: admin)
+
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: "website",
+        label: "Website",
+        field_type: :string,
+        position: 0
+      })
+
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: "topic",
+        label: "Topic",
+        field_type: :select,
+        options: [],
+        position: 1
+      })
+
+      form =
+        CMS.update_form!(
+          form,
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "[field:website] about [field:topic]",
+            autoresponder_body: "Thanks."
+          },
+          actor: admin
+        )
+
+      html = duplicate(conn, admin, form)
+      assert html =~ "The copy&#39;s autoresponder stays off:"
+
+      copy = copy_of(form)
+      assert field_names(copy) == ["website_2"]
+      refute copy.autoresponder_enabled
+      assert copy.autoresponder_subject == "[field:website_2] about [field:topic]"
+    end
   end
 
   test "deleting a form removes it from the list", %{conn: conn} do

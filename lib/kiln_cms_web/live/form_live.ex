@@ -149,25 +149,25 @@ defmodule KilnCMSWeb.FormLive do
     {Enum.reverse(renames), Enum.reverse(failed)}
   end
 
-  # One write once the fields exist: the renamed tokens, and the original's
-  # autoresponder switch, checked against the copy's fields.
+  # Once the fields exist: first the renamed tokens (the copy's autoresponder
+  # is still off, so its templates aren't checked yet), then the original's
+  # switch, checked against the copy's fields. Two writes, so a switch the
+  # check refuses doesn't take the token renames down with it.
   defp finish_autoresponder(form, copy, renames, opts) do
-    changes = Autoresponder.rename_field_tokens(form, Map.new(renames))
-
-    changes =
-      if form.autoresponder_enabled,
-        do: Map.put(changes, :autoresponder_enabled, true),
-        else: changes
-
-    if changes == %{} do
+    with {:ok, copy} <-
+           write_if_changed(copy, Autoresponder.rename_field_tokens(form, Map.new(renames)), opts),
+         {:ok, _copy} <-
+           write_if_changed(
+             copy,
+             if(form.autoresponder_enabled, do: %{autoresponder_enabled: true}, else: %{}),
+             opts
+           ) do
       :ok
-    else
-      case CMS.update_form(copy, changes, opts) do
-        {:ok, _copy} -> :ok
-        {:error, error} -> {:error, error}
-      end
     end
   end
+
+  defp write_if_changed(copy, changes, _opts) when changes == %{}, do: {:ok, copy}
+  defp write_if_changed(copy, changes, opts), do: CMS.update_form(copy, changes, opts)
 
   defp duplicated_message([]), do: gettext("Form duplicated (inactive until you activate it).")
 
