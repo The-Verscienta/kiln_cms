@@ -266,6 +266,7 @@ defmodule KilnCMS.Accounts do
       # address's owner (#2594) — system-only (`authorize?: false` from
       # `Preparations.ClaimUnconfirmedAccount`; the link is the credential).
       define :take_over_by_magic_link, action: :take_over_by_magic_link
+      define :take_over_by_sso, action: :take_over_by_sso
       # The emailed link that lifts a sign-in pause (#2250) — both system-only
       # (`authorize?: false` from `KilnCMSWeb.SignInUnlockController`, with the
       # request host's org in `context:`; an actor-carrying call is refused).

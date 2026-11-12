@@ -87,7 +87,8 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
   ## Options
 
     * `:via` — the path taking the account over, recorded as the events'
-      `via`: `:invitation` (the default), `:password_reset` or `:magic_link`.
+      `via`: `:invitation` (the default), `:password_reset`, `:magic_link` or
+      `:sso`.
     * `:unconfirmed_only?` — do nothing when the locked row is confirmed
       (default `false`).
     * `:remove` — a `(changeset, user, opts) -> {:ok, boolean} | {:error,
@@ -122,7 +123,7 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
 
   @effects :forget_prior_credentials_after_commit
 
-  @vias [:invitation, :password_reset, :magic_link]
+  @vias [:invitation, :password_reset, :magic_link, :sso]
 
   @impl true
   def init(opts) do

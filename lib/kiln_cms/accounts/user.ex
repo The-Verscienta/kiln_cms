@@ -1089,6 +1089,25 @@ defmodule KilnCMS.Accounts.User do
               reason: :password_reset, after_commit?: true}
     end
 
+    # The same takeover for an unconfirmed account its address's owner reaches
+    # through the identity provider. The provider verified the address, not the
+    # password an earlier registrant chose, so linking as-is would share the
+    # account. System-only, as the magic-link one is: only
+    # `Changes.RegisterWithSso` calls it (`authorize?: false`).
+    update :take_over_by_sso do
+      description "Take over an unconfirmed account its address's owner signed in to through the identity provider (system-only)."
+      accept []
+      require_atomic? false
+
+      change KilnCMS.Accounts.Changes.ClaimUnconfirmedAccount
+      change KilnCMS.Accounts.Changes.RevokeAllTokens
+
+      change {KilnCMS.Accounts.Changes.ForgetPriorCredentials, via: :sso, unconfirmed_only?: true}
+
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :password_reset, after_commit?: true}
+    end
+
     update :reset_password_with_token do
       # `ForgiveSignInThrottle` runs an `after_action` hook (it needs the saved
       # record's email), which an atomic update has no place to put.
@@ -1516,6 +1535,11 @@ defmodule KilnCMS.Accounts.User do
       forbid_if always()
     end
 
+    # The identity provider's takeover of an unconfirmed account: the same shape.
+    policy action(:take_over_by_sso) do
+      forbid_if always()
+    end
+
     # The sign-in unlock link (#2250): the same shape again. Forbidden to every
     # authorized caller; `SignInUnlockAction` refuses an actor-carrying call,
     # since the admin bypass above would pass this. The link is the credential.
@@ -1572,7 +1596,8 @@ defmodule KilnCMS.Accounts.User do
           :confirm_new_user,
           :reset_password_with_token,
           :accept_invitation_with_password,
-          :take_over_by_magic_link
+          :take_over_by_magic_link,
+          :take_over_by_sso
         ])
       ]
   end
