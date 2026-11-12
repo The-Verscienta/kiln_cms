@@ -9,6 +9,11 @@ defmodule KilnCMSWeb.SafeRedirect do
   `//evil.com`.
   """
 
+  # Characters a browser's URL parser strips or reinterprets, so a path that
+  # looks local can resolve off-origin. The same list `Phoenix.URL` holds (it is
+  # private API, hence the copy).
+  @browser_rewritten ["\\", "/%09", "/\t", "\n", "\r"]
+
   @doc """
   Return `path` when it is a safe same-origin local path, else `fallback`.
   """
@@ -28,8 +33,11 @@ defmodule KilnCMSWeb.SafeRedirect do
   """
   @spec safe_local_path?(term()) :: boolean()
   def safe_local_path?("/" <> _ = path) do
+    # What `Phoenix.Controller.redirect/2` refuses and RAISES on: a path that
+    # passed here and then met one of these was a 500, not a redirect.
     not String.starts_with?(path, "//") and
       not String.starts_with?(path, "/\\") and
+      not String.contains?(path, @browser_rewritten) and
       case URI.parse(path) do
         %URI{scheme: nil, host: nil} -> true
         _ -> false

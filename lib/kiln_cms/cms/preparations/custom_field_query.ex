@@ -426,8 +426,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp group_stats(map) when is_map(map) do
     Enum.reduce(map, {0, 0}, fn
-      {key, value}, {depth, members} when key in ~w(_or _and _not) ->
-        children = if is_map(value) and key == "_not", do: [value], else: member_list(value)
+      # Atom keys too (`%{_or: […]}` from an Elixir or MCP caller): the filter
+      # itself normalises keys with `to_string/1`, so the caps must as well.
+      {key, value}, {depth, members} when key in [:_or, :_and, :_not] or key in ~w(_or _and _not) ->
+        children =
+          if is_map(value) and to_string(key) == "_not", do: [value], else: member_list(value)
+
         {d, m} = children |> Enum.map(&group_stats/1) |> Enum.reduce({0, 0}, &merge_stats/2)
         {max(depth, d + 1), members + length(children) + m}
 
@@ -633,6 +637,14 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp condition(%{name: name}, op, _raw) when op not in @operators do
     {:error, "unknown operator #{inspect(op)} for custom field #{inspect(name)}"}
+  end
+
+  # `custom_filter[name][eq][x]=1` parses to a map operand. No operator takes
+  # one, and the clauses below `to_string/1` theirs — a raise, so a 500, on a
+  # public read. Lists are each clause's own business (`in` casts them).
+  # Not a struct: GraphQL hands a date operand over as a `%Date{}`.
+  defp condition(%{name: name}, op, raw) when is_map(raw) and not is_struct(raw) do
+    {:error, "#{op} on custom field #{inspect(name)} takes a value, not a nested filter"}
   end
 
   # Presence testing works for every field type, media/reference included.

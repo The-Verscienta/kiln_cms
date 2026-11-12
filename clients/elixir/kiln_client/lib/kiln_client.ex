@@ -205,7 +205,12 @@ defmodule KilnClient do
     |> Enum.reduce_while({:ok, %{}}, fn chunk, {:ok, by_id} ->
       chunk_opts =
         opts
-        |> Keyword.put(:filter, %{id: {:in, chunk}})
+        # Merged, so a caller's own `:filter` (a locale, a state) still applies.
+        |> Keyword.update(
+          :filter,
+          %{id: {:in, chunk}},
+          &(&1 |> Map.new() |> Map.put(:id, {:in, chunk}))
+        )
         |> Keyword.merge(limit: length(chunk), count: false)
 
       case list(plural, chunk_opts) do

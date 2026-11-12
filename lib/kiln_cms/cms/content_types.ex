@@ -623,8 +623,13 @@ defmodule KilnCMS.CMS.ContentTypes do
   end
 
   # Non-bang fetch by id (`{:ok, record} | {:error, _}`), e.g. for preview links.
+  #
+  # A type that no longer resolves (an archived dynamic type, a removed plugin)
+  # is an error tuple too, not a raise: callers of the non-bang form — a task or
+  # a menu item still pointing at such an entry — handle `{:error, _}`.
   def get_record(type, id, opts \\ []) do
-    case get!(type, org_from(opts)) do
+    case get(type, org_from(opts)) do
+      nil -> {:error, :unknown_content_type}
       %{source: :dynamic, definition: definition} -> CMS.get_entry(id, scoped(opts, definition))
       _compiled -> call(type, "get_#{atom(type, opts)}", [id, opts], opts)
     end

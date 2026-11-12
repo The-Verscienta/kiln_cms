@@ -187,7 +187,11 @@ export class KilnClient {
   constructor(options: KilnClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
     this.apiKey = options.apiKey;
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
+    // Wrapped, not stored bare: `this.fetchImpl(…)` would call the platform's
+    // fetch with the client as `this`, which browsers and Workers reject with
+    // "Illegal invocation" (Node does not, so tests never saw it).
+    const fetchFn = options.fetch ?? globalThis.fetch;
+    this.fetchImpl = (input, init) => fetchFn(input, init);
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.uploadTimeoutMs = options.uploadTimeoutMs ?? 300_000;
     this.headers = options.headers ?? {};

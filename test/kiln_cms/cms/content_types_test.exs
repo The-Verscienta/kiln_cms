@@ -57,6 +57,14 @@ defmodule KilnCMS.CMS.ContentTypesTest do
       assert Enum.any?(ContentTypes.list!(:page, authorize?: false), &(&1.id == page.id))
     end
 
+    # A task or menu item can outlive its type (an archived dynamic type). The
+    # non-bang form answers an error for it; it used to raise through callers
+    # that only handle `{:error, _}`.
+    test "get_record answers an error tuple for a type that no longer resolves" do
+      assert {:error, :unknown_content_type} =
+               ContentTypes.get_record("no_such_type", Ash.UUID.generate(), authorize?: false)
+    end
+
     test "get_published_by_slug returns published content only" do
       s = slug()
       post = CMS.create_post!(%{title: "P", slug: s}, authorize?: false)

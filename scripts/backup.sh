@@ -1108,7 +1108,10 @@ cmd_verify() {
   [ -n "$dump_stamp" ] || die "no dumps found under $BACKUP_DIR/db"
   f="$BACKUP_DIR/db/kiln-db-${dump_stamp}.dump"
   echo "==> Newest dump: $(basename "$f") ($(du -h "$f" | cut -f1))"
-  pg_restore --list "$f" >/dev/null && echo "    dump: ok"
+  # `|| die`, not `&& echo`: `set -e` ignores a failure that is not the last
+  # command of an `&&` list, so a corrupt dump used to verify clean.
+  pg_restore --list "$f" >/dev/null || die "dump $(basename "$f") failed pg_restore --list"
+  echo "    dump: ok"
   verify_sidecar "$BACKUP_DIR/db" "kiln-db-${dump_stamp}.sha256"
 
   media_stamp="$(newest_settled_media_stamp "$BACKUP_DIR/media")"

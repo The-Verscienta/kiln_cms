@@ -670,7 +670,7 @@ defmodule KilnCMSWeb.BlockComponents do
           <.field_legend field={@field} />
           <div class="flex flex-wrap gap-3">
             <label
-              :for={n <- 1..rating_max(@field)}
+              :for={n <- 1..rating_max(@field)//1}
               class="flex items-center gap-1 text-sm"
             >
               <input
@@ -762,7 +762,7 @@ defmodule KilnCMSWeb.BlockComponents do
   defp checked_options(value) when is_binary(value), do: [value]
   defp checked_options(_value), do: []
 
-  defp rating_max(%{max_value: max}) when is_number(max), do: trunc(max)
+  defp rating_max(%{max_value: max}) when is_number(max), do: max(trunc(max), 1)
   defp rating_max(_field), do: 5
 
   defp range_attr(nil), do: nil
