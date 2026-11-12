@@ -8,7 +8,8 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
 
   `image_picker/1` is also the Branding page's library drawer (#1811):
   `KilnCMSWeb.BrandingLive` handles the same `pick_image`, `search_media` and
-  `close_picker` events, with the Unsplash tab off.
+  `close_picker` events, with the Unsplash tab off, and without the upload
+  dropzone (it passes no `upload`).
   """
 
   use KilnCMSWeb, :html
@@ -49,6 +50,11 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
   attr :title, :string,
     default: nil,
     doc: "drawer heading; defaults to one derived from `index` (the branding page passes its own)"
+
+  attr :upload, :any,
+    default: nil,
+    doc:
+      "the host's `Phoenix.LiveView.UploadConfig` for uploading straight from the drawer; nil hides the dropzone"
 
   # Media-library browser as a right-side drawer (Theme D). It slides in beside the
   # editor rather than a full-screen modal that blanks the whole surface, so you
@@ -104,6 +110,8 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
       </div>
 
       <div :if={@picker_tab == :library} class="flex-1 overflow-y-auto p-4">
+        <.picker_upload :if={@upload} upload={@upload} multi?={@multi?} />
+
         <form :if={@media != []} id="media-browser-filter" phx-change="search_media" class="mb-3">
           <input
             type="text"
@@ -117,11 +125,14 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
           />
         </form>
 
-        <p :if={@media == []} class="text-sm text-base-content/60">
+        <p :if={@media == [] and is_nil(@upload)} class="text-sm text-base-content/60">
           {gettext("No media yet — upload some in the")} <.link
             navigate={~p"/media"}
             class="underline"
           >{gettext("media library")}</.link>.
+        </p>
+        <p :if={@media == [] and @upload} class="text-sm text-base-content/70">
+          {gettext("No images in the library yet — upload one above.")}
         </p>
         <p :if={@media != [] and @visible == []} class="text-sm text-base-content/60">
           {gettext("No media matches “%{query}”.", query: @query)}
@@ -282,6 +293,119 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
     </.modal>
     """
   end
+
+  # Upload straight from the drawer: the editor shouldn't have to leave for
+  # `/media`, upload, come back and find the picture again just to set a
+  # featured image. A finished file lands on whatever the drawer was opened
+  # for, the same as a library pick or an Unsplash import (the host's
+  # progress callback routes it); in a gallery it joins the selection
+  # instead, so the input takes several files only there.
+  #
+  # The form exists because a `live_file_input` must sit in one with a
+  # `phx-change`; nothing else in it is a field.
+  attr :upload, :any, required: true
+  attr :multi?, :boolean, required: true
+
+  defp picker_upload(assigns) do
+    ~H"""
+    <form
+      id="image-picker-upload"
+      phx-change="validate_picker_upload"
+      phx-submit="validate_picker_upload"
+      class="mb-4"
+    >
+      <label
+        for={@upload.ref}
+        phx-drop-target={@upload.ref}
+        class="group flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-base-content/25 px-4 py-3 text-sm transition-colors hover:border-primary hover:bg-primary/5 phx-drop-target-active:border-primary phx-drop-target-active:bg-primary/5"
+      >
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-base-200 transition-colors group-hover:bg-primary/15">
+          <.icon name="hero-arrow-up-tray" class="size-4 text-base-content/70" />
+        </span>
+        <span class="min-w-0">
+          <span class="block font-medium">
+            {if @multi?, do: gettext("Upload images"), else: gettext("Upload an image")}
+          </span>
+          <span class="block text-xs text-base-content/70">
+            {gettext("Click to choose, or drop a file here · JPG, PNG, WebP or GIF up to %{mb} MB",
+              mb: div(@upload.max_file_size, 1_000_000)
+            )}
+          </span>
+        </span>
+        <.live_file_input upload={@upload} class="sr-only" />
+      </label>
+
+      <p
+        :for={err <- upload_errors(@upload)}
+        class="mt-2 text-xs text-error"
+        role="alert"
+      >
+        {picker_upload_error(err, @upload)}
+      </p>
+
+      <ul :if={@upload.entries != []} class="mt-2 space-y-2">
+        <li
+          :for={entry <- @upload.entries}
+          id={"picker-upload-#{entry.ref}"}
+          role="status"
+          class={[
+            "rounded border px-3 py-2 text-xs",
+            (upload_errors(@upload, entry) == [] && "border-base-content/10") ||
+              "border-error/40 bg-error/5"
+          ]}
+        >
+          <div class="flex items-center gap-2">
+            <span class="min-w-0 flex-1 truncate">
+              <%= if upload_errors(@upload, entry) == [] do %>
+                {gettext("Uploading %{name}… %{pct}%",
+                  name: entry.client_name,
+                  pct: entry.progress
+                )}
+              <% else %>
+                {gettext("%{name} couldn't be uploaded: %{reason}",
+                  name: entry.client_name,
+                  reason:
+                    Enum.map_join(
+                      upload_errors(@upload, entry),
+                      ", ",
+                      &picker_upload_error(&1, @upload)
+                    )
+                )}
+              <% end %>
+            </span>
+            <button
+              type="button"
+              phx-click="cancel_picker_upload"
+              phx-value-ref={entry.ref}
+              class="shrink-0 text-base-content/70 hover:text-base-content"
+            >
+              {if upload_errors(@upload, entry) == [],
+                do: gettext("Cancel"),
+                else: gettext("Dismiss")}
+            </button>
+          </div>
+          <progress
+            :if={upload_errors(@upload, entry) == []}
+            value={entry.progress}
+            max="100"
+            class="mt-1.5 h-1 w-full"
+          ></progress>
+        </li>
+      </ul>
+    </form>
+    """
+  end
+
+  defp picker_upload_error(:too_large, upload),
+    do: gettext("too large (max %{mb} MB)", mb: div(upload.max_file_size, 1_000_000))
+
+  defp picker_upload_error(:not_accepted, _upload),
+    do: gettext("not an image type this editor accepts")
+
+  defp picker_upload_error(:too_many_files, upload),
+    do: gettext("too many files at once (max %{count})", count: upload.max_entries)
+
+  defp picker_upload_error(_other, _upload), do: gettext("upload failed")
 
   # The document counterpart of `image_picker/1` (#481) — a single-select
   # drawer over the (documents-only) file library, filling the `:file` block

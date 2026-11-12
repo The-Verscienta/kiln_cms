@@ -199,6 +199,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:restore_refusal, nil)
     |> assign(:page_title, gettext("New %{type}", type: String.downcase(content_type.label)))
     |> assign(:form, to_form(%{"title" => ""}, as: :form))
+    |> assign(:featured_media, nil)
   end
 
   # The writer's first commit on `/editor/content/:type/new`: create the row
@@ -375,6 +376,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
       max_file_size: Ingest.max_image_size(),
       auto_upload: true,
       progress: &handle_body_image_progress/3
+    )
+    # Uploads from the image picker's own dropzone: the same images and
+    # ceiling, but a finished file lands on whatever the drawer was opened
+    # for (featured image, social image, a block, a gallery) instead of
+    # becoming a new block — see `handle_picker_image_progress/3`.
+    |> allow_upload(:picker_images,
+      accept: @body_image_accept,
+      max_entries: @body_image_max_entries,
+      max_file_size: Ingest.max_image_size(),
+      auto_upload: true,
+      progress: &handle_picker_image_progress/3
     )
     # Debounced comments reload (#1252 review) — see @comments_reload_debounce_ms.
     |> assign(:comments_reload_timer, nil)
@@ -964,6 +976,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
     )
     |> assign(:form, build_form(view, socket.assigns.actor))
+    |> refresh_featured_media()
     |> refresh_tag_index()
     |> seed_block_children(view)
     |> refresh_preview()
@@ -2335,6 +2348,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       {:noreply,
        socket
        |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+       |> refresh_featured_media()
        |> mark_dirty(:settings)}
     end
   end
@@ -3159,6 +3173,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_event("close_picker", _params, socket),
     do: {:noreply, reset_picker(socket)}
+
+  # The picker's dropzone form (`picker_upload/1`): its change event only
+  # carries the entries, which ride on the socket; there is nothing to
+  # validate beyond what `allow_upload` already enforces.
+  def handle_event("validate_picker_upload", _params, socket), do: {:noreply, socket}
+
+  # Cancel one picker upload, or dismiss one that failed the client-side checks.
+  def handle_event("cancel_picker_upload", %{"ref" => ref}, socket) when is_binary(ref),
+    do: {:noreply, cancel_upload(socket, :picker_images, ref)}
 
   # Live-filter the browser grid as the user types.
   def handle_event("search_media", %{"q" => q}, socket) when is_binary(q) do
@@ -4136,6 +4159,73 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # --- uploads from the image picker's dropzone --------------------------------
+
+  # The same `Ingest` pipeline and gate as a body upload, but a finished file
+  # is routed like an Unsplash import (`route_picked_item/2`): onto the field
+  # or block the drawer was opened for, or into a gallery's selection. Only an
+  # image is accepted — the client-side `accept` is a hint, not a check, and a
+  # PDF renamed `.png` must not become a featured image — so the file is
+  # sniffed before anything is stored.
+  defp handle_picker_image_progress(:picker_images, %{done?: false}, socket),
+    do: {:noreply, socket}
+
+  defp handle_picker_image_progress(:picker_images, entry, socket) do
+    name = entry.client_name
+
+    if socket.assigns.may_write? do
+      result =
+        consume_uploaded_entry(socket, entry, fn %{path: path} ->
+          {:ok, ingest_picker_image(path, name, socket)}
+        end)
+
+      case result do
+        {:ok, item} ->
+          {:noreply,
+           socket
+           |> assign(:media, [media_row(item) | socket.assigns.media])
+           |> route_uploaded_item(item)}
+
+        {:error, reason} ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             gettext("Couldn't upload %{name}: %{reason}",
+               name: name,
+               reason: ingest_failure_reason(reason)
+             )
+           )}
+      end
+    else
+      {:noreply,
+       socket
+       |> cancel_upload(:picker_images, entry.ref)
+       |> put_flash(:error, gettext("You don't have permission to add images here."))}
+    end
+  end
+
+  # The drawer was closed while the file travelled: it is in the library, but
+  # there is nothing left to put it on.
+  defp route_uploaded_item(%{assigns: %{picking: nil}} = socket, _item), do: socket
+  defp route_uploaded_item(socket, item), do: route_picked_item(socket, item)
+
+  defp ingest_picker_image(path, name, socket) do
+    case KilnCMS.ImageProcessor.validate_upload(path) do
+      {:ok, _image} ->
+        Ingest.store_file(path, name,
+          actor: socket.assigns.actor,
+          tenant: socket.assigns.current_org
+        )
+
+      {:error, :too_many_pixels} ->
+        {:error, :too_many_pixels}
+
+      {:error, _reason} ->
+        {:error, :unsupported_format}
+    end
+  end
+
   # Where the block for an uploaded file lands: after the block named in the
   # anchor event, or at the end of the list when the anchor is missing.
   defp anchor_id(id) when is_binary(id) and id != "", do: id
@@ -4268,6 +4358,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       socket
       |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+      |> refresh_featured_media()
       |> mark_dirty(:settings)
     end
   end
@@ -5977,8 +6068,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # The media id currently on an image block sub-form, if any.
   defp media_id_of(bf), do: bf[:media_id].value
 
+  # Closing the drawer abandons its uploads still in flight: a file finishing
+  # after the drawer is gone would have nothing to land on.
   defp reset_picker(socket) do
     socket
+    |> cancel_picker_uploads()
     |> assign(:picking, nil)
     |> assign(:picked, [])
     |> assign(:media_query, "")
@@ -5991,6 +6085,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:av_query, "")
     |> assign(:picker_av, nil)
   end
+
+  # A finished entry is skipped: the one being consumed right now (a pick
+  # routed from `handle_picker_image_progress/3` closes the drawer) still
+  # stands in the socket's list, but its upload channel is already gone.
+  defp cancel_picker_uploads(%{assigns: %{uploads: %{picker_images: conf}}} = socket) do
+    conf.entries
+    |> Enum.reject(& &1.done?)
+    |> Enum.reduce(socket, &cancel_upload(&2, :picker_images, &1.ref))
+  end
+
+  defp cancel_picker_uploads(socket), do: socket
 
   # ── AI-assisted SEO drafting (#60) ────────────────────────────────────────
 
@@ -6609,6 +6714,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
     case AshPhoenix.Form.value(socket.assigns.form, :featured_image_id) do
       nil -> nil
       id -> media_url(socket, to_string(id))
+    end
+  end
+
+  # The featured image's `@media`-shaped row, for the Settings tab's field
+  # (`featured_image_field/1`), resolved like `media_url/2`: the picker window
+  # first, then the database. The window holds only the `@max_media` most
+  # recent images, so on a large library an older featured image is not in it,
+  # and a lookup in the window alone showed "None selected" with no Remove
+  # link for a record that has one. Refreshed wherever the featured image can
+  # change: a record assign (mount, reload, restore), a pick, a clear.
+  defp refresh_featured_media(socket) do
+    row =
+      case AshPhoenix.Form.value(socket.assigns.form, :featured_image_id) do
+        id when id in [nil, ""] -> nil
+        id -> resolve_media_row(socket, to_string(id))
+      end
+
+    assign(socket, :featured_media, row)
+  end
+
+  defp resolve_media_row(socket, id) do
+    case Enum.find(socket.assigns.media, &(to_string(&1.id) == id)) do
+      %{} = row ->
+        row
+
+      nil ->
+        case CMS.get_media_item(id,
+               actor: socket.assigns.actor,
+               tenant: socket.assigns.current_org
+             ) do
+          {:ok, item} -> media_row(item)
+          _ -> nil
+        end
     end
   end
 
@@ -8126,6 +8264,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
               tags={@tags}
               max_tags={@max_tags}
               media={@media}
+              featured_media={@featured_media}
               related_field={@related_field}
               related_current={@related_current}
               related_definition={@related_definition}
@@ -8199,6 +8338,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         unsplash_more?={@unsplash_more?}
         unsplash_searching?={@unsplash_searching?}
         unsplash_importing={@unsplash_importing}
+        upload={if @may_write?, do: @uploads.picker_images}
       />
 
       <.file_picker

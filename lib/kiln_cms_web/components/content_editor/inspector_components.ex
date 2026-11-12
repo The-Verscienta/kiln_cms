@@ -2426,6 +2426,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
 
   attr :form, :any, required: true
   attr :media, :list, required: true
+  # The featured image's row as the LiveView resolved it (`refresh_featured_media`
+  # in `ContentEditorLive`), which reaches past the `@media` window to the
+  # database. Used only while it still matches the form's value.
+  attr :featured_media, :map, default: nil
   # A featured image the type shares across locales, on a translation (#1327,
   # #1860): shown, with no way to pick or remove one here.
   attr :locked, :boolean, default: false
@@ -2436,7 +2440,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     assigns =
       assigns
       |> assign(:field, assigns.form[:featured_image_id])
-      |> assign(:selected, Enum.find(assigns.media, &(to_string(&1.id) == to_string(id))))
+      |> assign(:selected, featured_selected(id, assigns.media, assigns.featured_media))
 
     ~H"""
     <div>
@@ -2473,6 +2477,15 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       </div>
     </div>
     """
+  end
+
+  defp featured_selected(id, _media, _resolved) when id in [nil, ""], do: nil
+
+  defp featured_selected(id, media, resolved) do
+    id = to_string(id)
+
+    Enum.find(media, &(to_string(&1.id) == id)) ||
+      if(resolved && to_string(resolved.id) == id, do: resolved)
   end
 
   # Pick-for-comparison toggle on a version-history row.

@@ -70,6 +70,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
   ([long form](docs/changelog/unreleased.md#slack-webhook-format))
 
+- **The editor's image picker (featured image, social image, image and gallery blocks, media fields) has its own Upload button and drop zone; the uploaded image is used right away.**
+  ([long form](docs/changelog/unreleased.md#image-picker-upload))
+
 ### Changed
 
 - **Webhook URLs are masked (`https://host/…/last4`) on the Webhooks page, in the governance trail and its JSON/CSV exports (now also with `endpoint_id`), and in notices and logs. Reveal URL shows one; the edit form starts blank, and blank keeps the URL.**
@@ -122,6 +125,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'` runs again: release tasks under
   `eval` read through the content cache, which only a serving node starts, instead of crashing.**
   ([long form](docs/changelog/unreleased.md#release-eval-read-through))
+
+- **The content editor's Featured image field shows an image older than the org's 500 most recent uploads, with its Remove link, instead of "None selected".**
+  ([long form](docs/changelog/unreleased.md#featured-image-older-than-picker-window))
 
 ## [1.9.2] - 2026-11-12
 

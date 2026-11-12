@@ -1139,6 +1139,33 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert CMS.get_page!(page.id, authorize?: false).featured_image_id == media.id
     end
 
+    # The picker window holds only the 500 most recent images; a featured image
+    # older than that still shows in Settings, with its Remove link.
+    test "shows a featured image older than the picker window", %{conn: conn} do
+      old =
+        Ash.Seed.seed!(MediaItem, %{
+          filename: "melissa.jpg",
+          url: "/uploads/melissa",
+          inserted_at: DateTime.add(DateTime.utc_now(), -365, :day)
+        })
+
+      Ash.Seed.seed!(
+        MediaItem,
+        for(i <- 1..500, do: %{filename: "recent-#{i}.jpg", url: "/uploads/recent-#{i}"})
+      )
+
+      page = draft_page(%{title: "OldFeat", featured_image_id: old.id})
+
+      {:ok, lv, html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      assert html =~ "melissa.jpg"
+      assert has_element?(lv, "button[phx-click='clear_featured']")
+
+      lv |> element("button[phx-click='clear_featured']") |> render_click()
+      refute has_element?(lv, "button[phx-click='clear_featured']")
+    end
+
     test "picking a library image sets the block's url and media_id", %{conn: conn} do
       media = Ash.Seed.seed!(MediaItem, %{filename: "x.jpg", url: "/uploads/x"})
 
