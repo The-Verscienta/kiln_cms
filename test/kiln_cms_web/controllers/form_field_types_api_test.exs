@@ -136,6 +136,40 @@ defmodule KilnCMSWeb.FormFieldTypesApiTest do
       assert stored(form) == []
     end
 
+    # #2269: the HTML form translates these; the JSON contract keeps them
+    # verbatim, byte for byte.
+    test "bounded refusals keep their English text verbatim", %{conn: conn} do
+      form = form!()
+      too_long = String.duplicate("x", KilnCMS.Limits.line() + 1)
+
+      errors =
+        conn
+        |> json_post(form, %{qty: 99, stars: 8, stars5: 6, ref: too_long})
+        |> json_response(422)
+        |> Map.fetch!("errors")
+
+      assert errors["qty"] == "must be at most 10"
+      assert errors["stars"] == "must be a rating from 1 to 7"
+      assert errors["stars5"] == "must be a rating from 1 to 5"
+      assert errors["ref"] == "is too long"
+
+      errors =
+        build_conn()
+        |> json_post(form, %{qty: -1})
+        |> json_response(422)
+        |> Map.fetch!("errors")
+
+      assert errors["qty"] == "must be at least 0"
+
+      errors =
+        build_conn()
+        |> json_post(form, %{qty: 0.25})
+        |> json_response(422)
+        |> Map.fetch!("errors")
+
+      assert errors["qty"] == "must be a multiple of 0.5"
+    end
+
     test "wrong shapes never 500", %{conn: conn} do
       form = form!()
 

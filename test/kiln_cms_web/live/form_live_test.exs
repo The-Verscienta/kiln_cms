@@ -140,6 +140,197 @@ defmodule KilnCMSWeb.FormLiveTest do
     assert {qty.min_value, qty.max_value, qty.step} == {1.0, 9.0, 2.0}
   end
 
+  describe "duplicating a form (#2267)" do
+    defp duplicate(conn, admin, form) do
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/forms")
+
+      lv
+      |> element(~s(button[phx-click="duplicate_form"][phx-value-id="#{form.id}"]))
+      |> render_click()
+    end
+
+    defp copy_of(form) do
+      assert [copy] =
+               CMS.list_forms!(authorize?: false, query: [filter: [slug: "#{form.slug}-copy"]])
+
+      copy
+    end
+
+    defp field_names(form),
+      do: form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.map(& &1.name)
+
+    # The copy's token check reads the copy's own fields, which used to be
+    # created after the form: an enabled template naming a field refused the
+    # whole duplicate.
+    test "an enabled autoresponder that names a field is copied, still on", %{conn: conn} do
+      admin = authed_user(:admin)
+      slug = "fl-ar-#{System.unique_integer([:positive])}"
+      form = CMS.create_form!(%{name: "Contact", slug: slug}, actor: admin)
+
+      CMS.create_form_field!(
+        %{form_id: form.id, name: "email", label: "Email", field_type: :email},
+        actor: admin
+      )
+
+      form =
+        CMS.update_form!(
+          form,
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "Hi [field:email]",
+            autoresponder_body: "We got [field:email]."
+          },
+          actor: admin
+        )
+
+      html = duplicate(conn, admin, form)
+
+      assert html =~ "Form duplicated (inactive until you activate it)."
+      refute html =~ "couldn"
+
+      copy = copy_of(form)
+      assert copy.autoresponder_enabled
+      assert copy.autoresponder_subject == "Hi [field:email]"
+      assert copy.autoresponder_body == "We got [field:email]."
+      assert field_names(copy) == ["email"]
+    end
+
+    test "a field named like the honeypot is renamed in the copy, tokens and all",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      slug = "fl-hp-#{System.unique_integer([:positive])}"
+      form = CMS.create_form!(%{name: "Contact", slug: slug}, actor: admin)
+
+      CMS.create_form_field!(
+        %{form_id: form.id, name: "email", label: "Email", field_type: :email},
+        actor: admin
+      )
+
+      # From before the name was reserved: the action refuses it now.
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: "website",
+        label: "Website",
+        field_type: :string,
+        position: 1
+      })
+
+      form =
+        CMS.update_form!(
+          form,
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "Hi [field:website]",
+            autoresponder_body: "Sent to [field:email] about [field:website]."
+          },
+          actor: admin
+        )
+
+      html = duplicate(conn, admin, form)
+
+      assert html =~ "was renamed “website_2” in the copy"
+      refute html =~ "couldn"
+
+      copy = copy_of(form)
+      refute copy.active
+      assert field_names(copy) == ["email", "website_2"]
+      assert copy.autoresponder_enabled
+      assert copy.autoresponder_subject == "Hi [field:website_2]"
+      assert copy.autoresponder_body == "Sent to [field:email] about [field:website_2]."
+
+      # The original keeps its field and its template.
+      assert field_names(form) == ["email", "website"]
+
+      assert CMS.get_form!(form.id, authorize?: false).autoresponder_subject ==
+               "Hi [field:website]"
+    end
+
+    test "a field that can't be copied is named, not dropped silently", %{conn: conn} do
+      admin = authed_user(:admin)
+      slug = "fl-bad-#{System.unique_integer([:positive])}"
+      form = CMS.create_form!(%{name: "Contact", slug: slug}, actor: admin)
+
+      CMS.create_form_field!(
+        %{form_id: form.id, name: "email", label: "Email", field_type: :email},
+        actor: admin
+      )
+
+      # A row the create action refuses for another reason: a dropdown
+      # without options.
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: "topic",
+        label: "Topic",
+        field_type: :select,
+        options: [],
+        position: 1
+      })
+
+      form =
+        CMS.update_form!(
+          form,
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "About [field:topic]",
+            autoresponder_body: "Thanks."
+          },
+          actor: admin
+        )
+
+      html = duplicate(conn, admin, form)
+
+      assert html =~ "Form duplicated, but a field couldn&#39;t be copied: topic."
+      # Its template names the missing field, so the copy's stays off.
+      assert html =~ "The copy&#39;s autoresponder stays off:"
+
+      copy = copy_of(form)
+      assert field_names(copy) == ["email"]
+      refute copy.autoresponder_enabled
+      assert copy.autoresponder_subject == "About [field:topic]"
+    end
+
+    test "a refused autoresponder switch keeps the copy's renamed tokens", %{conn: conn} do
+      admin = authed_user(:admin)
+      form = CMS.create_form!(%{name: "Both", slug: "fl-dup-both"}, actor: admin)
+
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: "website",
+        label: "Website",
+        field_type: :string,
+        position: 0
+      })
+
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: "topic",
+        label: "Topic",
+        field_type: :select,
+        options: [],
+        position: 1
+      })
+
+      form =
+        CMS.update_form!(
+          form,
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "[field:website] about [field:topic]",
+            autoresponder_body: "Thanks."
+          },
+          actor: admin
+        )
+
+      html = duplicate(conn, admin, form)
+      assert html =~ "The copy&#39;s autoresponder stays off:"
+
+      copy = copy_of(form)
+      assert field_names(copy) == ["website_2"]
+      refute copy.autoresponder_enabled
+      assert copy.autoresponder_subject == "[field:website_2] about [field:topic]"
+    end
+  end
+
   test "deleting a form removes it from the list", %{conn: conn} do
     admin = authed_user(:admin)
     form = CMS.create_form!(%{name: "Contact", slug: "fl-del"}, actor: admin)

@@ -2114,6 +2114,11 @@ msgstr ""
 msgid "A web address. For a link to an external site, a source or a download."
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "A whole number of stars, from 1 to the maximum, to pre-select that rating."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A whole number. For a count, a quantity, a rank or a year."
@@ -4027,7 +4032,7 @@ msgstr ""
 msgid "Awaiting admin approval"
 msgstr ""
 
-#: lib/kiln_cms_web/controllers/form_controller.ex
+#: lib/kiln_cms_web/controllers/form_html.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Back"
@@ -4965,6 +4970,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a published post to send."
+msgstr ""
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a rating from 1 to %{max}."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
@@ -8404,6 +8414,21 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
+msgid "Enter a number in steps of %{step}."
+msgstr ""
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Enter a number of at least %{min}."
+msgstr ""
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Enter a number of at most %{max}."
+msgstr ""
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
 msgid "Enter a number."
 msgstr ""
 
@@ -9491,6 +9516,23 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Form duplicated (inactive until you activate it)."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Form duplicated (inactive until you activate it). The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for spam protection."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Form duplicated, but a field couldn't be copied: %{names}."
+msgid_plural "Form duplicated, but %{count} fields couldn't be copied: %{names}."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/controllers/form_html.ex
+#, elixir-autogen, elixir-format
+msgid "Form not found"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
@@ -12428,6 +12470,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Must match a pattern."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Must match one of the options exactly to pre-select it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Must match one of the options exactly; that one box starts checked."
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -17021,6 +17073,11 @@ msgstr ""
 msgid "Resend the invitation to %{email}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reserved name"
+msgstr ""
+
 #: lib/kiln_cms_web/live/confirm_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reset the password instead."
@@ -20334,6 +20391,7 @@ msgid "Text, a number, a date, an image — typed or picked on each record."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/form_controller.ex
+#: lib/kiln_cms_web/controllers/form_html.ex
 #, elixir-autogen, elixir-format
 msgid "Thank you"
 msgstr ""
@@ -20931,6 +20989,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "The control won — the document already reads that way; nothing to promote."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "The copy's autoresponder stays off: %{reason}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -22117,6 +22180,11 @@ msgid_plural "This field needs at least %{count} rows."
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/controllers/form_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This form doesn't exist or no longer takes submissions."
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "This form is inactive — the embed shows “Form not found” until you activate it."
@@ -22603,6 +22671,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "This upload's metadata is being stripped in the background. It is not visible on the site or in the API until that finishes."
+msgstr ""
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "This value is too long."
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_components.ex
@@ -26147,7 +26220,7 @@ msgstr ""
 msgid "is published"
 msgstr ""
 
-#: lib/kiln_cms/cms/validations/form_field_config.ex
+#: lib/kiln_cms/cms/validations/reserved_field_name.ex
 #, elixir-autogen, elixir-format
 msgid "is reserved for spam protection"
 msgstr ""
@@ -27279,6 +27352,11 @@ msgstr[1] ""
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "“%{name}” holds %{count} tag(s). Delete the group anyway? The tags are kept and become ungrouped."
+msgstr ""
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "“%{name}” is reserved for spam protection: a visitor who fills this field has their submission discarded. Give it another machine name."
 msgstr ""
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex

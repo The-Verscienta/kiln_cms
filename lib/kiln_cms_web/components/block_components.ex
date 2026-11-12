@@ -626,6 +626,7 @@ defmodule KilnCMSWeb.BlockComponents do
                 value={opt}
                 required={@field.required}
                 checked={opt == @current}
+                class={if i == 0, do: group_target_class()}
               />
               <span>{opt}</span>
             </label>
@@ -653,6 +654,7 @@ defmodule KilnCMSWeb.BlockComponents do
                 name={@field.name <> "[]"}
                 value={opt}
                 checked={opt in checked_options(@current)}
+                class={if i == 0, do: group_target_class()}
               />
               <span>{opt}</span>
             </label>
@@ -678,6 +680,7 @@ defmodule KilnCMSWeb.BlockComponents do
                 value={n}
                 required={@field.required}
                 checked={to_string(n) == to_string(@current)}
+                class={if n == 1, do: group_target_class()}
               />
               <span aria-hidden="true">{n} ★</span>
               <span class="sr-only">
@@ -747,6 +750,12 @@ defmodule KilnCMSWeb.BlockComponents do
     """
   end
 
+  # The first input of a radio / checkboxes / rating group is where the error
+  # summary's link lands (`error_anchor/1`). Following a fragment link scrolls
+  # its target to the top of the viewport, which would hide the group's
+  # legend above it; the scroll margin keeps the legend in view.
+  defp group_target_class, do: "scroll-mt-12"
+
   # The checked options of a checkboxes group: the re-rendered submission (a
   # list) or the field's default (a single option).
   defp checked_options(value) when is_list(value), do: value
@@ -773,7 +782,7 @@ defmodule KilnCMSWeb.BlockComponents do
     field_items =
       Enum.map(fields, fn field ->
         %{
-          anchor: field.name,
+          anchor: error_anchor(field),
           text:
             gettext("%{label}: %{message}",
               label: field.label,
@@ -790,6 +799,22 @@ defmodule KilnCMSWeb.BlockComponents do
 
     field_items ++ other_items
   end
+
+  # Where a summary link points (#2268). Following a fragment link focuses its
+  # target when that target can take focus, with no script. A group's id is
+  # its `<fieldset>`, which cannot, so the link goes to the group's first
+  # input instead: focus lands on a control the visitor can act on, and a
+  # screen reader announces the legend with it. Radio and checkboxes count
+  # their inputs from 0, rating from 1 (`public_form_field/1`). A hidden
+  # input can never take focus, so its error is listed without a link. A
+  # group with no options (legacy data) has no input to point at.
+  defp error_anchor(%{field_type: type, name: name, options: [_ | _]})
+       when type in [:radio, :checkboxes],
+       do: name <> "-0"
+
+  defp error_anchor(%{field_type: :rating, name: name}), do: name <> "-1"
+  defp error_anchor(%{field_type: :hidden}), do: nil
+  defp error_anchor(%{name: name}), do: name
 
   # `KilnCMS.Forms.submit/3` reports refusals as short English fragments. The
   # headless JSON API returns them verbatim as part of its response shape, so
@@ -826,6 +851,22 @@ defmodule KilnCMSWeb.BlockComponents do
 
   defp form_error_message(message) when message in ["is not valid", "must be a boolean"],
     do: gettext("This value isn't valid.")
+
+  defp form_error_message("is too long"), do: gettext("This value is too long.")
+
+  # The refusals that carry a bound (#2269), parsed by the module that builds
+  # them. The bound is shown as the server wrote it (`0.5`, not `0,5`): it is
+  # the value the visitor has to type, and the number input takes a period.
+  defp form_error_message(message) when is_binary(message) do
+    case KilnCMS.Forms.error_detail(message) do
+      {:min, min} -> gettext("Enter a number of at least %{min}.", min: min)
+      {:max, max} -> gettext("Enter a number of at most %{max}.", max: max)
+      # The step counts from the minimum, so "steps of", not "a multiple of".
+      {:step, step} -> gettext("Enter a number in steps of %{step}.", step: step)
+      {:rating_max, max} -> gettext("Choose a rating from 1 to %{max}.", max: max)
+      {:message, message} -> message
+    end
+  end
 
   defp form_error_message(message), do: to_string(message)
 
