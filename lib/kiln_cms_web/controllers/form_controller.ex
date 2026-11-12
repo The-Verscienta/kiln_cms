@@ -513,12 +513,19 @@ defmodule KilnCMSWeb.FormController do
   defp back(conn) do
     with [referer] <- get_req_header(conn, "referer"),
          %URI{host: host, path: path} when is_binary(path) <- URI.parse(referer),
-         true <- host in [nil, conn.host] do
+         true <- host in [nil, conn.host],
+         true <- local_path?(path) do
       path
     else
       _ -> nil
     end
   end
+
+  # A same-host referer can still carry a path a browser reads as another
+  # host: `//evil.example/x` is protocol-relative, and browsers treat `\`
+  # like `/`, so `/\evil.example` is one too.
+  defp local_path?("/" <> rest), do: not String.starts_with?(rest, ["/", "\\"])
+  defp local_path?(_path), do: false
 
   defp h(value) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()

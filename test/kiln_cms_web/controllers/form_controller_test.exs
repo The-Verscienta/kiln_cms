@@ -269,6 +269,9 @@ defmodule KilnCMSWeb.FormControllerTest do
 
       assert post_with.("http://www.example.com/contact?x=1") == ["/contact"]
       assert post_with.("https://evil.example/contact") == []
+      # Same host, but a path a browser reads as another host.
+      assert post_with.("http://www.example.com//evil.example/x") == []
+      assert post_with.("http://www.example.com/\\evil.example/x") == []
       assert post_with.(nil) == []
     end
 
