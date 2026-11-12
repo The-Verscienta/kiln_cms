@@ -294,28 +294,36 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
       # No `events` given: subscribe to the defaults for THIS tenant's types.
       # The attribute default can only see the default org's (see
-      # `default_events/1`).
+      # `default_events/1`). A Slack endpoint's default is every security
+      # event (#2245): it may take nothing else.
       change fn changeset, _context ->
-        if Ash.Changeset.changing_attribute?(changeset, :events) do
-          changeset
-        else
-          Ash.Changeset.force_change_attribute(
-            changeset,
-            :events,
-            default_events(changeset.tenant)
-          )
+        cond do
+          Ash.Changeset.changing_attribute?(changeset, :events) ->
+            changeset
+
+          Ash.Changeset.get_attribute(changeset, :format) == :slack ->
+            Ash.Changeset.force_change_attribute(changeset, :events, security_events())
+
+          true ->
+            Ash.Changeset.force_change_attribute(
+              changeset,
+              :events,
+              default_events(changeset.tenant)
+            )
         end
       end
 
       # A receiver-shared signing secret, generated once and stored encrypted.
       change set_attribute(:secret_encrypted, &__MODULE__.generate_encrypted_secret/0)
       validate KilnCMS.CMS.Validations.WebhookUrl
+      validate KilnCMS.CMS.Validations.WebhookFormatEvents
     end
 
     update :update do
       primary? true
       require_atomic? false
       validate KilnCMS.CMS.Validations.WebhookUrl
+      validate KilnCMS.CMS.Validations.WebhookFormatEvents
       # Any edit gives the endpoint a clean failure count. The auto-disable
       # stamp is only cleared when the endpoint ends up active: an admin fixing
       # the URL of an auto-disabled endpoint and leaving it off to ping first
@@ -459,7 +467,11 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
     # The body a delivery is rendered as (#2245): `:kiln`, the signed JSON
     # envelope, or `:slack`, an incoming-webhook message. Set at create only.
-    attribute :format, :atom do
+    # `KnownAtom`, not `:atom` (docs/releasing.md, "New values in an atom
+    # column"): a format a later release adds loads here as an `UnknownAtom`
+    # after a rollback instead of failing every read of the table. Delivery
+    # treats one as nothing it can render.
+    attribute :format, KilnCMS.Types.KnownAtom do
       allow_nil? false
       default :kiln
       public? true

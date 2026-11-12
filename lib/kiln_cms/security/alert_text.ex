@@ -33,23 +33,36 @@ defmodule KilnCMS.Security.AlertText do
   @doc """
   The values a headline is made of, from an alert's payload. String keys,
   because the map is stored as JSON and read back that way.
+
+  The payload may have atom keys (as `KilnCMS.Security.Changes.DeliverAlert`
+  builds it) or string keys (as the webhook ledger hands it back to
+  `KilnCMS.Webhooks.SlackFormat`).
   """
   @spec details(map()) :: details()
   def details(data) when is_map(data) do
-    event = Map.get(data, :event) || %{}
+    event = field(data, :event) || %{}
 
     %{
-      "phase" => Map.get(data, :phase),
-      "kind" => Map.get(data, :kind),
-      "channel" => Map.get(data, :channel),
-      "change" => Map.get(data, :change),
-      "kinds" => List.wrap(Map.get(data, :kinds)),
-      "count" => Map.get(data, :count),
-      "ip" => Map.get(event, :ip),
-      "event_type" => Map.get(event, :type)
+      "phase" => field(data, :phase),
+      "kind" => field(data, :kind),
+      "channel" => field(data, :channel),
+      "change" => field(data, :change),
+      "kinds" => List.wrap(field(data, :kinds)),
+      "count" => field(data, :count),
+      "ip" => field(event, :ip),
+      "event_type" => field(event, :type)
     }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
+
+  defp field(map, key) when is_map(map) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> Map.get(map, Atom.to_string(key))
+    end
+  end
+
+  defp field(_value, _key), do: nil
 
   @doc """
   One line saying what happened, in the current locale, from `details/1`'s

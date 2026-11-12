@@ -6369,6 +6369,11 @@ msgstr "Restauration de cette version impossible."
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't reveal that URL."
+msgstr "Impossible d’afficher cette URL."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't reveal that signing secret."
 msgstr "Impossible d'afficher ce secret de signature."
 
@@ -6786,6 +6791,11 @@ msgstr "Ctrl+Z"
 #, elixir-autogen, elixir-format
 msgid "Current"
 msgstr "Actuel"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Current URL:"
+msgstr "URL actuelle :"
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
@@ -9648,6 +9658,11 @@ msgstr "Paramètres des formulaires"
 msgid "Form submission"
 msgstr "Envoi de formulaire"
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Format"
+msgstr "Format"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Formatted text"
@@ -10313,6 +10328,11 @@ msgstr "Champ masqué — %{label}"
 #, elixir-autogen, elixir-format
 msgid "Hide"
 msgstr "Masquer"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hide URL"
+msgstr "Masquer l’URL"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -11333,6 +11353,11 @@ msgstr "Mots-clés appliqués. Le slug n'a pas été modifié car ce contenu est
 msgid "Kiln %{version} is available; this is %{current}."
 msgstr "Kiln %{version} est disponible ; celle-ci est la %{current}."
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kiln (signed JSON)"
+msgstr "Kiln (JSON signé)"
+
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
 msgid "Kiln can't see your real address."
@@ -11565,6 +11590,11 @@ msgstr "Laissez vide pour la valeur par défaut"
 #, elixir-autogen, elixir-format
 msgid "Leave blank for the default message"
 msgstr "Laissez vide pour le message par défaut"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to keep the current URL."
+msgstr "Laissez vide pour conserver l’URL actuelle."
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -17326,6 +17356,11 @@ msgstr "Afficher"
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
+msgid "Reveal URL"
+msgstr "Afficher l’URL"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
 msgid "Reveal signing secret for %{url}"
 msgstr "Afficher le secret de signature de %{url}"
 
@@ -19460,6 +19495,31 @@ msgstr "Aller au contenu principal"
 #, elixir-autogen, elixir-format
 msgid "Skipped"
 msgstr "Ignoré"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack"
+msgstr "Slack"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack (incoming webhook)"
+msgstr "Slack (webhook entrant)"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack doesn't check signatures: the URL is the credential. After saving, Kiln shows only its host."
+msgstr "Slack ne vérifie pas les signatures : l’URL est l’identifiant secret. Après l’enregistrement, Kiln n’en affiche que l’hôte."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack endpoints receive security alerts only."
+msgstr "Les endpoints Slack ne reçoivent que les alertes de sécurité."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack webhook added."
+msgstr "Webhook Slack ajouté."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex

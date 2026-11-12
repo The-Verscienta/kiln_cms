@@ -127,6 +127,20 @@ defmodule KilnCMSWeb.SurfaceTest do
     assert Surface.of(%{route: "/some/tenant/page"}) == :delivery
   end
 
+  # A webhook URL can be the credential (an incoming webhook carries its own
+  # token, #2245), so it is shown masked everywhere the console shows it. That
+  # only holds while no API hands out the rows: neither resource is on
+  # JSON:API, GraphQL or the MCP tools.
+  test "webhook endpoints and deliveries are not an API surface" do
+    for resource <- [KilnCMS.CMS.WebhookEndpoint, KilnCMS.CMS.WebhookDelivery] do
+      refute AshJsonApi.Resource in Spark.extensions(resource), inspect(resource)
+      refute AshGraphql.Resource in Spark.extensions(resource), inspect(resource)
+
+      refute Enum.any?(AshAi.Info.tools(KilnCMS.CMS), &(&1.resource == resource)),
+             inspect(resource)
+    end
+  end
+
   defp plugin_console_paths do
     for {path, _live_view, _action} <- Kiln.Plugins.admin_routes() ++ Kiln.Plugins.editor_routes(),
         do: "/" <> String.trim_leading(path, "/")

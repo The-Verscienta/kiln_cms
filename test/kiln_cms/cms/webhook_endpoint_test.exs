@@ -312,6 +312,117 @@ defmodule KilnCMS.CMS.WebhookEndpointTest do
     end
   end
 
+  describe "a Slack endpoint takes security events only (#2245)" do
+    @slack_url "https://hooks.example.test/services/T0/B0/abcdefgh"
+
+    defp event_errors(error) do
+      for %Ash.Error.Changes.InvalidAttribute{field: :events, message: message} <- error.errors,
+          do: message
+    end
+
+    test "created without events, it takes every security event" do
+      endpoint =
+        CMS.create_webhook_endpoint!(%{url: @slack_url, format: :slack}, actor: admin())
+
+      assert Enum.sort(endpoint.events) == Enum.sort(WebhookEndpoint.security_events())
+    end
+
+    test "created with a content event, it is refused" do
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.create_webhook_endpoint(
+                 %{
+                   url: @slack_url,
+                   format: :slack,
+                   events: ["security.lockout", "page.published"]
+                 },
+                 actor: admin()
+               )
+
+      assert event_errors(error) == ["Slack endpoints can only receive security events"]
+    end
+
+    test "updated to take a content event, it is refused and keeps its events" do
+      admin = admin()
+
+      endpoint =
+        CMS.create_webhook_endpoint!(
+          %{url: @slack_url, format: :slack, events: ["security.lockout"]},
+          actor: admin
+        )
+
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.update_webhook_endpoint(
+                 endpoint,
+                 %{events: ["security.lockout", "page.published"]},
+                 actor: admin
+               )
+
+      assert event_errors(error) == ["Slack endpoints can only receive security events"]
+      assert CMS.get_webhook_endpoint!(endpoint.id, actor: admin).events == ["security.lockout"]
+    end
+
+    # By prefix: a kind a later release adds is a security event too.
+    test "a security event this release does not list is allowed" do
+      endpoint =
+        CMS.create_webhook_endpoint!(
+          %{url: @slack_url, format: :slack, events: ["security.some_future_kind"]},
+          actor: admin()
+        )
+
+      assert endpoint.events == ["security.some_future_kind"]
+    end
+
+    test "an update that leaves the events alone is not checked" do
+      admin = admin()
+
+      endpoint =
+        CMS.create_webhook_endpoint!(%{url: @slack_url, format: :slack}, actor: admin)
+
+      # A row from before the rule (raw: the action would refuse it).
+      endpoint = Ash.Seed.update!(endpoint, %{events: ["page.published"]})
+
+      assert {:ok, %{active: false}} =
+               CMS.update_webhook_endpoint(endpoint, %{active: false}, actor: admin)
+    end
+
+    test "a Kiln endpoint may take content and security events together" do
+      endpoint =
+        CMS.create_webhook_endpoint!(
+          %{url: @slack_url, events: ["security.lockout", "page.published"]},
+          actor: admin()
+        )
+
+      assert endpoint.format == :kiln
+    end
+  end
+
+  # `KnownAtom` (docs/releasing.md): a format a later release adds loads
+  # after a rollback instead of failing every read of the table.
+  test "a format this release does not know loads as UnknownAtom" do
+    admin = admin()
+    endpoint = CMS.create_webhook_endpoint!(%{url: "https://example.test/hook"}, actor: admin)
+
+    KilnCMS.Repo.query!(
+      "UPDATE webhook_endpoints SET format = 'teams' WHERE id = $1::text::uuid",
+      [
+        endpoint.id
+      ]
+    )
+
+    assert %KilnCMS.Types.UnknownAtom{value: "teams"} =
+             CMS.get_webhook_endpoint!(endpoint.id, actor: admin).format
+  end
+
+  test "an invalid URL's error does not carry the URL (#2245)" do
+    assert {:error, %Ash.Error.Invalid{errors: errors}} =
+             CMS.create_webhook_endpoint(%{url: "http://localhost/s3cr3tT0ken"}, actor: admin())
+
+    assert [%Ash.Error.Changes.InvalidAttribute{field: :url, value: nil}] =
+             Enum.filter(errors, &match?(%Ash.Error.Changes.InvalidAttribute{field: :url}, &1))
+
+    refute inspect(errors) =~ "s3cr3tT0ken"
+  end
+
   describe "the URL is sensitive (#2245)" do
     test "inspecting an endpoint does not show its URL" do
       endpoint =

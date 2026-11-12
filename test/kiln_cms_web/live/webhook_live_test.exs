@@ -47,12 +47,18 @@ defmodule KilnCMSWeb.WebhookLiveTest do
   # Long enough (>= 16 characters) for the masked row to show its last four.
   @long_secret "whsec-test-0123456789-abcdWXYZ"
 
+  # An incoming-webhook style URL with a token in its path (#2245): the page
+  # shows it as `@masked_url` and never sends `@secret_segment` unasked.
+  @hook_url "https://hooks.test/existing/T0SECRET-token-Zq9x"
+  @masked_url "https://hooks.test/…/Zq9x"
+  @secret_segment "T0SECRET-token"
+
   defp seed_endpoint(secret \\ "s3cret", org_id \\ nil) do
     Ash.Seed.seed!(
       WebhookEndpoint,
       Map.merge(
         %{
-          url: "https://hooks.test/existing",
+          url: @hook_url,
           events: ["page.published"],
           active: true,
           secret_encrypted: KilnCMS.Keys.Vault.encrypt(secret)
@@ -119,16 +125,19 @@ defmodule KilnCMSWeb.WebhookLiveTest do
         lv
         |> form("#new-webhook-form",
           webhook: %{
-            url: "https://hooks.test/incoming",
+            url: "https://hooks.test/incoming/T0SECRET-token-Zq9x",
             events: ["page.published", "page.updated"]
           }
         )
         |> render_submit()
 
-      assert html =~ "https://hooks.test/incoming"
+      # Listed masked straight away (#2245).
+      assert html =~ "https://hooks.test/…/Zq9x"
+      refute html =~ @secret_segment
 
       assert [endpoint] = CMS.list_webhook_endpoints!(authorize?: false)
-      assert endpoint.url == "https://hooks.test/incoming"
+      assert endpoint.url == "https://hooks.test/incoming/T0SECRET-token-Zq9x"
+      assert endpoint.format == :kiln
       assert Enum.sort(endpoint.events) == ["page.published", "page.updated"]
       # A signing secret is generated and surfaced to the admin.
       assert is_binary(WebhookEndpoint.secret(endpoint))
@@ -182,7 +191,7 @@ defmodule KilnCMSWeb.WebhookLiveTest do
 
       assert has_element?(
                lv,
-               ~s(#reveal-secret-#{endpoint.id}[aria-label="Reveal signing secret for https://hooks.test/existing"]),
+               ~s(#reveal-secret-#{endpoint.id}[aria-label="Reveal signing secret for #{@masked_url}"]),
                "Reveal"
              )
     end
@@ -599,7 +608,7 @@ defmodule KilnCMSWeb.WebhookLiveTest do
 
       saved = CMS.get_webhook_endpoint!(endpoint.id, authorize?: false)
       assert saved.events == []
-      assert saved.url == "https://hooks.test/existing"
+      assert saved.url == @hook_url
     end
   end
 
@@ -729,7 +738,8 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/webhooks")
 
       row = "#delivery-#{orphaned.id}"
-      assert has_element?(lv, row, "https://hooks.test/existing")
+      assert has_element?(lv, row, @masked_url)
+      refute render(lv) =~ @secret_segment
       assert has_element?(lv, ~s(#{row} [data-role="deleted-endpoint"]), "(deleted endpoint)")
       refute has_element?(lv, ~s(button[phx-click="redeliver"][phx-value-id="#{orphaned.id}"]))
     end
@@ -744,7 +754,7 @@ defmodule KilnCMSWeb.WebhookLiveTest do
 
       row = "#delivery-#{orphaned.id}"
       assert has_element?(lv, ~s(#{row} [data-role="deleted-endpoint"]), "(deleted endpoint)")
-      refute has_element?(lv, "#{row} code", "https://hooks.test/existing")
+      refute has_element?(lv, "#{row} code", "https://hooks.test")
     end
 
     # Another admin deletes the endpoint after this page rendered.
@@ -796,6 +806,315 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/webhooks")
 
       assert html =~ "Auto-disabled after 10 failed deliveries"
+    end
+  end
+
+  # #2245: an incoming webhook's URL is its credential.
+  describe "URLs are masked everywhere on the page (#2245)" do
+    defp edit(lv, endpoint) do
+      lv
+      |> element(~s(button[phx-click="edit"][phx-value-id="#{endpoint.id}"]))
+      |> render_click()
+    end
+
+    test "the list, the secret's labels and the deliveries never carry the secret segment",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      endpoint = seed_endpoint(@long_secret)
+
+      Ash.Seed.seed!(KilnCMS.CMS.WebhookDelivery, %{
+        endpoint_id: endpoint.id,
+        endpoint_url: endpoint.url,
+        event: "page.published",
+        payload: %{}
+      })
+
+      gone = seed_endpoint()
+
+      Ash.Seed.seed!(KilnCMS.CMS.WebhookDelivery, %{
+        endpoint_id: gone.id,
+        endpoint_url: gone.url,
+        event: "page.published",
+        payload: %{}
+      })
+
+      :ok = CMS.destroy_webhook_endpoint(gone, actor: admin)
+
+      conn = log_in(conn, admin)
+      dead = conn |> get(~p"/editor/webhooks") |> html_response(200)
+      {:ok, lv, live_html} = live(conn, ~p"/editor/webhooks")
+
+      for html <- [dead, live_html] do
+        refute html =~ @secret_segment
+        refute html =~ @hook_url
+      end
+
+      assert has_element?(lv, "#webhook-#{endpoint.id}-url", @masked_url)
+      assert has_element?(lv, ~s([aria-label="Reveal signing secret for #{@masked_url}"]))
+      assert lv |> element("table") |> render() =~ @masked_url
+
+      # Revealing the secret labels its Copy and Hide with the masked URL too.
+      html = lv |> element("#reveal-secret-#{endpoint.id}") |> render_click()
+      refute html =~ @secret_segment
+
+      assert has_element?(
+               lv,
+               ~s(#copy-secret-#{endpoint.id}[aria-label="Copy signing secret for #{@masked_url}"])
+             )
+    end
+
+    test "Reveal URL shows the full URL, and Hide URL masks it again", %{conn: conn} do
+      endpoint = seed_endpoint()
+      {lv, _html} = open(conn)
+
+      lv |> element("#reveal-url-#{endpoint.id}") |> render_click()
+      assert has_element?(lv, "#webhook-#{endpoint.id}-url", @hook_url)
+      assert has_element?(lv, "#reveal-url-#{endpoint.id}", "Hide URL")
+
+      html = lv |> element("#reveal-url-#{endpoint.id}") |> render_click()
+      refute html =~ @secret_segment
+      assert has_element?(lv, "#webhook-#{endpoint.id}-url", @masked_url)
+    end
+
+    test "Reveal URL for another site's endpoint reveals nothing", %{conn: conn} do
+      other =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: "Other",
+          slug: "wh-url-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      theirs = seed_endpoint("s3cret", other.id)
+      {lv, _html} = open(conn)
+
+      html = render_click(lv, "reveal_url", %{"id" => theirs.id})
+
+      assert html =~ "Couldn&#39;t reveal that URL."
+      refute html =~ @secret_segment
+    end
+
+    test "Reveal URL is refused to an admin demoted after the page mounted", %{conn: conn} do
+      endpoint = seed_endpoint()
+      user = authed_user(:editor)
+
+      membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: user.id,
+          organization_id: KilnCMS.Accounts.default_org_id(),
+          role: :admin
+        })
+
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/webhooks")
+      Ash.Seed.update!(membership, %{role: :editor})
+
+      html = lv |> element("#reveal-url-#{endpoint.id}") |> render_click()
+
+      assert html =~ "Couldn&#39;t reveal that URL."
+      refute html =~ @secret_segment
+    end
+
+    test "the edit form is not pre-filled: not at first, after a change, or after a toggle",
+         %{conn: conn} do
+      endpoint = seed_endpoint()
+      {lv, _html} = open(conn)
+
+      html = edit(lv, endpoint)
+      refute html =~ @secret_segment
+      assert has_element?(lv, "#edit-webhook-#{endpoint.id}", "Current URL:")
+
+      assert has_element?(
+               lv,
+               "#edit-webhook-#{endpoint.id} #webhook-#{endpoint.id}-url",
+               @masked_url
+             )
+
+      assert has_element?(
+               lv,
+               "#edit-webhook-#{endpoint.id}",
+               "Leave blank to keep the current URL."
+             )
+
+      assert has_element?(
+               lv,
+               ~s(#edit-webhook-#{endpoint.id} input[name="webhook[url]"][value=""])
+             )
+
+      html =
+        lv
+        |> form("#edit-webhook-#{endpoint.id}", webhook: %{active: "false"})
+        |> render_change()
+
+      refute html =~ @secret_segment
+
+      html = bulk(lv, "edit", "group", "page")
+      refute html =~ @secret_segment
+
+      # What the admin types is theirs to see.
+      html =
+        lv
+        |> form("#edit-webhook-#{endpoint.id}", webhook: %{url: "https://hooks.test/typed"})
+        |> render_change()
+
+      assert html =~ ~s(value="https://hooks.test/typed")
+    end
+
+    test "a blank URL keeps the URL and raises no notice; a new URL does", %{conn: conn} do
+      endpoint = Ash.Seed.update!(seed_endpoint(), %{events: ["security.lockout"]})
+      {lv, _html} = open(conn)
+
+      edit(lv, endpoint)
+
+      html =
+        lv
+        |> form("#edit-webhook-#{endpoint.id}", webhook: %{url: ""})
+        |> render_submit()
+
+      assert html =~ "Saved."
+      assert CMS.get_webhook_endpoint!(endpoint.id, authorize?: false).url == @hook_url
+      assert KilnCMS.Test.SecurityAlerts.dispatches() == []
+
+      edit(lv, endpoint)
+
+      lv
+      |> form("#edit-webhook-#{endpoint.id}", webhook: %{url: "https://hooks.test/moved"})
+      |> render_submit()
+
+      assert CMS.get_webhook_endpoint!(endpoint.id, authorize?: false).url ==
+               "https://hooks.test/moved"
+
+      assert [%{"notice" => %{"change" => "webhook_changed"}}] =
+               KilnCMS.Test.SecurityAlerts.dispatches()
+    end
+  end
+
+  describe "the Slack format (#2245)" do
+    defp choose_slack(lv) do
+      lv
+      |> form("#new-webhook-form", webhook: %{format: "slack"})
+      |> render_change()
+    end
+
+    defp slack_endpoint! do
+      CMS.create_webhook_endpoint!(
+        %{url: "https://hooks.slack.test/services/T0/B0/T0SECRET-token-Zq9x", format: :slack},
+        authorize?: false
+      )
+    end
+
+    test "choosing Slack limits the picker to security events and ticks them all", %{conn: conn} do
+      {lv, _html} = open(conn)
+      security = WebhookEndpoint.security_events()
+
+      html = choose_slack(lv)
+
+      assert Enum.sort(checked(html, "new-webhook-form")) == Enum.sort(security)
+      refute has_element?(lv, ~s(#new-webhook-form input[value="page.published"]))
+      assert has_element?(lv, "#slack-url-credential", "the URL is the credential")
+      assert html =~ "Slack endpoints receive security alerts only."
+
+      # Back to Kiln: the defaults again.
+      html =
+        lv
+        |> form("#new-webhook-form", webhook: %{format: "kiln"})
+        |> render_change()
+
+      assert Enum.sort(checked(html, "new-webhook-form")) ==
+               Enum.sort(WebhookEndpoint.default_events())
+    end
+
+    test "Select all on a Slack form ticks every security event", %{conn: conn} do
+      {lv, _html} = open(conn)
+      choose_slack(lv)
+
+      assert checked(bulk(lv, "new", "none"), "new-webhook-form") == []
+
+      html = bulk(lv, "new", "all")
+
+      assert Enum.sort(checked(html, "new-webhook-form")) ==
+               Enum.sort(WebhookEndpoint.security_events())
+
+      refute has_element?(lv, ~s(#new-webhook-form button[phx-value-op="all"][title]))
+    end
+
+    test "adding one: a Slack row with a badge, and no secret or Rotate", %{conn: conn} do
+      {lv, _html} = open(conn)
+      choose_slack(lv)
+
+      html =
+        lv
+        |> form("#new-webhook-form",
+          webhook: %{url: "https://hooks.slack.test/services/T0/B0/T0SECRET-token-Zq9x"}
+        )
+        |> render_submit()
+
+      assert html =~ "Slack webhook added."
+      assert [endpoint] = CMS.list_webhook_endpoints!(authorize?: false)
+      assert endpoint.format == :slack
+      assert Enum.sort(endpoint.events) == Enum.sort(WebhookEndpoint.security_events())
+
+      refute html =~ @secret_segment
+      refute html =~ WebhookEndpoint.secret(endpoint)
+      assert has_element?(lv, "#webhook-#{endpoint.id}-slack", "Slack")
+      refute has_element?(lv, "#webhook-#{endpoint.id}-secret-masked")
+      refute has_element?(lv, "#reveal-secret-#{endpoint.id}")
+      refute has_element?(lv, "#rotate-secret-#{endpoint.id}")
+    end
+
+    test "a forged Slack create with a content event is refused", %{conn: conn} do
+      {lv, _html} = open(conn)
+      choose_slack(lv)
+
+      html =
+        render_submit(lv, "create", %{
+          "webhook" => %{
+            "url" => "https://hooks.slack.test/services/T0/B0/abc",
+            "format" => "slack",
+            "events" => ["security.lockout", "page.published"]
+          }
+        })
+
+      assert html =~ "Slack endpoints can only receive security events"
+      assert CMS.list_webhook_endpoints!(authorize?: false) == []
+    end
+
+    test "editing one shows the format read-only and offers security events only",
+         %{conn: conn} do
+      endpoint = slack_endpoint!()
+      {lv, _html} = open(conn)
+
+      edit(lv, endpoint)
+
+      assert has_element?(lv, "#webhook-#{endpoint.id}-format", "Slack (incoming webhook)")
+      refute has_element?(lv, ~s(#edit-webhook-#{endpoint.id} select[name="webhook[format]"]))
+      refute has_element?(lv, ~s(#edit-webhook-#{endpoint.id} input[value="page.published"]))
+
+      html = bulk(lv, "edit", "none")
+      assert checked(html, "edit-webhook-#{endpoint.id}") == []
+      html = bulk(lv, "edit", "all")
+
+      assert Enum.sort(checked(html, "edit-webhook-#{endpoint.id}")) ==
+               Enum.sort(WebhookEndpoint.security_events())
+    end
+
+    test "an admin demoted after the page mounted cannot add one", %{conn: conn} do
+      user = authed_user(:editor)
+
+      membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: user.id,
+          organization_id: KilnCMS.Accounts.default_org_id(),
+          role: :admin
+        })
+
+      {:ok, lv, _html} = conn |> log_in(user) |> live(~p"/editor/webhooks")
+      choose_slack(lv)
+      Ash.Seed.update!(membership, %{role: :editor})
+
+      lv
+      |> form("#new-webhook-form", webhook: %{url: "https://hooks.slack.test/services/T0/B0/abc"})
+      |> render_submit()
+
+      assert CMS.list_webhook_endpoints!(authorize?: false) == []
     end
   end
 end

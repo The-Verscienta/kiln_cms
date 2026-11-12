@@ -28,6 +28,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   alias KilnCMS.SafeFetch
   alias KilnCMS.Webhooks
   alias KilnCMS.Webhooks.RetractionLost
+  alias KilnCMS.Webhooks.SlackFormat
 
   @impl Oban.Worker
   def backoff(%Oban.Job{args: %{"retraction" => true}, attempt: attempt}),
@@ -260,11 +261,33 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   end
 
   defp post(endpoint, secret, delivery_id, event, payload) do
-    # `delivery_id` rides inside the body, so the signature covers it; the
-    # header copy is for routing and logging without a parse. Stable across a
-    # delivery's retries — it is the ledger row's id.
-    body = Jason.encode!(%{event: event, data: payload, delivery_id: delivery_id})
+    case body(endpoint.format, delivery_id, event, payload) do
+      {:ok, body} -> post_body(endpoint, secret, delivery_id, event, body)
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
+  # The body is rendered here, at send time, by the endpoint's format (#2245),
+  # and the signature below covers the body actually sent: Slack ignores the
+  # headers, but there stays one send path, and a relay in front of a
+  # Slack-compatible receiver can still verify them.
+  #
+  # Kiln's envelope: `delivery_id` rides inside the body, so the signature
+  # covers it; the header copy is for routing and logging without a parse.
+  # Stable across a delivery's retries — it is the ledger row's id.
+  defp body(:kiln, delivery_id, event, payload),
+    do: {:ok, Jason.encode!(%{event: event, data: payload, delivery_id: delivery_id})}
+
+  defp body(:slack, _delivery_id, event, payload),
+    do: {:ok, Jason.encode!(SlackFormat.render(event, payload))}
+
+  # A format a later release added (`KilnCMS.Types.UnknownAtom`), met after a
+  # rollback: this release cannot render it, and sending Kiln's envelope to a
+  # receiver set up for something else would only fail there.
+  defp body(_unknown, _delivery_id, _event, _payload),
+    do: {:error, "delivery failed: endpoint format not supported by this release"}
+
+  defp post_body(endpoint, secret, delivery_id, event, body) do
     # Headers are built here, at send time, from nothing the job stored: a job
     # enqueued before an upgrade goes out with the headers of the release that
     # runs it. That is how #1616 dropped the body-only `x-kilncms-signature`
