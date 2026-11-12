@@ -349,6 +349,40 @@ defmodule KilnCMS.Accounts.AdminAccountActionsTest do
 
     # Narrowing scopes or audiences is not a demotion, and must not be caught by
     # the guard — `:manage_access` carries all of those on one action.
+    # Two admins demoting each other at once both pass the build-time count.
+    # With no `role: :admin` row left, `/setup` re-opens to an anonymous
+    # visitor. Stood in for here by a changeset built while the other admin
+    # still stood, and submitted after that admin was demoted.
+    test "a demotion decided before the other admin's demotion is refused when it runs" do
+      one = user(:admin)
+      two = user(:admin)
+
+      built =
+        Ash.Changeset.for_update(one, :manage_access, %{role: :editor}, actor: two)
+
+      assert built.valid?
+
+      assert {:ok, _demoted} = Accounts.manage_user_access(two, %{role: :editor}, actor: one)
+
+      assert {:error, error} = Ash.update(built)
+      assert Exception.message(error) =~ "no admin"
+      assert Accounts.get_user!(one.id, authorize?: false).role == :admin
+      assert KilnCMS.Accounts.Bootstrap.bootstrapped?()
+    end
+
+    test "an erasure decided the same way is refused too" do
+      one = user(:admin)
+      two = user(:admin)
+
+      built = Ash.Changeset.for_update(one, :anonymize, %{}, actor: two)
+      assert built.valid?
+
+      assert {:ok, _demoted} = Accounts.manage_user_access(two, %{role: :editor}, actor: one)
+
+      assert {:error, error} = Ash.update(built)
+      assert Exception.message(error) =~ "no admin"
+    end
+
     test "a non-role edit on the last admin is untouched" do
       admin = user(:admin)
 

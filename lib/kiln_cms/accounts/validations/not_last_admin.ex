@@ -35,14 +35,16 @@ defmodule KilnCMS.Accounts.Validations.NotLastAdmin do
   would lock every operator out is still refused unless it says, by name, that
   locking them out is the point.
 
-  ## Counted, not reserved
+  ## Counted here, reserved in the transaction
 
-  The count is a plain read, so two admins demoting each other at the same
-  instant can both pass it. The narrower race is not worth an advisory lock
-  here: unlike the bootstrap it guards against (where the prize is *creating* an
-  admin nobody authorized), the failure mode is a lockout an operator can undo
-  from a release console, and the realistic mistake — one admin tidying up the
-  account list — is caught.
+  The count here is a plain read at build time, so two admins demoting each
+  other at the same instant both pass it. That is not only a lockout: an
+  instance with no `role: :admin` row answers `Bootstrap.bootstrapped?/0`
+  false, which re-opens the anonymous first-run `:bootstrap_admin` action to
+  the next visitor of `/setup`. So `KilnCMS.Accounts.Changes.GuardLastAdmin`,
+  declared beside this validation, asks the same question again inside the
+  write's transaction under the bootstrap advisory lock, where the two writes
+  are serialized and the second one sees the first.
 
   Only a *demotion* is checked on `:manage_access`: granting a temporary role,
   changing audiences or narrowing type scopes leave the count alone, and that one
@@ -58,16 +60,29 @@ defmodule KilnCMS.Accounts.Validations.NotLastAdmin do
 
   @impl true
   def validate(changeset, opts, _context) do
+    if orphans?(changeset, opts), do: {:error, error()}, else: :ok
+  end
+
+  @doc """
+  Would this write leave the instance with no standing admin? The validation's
+  own question, exported so `KilnCMS.Accounts.Changes.GuardLastAdmin` can ask
+  it again inside the write's transaction, under the bootstrap lock.
+  """
+  @spec orphans?(Ash.Changeset.t(), keyword()) :: boolean()
+  def orphans?(changeset, opts) do
     demotion? = Keyword.get(opts, :demotes?, false) or demoting_an_admin?(changeset)
 
-    if not exempt?(changeset) and demotion? and standing_admin?(changeset) and
-         last_admin?(changeset.data.id) do
-      {:error,
-       field: :role,
-       message: "would leave this instance with no admin. Promote someone else to admin first."}
-    else
-      :ok
-    end
+    not exempt?(changeset) and demotion? and standing_admin?(changeset) and
+      last_admin?(changeset.data.id)
+  end
+
+  @doc "The refusal, as `Ash.Changeset.add_error/2` and a validation both take it."
+  @spec error() :: keyword()
+  def error do
+    [
+      field: :role,
+      message: "would leave this instance with no admin. Promote someone else to admin first."
+    ]
   end
 
   @doc """

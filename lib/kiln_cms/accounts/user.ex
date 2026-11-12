@@ -344,6 +344,9 @@ defmodule KilnCMS.Accounts.User do
       # An admin demoting the last admin locks every operator out of `/editor`
       # with no route back through the UI — see the validation module.
       validate KilnCMS.Accounts.Validations.NotLastAdmin
+      # The same question again, in the transaction and under the bootstrap
+      # lock: two admins demoting each other at once both pass the validation.
+      change KilnCMS.Accounts.Changes.GuardLastAdmin
 
       # A standing tier at or above a live temporary one makes the grant
       # meaningless; leaving it on the row would show a countdown that changes
@@ -436,6 +439,7 @@ defmodule KilnCMS.Accounts.User do
       # would see `:admin` or the already-forced `:viewer` depends on which of the
       # two lines below is declared first.
       validate {KilnCMS.Accounts.Validations.NotLastAdmin, demotes?: true}
+      change {KilnCMS.Accounts.Changes.GuardLastAdmin, demotes?: true}
 
       # The registrations system actor may erase only the account a rejection
       # in this transaction has just turned away (#2514). Before the scrub, so
