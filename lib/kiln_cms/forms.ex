@@ -73,6 +73,15 @@ defmodule KilnCMS.Forms do
   # rides in it, just a millisecond timestamp), only a sanity window.
   @rendered_at_max_age :timer.hours(24)
 
+  # The refusals that carry a bound. `submit/3` builds them from these
+  # prefixes and `error_detail/1` parses them back with the same ones, so the
+  # HTML form's translation (#2269) cannot drift from the JSON API's English.
+  @min_prefix "must be at least "
+  @max_prefix "must be at most "
+  @step_prefix "must be a multiple of "
+  @rating_prefix "must be a rating from 1 to "
+  @too_long "is too long"
+
   @doc """
   The actor the form pipeline runs as: the submission write and the field
   read behind it, the notification and autoresponder workers' re-reads, the
@@ -278,6 +287,23 @@ defmodule KilnCMS.Forms do
         end
     end
   end
+
+  @doc """
+  Parse a refusal message from `submit/3` back into its kind and bound, so a
+  surface a person reads can show it as a translated sentence (#2269) while
+  the JSON API keeps returning the English fragment verbatim.
+
+  Returns `{:min, bound}`, `{:max, bound}`, `{:step, bound}` or
+  `{:rating_max, max}`, with the bound as the message wrote it (`"0.25"`,
+  `"-3"`), and `{:message, message}` for any other message.
+  """
+  @spec error_detail(String.t()) ::
+          {:min | :max | :step | :rating_max, String.t()} | {:message, String.t()}
+  def error_detail(@min_prefix <> bound) when bound != "", do: {:min, bound}
+  def error_detail(@max_prefix <> bound) when bound != "", do: {:max, bound}
+  def error_detail(@step_prefix <> bound) when bound != "", do: {:step, bound}
+  def error_detail(@rating_prefix <> max) when max != "", do: {:rating_max, max}
+  def error_detail(message) when is_binary(message), do: {:message, message}
 
   @doc """
   The hidden field a rendered page uses to carry its assigned experiment variant
@@ -586,7 +612,7 @@ defmodule KilnCMS.Forms do
 
     if String.length(str) <= KilnCMS.Limits.line(),
       do: {:ok, str},
-      else: {:error, "is too long"}
+      else: {:error, @too_long}
   end
 
   defp cast(%{field_type: :number} = field, value) do
@@ -601,7 +627,7 @@ defmodule KilnCMS.Forms do
 
     case rating_integer(value) do
       n when is_integer(n) and n >= 1 and n <= max -> {:ok, n}
-      _ -> {:error, "must be a rating from 1 to #{max}"}
+      _ -> {:error, @rating_prefix <> to_string(max)}
     end
   end
 
@@ -647,7 +673,7 @@ defmodule KilnCMS.Forms do
 
   defp check_min(min, decimal) when is_number(min) do
     if Decimal.lt?(decimal, bound(min)),
-      do: {:error, "must be at least #{bound_text(min)}"},
+      do: {:error, @min_prefix <> bound_text(min)},
       else: :ok
   end
 
@@ -655,7 +681,7 @@ defmodule KilnCMS.Forms do
 
   defp check_max(max, decimal) when is_number(max) do
     if Decimal.gt?(decimal, bound(max)),
-      do: {:error, "must be at most #{bound_text(max)}"},
+      do: {:error, @max_prefix <> bound_text(max)},
       else: :ok
   end
 
@@ -664,7 +690,7 @@ defmodule KilnCMS.Forms do
   defp check_step(step, min, decimal) when is_number(step) and step > 0 do
     if on_step?(decimal, bound(min || 0), bound(step)),
       do: :ok,
-      else: {:error, "must be a multiple of #{bound_text(step)}"}
+      else: {:error, @step_prefix <> bound_text(step)}
   end
 
   defp check_step(_step, _min, _decimal), do: :ok

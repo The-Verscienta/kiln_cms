@@ -756,6 +756,22 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   defp invalid(errors, key), do: if(Map.has_key?(errors, key), do: "true")
 
+  # What a default value does for the types where the bare input doesn't say
+  # (#2269): the public form pre-selects only an exact option match, and a
+  # rating only a whole star count (`BlockComponents.public_form_field/1`).
+  defp default_value_hint(:boolean), do: gettext("Use \"true\" to pre-check the box.")
+
+  defp default_value_hint(type) when type in [:select, :radio],
+    do: gettext("Must match one of the options exactly to pre-select it.")
+
+  defp default_value_hint(:checkboxes),
+    do: gettext("Must match one of the options exactly; that one box starts checked.")
+
+  defp default_value_hint(:rating),
+    do: gettext("A whole number of stars, from 1 to the maximum, to pre-select that rating.")
+
+  defp default_value_hint(_type), do: nil
+
   # `hint_ids`: one id or a list of them (a `nil` in it is skipped).
   defp described_by(errors, key, hint_ids \\ nil) do
     ids = List.wrap(hint_ids) ++ [Map.has_key?(errors, key) && "fs-#{key}-error"]
@@ -1259,12 +1275,22 @@ defmodule KilnCMSWeb.FormBuilderLive do
                       value={shown(@field_draft, "default_value", selected.default_value)}
                       phx-debounce="300"
                       aria-invalid={invalid(@field_errors, "default_value")}
-                      aria-describedby={described_by(@field_errors, "default_value")}
+                      aria-describedby={
+                        described_by(
+                          @field_errors,
+                          "default_value",
+                          default_value_hint(selected.field_type) && "fs-default-hint"
+                        )
+                      }
                       class="field-input mt-1"
                     />
                     <.setting_errors key="default_value" errors={@field_errors} />
-                    <p :if={selected.field_type == :boolean} class="mt-1 text-xs text-base-content/60">
-                      {gettext("Use \"true\" to pre-check the box.")}
+                    <p
+                      :if={default_value_hint(selected.field_type)}
+                      id="fs-default-hint"
+                      class="mt-1 text-xs text-base-content/60"
+                    >
+                      {default_value_hint(selected.field_type)}
                     </p>
                   </div>
 
