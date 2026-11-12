@@ -94,7 +94,27 @@ defmodule KilnCMS.CMS.Preparations.MaskPrivateFields do
     end)
   end
 
-  defp refuse_probe(query, _mode), do: query
+  # Below editor the same two are oracles for a PRIVATE key: the value is
+  # dropped from the response, but whether the row matched a guessed map, or
+  # where it sorted, is not. Refused wherever the site has a private field at
+  # all — the shared entry tier reaches every dynamic type, and a per-type
+  # answer would itself say which types hold one.
+  defp refuse_probe(query, :private) do
+    Ash.Query.before_action(query, fn query ->
+      if HiddenFields.touches_custom_fields?(query) and private_fields?(query.tenant) do
+        Ash.Query.add_error(query,
+          field: :custom_fields,
+          message: "cannot be filtered or sorted as a whole: use custom_filter and custom_sort"
+        )
+      else
+        query
+      end
+    end)
+  end
+
+  defp private_fields?(tenant) do
+    tenant |> KilnCMS.Accounts.org_id() |> PrivateFields.all() |> map_size() > 0
+  end
 
   defp mask(records, :private, tenant), do: Enum.map(records, &mask_private(&1, tenant))
 

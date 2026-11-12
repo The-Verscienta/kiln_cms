@@ -9,6 +9,8 @@ defmodule KilnCMS.CMS.PrivateFieldsTest do
 
   alias KilnCMS.CMS
 
+  require Ash.Query
+
   @accept "application/vnd.api+json"
   @password "password123456"
 
@@ -268,6 +270,44 @@ defmodule KilnCMS.CMS.PrivateFieldsTest do
 
       assert {200, %{"data" => [_]}} =
                api_get(base <> "&custom_filter[secret]=hidden", token(user(:editor)))
+    end
+  end
+
+  # `custom_fields` is a public attribute, so the API layers derive a filter and
+  # a sort on the WHOLE stored map from it, private keys included. The value is
+  # masked in the response; whether the row matched, or where it sorted, is not.
+  describe "the whole custom_fields map below editor" do
+    setup ctx do
+      %{entry: entry!(ctx.admin, ctx.type, %{"secret" => "hidden", "motto" => "shown"})}
+    end
+
+    defp whole_map_read(ctx, actor, build) do
+      KilnCMS.CMS.Entry
+      |> Ash.Query.for_read(:published, %{}, actor: actor, tenant: ctx.entry.org_id)
+      |> build.()
+      |> Ash.read(actor: actor, tenant: ctx.entry.org_id)
+    end
+
+    test "cannot be filtered on", ctx do
+      guess = %{"secret" => "hidden", "motto" => "shown"}
+      filter = &Ash.Query.filter(&1, custom_fields == ^guess)
+
+      for actor <- [nil, user(:viewer)] do
+        assert {:error, error} = whole_map_read(ctx, actor, filter)
+        assert Exception.message(error) =~ "as a whole"
+      end
+
+      assert {:ok, [_match]} = whole_map_read(ctx, ctx.admin, filter)
+    end
+
+    test "cannot be sorted on", ctx do
+      sort = &Ash.Query.sort(&1, custom_fields: :asc)
+
+      assert {:error, error} = whole_map_read(ctx, nil, sort)
+      assert Exception.message(error) =~ "as a whole"
+
+      base = "/api/json/entries/published?filter[type_name]=#{ctx.type.name}"
+      assert {400, _} = api_get(base <> "&sort=custom_fields")
     end
   end
 
