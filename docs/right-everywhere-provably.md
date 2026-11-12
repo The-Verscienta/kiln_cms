@@ -101,9 +101,10 @@ hours reached the last endpoint at **p50 0.14 s, p95 0.58 s, none lost**
 - **A change feed, server side.** `KilnCMS.Delivery.Feed` announces
   `published`, `updated` and `withdrawn` for each site over Phoenix PubSub,
   from the same transitions the webhooks use. Events carry identifiers, never
-  content. It is in-process only for now: the public SSE and Phoenix Channel
-  transports are planned for 2.2
-  ([changelog](changelog/v1.6.0.md#change-feed-server)).
+  content ([changelog](changelog/v1.6.0.md#change-feed-server)). Since 1.9
+  the public SSE transport serves it at `GET /api/feed`
+  ([API](api.md#change-feed-sse)); the Phoenix Channel transport is still
+  planned.
 - **Re-fire from an overlay.** `KilnCMS.Firing.refire/3` lets an overlay fire
   named documents again, with their dependents, webhooks and CDN purge, as an
   edit of live content would ([changelog](changelog/v1.6.0.md#overlay-refire)).
@@ -174,11 +175,12 @@ end can show the draft side of the same timeline (headless draft mode,
 These are planned, not shipped. The order is in
 [path-forward.md](path-forward.md).
 
-- **A public change feed** over SSE and Phoenix Channels, and
-  `kiln.subscribe()` / `KilnClient.subscribe/2` so a front end updates its
-  open pages in one call (2.2, 2.3). Today a front end learns of a change
-  through your webhook receiver, or through the experimental GraphQL
-  subscriptions over `/ws/gql`.
+- **The change feed over Phoenix Channels**, and `kiln.subscribe()` /
+  `KilnClient.subscribe/2` so a front end updates its open pages in one call
+  (2.2, 2.3). Today a front end follows `GET /api/feed` (Server-Sent Events,
+  since 1.9; [how](headless-consumer-guide.md#live-updates-follow-the-change-feed)),
+  your webhook receiver, or the experimental GraphQL subscriptions over
+  `/ws/gql`.
 - **Fan-out numbers**: open connections per node and propagation p95 at 1k,
   10k and 50k subscribers (2.4). The in-process feed has been measured at up
   to 10,000 subscribers ([benchmarks](benchmarks.md)); the network transports
