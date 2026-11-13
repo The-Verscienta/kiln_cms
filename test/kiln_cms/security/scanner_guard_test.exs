@@ -358,6 +358,29 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       StubCrawlerResolver.release(resolver)
     end
 
+    @duckduckbot "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)"
+
+    test "DuckDuckBot outside its fresh published list is counted, inside it is exempt (#2586)",
+         %{ip: ip} do
+      on_exit(&KilnCMS.CrawlerVerification.Ranges.clear/0)
+      {a, b, c, _} = ip
+      KilnCMS.CrawlerVerification.Ranges.put_fixture(:duckduckgo, ["#{a}.#{b}.#{c}.0/24"])
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+
+      outside = {a, b, rem(c + 1, 256), 9}
+      miss(4, "/gone", ua: @duckduckbot, ip: outside)
+      assert [_] = rules()
+    end
+
+    test "DuckDuckBot with no fresh list stays exempt", %{ip: ip} do
+      KilnCMS.CrawlerVerification.Ranges.clear()
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+    end
+
     test "a claim DNS proved false is counted like any other client", %{ip: ip} do
       CrawlerVerification.put_result(:google, ip, {:rejected, :wrong_domain})
 

@@ -487,3 +487,15 @@ config :kiln_cms, KilnCMS.CrawlerVerification,
   resolver: KilnCMS.Test.StubCrawlerResolver,
   max_entries: 2_000,
   max_verified_entries: 200
+
+# Published crawler IP ranges (#2586): on, like production, but nothing
+# fetches a list unless a test does, and every fetch goes to a Req.Test stub.
+# `bootstrap?: false` keeps the application boot from queueing a fetch job,
+# and the day-long `tick_ms` keeps `RangesSync`'s 10-minute check (which warns
+# that no list is fresh) out of a long run's logs; its tests call it directly.
+# Tests plant lists with `KilnCMS.CrawlerVerification.Ranges.put_fixture/3`.
+config :kiln_cms, KilnCMS.CrawlerVerification.Ranges,
+  enabled: true,
+  bootstrap?: false,
+  tick_ms: :timer.hours(24),
+  req_options: [plug: {Req.Test, KilnCMS.CrawlerVerification.Ranges}]

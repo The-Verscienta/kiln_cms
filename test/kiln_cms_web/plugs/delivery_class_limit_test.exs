@@ -553,6 +553,7 @@ defmodule KilnCMSWeb.Plugs.DeliveryClassLimitTest do
       assert tags[[:kiln_cms, :crawler_verification, :lookup, :count]] == [:engine, :result]
       assert tags[[:kiln_cms, :crawler_verification, :lookup, :duration]] == [:result]
       assert tags[[:kiln_cms, :crawler_verification, :skipped, :count]] == [:reason]
+      assert tags[[:kiln_cms, :crawler_verification, :ranges_fetch, :count]] == [:engine, :result]
     end
   end
 end

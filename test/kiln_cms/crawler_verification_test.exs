@@ -15,6 +15,7 @@ defmodule KilnCMS.CrawlerVerificationTest do
   alias KilnCMS.CrawlerVerification
   alias KilnCMS.CrawlerVerification.Engines
   alias KilnCMS.CrawlerVerification.InFlight
+  alias KilnCMS.CrawlerVerification.Ranges
   alias KilnCMS.Security.Cidr
   alias KilnCMS.Test.PublicAddress
   alias KilnCMS.Test.StubCrawlerResolver, as: Stub
@@ -750,7 +751,8 @@ defmodule KilnCMS.CrawlerVerificationTest do
       assert Stub.calls(:ptr, ip) == 0
     end
 
-    test "for DuckDuckBot, which publishes no reverse-DNS domain", %{opts: opts} do
+    test "for DuckDuckBot with no fresh list, since it publishes no reverse-DNS domain",
+         %{opts: opts} do
       ip = v4()
 
       assert CrawlerVerification.check(:duckduckgo, ip, opts) == {:unverified, :unverifiable}
@@ -767,6 +769,139 @@ defmodule KilnCMS.CrawlerVerificationTest do
       assert CrawlerVerification.check(:google, ip, [enabled: false] ++ opts) == :disabled
       assert CrawlerVerification.check(:duckduckgo, ip, [enabled: false] ++ opts) == :disabled
       assert CrawlerVerification.check(:google, v4(), [enabled: false] ++ opts) == :disabled
+    end
+  end
+
+  describe "published IP ranges (#2586)" do
+    # Clear of every vendor's real list and of `PublicAddress`, whose
+    # addresses the DNS cases below use.
+    @range_v4 "45.143.200.0/24"
+    @range_v6 "2a01:4f8:1::/48"
+
+    setup do
+      Ranges.clear()
+      on_exit(&Ranges.clear/0)
+    end
+
+    test "DuckDuckBot inside a fresh list is verified, with no DNS lookup", %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4, @range_v6])
+      ip = fresh({45, 143, 200, 7})
+      ip6 = fresh({0x2A01, 0x4F8, 1, 2, 0, 0, 0, 7})
+
+      assert CrawlerVerification.check(:duckduckgo, ip, opts) == :verified
+      assert CrawlerVerification.check(:duckduckgo, ip6, opts) == :verified
+      assert Stub.calls(:ptr, ip) == 0
+      assert Stub.calls(:ptr, ip6) == 0
+    end
+
+    test "DuckDuckBot outside a fresh list is a proven failure", %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4])
+      ip = v4()
+
+      assert CrawlerVerification.check(:duckduckgo, ip, opts) == {:unverified, :failed}
+      assert Stub.calls(:ptr, ip) == 0
+    end
+
+    test "DuckDuckBot over IPv6 is unverifiable when its list holds no IPv6 range",
+         %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4])
+      ip6 = fresh({0x2A01, 0x4F8, 9, 2, 0, 0, 0, 7})
+
+      assert CrawlerVerification.check(:duckduckgo, ip6, opts) == {:unverified, :unverifiable}
+    end
+
+    test "a stale list never verifies and never fails anything", %{opts: opts} do
+      max_age = Ranges.config()[:max_age_ms]
+      Ranges.put_fixture(:duckduckgo, [@range_v4], age_ms: max_age + 1)
+      Ranges.put_fixture(:google, [@range_v4], age_ms: max_age + 1)
+      ip = fresh({45, 143, 200, 8})
+
+      assert CrawlerVerification.check(:duckduckgo, ip, opts) == {:unverified, :unverifiable}
+      assert CrawlerVerification.check(:duckduckgo, v4(), opts) == {:unverified, :unverifiable}
+
+      # Google falls back to DNS, where this address has no PTR record.
+      assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :pending}
+      assert settle(:google, ip, opts) == {:unverified, :failed}
+      assert Stub.calls(:ptr, ip) == 1
+    end
+
+    test "Google inside a fresh list is verified with no lookup and no rate-cap charge",
+         %{opts: opts} do
+      Ranges.put_fixture(:google, [@range_v4])
+      opts = [lookups_per_minute: 1] ++ opts
+
+      for d <- 10..20 do
+        ip = fresh({45, 143, 200, d})
+        assert CrawlerVerification.check(:google, ip, opts) == :verified
+        assert Stub.calls(:ptr, ip) == 0
+      end
+
+      # The node's one lookup a minute is still unspent.
+      assert CrawlerVerification.check(:google, v4(), opts) == {:unverified, :pending}
+      assert CrawlerVerification.check(:google, v4(), opts) == {:unverified, :skipped}
+    end
+
+    test "a spoofed Googlebot outside a fresh list goes to DNS, never verified by ranges",
+         %{opts: opts} do
+      Ranges.put_fixture(:google, [@range_v4])
+      ip = v4()
+
+      assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :pending}
+      assert settle(:google, ip, opts) == {:unverified, :failed}
+      assert Stub.calls(:ptr, ip) == 1
+    end
+
+    test "a real Googlebot the list does not name yet is still verified by DNS",
+         %{opts: opts} do
+      Ranges.put_fixture(:google, [@range_v4])
+      ip = v4()
+      host = unique_host("crawl.googlebot.com")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, [ip])
+
+      assert settle(:google, ip, opts) == :verified
+    end
+
+    test "an address inside a list is not public through untrusted forwarding or a trusted proxy",
+         %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4])
+      Ranges.put_fixture(:google, [@range_v4])
+      ip = fresh({45, 143, 200, 30})
+
+      for engine <- [:duckduckgo, :google] do
+        assert CrawlerVerification.check(engine, ip, [forwarded_untrusted?: true] ++ opts) ==
+                 {:unverified, :not_public}
+      end
+
+      previous = Application.get_env(:kiln_cms, :trusted_proxies)
+      Application.put_env(:kiln_cms, :trusted_proxies, ["45.143.200.30/32"])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, :trusted_proxies, previous),
+          else: Application.delete_env(:kiln_cms, :trusted_proxies)
+      end)
+
+      assert CrawlerVerification.check(:duckduckgo, ip, opts) == {:unverified, :not_public}
+      assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :not_public}
+      assert Stub.calls(:ptr, ip) == 0
+    end
+
+    test "with ranges off, the lists are not read", %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4])
+      Ranges.put_fixture(:google, [@range_v4])
+      ip = fresh({45, 143, 200, 40})
+      opts = [ranges: [enabled: false]] ++ opts
+
+      assert CrawlerVerification.check(:duckduckgo, ip, opts) == {:unverified, :unverifiable}
+      assert CrawlerVerification.check(:duckduckgo, v4(), opts) == {:unverified, :unverifiable}
+      assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :pending}
+    end
+
+    test "with verification off, nothing is checked", %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4])
+
+      assert CrawlerVerification.check(:duckduckgo, v4(), [enabled: false] ++ opts) == :disabled
     end
   end
 
