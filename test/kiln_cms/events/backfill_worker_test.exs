@@ -10,8 +10,11 @@ defmodule KilnCMS.Events.BackfillWorkerTest do
   use KilnCMS.DataCase, async: false
   use Oban.Testing, repo: KilnCMS.Repo
 
+  import ExUnit.CaptureLog
+
   alias KilnCMS.CMS
   alias KilnCMS.Events.BackfillWorker
+  alias KilnCMS.Events.Recurrence
 
   @london "Europe/London"
 
@@ -74,6 +77,40 @@ defmodule KilnCMS.Events.BackfillWorkerTest do
       assert [_only_one] = queued()
     end
 
+    test "the job carries this node's engine, on its own queue, ten minutes out" do
+      # The queue is one no node of an older release polls, and the delay lets
+      # the old nodes of a rolling deploy go before the pass runs (moduledoc).
+      assert :ok = BackfillWorker.enqueue()
+      assert [job] = queued()
+
+      assert job.args == %{"engine" => Recurrence.engine_version()}
+      assert job.queue == "occurrence_backfill"
+      # And this release polls it: a queue nobody runs leaves the job waiting.
+      assert Application.fetch_env!(:kiln_cms, Oban)[:queues][:occurrence_backfill] == 1
+      assert job.state == "scheduled"
+      assert DateTime.diff(job.scheduled_at, DateTime.utc_now()) in 590..600
+    end
+
+    test "a completed job from before engines were recorded does not block it" do
+      # The previous release's boot job (`args: %{}`) completed an hour ago.
+      # With the old `[:worker]` dedup this enqueue inserted nothing, and the
+      # new engine's recompute never ran.
+      legacy!(%{}, "completed")
+
+      assert :ok = BackfillWorker.enqueue()
+
+      assert [_legacy, fresh] = Enum.sort_by(queued(), & &1.id)
+      assert fresh.args == %{"engine" => Recurrence.engine_version()}
+    end
+
+    test "a completed job for this engine does block it" do
+      legacy!(%{"engine" => Recurrence.engine_version()}, "completed")
+
+      assert :ok = BackfillWorker.enqueue()
+
+      assert [_only_the_completed_one] = queued()
+    end
+
     test "always answers :ok, never an error tuple a caller could crash on" do
       # `Application.start/2` calls this, so its return value is on the boot
       # path: anything other than `:ok` — or a raise, which the rescue covers —
@@ -93,6 +130,67 @@ defmodule KilnCMS.Events.BackfillWorkerTest do
       assert CMS.get_entry!(record.id, authorize?: false).next_occurrence_at
     end
 
+    test "a job for a newer engine snoozes and writes nothing", ctx do
+      # A node of this release picking up a later release's job mid-deploy
+      # would recompute with the old engine and use the new engine's run up.
+      record = event!(ctx, 30) |> Ash.Seed.update!(%{next_occurrence_at: nil})
+
+      assert {:snooze, _seconds} =
+               perform_job(BackfillWorker, %{"engine" => Recurrence.engine_version() + 1})
+
+      assert is_nil(CMS.get_entry!(record.id, authorize?: false).next_occurrence_at)
+    end
+
+    test "a job for this engine performs", ctx do
+      record = event!(ctx, 30) |> Ash.Seed.update!(%{next_occurrence_at: nil})
+
+      assert :ok = perform_job(BackfillWorker, %{"engine" => Recurrence.engine_version()})
+
+      assert CMS.get_entry!(record.id, authorize?: false).next_occurrence_at
+    end
+
+    test "a legacy job with no engine performs rather than snoozing", ctx do
+      # `nil > 1` is true in Erlang term order: without the `is_integer/1`
+      # guard a job enqueued by the previous release would snooze forever.
+      record = event!(ctx, 30) |> Ash.Seed.update!(%{next_occurrence_at: nil})
+
+      assert :ok = perform_job(BackfillWorker, %{})
+
+      assert CMS.get_entry!(record.id, authorize?: false).next_occurrence_at
+    end
+
+    test "logs how many rows changed, and names the ones that left the listings", ctx do
+      filled = event!(ctx, 30) |> Ash.Seed.update!(%{next_occurrence_at: nil})
+
+      # A stored date on an event that is over: the pass writes `nil`, so the
+      # event leaves the what's-on listings.
+      gone =
+        event!(ctx, -30)
+        |> Ash.Seed.update!(%{next_occurrence_at: DateTime.add(DateTime.utc_now(), 86_400)})
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert :ok = perform_job(BackfillWorker, %{"engine" => Recurrence.engine_version()})
+        end)
+
+      assert log =~ "[warning]"
+      assert log =~ "recomputed 2 record(s)"
+      assert log =~ "1 now have no upcoming date"
+      assert log =~ gone.id
+      refute log =~ filled.id
+    end
+
+    test "logs nothing when nothing changed", ctx do
+      event!(ctx, 30)
+
+      log =
+        capture_log([level: :info], fn ->
+          assert :ok = perform_job(BackfillWorker, %{"engine" => Recurrence.engine_version()})
+        end)
+
+      refute log =~ "occurrence backfill"
+    end
+
     test "all_types widens the pass", ctx do
       record = event!(ctx, 30)
       assert record.next_occurrence_at
@@ -102,10 +200,12 @@ defmodule KilnCMS.Events.BackfillWorkerTest do
       |> Enum.find(&(&1.name == "when"))
       |> CMS.destroy_field_definition!(actor: ctx.admin)
 
-      assert :ok = perform_job(BackfillWorker, %{})
+      engine = Recurrence.engine_version()
+
+      assert :ok = perform_job(BackfillWorker, %{"engine" => engine})
       assert CMS.get_entry!(record.id, authorize?: false).next_occurrence_at
 
-      assert :ok = perform_job(BackfillWorker, %{"all_types" => true})
+      assert :ok = perform_job(BackfillWorker, %{"engine" => engine, "all_types" => true})
       assert is_nil(CMS.get_entry!(record.id, authorize?: false).next_occurrence_at)
     end
   end
@@ -118,6 +218,22 @@ defmodule KilnCMS.Events.BackfillWorkerTest do
       # that warning meaningful.
       refute Application.get_env(:kiln_cms, :occurrence_backfill_on_boot, true)
     end
+  end
+
+  # A job row as the previous boot left it: inserted directly, because what is
+  # under test is whether `enqueue/0` sees it, not how it got there.
+  defp legacy!(args, state) do
+    now = DateTime.utc_now()
+
+    args
+    |> Oban.Job.new(worker: "KilnCMS.Events.BackfillWorker", queue: "default")
+    |> Ecto.Changeset.change(
+      state: state,
+      inserted_at: DateTime.add(now, -3600),
+      scheduled_at: DateTime.add(now, -3600),
+      completed_at: DateTime.add(now, -3500)
+    )
+    |> KilnCMS.Repo.insert!()
   end
 
   defp queued do

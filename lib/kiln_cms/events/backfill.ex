@@ -53,8 +53,18 @@ defmodule KilnCMS.Events.Backfill do
 
   @batch 500
 
-  @typedoc "What one pass did."
-  @type result :: %{scanned: non_neg_integer(), written: non_neg_integer()}
+  @typedoc """
+  What one pass did. `cleared` holds the ids of the rows it wrote `nil` to
+  over a stored date: those events left the "what's on" listings, which is
+  worth a log line when a recurrence engine change is the cause.
+  """
+  @type result :: %{
+          scanned: non_neg_integer(),
+          written: non_neg_integer(),
+          cleared: [Ash.UUID.t()]
+        }
+
+  @empty %{scanned: 0, written: 0, cleared: []}
 
   @doc """
   Backfill every organization. See `run_org/2` for options.
@@ -63,7 +73,7 @@ defmodule KilnCMS.Events.Backfill do
   def run(opts \\ []) do
     KilnCMS.Accounts.list_org_ids()
     |> Enum.map(&run_org(&1, opts))
-    |> Enum.reduce(%{scanned: 0, written: 0}, &tally/2)
+    |> Enum.reduce(@empty, &tally/2)
   end
 
   @doc """
@@ -91,14 +101,19 @@ defmodule KilnCMS.Events.Backfill do
       on_type.(descriptor, result)
       result
     end)
-    |> Enum.reduce(%{scanned: 0, written: 0}, &tally/2)
+    |> Enum.reduce(@empty, &tally/2)
   end
 
   defp types(org_id, true), do: ContentTypes.all_for_org(org_id)
   defp types(org_id, false), do: Events.calendar_types(org_id)
 
-  defp tally(result, acc),
-    do: %{scanned: acc.scanned + result.scanned, written: acc.written + result.written}
+  defp tally(result, acc) do
+    %{
+      scanned: acc.scanned + result.scanned,
+      written: acc.written + result.written,
+      cleared: acc.cleared ++ result.cleared
+    }
+  end
 
   # `Stream.unfold` rather than a recursive function so the paging condition is
   # stated once: a short page is the last page, and there is no separate "are we
@@ -116,11 +131,17 @@ defmodule KilnCMS.Events.Backfill do
           rows -> {rows, List.last(rows).id}
         end
     end)
-    |> Enum.reduce(%{scanned: 0, written: 0}, fn rows, acc ->
-      %{
-        scanned: acc.scanned + length(rows),
-        written: acc.written + Enum.count(rows, &refresh(&1, org_id, anchor))
-      }
+    |> Enum.reduce(@empty, fn rows, acc ->
+      outcomes = Enum.map(rows, &refresh(&1, org_id, anchor))
+
+      tally(
+        %{
+          scanned: length(rows),
+          written: Enum.count(outcomes, &(&1 != :skipped)),
+          cleared: for({:cleared, id} <- outcomes, do: id)
+        },
+        acc
+      )
     end)
   end
 
@@ -143,13 +164,18 @@ defmodule KilnCMS.Events.Backfill do
   defp cursor_filter(nil), do: []
   defp cursor_filter(cursor), do: [id: [greater_than: cursor]]
 
+  # `:written`, `{:cleared, id}` (written `nil` over a stored date), or
+  # `:skipped` (unchanged or unwritable).
   defp refresh(record, org_id, anchor) do
     case Index.refresh(record, org_id, anchor) do
-      :written ->
-        true
+      {:written, nil} ->
+        {:cleared, record.id}
+
+      {:written, _next} ->
+        :written
 
       :unchanged ->
-        false
+        :skipped
 
       # A backfill runs against a live site, so one unwritable row must not
       # abandon the pass — but unlike the sweep there is no next scheduled run
@@ -159,7 +185,7 @@ defmodule KilnCMS.Events.Backfill do
           "occurrence backfill: #{record.id} not written: #{inspect(reason)}; re-run to retry"
         )
 
-        false
+        :skipped
     end
   end
 end

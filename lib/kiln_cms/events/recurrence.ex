@@ -72,9 +72,33 @@ defmodule KilnCMS.Events.Recurrence do
             by_month: [],
             ex_dates: []
 
+  # See `engine_version/0`. Bump it with any change to what `expand/6` returns
+  # for a rule `parse/1` accepts.
+  @engine_version 1
+
   @doc "The default ceiling on how many occurrences a single expansion returns."
   @spec default_max() :: pos_integer()
   def default_max, do: @default_max
+
+  @doc """
+  The version of the expansion this module implements.
+
+  `next_occurrence_at` is stored, and `KilnCMS.Events.Index` treats a stored
+  future value (and a `nil`) as right by construction. That holds for one
+  engine only: when expansion output changes for any rule `parse/1` accepts,
+  every stored value computed by the old engine may be wrong, and nothing but
+  a full pass revisits them. `KilnCMS.Events.BackfillWorker` keys its boot job
+  on this number, so bumping it is what makes the first boot of a release
+  recompute the archive.
+
+  **Bump it whenever stored output can change:** an `expand/6` change for an
+  accepted rule, and also a change to `KilnCMS.Events.Index`'s `@horizon_days`
+  or `anchor/1`, which are the other inputs to the stored value. The golden
+  checksum in `test/kiln_cms/events/recurrence_test.exs` fails when expansion
+  output moves without a bump.
+  """
+  @spec engine_version() :: pos_integer()
+  def engine_version, do: @engine_version
 
   @doc """
   Parse an RRULE string (optionally with a trailing `EXDATE=` part).
