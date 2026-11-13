@@ -17,7 +17,7 @@ defmodule KilnCMS.Backups.HeartbeatTest do
   import ExUnit.CaptureLog
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, Heartbeat}
+  alias KilnCMS.Backups.{Chain, Heartbeat, StepWorker}
   alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
 
@@ -271,6 +271,96 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       fresh = %{state | last_beat: System.monotonic_time(:millisecond) - 60_000}
       Backups.with_actor(nil, fn -> Heartbeat.tick(fresh) end)
 
+      assert Process.alive?(step)
+    end
+  end
+
+  describe "stopping steps whose job was canceled (#2538)" do
+    # A process registered as a step is, under `value`, as `StepWorker`
+    # registers one; monitored, and killed at the end if still alive.
+    defp registered_step(value) do
+      parent = self()
+
+      step =
+        spawn(fn ->
+          {:ok, _} = Registry.register(KilnCMS.Backups.StepRegistry, "chain", value)
+          send(parent, :registered)
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive :registered
+      on_exit(fn -> Process.exit(step, :kill) end)
+      {step, Process.monitor(step)}
+    end
+
+    defp step_job!(state) do
+      job =
+        Oban.insert!(
+          StepWorker.new(%{
+            "chain" => Ash.UUID.generate(),
+            "step" => "archive",
+            "part" => 1,
+            "stamp" => "20260101-000000",
+            "dir" => Ash.UUID.generate()
+          })
+        )
+
+      {1, _} = Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: state])
+      job
+    end
+
+    for job_state <- ["cancelled", "completed", "discarded"] do
+      test "a step whose job is #{job_state} is killed after a successful beat", %{state: state} do
+        job = step_job!(unquote(job_state))
+        {step, ref} = registered_step({"archive", job.id})
+
+        log = capture_log([level: :error], fn -> Heartbeat.tick(state) end)
+
+        assert_receive {:DOWN, ^ref, :process, ^step, :killed}
+        assert log =~ "stopping 1 backup step(s) whose job was canceled"
+      end
+    end
+
+    test "a step whose job row is missing keeps running (a lagging standby, a restore)", %{
+      state: state
+    } do
+      job = step_job!("executing")
+      Repo.delete_all(from(j in Oban.Job, where: j.id == ^job.id))
+      {step, _ref} = registered_step({"archive", job.id})
+
+      Heartbeat.tick(state)
+
+      refute_receive {:DOWN, _, :process, ^step, _}, 100
+      assert Process.alive?(step)
+    end
+
+    test "a step whose job is executing keeps running", %{state: state} do
+      job = step_job!("executing")
+      {step, _ref} = registered_step({"archive", job.id})
+
+      Heartbeat.tick(state)
+
+      refute_receive {:DOWN, _, :process, ^step, _}, 100
+      assert Process.alive?(step)
+    end
+
+    test "a step registered by name alone (before #2538) is left to the fence", %{state: state} do
+      {step, _ref} = registered_step("archive")
+
+      Heartbeat.tick(state)
+
+      refute_receive {:DOWN, _, :process, ^step, _}, 100
+      assert Process.alive?(step)
+    end
+
+    test "no check when the beat fails: the job states may be anyone's guess", %{state: state} do
+      job = step_job!("cancelled")
+      {step, _ref} = registered_step({"archive", job.id})
+
+      fresh = %{state | last_beat: System.monotonic_time(:millisecond) - 60_000}
+      Backups.with_actor(nil, fn -> Heartbeat.tick(fresh) end)
+
+      refute_receive {:DOWN, _, :process, ^step, _}, 100
       assert Process.alive?(step)
     end
   end

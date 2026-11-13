@@ -14,7 +14,7 @@ defmodule KilnCMS.Backups.ResumeTest do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Checksum, Manifest, Worker, WorkState}
+  alias KilnCMS.Backups.{Artifact, Checksum, DirId, Manifest, Worker, WorkState}
   alias KilnCMS.Test.BackupChain
 
   @moduletag :capture_log
@@ -770,6 +770,386 @@ defmodule KilnCMS.Backups.ResumeTest do
   end
 
   # -- the work-directory sweep ----------------------------------------------
+
+  # -- #2538: the wait after a Cancel ----------------------------------------
+
+  describe "resumable_run/3 right after a Cancel (#2538)" do
+    setup %{dir: dir} do
+      now = DateTime.utc_now()
+      window = Backups.Heartbeat.settled_after_ms()
+
+      at = fn offset_ms -> DateTime.add(now, -window + offset_ms, :millisecond) end
+
+      seed = fn stamp, status, finished_at ->
+        run =
+          Ash.Seed.seed!(Backups.Run, %{stamp: stamp, status: status, finished_at: finished_at})
+
+        work = WorkState.path(dir, stamp)
+        File.mkdir_p!(work)
+        :ok = WorkState.write(work, WorkState.new(stamp))
+        run
+      end
+
+      %{now: now, at: at, seed: seed}
+    end
+
+    test "is refused until the window has passed, with the seconds left", %{
+      now: now,
+      at: at,
+      seed: seed
+    } do
+      seed.("20260101-000001", :canceled, at.(1_000))
+      seed.("20260101-000002", :canceled, at.(-1_000))
+      seed.("20260101-000003", :canceled, at.(window_ms() - 1))
+
+      assert {:error, {:canceled_recently, 1}} = Backups.resumable_run("20260101-000001", now)
+      assert {:ok, _} = Backups.resumable_run("20260101-000002", now)
+
+      assert {:error, {:canceled_recently, seconds}} =
+               Backups.resumable_run("20260101-000003", now)
+
+      assert seconds == div(window_ms(), 1000)
+    end
+
+    test "a run that just failed, or a canceled one with no finished_at, is not held back", %{
+      now: now,
+      seed: seed
+    } do
+      seed.("20260101-000004", :failed, now)
+      seed.("20260101-000005", :canceled, nil)
+
+      assert {:ok, _} = Backups.resumable_run("20260101-000004", now)
+      assert {:ok, _} = Backups.resumable_run("20260101-000005", now)
+    end
+
+    defp window_ms, do: Backups.Heartbeat.settled_after_ms()
+  end
+
+  describe "a resume start inside the window (#2538)" do
+    @describetag :pg_tools
+
+    # A promoted or retried start (no request-path check) waits out what is
+    # left of the window in the step, then resumes.
+    test "waits, logs the wait on the run, and succeeds", %{base: base, dir: dir} do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp} = fail_at_part_3(dir, tools)
+      window = Backups.Heartbeat.settled_after_ms()
+
+      canceled_at = fn offset_ms ->
+        at = DateTime.add(DateTime.utc_now(), -window + offset_ms, :millisecond)
+
+        {1, _} =
+          KilnCMS.Repo.update_all(
+            from(r in "backup_runs", where: r.id == type(^failed.id, :binary_id)),
+            set: [status: "canceled", finished_at: at]
+          )
+      end
+
+      # Settled when requested; one second inside the window when it starts.
+      canceled_at.(-1_000)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        canceled_at.(1_000)
+        started = System.monotonic_time(:millisecond)
+        BackupChain.drain()
+        assert System.monotonic_time(:millisecond) - started >= 1_000
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded} = run] = runs()
+      assert Enum.any?(run.log, &(&1.message =~ ~r/\AWaited \d+ s after the Cancel/))
+      assert dump_count(tools) == 1
+    end
+  end
+
+  # -- #2539: where a resume runs, and a resume that can't --------------------
+
+  describe "the run's backup directory (#2539)" do
+    @describetag :pg_tools
+
+    test "a fresh run records the directory its files are in", %{dir: dir} do
+      assert :ok = BackupChain.run()
+      assert {:ok, id} = DirId.current(dir)
+      assert [%{status: :succeeded, dir_id: ^id}] = runs()
+    end
+
+    test "a start retried on another node records the retry's directory", %{dir: dir} do
+      # The first attempt can't make the work directory, after opening the run.
+      {:ok, first} = DirId.local(dir)
+      blocker = Path.join(dir, ".work")
+      File.write!(blocker, "")
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} = Backups.request([], Backups.system())
+        assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+        assert [%{status: :running, dir_id: ^first}] = runs()
+
+        # The retry: a directory with another id.
+        File.rm!(blocker)
+        second = Ash.UUID.generate()
+        File.write!(DirId.path(dir), second <> "\n")
+
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+        assert [%{status: :succeeded, dir_id: ^second}] = runs()
+      end)
+    end
+
+    # B3: local files win over the recorded id, and the resume rebinds it.
+    test "a directory with a new id that still has the files resumes there", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp} = fail_at_part_3(dir, tools)
+      assert {:ok, old} = DirId.current(dir)
+      assert failed.dir_id == old
+
+      new = Ash.UUID.generate()
+      File.write!(DirId.path(dir), new <> "\n")
+
+      assert :ok = BackupChain.resume(stamp)
+      assert [%{status: :succeeded, dir_id: ^new}] = runs()
+      assert dump_count(tools) == 1
+    end
+
+    test "a run with no directory id (from before #2539) resumes and gains one", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp} = fail_at_part_3(dir, tools)
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          from(r in "backup_runs", where: r.id == type(^failed.id, :binary_id)),
+          set: [dir_id: nil]
+        )
+
+      assert :ok = BackupChain.resume(stamp)
+      assert {:ok, id} = DirId.current(dir)
+      assert [%{status: :succeeded, dir_id: ^id}] = runs()
+    end
+
+    test "on a node without the files the start waits, then runs where they are", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+      {:ok, id} = DirId.current(dir)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        # The start lands on a node with another backup directory.
+        aside = Path.join(base, "work-aside")
+        File.rename!(work, aside)
+        File.write!(DirId.path(dir), Ash.UUID.generate() <> "\n")
+
+        assert %{snoozed: 1} = BackupChain.drain(with_scheduled: false)
+        assert [%{status: :failed}] = runs()
+        assert %{step: :start} = Backups.in_flight()
+
+        # The node with the files picks it up.
+        File.rename!(aside, work)
+        File.write!(DirId.path(dir), id <> "\n")
+
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded, dir_id: ^id}] = runs()
+      assert dump_count(tools) == 1
+    end
+
+    # Critic amendment 1 and 2: requested while the files were there, then no
+    # node with them ever picks it up. Every attempt spends its snooze budget;
+    # the last one gives up.
+    test "a resume no node with its files picks up is given up, visibly, and the waiter runs",
+         %{base: base, dir: dir} do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+      {:ok, id} = DirId.current(dir)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+
+        File.rename!(work, Path.join(base, "work-aside"))
+        File.write!(DirId.path(dir), Ash.UUID.generate() <> "\n")
+
+        BackupChain.drain(with_scheduled: true)
+        assert {:error, {:backup_dir_elsewhere, ^id}} = BackupChain.settled(chain)
+      end)
+
+      assert Backups.in_flight() == nil
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+      assert run.error =~ ~r/\AResume refused: no server with its backup directory \(id #{id}\)/
+      assert run.error =~ failed.error
+      assert Backups.run_resumable?(run)
+
+      # The queued request was promoted and ran.
+      assert [%{trigger: "schedule", status: :succeeded}] =
+               Enum.reject(runs(), &(&1.id == failed.id))
+    end
+  end
+
+  describe "a resume refused after it was requested (#2539)" do
+    @describetag :pg_tools
+
+    # Requested while `state.json` is there (the request checks), then gone
+    # before the start step reads it. The file is put back afterwards.
+    defp refused_resume!(stamp, work) do
+      state = File.read!(WorkState.file(work))
+
+      outcome =
+        BackupChain.listen(fn ->
+          {:ok, %{status: :started, chain: chain}} =
+            Backups.request([resume: stamp], Backups.system())
+
+          File.rm!(WorkState.file(work))
+          BackupChain.drain()
+          BackupChain.settled(chain)
+        end)
+
+      File.write!(WorkState.file(work), state)
+      outcome
+    end
+
+    test "missing work files: the run stays failed and says why, the lock is free", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+
+      assert {:error, :no_state} = refused_resume!(stamp, work)
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+
+      assert run.error ==
+               "Resume refused: its work files (.work/#{stamp}/state.json) are not on the " <>
+                 "server that picked it up\n" <> failed.error
+
+      assert %{level: :error, step: "resume"} = List.last(run.log)
+      assert Backups.in_flight() == nil
+      assert Backups.run_resumable?(run)
+    end
+
+    test "two refusals in a row: one refusal line, the original failure kept", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+
+      assert {:error, :no_state} = refused_resume!(stamp, work)
+      assert {:error, :no_state} = refused_resume!(stamp, work)
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert length(String.split(run.error, "Resume refused:")) == 2
+      assert String.ends_with?(run.error, "\n" <> failed.error)
+
+      # And the files still resume it.
+      assert :ok = BackupChain.resume(stamp)
+    end
+
+    test "files gone after this chain re-opened the run: failed with the reason", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+
+      # The first attempt re-opens the run, then can't write its state.
+      blocker = WorkState.file(work) <> ".partial"
+      File.mkdir!(blocker)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+        assert [%{status: :running, chain_id: ^chain}] = runs()
+
+        File.rm_rf!(work)
+        BackupChain.drain()
+        assert {:error, :no_state} = BackupChain.settled(chain)
+      end)
+
+      assert [run] = runs()
+      assert run.status == :failed
+      assert run.error =~ ~r/\AResume refused: its work files \(\.work\/#{stamp}\/state\.json\)/
+      assert Backups.in_flight() == nil
+    end
+
+    # B5: the stale-running run is closed as failed, visibly, and stays resumable.
+    test "a stale running run whose files are gone is failed with the refusal", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+      quiet = DateTime.add(DateTime.utc_now(), -5 * 3600, :second)
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          from(r in "backup_runs", where: r.id == type(^failed.id, :binary_id)),
+          set: [
+            status: "running",
+            finished_at: nil,
+            error: nil,
+            started_at: quiet,
+            updated_at: quiet
+          ]
+        )
+
+      assert {:error, :no_state} = refused_resume!(stamp, work)
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+
+      assert run.error ==
+               "Resume refused: its work files (.work/#{stamp}/state.json) are not on the " <>
+                 "server that picked it up\nInterrupted: the job was killed or the node stopped"
+
+      assert Backups.run_resumable?(run)
+    end
+
+    test "a media-only run on a node with no media directory keeps its status, and says why",
+         %{base: base} do
+      tools = stub_tools(base)
+      File.write!(tools.gate, "")
+      assert {:error, _} = BackupChain.run("manual", components: [:media])
+      File.rm!(tools.gate)
+      assert [%{status: :failed, stamp: stamp, components: [:media]} = failed] = runs()
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :media_dir, nil)
+      )
+
+      assert {:error, :no_media_dir} = BackupChain.resume(stamp)
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+
+      assert run.error =~
+               ~r/\AResume refused: it backs up only media, and the server that picked it up has no media directory\n/
+
+      assert Backups.in_flight() == nil
+    end
+  end
 
   describe "Worker.sweep_work_dirs/2" do
     test "removes stamp-named work dirs older than three days, and only those", %{dir: dir} do

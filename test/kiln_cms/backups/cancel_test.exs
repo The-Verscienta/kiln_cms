@@ -15,7 +15,7 @@ defmodule KilnCMS.Backups.CancelTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Chain, Manifest}
+  alias KilnCMS.Backups.{Artifact, Chain, Heartbeat, Manifest, StepWorker, WorkState}
   alias KilnCMS.Repo
   alias KilnCMS.Security
   alias KilnCMS.Test.BackupChain
@@ -133,10 +133,21 @@ defmodule KilnCMS.Backups.CancelTest do
 
   defp mtime(path), do: File.stat!(path, time: :posix).mtime
 
-  defp fake_rclone!(base) do
+  # The Cancel as if it had settled: `finished_at` moved back past
+  # `Heartbeat.settled_after_ms/0` (#2538).
+  defp backdate_finished!(stamp) do
+    at = DateTime.add(DateTime.utc_now(), -(Heartbeat.settled_after_ms() + 1_000), :millisecond)
+
+    {1, _} =
+      Repo.update_all(from(r in "backup_runs", where: r.stamp == ^stamp),
+        set: [finished_at: at]
+      )
+  end
+
+  defp fake_rclone!(base, body \\ "exit 0\n") do
     bin = Path.join(base, "bin")
     File.mkdir_p!(bin)
-    File.write!(Path.join(bin, "rclone"), "#!/bin/sh\nexit 0\n")
+    File.write!(Path.join(bin, "rclone"), "#!/bin/sh\n" <> body)
     File.chmod!(Path.join(bin, "rclone"), 0o755)
     System.put_env("PATH", bin <> ":" <> System.get_env("PATH"))
 
@@ -180,6 +191,9 @@ defmodule KilnCMS.Backups.CancelTest do
       assert Backups.work_state?(stamp)
       assert %{success: 0} = BackupChain.drain()
 
+      # #2538: not right after the Cancel; once it has settled.
+      assert {:error, {:canceled_recently, _}} = BackupChain.resume(stamp)
+      backdate_finished!(stamp)
       assert :ok = BackupChain.resume(stamp)
 
       for {path, at} <- old, do: assert(mtime(path) == at, "#{path} was rebuilt")
@@ -298,13 +312,15 @@ defmodule KilnCMS.Backups.CancelTest do
       assert metadata == %{"stamp" => run.stamp}
     end
 
-    test "the killed step's late writes don't overwrite :canceled", %{admin: admin} do
+    test "the killed step's late writes don't overwrite :canceled, nor the resume after it",
+         %{admin: admin} do
       {:ok, %{status: :started}} = request()
       job = step_until("archive", 1)
       %{stamp: stamp} = lock()
 
-      # The step had begun when the cancel landed.
+      # The step had begun when the cancel landed, holding its chain's run.
       {:ok, zombie} = Chain.begin_step(job)
+      zombie_run = run_of(stamp)
       assert {:ok, _} = Backups.cancel_run(run_of(stamp), actor: admin)
 
       assert {:error, :superseded} = Chain.advance(zombie, "archive", 2)
@@ -316,6 +332,115 @@ defmodule KilnCMS.Backups.CancelTest do
                Backups.fail_run(run_of(stamp), %{error: "late"}, actor: Backups.system())
 
       assert %{status: :canceled} = run_of(stamp)
+
+      # #2538: a resume flips the run back to `running` under its own chain;
+      # the old step's writes are still refused.
+      backdate_finished!(stamp)
+      {:ok, %{status: :started, chain: resumed}} = request(resume: stamp)
+      %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      assert %{status: :running, chain_id: ^resumed} = run_of(stamp)
+
+      for call <- [
+            &Backups.fail_run(&1, %{error: "late"}, actor: Backups.system()),
+            &Backups.record_run_progress(&1, %{}, actor: Backups.system()),
+            &Backups.finish_run(&1, %{}, actor: Backups.system())
+          ] do
+        assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+                 call.(zombie_run)
+      end
+
+      assert %{status: :running, chain_id: ^resumed} = run_of(stamp)
+    end
+  end
+
+  describe "#2538: Resume right after a Cancel" do
+    test "is refused with how long to wait; nothing starts and the run stays canceled", %{
+      admin: admin
+    } do
+      {:ok, %{status: :started, chain: chain}} = request()
+      step_until("dump")
+      %{stamp: stamp} = lock()
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+      jobs = step_jobs(chain)
+
+      assert {:error, {:canceled_recently, seconds}} = request(resume: stamp)
+      assert seconds > 0 and seconds <= div(Heartbeat.settled_after_ms(), 1000)
+
+      assert Backups.in_flight() == nil
+      assert step_jobs(chain) == jobs
+
+      assert Repo.all(
+               from(j in Oban.Job, where: j.queue == "backup_steps" and j.state == "available")
+             ) == []
+
+      assert %{status: :canceled} = run_of(stamp)
+    end
+  end
+
+  describe "#2538: a step that outlives its Cancel" do
+    # The node running it missed the Cancel (under `testing: :manual` nothing
+    # kills the step), and a resume of the same stamp started meanwhile.
+    test "can't overwrite the resume's state.json or its run, and the resume succeeds", %{
+      base: base,
+      dir: dir,
+      admin: admin
+    } do
+      gate = Path.join(base, "rclone.gate")
+
+      fake_rclone!(base, """
+      touch "#{gate}.started"
+      while [ ! -f "#{gate}" ]; do sleep 0.05; done
+      exit 0
+      """)
+
+      {:ok, %{status: :started, chain: old_chain}} = request()
+      job = step_until("offsite")
+      %{stamp: stamp} = lock()
+
+      # The zombie claims the lease and blocks in its first `rclone copy`.
+      zombie = Task.async(fn -> StepWorker.perform(job) end)
+      wait_for!(gate <> ".started")
+      assert %{status: :running, chain_id: ^old_chain} = run_of(stamp)
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+      assert Process.alive?(zombie.pid)
+
+      backdate_finished!(stamp)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: resumed}} = request(resume: stamp)
+        %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+        # The zombie's copy finishes; it reaches its state write.
+        File.write!(gate, "")
+        assert {:cancel, :superseded} = Task.await(zombie, 15_000)
+
+        {:ok, state} = WorkState.read(WorkState.path(dir, stamp))
+        assert WorkState.chain(state) == resumed
+
+        run = run_of(stamp)
+        assert %{status: :running, chain_id: ^resumed} = run
+        refute Enum.any?(run.log, &(&1.message =~ "off-site"))
+
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(resumed)
+      end)
+
+      assert %{status: :succeeded} = run_of(stamp)
+    end
+  end
+
+  defp wait_for!(path, tries \\ 200) do
+    cond do
+      File.exists?(path) ->
+        :ok
+
+      tries == 0 ->
+        flunk("#{path} never appeared")
+
+      true ->
+        Process.sleep(25)
+        wait_for!(path, tries - 1)
     end
   end
 
