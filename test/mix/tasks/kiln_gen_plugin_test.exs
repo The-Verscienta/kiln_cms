@@ -22,6 +22,23 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
       assert_creates(igniter, "projects/ratings/plugin.ex")
       assert diff(igniter) =~ "plugins: [Ratings.Plugin]"
     end
+
+    # #2733: the notice used to say `mix kiln.gen.content <Type> --domain
+    # Ratings.Catalog`. kiln.gen.content has no --domain switch and registers
+    # every type on KilnCMS.CMS, so the next step has to be the by-hand one.
+    test "the next step for content types is one that works" do
+      igniter = Igniter.compose_task(project(), "kiln.gen.plugin", ["Ratings"])
+      notice = Enum.join(igniter.notices, "\n")
+
+      assert notice =~
+               ~r/^\s+use KilnCMS\.CMS\.Content, type: :<type>, domain: Ratings\.Catalog$/m
+
+      assert notice =~ ~r/^\s+projects\/example\/catalog\/\*\.ex as the template:$/m
+      assert notice =~ ~r/^\s+- uncomment domains\/0 in projects\/ratings\/plugin\.ex$/m
+      assert notice =~ ~r/^\s+config\/project\.exs \(projects\/example\/project\.exs/m
+      assert notice =~ ~r/^\s+it writes under projects\/ratings\/priv\/$/m
+      refute notice =~ "--domain"
+    end
   end
 
   describe "--dep (#1909)" do

@@ -38,10 +38,17 @@ if Code.ensure_loaded?(Igniter) do
     needs content types, Ash domains or `KilnCMSWeb` stays an overlay (see
     `Kiln.Plugin`, "As a Mix dependency, or as a `projects/` overlay").
 
-    Content types come next: generate them with
-    `mix kiln.gen.content <Type> --domain <Plugin>.Catalog` and register the
-    domain in `:ash_domains`/`:content_domains` — then verify the install
-    with `mix kiln.plugins.doctor` (it runs in precommit too).
+    Content types come next, and no generator writes them into a plugin's
+    domain yet: `mix kiln.gen.content` registers every type on the core
+    `KilnCMS.CMS`. Write them by hand on `KilnCMS.CMS.Content` with
+    `domain: <Plugin>.Catalog`, using `projects/example` (`catalog.ex` and
+    `catalog/`) as the template; uncomment `domains/0` in the generated
+    plugin; add the domain to `:ash_domains` and `:content_domains` in
+    `config/project.exs`; then run `mix ash.codegen` and move the migration
+    and snapshots it writes under `projects/<name>/priv/`. The notice lists
+    these steps, and `docs/extending-content.md` ("Plugins") and
+    `projects/example/README.md` explain them. Then verify the install with
+    `mix kiln.plugins.doctor` (it runs in precommit too).
     """
     @shortdoc "Generate a KilnCMS plugin skeleton"
     use Igniter.Mix.Task
@@ -406,8 +413,19 @@ if Code.ensure_loaded?(Igniter) do
       config :kiln_cms, :plugins.
       #{if block, do: "\nIts #{block} block is live: it appears in the editor's block palette,\nstores through the block union, and renders in firing/search.\n", else: ""}#{if field, do: "\nIts #{field} field type is live: admins can pick it at /editor/fields,\nand its cast/2 gates content writes.\n", else: ""}
       Next:
-        * Content types: mix kiln.gen.content <Type> --domain #{camel}.Catalog,
-          then add #{camel}.Catalog to :ash_domains and :content_domains.
+        * Content types: mix kiln.gen.content can't write them into a plugin's
+          domain yet (it registers every type on KilnCMS.CMS), so write them
+          by hand, using projects/example/catalog.ex and
+          projects/example/catalog/*.ex as the template:
+            - a #{camel}.Catalog domain in projects/#{snake}/catalog.ex, and
+              each type in projects/#{snake}/catalog/ built with
+              use KilnCMS.CMS.Content, type: :<type>, domain: #{camel}.Catalog
+            - uncomment domains/0 in projects/#{snake}/plugin.ex
+            - add #{camel}.Catalog to :ash_domains and :content_domains in
+              config/project.exs (projects/example/project.exs shows the shape)
+            - mix ash.codegen <name>, then move the migration and snapshots
+              it writes under projects/#{snake}/priv/
+              (see projects/example/README.md)
         * Verify the install: mix kiln.plugins.doctor (also runs in precommit).
       """
     end

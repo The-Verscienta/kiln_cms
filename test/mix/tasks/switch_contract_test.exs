@@ -30,6 +30,14 @@ defmodule Mix.Tasks.SwitchContractTest do
   the moduledoc, type the flag, and get "unknown option" or silence. 94 flags
   across 18 of the 28 tasks, at the time of writing.
 
+  A flag is charged to the task that runs it, not the file it is written in
+  (#2733). `kiln.gen.plugin`'s notice told users to run
+  `mix kiln.gen.content <Type> --domain …`, a switch `kiln.gen.content` has
+  never had, and this gate could not see it twice over: it read moduledocs
+  only, never the notices tasks print, and it skipped any `mix` command that
+  ran a different task. It now reads every string literal in every task, and
+  checks each `mix <task> --flag` against `<task>`'s switches.
+
   The reverse (declared → documented) is deliberately not asserted. It is a
   different and much weaker claim: an undocumented switch still works, whereas
   an undocumented-but-documented one is a lie an operator acts on.
@@ -50,20 +58,26 @@ defmodule Mix.Tasks.SwitchContractTest do
   # is a green suite. A failure here means the extraction broke, not that a task
   # did.
   #
-  # Set close to the real number (94 across 18 of the 28 tasks) rather than
-  # comfortably below it, because a slack floor is barely a floor: the first
-  # version of this file scanned 74 and the floor of 60 sat happily through
-  # three separate extraction bugs that between them hid a fifth of the flags —
-  # including every `## Options` bullet list in the repo. Losing any single
-  # task's flags should trip this. Raise it when tasks genuinely gain flags.
-  @minimum_flags 88
+  # Set close to the real number rather than comfortably below it, because a
+  # slack floor is barely a floor: the first version of this file scanned 74
+  # and the floor of 60 sat happily through three separate extraction bugs that
+  # between them hid a fifth of the flags — including every `## Options` bullet
+  # list in the repo. Losing any single task's flags should trip this. Raise it
+  # when tasks genuinely gain flags.
+  #
+  # The real number was 94 while only moduledocs were read; reading every
+  # string literal and every task's commands (#2733) made it 187 `{task, flag}`
+  # pairs, counted once per file that documents them.
+  @minimum_flags 180
 
   describe "every documented flag parses" do
-    test "the moduledoc's flags are all declared switches" do
+    test "every flag a task's text documents is a declared switch of the task it runs" do
+      known = known_switches()
+
       problems =
         for path <- @tasks,
-            {flag, switches} <- undeclared(path) do
-          "#{path}: moduledoc documents --#{flag}, which is not in @switches " <>
+            {task, flag, switches} <- undeclared(path, known) do
+          "#{path}: documents `mix #{task} --#{flag}`, and #{task} does not declare it " <>
             "(declared: #{inspect(switches)})"
         end
 
@@ -71,8 +85,8 @@ defmodule Mix.Tasks.SwitchContractTest do
              """
              A documented flag does not parse. `OptionParser` normalizes `-` to
              `_` and never the reverse, so a switch declared `foo_bar:` is typed
-             `--foo-bar`; a flag the moduledoc shows but @switches omits is an
-             unknown option at runtime (#931, #1088).
+             `--foo-bar`; a flag the text shows but the task omits is an
+             unknown option at runtime (#931, #1088, #2733).
 
              #{Enum.join(problems, "\n")}
              """
@@ -80,9 +94,10 @@ defmodule Mix.Tasks.SwitchContractTest do
 
     test "the sweep actually reads a meaningful number of flags" do
       # Guards the guard. Every mechanism here — locating the moduledoc, finding
-      # the indented usage blocks, walking the AST for `@switches` — can fail
-      # open and turn the assertion above into a tautology.
-      counted = Enum.sum(for path <- @tasks, do: length(documented_flags(path)))
+      # the command lines, walking the AST for `@switches` — can fail open and
+      # turn the assertion above into a tautology.
+      known = known_switches()
+      counted = Enum.sum(for path <- @tasks, do: length(documented_flags(path, known)))
 
       assert counted >= @minimum_flags,
              "only #{counted} documented flags found across #{length(@tasks)} tasks; " <>
@@ -98,7 +113,7 @@ defmodule Mix.Tasks.SwitchContractTest do
   # These pin them against fixtures rather than against the repo, which changes.
   describe "the checker itself" do
     test "it catches a documented flag that is not declared" do
-      assert [{"drain-media", [:dry_run]}] =
+      assert [{"fixture", "drain-media", [:dry_run]}] =
                undeclared_in(~S'''
                defmodule Mix.Tasks.Fixture do
                  @moduledoc """
@@ -117,7 +132,7 @@ defmodule Mix.Tasks.SwitchContractTest do
     # the assertion was satisfied by that — so the test named for #931 passed on
     # a different flag while `--all_orgs` sailed through.
     test "an underscored spelling is caught, which is #931 itself" do
-      assert [{"all_orgs", _}] =
+      assert [{"fixture", "all_orgs", _}] =
                undeclared_in(~S'''
                defmodule Mix.Tasks.Fixture do
                  @moduledoc """
@@ -146,7 +161,7 @@ defmodule Mix.Tasks.SwitchContractTest do
       # Heredocs dedent to the closing delimiter, so a bullet written at four
       # spaces arrives at two. An indent threshold that excludes prose also
       # excluded these — seven tasks' Options lists, silently.
-      assert [{"bogus", _}] =
+      assert [{"fixture", "bogus", _}] =
                undeclared_in(~S'''
                defmodule Mix.Tasks.Fixture do
                  @moduledoc """
@@ -164,7 +179,7 @@ defmodule Mix.Tasks.SwitchContractTest do
       # `#{...}` makes the AST node a `{:<<>>, _, parts}` rather than a binary,
       # so a `is_binary/1`-only clause returned "" and the file contributed no
       # flags at all — two real generator tasks were in that hole.
-      assert [{"bogus", _}] =
+      assert [{"fixture", "bogus", _}] =
                undeclared_in(~S'''
                defmodule Mix.Tasks.Fixture do
                  @example "x"
@@ -198,7 +213,7 @@ defmodule Mix.Tasks.SwitchContractTest do
     test "an `@aliases` short letter is not a valid long spelling" do
       # `@aliases [o: :out]` means `-o`, never `--o`. Folding its keys into the
       # declared set would accept a moduledoc that wrote `--o`.
-      assert [{"o", _}] =
+      assert [{"fixture", "o", _}] =
                undeclared_in(~S'''
                defmodule Mix.Tasks.Fixture do
                  @moduledoc """
@@ -222,7 +237,7 @@ defmodule Mix.Tasks.SwitchContractTest do
                ''')
     end
 
-    test "flags quoted in prose are ignored, only indented usage blocks count" do
+    test "other commands' flags quoted in prose are ignored" do
       # `kiln.update`'s moduledoc discusses git's own flags in prose. Scanning
       # the whole moduledoc reported every one of them as undeclared.
       assert [] =
@@ -234,6 +249,94 @@ defmodule Mix.Tasks.SwitchContractTest do
                  @switches [check: :boolean]
                end
                ''')
+    end
+
+    test "a sibling task's flag in a notice is checked against the sibling (#2733)" do
+      # The shape of #2733: a notice string, not the moduledoc, naming another
+      # task mid-line. The flag is the sibling's to declare, not this task's.
+      assert [{"kiln.sibling", "domain", [:from]}] =
+               undeclared_in(
+                 ~S'''
+                 defmodule Mix.Tasks.Fixture do
+                   @moduledoc "Generates things."
+                   @switches [domain: :string]
+
+                   defp notice(camel) do
+                     """
+                     Next:
+                       * Content types: mix kiln.sibling <Type> --domain #{camel}.Catalog,
+                         then register it.
+                     """
+                   end
+                 end
+                 ''',
+                 %{"kiln.sibling" => [:from]}
+               )
+    end
+
+    test "a command between backticks in prose is checked, up to the closing one" do
+      known = %{"kiln.sibling" => [:from]}
+
+      assert [{"kiln.sibling", "nope", _}] =
+               undeclared_in(
+                 ~S'''
+                 defmodule Mix.Tasks.Fixture do
+                   @moduledoc """
+                   Run `mix kiln.sibling --from recipe`.
+                   Or `mix kiln.sibling --nope`, after git's `--elsewhere` is set.
+                   """
+                 end
+                 ''',
+                 known
+               )
+    end
+
+    test "a command ends at a shell comment" do
+      # `--bogus` is in the comment after the command, and is not its flag.
+      assert [] =
+               undeclared_in(~S'''
+               defmodule Mix.Tasks.Fixture do
+                 @moduledoc """
+                     mix fixture --yes   # then pass --bogus to something else
+                 """
+                 @switches [yes: :boolean]
+               end
+               ''')
+    end
+
+    test "a task the repo does not have is not this gate's business" do
+      assert [] =
+               undeclared_in(~S'''
+               defmodule Mix.Tasks.Fixture do
+                 @moduledoc """
+                 Then run `mix ash.codegen --check` and `mix test --only slow`.
+                 """
+               end
+               ''')
+    end
+
+    # The gate against the real file, with #2733's line put back in each of the
+    # two places it stood. A fixture proves the regex can match that shape;
+    # this proves the scan reaches the notice and the moduledoc of the actual
+    # task, which is what was missing.
+    test "reinstating #2733's --domain line in kiln.gen.plugin fails the gate" do
+      path = "lib/mix/tasks/kiln.gen.plugin.ex"
+      source = File.read!(path)
+      known = known_switches()
+
+      assert undeclared_in(source, known) == []
+
+      for {current, old} <- [
+            {"* Content types: mix kiln.gen.content can't write them into a plugin's",
+             "* Content types: mix kiln.gen.content <Type> --domain \#{camel}.Catalog,"},
+            {"Content types come next, and no generator writes them into a plugin's",
+             "Content types come next: `mix kiln.gen.content <Type> --domain <Plugin>.Catalog`"}
+          ] do
+        mutated = String.replace(source, current, old)
+        assert mutated != source, "the anchor #{inspect(current)} is gone from #{path}"
+
+        assert [{"kiln.gen.content", "domain", _}] = undeclared_in(mutated, known)
+      end
     end
 
     test "switches declared inline on OptionParser.parse! count too" do
@@ -252,15 +355,30 @@ defmodule Mix.Tasks.SwitchContractTest do
 
   # ── extraction ──────────────────────────────────────────────────────────────
 
-  defp undeclared(path), do: path |> File.read!() |> undeclared_in()
+  # Every task's declared switches, by task name, so a flag one task's text
+  # documents for ANOTHER task can be checked against that task (#2733).
+  defp known_switches do
+    Map.new(@tasks, fn path ->
+      ast = path |> File.read!() |> Code.string_to_quoted!()
+      {task_name(ast), switch_keys(ast)}
+    end)
+  end
 
-  defp undeclared_in(source) do
+  defp undeclared(path, known), do: path |> File.read!() |> undeclared_in(known)
+
+  # `{task, flag, task's switches}` for each flag this source documents that
+  # its task does not declare. `known` maps other task names to their switches;
+  # a reference to a task outside it (`mix ash.codegen --check`, `mix test`)
+  # is not this gate's business and is skipped.
+  defp undeclared_in(source, known \\ %{}) do
     ast = Code.string_to_quoted!(source)
-    switches = switch_keys(ast)
+    own = task_name(ast)
+    switches = Map.put(known, own, switch_keys(ast))
 
-    for flag <- flags_in(moduledoc(ast), task_name(ast)),
-        not declared?(flag, switches),
-        do: {flag, switches}
+    for {task, flag} <- documented_in(ast, own),
+        Map.has_key?(switches, task),
+        not declared?(flag, switches[task]),
+        do: {task, flag, switches[task]}
   end
 
   # The comparison runs in FLAG space, never in key space, and that direction is
@@ -289,18 +407,38 @@ defmodule Mix.Tasks.SwitchContractTest do
 
   defp spelling(key), do: key |> Atom.to_string() |> String.replace("_", "-")
 
-  defp documented_flags(path) do
+  # The `{task, flag}` pairs one file documents for the repo's tasks, which is
+  # what the floor counts.
+  defp documented_flags(path, known) do
     ast = path |> File.read!() |> Code.string_to_quoted!()
-    flags_in(moduledoc(ast), task_name(ast))
+
+    for {task, _flag} = pair <- documented_in(ast, task_name(ast)),
+        Map.has_key?(known, task),
+        do: pair
   end
 
   defp declared_switches(path),
     do: path |> File.read!() |> Code.string_to_quoted!() |> switch_keys()
 
-  # Where tasks actually document flags, measured across all 28 rather than
+  # Where tasks actually document flags, measured across the repo rather than
   # guessed: a `## Options` bullet whose subject is the flag, a line in an
-  # options block that starts with the flag, and a `mix …` usage example.
+  # options block that starts with the flag, and a `mix …` command line.
   #
+  # The first two belong to the task whose moduledoc they are in. A command
+  # line belongs to the task it runs, wherever it is written: in a moduledoc,
+  # after a backtick in prose, or in a notice the task prints. Moduledocs and
+  # notices point at sibling tasks — `kiln.promote_data` opens by telling you to
+  # run `mix kiln.gen.content --from recipe`, and `kiln.gen.plugin`'s notice
+  # once told you to run `mix kiln.gen.content <Type> --domain …`, a switch
+  # `kiln.gen.content` has never had (#2733). Charging the sibling's flag to
+  # the task that mentions it was a false positive; skipping it, as this did
+  # until #2733, was a false negative.
+  defp documented_in(ast, own) do
+    bullets = for flag <- bullet_flags(moduledoc(ast)), do: {own, flag}
+    commands = for text <- string_literals(ast), pair <- command_flags(text), do: pair
+    Enum.uniq(bullets ++ commands)
+  end
+
   # NOT "any indented line", which is how this was written first. A heredoc is
   # dedented to its closing delimiter, so a bullet written at four spaces in the
   # source arrives at two — under any indent threshold that also excludes prose.
@@ -315,27 +453,54 @@ defmodule Mix.Tasks.SwitchContractTest do
   @flag_line ~r/^\s*(?:[*-]\s+`?--|--)/
   @flag ~r/--([a-z][a-z0-9_-]*)/
 
-  defp flags_in(doc, task) do
-    # A usage example counts only when it invokes THIS task. Moduledocs point at
-    # sibling tasks — `kiln.promote_data` opens by telling you to run
-    # `mix kiln.gen.content --from recipe` — and charging one task with another's
-    # flags is a false positive that would train people to edit the gate.
-    #
-    # `nil` (no recognizable task module) matches no usage line rather than all
-    # of them: an empty name interpolates to `mix\s+\b`, which matches every
-    # `mix …` line there is, and that is how `--from` above was first reported.
-    usage = task && ~r/^\s*mix\s+#{Regex.escape(task)}\b/
-
+  defp bullet_flags(doc) do
     doc
     |> String.split("\n")
-    |> Enum.filter(&(Regex.match?(@flag_line, &1) or (usage && Regex.match?(usage, &1))))
+    |> Enum.filter(&Regex.match?(@flag_line, &1))
     |> Enum.flat_map(&Regex.scan(@flag, &1))
     |> Enum.map(fn [_, flag] -> flag end)
-    |> Enum.uniq()
   end
 
-  # `Mix.Tasks.Kiln.Export.Static` → `kiln.export.static`, so the usage rule
-  # above works on a fixture string as well as on a real file.
+  # `mix <task> <args>`, anywhere on a line. The args run until whatever ends
+  # a command in text: a closing backtick, the end of the line, a shell `#`
+  # comment (`mix kiln.x --a   # then pass --b to y` documents only `--a`), a
+  # `|`, `;` or `&&`, or the next `mix`.
+  @command ~r/\bmix\s+([a-z]\w*(?:\.\w+)*)((?:(?!\bmix\s)[^`#\n|;&])*)/
+
+  defp command_flags(text) do
+    for [_, task, args] <- Regex.scan(@command, text),
+        [_, flag] <- Regex.scan(@flag, args),
+        do: {task, flag}
+  end
+
+  # Every string literal in the source: moduledocs, `@doc`s, module attributes
+  # and the notices and messages a task prints. An interpolated string is its
+  # literal segments with a placeholder where each `#{…}` was, which keeps the
+  # segments either side of it apart: `--domain #{camel}.Catalog` reads as
+  # `--domain … .Catalog`. The interpolated expressions are walked too, since a
+  # notice can hold strings inside them (`#{if block, do: "…"}`).
+  @interpolation " … "
+
+  defp string_literals(ast) do
+    {_ast, texts} =
+      Macro.prewalk(ast, [], fn
+        text, acc when is_binary(text) ->
+          {text, [text | acc]}
+
+        {:<<>>, _, parts}, acc ->
+          text = Enum.map_join(parts, &if(is_binary(&1), do: &1, else: @interpolation))
+          exprs = Enum.reject(parts, &is_binary/1)
+          {{:__block__, [], exprs}, [text | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reverse(texts)
+  end
+
+  # `Mix.Tasks.Kiln.Export.Static` → `kiln.export.static`: the name a command
+  # line uses, so a fixture string's flags are charged as a real file's are.
   defp task_name(ast) do
     {_ast, mod} =
       Macro.prewalk(ast, nil, fn

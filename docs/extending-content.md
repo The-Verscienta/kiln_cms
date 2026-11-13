@@ -1983,7 +1983,10 @@ routes** (role-gated, mounted in the admin live session), **supervision
 children**, and **Oban queues** (merged at boot). Content types need no
 callback: build them on `KilnCMS.CMS.Content` in the plugin's own Ash domain
 and register that domain in `:ash_domains`/`:content_domains` — admin CRUD,
-webhooks, delivery and workers follow automatically.
+webhooks, delivery and workers follow automatically. `mix ash.codegen` writes
+their migrations and snapshots into the core's `priv/`; move them under
+`projects/<name>/priv/`, which the image build copies back into `priv/` (see
+`projects/example/README.md`).
 
 **Filters on a plugin field type compare text.** `cast/2` runs on writes
 only. A `custom_filter` or `customWhere` operand on a plugin type's field is
