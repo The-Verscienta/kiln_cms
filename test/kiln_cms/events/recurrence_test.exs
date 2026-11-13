@@ -653,14 +653,128 @@ defmodule KilnCMS.Events.RecurrenceTest do
   end
 
   describe "UNTIL renders against DTSTART's value type" do
-    test "date form for storage, UTC datetime form for a timed event" do
+    test "date form for storage, the end of the local date for a timed event" do
       {:ok, rule} = Recurrence.parse("FREQ=WEEKLY;BYDAY=TU;UNTIL=20260303")
 
-      assert Recurrence.to_rrule(rule) =~ "UNTIL=20260303"
-      # End-of-day, because the stored UNTIL is an inclusive date: midnight
-      # would silently drop 3 March, which Kiln's own expansion keeps.
-      assert Recurrence.to_rrule(rule, until: :datetime) =~ "UNTIL=20260303T235959Z"
+      assert Recurrence.to_rrule(rule) =~ "UNTIL=20260303;"
+      assert Recurrence.to_rrule(rule, until: :date, time_zone: @new_york) =~ "UNTIL=20260303;"
+
+      # Etc/UTC is the one zone where the old fixed `T235959Z` was right.
+      assert rendered_until("FREQ=WEEKLY;UNTIL=20260303", @utc) == "20260303T235959Z"
     end
+  end
+
+  describe "a timed UNTIL is the end of the local date, in UTC (#2751)" do
+    # Expected values worked out by hand: local midnight of the next day, in
+    # that day's offset, minus one second.
+    for {zone, until, expected, why} <- [
+          {"America/New_York", "20260303", "20260304T045959Z", "EST, west of UTC"},
+          {"Asia/Tokyo", "20260303", "20260303T145959Z", "JST, east of UTC"},
+          {"America/New_York", "20260308", "20260309T035959Z", "spring-forward day: EDT"},
+          {"America/New_York", "20261101", "20261102T045959Z", "fall-back day: EST"},
+          # Chile springs forward at local 00:00 (04:00 UTC) on 6 September
+          # 2026, so the next day's midnight is in the gap: the end of the 5th
+          # is the instant before it.
+          {"America/Santiago", "20260905", "20260906T035959Z", "midnight gap"},
+          # Chile falls back at local 24:00 on 4 April 2026 (03:00 UTC): 23:xx
+          # happens twice. Local 23:59:59 resolved to the first of the pair
+          # would cut the second hour; next midnight − 1 s does not.
+          {"America/Santiago", "20260404", "20260405T035959Z", "24:00 fall-back"}
+        ] do
+      test "#{zone} UNTIL #{until} (#{why})" do
+        assert rendered_until("FREQ=WEEKLY;UNTIL=#{unquote(until)}", unquote(zone)) ==
+                 unquote(expected)
+      end
+    end
+
+    test "the datetime form needs the zone, and never defaults to UTC" do
+      rule = rule!("FREQ=WEEKLY;UNTIL=20260303")
+
+      assert_raise ArgumentError, ~r/time_zone/, fn ->
+        Recurrence.to_rrule(rule, until: :datetime)
+      end
+    end
+
+    test "a zone the database does not know falls back to the date form" do
+      # A public feed must not fail on one record.
+      rule = rule!("FREQ=WEEKLY;UNTIL=20260303")
+
+      assert Recurrence.to_rrule(rule, until: :datetime, time_zone: "Nowhere/Atlantis") ==
+               "FREQ=WEEKLY;UNTIL=20260303"
+    end
+
+    # The issue's two scenarios, generalised: whatever Kiln expands for a rule
+    # with UNTIL D is at or before the rendered UNTIL, and the first occurrence
+    # past D of the same rule without UNTIL is after it. So a client that reads
+    # the rendered rule shows exactly Kiln's dates.
+    test "New York 20:00 weekly keeps its last occurrence" do
+      assert_until_agrees("FREQ=WEEKLY;BYDAY=TU", ~D[2026-03-03], ~T[20:00:00], @new_york)
+    end
+
+    test "Tokyo 08:00 gains no occurrence the day after UNTIL" do
+      # 08:00 JST on the 5th is 23:00 UTC on the 4th: inside the old `T235959Z`.
+      assert_until_agrees("FREQ=DAILY", ~D[2026-03-04], ~T[08:00:00], "Asia/Tokyo")
+    end
+
+    test "agrees in every zone on DST changeover days, at either end of the day" do
+      zones = ~w(Europe/London America/New_York Asia/Tokyo America/Santiago Asia/Kolkata
+                 Pacific/Chatham)
+
+      days = [
+        ~D[2026-03-08],
+        ~D[2026-03-29],
+        ~D[2026-04-04],
+        ~D[2026-04-05],
+        ~D[2026-09-05],
+        ~D[2026-09-06],
+        ~D[2026-09-27],
+        ~D[2026-10-25],
+        ~D[2026-11-01]
+      ]
+
+      for zone <- zones, day <- days, time <- [~T[00:30:00], ~T[08:00:00], ~T[23:30:00]] do
+        assert_until_agrees("FREQ=DAILY", day, time, zone)
+      end
+    end
+  end
+
+  defp rendered_until(rrule, zone) do
+    [_, until] =
+      Regex.run(
+        ~r/UNTIL=([0-9TZ]+)/,
+        rrule |> rule!() |> Recurrence.to_rrule(until: :datetime, time_zone: zone)
+      )
+
+    until
+  end
+
+  defp until_instant(rrule, zone) do
+    <<y::binary-4, mo::binary-2, d::binary-2, "T", h::binary-2, mi::binary-2, s::binary-2, "Z">> =
+      rendered_until(rrule, zone)
+
+    {:ok, dt, 0} = DateTime.from_iso8601("#{y}-#{mo}-#{d}T#{h}:#{mi}:#{s}Z")
+    dt
+  end
+
+  defp assert_until_agrees(rrule, until_date, time, zone) do
+    bounded = rrule <> ";UNTIL=" <> Calendar.strftime(until_date, "%Y%m%d")
+    limit = until_instant(bounded, zone)
+    dtstart = until_date |> Date.add(-14) |> NaiveDateTime.new!(time)
+    window = {~U[2026-01-01 00:00:00Z], ~U[2027-01-01 00:00:00Z]}
+
+    kiln = Recurrence.expand(rule!(bounded), dtstart, zone, elem(window, 0), elem(window, 1))
+    assert kiln != []
+
+    for instant <- kiln do
+      assert DateTime.compare(instant, limit) != :gt,
+             "#{zone} #{bounded}: Kiln's #{instant} is after the rendered UNTIL #{limit}"
+    end
+
+    unbounded = Recurrence.expand(rule!(rrule), dtstart, zone, elem(window, 0), elem(window, 1))
+    first_after = Enum.find(unbounded, &(&1 not in kiln))
+
+    assert DateTime.compare(first_after, limit) == :gt,
+           "#{zone} #{bounded}: #{first_after} is past UNTIL in Kiln, inside it for a client"
   end
 
   # Local dates of `rrule` from `dtstart` (UTC wall time) through `through`.

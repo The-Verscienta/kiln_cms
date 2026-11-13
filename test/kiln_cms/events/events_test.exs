@@ -523,7 +523,30 @@ defmodule KilnCMS.EventsTest do
       ics = ICS.event(event, org_id: ctx.org)
 
       assert ics =~ "DTSTART;TZID=Europe/London:"
-      assert ics =~ "UNTIL=20260405T235959Z"
+      # The end of 5 April in London, which is on BST by then: midnight of the
+      # 6th is 23:00 UTC on the 5th. The old `T235959Z` let a client add an
+      # hour of the 6th to the series (#2751).
+      assert ics =~ "UNTIL=20260405T225959Z"
+    end
+
+    test "an all-day rule's UNTIL stays a DATE, matching its DTSTART", ctx do
+      add_recurrence(ctx.td, ctx.admin)
+
+      event =
+        event!(ctx, %{
+          "when" => %{
+            "start" => "2026-03-15T00:00",
+            "end" => "2026-03-15T00:00",
+            "time_zone" => @london,
+            "all_day" => true
+          },
+          "repeats" => %{"rrule" => "FREQ=WEEKLY;BYDAY=SU;UNTIL=20260405"}
+        })
+
+      ics = ICS.event(event, org_id: ctx.org)
+
+      assert ics =~ "DTSTART;VALUE=DATE:20260315"
+      assert ics =~ ~r/RRULE:[^\r]*UNTIL=20260405(;|\r)/
     end
 
     test "a zone that bypassed the field-type cast cannot inject calendar lines", ctx do

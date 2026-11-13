@@ -172,8 +172,23 @@ defmodule KilnCMS.Events.Recurrence do
   round-trips through `parse/1`) or `:datetime`. RFC 5545 §3.3.10 requires
   `UNTIL` to match `DTSTART`'s value type, so a timed event's rule must render
   the datetime form — a date-only `UNTIL` against a DATE-TIME `DTSTART` is
-  malformed, and a client that coerces it to midnight drops the last day of the
-  series that Kiln's own expansion (which compares dates inclusively) keeps.
+  malformed.
+
+  The datetime form is the **last instant of the stored date in the event's
+  zone**, in UTC, because that is how expansion reads `until`: an inclusive
+  local date. So `until: :datetime` also needs `:time_zone`, and raises
+  `ArgumentError` without one — a UTC default renders the end of the UTC day,
+  which drops the last occurrence west of UTC and adds one east of it (#2751).
+
+  It is computed as local midnight of the next day, resolved by `to_utc/2`,
+  minus one second. That is exact across DST: when midnight falls in a gap the
+  result is the last real instant of the date, and when midnight repeats (a
+  zone that falls back at 24:00) the first midnight is the end of the date —
+  local 23:59:59 would be the first of two, and cut the second hour.
+
+  A zone the database does not know falls back to the date form rather than
+  raising: a public feed must not fail on one record, and a date `UNTIL` is
+  what a lenient client reads best.
   """
   @spec to_rrule(t(), keyword()) :: String.t()
   def to_rrule(%__MODULE__{} = rule, opts \\ []) do
@@ -181,7 +196,7 @@ defmodule KilnCMS.Events.Recurrence do
       "FREQ=#{rule.freq |> to_string() |> String.upcase()}",
       rule.interval > 1 && "INTERVAL=#{rule.interval}",
       rule.count && "COUNT=#{rule.count}",
-      rule.until && "UNTIL=#{render_until(rule.until, Keyword.get(opts, :until, :date))}",
+      rule.until && "UNTIL=#{render_until(rule.until, until_type(opts), opts)}",
       rule.by_month != [] && "BYMONTH=" <> Enum.join(rule.by_month, ","),
       rule.by_day != [] && "BYDAY=" <> Enum.map_join(rule.by_day, ",", &render_day/1),
       rule.by_month_day != [] && "BYMONTHDAY=" <> Enum.join(rule.by_month_day, ",")
@@ -190,11 +205,35 @@ defmodule KilnCMS.Events.Recurrence do
     |> Enum.join(";")
   end
 
-  defp render_until(date, :date), do: Calendar.strftime(date, "%Y%m%d")
+  defp until_type(opts) do
+    case Keyword.get(opts, :until, :date) do
+      :datetime ->
+        unless Keyword.has_key?(opts, :time_zone),
+          do: raise(ArgumentError, "to_rrule/2 with until: :datetime needs :time_zone")
 
-  # End-of-day UTC, because the stored `until` is an inclusive *date* and that
-  # is how expansion treats it: `20260303T000000Z` would silently drop 3 March.
-  defp render_until(date, :datetime), do: Calendar.strftime(date, "%Y%m%dT235959Z")
+        :datetime
+
+      type ->
+        type
+    end
+  end
+
+  defp render_until(date, :date, _opts), do: Calendar.strftime(date, "%Y%m%d")
+
+  defp render_until(date, :datetime, opts) do
+    midnight = date |> Date.add(1) |> NaiveDateTime.new!(~T[00:00:00])
+
+    case to_utc(midnight, Keyword.fetch!(opts, :time_zone)) do
+      {:ok, next_day} ->
+        next_day
+        |> DateTime.add(-1, :second)
+        |> DateTime.truncate(:second)
+        |> Calendar.strftime("%Y%m%dT%H%M%SZ")
+
+      :error ->
+        render_until(date, :date, opts)
+    end
+  end
 
   @doc """
   Occurrences of `rule` starting at `dtstart`, within `[from, until]`, in
