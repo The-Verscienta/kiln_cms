@@ -209,7 +209,8 @@ before anything reaches the database:
   refused (rule 203.0.113.0/24)". The rule is masked like an address (see
   [IP addresses in alerts](#ip-addresses-in-alerts)).
 - The summary counts the client networks recorded in the window, at most 20
-  per server, not the requests refused. For the number of refusals, see the
+  per server ([Running more than one server](#running-more-than-one-server)),
+  not the requests refused. For the number of refusals, see the
   `kiln_cms.ip_block.refused.count` counter
   ([Observability](observability.md#blocked-addresses)).
 
@@ -249,12 +250,15 @@ remembers, in memory, the keys that authenticated on it in the last 5
 minutes, as a SHA-256 of the key and the key's id. A refused request whose
 key is not remembered (forged, unknown, revoked, expired, never used on this
 server, or a JWT from the headless sign-in rather than a key) is counted on the
-`kiln_cms.security.api_key_trip.count` counter and nothing else. That means:
+`kiln_cms.security.api_key_trip.count` counter and nothing else. Why the key
+is not checked at the refusal, and why servers do not share what they
+remember, is argued in [ADR 0053](decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md). That means:
 
 - On image transforms and plugin routes, which never check a key, a refusal
   alerts only if the same key was used on an authenticated API on the same
   server within 5 minutes. Behind a load balancer, the earlier use and the
-  refusal have to land on the same server.
+  refusal have to land on the same server (see
+  [Running more than one server](#running-more-than-one-server)).
 - `/ws/gql` cannot carry an API key (the socket accepts only a JWT), so a
   refusal there never alerts.
 - A key revoked in those 5 minutes records nothing.
@@ -748,6 +752,47 @@ What can go wrong:
   `security_alert_dispatches` (`security_alert_dispatches_purged`), so a clone
   never mails production's admins about production's events.
 - **Data.** [data-flows.md](data-flows.md) lists what each part stores.
+
+### Running more than one server
+
+The gates in front of blocked-address and rate-limit alerts are kept in each
+server's memory, so a cluster behaves differently from one server in three
+ways.
+
+- **Most request-rate limits are per server.** Every request-rate limit
+  (`KilnCMSWeb.RateLimit`) except sign-in (`auth`), registration (`register`)
+  and unlock (`unlock`) is counted in each server's memory, the five limits
+  that raise `api_key_rate_limited` included. (The per-account budgets, such as
+  sign-in lockout and invitations, are shared through the database and don't
+  multiply.) Behind a load balancer an address can make up to N times the
+  configured number of requests on N servers before it is refused, so a key goes over a limit, and
+  alerts, less often than the numbers suggest.
+- **A rate-limit alert needs the refusing server to know the key.** It is
+  raised only when that server [verified the key](#api-keys-over-a-rate-limit)
+  in the last 5 minutes. On `/api`, `/gql` and `/mcp` it normally has, with
+  or without session affinity: the server that refuses an address is the one
+  that let the address's earlier requests through, and it checked the key on
+  each of them that carried it. No alert is raised when:
+  - the refusal is on an image transform or a plugin route (neither checks a
+    key) or the ActivityPub inbox (which counts against the `api` limit
+    without checking a key), and the key's earlier API use landed on another
+    server;
+  - the address's limit was used up by requests that did not carry the key,
+    such as other clients behind the same egress address;
+  - the server's key cache restarted on its own while its rate-limit counts
+    did not, or the server runs a release that does not remember keys (see
+    the rolling-deploy note above).
+
+  On a server running this release, these refusals show up as `unverified`
+  on `kiln_cms.security.api_key_trip.count`. Why the servers do not share what
+  they remember is argued in [ADR 0053](decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md).
+- **A blocked-address summary can count more than 20.** Each server lets at
+  most 20 client networks per site through per 15-minute window, and a
+  network is recorded once per window across all servers. When the blocked
+  clients are spread over the servers, the window's summary can count up to
+  about 20 times the number of servers. It is "about" because each server
+  starts its window by its own clock, and the summary's window starts by the
+  database's.
 
 ## For developers
 
