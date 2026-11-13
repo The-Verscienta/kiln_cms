@@ -164,6 +164,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Team says how long an invitation link lasts and links its guide, Settings says adding a passkey or authenticator app emails you, and `/sign-in/verify` says a passkey works too when one can.**
   ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#account-screens-help-text))
 
+- **New guide "Take content down": unpublishing and archiving from the editor, the content list, a date, the calendar or a release, who may use each, and what each refusal message means.**
+  ([long form](docs/changelog/unreleased.md#take-content-down-guide))
+
 ### Fixed
 
 - **Backup Resume is safe: the re-open is atomic, Resume waits ~2.5 min after a Cancel, a step that outlived its Cancel can't overwrite state or history, a resume runs on the node with its files, and a refused one says why on its row.**

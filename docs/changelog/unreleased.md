@@ -1118,6 +1118,49 @@ carries the reasoning.
   is now [ADR 0050](../decisions/0050-a-site-invitation-is-its-own-row-not-an-account-written-up-front.md),
   linked from the invitation guide. No migration or config change.
 
+<a id="take-content-down-guide"></a>
+
+- **A new guide, [Take content down](../take-content-down.md), walks through every way to unpublish or archive a page, who may use each, and what each refusal means.**
+  Since 1.9.0, taking content down needs the same permission as putting it
+  up: an admin, or an editor on a site where **Team → Publishing** lets
+  editors publish
+  ([the 1.9.0 Breaking entry](v1.9.0.md#takedown-needs-publish-rights)).
+  The editorial workflow guide stated the rule in a paragraph, but not the
+  steps, and the five routes behave differently for someone who may not
+  publish. The guide has a section for each:
+  - **The page's editor**: **Unpublish**, under **More actions** on a
+    **Live · draft** page. The editor has no Archive button.
+  - **The content list**: a row's **Unpublish**, and **Unpublish**,
+    **Archive** and **Unarchive** in the bar for ticked rows, with refused
+    or ineligible rows counted as skipped.
+  - **A date**: **Scheduled unpublish at** in **Settings**, which is locked
+    on a live or scheduled page for anyone who may not publish, and open on
+    a draft nobody has scheduled.
+  - **The calendar**: anyone may drag an unpublish chip; a move they may
+    not make is refused when it is dropped, and the chip snaps back.
+  - **A release**: any editor may add an Unpublish item, and only an admin
+    ships the release, whatever **Team → Publishing** says.
+
+  It ends with the four refusal messages the editor and a row's
+  **Unpublish** show, quoted exactly so a reader can match the screen;
+  `test/kiln_cms/docs/take_content_down_test.exs` fails if one stops being
+  a msgid in `priv/gettext/default.pot`. It also says what happens when a
+  page was trashed by someone else after the list loaded: the action fails
+  without a message until #2781 is fixed.
+
+  Section 7 of [The editorial workflow](../editorial-workflow.md) now links
+  to the guide instead of repeating it, and says that **Let editors
+  publish** gives editors archive rights too, which it always did. The
+  guide sits under Authoring & editorial in the docs, after The working
+  copy. Two decision records explain the rules it describes, and are linked
+  from the policy matrix, the trash guide and the overlay contract:
+  [ADR 0051](../decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md)
+  (why the dates, the scheduled transitions and archive are gated as well
+  as unpublish) and
+  [ADR 0052](../decisions/0052-a-trashed-content-row-refuses-every-update-by-default-through-a-row-filter.md)
+  (why a trashed page refuses updates through a row filter, and how an
+  action earns an exemption). No behavior changes. (#2475, #2534)
+
 ## Fixed
 
 <a id="backup-resume-safety"></a>
