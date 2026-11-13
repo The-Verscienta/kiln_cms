@@ -217,6 +217,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`backup.sh` reads `BACKUP_KEEP_DAYS` like the app: anything but a whole number of days from 1 to 2147483647 keeps 14 and warns, instead of pruning nothing (`14d`), pruning all but a day (`0`) or writing an unreadable `manifest.json`.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-validated))
 
+- **A cached setting read inside a write transaction (site branding in a confirmation mail, the content-type registry) no longer takes a second pool connection while the transaction holds one, a deadlock risk under load: a hit is served, a miss reads on the transaction's connection and is not cached.**
+  ([#2859](https://github.com/The-Verscienta/kiln_cms/pull/2859) · [long form](docs/changelog/unreleased.md#cache-fetch-in-transaction))
+
 - **An object, or a list where one value goes, sent for a single custom field or a link value over JSON:API, GraphQL or MCP is a field error naming the field (`must be a single value, not an object or a list`), not a 500; a list on a text field is no longer joined into one string.**
   ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-field-value-shapes))
 

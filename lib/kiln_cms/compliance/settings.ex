@@ -100,12 +100,12 @@ defmodule KilnCMS.Compliance.Settings do
   As `for_org/1`, but reading the row directly instead of through the cache.
 
   For a caller **inside a write transaction** — the publish gate. `Cachex`
-  runs a cache miss's fallback on a courier process, so a cached resolve from
-  inside a transaction checks out a *second* pool connection while the first is
-  still held. That is a second connection per publish at best, and under a
-  saturated pool it is publishes waiting on each other: the transaction cannot
-  finish until it gets a connection that the transaction itself is helping to
-  hold.
+  used to run a cache miss's fallback on a courier process, so a cached
+  resolve from inside a transaction checked out a *second* pool connection
+  while the first was still held: under a saturated pool, publishes waiting on
+  each other. Since #2823 `KilnCMS.Cache.fetch/3` computes such a miss on the
+  caller's connection and stores nothing, so reading directly here costs no
+  more than that miss would, and keeps the gate's read explicit.
 
   Affordable precisely because of who calls it: a publish is rare and already
   writing, so one indexed single-row read is nothing. The editor's per-keystroke
@@ -129,7 +129,7 @@ defmodule KilnCMS.Compliance.Settings do
     # operator config: see that function.
     #
     # The actor is taken here, not inside the fallback, because a cache miss
-    # runs the fallback on a Cachex courier process.
+    # outside a transaction runs the fallback on a Cachex courier process.
     actor = system()
 
     KilnCMS.Cache.fetch(KilnCMS.Cache.compliance_key(org_id), @ttl, fn ->

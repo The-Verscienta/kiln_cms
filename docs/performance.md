@@ -158,9 +158,10 @@ content section fuses up to eight legs. Since #1712 it is built to share the poo
   searches` on top of Oban and every other request.
 - **A connection per query, not per search.** Each query checks a connection out and gives
   it back. Holding one checkout for a whole search was tried and made things worse. The
-  connection sat idle between queries, and a cache fallback inside the search, which runs
-  in Cachex's own process, needed a second one. At ten clients the pool dropped nearly
-  every request.
+  connection sat idle between queries, and a cache fallback inside the search, which then
+  ran in Cachex's own process, needed a second one. At ten clients the pool dropped nearly
+  every request. (Since #2823 a cache miss from a process that holds a connection runs on
+  that connection, uncached; the idle connection is still reason enough.)
 - **`503`, not `500`, when the pool gives up.** A checkout the pool drops
   (`connection not available and request was dropped from queue`) makes `GET /api/search`
   answer `503 temporarily_unavailable` with `Retry-After: 1`, which is never cached.
