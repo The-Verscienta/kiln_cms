@@ -35,15 +35,55 @@ defmodule KilnCMS.Events.Recurrence do
   ## The subset
 
   `FREQ` (`DAILY` `WEEKLY` `MONTHLY` `YEARLY`), `INTERVAL`, `COUNT`, `UNTIL`,
-  `BYDAY` (weekly, plus an optional ordinal for monthly — `2TU`), `BYMONTHDAY`,
-  and `EXDATE`. Deliberately not the whole spec: `BYSETPOS`, `BYWEEKNO`,
-  `BYYEARDAY` and sub-daily frequencies are rejected at parse time rather than
-  silently ignored, because an editor whose rule is quietly reinterpreted gets a
-  calendar that is wrong in a way nothing surfaces.
+  `BYMONTH`, `BYDAY` (with an optional ordinal for monthly and yearly rules —
+  `2TU`, `-1FR`, bounded to ±1..5), `BYMONTHDAY`, and `EXDATE`. Deliberately
+  not the whole spec: `BYSETPOS`, `BYWEEKNO`, `BYYEARDAY`, `BYHOUR`/`BYMINUTE`/
+  `BYSECOND`, a week start other than Monday and sub-daily frequencies are
+  rejected at parse time rather than silently ignored, because an editor whose
+  rule is quietly reinterpreted gets a calendar that is wrong in a way nothing
+  surfaces.
 
   A rejected rule is an error at *parse* time, which is the field type's
   validation — so it never reaches storage and never has to be reinterpreted at
-  render time.
+  render time. The reverse also holds: every rule that parses has to expand the
+  way RFC 5545 and every calendar client expand it, because `to_rrule/2` hands
+  subscribers the rule text, not Kiln's dates.
+
+  ## How the parts combine (RFC 5545 §3.3.10)
+
+    * **The period.** DAILY steps days, WEEKLY Monday-start weeks, MONTHLY
+      calendar months and YEARLY calendar years, from DTSTART's, by `INTERVAL`.
+    * **Every BY\* part limits.** A date is an occurrence when its month is in
+      `BYMONTH`, its day in `BYMONTHDAY` (negative counts from the month's
+      end) and its weekday in `BYDAY`, for every part that is given. So `BYDAY`
+      with `BYMONTHDAY` is their intersection — `BYDAY=FR;BYMONTHDAY=13` is
+      Friday the 13th — and `BYMONTH` limits DAILY and WEEKLY rules too.
+    * **An ordinal `BYDAY`** counts within the month for MONTHLY, and for
+      YEARLY with `BYMONTH`; within the year for YEARLY without it.
+      `FREQ=YEARLY;BYDAY=2TU` is the second Tuesday of the year, in January.
+    * **Defaults from DTSTART**, applied only when nothing narrower is given:
+      WEEKLY recurs on DTSTART's weekday; MONTHLY on its day of the month;
+      YEARLY on its month and day, or on its day of the `BYMONTH` months. A
+      YEARLY rule with `BYMONTHDAY` or `BYDAY` and no `BYMONTH` ranges over the
+      whole year.
+    * **Invalid dates are skipped**, not rolled over: `FREQ=YEARLY` from 29
+      February recurs in leap years only, and `COUNT` counts real dates.
+    * **`COUNT`, then `EXDATE`.** `COUNT` is counted from DTSTART, before
+      `EXDATE` subtracts. `UNTIL` is an inclusive date in the event's zone.
+
+  ## Known divergences from RFC 5545
+
+    * **A nonexistent local time is shifted forward** past a DST gap; RFC
+      5545 §3.3.10 says such an instance is ignored. See "Wall-clock, not
+      UTC" for why.
+    * **DTSTART is not emitted, or counted by `COUNT`, unless it matches the
+      rule.** RFC 5545 §3.8.5.3 calls a non-matching DTSTART undefined, while
+      §3.3.10 counts it as the first instance. This module follows
+      python-dateutil and rrule.js; some clients (Google Calendar) show DTSTART
+      as an extra instance.
+    * **A timed `UNTIL` is read as a date.** `UNTIL=19971224T000000Z` is
+      truncated to its UTC date and compared inclusively in local time, so a
+      09:00 New York occurrence on 24 December is kept where the RFC drops it.
   """
 
   @default_max 200
@@ -74,7 +114,7 @@ defmodule KilnCMS.Events.Recurrence do
 
   # See `engine_version/0`. Bump it with any change to what `expand/6` returns
   # for a rule `parse/1` accepts.
-  @engine_version 1
+  @engine_version 2
 
   @doc "The default ceiling on how many occurrences a single expansion returns."
   @spec default_max() :: pos_integer()
@@ -191,7 +231,7 @@ defmodule KilnCMS.Events.Recurrence do
     start_date = NaiveDateTime.to_date(dtstart)
 
     rule
-    |> default_by_day(start_date)
+    |> apply_defaults(start_date)
     |> candidate_dates(start_date, stop_date)
     # COUNT is counted from the series start, not from the window — an occurrence
     # before `from` still consumes one, or a window into the middle of a
@@ -228,21 +268,35 @@ defmodule KilnCMS.Events.Recurrence do
     |> List.first()
   end
 
-  # RFC 5545 defaults an unspecified BY* part from DTSTART: a WEEKLY rule with no
-  # BYDAY recurs on DTSTART's weekday, and a MONTHLY/YEARLY rule with neither
-  # BYDAY nor BYMONTHDAY recurs on DTSTART's day of the month.
+  # RFC 5545 defaults an unspecified BY* part from DTSTART (§3.3.10, and the
+  # §3.8.5.3 notes): a WEEKLY rule with no BYDAY recurs on DTSTART's weekday; a
+  # MONTHLY rule with neither BYDAY nor BYMONTHDAY on DTSTART's day of the
+  # month; a YEARLY rule with no BYMONTH, BYMONTHDAY or BYDAY on DTSTART's
+  # month and day, and one with BYMONTH alone on DTSTART's day of those months.
+  #
+  # A YEARLY rule with BYMONTHDAY or BYDAY but no BYMONTH gets NO month default:
+  # it ranges over the whole year (`BYMONTHDAY=1` is twelve dates a year,
+  # `BYDAY=TU` fifty-two), as python-dateutil, rrule.js and libical expand it.
   #
   # Applied here rather than at parse time because the rule alone does not know
   # its start — and a rule stored without those parts should keep meaning "the
   # same weekday/day as this event" if the event is later moved.
-  defp default_by_day(%{freq: :weekly, by_day: []} = rule, start_date),
+  defp apply_defaults(%{freq: :weekly, by_day: []} = rule, start_date),
     do: %{rule | by_day: [{nil, Date.day_of_week(start_date)}]}
 
-  defp default_by_day(%{freq: freq, by_day: [], by_month_day: []} = rule, start_date)
-       when freq in [:monthly, :yearly],
-       do: %{rule | by_month_day: [start_date.day]}
+  defp apply_defaults(%{freq: :monthly, by_day: [], by_month_day: []} = rule, start_date),
+    do: %{rule | by_month_day: [start_date.day]}
 
-  defp default_by_day(rule, _start_date), do: rule
+  defp apply_defaults(
+         %{freq: :yearly, by_month: [], by_day: [], by_month_day: []} = rule,
+         start_date
+       ),
+       do: %{rule | by_month: [start_date.month], by_month_day: [start_date.day]}
+
+  defp apply_defaults(%{freq: :yearly, by_day: [], by_month_day: []} = rule, start_date),
+    do: %{rule | by_month_day: [start_date.day]}
+
+  defp apply_defaults(rule, _start_date), do: rule
 
   # ── parsing ───────────────────────────────────────────────────────────────
 
@@ -287,8 +341,14 @@ defmodule KilnCMS.Events.Recurrence do
     |> String.split(",", trim: true)
     |> Enum.reduce_while({:ok, []}, fn day, {:ok, acc} ->
       case parse_day(day) do
-        {:ok, parsed} -> {:cont, {:ok, [parsed | acc]}}
-        :error -> {:halt, {:error, "BYDAY #{day} isn't a weekday like TU or 2TU"}}
+        {:ok, parsed} ->
+          {:cont, {:ok, [parsed | acc]}}
+
+        {:error, :ordinal} ->
+          {:halt, {:error, "BYDAY #{day}: the number before the weekday must be 1..5 or -1..-5"}}
+
+        :error ->
+          {:halt, {:error, "BYDAY #{day} isn't a weekday like TU or 2TU"}}
       end
     end)
     |> case do
@@ -426,8 +486,11 @@ defmodule KilnCMS.Events.Recurrence do
     end
   end
 
+  # Kept at ±1..5 for YEARLY too, though RFC 5545 allows ±53 there ("every 20th
+  # Monday of the year"): a rule saved under a wider parser becomes a one-off
+  # event, silently, on a release rolled back to a narrower one.
   defp ordinal_day(n, weekday) when n in -5..5 and n != 0, do: {:ok, {n, weekday}}
-  defp ordinal_day(_n, _weekday), do: :error
+  defp ordinal_day(_n, _weekday), do: {:error, :ordinal}
 
   defp render_day({nil, weekday}), do: weekday_code(weekday)
   defp render_day({ordinal, weekday}), do: "#{ordinal}#{weekday_code(weekday)}"
@@ -468,52 +531,98 @@ defmodule KilnCMS.Events.Recurrence do
   defp period_starts(%{freq: :monthly, interval: n}, start_date),
     do: Stream.iterate(Date.beginning_of_month(start_date), &Date.shift(&1, month: n))
 
+  # A calendar year from DTSTART's year, not a month: BYMONTH, BYMONTHDAY and
+  # BYDAY range over the whole year (#2750). Anchoring on DTSTART's month made
+  # `BYMONTH=3,9` from March produce March only, and `BYMONTH=6` from January
+  # produce nothing at all.
   defp period_starts(%{freq: :yearly, interval: n}, start_date),
-    do: Stream.iterate(Date.beginning_of_month(start_date), &Date.shift(&1, year: n))
+    do: Stream.iterate(Date.new!(start_date.year, 1, 1), &Date.shift(&1, year: n))
 
-  defp dates_in_period(%{freq: :daily}, date), do: [date]
+  # BYMONTH limits every frequency. DAILY and WEEKLY used to ignore it while
+  # `to_rrule/2` handed it to every subscribed client, so `FREQ=DAILY;BYMONTH=6`
+  # was every day here and June only in a calendar.
+  defp dates_in_period(%{freq: :daily} = rule, date),
+    do: Enum.filter([date], &month_ok?(rule, &1))
 
-  defp dates_in_period(%{freq: :weekly, by_day: days}, week_start) do
+  defp dates_in_period(%{freq: :weekly, by_day: days} = rule, week_start) do
     days
     |> Enum.map(fn {_ordinal, weekday} -> Date.add(week_start, weekday - 1) end)
+    |> Enum.filter(&month_ok?(rule, &1))
     |> Enum.sort(Date)
   end
 
-  defp dates_in_period(%{freq: freq, by_month: [_ | _] = months} = rule, period_start)
-       when freq in [:monthly, :yearly] do
-    if period_start.month in months,
-      do: dates_in_period(%{rule | by_month: []}, period_start),
-      else: []
-  end
-
+  # MONTHLY and YEARLY: one filter over the days of the period (a month, or a
+  # year), every BY* part a limit that a day must pass. That is RFC 5545's
+  # reading for every combination this module accepts — in particular BYDAY
+  # *limits* when BYMONTHDAY is present, so "Friday the 13th"
+  # (`BYDAY=FR;BYMONTHDAY=13`) is the intersection, not every Friday plus every
+  # 13th. The cost is bounded by the period: at most 366 checks a year.
   defp dates_in_period(%{freq: freq} = rule, period_start) when freq in [:monthly, :yearly] do
-    days_of_month = Date.days_in_month(period_start)
+    days = period_days(freq, period_start)
+    ordinals = ordinal_dates(rule, days)
+    plain = for {nil, weekday} <- rule.by_day, into: MapSet.new(), do: weekday
 
-    by_month_day =
-      rule.by_month_day
-      |> Enum.map(&if(&1 < 0, do: days_of_month + &1 + 1, else: &1))
-      |> Enum.filter(&(&1 in 1..days_of_month))
-      |> Enum.map(&%{period_start | day: &1})
-
-    by_day = Enum.flat_map(rule.by_day, &ordinal_weekday(period_start, days_of_month, &1))
-
-    (by_month_day ++ by_day) |> Enum.uniq() |> Enum.sort(Date)
+    Enum.filter(days, fn date ->
+      month_ok?(rule, date) and month_day_ok?(rule, date) and
+        day_ok?(rule, date, plain, ordinals)
+    end)
   end
 
-  # `2TU` = the second Tuesday; `-1FR` = the last Friday. A nil ordinal inside a
-  # monthly rule means every matching weekday in the month.
-  defp ordinal_weekday(period_start, days_of_month, {ordinal, weekday}) do
-    matching =
-      for day <- 1..days_of_month,
-          date = %{period_start | day: day},
-          Date.day_of_week(date) == weekday,
-          do: date
+  defp period_days(:monthly, start),
+    do: Enum.to_list(Date.range(start, Date.end_of_month(start)))
 
-    case ordinal do
-      nil -> matching
-      n when n > 0 -> matching |> Enum.at(n - 1) |> List.wrap()
-      n -> matching |> Enum.at(length(matching) + n) |> List.wrap()
+  defp period_days(:yearly, start),
+    do: Enum.to_list(Date.range(start, Date.new!(start.year, 12, 31)))
+
+  defp month_ok?(%{by_month: []}, _date), do: true
+  defp month_ok?(%{by_month: months}, date), do: date.month in months
+
+  # A negative BYMONTHDAY counts from the end of the month: -1 is the last day.
+  # A day a month does not have (`30` in February) simply matches nothing — RFC
+  # 5545 ignores an invalid date rather than rolling it over.
+  defp month_day_ok?(%{by_month_day: []}, _date), do: true
+
+  defp month_day_ok?(%{by_month_day: month_days}, date) do
+    from_end = date.day - Date.days_in_month(date) - 1
+    date.day in month_days or from_end in month_days
+  end
+
+  defp day_ok?(%{by_day: []}, _date, _plain, _ordinals), do: true
+
+  defp day_ok?(_rule, date, plain, ordinals),
+    do: Date.day_of_week(date) in plain or MapSet.member?(ordinals, date)
+
+  # The dates an ordinal BYDAY (`2TU`, `-1FR`) picks in this period. The nth
+  # weekday is counted within each MONTH for MONTHLY, and for YEARLY with
+  # BYMONTH; within the YEAR for YEARLY without BYMONTH (RFC 5545 §3.3.10), so
+  # `FREQ=YEARLY;BYDAY=-1FR` is the last Friday of December, not of every month.
+  defp ordinal_dates(rule, days) do
+    case for {n, weekday} <- rule.by_day, not is_nil(n), do: {n, weekday} do
+      [] ->
+        MapSet.new()
+
+      entries ->
+        for scope <- ordinal_scopes(rule, days),
+            {n, weekday} <- entries,
+            date <- nth_weekday(scope, n, weekday),
+            into: MapSet.new(),
+            do: date
     end
+  end
+
+  defp ordinal_scopes(%{freq: :yearly, by_month: []}, days), do: [days]
+  defp ordinal_scopes(_rule, days), do: Enum.chunk_by(days, & &1.month)
+
+  # `Enum.at/2` only after the range check: the parser bounds the ordinal to
+  # ±1..5, and a fifth Tuesday a month does not have is no date, not some other
+  # Tuesday counted from the other end.
+  defp nth_weekday(scope, n, weekday) do
+    matching = Enum.filter(scope, &(Date.day_of_week(&1) == weekday))
+    index = if n > 0, do: n - 1, else: length(matching) + n
+
+    if index in 0..(length(matching) - 1)//1,
+      do: [Enum.at(matching, index)],
+      else: []
   end
 
   # The whole point of carrying a zone: build the local wall time, then convert.

@@ -29,9 +29,12 @@ defmodule Mix.Tasks.Kiln.Occurrences.Backfill do
 
   ## In a release
 
-  There is no Mix in a release image, so call the module:
+  There is no Mix in a release image, so call the module on the running node:
 
-      bin/kiln_cms eval 'KilnCMS.Events.Backfill.run()'
+      bin/kiln_cms rpc 'KilnCMS.Events.Backfill.run()'
+
+  `rpc`, not `eval`: `eval` starts a bare VM without the application, so the
+  recurrence engine's cached type registry has no Cachex to read.
   """
   use Mix.Task
 

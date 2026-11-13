@@ -373,6 +373,29 @@ defmodule KilnCMS.EventsTest do
       assert ics |> String.split("BEGIN:VEVENT") |> length() == 2
     end
 
+    test "a yearly rule's RRULE is the stored rule, re-rendered unchanged (#2750)", ctx do
+      # The expansion fix moves Kiln's own surfaces to what subscribers already
+      # saw; the exported rule text must not move with it.
+      add_recurrence(ctx.td, ctx.admin)
+
+      for rrule <-
+            ~w(FREQ=YEARLY;BYMONTH=3,9 FREQ=YEARLY;BYMONTH=11;BYDAY=4TH FREQ=YEARLY;BYDAY=2TU) do
+        event =
+          event!(ctx, %{
+            "when" => %{"start" => "2026-03-10T19:00", "time_zone" => @london},
+            "repeats" => %{"rrule" => rrule}
+          })
+
+        stored = get_in(event.custom_fields, ["repeats", "rrule"])
+        {:ok, rule} = KilnCMS.Events.Recurrence.parse(stored)
+
+        ics = ICS.event(event, org_id: ctx.org)
+
+        assert ics =~ "\r\nRRULE:#{KilnCMS.Events.Recurrence.to_rrule(rule)}\r\n"
+        assert ics =~ "\r\nRRULE:#{rrule}\r\n"
+      end
+    end
+
     test "an all-day event uses VALUE=DATE with an exclusive end", ctx do
       event =
         event!(ctx, %{

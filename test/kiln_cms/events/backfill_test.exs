@@ -205,6 +205,54 @@ defmodule KilnCMS.Events.BackfillTest do
     end
   end
 
+  describe "an engine change reaches stored values (#2750)" do
+    # A yearly rule the old engine expanded inside DTSTART's month only. From a
+    # January DTSTART, `BYMONTH=6;BYMONTHDAY=15` gave nil: the terminal state
+    # the sweep never revisits.
+    @yearly %{"rrule" => "FREQ=YEARLY;BYMONTH=6;BYMONTHDAY=15"}
+
+    defp yearly!(ctx) do
+      start = Date.utc_today() |> Map.put(:day, 1) |> Date.add(-400)
+      start = Date.new!(start.year, 1, 10) |> NaiveDateTime.new!(~T[12:00:00])
+
+      event!(ctx, %{
+        "when" => %{"start" => NaiveDateTime.to_iso8601(start), "time_zone" => @london},
+        "repeats" => @yearly
+      })
+    end
+
+    defp assert_june_15(%DateTime{} = value) do
+      local = DateTime.shift_zone!(value, @london)
+      assert {local.month, local.day, local.hour} == {6, 15, 12}
+      assert DateTime.compare(value, Index.anchor()) != :lt
+      assert DateTime.diff(value, Index.anchor(), :day) <= 366
+    end
+
+    test "saving a yearly event stores the RFC next date", ctx do
+      assert_june_15(yearly!(ctx).next_occurrence_at)
+    end
+
+    test "the old engine's terminal nil is corrected by the backfill, not the sweep", ctx do
+      record = ctx |> yearly!() |> unbackfilled!()
+
+      KilnCMS.Events.Sweep.run_org(ctx.org)
+      assert is_nil(reload(record).next_occurrence_at), "the sweep never revisits a nil"
+
+      assert %{written: 1} = Backfill.run_org(ctx.org)
+      assert_june_15(reload(record).next_occurrence_at)
+
+      assert %{written: 0} = Backfill.run_org(ctx.org)
+    end
+
+    test "the old engine's wrong future date is corrected by the backfill", ctx do
+      wrong = DateTime.add(Index.anchor(), 2 * 86_400)
+      record = ctx |> yearly!() |> Ash.Seed.update!(%{next_occurrence_at: wrong})
+
+      assert %{written: 1, cleared: []} = Backfill.run_org(ctx.org)
+      assert_june_15(reload(record).next_occurrence_at)
+    end
+  end
+
   describe "trashed rows (#2621)" do
     # The pass stays live-only; `:restore` recomputes instead. The value is
     # relative to the clock, so one written into the trash would be stale
