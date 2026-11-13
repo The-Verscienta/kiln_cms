@@ -63,7 +63,10 @@ defmodule KilnCMSWeb.BackupLive do
 
   A failed, interrupted or canceled in-app run whose `.work/<stamp>/state.json`
   still exists gets a **Resume** button (platform admin only, computed for the
-  visible page and bounded by its 25 rows).
+  visible page and bounded by its 25 rows). For about two and a half minutes
+  after a Cancel the click is refused with a flash saying how long to wait
+  (`{:canceled_recently, seconds}`, #2538); the button stays, and its tooltip
+  says so.
 
   Both handlers re-check `platform_admin?`, take only the run's **id** from the
   client and look the run up themselves; Resume passes THAT run's stamp to
@@ -324,6 +327,16 @@ defmodule KilnCMSWeb.BackupLive do
   defp resume_message({:not_resumable, _status}),
     do:
       gettext("That backup can't be resumed: only a failed, interrupted or canceled backup can.")
+
+  # #2538: the Cancel hasn't settled yet. The button stays; the click says how
+  # long to wait.
+  defp resume_message({:canceled_recently, seconds}),
+    do:
+      ngettext(
+        "That backup was canceled moments ago. Resume it again in %{count} second: a step on a server that lost contact with the database may still be stopping.",
+        "That backup was canceled moments ago. Resume it again in %{count} seconds: a step on a server that lost contact with the database may still be stopping.",
+        seconds
+      )
 
   defp resume_message(reason) when reason in [:no_state, :no_such_run],
     do: gettext("That backup can't be resumed: the files it had written are gone.")
@@ -1168,8 +1181,13 @@ defmodule KilnCMSWeb.BackupLive do
 
   # Resumable statuses (`Backups.run_resumable?/2`): a stale `running` run is
   # one whose chain was interrupted.
+  # Static, not a countdown: the page doesn't poll when nothing is in flight,
+  # so a countdown would go stale (#2538).
   defp resume_title(%{status: :canceled}),
-    do: gettext("Continue this canceled backup from the files it already wrote.")
+    do:
+      gettext(
+        "Continue this canceled backup from the files it already wrote. Right after a Cancel, wait about two and a half minutes."
+      )
 
   defp resume_title(%{status: :failed}),
     do: gettext("Continue this failed backup from the files it already wrote.")

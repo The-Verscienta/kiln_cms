@@ -13,7 +13,7 @@ defmodule KilnCMS.Backups.ChainTest do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Chain, DirId, Manifest, StepWorker, Worker, WorkState}
+  alias KilnCMS.Backups.{Artifact, Chain, DirId, Manifest, Steps, StepWorker, Worker, WorkState}
   alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
 
@@ -731,6 +731,98 @@ defmodule KilnCMS.Backups.ChainTest do
       {:ok, %{status: :started}} = request()
       step_until("dump")
       assert {:ok, :none} = Chain.reap()
+    end
+  end
+
+  describe "a resume interrupted before it re-opened its run (#2539)" do
+    # The run still names the chain it last ran under (none here), so the
+    # interrupted resume has no run of its own to fail: it notes the refusal.
+    test "a discarded, unclaimed resume start: the run says so, the waiter starts", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-121212")
+      {:ok, %{status: :started, chain: chain}} = request(resume: stamp)
+      job = current_job()
+      {:ok, %{status: :queued}} = request(trigger: "schedule")
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: "discarded"])
+
+      assert {:ok, {:orphaned, %{chain: ^chain, promoted: promoted}}} = Chain.reap()
+      assert %{chain: ^promoted, trigger: "schedule"} = Backups.in_flight()
+
+      run = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert run.status == :failed
+
+      assert run.error ==
+               "Resume refused: Interrupted: the backup's step job ended without finishing " <>
+                 "its step\ntar exited 2"
+    end
+
+    test "a claimed resume start reclaimed with no attempts left: the run says so", %{dir: dir} do
+      stamp = resumable!(dir, "20261101-131313")
+      {:ok, %{status: :started}} = request(resume: stamp)
+      job = current_job()
+      {:ok, _lease} = Chain.begin_step(job)
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [attempt: 3])
+      executing!(Repo.get!(Oban.Job, job.id), "gone@node", 600)
+      beat!("gone@node", Ash.UUID.generate(), 600)
+
+      assert {:ok, {:interrupted, _info}} = Chain.reclaim_stale()
+      assert Backups.in_flight() == nil
+
+      assert %{status: :failed, error: error} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert error ==
+               "Resume refused: Interrupted: node gone@node stopped responding\ntar exited 2"
+    end
+
+    # What `StepWorker` does with a raise in the start step: `Steps.crashed/3`.
+    test "a resume start that crashed before the re-open: retried, then refused visibly", %{
+      dir: dir
+    } do
+      stamp = resumable!(dir, "20261101-141414")
+      {:ok, %{status: :started, chain: chain}} = request(resume: stamp)
+      job = current_job()
+      {:ok, lease} = Chain.begin_step(job)
+
+      assert {:error, {:crashed, "boom"}} =
+               Steps.crashed(lease, %{job | attempt: 1, max_attempts: 4}, {:crashed, "boom"})
+
+      assert %{error: "tar exited 2"} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      BackupChain.listen(fn ->
+        assert {:cancel, {:crashed, "boom"}} =
+                 Steps.crashed(lease, %{job | attempt: 4, max_attempts: 4}, {:crashed, "boom"})
+
+        assert {:error, {:crashed, "boom"}} = BackupChain.settled(chain)
+      end)
+
+      assert Backups.in_flight() == nil
+
+      assert %{
+               status: :failed,
+               error: "Resume refused: its start step crashed: boom\ntar exited 2"
+             } =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+    end
+
+    test "a resume chain that did re-open its run is failed as interrupted, as before", %{
+      dir: dir
+    } do
+      stamp = resumable!(dir, "20261101-151515")
+      {:ok, %{status: :started, chain: chain}} = request(resume: stamp)
+      step_until("dump")
+      job = current_job()
+
+      assert %{status: :running, chain_id: ^chain} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: "discarded"])
+      assert {:ok, {:orphaned, _}} = Chain.reap()
+
+      run = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert run.status == :failed
+      assert run.error =~ ~r/\AInterrupted: /
     end
   end
 

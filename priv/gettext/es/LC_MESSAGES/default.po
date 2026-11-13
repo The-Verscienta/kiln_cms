@@ -6024,8 +6024,8 @@ msgstr "Continuar editando"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Continue this canceled backup from the files it already wrote."
-msgstr "Continúa esta copia de seguridad cancelada a partir de los archivos que ya escribió."
+msgid "Continue this canceled backup from the files it already wrote. Right after a Cancel, wait about two and a half minutes."
+msgstr "Continúa esta copia de seguridad cancelada a partir de los archivos que ya escribió. Justo después de cancelarla, espera unos dos minutos y medio."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -21018,6 +21018,13 @@ msgstr "Esa copia no se puede reanudar: los archivos que había escrito ya no es
 #, elixir-autogen, elixir-format
 msgid "That backup is running right now."
 msgstr "Esa copia de seguridad está en curso ahora mismo."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup was canceled moments ago. Resume it again in %{count} second: a step on a server that lost contact with the database may still be stopping."
+msgid_plural "That backup was canceled moments ago. Resume it again in %{count} seconds: a step on a server that lost contact with the database may still be stopping."
+msgstr[0] "Esa copia de seguridad se canceló hace un momento. Vuelve a reanudarla dentro de %{count} segundo: un paso en un servidor que perdió el contacto con la base de datos puede seguir deteniéndose."
+msgstr[1] "Esa copia de seguridad se canceló hace un momento. Vuelve a reanudarla dentro de %{count} segundos: un paso en un servidor que perdió el contacto con la base de datos puede seguir deteniéndose."
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format

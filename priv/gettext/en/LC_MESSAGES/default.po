@@ -6024,7 +6024,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Continue this canceled backup from the files it already wrote."
+msgid "Continue this canceled backup from the files it already wrote. Right after a Cancel, wait about two and a half minutes."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -21018,6 +21018,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "That backup is running right now."
 msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup was canceled moments ago. Resume it again in %{count} second: a step on a server that lost contact with the database may still be stopping."
+msgid_plural "That backup was canceled moments ago. Resume it again in %{count} seconds: a step on a server that lost contact with the database may still be stopping."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
