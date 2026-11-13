@@ -18,6 +18,21 @@ defmodule KilnCMSWeb.WebhookLive do
   leaves out the events that carry unpublished content; those are marked in
   the list, and an endpoint subscribed to any of them says so on its row
   (#1776).
+
+  ## URLs and formats (#2245)
+
+  A URL is shown masked everywhere on the page
+  (`KilnCMS.Webhooks.display_url/1`): an incoming webhook's URL carries its
+  own token. Reveal URL re-reads the endpoint as this admin on this site, like
+  Reveal for the secret, and shows the full URL for this LiveView session.
+  The edit form is not pre-filled with the URL: its input shows only what was
+  typed into it, under "Current URL" masked, and a blank field keeps the URL
+  as it is.
+
+  The format is chosen when an endpoint is added and shown read-only after.
+  Choosing Slack limits the picker to the security events and ticks them all.
+  A Slack row wears a badge and shows no signing secret or Rotate secret:
+  Slack checks no signature, so the URL is the credential.
   """
   use KilnCMSWeb, :live_view
 
@@ -38,6 +53,7 @@ defmodule KilnCMSWeb.WebhookLive do
      |> assign(:edit, nil)
      |> assign(:revealed, MapSet.new())
      |> assign(:rotated, MapSet.new())
+     |> assign(:revealed_urls, MapSet.new())
      |> assign(:form, create_form(actor, socket.assigns.current_org))
      |> load_endpoints()
      |> load_deliveries()}
@@ -47,22 +63,20 @@ defmodule KilnCMSWeb.WebhookLive do
 
   @impl true
   def handle_event("validate", %{"webhook" => params}, socket) when is_map(params) do
-    {:noreply,
-     assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, normalize(params)))}
+    form = socket.assigns.form
+    params = params |> normalize() |> preset_on_format_change(form, socket.assigns)
+    {:noreply, assign(socket, :form, AshPhoenix.Form.validate(form, params))}
   end
 
   def handle_event("create", %{"webhook" => params}, socket) when is_map(params) do
     case AshPhoenix.Form.submit(socket.assigns.form, params: normalize(params)) do
       {:ok, endpoint} ->
-        {:noreply,
-         socket
-         |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
-         |> load_endpoints()
-         |> update(:revealed, &MapSet.put(&1, endpoint.id))
-         |> put_flash(
-           :info,
-           gettext("Webhook added. Copy its signing secret into your receiver.")
-         )}
+        socket =
+          socket
+          |> assign(:form, create_form(socket.assigns.actor, socket.assigns.current_org))
+          |> load_endpoints()
+
+        {:noreply, created(socket, endpoint)}
 
       {:error, form} ->
         {:noreply, assign(socket, :form, form)}
@@ -82,14 +96,7 @@ defmodule KilnCMSWeb.WebhookLive do
         {:noreply, socket}
 
       form ->
-        events =
-          bulk_select(
-            op,
-            params["group"],
-            checked_events(form),
-            socket.assigns.available_events,
-            socket.assigns.default_events
-          )
+        events = form_bulk_select(form, op, params["group"], socket.assigns)
 
         form_params = form.source |> AshPhoenix.Form.params() |> Map.put("events", events)
         {:noreply, put_target_form(socket, target, AshPhoenix.Form.validate(form, form_params))}
@@ -111,14 +118,14 @@ defmodule KilnCMSWeb.WebhookLive do
   def handle_event("validate_edit", %{"webhook" => params}, socket) when is_map(params) do
     edit = %{
       socket.assigns.edit
-      | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize(params))
+      | form: AshPhoenix.Form.validate(socket.assigns.edit.form, normalize_edit(params))
     }
 
     {:noreply, assign(socket, :edit, edit)}
   end
 
   def handle_event("save_edit", %{"webhook" => params}, socket) when is_map(params) do
-    case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize(params)) do
+    case AshPhoenix.Form.submit(socket.assigns.edit.form, params: normalize_edit(params)) do
       {:ok, _endpoint} ->
         {:noreply,
          socket |> assign(:edit, nil) |> load_endpoints() |> put_flash(:info, gettext("Saved."))}
@@ -174,6 +181,27 @@ defmodule KilnCMSWeb.WebhookLive do
 
     {:noreply, socket}
   end
+
+  # --- URL (#2245) ---------------------------------------------------------------
+
+  # Like `reveal_secret`: the id comes from the client, so the endpoint is
+  # re-read as this admin on this site first. A non-admin, an admin demoted
+  # since the page mounted, or another site's id reveals nothing.
+  def handle_event("reveal_url", %{"id" => id}, socket) when is_binary(id) do
+    socket =
+      case CMS.get_webhook_endpoint(id,
+             actor: socket.assigns.actor,
+             tenant: socket.assigns.current_org
+           ) do
+        {:ok, endpoint} -> update(socket, :revealed_urls, &MapSet.put(&1, endpoint.id))
+        _ -> put_flash(socket, :error, gettext("Couldn't reveal that URL."))
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("hide_url", %{"id" => id}, socket) when is_binary(id),
+    do: {:noreply, update(socket, :revealed_urls, &MapSet.delete(&1, id))}
 
   def handle_event("hide_secret", %{"id" => id}, socket) when is_binary(id) do
     {:noreply,
@@ -291,6 +319,18 @@ defmodule KilnCMSWeb.WebhookLive do
     |> assign(:endpoints, endpoints)
     |> update(:revealed, &MapSet.intersection(&1, listed))
     |> update(:rotated, &MapSet.intersection(&1, listed))
+    |> update(:revealed_urls, &MapSet.intersection(&1, listed))
+  end
+
+  # A Slack endpoint has no secret to copy (Slack checks none), so nothing is
+  # revealed for it.
+  defp created(socket, %{format: :slack}),
+    do: put_flash(socket, :info, gettext("Slack webhook added."))
+
+  defp created(socket, endpoint) do
+    socket
+    |> update(:revealed, &MapSet.put(&1, endpoint.id))
+    |> put_flash(:info, gettext("Webhook added. Copy its signing secret into your receiver."))
   end
 
   defp load_deliveries(socket) do
@@ -341,6 +381,55 @@ defmodule KilnCMSWeb.WebhookLive do
     Map.put(params, "events", events)
   end
 
+  # The edit form's URL input starts blank, and blank means "keep the URL"
+  # (#2245): the key is dropped, so the update does not touch the URL and a
+  # save that changes nothing else raises no `webhook_changed` notice.
+  defp normalize_edit(params) do
+    params = normalize(params)
+    if params["url"] in [nil, ""], do: Map.delete(params, "url"), else: params
+  end
+
+  # What the edit form's URL input shows: what was typed into it, never the
+  # stored URL (#2245).
+  defp typed_url(form), do: form.source |> AshPhoenix.Form.params() |> Map.get("url", "")
+
+  # Switching the new form's format re-ticks the picker: every security event
+  # for Slack (the preset), the defaults for Kiln.
+  defp preset_on_format_change(%{"format" => format} = params, form, assigns)
+       when is_binary(format) do
+    cond do
+      slack?(form) == (format == "slack") -> params
+      format == "slack" -> Map.put(params, "events", security_events(assigns.available_events))
+      true -> Map.put(params, "events", assigns.default_events)
+    end
+  end
+
+  defp preset_on_format_change(params, _form, _assigns), do: params
+
+  defp slack?(form), do: form[:format].value in [:slack, "slack"]
+
+  # A Slack form offers only the security events (#2245).
+  defp offered_events(form, available),
+    do: if(slack?(form), do: security_events(available), else: available)
+
+  defp security_events(available), do: Enum.filter(available, &security_event?/1)
+
+  defp format_label(:slack), do: gettext("Slack (incoming webhook)")
+  defp format_label(:kiln), do: gettext("Kiln (signed JSON)")
+  defp format_label(%KilnCMS.Types.UnknownAtom{value: value}), do: value
+  defp format_label(other), do: to_string(other)
+
+  defp format_options,
+    do: [
+      {gettext("Kiln (signed JSON)"), "kiln"},
+      {gettext("Slack (incoming webhook)"), "slack"}
+    ]
+
+  defp event_errors(form) do
+    field = form[:events]
+    if used_input?(field), do: Enum.map(field.errors, &translate_error/1), else: []
+  end
+
   # The new form is seeded with the default events (`create_form/2`) and an
   # edit form with the endpoint's own, so a missing value checks nothing.
   defp checked_events(form) do
@@ -359,10 +448,32 @@ defmodule KilnCMSWeb.WebhookLive do
   defp put_target_form(socket, "edit", form),
     do: assign(socket, :edit, %{socket.assigns.edit | form: form})
 
+  # A Slack form offers only the security events, and its defaults are all of
+  # them (#2642): Select all ticks them all.
+  defp form_bulk_select(form, op, group, assigns) do
+    available = offered_events(form, assigns.available_events)
+    checked = checked_events(form)
+
+    if slack?(form) do
+      op = if op == "all", do: "defaults", else: op
+      bulk_select(op, group, checked, available, available)
+    else
+      bulk_select(op, group, checked, available, assigns.default_events)
+    end
+  end
+
   # Events the list does not offer (a type deleted since) are kept by every
   # operation except Clear; the offered ones come back in the list's order.
-  defp bulk_select("all", _group, current, available, _defaults),
-    do: available ++ (current -- available)
+  #
+  # Select all leaves the security alert events out (#2642), keeping any
+  # already ticked. It exists to mirror content: an endpoint that took every
+  # event that way would ship client addresses and actor ids to a receiver
+  # nobody chose for them, and every later edit of it would send each admin
+  # an un-mutable notice. The security group's own toggle still ticks them.
+  defp bulk_select("all", _group, current, available, _defaults) do
+    Enum.filter(available, &(&1 in current or not security_event?(&1))) ++
+      (current -- available)
+  end
 
   defp bulk_select("none", _group, _current, _available, _defaults), do: []
 
@@ -379,6 +490,9 @@ defmodule KilnCMSWeb.WebhookLive do
   end
 
   defp bulk_select(_op, _group, current, _available, _defaults), do: current
+
+  # By prefix, like the delivery side: a kind a later release adds is one too.
+  defp security_event?(event), do: String.starts_with?(event, "security.")
 
   # `page.published` → `page`; `form.submitted` → `form`.
   defp event_group(event), do: event |> String.split(".", parts: 2) |> hd()
@@ -425,14 +539,36 @@ defmodule KilnCMSWeb.WebhookLive do
             class="card card-pad space-y-4"
           >
             <.input
+              field={@form[:format]}
+              type="select"
+              label={gettext("Format")}
+              options={format_options()}
+              hint={slack?(@form) && gettext("Slack endpoints receive security alerts only.")}
+            />
+            <.input
               field={@form[:url]}
               type="url"
               label={gettext("Endpoint URL")}
               placeholder="https://example.com/hooks/kiln"
             />
+            <p
+              :if={slack?(@form)}
+              id="slack-url-credential"
+              class="flex gap-1.5 text-xs text-warning-ink"
+            >
+              <.icon name="hero-exclamation-triangle" class="size-4 shrink-0" />
+              {gettext(
+                "Slack doesn't check signatures: the URL is the credential. After saving, Kiln shows only its host."
+              )}
+            </p>
             <fieldset>
               <legend class="text-sm font-medium">{gettext("Events")}</legend>
-              <.event_checkboxes form={@form} available_events={@available_events} target="new" />
+              <.event_checkboxes
+                form={@form}
+                available_events={offered_events(@form, @available_events)}
+                target="new"
+                slack={slack?(@form)}
+              />
             </fieldset>
             <.button type="submit" variant="primary">{gettext("Add webhook")}</.button>
           </.form>
@@ -470,7 +606,17 @@ defmodule KilnCMSWeb.WebhookLive do
                     <span class="sr-only">
                       {if endpoint.active, do: gettext("Active"), else: gettext("Disabled")}
                     </span>
-                    <code class="truncate text-sm">{endpoint.url}</code>
+                    <.endpoint_url
+                      endpoint={endpoint}
+                      revealed={MapSet.member?(@revealed_urls, endpoint.id)}
+                    />
+                    <span
+                      :if={endpoint.format == :slack}
+                      id={"webhook-#{endpoint.id}-slack"}
+                      class="rounded bg-base-200 px-1.5 py-0.5 text-xs font-medium text-base-content/80"
+                    >
+                      {gettext("Slack")}
+                    </span>
                     <span
                       :if={endpoint.auto_disabled_at}
                       class="rounded bg-error/15 px-1.5 py-0.5 text-xs font-medium text-error"
@@ -502,7 +648,10 @@ defmodule KilnCMSWeb.WebhookLive do
                       {event}
                     </span>
                   </div>
+                  <%!-- Slack checks no signature (#2245): the secret still
+                       exists, but there is nothing to copy it into. --%>
                   <.signing_secret
+                    :if={endpoint.format != :slack}
                     endpoint={endpoint}
                     revealed={MapSet.member?(@revealed, endpoint.id)}
                     rotated={MapSet.member?(@rotated, endpoint.id)}
@@ -534,7 +683,10 @@ defmodule KilnCMSWeb.WebhookLive do
                     {gettext("Edit")}
                   </button>
                   <button
-                    :if={CMS.can_rotate_webhook_secret?(@actor, endpoint, tenant: @current_org)}
+                    :if={
+                      endpoint.format != :slack and
+                        CMS.can_rotate_webhook_secret?(@actor, endpoint, tenant: @current_org)
+                    }
                     type="button"
                     id={"rotate-secret-#{endpoint.id}"}
                     phx-click="rotate_secret"
@@ -571,7 +723,29 @@ defmodule KilnCMSWeb.WebhookLive do
                 phx-submit="save_edit"
                 class="space-y-4"
               >
-                <.input field={@edit.form[:url]} type="url" label={gettext("Endpoint URL")} />
+                <p class="text-sm">
+                  <span class="font-medium">{gettext("Format")}:</span>
+                  <span id={"webhook-#{endpoint.id}-format"}>{format_label(endpoint.format)}</span>
+                </p>
+                <div class="space-y-1">
+                  <%!-- Never pre-filled (#2245): the input shows only what was
+                       typed into it, so the stored URL does not go back to the
+                       browser. Blank keeps it. --%>
+                  <.input
+                    field={@edit.form[:url]}
+                    type="url"
+                    label={gettext("Endpoint URL")}
+                    value={typed_url(@edit.form)}
+                    hint={gettext("Leave blank to keep the current URL.")}
+                  />
+                  <p class="flex flex-wrap items-center gap-2 text-xs text-base-content/70">
+                    <span>{gettext("Current URL:")}</span>
+                    <.endpoint_url
+                      endpoint={endpoint}
+                      revealed={MapSet.member?(@revealed_urls, endpoint.id)}
+                    />
+                  </p>
+                </div>
                 <label class="flex items-center gap-2 text-sm">
                   <input type="hidden" name="webhook[active]" value="false" />
                   <input
@@ -587,8 +761,9 @@ defmodule KilnCMSWeb.WebhookLive do
                   <legend class="text-sm font-medium">{gettext("Events")}</legend>
                   <.event_checkboxes
                     form={@edit.form}
-                    available_events={@available_events}
+                    available_events={offered_events(@edit.form, @available_events)}
                     target="edit"
+                    slack={slack?(@edit.form)}
                   />
                 </fieldset>
                 <div class="flex flex-wrap items-center gap-2">
@@ -653,12 +828,13 @@ defmodule KilnCMSWeb.WebhookLive do
                   </td>
                   <td><code class="text-xs">{delivery.event}</code></td>
                   <td class="max-w-48 truncate">
-                    <code :if={delivery.endpoint_id} class="text-xs">
-                      {delivery.endpoint && delivery.endpoint.url}
+                    <code :if={delivery.endpoint_id && delivery.endpoint} class="text-xs">
+                      {Webhooks.display_url(delivery.endpoint.url)}
                     </code>
-                    <%!-- The endpoint was deleted; the row keeps its URL copy (#2330). --%>
+                    <%!-- The endpoint was deleted; the row keeps its URL copy
+                         (#2330), shown masked like every URL (#2245). --%>
                     <code :if={is_nil(delivery.endpoint_id) and delivery.endpoint_url} class="text-xs">
-                      {delivery.endpoint_url}
+                      {Webhooks.display_url(delivery.endpoint_url)}
                     </code>
                     <span
                       :if={is_nil(delivery.endpoint_id)}
@@ -730,7 +906,9 @@ defmodule KilnCMSWeb.WebhookLive do
             id={"copy-secret-#{@endpoint.id}"}
             phx-hook="Clipboard"
             data-clipboard-text={@secret}
-            aria-label={gettext("Copy signing secret for %{url}", url: @endpoint.url)}
+            aria-label={
+              gettext("Copy signing secret for %{url}", url: Webhooks.display_url(@endpoint.url))
+            }
             class="btn btn-sm btn-default px-2 py-0.5 text-xs"
           >
             <.icon name="hero-clipboard-document" class="size-3.5" />
@@ -741,7 +919,9 @@ defmodule KilnCMSWeb.WebhookLive do
             id={"reveal-secret-#{@endpoint.id}"}
             phx-click="hide_secret"
             phx-value-id={@endpoint.id}
-            aria-label={gettext("Hide signing secret for %{url}", url: @endpoint.url)}
+            aria-label={
+              gettext("Hide signing secret for %{url}", url: Webhooks.display_url(@endpoint.url))
+            }
             class="btn btn-sm btn-default px-2 py-0.5 text-xs"
           >
             <.icon name="hero-eye-slash" class="size-3.5" />
@@ -764,7 +944,9 @@ defmodule KilnCMSWeb.WebhookLive do
             id={"reveal-secret-#{@endpoint.id}"}
             phx-click="reveal_secret"
             phx-value-id={@endpoint.id}
-            aria-label={gettext("Reveal signing secret for %{url}", url: @endpoint.url)}
+            aria-label={
+              gettext("Reveal signing secret for %{url}", url: Webhooks.display_url(@endpoint.url))
+            }
             class="btn btn-sm btn-default px-2 py-0.5 text-xs"
           >
             <.icon name="hero-eye" class="size-3.5" />
@@ -786,25 +968,71 @@ defmodule KilnCMSWeb.WebhookLive do
   defp delivery_status_label(:failed), do: gettext("Failed")
   defp delivery_status_label(:pending), do: gettext("Retrying")
 
+  attr :endpoint, :map, required: true
+  attr :revealed, :boolean, required: true
+
+  # The endpoint's URL, masked unless this admin revealed it (#2245), with the
+  # button that reveals or hides it.
+  defp endpoint_url(assigns) do
+    ~H"""
+    <code id={"webhook-#{@endpoint.id}-url"} class="truncate text-sm">
+      {if @revealed, do: @endpoint.url, else: Webhooks.display_url(@endpoint.url)}
+    </code>
+    <button
+      :if={!@revealed}
+      type="button"
+      id={"reveal-url-#{@endpoint.id}"}
+      phx-click="reveal_url"
+      phx-value-id={@endpoint.id}
+      class="btn btn-sm btn-default px-2 py-0.5 text-xs"
+    >
+      <.icon name="hero-eye" class="size-3.5" />
+      {gettext("Reveal URL")}
+    </button>
+    <button
+      :if={@revealed}
+      type="button"
+      id={"reveal-url-#{@endpoint.id}"}
+      phx-click="hide_url"
+      phx-value-id={@endpoint.id}
+      class="btn btn-sm btn-default px-2 py-0.5 text-xs"
+    >
+      <.icon name="hero-eye-slash" class="size-3.5" />
+      {gettext("Hide URL")}
+    </button>
+    """
+  end
+
   attr :form, :any, required: true
   attr :available_events, :list, required: true
   attr :target, :string, required: true, doc: ~s("new" or "edit": which form the buttons act on)
+  attr :slack, :boolean, default: false, doc: "a Slack-format form: security events only"
 
   defp event_checkboxes(assigns) do
-    assigns = assign(assigns, :checked, checked_events(assigns.form))
+    assigns =
+      assigns
+      |> assign(:checked, checked_events(assigns.form))
+      |> assign(:errors, event_errors(assigns.form))
 
     ~H"""
-    <p class="mt-1 text-xs text-base-content/70">
+    <p :if={!@slack} class="mt-1 text-xs text-base-content/70">
       {gettext(
         "Events marked “includes unpublished content” send the full body of drafts and embargoed documents. They are off by default: select them only if this receiver should see content before it is published."
       )}
     </p>
+    <div :if={@errors != []} id={"#{@target}-events-error"}>
+      <p :for={msg <- @errors} class="mt-1.5 flex items-center gap-2 text-sm text-error">
+        <.icon name="hero-exclamation-circle" class="size-5" />
+        {msg}
+      </p>
+    </div>
     <div class="mt-2 flex flex-wrap gap-2" role="group" aria-label={gettext("Select events")}>
       <button
         type="button"
         phx-click="select_events"
         phx-value-target={@target}
         phx-value-op="all"
+        title={!@slack && gettext("Select all events except security alerts")}
         class="btn btn-sm btn-default"
       >
         {gettext("Select all")}

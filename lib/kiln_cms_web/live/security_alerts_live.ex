@@ -283,7 +283,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
               />
               <p class="-mt-1 ml-6 text-xs text-base-content/70">
                 {gettext(
-                  "Off, an alert shows only the address's network (the first three parts of an IPv4 address). The security log keeps the full address either way."
+                  "Off, an alert shows only the address's network: its /24 for IPv4, its /48 for IPv6. The security log keeps the full address either way."
                 )}
               </p>
             </div>

@@ -59,6 +59,11 @@ msgstr ""
 msgid "%{field}: %{message}"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/webhook_format_events.ex
+#, elixir-autogen, elixir-format
+msgid "Slack endpoints can only receive security events"
+msgstr ""
+
 msgid "are still associated with this entry"
 msgstr ""
 

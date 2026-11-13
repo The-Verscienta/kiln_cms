@@ -106,8 +106,14 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
   # #1926: a retraction webhook that exhausted its retries is on the trail.
   describe "lost retractions" do
+    # The trail and its exports name the endpoint masked (#2245): an
+    # incoming-webhook URL carries its own token.
+    @hook_url "https://mirror.test/hook/T0SECRET-token-Zq9x"
+    @masked_url "https://mirror.test/…/Zq9x"
+    @secret_segment "T0SECRET-token"
+
     defp lost_retraction!(admin, post) do
-      endpoint = CMS.create_webhook_endpoint!(%{url: "https://mirror.test/hook"}, actor: admin)
+      endpoint = CMS.create_webhook_endpoint!(%{url: @hook_url}, actor: admin)
 
       %{
         endpoint_id: endpoint.id,
@@ -146,8 +152,9 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/editor/governance/post/#{post.id}")
       assert has_element?(view, "#lost-retractions", "Retractions not delivered")
-      assert has_element?(view, "#lost-retraction-#{lost.id}", "https://mirror.test/hook")
+      assert has_element?(view, "#lost-retraction-#{lost.id}", @masked_url)
       assert has_element?(view, "#lost-retraction-#{lost.id}", "endpoint returned HTTP 502")
+      refute render(view) =~ @secret_segment
     end
 
     # The webhooks page lists the 25 newest deliveries; a retraction is given
@@ -186,7 +193,8 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
       {:ok, view, _html} = live(log_in(conn, admin), ~p"/editor/governance/post/#{post.id}")
 
       row = "#lost-retraction-#{lost.id}"
-      assert has_element?(view, row, "https://mirror.test/hook")
+      assert has_element?(view, row, @masked_url)
+      refute render(view) =~ @secret_segment
       assert has_element?(view, ~s(#{row} [data-role="deleted-endpoint"]), "(deleted endpoint)")
       refute has_element?(view, "#{row} button", "Redeliver")
     end
@@ -221,12 +229,15 @@ defmodule KilnCMSWeb.GovernanceLiveTest do
 
       body = conn |> get(~p"/editor/governance/post/#{post.id}/export.json") |> json_response(200)
 
-      assert [%{"event" => "post.unpublished", "endpoint_url" => "https://mirror.test/hook"}] =
+      assert [%{"event" => "post.unpublished", "endpoint_url" => @masked_url}] =
                body["lost_retractions"]
+
+      refute Jason.encode!(body) =~ @secret_segment
 
       csv = conn |> get(~p"/editor/governance/post/#{post.id}/export.csv") |> response(200)
       assert csv =~ "retraction_lost"
-      assert csv =~ "https://mirror.test/hook"
+      assert csv =~ @masked_url
+      refute csv =~ @secret_segment
     end
   end
 

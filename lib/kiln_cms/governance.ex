@@ -838,7 +838,12 @@ defmodule KilnCMS.Governance do
       endpoints:
         Enum.map(record.deliveries, fn delivery ->
           %{
-            url: delivery.endpoint_url,
+            # Masked (#2245), like the lost retractions: the trail and its
+            # exports name the endpoint, they do not hand out its URL. Two
+            # endpoints on one host can mask alike, so the id tells them
+            # apart. A row from before the URL snapshot (#2330) has none.
+            endpoint_id: delivery.endpoint_id,
+            url: delivery.endpoint_url && KilnCMS.Webhooks.display_url(delivery.endpoint_url),
             status: delivery.status,
             attempts: delivery.attempts,
             delivered_at: delivery.delivered_at,

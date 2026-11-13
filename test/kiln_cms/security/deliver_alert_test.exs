@@ -499,4 +499,138 @@ defmodule KilnCMS.Security.DeliverAlertTest do
       assert [%{"summary_sent_at" => %{}}] = SecurityAlerts.dispatches()
     end
   end
+
+  describe "the bell's details (#2642)" do
+    test "a site alert's row carries its details and the English excerpt", ctx do
+      lockout(ctx.org.id)
+      SecurityAlerts.deliver()
+
+      assert [bell | _] = bells()
+      assert bell.excerpt == "An account was locked out (from 203.0.113.0/24)"
+
+      assert bell.details == %{
+               "phase" => "alert",
+               "kind" => "lockout",
+               "channel" => "site",
+               "kinds" => [],
+               "count" => 1,
+               "ip" => "203.0.113.0/24",
+               "event_type" => "sign_in_locked"
+             }
+
+      # Nothing the excerpt did not already say: no full address, no agent.
+      refute inspect(bell.details) =~ @ip
+      refute inspect(bell.details) =~ "Secret-Agent"
+    end
+
+    test "a notice's row carries its change and the kinds turned off", ctx do
+      KilnCMS.Security.AlertGate.insert_notice!(ctx.org.id, %{
+        change: "kind_disabled",
+        kinds: ["lockout"],
+        actor_id: ctx.admin.id
+      })
+
+      SecurityAlerts.deliver()
+
+      assert [bell | _] = bells()
+      assert bell.excerpt == "Some security alerts were turned off"
+
+      assert %{"phase" => "notice", "change" => "kind_disabled", "kinds" => ["lockout"]} =
+               bell.details
+
+      refute Map.has_key?(bell.details, "actor_id")
+    end
+
+    test "a platform alert's rows are anchored as platform alerts", ctx do
+      {:ok, _} =
+        Accounts.manage_user_access(user(:editor), %{role: :admin},
+          actor: ctx.platform,
+          context: KilnCMS.Security.AuthEvents.context(Plug.Test.conn(:get, "/"), ctx.org.id)
+        )
+
+      SecurityAlerts.deliver()
+
+      assert [_ | _] = rows = bells()
+
+      assert Enum.all?(
+               rows,
+               &(&1.content_type == KilnCMS.Notifications.platform_alert_content_type())
+             )
+    end
+
+    test "the email and the excerpt stay English whatever the locale", ctx do
+      Gettext.put_locale(KilnCMSWeb.Gettext, "es")
+      lockout(ctx.org.id)
+      SecurityAlerts.deliver()
+
+      assert [bell | _] = bells()
+      assert bell.excerpt == "An account was locked out (from 203.0.113.0/24)"
+
+      [mail] = mails()
+      assert mail.subject == "Security alert on #{site_name(ctx.org)}: An account was locked out"
+      assert mail.html_body =~ "An account was locked out (from 203.0.113.0/24)"
+    end
+  end
+
+  describe "a delivery that runs out of attempts (#2642)" do
+    defp attach_failures do
+      test = self()
+      id = "deliver-alert-failed-#{uniq()}"
+
+      :telemetry.attach(
+        id,
+        [:kiln_cms, :security, :alert_failed],
+        fn _event, measurements, metadata, _ ->
+          send(test, {:alert_failed, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "is reported once, as an alert that was never sent", ctx do
+      attach_failures()
+      endpoint!(ctx.org.id, ["security.lockout"], ctx.admin)
+      lockout(ctx.org.id)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          KilnCMS.Webhooks.with_actor(%{id: "nobody"}, fn -> SecurityAlerts.deliver() end)
+        end)
+
+      scope = ctx.org.id
+
+      assert_received {:alert_failed, %{count: 1},
+                       %{
+                         scope: ^scope,
+                         kind: "lockout",
+                         reason: :delivery_exhausted,
+                         phase: :alert
+                       }}
+
+      refute_received {:alert_failed, _, _}
+      assert log =~ "was not delivered after its last attempt"
+    end
+
+    test "is reported as a summary when the alert went and its summary did not", ctx do
+      attach_failures()
+      endpoint!(ctx.org.id, ["security.lockout"], ctx.admin)
+      lockout(ctx.org.id)
+      lockout(ctx.org.id)
+      SecurityAlerts.deliver()
+      refute_received {:alert_failed, _, _}
+
+      [dispatch] = SecurityAlerts.dispatches()
+      SecurityAlerts.close_window(dispatch["id"])
+      SecurityAlerts.backdate_events()
+
+      KilnCMS.Webhooks.with_actor(%{id: "nobody"}, fn -> SecurityAlerts.deliver() end)
+
+      assert_received {:alert_failed, %{count: 1},
+                       %{kind: "lockout", reason: :delivery_exhausted, phase: :summary}}
+
+      assert [%{"summary_sent_at" => nil, "failed_at" => %{}}] = SecurityAlerts.dispatches()
+    end
+  end
 end

@@ -119,7 +119,14 @@ defmodule KilnCMS.Webhooks.RetractionLost do
   defp excerpt(delivery, reason),
     do: String.slice("#{endpoint_url(delivery)} — #{reason}", 0, 500)
 
-  defp endpoint_url(%{endpoint: %{url: url}}) when is_binary(url), do: url
-  defp endpoint_url(%{endpoint_url: url}) when is_binary(url), do: url
+  # Masked (#2245): the log line and the notice every admin of the site reads
+  # name the endpoint without handing out its URL, which for an incoming
+  # webhook is the credential.
+  defp endpoint_url(%{endpoint: %{url: url}}) when is_binary(url),
+    do: KilnCMS.Webhooks.display_url(url)
+
+  defp endpoint_url(%{endpoint_url: url}) when is_binary(url),
+    do: KilnCMS.Webhooks.display_url(url)
+
   defp endpoint_url(_delivery), do: "a deleted endpoint"
 end

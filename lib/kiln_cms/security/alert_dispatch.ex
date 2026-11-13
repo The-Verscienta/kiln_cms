@@ -119,10 +119,14 @@ defmodule KilnCMS.Security.AlertDispatch do
     end
 
     # A delivery that exhausted its attempts: stamped, so the trigger stops
-    # picking the row up rather than retrying a poison row all day.
+    # picking the row up rather than retrying a poison row all day, and
+    # reported (log and `alert_failed` telemetry, #2642). Not atomic: the
+    # report runs after the stamp commits.
     update :mark_failed do
       accept []
+      require_atomic? false
       change set_attribute(:failed_at, &DateTime.utc_now/0)
+      change KilnCMS.Security.Changes.ReportAlertFailed
     end
 
     # Deletes every row past `expires_at`. Returns how many went.

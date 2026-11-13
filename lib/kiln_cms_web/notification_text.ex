@@ -96,6 +96,23 @@ defmodule KilnCMSWeb.NotificationText do
   # the test holds every event this release knows to its own sentence.
   def headline(_notification), do: fallback()
 
+  @doc """
+  The row's excerpt, or `nil` when it has none.
+
+  A security row with `details` (#2642) is said again from them in the
+  current locale (`KilnCMS.Security.AlertText`), so an es or fr inbox does
+  not show a translated headline over an English line. Every other row, and
+  a security row written before `details` existed, shows its stored
+  `excerpt` as it is.
+  """
+  @spec excerpt(map()) :: String.t() | nil
+  def excerpt(%{event: event, details: %{"phase" => _phase} = details})
+      when event in [:security_alert, :security_notice],
+      do: KilnCMS.Security.AlertText.headline(details)
+
+  def excerpt(%{excerpt: excerpt}), do: excerpt
+  def excerpt(_notification), do: nil
+
   @doc "The neutral line for an event with no sentence of its own."
   @spec fallback() :: String.t()
   def fallback, do: gettext("Notification")

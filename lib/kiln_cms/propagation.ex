@@ -74,6 +74,7 @@ defmodule KilnCMS.Propagation do
   # what `KilnCMS.CMS.WebhookDelivery.given_up_at/1` decides from.
   @trail_delivery_fields [
     :propagation_id,
+    :endpoint_id,
     :endpoint_url,
     :status,
     :attempts,

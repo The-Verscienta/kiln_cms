@@ -10,8 +10,14 @@ as [#570](https://github.com/The-Verscienta/kiln_cms/issues/570) — the feature
 
 ## Registering an endpoint
 
-Admins manage endpoints at **`/editor/webhooks`**. Adding one takes a URL and a
-set of events to subscribe to; Kiln generates a signing secret at creation time.
+Admins manage endpoints at **`/editor/webhooks`**. Adding one takes a format, a
+URL and a set of events to subscribe to; Kiln generates a signing secret at creation time.
+The **Format** is **Kiln (signed JSON)**, the envelope described below, unless
+you choose **Slack (incoming webhook)** for a channel that receives the site's
+security alerts ([Slack-format endpoints](#slack-format-endpoints)). The format
+is fixed once the endpoint is added: to change it, add a new endpoint.
+After you add it, the list shows the endpoint's URL masked
+([See or change an endpoint URL](#see-or-change-an-endpoint-url)).
 It does not change when you edit the endpoint; an admin replaces it on purpose with
 **Rotate secret** ([Rotate a webhook signing secret](#rotate-a-webhook-signing-secret)
 below). Each row shows the secret masked
@@ -33,8 +39,12 @@ endpoint created over code or AshAdmin gets when it names no events: the
 events that carry unpublished content are marked **includes unpublished
 content** and start unticked. **Select all**, **Clear** and **Reset to
 defaults** act on the whole list, and each group (one per content type, plus
-tasks, releases, experiments, memberships, and the tag, tag group and category
-taxonomy) has its own toggle. An endpoint
+tasks, releases, experiments, memberships, security, and the tag, tag group and category
+taxonomy) has its own toggle. **Select all** leaves the `security.*` events
+as they are: it ticks every other event, and keeps a security event only if
+it was already ticked. Security alerts carry client addresses and user ids,
+so an endpoint receives them only when someone ticks them in the `security`
+group, whose own toggle ticks them all. An endpoint
 that receives unpublished content says so on its row.
 
 ## Copy a webhook signing secret
@@ -142,6 +152,94 @@ What can go wrong:
   secret. Reveal the new one and update the receiver; failed deliveries retry
   on their own and can be redelivered ([Ping and redeliver](#ping-and-redeliver)).
 
+## See or change an endpoint URL
+
+An endpoint's URL can be a credential. A Slack, Teams, Discord or Zapier
+incoming-webhook URL carries its own token, and anyone holding it can post to
+the channel. So Kiln shows every endpoint's URL masked, whatever its format,
+and sends the full URL to the browser only when an admin asks for it. You
+need the admin role; `/editor/webhooks` is admin-only.
+
+1. Open **Webhooks** (`/editor/webhooks`). Each row shows its URL masked: the
+   scheme and host, then `/…/` and the last four characters of the path and
+   query, such as `https://hooks.slack.com/…/9xQz`. When the path and query
+   are shorter than 16 characters, only the scheme and host are shown
+   (`https://example.com`). A user name and password in the URL are never
+   shown, nor is the scheme's default port.
+2. Click **Reveal URL** beside it. Kiln reads the endpoint again as you, on
+   the current site, and the full URL replaces the masked one, with a
+   **Hide URL** button. It stays revealed until you click **Hide URL** or
+   leave or reload the page.
+3. To change the URL, click **Edit** on the row. The form shows the
+   endpoint's **Format** (read-only), an empty **Endpoint URL** field with the
+   hint "Leave blank to keep the current URL.", and under it **Current URL:**
+   followed by the masked URL and its own **Reveal URL** button.
+4. Type the new URL and click **Save**, or leave the field empty to keep the
+   URL as it is and change only **Active** or the events. The page says
+   "Saved."
+
+Leaving the field empty does not count as a URL change, so saving an endpoint
+subscribed to security alerts without typing a URL sends no
+[silencing notice](security-alerts.md#silencing-notices) for its URL.
+
+The same masked form names an endpoint everywhere else it appears: the
+**Recent deliveries** table, the labels of the signing-secret buttons read by
+screen readers, a document's governance trail and its JSON and CSV exports,
+the "Retraction not delivered" notice, and the application log. The database
+and the delivery ledger keep the real URL, and a redelivery is sent to it.
+
+What can go wrong:
+
+- **"Couldn't reveal that URL."**: the endpoint was not found (another admin
+  deleted it after your page loaded) or you are no longer an admin of the
+  site. Reload the page.
+- **Two rows look the same.** Two endpoints on one host whose paths end alike
+  mask to the same text. Reveal both, or tell them apart by their events.
+  The governance exports carry each endpoint's `endpoint_id` for this.
+
+## Slack-format endpoints
+
+A Slack-format endpoint posts the site's [security alerts](security-alerts.md)
+into a chat channel as a message, instead of Kiln's signed JSON envelope. It
+works with a Slack incoming webhook and with receivers that accept the same
+body: Mattermost, Rocket.Chat, and Discord's `/slack` URL. The step-by-step
+setup is in [Send alerts to Slack](security-alerts.md#send-alerts-to-slack).
+
+- **Security events only.** Its events must all start with `security.`. A
+  Slack endpoint is never sent a content event, a retraction, a form
+  submission or a taxonomy event: content carries document bodies that have
+  no sensible chat rendering. Adding or saving one with another event ticked
+  is refused with "Slack endpoints can only receive security events". An
+  endpoint added with no events gets every security event.
+- **The body.** A JSON object with `text` (the whole message on one line,
+  ending with the link to the console as a bare URL, for receivers that ignore
+  `blocks`), `blocks` (a section with the headline, the site and when, and a
+  context line with a link to the security log and the event name) and
+  `"unfurl_links": false, "unfurl_media": false`. The wording is the same
+  English headline as the alert email. The site name, the IP address and the
+  event name are put in code spans, with backticks replaced and line breaks
+  collapsed, and `&`, `<` and `>` are escaped, so nothing typed into a site
+  name can mention `@channel`, add a link or format the message. It carries no
+  user id, delivery id or endpoint id.
+- **Ping** posts "KilnCMS webhook test for `Site`" and never the endpoint's URL.
+- **Signed, but nobody checks.** The `x-kilncms-webhook-signature`,
+  `x-kilncms-event` and `x-kilncms-delivery-id` headers are still sent, and
+  the signature covers the body actually sent, so a relay in front of the
+  channel can verify it. Slack itself checks no signature: **the URL is the
+  credential**. That is why the row shows no signing secret and no **Rotate
+  secret** button, and why the URL is masked. If the URL leaks, regenerate it
+  in Slack, then delete the endpoint and add the new URL.
+- **Failures are ordinary.** Slack answers `400 invalid_payload`, `403`,
+  `404 channel_not_found` or `410 channel_is_archived` when it can't post;
+  those are retried and count toward [auto-disable](#auto-disable) like any
+  non-2xx answer.
+- **An event it has no message for**, such as a content event an older node
+  queued for it during a rolling deploy, is posted as one neutral line naming
+  the event, with nothing from its payload.
+- **A format this release doesn't know** (an endpoint added by a newer release,
+  met after a rollback) is not sent at all: the delivery fails with
+  `delivery failed: endpoint format not supported by this release`.
+
 ## Delete an endpoint
 
 You need the admin role; `/editor/webhooks` is admin-only, and so is the
@@ -167,7 +265,7 @@ What deleting does:
   stop ([Retractions are exempt](#retractions-are-exempt)).
 - **The history stays.** Past deliveries keep their ledger rows under the
   usual [retention](#delivery-history). In **Recent deliveries** each row
-  still shows the URL it was sent to, followed by "(deleted endpoint)", and
+  still shows the URL it was sent to, masked, followed by "(deleted endpoint)", and
   has no **Redeliver** button: there is no endpoint to send it to, and the
   signing secret went with it. A failed retraction in a document's
   **Retractions not delivered** panel on the governance trail is shown the
@@ -326,6 +424,9 @@ dedupe key. `data` shape depends on the event:
   or a silencing notice, told apart by `phase`. See
   [Security alert events](#security-alert-events).
 - **`ping`** — `{"message": "KilnCMS webhook test", "endpoint_url": "...", "sent_at": "<ISO 8601>"}`.
+  `endpoint_url` is the endpoint's full URL. A
+  [Slack-format endpoint](#slack-format-endpoints) is not sent this envelope:
+  its ping is a chat message naming the site, without the URL.
 
 ```jsonc
 // POST to your endpoint, page.published
@@ -397,7 +498,10 @@ changed, deleted, re-keyed or auto-disabled, an admin removed or demoted, the
 site's mail relay changed).
 
 - **Opt in.** None is in the defaults, so an endpoint receives none until an
-  admin ticks them in the `security` group of its event list.
+  admin ticks them in the `security` group of its event list. The list's
+  **Select all** does not tick them; the `security` group's own toggle does.
+- **To a chat channel.** A [Slack-format endpoint](#slack-format-endpoints)
+  receives these events as a chat message instead of this JSON envelope.
 - **When.** Within about a minute of the event. Alerts are grouped per kind
   into 15-minute windows: the first event of a window is sent as an alert
   (`"phase": "alert"`), and when more followed, one summary
@@ -651,7 +755,7 @@ is an ordinary delivery.)
     the identity only.
 
 Fix the receiver, then press **Redeliver** on the row in the trail's panel.
-A row whose endpoint has since been deleted keeps its URL, marked
+A row whose endpoint has since been deleted keeps its URL (shown masked), marked
 "(deleted endpoint)", and has no **Redeliver** button
 ([Delete an endpoint](#delete-an-endpoint)).
 `/editor/webhooks` lists only the 25 newest deliveries, and a retraction is
@@ -672,7 +776,7 @@ given up on about a day after it was sent.
 ## Delivery history
 
 `/editor/webhooks` shows the 25 most recent deliveries across all of an
-org's endpoints: timestamp, event, target endpoint, status
+org's endpoints: timestamp, event, target endpoint (its URL masked), status
 (delivered/retrying/failed), attempt count, last HTTP status, and last error.
 Delivery rows are retained for **30 days**, then pruned by a nightly job (per
 org, so one site's retention sweep never touches another's history). A failed

@@ -60,6 +60,11 @@ msgstr "%{field} doit être au plus %{max}"
 msgid "%{field}: %{message}"
 msgstr "%{field} : %{message}"
 
+#: lib/kiln_cms/cms/validations/webhook_format_events.ex
+#, elixir-autogen, elixir-format
+msgid "Slack endpoints can only receive security events"
+msgstr "les endpoints Slack ne peuvent recevoir que des événements de sécurité"
+
 msgid "are still associated with this entry"
 msgstr "sont toujours associés à cette entrée"
 

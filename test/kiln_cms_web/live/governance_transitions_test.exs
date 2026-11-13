@@ -82,8 +82,13 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
       Plug.Conn.send_resp(conn, if(conn.host == "dead.test", do: 503, else: 200), "{}")
     end)
 
-    CMS.create_webhook_endpoint!(%{url: "https://good.test/hook"}, actor: admin)
-    CMS.create_webhook_endpoint!(%{url: "https://dead.test/hook"}, actor: admin)
+    CMS.create_webhook_endpoint!(%{url: "https://good.test/hook/T0SECRET-good-Gd01"},
+      actor: admin
+    )
+
+    CMS.create_webhook_endpoint!(%{url: "https://dead.test/hook/T0SECRET-dead-Dd01"},
+      actor: admin
+    )
 
     post = CMS.create_post!(%{title: "Dosage Advice", slug: slug()}, actor: admin)
     post = CMS.publish_post!(post, %{}, actor: admin)
@@ -113,7 +118,7 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
         assert has_element?(view, "#{row} [data-role=approver]", to_string(admin.email))
         assert has_element?(view, "#{row} [data-role=cdn]", "acknowledged")
         assert has_element?(view, "#{row} [data-role=cdn]", "enqueued")
-        assert has_element?(view, "#{row} [data-role=endpoints]", "https://good.test/hook")
+        assert has_element?(view, "#{row} [data-role=endpoints]", "https://good.test/…/Gd01")
         assert has_element?(view, "#{row} [data-role=endpoints]", "delivered")
       end
 
@@ -123,9 +128,10 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
       assert has_element?(view, "#transition-3 [data-role=row-chain]", "not yet anchored")
 
       # The endpoint that never answered is a terminal failure, with its error.
-      assert has_element?(view, "#transition-3 [data-role=endpoints]", "https://dead.test/hook")
+      assert has_element?(view, "#transition-3 [data-role=endpoints]", "https://dead.test/…/Dd01")
       assert has_element?(view, "#transition-3 [data-role=endpoints]", "given up")
       assert has_element?(view, "#transition-3 [data-role=endpoints]", "503")
+      refute render(view) =~ "T0SECRET"
 
       assert has_element?(view, "#transition-2", "publish")
       assert has_element?(view, "#transition-3", "unpublish")
@@ -221,7 +227,7 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
                "Sent to 1 endpoint"
              )
 
-      assert has_element?(view, "#transition-3 [data-role=endpoints]", "https://dead.test/hook")
+      assert has_element?(view, "#transition-3 [data-role=endpoints]", "https://dead.test/…/Dd01")
 
       csv =
         conn
@@ -236,7 +242,10 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
          %{conn: conn} do
       admin = authed_user(:admin)
       Req.Test.stub(KilnCMS.Webhooks, &Plug.Conn.send_resp(&1, 200, "{}"))
-      CMS.create_webhook_endpoint!(%{url: "https://good.test/hook"}, actor: admin)
+
+      CMS.create_webhook_endpoint!(%{url: "https://good.test/hook/T0SECRET-good-Gd01"},
+        actor: admin
+      )
 
       post = CMS.create_post!(%{title: "Quiet Success", slug: slug()}, actor: admin)
       CMS.publish_post!(post, %{}, actor: admin)
@@ -460,15 +469,21 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
       endpoints = Map.new(withdrawal["propagation"]["endpoints"], &{&1["url"], &1})
 
       assert %{"status" => "succeeded", "delivered_at" => at} =
-               endpoints["https://good.test/hook"]
+               endpoints["https://good.test/…/Gd01"]
 
       assert is_binary(at)
 
       assert %{"status" => "failed", "failed_at" => failed_at, "error" => error} =
-               endpoints["https://dead.test/hook"]
+               endpoints["https://dead.test/…/Dd01"]
 
       assert is_binary(failed_at)
       assert error =~ "503"
+      refute Jason.encode!(body) =~ "T0SECRET"
+
+      # Masked URLs can collide on one host; the endpoint id tells them apart.
+      ids = Enum.map(withdrawal["propagation"]["endpoints"], & &1["endpoint_id"])
+      assert Enum.all?(ids, &is_binary/1)
+      assert length(Enum.uniq(ids)) == length(ids)
     end
 
     test "the CSV export carries the same columns", %{conn: conn} do
@@ -495,8 +510,10 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
       assert withdrawal =~ "post.unpublished"
       assert withdrawal =~ "settled at "
       assert withdrawal =~ ",acknowledged,"
-      assert withdrawal =~ "https://good.test/hook delivered "
-      assert withdrawal =~ "https://dead.test/hook failed "
+      assert withdrawal =~ "https://good.test/…/Gd01 delivered "
+      assert withdrawal =~ "https://dead.test/…/Dd01 failed "
+      # Masked (#2245): the export names endpoints without their tokens.
+      refute csv =~ "T0SECRET"
       assert withdrawal =~ "/api/content/post/#{post.slug}?as_of="
       assert publish =~ ",publish,#{admin.email},true,"
 

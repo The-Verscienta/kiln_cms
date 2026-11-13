@@ -14,60 +14,35 @@ defmodule KilnCMS.Security.AlertMail do
   alert about that site must not depend on it — a changed relay is itself an
   alert (`mail_relay_changed`).
 
-  English, like the other account mail (`SendRegistrationPending`): an alert
-  goes to admins of possibly several sites, from a worker with no request
-  locale.
+  ## English, decided
+
+  The email is English, like the other account mail
+  (`SendRegistrationPending`, `KilnCMS.Accounts.ApiKeyReuse`), whatever
+  locale the console that raised it was in (#2642). An account stores no
+  preferred language, one admin may hold several sites in different
+  locales, and the worker has no request. The labels it shares with the bell
+  (`KilnCMS.Security.AlertText`) are gettext'd, so they are rendered under
+  `Gettext.with_locale(KilnCMSWeb.Gettext, "en", ...)`; the prose only the
+  email has (subject, body, footer) is plain English, not gettext, so the
+  catalogs carry no es/fr text no reader would see.
   """
   import Swoosh.Email
 
   alias KilnCMS.Mail
-
-  @kind_labels %{
-    "new_admin" => "A new administrator",
-    "role_elevation" => "A role was raised",
-    "failed_sign_ins" => "Failed sign-ins reached the alert threshold",
-    "lockout" => "An account was locked out",
-    "two_factor_disabled" => "Two-step verification was turned off",
-    "sso_config_changed" => "Single sign-on settings changed",
-    "platform_role_changed" => "A platform administrator lost the role",
-    "new_api_key" => "An API key was created",
-    "api_key_abuse" => "A rotated API key was used again"
-  }
-
-  @change_labels %{
-    "kind_disabled" => "Some security alerts were turned off",
-    "admin_notifications_off" => "Security alert notifications and emails were turned off",
-    "webhook_changed" => "A webhook that receives security alerts was changed",
-    "webhook_removed" => "A webhook that receives security alerts was deleted",
-    "webhook_secret_rotated" =>
-      "A webhook that receives security alerts got a new signing secret",
-    "webhook_auto_disabled" =>
-      "A webhook that receives security alerts was switched off after failed deliveries",
-    "admin_removed" => "An administrator was removed",
-    "admin_demoted" => "An administrator was demoted",
-    "admin_grant_revoked" => "A temporary administrator role was ended early",
-    "mail_relay_changed" => "The site's mail relay was changed"
-  }
+  alias KilnCMS.Security.AlertText
 
   @doc """
-  One line saying what happened: the bell's excerpt, and the email's first
-  paragraph.
+  One line saying what happened: the bell's English excerpt, and the email's
+  first paragraph. `KilnCMS.Security.AlertText.headline/1`, in English.
   """
   @spec headline(map()) :: String.t()
-  def headline(%{phase: "notice", change: change}),
-    do: Map.get(@change_labels, change, "Security alerts were made quieter")
+  def headline(data), do: english(fn -> AlertText.headline(AlertText.details(data)) end)
 
-  def headline(%{phase: "summary", kind: kind, count: count}),
-    do: "#{label(kind)}: #{count} in this alert window"
+  defp label(kind), do: english(fn -> AlertText.kind_label(kind) end)
 
-  def headline(%{kind: kind} = data) do
-    case get_in(data, [:event, :ip]) do
-      nil -> label(kind)
-      ip -> "#{label(kind)} (from #{ip})"
-    end
-  end
-
-  defp label(kind), do: Map.get(@kind_labels, kind, "Security alert")
+  # The labels are gettext'd for the bell (#2642); the email pins English.
+  # A future per-user locale is this one call.
+  defp english(fun), do: Gettext.with_locale(KilnCMSWeb.Gettext, "en", fun)
 
   @doc "The email's subject."
   @spec subject(map()) :: String.t()
