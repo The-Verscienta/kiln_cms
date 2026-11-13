@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.EnumerationRegistrationTest do
   use KilnCMSWeb.ConnCase, async: false
 
   import KilnCMS.EnumerationAssertions
+  import KilnCMS.MailAssertions
   import Phoenix.LiveViewTest
   import Swoosh.TestAssertions
 
@@ -210,16 +211,16 @@ defmodule KilnCMSWeb.EnumerationRegistrationTest do
       submit_register(build_conn(), unknown)
       KilnCMS.DataCase.drain_oban()
 
-      assert_email_sent(fn email ->
-        email.subject =~ "Someone tried to create" and email.to == [{"", known}]
-      end)
-
-      assert_email_sent(fn email ->
-        email.subject =~ "Confirm your email" and email.to == [{"", unknown}]
-      end)
-
+      # Drained together, the mails arrive in no fixed order: Oban fetches the
+      # :mail queue through UPDATE ... RETURNING, whose row order Postgres does
+      # not guarantee. So assert the set (#2602).
       # Exactly one mail each: nothing confirmable went to the owner, nothing
       # accusatory to the stranger.
+      assert_delivered([
+        &(&1.subject =~ "Someone tried to create" and &1.to == [{"", known}]),
+        &(&1.subject =~ "Confirm your email" and &1.to == [{"", unknown}])
+      ])
+
       refute_email_sent()
     end
 

@@ -15,6 +15,7 @@ defmodule KilnCMSWeb.EnumerationNewsletterTest do
   use KilnCMSWeb.ConnCase, async: true
 
   import KilnCMS.EnumerationAssertions
+  import KilnCMS.MailAssertions
   import Swoosh.TestAssertions
 
   alias KilnCMS.Newsletter
@@ -61,7 +62,8 @@ defmodule KilnCMSWeb.EnumerationNewsletterTest do
     seen = observe(post_subscribe("not-an-address"), [])
 
     assert seen.body =~ "Check that address"
-    seen.body =~ "doesn't look like"
+    # The body is HTML, so the apostrophe in "doesn't" arrives as `&#39;`.
+    assert seen.body =~ "look like an email address"
 
     refute seen == observe(post_subscribe(address("new")), [])
   end
@@ -75,11 +77,12 @@ defmodule KilnCMSWeb.EnumerationNewsletterTest do
     flush_mail()
 
     for email <- [pending, confirmed, unsubscribed, fresh], do: post_subscribe(email)
+    # In manual mode the drain runs only this test's own (uncommitted, sandboxed)
+    # jobs, in this process, so no other test's mail can land here. What varies
+    # is the order the two mails arrive in, hence a set assertion (#2602).
     KilnCMS.DataCase.drain_oban()
 
-    for email <- [pending, fresh] do
-      assert_email_sent(fn mail -> mail.to == [{"", email}] end)
-    end
+    assert_delivered(for email <- [pending, fresh], do: &(&1.to == [{"", email}]))
 
     refute_email_sent()
   end
