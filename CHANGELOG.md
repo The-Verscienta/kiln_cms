@@ -144,6 +144,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The setting and logic behind requiring two-step sign-in (part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
 
+- **New Prometheus counter `kiln_cms_api_invalid_bearer_count` (labels `enforced`, `surface`, `read`, `reason`; needs `KILN_METRICS_ENABLED`): the stale-token count that gates removing `KILN_API_REJECT_INVALID_BEARER` (ADR 0017).**
+  ([#2907](https://github.com/The-Verscienta/kiln_cms/pull/2907) · [long form](docs/changelog/unreleased.md#invalid-bearer-metric))
+
 ### Changed
 
 - **An account can hold at most 20 passkeys and add at most 5 an hour; the Passkeys section of the settings page says which limit refused.**
