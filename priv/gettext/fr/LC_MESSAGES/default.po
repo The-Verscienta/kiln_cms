@@ -10450,6 +10450,11 @@ msgstr "Retenu"
 msgid "Held by the backend"
 msgstr "Détenues par le service"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Held for two-step sign-in setup"
+msgstr "Retenu jusqu'à la configuration de la connexion en deux étapes"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Held: sent without completing the check."
@@ -23745,6 +23750,11 @@ msgstr "Connexion en deux étapes pour les administrateurs et éditeurs"
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in for platform administrators"
 msgstr "Connexion en deux étapes pour les administrateurs de la plateforme"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in requirement changed"
+msgstr "Exigence de connexion en deux étapes modifiée"
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
