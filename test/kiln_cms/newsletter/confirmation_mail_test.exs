@@ -41,6 +41,25 @@ defmodule KilnCMS.Newsletter.ConfirmationMailTest do
       assert email.html_body =~ "/newsletter/confirm/#{subscriber.confirm_token}"
     end
 
+    test "the subject names the site from its own branding (#2823)" do
+      # The branding read runs in `:subscribe`'s transaction. Its cache miss
+      # used to go to the Cachex courier, which queued on the connection this
+      # transaction holds until the sandbox dropped it, so the mail carried the
+      # fallback name after a one-second stall. A fresh org keeps the read off
+      # the default org's shared cache entry.
+      site = KilnCMS.OrgFixtures.org("confirm-brand")
+      site_name = "Brand #{System.unique_integer([:positive])}"
+      admin = user(:admin)
+      KilnCMS.CMS.save_site_branding!(%{site_name: site_name}, actor: admin, tenant: site)
+      address = email_for("branded")
+
+      assert {:ok, _subscriber} =
+               Newsletter.subscribe(%{email: address}, authorize?: false, tenant: site.id)
+
+      email = KilnCMS.Mail.from_args(queued_mail(address).args)
+      assert email.subject == "Confirm your subscription to #{site_name}"
+    end
+
     test "the mailed token is the PERSISTED one, so the link actually resolves" do
       # The regression this guards: `:subscribe` upserts with
       # `upsert_fields [:name]`, so the freshly generated token in the changeset

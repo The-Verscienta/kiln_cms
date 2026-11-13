@@ -403,10 +403,11 @@ defmodule KilnCMS.Accounts.InvitationMailTest do
   The invitation and membership-notice mails (#2135) carry the site name as it
   is in the subject and HTML-escaped only in the body.
 
-  `async: false`: the site name is read through the branding cache, whose
-  courier process needs the shared sandbox.
+  Each test brands its own fresh site, so the branding cache entry it reads is
+  its own. A branding read inside a transaction runs on the caller's connection
+  (`KilnCMS.Cache.fetch/3`), so the sandbox mode does not matter to it.
   """
-  use KilnCMS.DataCase, async: false
+  use KilnCMS.DataCase, async: true
 
   import KilnCMS.OrgFixtures, only: [org: 1]
   import Swoosh.TestAssertions
