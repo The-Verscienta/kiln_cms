@@ -777,7 +777,27 @@ jobs:
       # #1325's globbed helpers broke it for every push in between. The dry run
       # renders every guide and writes them to a temp dir; it needs no site, no
       # key and no network beyond Mix.install's three packages.
+      #
+      # All three publisher steps below run with Mix's build lock off and a
+      # step timeout (#2572). One run hung here for 68 minutes, printing
+      # nothing after "Waiting for lock on the build directory (held by
+      # process 2844)" / "==> mix_install": pid 2844 was this step's own BEAM.
+      # Mix's lock is re-entrant only within one Erlang process, so another
+      # process in the same VM waited on a lock its own OS process held. What
+      # the holder was doing is unknown (two inet_gethost children were still
+      # alive when the runner cleaned up). The lock guards against concurrent
+      # compiles of one project from several OS processes, and each of these
+      # steps is a single `elixir` process with its own Mix.install cache, so
+      # `MIX_OS_CONCURRENCY_LOCK=0` costs nothing. The timeout is the backstop:
+      # a normal run takes 3–15 s, about a minute with a cold Mix.install, so
+      # a hang now fails in minutes and can be re-run, instead of holding the
+      # job until the 6-hour default. The real publish workflows
+      # (publish-*.yml) are left without one: a full `--all` sync waits out
+      # the site's 429s and can legitimately run long.
       - name: Check the docs publisher can still read mix.exs
+        timeout-minutes: 5
+        env:
+          MIX_OS_CONCURRENCY_LOCK: "0"
         run: elixir scripts/publish_docs.exs --all --dry-run --out "$RUNNER_TEMP/docs-html"
 
       # The same for the release-notes publisher (#1870), which runs only when
@@ -785,15 +805,21 @@ jobs:
       # docs/changelog/ and CHANGELOG.md's dated headings; its parsing is unit
       # tested in test/scripts/publish_releases_test.exs.
       - name: Check the release-notes publisher can still read the changelog
+        timeout-minutes: 5
+        env:
+          MIX_OS_CONCURRENCY_LOCK: "0"
         run: elixir scripts/publish_releases.exs --all --dry-run --out "$RUNNER_TEMP/release-notes-html"
 
       # And the security-page publisher (#1873): SECURITY.md rendered, and the
       # repository's published advisories read from the GitHub API (the
-      # token only lifts the anonymous rate limit). Unit tested in
+      # token only lifts the anonymous rate limit), through its own Req client
+      # with Req's default retry. Unit tested in
       # test/scripts/publish_security_test.exs.
       - name: Check the security-page publisher can still read SECURITY.md and the advisories
+        timeout-minutes: 5
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          MIX_OS_CONCURRENCY_LOCK: "0"
         run: elixir scripts/publish_security.exs --dry-run --out "$RUNNER_TEMP/security-html"
 
   client:
