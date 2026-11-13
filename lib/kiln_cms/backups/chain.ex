@@ -58,7 +58,19 @@ defmodule KilnCMS.Backups.Chain do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, DirId, Importer, Lock, Retention, Steps, StepWorker, WorkState}
+
+  alias KilnCMS.Backups.{
+    Artifact,
+    DirId,
+    Importer,
+    Lock,
+    Recorder,
+    Retention,
+    Steps,
+    StepWorker,
+    WorkState
+  }
+
   alias KilnCMS.Backups.Run.Changes.Normalize
   alias KilnCMS.Repo
 
@@ -451,6 +463,41 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   @doc """
+  Give up a resume whose start `job` found no node with the run's files
+  (#2539; `StepWorker`): when `job` is still the lock's start job, free the
+  lock and promote the waiting request, then, after the commit, say on the
+  run why (`Steps.resume_refused/3`). Returns what the job returns:
+  `{:cancel, reason}`, or `{:cancel, :superseded}` when the lock has moved on.
+  """
+  @spec abandon_start(Oban.Job.t(), term()) :: {:cancel, term()} | {:error, term()}
+  def abandon_start(%Oban.Job{id: id, args: args}, reason) do
+    result =
+      with_lock(fn row ->
+        if current?(row, args, id), do: release_resume(row), else: {:error, :superseded}
+      end)
+
+    case result do
+      {:ok, stamp} when is_binary(stamp) ->
+        Steps.resume_refused(stamp, args["chain"], reason)
+        {:cancel, reason}
+
+      {:ok, nil} ->
+        {:cancel, reason}
+
+      {:error, :superseded} ->
+        {:cancel, :superseded}
+
+      {:error, error} ->
+        Logger.warning("Couldn't give up the backup resume: #{inspect(error, limit: 5)}")
+        {:error, error}
+    end
+  end
+
+  defp release_resume(row) do
+    with {:ok, _promoted} <- release_in_txn(row), do: {:ok, row.resume_stamp}
+  end
+
+  @doc """
   Run `fun` under the lock, only while `lease` still holds it. A Cancel takes
   the same advisory lock, so a cancel that commits first makes this skip `fun`
   (`{:error, :superseded}`), and a cancel that comes after waits for `fun`.
@@ -747,7 +794,8 @@ defmodule KilnCMS.Backups.Chain do
       dir_id: row.dir_id,
       step: row.step,
       part: row.part,
-      node: node
+      node: node,
+      resume: row.resume_stamp
     }
   end
 
@@ -833,6 +881,21 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   # After the commit: the Run, and the failure manifest when the files are here.
+  #
+  # A resume chain (#2539) whose start never re-opened the run (discarded or
+  # killed before it claimed the lock, or before the re-open) has no run of its
+  # own to fail: the run still names the chain it last ran under. It gets the
+  # refusal note instead of nothing.
+  defp interrupt(%{resume: stamp} = info, message) when is_binary(stamp) do
+    if Recorder.from_run(stamp, info.chain).run,
+      do: Steps.interrupt(stamp, info.chain, info.dir_id, message),
+      else: Steps.resume_refused(stamp, info.chain, {:interrupted, message})
+  rescue
+    error ->
+      Logger.warning("Couldn't record the interrupted backup: #{Exception.message(error)}")
+      :ok
+  end
+
   defp interrupt(%{stamp: nil}, _message), do: :ok
 
   defp interrupt(info, message) do

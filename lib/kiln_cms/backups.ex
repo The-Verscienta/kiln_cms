@@ -79,6 +79,7 @@ defmodule KilnCMS.Backups do
       define :finish_run, action: :finish
       define :fail_run, action: :fail
       define :resume_run, action: :resume
+      define :note_run_resume_refused, action: :note_resume_refused, args: [:reason]
       define :import_run, action: :import
       define :list_runs, action: :read
       define :run_history, action: :history
@@ -350,6 +351,20 @@ defmodule KilnCMS.Backups do
   @spec work_state?(term()) :: boolean()
   def work_state?(stamp) do
     WorkState.valid_stamp?(stamp) and stamp |> work_dir() |> WorkState.exists?()
+  end
+
+  @doc false
+  # The backup directory a resume of `stamp` must run in (#2539): the run's
+  # `dir_id`, nil when the run has none (imported, from before #2539) or
+  # doesn't exist. Fails closed on a refused read, so the caller can tell
+  # "unpinned" from "unknown".
+  @spec resume_dir_id(String.t()) :: {:ok, String.t() | nil} | {:error, term()}
+  def resume_dir_id(stamp) do
+    case get_run_by_stamp(stamp, actor: system(), authorize_with: :error) do
+      {:ok, %Run{dir_id: dir_id}} -> {:ok, dir_id}
+      {:ok, nil} -> {:ok, nil}
+      {:error, _} = error -> error
+    end
   end
 
   @doc "The work directory of a (valid) stamp. Raises for any other."

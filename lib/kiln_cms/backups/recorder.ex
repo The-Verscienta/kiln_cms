@@ -34,6 +34,7 @@ defmodule KilnCMS.Backups.Recorder do
   @type t :: %__MODULE__{
           run: KilnCMS.Backups.Run.t() | nil,
           chain_id: String.t() | nil,
+          dir_id: String.t() | nil,
           components: [:db | :media],
           artifacts: [map()],
           log: [map()]
@@ -41,7 +42,7 @@ defmodule KilnCMS.Backups.Recorder do
 
   @artifact_fields [:kind, :name, :bytes, :sha256, :verified, :parts, :encrypted?, :destinations]
 
-  defstruct run: nil, chain_id: nil, components: [], artifacts: [], log: []
+  defstruct run: nil, chain_id: nil, dir_id: nil, components: [], artifacts: [], log: []
 
   @doc """
   Open the run for an attempt. On a stamp collision or any write error the
@@ -49,7 +50,9 @@ defmodule KilnCMS.Backups.Recorder do
 
   With a `chain_id`, a run this chain already opened under `stamp` (the start
   step retried) is taken up again instead of colliding with itself. `extra`
-  may carry `scheduled_components` and `schedule_ids` (#2219).
+  may carry `scheduled_components` and `schedule_ids` (#2219), and `dir_id`,
+  the directory the run's files go to (#2539), which `progress/1` records
+  again, so a start retried on another node rebinds it.
   """
   @spec open(
           String.t(),
@@ -63,7 +66,7 @@ defmodule KilnCMS.Backups.Recorder do
           t()
   def open(stamp, trigger, started_at, components, job_id, chain_id \\ nil, extra \\ %{}) do
     attrs =
-      Map.merge(Map.take(extra, [:scheduled_components, :schedule_ids]), %{
+      Map.merge(Map.take(extra, [:scheduled_components, :schedule_ids, :dir_id]), %{
         stamp: stamp,
         trigger: trigger,
         components: components,
@@ -72,7 +75,7 @@ defmodule KilnCMS.Backups.Recorder do
         chain_id: chain_id
       })
 
-    rec = %__MODULE__{components: components, chain_id: chain_id}
+    rec = %__MODULE__{components: components, chain_id: chain_id, dir_id: extra[:dir_id]}
 
     case own_run(stamp, chain_id) do
       %{} = run -> %{rec | run: run}
@@ -204,16 +207,19 @@ defmodule KilnCMS.Backups.Recorder do
   cleared, and the accumulator starts from the run's existing log so the history
   keeps the first attempt's lines and gains the resume.
 
+  `dir_id` is the directory the resume read `state.json` from (#2539): the
+  run is rebound to it, which also back-fills a run from before #2539.
+
   Unlike every other call here this one reports `{:error, reason}`: the caller
   must refuse the resume when the run can't be re-opened (it is no longer
   failed, the grant is revoked, the row is gone), not carry on without a row.
   """
-  @spec reopen(String.t(), String.t() | nil) :: {:ok, t()} | {:error, term()}
-  def reopen(stamp, chain_id \\ nil) do
+  @spec reopen(String.t(), String.t() | nil, String.t() | nil) :: {:ok, t()} | {:error, term()}
+  def reopen(stamp, chain_id \\ nil, dir_id \\ nil) do
     result =
       safely("reopen", fn ->
         with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
-          Backups.resume_run(run, %{chain_id: chain_id}, actor: Backups.system())
+          Backups.resume_run(run, resume_params(chain_id, dir_id), actor: Backups.system())
         end
       end)
 
@@ -223,9 +229,13 @@ defmodule KilnCMS.Backups.Recorder do
     end
   end
 
+  # A nil `dir_id` keeps the run's own: it is not evidence of anything.
+  defp resume_params(chain_id, nil), do: %{chain_id: chain_id}
+  defp resume_params(chain_id, dir_id), do: %{chain_id: chain_id, dir_id: dir_id}
+
   @doc """
   The accumulator for a run that chain `chain_id` already re-opened
-  (`reopen/2`): a resume's start step retried after the re-open committed but
+  (`reopen/3`): a resume's start step retried after the re-open committed but
   before its `state.json` landed. `{:error, :not_resumable}` unless the run is
   `running` under `chain_id`.
   """
@@ -241,10 +251,30 @@ defmodule KilnCMS.Backups.Recorder do
     %__MODULE__{
       run: run,
       chain_id: chain_id,
+      dir_id: run.dir_id,
       components: run.components,
       artifacts: [],
       log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message]))
     }
+  end
+
+  @doc """
+  Say on the run of `stamp` that a resume of it was refused (#2539), through
+  its `:note_resume_refused` action: for a resume that never re-opened the run
+  (its files aren't on the node that picked it up, it gave up waiting for a
+  node that has them). The run keeps its status, so it stays resumable; a
+  stale `running` one is failed. Best-effort: a run that is live, imported,
+  succeeded or gone is left alone, with a warning.
+  """
+  @spec resume_refused(String.t(), String.t()) :: :ok
+  def resume_refused(stamp, message) do
+    safely("resume refused", fn ->
+      with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
+        Backups.note_run_resume_refused(run, message, actor: Backups.system())
+      end
+    end)
+
+    :ok
   end
 
   @doc """
@@ -369,8 +399,11 @@ defmodule KilnCMS.Backups.Recorder do
   @spec progress(t()) :: t()
   def progress(%__MODULE__{run: nil} = rec), do: rec
 
-  def progress(%__MODULE__{} = rec),
+  def progress(%__MODULE__{dir_id: nil} = rec),
     do: write(rec, "progress", &Backups.record_run_progress/3)
+
+  def progress(%__MODULE__{} = rec),
+    do: write(rec, "progress", &Backups.record_run_progress/3, %{dir_id: rec.dir_id})
 
   @doc "Close the run as succeeded."
   @spec finish(t()) :: t()

@@ -144,8 +144,16 @@ defmodule KilnCMS.Backups.Steps do
           {nil, Recorder.from_run(lease.stamp, lease.chain)}
       end
 
-    ctx = context(lease, state)
-    retry_or_fail(ctx, lease, job, state, rec, reason)
+    if resume_never_reopened?(lease, job, state, rec),
+      do: refuse_resume(lease, reason),
+      else: retry_or_fail(context(lease, state), lease, job, state, rec, reason)
+  end
+
+  # A resume's start that crashed before it re-opened the run (#2539) has no
+  # run of its own to fail: on its last attempt it is refused, visibly.
+  defp resume_never_reopened?(lease, job, state, rec) do
+    lease.resume != nil and state == nil and rec.run == nil and
+      job.attempt >= job.max_attempts
   end
 
   defp context(lease, state) do
@@ -224,9 +232,11 @@ defmodule KilnCMS.Backups.Steps do
         "Refused: #{reason}",
         schedule_fields(args, requested)
       )
-    end
 
-    refuse(lease, reason)
+      refuse(lease, reason)
+    else
+      refuse_resume(lease, reason)
+    end
   end
 
   # The start job's `"components"`, or nil (everything). Unknown names are
@@ -302,7 +312,14 @@ defmodule KilnCMS.Backups.Steps do
 
     rec =
       lease.stamp
-      |> Recorder.open(trigger, started_at, components, job.id, lease.chain, scheduled)
+      |> Recorder.open(
+        trigger,
+        started_at,
+        components,
+        job.id,
+        lease.chain,
+        Map.put(scheduled, :dir_id, lease.dir_id)
+      )
       |> Recorder.log(:info, "start", "Backup started (#{trigger})")
       |> log_components(components)
       |> log_queue(job.args)
@@ -354,12 +371,14 @@ defmodule KilnCMS.Backups.Steps do
         conclude(context(lease, state), lease, job, {:next, "dump", nil, state, rec})
 
       _other ->
-        # Re-opened FIRST: the sweep below fails `running` runs that went
-        # quiet, and this one was exactly that until `Recorder.reopen/2`
-        # flipped it back.
+        # The work state is read BEFORE the run is re-opened (#2539): a resume
+        # whose files aren't here is refused with the run as it was, and says
+        # so on the row. The re-open comes before the sweeps below: they fail
+        # `running` runs that went quiet, and this one was exactly that until
+        # `Recorder.reopen/3` flipped it back.
         with :ok <- resumable_here(lease.stamp),
-             {:ok, %{run: run} = rec} <- reopen(lease),
-             {:ok, state} <- WorkState.read(work_dir) do
+             {:ok, state} <- WorkState.read(work_dir),
+             {:ok, %{run: run} = rec} <- reopen(lease) do
           dir = Backups.dir()
           reconcile_stale_runs()
           sweep_stale_partials(dir)
@@ -388,12 +407,83 @@ defmodule KilnCMS.Backups.Steps do
 
           conclude(context(lease, state), lease, job, {:next, "dump", nil, state, rec})
         else
-          {:error, reason} ->
-            Logger.warning("Backup resume refused: #{inspect(reason)}")
-            refuse(lease, reason)
+          {:error, reason} -> refuse_resume(lease, reason)
         end
     end
   end
+
+  # A resume that can't run here (#2539) closes visibly: the run says why on
+  # its row before the lock is released, as `fail/5` does, so a Resume can't
+  # re-open a run this chain is still about to write. Nothing was started: no
+  # manifest.
+  defp refuse_resume(lease, reason) do
+    Logger.warning("Backup resume refused: #{inspect(reason)}")
+    note_resume_refused(lease.resume, lease.chain, reason)
+    _ = Chain.release(lease)
+    settled(lease, {:error, reason})
+    {:cancel, reason}
+  end
+
+  @doc false
+  # A resume chain given up from outside its start step (#2539): the start
+  # never found a node with the run's files (`Chain.abandon_start/2`), or it
+  # was interrupted before it re-opened the run (`Chain`'s reap and reclaim).
+  # The caller has released the lock. The run says why, and the chain settles.
+  @spec resume_refused(String.t(), String.t(), term()) :: :ok
+  def resume_refused(stamp, chain, reason) do
+    Logger.warning("Backup resume of #{stamp} refused: #{inspect(reason)}")
+    note_resume_refused(stamp, chain, reason)
+    settled(%{chain: chain, stamp: stamp}, {:error, reason})
+  end
+
+  # A run this chain re-opened (an attempt got that far, then lost its files)
+  # is ours: failed with the reason, and resumable again. Any other run never
+  # was ours, so it keeps its status and gains the note (`Recorder.resume_refused/2`).
+  defp note_resume_refused(stamp, chain, reason) do
+    message = describe_resume_refusal(reason, stamp)
+
+    case Recorder.reopened(stamp, chain) do
+      {:ok, rec} ->
+        rec
+        |> Recorder.log(:error, "resume", "Resume refused: " <> message)
+        |> Recorder.fail("Resume refused: " <> message)
+
+      {:error, _} ->
+        Recorder.resume_refused(stamp, message)
+    end
+
+    :ok
+  end
+
+  defp describe_resume_refusal(:no_state, stamp),
+    do: "its work files (.work/#{stamp}/state.json) are not on the server that picked it up"
+
+  defp describe_resume_refusal(:no_media_dir, _stamp),
+    do: "it backs up only media, and the server that picked it up has no media directory"
+
+  defp describe_resume_refusal({:not_resumable, _status}, _stamp),
+    do: "the run changed meanwhile"
+
+  defp describe_resume_refusal(:not_resumable, _stamp), do: "the run changed meanwhile"
+
+  defp describe_resume_refusal({:backup_dir_elsewhere, id}, _stamp),
+    do:
+      "no server with its backup directory (id #{id}) picked it up; " <>
+        "every attempt waited about 10 minutes for one"
+
+  defp describe_resume_refusal({:canceled_recently, _seconds}, _stamp),
+    do: "it was canceled moments ago and the wait ran out"
+
+  defp describe_resume_refusal(reason, _stamp)
+       when reason in [:disabled, :no_database_url, :no_pg_dump, :no_pg_restore],
+       do: "backups are not available on the server that picked it up (#{reason})"
+
+  defp describe_resume_refusal({:interrupted, message}, _stamp), do: message
+
+  defp describe_resume_refusal({:crashed, message}, _stamp),
+    do: "its start step crashed: #{message}"
+
+  defp describe_resume_refusal(reason, _stamp), do: inspect(reason)
 
   # A resume backs up what its run did (#2219). A run of nothing but media,
   # resumed on a node with no media directory, would have nothing to do:
@@ -414,11 +504,20 @@ defmodule KilnCMS.Backups.Steps do
   # and then failed (its state write, say): the Run is `running` under this
   # chain, which `resumable_run/3` refuses as not resumable. That one is ours
   # to carry on with.
+  #
+  # Either way the run is bound to this node's backup directory (#2539), which
+  # just read the run's `state.json`: `Recorder.reopen/3` writes it, and a run
+  # already re-opened records it with its next progress write.
   defp reopen(lease) do
-    with {:error, _} <- Recorder.reopened(lease.stamp, lease.chain),
-         {:ok, run, waited_ms} <- settled_resumable(lease.stamp, 0),
-         {:ok, rec} <- Recorder.reopen(run.stamp, lease.chain) do
-      {:ok, log_settle_wait(rec, waited_ms)}
+    case Recorder.reopened(lease.stamp, lease.chain) do
+      {:ok, rec} ->
+        {:ok, %{rec | dir_id: lease.dir_id}}
+
+      {:error, _} ->
+        with {:ok, run, waited_ms} <- settled_resumable(lease.stamp, 0),
+             {:ok, rec} <- Recorder.reopen(run.stamp, lease.chain, lease.dir_id) do
+          {:ok, log_settle_wait(rec, waited_ms)}
+        end
     end
   end
 

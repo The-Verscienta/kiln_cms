@@ -27,13 +27,16 @@ defmodule KilnCMS.Backups.Run do
 
   Artifacts and log entries are embedded (`KilnCMS.Backups.Artifact`,
   `KilnCMS.Backups.LogEntry`); see `KilnCMS.Backups.Log` for the log bound.
+
+  `dir_id` (#2539) names the backup directory the run's files are in, so a
+  resume's start runs on a node that has them (`KilnCMS.Backups.StepWorker`).
   """
   use Ash.Resource,
     domain: KilnCMS.Backups,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer]
 
-  alias KilnCMS.Backups.Run.Changes.{Cancel, Normalize, OwnChain, Resume}
+  alias KilnCMS.Backups.Run.Changes.{Cancel, Normalize, OwnChain, Resume, ResumeRefused}
 
   # `:canceled` (#2218) comes last: a platform admin stopped the run. Widening
   # the check constraint is expand-safe; an older node READING a canceled row
@@ -91,7 +94,8 @@ defmodule KilnCMS.Backups.Run do
         :schedule_ids,
         :started_at,
         :oban_job_id,
-        :chain_id
+        :chain_id,
+        :dir_id
       ]
 
       change set_attribute(:origin, :app)
@@ -122,9 +126,10 @@ defmodule KilnCMS.Backups.Run do
     # run that is still `running` (#2218) under the writer's own chain
     # (`OwnChain`, #2538): a step canceled or superseded meanwhile gets a
     # `StaleRecord` error (the recorder logs it) instead of overwriting
-    # `canceled`, a newer outcome, or a resume's progress.
+    # `canceled`, a newer outcome, or a resume's progress. `dir_id` (#2539):
+    # a fresh start retried on another node records that node's directory.
     update :record_progress do
-      accept [:components, :artifacts, :log]
+      accept [:components, :artifacts, :log, :dir_id]
       require_atomic? false
       change filter(expr(status == :running))
       change OwnChain
@@ -156,14 +161,27 @@ defmodule KilnCMS.Backups.Run do
     # the `Resume` change: it refuses anything but a failed or canceled run or
     # a stale `running` one, and re-checks the same in the UPDATE's WHERE, so
     # two callers holding one stale struct can't both flip it (#2421). The
-    # stamp and `started_at` stay the original attempt's.
+    # stamp and `started_at` stay the original attempt's. `dir_id` (#2539) is
+    # rebound to the directory the resume read `state.json` from.
     update :resume do
-      accept [:chain_id]
+      accept [:chain_id, :dir_id]
       require_atomic? false
       change Resume
       change set_attribute(:status, :running)
       change set_attribute(:finished_at, nil)
       change set_attribute(:error, nil)
+      change Normalize
+    end
+
+    # A resume that was requested but couldn't run says why on the row (#2539),
+    # which keeps its status (a stale `running` one is failed). The guard and
+    # the WHERE that keeps it off live, imported and re-opened runs are the
+    # `ResumeRefused` change.
+    update :note_resume_refused do
+      accept []
+      argument :reason, :string, allow_nil?: false
+      require_atomic? false
+      change ResumeRefused
       change Normalize
     end
 
@@ -244,7 +262,8 @@ defmodule KilnCMS.Backups.Run do
     # included, and open only to the `:backups` system actor. (No `destroy`
     # action exists; deletion comes with #2225.) `resume` (#2218) is the worker
     # re-opening a failed run; the platform admin's "Resume" button requests a
-    # backup, it never writes the run itself.
+    # backup, it never writes the run itself. `note_resume_refused` (#2539) is
+    # the worker saying on the row that a requested resume couldn't run.
     policy action([
              :start,
              :skip,
@@ -252,6 +271,7 @@ defmodule KilnCMS.Backups.Run do
              :finish,
              :fail,
              :resume,
+             :note_resume_refused,
              :import,
              :mark_pruned
            ]) do
@@ -350,6 +370,11 @@ defmodule KilnCMS.Backups.Run do
     # The step chain (#2218) writing this run; a resume or retry under a new
     # chain replaces it. Nil on imported runs and runs from before #2218.
     attribute :chain_id, :uuid, public?: true
+
+    # The `.kiln-dir-id` of the directory holding the run's files (#2539): a
+    # resume's start runs on a node with that directory. Nil for imported runs
+    # and runs from before #2539.
+    attribute :dir_id, :uuid, public?: true
 
     timestamps()
   end

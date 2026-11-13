@@ -14,7 +14,7 @@ defmodule KilnCMS.Backups.ResumeTest do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Checksum, Manifest, Worker, WorkState}
+  alias KilnCMS.Backups.{Artifact, Checksum, DirId, Manifest, Worker, WorkState}
   alias KilnCMS.Test.BackupChain
 
   @moduletag :capture_log
@@ -862,6 +862,292 @@ defmodule KilnCMS.Backups.ResumeTest do
       assert [%{status: :succeeded} = run] = runs()
       assert Enum.any?(run.log, &(&1.message =~ ~r/\AWaited \d+ s after the Cancel/))
       assert dump_count(tools) == 1
+    end
+  end
+
+  # -- #2539: where a resume runs, and a resume that can't --------------------
+
+  describe "the run's backup directory (#2539)" do
+    @describetag :pg_tools
+
+    test "a fresh run records the directory its files are in", %{dir: dir} do
+      assert :ok = BackupChain.run()
+      assert {:ok, id} = DirId.current(dir)
+      assert [%{status: :succeeded, dir_id: ^id}] = runs()
+    end
+
+    test "a start retried on another node records the retry's directory", %{dir: dir} do
+      # The first attempt can't make the work directory, after opening the run.
+      {:ok, first} = DirId.local(dir)
+      blocker = Path.join(dir, ".work")
+      File.write!(blocker, "")
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} = Backups.request([], Backups.system())
+        assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+        assert [%{status: :running, dir_id: ^first}] = runs()
+
+        # The retry: a directory with another id.
+        File.rm!(blocker)
+        second = Ash.UUID.generate()
+        File.write!(DirId.path(dir), second <> "\n")
+
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+        assert [%{status: :succeeded, dir_id: ^second}] = runs()
+      end)
+    end
+
+    # B3: local files win over the recorded id, and the resume rebinds it.
+    test "a directory with a new id that still has the files resumes there", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp} = fail_at_part_3(dir, tools)
+      assert {:ok, old} = DirId.current(dir)
+      assert failed.dir_id == old
+
+      new = Ash.UUID.generate()
+      File.write!(DirId.path(dir), new <> "\n")
+
+      assert :ok = BackupChain.resume(stamp)
+      assert [%{status: :succeeded, dir_id: ^new}] = runs()
+      assert dump_count(tools) == 1
+    end
+
+    test "a run with no directory id (from before #2539) resumes and gains one", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp} = fail_at_part_3(dir, tools)
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          from(r in "backup_runs", where: r.id == type(^failed.id, :binary_id)),
+          set: [dir_id: nil]
+        )
+
+      assert :ok = BackupChain.resume(stamp)
+      assert {:ok, id} = DirId.current(dir)
+      assert [%{status: :succeeded, dir_id: ^id}] = runs()
+    end
+
+    test "on a node without the files the start waits, then runs where they are", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+      {:ok, id} = DirId.current(dir)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        # The start lands on a node with another backup directory.
+        aside = Path.join(base, "work-aside")
+        File.rename!(work, aside)
+        File.write!(DirId.path(dir), Ash.UUID.generate() <> "\n")
+
+        assert %{snoozed: 1} = BackupChain.drain(with_scheduled: false)
+        assert [%{status: :failed}] = runs()
+        assert %{step: :start} = Backups.in_flight()
+
+        # The node with the files picks it up.
+        File.rename!(aside, work)
+        File.write!(DirId.path(dir), id <> "\n")
+
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded, dir_id: ^id}] = runs()
+      assert dump_count(tools) == 1
+    end
+
+    # Critic amendment 1 and 2: requested while the files were there, then no
+    # node with them ever picks it up. Every attempt spends its snooze budget;
+    # the last one gives up.
+    test "a resume no node with its files picks up is given up, visibly, and the waiter runs",
+         %{base: base, dir: dir} do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+      {:ok, id} = DirId.current(dir)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+
+        File.rename!(work, Path.join(base, "work-aside"))
+        File.write!(DirId.path(dir), Ash.UUID.generate() <> "\n")
+
+        BackupChain.drain(with_scheduled: true)
+        assert {:error, {:backup_dir_elsewhere, ^id}} = BackupChain.settled(chain)
+      end)
+
+      assert Backups.in_flight() == nil
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+      assert run.error =~ ~r/\AResume refused: no server with its backup directory \(id #{id}\)/
+      assert run.error =~ failed.error
+      assert Backups.run_resumable?(run)
+
+      # The queued request was promoted and ran.
+      assert [%{trigger: "schedule", status: :succeeded}] =
+               Enum.reject(runs(), &(&1.id == failed.id))
+    end
+  end
+
+  describe "a resume refused after it was requested (#2539)" do
+    @describetag :pg_tools
+
+    # Requested while `state.json` is there (the request checks), then gone
+    # before the start step reads it. The file is put back afterwards.
+    defp refused_resume!(stamp, work) do
+      state = File.read!(WorkState.file(work))
+
+      outcome =
+        BackupChain.listen(fn ->
+          {:ok, %{status: :started, chain: chain}} =
+            Backups.request([resume: stamp], Backups.system())
+
+          File.rm!(WorkState.file(work))
+          BackupChain.drain()
+          BackupChain.settled(chain)
+        end)
+
+      File.write!(WorkState.file(work), state)
+      outcome
+    end
+
+    test "missing work files: the run stays failed and says why, the lock is free", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+
+      assert {:error, :no_state} = refused_resume!(stamp, work)
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+
+      assert run.error ==
+               "Resume refused: its work files (.work/#{stamp}/state.json) are not on the " <>
+                 "server that picked it up\n" <> failed.error
+
+      assert %{level: :error, step: "resume"} = List.last(run.log)
+      assert Backups.in_flight() == nil
+      assert Backups.run_resumable?(run)
+    end
+
+    test "two refusals in a row: one refusal line, the original failure kept", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+
+      assert {:error, :no_state} = refused_resume!(stamp, work)
+      assert {:error, :no_state} = refused_resume!(stamp, work)
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert length(String.split(run.error, "Resume refused:")) == 2
+      assert String.ends_with?(run.error, "\n" <> failed.error)
+
+      # And the files still resume it.
+      assert :ok = BackupChain.resume(stamp)
+    end
+
+    test "files gone after this chain re-opened the run: failed with the reason", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+
+      # The first attempt re-opens the run, then can't write its state.
+      blocker = WorkState.file(work) <> ".partial"
+      File.mkdir!(blocker)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+        assert [%{status: :running, chain_id: ^chain}] = runs()
+
+        File.rm_rf!(work)
+        BackupChain.drain()
+        assert {:error, :no_state} = BackupChain.settled(chain)
+      end)
+
+      assert [run] = runs()
+      assert run.status == :failed
+      assert run.error =~ ~r/\AResume refused: its work files \(\.work\/#{stamp}\/state\.json\)/
+      assert Backups.in_flight() == nil
+    end
+
+    # B5: the stale-running run is closed as failed, visibly, and stays resumable.
+    test "a stale running run whose files are gone is failed with the refusal", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+      quiet = DateTime.add(DateTime.utc_now(), -5 * 3600, :second)
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          from(r in "backup_runs", where: r.id == type(^failed.id, :binary_id)),
+          set: [
+            status: "running",
+            finished_at: nil,
+            error: nil,
+            started_at: quiet,
+            updated_at: quiet
+          ]
+        )
+
+      assert {:error, :no_state} = refused_resume!(stamp, work)
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+
+      assert run.error ==
+               "Resume refused: its work files (.work/#{stamp}/state.json) are not on the " <>
+                 "server that picked it up\nInterrupted: the job was killed or the node stopped"
+
+      assert Backups.run_resumable?(run)
+    end
+
+    test "a media-only run on a node with no media directory keeps its status, and says why",
+         %{base: base, dir: dir} do
+      tools = stub_tools(base)
+      File.write!(tools.gate, "")
+      assert {:error, _} = BackupChain.run("manual", components: [:media])
+      File.rm!(tools.gate)
+      assert [%{status: :failed, stamp: stamp, components: [:media]} = failed] = runs()
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :media_dir, nil)
+      )
+
+      assert {:error, :no_media_dir} = BackupChain.resume(stamp)
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+
+      assert run.error =~
+               ~r/\AResume refused: it backs up only media, and the server that picked it up has no media directory\n/
+
+      assert Backups.in_flight() == nil
     end
   end
 

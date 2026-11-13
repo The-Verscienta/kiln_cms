@@ -736,6 +736,27 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert backup_jobs() == []
     end
 
+    test "a failed run whose resume was refused says so in its row and still offers Resume", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = app_run!(dir, 2, :failed)
+
+      Backups.note_run_resume_refused!(
+        run,
+        "its work files (.work/#{run.stamp}/state.json) are not on the server that picked it up",
+        actor: Backups.system()
+      )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, row, "Resume refused: its work files")
+      assert has_element?(lv, row, "tar exited 2")
+      assert has_element?(lv, ~s|#{row} button[data-role="resume"]|, "Resume")
+    end
+
     test "a run refused off-site shows the refusal, Not verified, and Resume", %{
       conn: conn,
       dir: dir
