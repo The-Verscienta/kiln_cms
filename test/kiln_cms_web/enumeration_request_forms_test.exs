@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.EnumerationRequestFormsTest do
   use KilnCMSWeb.ConnCase, async: true
 
   import KilnCMS.EnumerationAssertions
+  import KilnCMS.MailAssertions
   import Phoenix.LiveViewTest
   import Swoosh.TestAssertions
 
@@ -182,13 +183,13 @@ defmodule KilnCMSWeb.EnumerationRequestFormsTest do
       refute_email_sent()
       KilnCMS.DataCase.drain_oban()
 
-      assert_email_sent(fn email ->
-        email.subject =~ "Reset your" and email.to == [{"", known}]
-      end)
-
-      assert_email_sent(fn email ->
-        email.subject =~ "sign-in link" and email.to == [{"", known}]
-      end)
+      # Drained together, the mails arrive in no fixed order: Oban fetches the
+      # :mail queue through UPDATE ... RETURNING, whose row order Postgres does
+      # not guarantee. So assert the set (#2617).
+      assert_delivered([
+        &(&1.subject =~ "Reset your" and &1.to == [{"", known}]),
+        &(&1.subject =~ "sign-in link" and &1.to == [{"", known}])
+      ])
     end
   end
 end
