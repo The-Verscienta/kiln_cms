@@ -163,12 +163,16 @@ defmodule KilnCMSWeb.TotpEnrolment do
   def error_message(_error, fallback), do: fallback
 
   @doc """
-  Remove one of `user`'s own passkeys by `id`, with `context` (the page's
+  Remove the passkey `id` as `user`, with `context` (the page's
   `:security_context`) as the action context: the `passkey_removed` audit
   event takes its site from it, and without it the removal commits with no
   event. `{:ok, message}`, or `{:error, message}` saying why not: the
   shared demo account, the last factor a site requires, or a generic refusal
-  for an id that is not this account's passkey.
+  for an id `user` may not read.
+
+  The policy decides whose passkey that may be, not this function: for an
+  owner it is only their own, but a platform admin's bypass lets them remove
+  anyone's (recorded with the admin as actor), as on `/editor/settings`.
   """
   @spec remove_passkey(Accounts.User.t(), String.t(), map()) ::
           {:ok, String.t()} | {:error, String.t()}
