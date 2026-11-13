@@ -657,8 +657,10 @@ of work:
 
 - **Idempotent, safe to repeat:** firing and re-firing (artifacts upsert),
   search indexing and embeddings, media variants and the A/V metadata strip,
-  CDN purges, scheduled publish/unpublish triggers, cron sweeps, the
-  occurrence backfill, billing webhooks (claimed once per event).
+  CDN purges, scheduled publish/unpublish triggers, cron sweeps, billing
+  webhooks (claimed once per event). The occurrence backfill is safe to repeat
+  too, but it has a single attempt: a rescued run is discarded, not restarted,
+  and the next boot queues it again.
 - **Delivered at least once:** outbound webhooks, federation deliveries, web
   push, and single emails (transactional mail, form notifications, one
   newsletter recipient). A job killed after the remote side accepted the
@@ -689,6 +691,23 @@ sections are where a release says if it needs more (a new required variable, a
 reindex, a backfill). Downstream projects that pin Kiln as a submodule move
 the pin with `mix kiln.update`, which prints those sections before it does —
 [`releasing.md`](releasing.md#updating-a-project-to-a-release).
+
+**Your own Oban `queues:` list.** A deployment that builds Oban's `queues:`
+itself rather than keeping `config/config.exs`'s must add each queue a
+release introduces, or that queue's jobs are accepted and never run. Two are
+easy to miss because nothing visible waits on them:
+
+- `backup_steps: 1` (1.9): every in-app backup step. Without it a backup
+  request is accepted and never starts.
+- `occurrence_backfill: 1`: the boot-time recompute of events' next dates
+  ([Events](events.md#recomputing-stored-dates-at-boot)). Without it a release
+  that changes how recurrence rules expand keeps listing events by the old
+  dates.
+
+Each is concurrency 1; if you size `POOL_SIZE` as the sum of queue limits plus
+web traffic, add one for each. A plugin that already declares a queue of the
+same name turns `mix kiln.plugins.doctor` red
+([overlay-contract.md](overlay-contract.md)).
 
 **Reporting access.** BI tools read published content through the
 `kiln_reporting_v1` views with a read-only role that

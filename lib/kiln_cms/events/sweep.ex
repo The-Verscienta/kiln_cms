@@ -14,7 +14,10 @@ defmodule KilnCMS.Events.Sweep do
   (`KilnCMS.Events.Index.anchor/1`). Everything else is already correct:
 
     * a value **in the future** is right by construction — "the next occurrence
-      at or after T" does not move until T reaches it;
+      at or after T" does not move until T reaches it — for one recurrence
+      engine version; a release that changes the expansion bumps
+      `KilnCMS.Events.Recurrence.engine_version/0`, and the boot backfill
+      (`KilnCMS.Events.BackfillWorker`) re-runs over every row;
     * a `nil` is terminal, because the materialization horizon is a decade
       rather than a rolling window (again, `Events.Index` has the argument). A
       `nil` meaning "nothing within 400 days" would have made this sweep a scan
@@ -156,7 +159,7 @@ defmodule KilnCMS.Events.Sweep do
   # guard in `continue/6` catches it rather than looping.
   defp advance(record, org_id, anchor) do
     case Index.refresh(record, org_id, anchor) do
-      :written ->
+      {:written, _next} ->
         true
 
       # One unwritable row must not abandon the batch: the rest of the site's
