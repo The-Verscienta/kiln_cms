@@ -643,7 +643,9 @@ project has drifted behind upstream.
 A release that changes what firing produces (new markup on the `web`
 surface, a new key in `json_ld`) reaches a published document only when it is
 next published, edited or re-fired; reading it does not re-fire it. The
-release's upgrade notes say when a re-fire is worth running. To re-fire every
+release's upgrade notes say when a re-fire is worth running
+([ADR 0060](decisions/0060-an-artifact-change-bumps-format-version-only-when-every-existing-document-needs-it.md)
+says when a release bumps `format_version` instead). To re-fire every
 published document on every site at once:
 
 1. **Wait until every node runs the new release.** A firing job picked up by

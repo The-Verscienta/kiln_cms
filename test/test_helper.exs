@@ -160,9 +160,10 @@ backup_scale_exclusion = [:backup_scale]
 #     mix test --only benchmark test/kiln_cms/accounts/throttle_store_sharded_benchmark_test.exs
 benchmark_exclusion = [:benchmark]
 
-# Not a test: rewrites the schema-export fixture and goldens. Run it with
-# `--only regenerate_schema_goldens` (see its moduledoc).
-regenerate_exclusion = [:regenerate_schema_goldens]
+# Not tests: rewrite the schema-export fixture and goldens, and the SwiftUI
+# reader example's models. Run them with `--only regenerate_schema_goldens` /
+# `--only regenerate_swiftui_models` (see their moduledocs).
+regenerate_exclusion = [:regenerate_schema_goldens, :regenerate_swiftui_models]
 
 # Tests whose expected value is the core registry itself: the schema goldens
 # describe every compiled block and field type, so a project overlay that adds
