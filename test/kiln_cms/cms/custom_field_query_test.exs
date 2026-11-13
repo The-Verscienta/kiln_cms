@@ -288,7 +288,10 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
       define!(%{name: refs, field_type: :reference, target_type: "page"}, admin)
 
       assert shape_error(%{cover => %{"not_eq" => [%{}]}}, admin) =~ "takes one value, not a list"
-      assert shape_error(%{cover => %{"eq" => ["a", "b"]}}, admin) =~ "takes one value, not a list"
+
+      assert shape_error(%{cover => %{"eq" => ["a", "b"]}}, admin) =~
+               "takes one value, not a list"
+
       assert shape_error(%{shots => %{"eq" => [%{}]}}, admin) =~ "takes one value, not a list"
       assert shape_error(%{shots => %{"not_eq" => %{"id" => "x"}}}, admin) =~ "nested filter"
       assert shape_error(%{refs => %{"in" => [%{}]}}, admin) =~ "nested filter"
@@ -323,6 +326,144 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
 
       assert shape_error(%{name => %{"null" => ["true"]}}, admin) ==
                ~s(null for custom field "#{name}" must be true or false)
+    end
+  end
+
+  # #2677: a write tidies what it stores (a colour's case, an email's domain, a
+  # phone number's spacing, a time's padding, a slug, a select's label), so an
+  # equality operand is matched both as sent and as a write would have stored
+  # it. Range operators and text matching take the operand as sent.
+  describe "operands are tidied as the write tidied the value" do
+    defp ids_for(filter, admin),
+      do: %{custom_filter: filter} |> list_ids!(admin) |> Enum.sort()
+
+    defp store_raw!(page, name, value) do
+      KilnCMS.Repo.query!(
+        "UPDATE pages SET custom_fields = jsonb_set(custom_fields, ARRAY[$2::text], $3::text::jsonb) WHERE id = $1",
+        [Ecto.UUID.dump!(page.id), name, Jason.encode!(value)]
+      )
+    end
+
+    test "eq, not_eq and in find what the write stored, for each tidying type" do
+      admin = admin()
+
+      for {type, extra, written, operand} <- [
+            {:color, %{}, "#FFF", "#FFF"},
+            {:email, %{}, "a@Example.com", "a@Example.com"},
+            {:telephone, %{}, "+442079460958", "+44 20 7946 0958"},
+            {:time, %{}, "09:30", "9:30"},
+            {:slug, %{}, "hello-world", "Hello World"},
+            {:url, %{}, "https://x.example", " https://x.example "},
+            {:string, %{}, "plain", "  plain "},
+            {:select, %{options: ["ny"], option_labels: %{"ny" => "New York"}}, "ny", "New York"}
+          ] do
+        name = field_name("tidy")
+        define!(Map.merge(%{name: name, field_type: type}, extra), admin)
+        match = page!(%{name => written}, admin)
+        # Another value, stored as is: `not_eq` keeps it.
+        other = page!(%{name => written}, admin)
+        store_raw!(other, name, "zz")
+
+        assert {type, ids_for(%{name => operand}, admin)} == {type, [match.id]}
+
+        assert {type, ids_for(%{name => %{"in" => ["nothing", operand]}}, admin)} ==
+                 {type, [match.id]}
+
+        assert {type, ids_for(%{name => %{"not_eq" => operand, "null" => false}}, admin)} ==
+                 {type, [other.id]}
+      end
+    end
+
+    test "customWhere's string condition tidies its operand the same way" do
+      admin = admin()
+      name = field_name("accent")
+      define!(%{name: name, field_type: :color}, admin)
+      match = page!(%{name => "#ffffff"}, admin)
+
+      assert %{custom_where: [%{name: name, string: %{eq: "#FFF"}}]} |> list_ids!(admin) ==
+               [match.id]
+
+      assert %{custom_where: [%{name: name, string: %{in: ["#FFF"]}}]} |> list_ids!(admin) ==
+               [match.id]
+    end
+
+    test "a value stored before a retype is still found by its own spelling" do
+      admin = admin()
+
+      for {type, raw, canonical} <- [
+            {:color, "#FFF", "#ffffff"},
+            {:email, "a@Example.com", "a@example.com"}
+          ] do
+        name = field_name("retyped")
+        definition = define!(%{name: name, field_type: :string}, admin)
+        before = page!(%{name => raw}, admin)
+        CMS.update_field_definition!(definition, %{field_type: type}, actor: admin)
+        since = page!(%{name => raw}, admin)
+
+        assert CMS.get_page!(before.id, actor: admin).custom_fields[name] == raw
+        assert since.custom_fields[name] == canonical
+
+        assert {type, ids_for(%{name => raw}, admin)} == {type, Enum.sort([before.id, since.id])}
+        assert {type, ids_for(%{name => canonical}, admin)} == {type, [since.id]}
+
+        assert {type, ids_for(%{name => %{"in" => [raw]}}, admin)} ==
+                 {type, Enum.sort([before.id, since.id])}
+
+        assert {type, ids_for(%{name => %{"not_eq" => raw}}, admin)} == {type, []}
+      end
+    end
+
+    test "a select is matched by the option's value and by its label as stored" do
+      admin = admin()
+      name = field_name("city")
+      definition = define!(%{name: name, field_type: :string}, admin)
+      typed_label = page!(%{name => "New York"}, admin)
+
+      CMS.update_field_definition!(
+        definition,
+        %{field_type: :select, options: ["ny"], option_labels: %{"ny" => "New York"}},
+        actor: admin
+      )
+
+      by_value = page!(%{name => "ny"}, admin)
+
+      assert ids_for(%{name => "New York"}, admin) == Enum.sort([typed_label.id, by_value.id])
+      assert ids_for(%{name => "ny"}, admin) == [by_value.id]
+    end
+
+    test "an operand the field could never hold matches nothing, it is not a 400" do
+      admin = admin()
+
+      for type <- [:email, :telephone, :slug, :color, :time] do
+        name = field_name("never")
+        define!(%{name: name, field_type: type}, admin)
+
+        assert {type, ids_for(%{name => "not a value of this type!"}, admin)} == {type, []}
+        assert {type, ids_for(%{name => String.duplicate("a", 100_000)}, admin)} == {type, []}
+      end
+    end
+
+    test "text matching takes its pattern as sent" do
+      admin = admin()
+      name = field_name("handle")
+      define!(%{name: name, field_type: :slug}, admin)
+      match = page!(%{name => "Hello World"}, admin)
+
+      assert ids_for(%{name => "Hello World"}, admin) == [match.id]
+      assert ids_for(%{name => %{"ilike" => "Hello World"}}, admin) == []
+      assert ids_for(%{name => %{"contains" => "Hello World"}}, admin) == []
+      assert ids_for(%{name => %{"ilike" => "hello-%"}}, admin) == [match.id]
+    end
+
+    # A time's tidy drops its seconds, so tidying a range operand would move it.
+    test "range operators take the operand as sent" do
+      admin = admin()
+      name = field_name("opens")
+      define!(%{name: name, field_type: :time}, admin)
+      match = page!(%{name => "09:30"}, admin)
+
+      assert ids_for(%{name => %{"lt" => "09:30:15"}}, admin) == [match.id]
+      assert ids_for(%{name => %{"gte" => "09:30:15"}}, admin) == []
     end
   end
 

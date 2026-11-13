@@ -64,4 +64,43 @@ defmodule KilnCMS.CMS.FieldValueTest do
       assert FieldValue.coerce("1e400", %{field_type: :float}) == {:error, "must be a number"}
     end
   end
+
+  describe "canonical/2" do
+    test "the tidying types give what a write stores" do
+      for {definition, raw, canonical} <- [
+            {%{field_type: :color}, "#FFF", "#ffffff"},
+            {%{field_type: :email}, "a@Example.com", "a@example.com"},
+            {%{field_type: :telephone}, "+44 20 7946 0958", "+442079460958"},
+            {%{field_type: :time}, "9:30", "09:30"},
+            {%{field_type: :slug}, "Hello World", "hello-world"},
+            {%{field_type: :url}, " https://x.example ", "https://x.example"},
+            {%{field_type: :string}, " plain ", "plain"},
+            {%{field_type: :string}, 42, "42"},
+            {%{field_type: :select, options: ["ny"], option_labels: %{"ny" => "New York"}},
+             "New York", "ny"}
+          ] do
+        assert {definition.field_type, FieldValue.canonical(definition, raw)} ==
+                 {definition.field_type, {:ok, canonical}}
+      end
+    end
+
+    test "the types compared as sent, and operands a field could never hold, are :none" do
+      for {definition, raw} <- [
+            {%{field_type: :text}, " <b>x</b> "},
+            {%{field_type: :datetime}, "2026-03-01T10:00"},
+            {%{field_type: :integer}, "10"},
+            {%{field_type: :date}, "2026-03-01"},
+            {%{field_type: :no_such_plugin_type}, "x"},
+            {%{field_type: :email}, "not an address"},
+            {%{field_type: :telephone}, String.duplicate("1", 100_000)},
+            {%{field_type: :select, options: ["ny"]}, "Paris"},
+            {%{field_type: :string}, %{"x" => 1}},
+            {%{field_type: :string}, ["a"]},
+            {%{field_type: :string}, true}
+          ] do
+        assert {definition.field_type, raw, FieldValue.canonical(definition, raw)} ==
+                 {definition.field_type, raw, :none}
+      end
+    end
+  end
 end

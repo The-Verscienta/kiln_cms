@@ -1288,13 +1288,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     with {:ok, items} <- coerce_items(value, def), do: within_bounds(items, def)
   end
 
+  # An empty list on a single scalar field (`blank_for?/2` leaves it): a list
+  # where one value goes (#2743), with no first item to keep.
+  defp coerce([], %{field_type: type}, _read_opts) when type in @scalar_list_types,
+    do: {:error, FieldValue.not_single()}
+
   # A single scalar field handed a list (stored while the field was multiple —
   # a working copy, a restored version — or an API client sending an array)
   # keeps its first item, as a single media field does, rather than
   # stringifying the whole list into one value.
-  defp coerce([], %{field_type: type}, _read_opts) when type in @scalar_list_types,
-    do: {:error, FieldValue.not_single()}
-
   defp coerce(value, %{field_type: type} = def, _read_opts)
        when type in @scalar_list_types and is_list(value) do
     case value |> Enum.reject(&blank?/1) |> List.first() do

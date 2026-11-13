@@ -40,6 +40,15 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   `null`, array or object as `NULL` (last in either direction), so it neither
   leads the order nor breaks the keyset cursor of page 2.
 
+  An equality operand (`eq`, `not_eq`, each item of `in`) on a field whose
+  write tidies the value — a string or URL's spaces, a select's label, an
+  email, colour, telephone, time or slug — matches both as sent and as the
+  write would have stored it (#2677, `KilnCMS.CMS.FieldValue.canonical/2`),
+  so `#FFF` finds a stored `#ffffff` and a value stored before a retype is
+  still found by its own spelling. Range operators and text matching take the
+  operand as sent. An operand of a shape no operator takes — an object, or a
+  list beside anything but `in` — is a 400 (#2739).
+
   On the shared entry tier the definitions in scope depend on the dynamic
   type, which we recover from the query's own `type_definition_id`/`type_name`
   equality filter; unscoped queries fall back to *all* dynamic-type fields and
@@ -101,6 +110,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   require Ash.Sort
 
   alias Ash.Error.Query.InvalidArgument
+  alias KilnCMS.CMS.FieldValue
   alias KilnCMS.CMS.IndexedCustomFields
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Lists
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
@@ -622,6 +632,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       values ->
         values
+        |> equal_values(raw, link)
         |> Enum.map(&jsonb_condition(:metadata, "eq", name, &1))
         |> Enum.reduce(&expr(^&2 or ^&1))
     end)
@@ -634,6 +645,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       with {:ok, pattern} <- cast_value(raw, nil, label) do
         {:ok, expr(ilike(get_path(metadata, [^name]), ^pattern))}
       end
+    end
+  end
+
+  defp link_condition(%{name: name} = link, op, raw, label) when op in ~w(eq not_eq) do
+    with {:ok, value} <- cast_value(raw, ash_type(link), label) do
+      {:ok, equality(op, [value], [raw], link, &jsonb_condition(:metadata, op, name, &1))}
     end
   end
 
@@ -755,6 +772,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       values ->
         values
+        |> equal_values(raw, definition)
         |> Enum.map(&jsonb_condition(:custom_fields, "eq", name, &1))
         |> Enum.reduce(&expr(^&2 or ^&1))
     end)
@@ -780,10 +798,51 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
+  defp condition(%{name: name} = definition, op, raw) when op in ~w(eq not_eq) do
+    with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
+      {:ok,
+       equality(op, [value], [raw], definition, &jsonb_condition(:custom_fields, op, name, &1))}
+    end
+  end
+
+  # The range operators compare the operand as sent (cast, never tidied): a
+  # time's tidy drops its seconds, and an email's or a slug's would move it in
+  # the order.
   defp condition(%{name: name} = definition, op, raw) do
     with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
       {:ok, jsonb_condition(:custom_fields, op, name, value, Map.get(definition, :index_table))}
     end
+  end
+
+  # --- equality operands (#2677) -------------------------------------------------
+
+  # `eq` / `not_eq` over every spelling of the operand: `eq` matches any of
+  # them, `not_eq` none (an absent value still drops out of each `!=`).
+  defp equality(op, values, raws, definition, compare) do
+    join = if op == "eq", do: &expr(^&2 or ^&1), else: &expr(^&2 and ^&1)
+
+    values
+    |> equal_values(raws, definition)
+    |> Enum.map(compare)
+    |> Enum.reduce(join)
+  end
+
+  # The values an equality operand matches (#2677): each cast as sent — so a
+  # value stored before the field was retyped (a `:string` holding `"#FFF"`,
+  # now a colour) is still found by its own spelling — and, where it differs,
+  # as a write would have stored it (`FieldValue.canonical/2`): `#FFF` finds a
+  # stored `#ffffff`, a select's label its option's value. `values` are the
+  # cast operands of `raws`, item for item.
+  defp equal_values(values, raws, definition) do
+    values
+    |> Enum.zip(List.wrap(raws))
+    |> Enum.flat_map(fn {value, raw} ->
+      case FieldValue.canonical(definition, raw) do
+        {:ok, canonical} when canonical != value -> [value, canonical]
+        _same_or_none -> [value]
+      end
+    end)
+    |> Enum.uniq()
   end
 
   # Case-insensitive substring / prefix match on the field's text. The operand is

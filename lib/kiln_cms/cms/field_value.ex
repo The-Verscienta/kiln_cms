@@ -19,6 +19,14 @@ defmodule KilnCMS.CMS.FieldValue do
   # such as a geolocation or a range takes an object.
   @single_types [:text, :string, :url, :select, :integer, :float, :boolean, :date, :datetime]
 
+  # The types whose stored text is a tidied form of what was sent (#2677): a
+  # trimmed string or address, a select option by its label, and the built-in
+  # format types' canonical spellings. Not `:text` (sanitizing HTML per operand
+  # is not a comparison), not the date-times (#2678), and not a plugin type,
+  # whose `cast/2` the `Kiln.FieldType` contract does not promise to be
+  # deterministic: its operands are compared as the text sent.
+  @canonical_types [:string, :url, :select, :email, :color, :telephone, :time, :slug]
+
   @doc """
   The message for an object or a list where a field takes one value, as it
   completes "<Label> (<name>) …".
@@ -40,6 +48,24 @@ defmodule KilnCMS.CMS.FieldValue do
   def text(term) do
     if String.Chars.impl_for(term), do: {:ok, to_string(term)}, else: :error
   end
+
+  @doc """
+  What a filter operand `raw` on the single field `definition` is compared as
+  besides itself (#2677): the value a write would have stored for it —
+  `{:ok, "#ffffff"}` for a colour's `"#FFF"`, the option's value for a
+  select's label — or `:none` when the type keeps operands as sent, or the
+  field could never hold `raw` (it then simply matches nothing).
+  """
+  @spec canonical(map(), term()) :: {:ok, String.t() | number()} | :none
+  def canonical(%{field_type: type} = definition, raw)
+      when type in @canonical_types and (is_binary(raw) or is_number(raw)) do
+    case coerce(raw, Map.put(definition, :multiple, false)) do
+      {:ok, value} when is_binary(value) or is_number(value) -> {:ok, value}
+      _refused -> :none
+    end
+  end
+
+  def canonical(_definition, _raw), do: :none
 
   @doc """
   `value` coerced for the single (not `multiple`) field `definition`:
