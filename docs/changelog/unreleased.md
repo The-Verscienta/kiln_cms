@@ -1356,6 +1356,41 @@ carries the reasoning.
   change; rolling back restores the earlier wording. (Part of #2872;
   #2886, #2888)
 
+<a id="calendar-drag-and-bulk-skip-reason"></a>
+
+- **The calendar offers a chip's drag only to someone who may move it, and the content list's bulk bar says why it skipped rows.**
+  For editors and admins in the console. Both places used to offer a move
+  and then refuse it without much of a reason.
+  - **Calendar** (`/editor/calendar`). On the month and week grids, a
+    publish, unpublish, archive or expired chip now has the grab cursor, the
+    drag and the arrow-key nudge only for an admin, or for an editor on a
+    site where **Team → Publishing** lets editors publish and whose role may
+    edit that content type. A release go-live chip moves for an admin only.
+    For anyone else the chip is a plain link, and its tooltip no longer ends
+    with "arrow keys move it". Before, every editor could drag every
+    reschedulable chip, and a move they could not make was refused on drop.
+    The calendar works the handle out when it loads its dates, so a page
+    loaded before the switch or a role changed can still offer a drag; the
+    policy refuses that move as before, with the same messages. This is
+    #2474 item 1; that issue's other two items are unchanged.
+  - **Bulk bar** (content list). When an Unpublish, Archive, Unarchive,
+    Publish or Submit for review run skips a row for any reason other than a
+    safety field, the message adds "A row is skipped when it can't take this
+    step: it isn't in a state that allows it, you may not change it on this
+    site, or something on it needs fixing first (open it to see what)."
+    Before, it only counted the skipped rows. The sentence covers every
+    cause the count lumps together, as the bar does not record which cause
+    applied to which row. A run skipped only for a safety field keeps its
+    own sentence and does not get this one, and Delete leaves it off.
+
+  The new sentence is translated into Spanish and French.
+  [Take content down](../take-content-down.md) and
+  [Rescheduling from the grid](../content-lifecycles.md#rescheduling-from-the-grid)
+  are updated to match, and
+  [ADR 0051](../decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md)
+  has a dated amendment. No migration, API or config change; rolling back
+  restores the earlier behavior. (#2894)
+
 <a id="mcp-custom-field-filters-documented"></a>
 
 - **API consumers: the MCP read tools' `custom_filter`, `custom_where` and `custom_sort` are now documented, and so is JSON:API's `custom_where`, which takes one condition per query string.**

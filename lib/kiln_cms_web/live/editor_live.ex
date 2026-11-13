@@ -985,10 +985,25 @@ defmodule KilnCMSWeb.EditorLive do
       if needs_severity > 0,
         do:
           flash <>
-            " " <>
+            ". " <>
             gettext(
               "%{count} of them touch a safety field — open each in the editor to publish and say how much the change matters.",
               count: needs_severity
+            ),
+        else: flash
+
+    # Why a row was skipped, said once and true of every cause the tally lumps
+    # together: wrong state for this step, a write the policy refuses, or a
+    # validation the row fails (a required field left blank on Publish) (#2894).
+    # Keyed on the non-severity count, so a run skipped only for a safety field
+    # gets the one sentence above, not two. Delete is admin-only and leaves it off.
+    flash =
+      if skipped > 0 and verb != "delete",
+        do:
+          flash <>
+            ". " <>
+            gettext(
+              "A row is skipped when it can't take this step: it isn't in a state that allows it, you may not change it on this site, or something on it needs fixing first (open it to see what)."
             ),
         else: flash
 
