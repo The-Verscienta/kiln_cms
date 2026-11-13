@@ -236,6 +236,23 @@ defmodule KilnCMS.CMS.LinkFieldsTest do
       assert message =~ "Role is not one of the allowed options"
     end
 
+    # #2743: a link value is one value, as a field is; an object under it used
+    # to reach `to_string/1` and raise.
+    test "an object or an empty list as a link value fails the field, naming the connection",
+         %{admin: admin, name: name} do
+      flour = page!(admin, "Flour")
+
+      for value <- [%{"x" => 1}, []] do
+        message =
+          error_message!(fn ->
+            post!(admin, %{name => [%{"id" => flour.id, "link" => %{"role" => value}}]})
+          end)
+
+        assert message =~
+                 "item 1 “Flour”: Role must be a single value, not an object or a list"
+      end
+    end
+
     test "required applies per connection", %{admin: admin, field: field, name: name} do
       link!(admin, field, %{name: "unit", label: "Unit", field_type: :string, required: true})
       flour = page!(admin, "Flour")
