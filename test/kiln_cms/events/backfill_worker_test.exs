@@ -159,8 +159,14 @@ defmodule KilnCMS.Events.BackfillWorkerTest do
       assert CMS.get_entry!(record.id, authorize?: false).next_occurrence_at
     end
 
-    test "logs how many rows changed, and names the ones that left the listings", ctx do
+    test "logs how many rows changed, and names the ones that moved or left the listings",
+         ctx do
       filled = event!(ctx, 30) |> Ash.Seed.update!(%{next_occurrence_at: nil})
+
+      # A stored date that is not the event's next one: the pass moves it.
+      moved =
+        event!(ctx, 40)
+        |> Ash.Seed.update!(%{next_occurrence_at: DateTime.add(DateTime.utc_now(), 86_400)})
 
       # A stored date on an event that is over: the pass writes `nil`, so the
       # event leaves the what's-on listings.
@@ -169,15 +175,37 @@ defmodule KilnCMS.Events.BackfillWorkerTest do
         |> Ash.Seed.update!(%{next_occurrence_at: DateTime.add(DateTime.utc_now(), 86_400)})
 
       log =
-        capture_log([level: :warning], fn ->
+        capture_log([level: :info], fn ->
           assert :ok = perform_job(BackfillWorker, %{"engine" => Recurrence.engine_version()})
         end)
 
       assert log =~ "[warning]"
-      assert log =~ "recomputed 2 record(s)"
-      assert log =~ "1 now have no upcoming date"
-      assert log =~ gone.id
+      assert log =~ "occurrence backfill recomputed 3 record(s)"
+      assert log =~ "(recurrence engine #{Recurrence.engine_version()})"
+      assert log =~ "1 moved to a different date: #{moved.id};"
+      assert log =~ "1 now have no upcoming date and left the what's-on listings: #{gone.id}"
       refute log =~ filled.id
+    end
+
+    test "a pass that only moves dates logs at info, not warning", ctx do
+      moved =
+        event!(ctx, 40)
+        |> Ash.Seed.update!(%{next_occurrence_at: DateTime.add(DateTime.utc_now(), 86_400)})
+
+      # The test env logs at `:warning` (`config/test.exs`); a per-module
+      # override reaches this line without touching the global level.
+      Logger.put_module_level(BackfillWorker, :info)
+      on_exit(fn -> Logger.delete_module_level(BackfillWorker) end)
+
+      log =
+        capture_log([level: :info], fn ->
+          assert :ok = perform_job(BackfillWorker, %{"engine" => Recurrence.engine_version()})
+        end)
+
+      assert log =~ "[info]"
+      refute log =~ "[warning]"
+      assert log =~ "1 moved to a different date: #{moved.id};"
+      assert log =~ "0 now have no upcoming date"
     end
 
     test "logs nothing when nothing changed", ctx do

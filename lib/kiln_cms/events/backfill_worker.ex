@@ -65,10 +65,13 @@ defmodule KilnCMS.Events.BackfillWorker do
 
   ## What it logs
 
-  When the pass writes anything it logs, at `:warning`, how many rows changed
-  and how many now have no upcoming date, with the ids of the latter: those
-  events left the "what's on" listings, which an engine change can do
-  silently.
+  When the pass writes anything it logs one line: how many rows it
+  recomputed, how many of those moved to a different date and how many now
+  have no upcoming date, with the ids of both (50 at most each; the counts
+  are exact). The wording is neutral because most runs are the routine daily
+  repair, not an engine change. The line is a `:warning` only when ids were
+  cleared — those events left the "what's on" listings, which an engine change
+  can do silently — and `:info` otherwise.
 
   `max_attempts: 1`, like `KilnCMS.Events.SweepWorker`: the pass is idempotent
   and interruptible, so a failed run is better replaced by the next one against
@@ -121,22 +124,29 @@ defmodule KilnCMS.Events.BackfillWorker do
   defp log(%{written: 0}), do: :ok
 
   defp log(result) do
-    cleared = length(result.cleared)
-
-    Logger.warning(
-      "occurrence backfill (recurrence engine #{Recurrence.engine_version()}): " <>
-        "recomputed #{result.written} record(s) of #{result.scanned} scanned; " <>
-        "#{cleared} now have no upcoming date and left the what's-on listings" <>
-        cleared_ids(result.cleared, cleared)
+    Logger.log(
+      level(result),
+      "occurrence backfill recomputed #{result.written} record(s) of #{result.scanned} " <>
+        "scanned (recurrence engine #{Recurrence.engine_version()}); " <>
+        "#{length(result.moved)} moved to a different date" <>
+        ids(result.moved) <>
+        "; #{length(result.cleared)} now have no upcoming date and left the " <>
+        "what's-on listings" <> ids(result.cleared)
     )
   end
 
-  defp cleared_ids([], _count), do: ""
+  defp level(%{cleared: []}), do: :info
+  defp level(_result), do: :warning
 
-  defp cleared_ids(ids, count) when count > @logged_ids,
-    do: ": " <> Enum.join(Enum.take(ids, @logged_ids), ", ") <> " and #{count - @logged_ids} more"
+  defp ids([]), do: ""
 
-  defp cleared_ids(ids, _count), do: ": " <> Enum.join(ids, ", ")
+  defp ids(ids) when length(ids) > @logged_ids,
+    do:
+      ": " <>
+        Enum.join(Enum.take(ids, @logged_ids), ", ") <>
+        " and #{length(ids) - @logged_ids} more"
+
+  defp ids(ids), do: ": " <> Enum.join(ids, ", ")
 
   @doc """
   Queue the post-deploy backfill for this node's recurrence engine, unless one

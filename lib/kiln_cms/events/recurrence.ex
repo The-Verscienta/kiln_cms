@@ -176,8 +176,8 @@ defmodule KilnCMS.Events.Recurrence do
 
   The datetime form is the **last instant of the stored date in the event's
   zone**, in UTC, because that is how expansion reads `until`: an inclusive
-  local date. So `until: :datetime` also needs `:time_zone`, and raises
-  `ArgumentError` without one — a UTC default renders the end of the UTC day,
+  local date. So `until: :datetime` also needs `:time_zone`, a zone name, and
+  raises `ArgumentError` without one (`nil` included) — a UTC default renders the end of the UTC day,
   which drops the last occurrence west of UTC and adds one east of it (#2751).
 
   It is computed as local midnight of the next day, resolved by `to_utc/2`,
@@ -207,9 +207,12 @@ defmodule KilnCMS.Events.Recurrence do
 
   defp until_type(opts) do
     case Keyword.get(opts, :until, :date) do
+      # `is_binary/1`, not `Keyword.has_key?/2`: `time_zone: nil` (a record
+      # whose zone was never set) would otherwise reach `to_utc/2`, fail to
+      # resolve and fall back to the date form without a word.
       :datetime ->
-        unless Keyword.has_key?(opts, :time_zone),
-          do: raise(ArgumentError, "to_rrule/2 with until: :datetime needs :time_zone")
+        unless is_binary(Keyword.get(opts, :time_zone)),
+          do: raise(ArgumentError, "to_rrule/2 with until: :datetime needs a :time_zone string")
 
         :datetime
 
@@ -583,9 +586,13 @@ defmodule KilnCMS.Events.Recurrence do
   defp dates_in_period(%{freq: :daily} = rule, date),
     do: Enum.filter([date], &month_ok?(rule, &1))
 
+  # `Enum.uniq/1`: `BYDAY=MO,MO` names one date a week, not two. Emitting it
+  # twice made `COUNT=4` four instances on two Mondays, where a client (which
+  # reads BYDAY as a set) shows four Mondays.
   defp dates_in_period(%{freq: :weekly, by_day: days} = rule, week_start) do
     days
     |> Enum.map(fn {_ordinal, weekday} -> Date.add(week_start, weekday - 1) end)
+    |> Enum.uniq()
     |> Enum.filter(&month_ok?(rule, &1))
     |> Enum.sort(Date)
   end

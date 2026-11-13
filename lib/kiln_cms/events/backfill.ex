@@ -64,17 +64,21 @@ defmodule KilnCMS.Events.Backfill do
   @batch 500
 
   @typedoc """
-  What one pass did. `cleared` holds the ids of the rows it wrote `nil` to
-  over a stored date: those events left the "what's on" listings, which is
-  worth a log line when a recurrence engine change is the cause.
+  What one pass did. `written` counts every row it wrote. Of those, `moved`
+  holds the ids of the rows whose stored date it replaced with a different
+  one, and `cleared` the ids of the rows it wrote `nil` to over a stored date:
+  those events left the "what's on" listings. Both are worth a log line, since
+  a recurrence engine change can cause either. A row that had no date and now
+  has one is in neither list.
   """
   @type result :: %{
           scanned: non_neg_integer(),
           written: non_neg_integer(),
+          moved: [Ash.UUID.t()],
           cleared: [Ash.UUID.t()]
         }
 
-  @empty %{scanned: 0, written: 0, cleared: []}
+  @empty %{scanned: 0, written: 0, moved: [], cleared: []}
 
   @doc """
   Backfill every organization. See `run_org/2` for options.
@@ -121,6 +125,7 @@ defmodule KilnCMS.Events.Backfill do
     %{
       scanned: acc.scanned + result.scanned,
       written: acc.written + result.written,
+      moved: acc.moved ++ result.moved,
       cleared: acc.cleared ++ result.cleared
     }
   end
@@ -148,6 +153,7 @@ defmodule KilnCMS.Events.Backfill do
         %{
           scanned: length(rows),
           written: Enum.count(outcomes, &(&1 != :skipped)),
+          moved: for({:moved, id} <- outcomes, do: id),
           cleared: for({:cleared, id} <- outcomes, do: id)
         },
         acc
@@ -174,12 +180,16 @@ defmodule KilnCMS.Events.Backfill do
   defp cursor_filter(nil), do: []
   defp cursor_filter(cursor), do: [id: [greater_than: cursor]]
 
-  # `:written`, `{:cleared, id}` (written `nil` over a stored date), or
+  # `:written` (a date where there was none), `{:moved, id}` (a different
+  # date over a stored one), `{:cleared, id}` (`nil` over a stored date), or
   # `:skipped` (unchanged or unwritable).
   defp refresh(record, org_id, anchor) do
     case Index.refresh(record, org_id, anchor) do
       {:written, nil} ->
         {:cleared, record.id}
+
+      {:written, _next} when is_struct(record.next_occurrence_at, DateTime) ->
+        {:moved, record.id}
 
       {:written, _next} ->
         :written

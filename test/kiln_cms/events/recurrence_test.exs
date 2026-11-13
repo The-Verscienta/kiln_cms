@@ -107,6 +107,11 @@ defmodule KilnCMS.Events.RecurrenceTest.RFC do
          d(1998, 8, [6, 13, 20, 27]) ++
          d(1999, 6, [3, 10, 17, 24]) ++
          d(1999, 7, [1, 8, 15, 22, 29]) ++ d(1999, 8, [5, 12, 19, 26])},
+      # The RFC excludes DTSTART (2 September 1997, a Tuesday) because
+      # §3.3.10 would count it as the first instance. Kiln never emits a
+      # DTSTART that does not match the rule (see the moduledoc's divergences),
+      # so this EXDATE is a no-op here; "EXDATE removes a real yearly
+      # occurrence" is the test where one cancels a date.
       {"every Friday the 13th, forever (EXDATE as a rule part)",
        "FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13;EXDATE=19970902", ~N[1997-09-02 09:00:00],
        d(1998, 2, [13]) ++
@@ -175,6 +180,120 @@ defmodule KilnCMS.Events.RecurrenceTest.RFC do
   defp d(year, month, days), do: Enum.map(days, &Date.new!(year, month, &1))
 end
 
+defmodule KilnCMS.Events.RecurrenceTest.Golden do
+  @moduledoc false
+  # The frozen corpus behind the engine checksum. **Never edit a row**: the
+  # checksum of each engine version was recorded against exactly these rules,
+  # this window and this horizon, so an edit here is indistinguishable from an
+  # expansion change. Add coverage in a new engine version's corpus instead.
+  #
+  # Every FREQ against every BY* part it accepts, #2750's behaviors (year-
+  # scoped ordinals without BYMONTH, YEARLY BYMONTHDAY across the year,
+  # 29 February, YEARLY BYDAY with BYMONTHDAY, DAILY and WEEKLY BYMONTH) and a
+  # duplicate BYDAY, in zones that cross a DST gap and a DST overlap. Each is
+  # expanded over one fixed five-year window, below the hard cap, so no row is
+  # truncated: a truncated row hides every change past the cap.
+
+  @from ~U[2024-01-01 00:00:00Z]
+  @until ~U[2028-12-31 23:59:59Z]
+
+  @doc "`{rrule, dtstart, zone}`."
+  def rows do
+    ny = "America/New_York"
+    london = "Europe/London"
+
+    [
+      # DAILY
+      {"FREQ=DAILY;INTERVAL=3", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=DAILY;COUNT=40", ~N[2024-03-01 01:30:00], ny},
+      {"FREQ=DAILY;UNTIL=20240410", ~N[2024-03-25 01:30:00], london},
+      {"FREQ=DAILY;BYMONTH=6", ~N[2024-05-30 12:00:00], "Etc/UTC"},
+      {"FREQ=DAILY;BYMONTH=2;INTERVAL=2", ~N[2024-01-15 23:30:00], "Asia/Tokyo"},
+      {"FREQ=DAILY;COUNT=10;EXDATE=20240103,20240105", ~N[2024-01-01 09:00:00], ny},
+      # WEEKLY
+      {"FREQ=WEEKLY", ~N[2024-01-02 19:00:00], ny},
+      {"FREQ=WEEKLY;BYDAY=MO,WE,FR", ~N[2024-01-03 08:00:00], london},
+      {"FREQ=WEEKLY;BYDAY=MO,MO;COUNT=4", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=WEEKLY;BYDAY=SU,MO,SU", ~N[2024-02-04 01:30:00], ny},
+      {"FREQ=WEEKLY;INTERVAL=2;BYDAY=TU,SU", ~N[2024-08-06 01:30:00], london},
+      {"FREQ=WEEKLY;BYMONTH=6", ~N[2024-05-06 12:00:00], "Etc/UTC"},
+      {"FREQ=WEEKLY;BYMONTH=3,10;BYDAY=SU", ~N[2024-01-07 01:30:00], london},
+      {"FREQ=WEEKLY;BYDAY=TH;UNTIL=20250306", ~N[2024-11-07 23:30:00], "Pacific/Chatham"},
+      {"FREQ=WEEKLY;BYDAY=FR;COUNT=20;EXDATE=20240119", ~N[2023-12-01 09:00:00], ny},
+      # MONTHLY
+      {"FREQ=MONTHLY", ~N[2024-01-31 10:00:00], ny},
+      {"FREQ=MONTHLY;BYMONTHDAY=1,-1", ~N[2024-01-01 10:00:00], london},
+      {"FREQ=MONTHLY;BYMONTHDAY=30,-30", ~N[2024-01-30 10:00:00], ny},
+      {"FREQ=MONTHLY;BYDAY=TU", ~N[2024-01-02 18:00:00], ny},
+      {"FREQ=MONTHLY;BYDAY=2TU,-1FR", ~N[2024-01-09 18:00:00], ny},
+      {"FREQ=MONTHLY;BYDAY=5TH", ~N[2024-02-29 18:00:00], london},
+      {"FREQ=MONTHLY;BYDAY=MO,MO;COUNT=6", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=MONTHLY;BYDAY=1SA,SU;BYMONTHDAY=1,2,3,4,5,6,7", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=MONTHLY;BYMONTH=3,11;BYMONTHDAY=-1", ~N[2024-01-31 01:30:00], ny},
+      {"FREQ=MONTHLY;BYMONTH=3,10;BYDAY=-1SU", ~N[2024-03-31 01:30:00], london},
+      {"FREQ=MONTHLY;INTERVAL=5;BYMONTHDAY=29", ~N[2024-02-29 12:00:00], "Etc/UTC"},
+      {"FREQ=MONTHLY;COUNT=12;BYMONTHDAY=15;EXDATE=20240515", ~N[2024-01-15 09:00:00], ny},
+      {"FREQ=MONTHLY;UNTIL=20251231;BYDAY=-2MO", ~N[2024-01-22 09:00:00], ny},
+      # YEARLY
+      {"FREQ=YEARLY", ~N[2024-07-04 12:00:00], ny},
+      {"FREQ=YEARLY", ~N[2024-02-29 12:00:00], ny},
+      {"FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=29", ~N[2023-02-01 12:00:00], ny},
+      {"FREQ=YEARLY;BYMONTH=3,9", ~N[2024-03-10 01:30:00], ny},
+      {"FREQ=YEARLY;BYMONTH=6", ~N[2024-01-20 12:00:00], london},
+      {"FREQ=YEARLY;BYMONTHDAY=1", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=YEARLY;BYMONTHDAY=-1,15", ~N[2024-01-15 09:00:00], london},
+      {"FREQ=YEARLY;BYDAY=TU", ~N[2024-01-02 19:00:00], ny},
+      {"FREQ=YEARLY;BYDAY=2TU", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=YEARLY;BYDAY=-1FR,1MO", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=YEARLY;BYDAY=-5SU", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=YEARLY;BYDAY=WE,WE;COUNT=10", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=YEARLY;BYMONTH=11;BYDAY=4TH", ~N[2024-01-01 12:00:00], ny},
+      {"FREQ=YEARLY;BYMONTH=1,7;BYDAY=1MO,-1MO", ~N[2024-01-01 12:00:00], london},
+      {"FREQ=YEARLY;BYDAY=FR;BYMONTHDAY=13", ~N[2024-01-01 09:00:00], ny},
+      {"FREQ=YEARLY;BYMONTH=11;BYDAY=TU;BYMONTHDAY=2,3,4,5,6,7,8", ~N[2024-11-05 07:00:00], ny},
+      {"FREQ=YEARLY;BYMONTH=3;BYDAY=SU", ~N[2024-03-03 02:30:00], ny},
+      {"FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU", ~N[2024-10-27 01:30:00], london},
+      {"FREQ=YEARLY;INTERVAL=2;BYMONTH=1,2,3;BYMONTHDAY=10", ~N[2023-03-10 09:00:00], ny},
+      {"FREQ=YEARLY;COUNT=5;BYMONTH=3,9;EXDATE=20250910", ~N[2024-03-10 12:00:00], ny},
+      {"FREQ=YEARLY;UNTIL=20270101;BYMONTHDAY=31", ~N[2024-01-31 12:00:00], "Asia/Tokyo"}
+    ]
+  end
+
+  @doc """
+  `{checksum, expansions}` for `recurrence` (a module with `parse/1` and
+  `expand/6`), hashed together with `horizon_days`, the other input to the
+  stored `next_occurrence_at`.
+  """
+  def checksum(recurrence, horizon_days) do
+    expansions =
+      Enum.map(rows(), fn {rrule, dtstart, zone} ->
+        {:ok, rule} = recurrence.parse(rrule)
+        {rrule, recurrence.expand(rule, dtstart, zone, @from, @until, max: 1_000)}
+      end)
+
+    hash =
+      expansions
+      |> Enum.zip(rows())
+      |> Enum.map_join("\n", fn {{rrule, instants}, {rrule, dtstart, zone}} ->
+        Enum.join(
+          [
+            rrule,
+            NaiveDateTime.to_iso8601(dtstart),
+            zone,
+            Enum.map_join(instants, ",", &DateTime.to_iso8601/1)
+          ],
+          "|"
+        )
+      end)
+      |> then(&("horizon_days=#{horizon_days}\n" <> &1))
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+
+    {hash, expansions}
+  end
+end
+
 defmodule KilnCMS.Events.RecurrenceTest do
   @moduledoc """
   The RRULE subset and its bounded expansion (#480).
@@ -186,7 +305,9 @@ defmodule KilnCMS.Events.RecurrenceTest do
   """
   use ExUnit.Case, async: true
 
+  alias KilnCMS.Events.Index
   alias KilnCMS.Events.Recurrence
+  alias KilnCMS.Events.RecurrenceTest.Golden
   alias KilnCMS.Events.RecurrenceTest.RFC
 
   @london "Europe/London"
@@ -693,6 +814,12 @@ defmodule KilnCMS.Events.RecurrenceTest do
       assert_raise ArgumentError, ~r/time_zone/, fn ->
         Recurrence.to_rrule(rule, until: :datetime)
       end
+
+      # A record whose zone was never set: a present `nil` is no zone either,
+      # rather than an unknown one that quietly falls back to the date form.
+      assert_raise ArgumentError, ~r/time_zone/, fn ->
+        Recurrence.to_rrule(rule, until: :datetime, time_zone: nil)
+      end
     end
 
     test "a zone the database does not know falls back to the date form" do
@@ -795,6 +922,16 @@ defmodule KilnCMS.Events.RecurrenceTest do
   end
 
   describe "yearly rules expand over the year (#2750)" do
+    test "EXDATE removes a real yearly occurrence and leaves the rest" do
+      # The RFC table's Friday-the-13th row carries an EXDATE that matches no
+      # occurrence; this one cancels one that would otherwise be emitted.
+      assert dates(
+               "FREQ=YEARLY;BYDAY=FR;BYMONTHDAY=13;EXDATE=20260313",
+               ~N[2026-01-01 12:00:00],
+               ~D[2027-12-31]
+             ) == [~D[2026-02-13], ~D[2026-11-13], ~D[2027-08-13]]
+    end
+
     test "BYMONTH=3,9 from March gives March and September every year" do
       assert dates("FREQ=YEARLY;BYMONTH=3,9", ~N[2026-03-10 12:00:00], ~D[2027-12-31]) ==
                [~D[2026-03-10], ~D[2026-09-10], ~D[2027-03-10], ~D[2027-09-10]]
@@ -931,6 +1068,15 @@ defmodule KilnCMS.Events.RecurrenceTest do
     end
   end
 
+  describe "a repeated BYDAY names one date, not two" do
+    test "WEEKLY;BYDAY=MO,MO;COUNT=4 is four distinct Mondays" do
+      # A client reads BYDAY as a set. Emitting each Monday twice made COUNT=4
+      # two Mondays here and four in every subscribed calendar.
+      assert dates("FREQ=WEEKLY;BYDAY=MO,MO;COUNT=4", ~N[2026-01-05 12:00:00], ~D[2026-12-31]) ==
+               [~D[2026-01-05], ~D[2026-01-12], ~D[2026-01-19], ~D[2026-01-26]]
+    end
+  end
+
   describe "BYDAY limits BYMONTHDAY rather than adding to it" do
     test "MONTHLY;BYDAY=FR;BYMONTHDAY=13 is Friday the 13th, not every Friday and 13th" do
       assert dates("FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13", ~N[2026-01-01 12:00:00], ~D[2026-12-31]) ==
@@ -1023,36 +1169,37 @@ defmodule KilnCMS.Events.RecurrenceTest do
     # `next_occurrence_at` is stored, and `BackfillWorker` recomputes it on boot
     # only when `engine_version/0` changes. An expansion change that does not
     # bump it leaves every stored value the old engine computed in place, so
-    # this checksums the expansion of a fixed corpus (the RFC table) per
-    # engine. Changing the expansion fails here: bump `@engine_version` in
-    # `Recurrence` and add the new checksum, never edit an existing one.
+    # this checksums the expansion of a frozen corpus (`Golden`), and the
+    # materialization horizon, per engine. Changing either fails here: bump
+    # `@engine_version` in `Recurrence` and add the new checksum, never edit an
+    # existing one or the corpus.
+    #
+    # Engine 1 is the expansion before #2750, recorded by running `Golden`
+    # against `lib/kiln_cms/events/recurrence.ex` as of e74870214. It ignored
+    # BYMONTH on DAILY rules, so its `FREQ=DAILY;BYMONTH=6` row reached the
+    # cap; that is part of what it recorded, and the no-truncation test below
+    # holds for the current engine.
     @golden %{
-      1 => "9465c18581c8b39f31c897988ddd0d74cd31c3ce1308c53af7f9b0796a602217",
-      2 => "1590d90fca061d5d67188b30cb61cec8cbef56b09bb206a3c6285d97eaa5b50a"
+      1 => "9c4b1bb6c0b0c91c2fbf9429280863a56a21d7db961eff2e59b182b7b43c4010",
+      2 => "6485393050e5c1781083b339cc1832bdaafea016aa5d5247a0e646233b214b40"
     }
 
     test "the corpus checksum is the one recorded for this engine" do
-      assert Map.fetch(@golden, Recurrence.engine_version()) == {:ok, corpus_checksum()},
+      {checksum, _expansions} = Golden.checksum(Recurrence, Index.horizon_days())
+
+      assert Map.fetch(@golden, Recurrence.engine_version()) == {:ok, checksum},
              "expansion output changed: bump Recurrence's @engine_version and record " <>
-               "#{corpus_checksum()} for the new version"
+               "#{checksum} for the new version"
     end
-  end
 
-  defp corpus_checksum do
-    corpus =
-      Enum.map(RFC.rows(), fn {_label, rrule, dtstart, expected} ->
-        {rrule, dtstart, length(expected)}
-      end) ++
-        Enum.map(RFC.divergent(), fn {_label, rrule, dtstart, _rfc, kiln} ->
-          {rrule, dtstart, length(kiln) + 5}
-        end)
+    test "no corpus row is cut short by the cap" do
+      # A row that reaches `max:` hides every change past it from the checksum.
+      {_checksum, expansions} = Golden.checksum(Recurrence, Index.horizon_days())
 
-    corpus
-    |> Enum.map_join("\n", fn {rrule, dtstart, count} ->
-      instants = rrule |> rfc_expand(dtstart, count) |> Enum.map_join(",", &DateTime.to_iso8601/1)
-      rrule <> "|" <> NaiveDateTime.to_iso8601(dtstart) <> "|" <> instants
-    end)
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
+      for {rrule, instants} <- expansions do
+        assert instants != [], "#{rrule} expands to nothing in the corpus window"
+        assert length(instants) < 1_000, "#{rrule} reaches the cap in the corpus window"
+      end
+    end
   end
 end
