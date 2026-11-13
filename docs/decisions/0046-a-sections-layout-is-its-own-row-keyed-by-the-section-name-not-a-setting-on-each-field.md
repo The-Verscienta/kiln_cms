@@ -1,4 +1,4 @@
-# 0047. A section's layout is its own row, keyed by the section name, not a setting on each field
+# 0046. A section's layout is its own row, keyed by the section name, not a setting on each field
 
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
   #2496 in 1.9.0.
@@ -8,7 +8,7 @@
   which asked for this record;
   [#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) for two
   places the lifecycle rule below is applied imperfectly;
-  [ADR 0048](0048-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
+  [ADR 0047](0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
   for the field sync file that carries the layouts.
 - **Changelog** — [1.9.0](../changelog/v1.9.0.md#field-layout).
 

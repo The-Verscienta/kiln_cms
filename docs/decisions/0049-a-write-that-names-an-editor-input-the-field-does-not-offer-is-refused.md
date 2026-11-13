@@ -1,4 +1,4 @@
-# 0050. A write that names an editor input the field does not offer is refused
+# 0049. A write that names an editor input the field does not offer is refused
 
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
   #2284 in 1.9.0.
@@ -6,7 +6,7 @@
   and [#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495), which
   built it; [#2674](https://github.com/The-Verscienta/kiln_cms/issues/2674),
   which asked for this record;
-  [ADR 0049](0049-a-fields-editor-input-is-an-editor-only-string-separate-from-its-text-format.md)
+  [ADR 0048](0048-a-fields-editor-input-is-an-editor-only-string-separate-from-its-text-format.md)
   for what the editor input is.
 - **Changelog** — [1.9.0](../changelog/v1.9.0.md#field-widgets).
 
@@ -87,6 +87,6 @@ The same mismatch reaches the field definition from two kinds of writer:
   "reset it for me" behavior leaves `widget` out of the write.
 - A stored input a plugin later stops offering stays stored until a write
   clears it: any write that leaves `widget` out, or a save in the fields
-  admin. Until then the editor renders the default (ADR 0049). A write that
+  admin. Until then the editor renders the default (ADR 0048). A write that
   names the dropped input is refused, a field sync import that updates the
   field included.

@@ -1,4 +1,4 @@
-# 0049. A field's editor input is an editor-only string, separate from its text format
+# 0048. A field's editor input is an editor-only string, separate from its text format
 
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
   #2284 in 1.9.0.
@@ -6,7 +6,7 @@
   and [#2495](https://github.com/The-Verscienta/kiln_cms/pull/2495), which
   built it; [#2674](https://github.com/The-Verscienta/kiln_cms/issues/2674),
   which asked for this record;
-  [ADR 0050](0050-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md)
+  [ADR 0049](0049-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md)
   for what happens when a field stops offering the stored input.
 - **Changelog** — [1.9.0](../changelog/v1.9.0.md#field-widgets).
 

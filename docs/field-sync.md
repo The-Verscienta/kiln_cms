@@ -140,7 +140,7 @@ must fail on a refused import.
   entry is a default accordion. On import, a section name may appear once per
   owner, and the same unknown-key rule applies as for fields. See
   [Lay out custom fields as tabs, fieldsets or columns](extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns),
-  and [ADR 0047](decisions/0047-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md)
+  and [ADR 0046](decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md)
   for why a layout is keyed by the section name and when it is pruned.
 - A key you leave out of a hand-written file takes the attribute's default; an
   unknown key is refused (a typo would otherwise be silently ignored).
@@ -151,7 +151,7 @@ must fail on a refused import.
   attribute does not bump it, so an older build refuses such a file by the
   unknown key instead (below). Every release with field sync, 1.9.0 onward,
   reads and writes the same version-1 keys, `width`, `widget` and `sections`
-  included; [ADR 0048](decisions/0048-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
+  included; [ADR 0047](decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
   records why the file is still version 1.
 
 ### Moving a file to an older build
@@ -211,7 +211,7 @@ default. See
   `~ post.kind: widget` for every field with a chosen input and sets it back
   to the default. See
   [Moving a file to an older build](#moving-a-file-to-an-older-build) and
-  [ADR 0048](decisions/0048-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md).
+  [ADR 0047](decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md).
 
 ### What it does not carry
 

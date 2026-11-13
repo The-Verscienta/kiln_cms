@@ -1,4 +1,4 @@
-# 0048. The field sync file stays version 1, and a new attribute does not bump it
+# 0047. The field sync file stays version 1, and a new attribute does not bump it
 
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
   #2437, #2495 and #2496 in 1.9.0.
@@ -10,7 +10,7 @@
   [#2496](https://github.com/The-Verscienta/kiln_cms/pull/2496) (`width` and
   `sections`); [#2656](https://github.com/The-Verscienta/kiln_cms/issues/2656),
   which asked for this record;
-  [ADR 0047](0047-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md)
+  [ADR 0046](0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md)
   for the section layouts the file carries.
 - **Changelog** — [1.9.0](../changelog/v1.9.0.md#field-definition-sync), with
   [field layout](../changelog/v1.9.0.md#field-layout) and

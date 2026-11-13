@@ -1,6 +1,6 @@
 defmodule KilnCMS.CMS.FieldSyncVersionTest do
   @moduledoc """
-  Pins the keys a version-1 field sync document carries (#2656, ADR 0048).
+  Pins the keys a version-1 field sync document carries (#2656, ADR 0047).
 
   Every released reader of version 1 (1.9.0 onward) accepts exactly these
   keys and refuses any other as `unknown key(s)`. The lists are read from the
@@ -69,7 +69,7 @@ defmodule KilnCMS.CMS.FieldSyncVersionTest do
       * bump the version, with a reader that still accepts every older one
         (FieldSync.parse/1 matches the version exactly today).
 
-    See docs/decisions/0048-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md.
+    See docs/decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md.
     """
   end
 end
