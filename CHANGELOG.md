@@ -89,6 +89,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced, and rolling back is safe. Part of #2247.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
 
+- **Yearly rules with BYMONTH, BYMONTHDAY or BYDAY, monthly BYDAY with BYMONTHDAY, BYMONTH on daily and weekly rules, and a repeated weekly BYDAY now expand per RFC 5545, as subscribed calendars showed them (`FREQ=YEARLY;BYDAY=2TU` is January's). Next dates are recomputed ~10 min after boot on the new `occurrence_backfill` queue; a hand-built Oban `queues:` must add `occurrence_backfill: 1`. Rollback safe.**
+  ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#event-recurrence-rfc-upgrade))
+
 ### Breaking
 
 - **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
@@ -228,6 +231,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`eq`, `not_eq` and `in` on a single string, URL, select, email, color, telephone, time or slug field (or a string, URL or select link field) also match the value as a save stores it (`#FFF` finds `#ffffff`, a label finds its option), fixing the 1.9.0 known issue #2677.**
   ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-filter-operands-tidied))
+
+- **Restoring an event from the trash recomputes its next occurrence, fixing the 1.9.0 known issue #2621.**
+  ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#restored-event-next-occurrence))
+
+- **Calendar clients no longer drop or add the last occurrence of a timed repeating event with an end date: the `.ics` `UNTIL` is now the end of that day in the event's time zone.**
+  ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#ics-until-end-of-local-day))
 
 - **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
   ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))

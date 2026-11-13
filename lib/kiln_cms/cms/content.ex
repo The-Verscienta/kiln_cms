@@ -3681,6 +3681,16 @@ defmodule KilnCMS.CMS.Content do
           # records, so the restore re-checks.
           change KilnCMS.CMS.Changes.CheckUniqueFields
 
+          # `next_occurrence_at` is relative to the clock (`Events.Index.anchor/1`),
+          # so a value computed while the row sat in the trash (up to 30 days) is
+          # stale again by the time it comes out, and the sweep and the backfill
+          # are both live-only. Restore is the one moment a right value can be
+          # computed (#2621). The contrast with #2533, which walks the trash: what
+          # that writes (field shape, media snapshots) is source data that cannot
+          # be re-derived at restore time; this is derived from the row's own
+          # `custom_fields` plus the clock. `:restore_version` recomputes it too.
+          change KilnCMS.CMS.Changes.SetNextOccurrence
+
           # Trashing is a soft delete: `:destroy` runs `DeleteArtifacts`, which
           # purges the fired artifacts AND enqueues a Meilisearch removal — but
           # it does not change `state`, so a trashed published document is still
