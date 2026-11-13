@@ -95,7 +95,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2836](https://github.com/The-Verscienta/kiln_cms/pull/2836) · [long form](docs/changelog/unreleased.md#media-purge-quarantined))
 
 - **Custom-field API: requests that used to succeed are now a `400`: `[]` for a single custom field (it cleared it), a list beside `ilike` or a media or reference `eq`/`not_eq` (it was joined into one string), a `null` `ilike` operand, and a `{year, month, day}` object as a date or date-time filter operand. `not_eq` on a tidied field can now exclude more records.**
-  ([long form](docs/changelog/unreleased.md#custom-field-api-stricter-shapes))
+  ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-field-api-stricter-shapes))
 
 ### Added
 
@@ -218,13 +218,13 @@ Every summary line below that was shortened links to its own entry there.
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-validated))
 
 - **An object, or a list where one value goes, sent for a single custom field or a link value over JSON:API, GraphQL or MCP is a field error naming the field (`must be a single value, not an object or a list`), not a 500; a list on a text field is no longer joined into one string.**
-  ([long form](docs/changelog/unreleased.md#custom-field-value-shapes))
+  ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-field-value-shapes))
 
 - **A custom-field filter with an object operand, or a list beside any operator but `in`, on a field, link field or list field is a `400 invalid_argument` naming the operator and field, not a 500 or a silently joined value.**
-  ([long form](docs/changelog/unreleased.md#custom-filter-operand-shapes))
+  ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-filter-operand-shapes))
 
 - **`eq`, `not_eq` and `in` on a single string, URL, select, email, color, telephone, time or slug field (or a string, URL or select link field) also match the value as a save stores it (`#FFF` finds `#ffffff`, a label finds its option), fixing the 1.9.0 known issue #2677.**
-  ([long form](docs/changelog/unreleased.md#custom-filter-operands-tidied))
+  ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-filter-operands-tidied))
 
 ### Security
 
