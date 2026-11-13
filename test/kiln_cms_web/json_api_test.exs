@@ -1074,6 +1074,35 @@ defmodule KilnCMSWeb.JsonApiTest do
                  "/api/json/posts?custom_filter[ghost#{System.unique_integer([:positive])}]=x"
                )
     end
+
+    # #2856: `custom_where` is on the route, but a query string carries one
+    # condition. Plug merges every `custom_where[][...]` pair into one list
+    # item, and an indexed `custom_where[0][...]` decodes to a map, which the
+    # route's schema (an array) refuses.
+    test "custom_where takes one condition in the [] form; the indexed form is a 400" do
+      admin = user(:admin)
+      price = "price#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: price, label: "Price", field_type: :integer},
+        actor: admin
+      )
+
+      _cheap = published_post(%{title: "Cheap", custom_fields: %{price => 9}}, admin)
+      dear = published_post(%{title: "Dear", custom_fields: %{price => 30}}, admin)
+
+      assert {200, body} =
+               api_get("/api/json/posts?custom_where[][name]=#{price}&custom_where[][int][gt]=10")
+
+      assert ids(body) == [dear.id]
+
+      assert {400, %{"errors" => [%{"code" => "invalid_query"} = err | _]}} =
+               api_get(
+                 "/api/json/posts?custom_where[0][name]=#{price}&custom_where[0][int][gt]=10"
+               )
+
+      assert err["source"]["pointer"] =~ "custom_where"
+    end
   end
 
   # #2292: a custom field named like a column, `filter[price]` / `sort=-price`.
