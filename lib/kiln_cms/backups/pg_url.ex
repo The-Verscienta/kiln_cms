@@ -29,8 +29,13 @@ defmodule KilnCMS.Backups.PgUrl do
 
   A `key=value` conninfo string, or any scheme libpq would not read as a URI,
   is returned unchanged with no environment. Ecto-only query parameters
-  (`ssl=true`, `pool_size=10`) are not translated: libpq refuses them by name,
-  and the fix is to set `BACKUP_DATABASE_URL`.
+  (`pool_size=10`, `ssl=false`) are not translated: libpq refuses them by name
+  (`invalid URI query parameter: "pool_size"`), and the fix is to set
+  `BACKUP_DATABASE_URL`. `ssl=true` is the one libpq reads itself, as
+  `sslmode=require`.
+
+      iex> KilnCMS.Backups.PgUrl.split("ecto://kiln:hunter2@db/kiln_prod?sslmode=require")
+      {"postgres://kiln@db/kiln_prod?sslmode=require", [{"PGPASSWORD", "hunter2"}]}
 
   `scripts/backup.sh`, `scripts/restore.sh` and `scripts/staging.sh` do the
   same in shell (`pg_conn_split`); the two are tested against the same cases.

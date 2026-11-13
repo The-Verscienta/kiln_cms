@@ -110,6 +110,28 @@ carries the reasoning.
   security event, so the site's admins get a `webhook_changed` silencing
   notice. Tick it again after rolling forward. (Part of #2245.)
 
+<a id="backup-keep-days-upgrade"></a>
+
+- **If your host's cron sets `BACKUP_KEEP_DAYS`, check its value: `backup.sh` now refuses anything but a whole number of days from 1 to 2147483647, keeps 14 instead, and warns.**
+  Until now the script used the value unchecked in `find -mtime +N`, so
+  its effect depended on what you wrote (see the Fixed entry
+  [below](#backup-keep-days-validated)). Two settings change what the
+  next `backup.sh all` or `backup.sh prune` deletes:
+  - **`BACKUP_KEEP_DAYS=0`** pruned every backup older than one day. It now
+    keeps 14 days, so the backup directory grows to about 14 days of
+    backups. Check the disk has room, or set the number of days you want.
+  - **`BACKUP_KEEP_DAYS=14d`** (or another value with a unit) pruned
+    nothing at all on Linux, where GNU `find` refuses `+14d`. It now means
+    14, so the first prune after the upgrade deletes every backup older
+    than 14 days that the [keep rules](../backups.md#what-retention-deletes-and-what-it-keeps)
+    don't protect. Copy off anything older you want to keep before the
+    upgrade, or mark it as a [recovery point](../backups.md#keep-a-backup-as-a-recovery-point).
+  Each refused value writes
+  `BACKUP_KEEP_DAYS=<value> is not a whole number of days from 1 to 2147483647; using 14`
+  to stderr, which lands in the cron log. Rolling the pin back restores the
+  old reading, but backups the new prune has already deleted are gone. The
+  in-app backup already read the variable this way and is unchanged. (#2727)
+
 ## Added
 
 <a id="backup-schedules"></a>
@@ -765,3 +787,94 @@ carries the reasoning.
   failed or interrupted, and the trigger reads **Manual**, **Cron** or
   **Console** instead of the raw value. No migration and no configuration.
   See [Backup history](../backups.md#backup-history-2217). (#2542)
+
+<a id="database-url-ecto-scheme"></a>
+
+- **The in-app backup, the demo reset and the backup, restore and staging scripts accept an `ecto://` database URL.**
+  libpq (`pg_dump`, `pg_restore`, `psql`) reads a string as a connection URI
+  only when it starts with `postgres://` or `postgresql://`. `ecto://` is the
+  form `DATABASE_URL` is documented in, and the default in
+  `docker-compose.prod.yml`, but every `pg_*` call passed it on unchanged, so
+  libpq took the whole string as a database name on the local socket and
+  every dump failed: each in-app backup and demo reset on a default compose
+  deployment, and the cron `backup.sh` given that same `DATABASE_URL`. With
+  a query string (`?sslmode=require`) libpq failed differently, with
+  `invalid connection option`. Now a leading `ecto://`, in any case, is
+  rewritten to `postgres://` and nothing else in the string changes. That
+  covers `DATABASE_URL` and `BACKUP_DATABASE_URL` for the in-app backup and
+  the demo reset, `DATABASE_URL` for `backup.sh`, `RESTORE_DATABASE_URL`
+  for `restore.sh`, and `PROD_DATABASE_URL` and `STAGING_DATABASE_URL` for
+  `staging.sh`.
+
+  Ecto-only query parameters are not translated. libpq refuses
+  `pool_size=10`, `ssl=false` and the like with
+  `invalid URI query parameter: "pool_size"`; it happens to read `ssl=true`
+  itself, as `sslmode=require`. If your `DATABASE_URL` carries one, give the
+  in-app backup a `BACKUP_DATABASE_URL` without it, and the script a
+  `DATABASE_URL` in libpq's form. See
+  [Which database URL the backup tools accept](../backups.md#which-database-url-the-backup-tools-accept-2719).
+
+  Developers: `KilnCMS.Backups.PgUrl` holds the rewrite (`normalize/1`) and
+  the password split (`split/1`). `KilnCMS.Backups.database_url/0` now always
+  returns a URL libpq reads as one. (#2719)
+
+<a id="backup-keep-days-validated"></a>
+
+- **`backup.sh` reads `BACKUP_KEEP_DAYS` the way the app does.**
+  The script used the value unchecked. `BACKUP_KEEP_DAYS=14d` made
+  `find -mtime +14d` fail on Linux into `/dev/null`, so nothing was ever
+  pruned and nothing warned, and wrote `"keep_days": 14d` into
+  `manifest.json`, which is not JSON, so the Backups page and the
+  importer could not read that run. `0` pruned every backup older than a
+  day, where the app refuses 0. The script now reads it like
+  `KilnCMS.Config.Env.positive_integer/1`: surrounding whitespace is ignored,
+  blank means 14 silently, a whole number from 1 to 2147483647 is used (an
+  optional `+` and leading zeros are accepted, and the manifest gets the
+  plain number), and anything else (`0`, `-1`, `14d`, `1.5`, `2147483648`)
+  keeps 14 and writes
+  `BACKUP_KEEP_DAYS=<value> is not a whole number of days from 1 to 2147483647; using 14`
+  to stderr. Only `backup.sh all` and `backup.sh prune` read it. The app's
+  `KilnCMS.Backups.Manifest` also reads a `keep_days` of 0 or below as
+  absent. If you set either `0` or a value with a unit, read the
+  [upgrade note](#backup-keep-days-upgrade) first. (#2727)
+
+## Security
+
+<a id="backup-scripts-password-out-of-argv"></a>
+
+- **`backup.sh`, `restore.sh` and `staging.sh` keep the database password off the command line and out of what they print.**
+  A process's arguments are readable by any user on the host
+  (`/proc/<pid>/cmdline`, `ps`) for as long as it runs. The scripts passed
+  the whole database URL, password included, as an argument to `pg_dump`
+  (`backup.sh db` and `all`, `staging.sh up`), `pg_restore` (`restore.sh db`
+  and `drill`) and `psql` (the drill's checks, `staging.sh up`). They now
+  take the password out of the URL and give it to that one command as
+  `PGPASSWORD`, set in a subshell around it, so `rclone`, `tar`, `curl` and
+  the rest of the run never see it. `staging.sh up` gives `pg_dump` and
+  `psql` each their own URL's password. The in-app backup already did this.
+
+  The URL is read the way libpq reads it: the user and password end at the
+  first `@` before the first `/`, so an `@` in the password must be written
+  `%40`; percent-escapes in the password are decoded. A `password=` query
+  parameter is moved too (even as `pass%77ord=`), and wins over a password in
+  the user part, as it does in libpq. A URL with no password is left as
+  written, so your own `PGPASSWORD` or `~/.pgpass` still applies. A
+  `key=value` connection string (`host=db password=… dbname=kiln`) is passed
+  through unchanged, password included: use a URL.
+
+  Nothing prints the password any more either. `restore.sh drill`'s hint
+  for scrubbing the drill database, and `staging.sh up`'s closing
+  `DATABASE_URL=` line, print the URL without it and say so. Before, a cron
+  `backup.sh` given an `ecto://` `DATABASE_URL` failed with a libpq error
+  that quoted the whole URL, password included, into the cron log
+  (`database "ecto://user:password@host/db" does not exist`); rotate that
+  password if such a log was kept or shipped anywhere. See
+  [The database password stays out of the pg_dump command line](../backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726).
+
+  Developers: `KilnCMS.Backups.Steps.split_credentials/1` keeps its
+  signature, and now returns the URL rewritten from `ecto://`, moves a query
+  `password=` as well, and no longer raises on a malformed `%` escape (it
+  stays literal). The three scripts carry identical copies of
+  `pg_conn_split`, tested against the same table of URLs as
+  `KilnCMS.Backups.PgUrl.split/1`; the run under macOS's `/bin/bash` 3.2 is
+  skipped on Linux CI. (#2726)
