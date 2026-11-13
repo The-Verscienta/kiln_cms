@@ -10452,6 +10452,11 @@ msgstr "Retenido"
 msgid "Held by the backend"
 msgstr "Guardadas en el servicio"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Held for two-step sign-in setup"
+msgstr "Retenido hasta configurar el inicio de sesión en dos pasos"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Held: sent without completing the check."
@@ -23744,6 +23749,11 @@ msgstr "Inicio de sesión en dos pasos para administradores y editores"
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in for platform administrators"
 msgstr "Inicio de sesión en dos pasos para administradores de la plataforma"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in requirement changed"
+msgstr "Cambió el requisito de inicio de sesión en dos pasos"
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format

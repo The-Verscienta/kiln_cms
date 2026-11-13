@@ -69,7 +69,13 @@ defmodule KilnCMS.Security.Event do
     :ip_block_refused,
     # A verified API key over a rate limit (#2245). Sampled: one per key and
     # bucket per alert window.
-    :api_key_rate_limited
+    :api_key_rate_limited,
+    # A site's two-step sign-in requirement saved by an admin, or turned off
+    # from the server (#2247).
+    :second_factor_policy_changed,
+    # An account held until it sets up the second factor its site requires
+    # (#2247). Recorded at the sign-in doors only, once per sign-in.
+    :second_factor_required
   ]
 
   # The only metadata keys each type may carry. None names a person: who is in
@@ -78,10 +84,13 @@ defmodule KilnCMS.Security.Event do
     sign_in: ~w(method),
     sign_in_failed: ~w(method reason),
     sign_in_locked: ~w(method scope),
-    second_factor_enrolled: ~w(kind),
+    # `proof` (#2247): how an enrolment that the site required was vouched
+    # for — "email", "email_skipped_no_relay", "not_required" or
+    # "magic_link_session".
+    second_factor_enrolled: ~w(kind proof),
     second_factor_removed: ~w(kind via),
     recovery_code_used: ~w(remaining),
-    passkey_added: ~w(name),
+    passkey_added: ~w(name proof),
     passkey_removed: ~w(name via),
     # `level` is "site" (a membership) or "platform" (the account's own role);
     # `via` is "legacy_carry" when a legacy account's standing role was copied
@@ -117,7 +126,13 @@ defmodule KilnCMS.Security.Event do
     # "live", "gql", "collab" or "bridge".
     ip_block_refused: ~w(rule surface),
     # `name`: the key's name. `bucket`: the rate limit it went over.
-    api_key_rate_limited: ~w(name bucket)
+    api_key_rate_limited: ~w(name bucket),
+    # `change`: "strengthened", "weakened" or "unchanged". `via`: "admin" (a
+    # person's save) or "console" (`KilnCMS.Release.second_factor_requirement_off/1`).
+    second_factor_policy_changed: ~w(required_for grace_days previous_required_for change via),
+    # `surface`: "browser", "api", "live" or "socket". `reason`: "not_enrolled",
+    # "passkey_host" or "headless_passkey".
+    second_factor_required: ~w(tier surface reason)
   }
 
   @max_metadata_keys 8

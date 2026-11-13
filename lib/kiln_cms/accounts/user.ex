@@ -1782,6 +1782,13 @@ defmodule KilnCMS.Accounts.User do
       public? false
       writable? false
     end
+
+    # When the account was created (#2247): where a required second factor's
+    # grace period starts, at the earliest. Accounts that existed before this
+    # column carry the time it was added, so none of them starts out overdue.
+    create_timestamp :inserted_at do
+      public? false
+    end
   end
 
   relationships do

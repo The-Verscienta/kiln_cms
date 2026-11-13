@@ -181,10 +181,10 @@ a type may carry only the keys below; anything else is dropped.
 | `sign_in` | Sign-in | A sign-in completed, every factor passed | `method` |
 | `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code or a passkey refused at the code prompt, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below | `method`, `reason` |
 | `sign_in_locked` | Sign-in locked out | A throttle refused an attempt. First refusal per subject and scope each 15 minutes | `method`, `scope` |
-| `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind` |
+| `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind`, `proof` (reserved, see below) |
 | `second_factor_removed` | Second factor removed | Two-factor sign-in was turned off, or removed when an invitation, a password reset or a magic link took over an unconfirmed account (see below) | `kind`, `via` |
 | `recovery_code_used` | Recovery code used | A recovery code was spent at the code prompt | `remaining` |
-| `passkey_added` | Passkey added | A passkey was registered | `name` |
+| `passkey_added` | Passkey added | A passkey was registered | `name`, `proof` (reserved, see below) |
 | `passkey_removed` | Passkey removed | A passkey was deleted, by its owner or an admin, or when an invitation, a password reset or a magic link took over an unconfirmed account | `name`, `via` |
 | `role_granted` | Role granted | A membership was created, or a role was raised | `role`, `previous_role`, `level`, `via` |
 | `role_revoked` | Role revoked | A role was lowered, a membership removed, a temporary elevation ended early, or a live temporary admin grant replaced by a lower one | `role`, `level`, `change` |
@@ -215,6 +215,8 @@ a type may carry only the keys below; anything else is dropped.
 | `ip_block_refused` | Blocked address refused | A request or socket connect from an address on the site's [block list](ip-blocking.md) was refused. **No IP address and no user agent**, and no person: nothing records a blocked address. Sampled: see below. Raises the site's `blocked_ip` [alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window), and is written even when the site turned that alert off | `rule`, `surface` |
 | `api_key_rate_limited` | API key hit a rate limit | An API key this server verified in the last 5 minutes went over a rate limit an API key can reach. No person (whoever presented it is not known to be the owner); the target is the key (target type `api_key`), the IP the request's. Sampled: see below. Raises the platform's `api_key_rate_limited` [alert](security-alerts.md#api-keys-over-a-rate-limit) | `name`, `bucket` |
 | `platform_alerts_changed` | Platform security alerts changed | A platform admin saved the platform's [security alert settings](security-alerts.md#turn-off-rate-limit-alerts-for-api-keys). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the settings row (target type `platform_security_alerts`) | `disabled_kinds` |
+| `second_factor_policy_changed` | Two-step sign-in requirement changed | A site's two-step sign-in requirement (who must hold a second factor, and the grace period) was saved, including turned off, or was turned off from the server with `KilnCMS.Release.second_factor_requirement_off/1` ([Turn the requirement off from the server](two-factor-auth.md#turn-the-requirement-off-from-the-server)). An admin's save names the admin; the server's names no person and has no IP address. The target is the setting (target type `site_second_factor_policy`). No console page writes the requirement yet (#2247) | `required_for`, `grace_days`, `previous_required_for`, `change`, `via` |
+| `second_factor_required` | Held for two-step sign-in setup | Reserved for the enforcement of the requirement (#2247): an account held until it sets up the second factor its site requires, recorded at the sign-in doors once per sign-in. Nothing records it in this release | `tier`, `surface`, `reason` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials`,
@@ -290,6 +292,28 @@ records for its whole retention. The page shows the current entries. This
 event replaces `org_setting_changed` for this setting, so a save is still
 exactly one event. For `admin_allowlist_overridden`, `change` is `cleared` or
 `added` and `count` the number of entries after the change.
+
+For `second_factor_policy_changed`, `required_for` is who the requirement
+covers after the write (`off`, `admins`, `editors` for editors and
+administrators, or `everyone`), `grace_days` the grace period after it (0 to
+90), and `previous_required_for` who it covered before (`off` when the site had
+never saved one). `change` is `weakened` when the write covers fewer roles or
+gives a longer grace, else `strengthened` when it covers more roles or gives a
+shorter one, else `unchanged`; a write that does both, say covering one more
+role but doubling the grace, is `weakened`. `via` is `admin` for an admin's
+save and `console` for `KilnCMS.Release.second_factor_requirement_off/1`. This
+event replaces `org_setting_changed` for this setting, so a write is still
+exactly one event.
+
+`second_factor_required`, and the `proof` key on `second_factor_enrolled` and
+`passkey_added`, are defined ahead of the enforcement that records them
+(#2247), so the log and its allowlist are in place before anything writes
+them. For `second_factor_required`, `tier` is the role the requirement held
+the account for, `surface` where it was held (`browser`, `api`, `live` or
+`socket`), and `reason` is `not_enrolled`, `passkey_host` or
+`headless_passkey`. `proof` will say how an enrollment the site required was
+vouched for: `email`, `email_skipped_no_relay`, `not_required` or
+`magic_link_session`.
 
 For `sign_in_unlock_requested`, `surface` is always `browser`: the link can
 only be asked for on `/sign-in/unlock`. For `sign_in_unlocked`, `was_locked`
@@ -449,7 +473,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in_failed` (wrong code) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` (`audit_failure/3`), used by `TwoFactorController.create` and `ApiAuthController.verify`; and `check_passkey/3`, used by `TwoFactorController.passkey_verify` for a passkey refused at the prompt (#2247) | sampled; `method: "second_factor"`, `reason: "invalid_code"` (a refused passkey too) |
 | `sign_in_locked` (account, address) | `audit_sign_in.ex`, via `AuthEvents.password_locked/3`, when `ThrottleSignIn` refuses | after commit; `method: "password"`, `scope: "account"` or `"address"` |
 | `sign_in_locked` (second factor at sign-in) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` or `check_passkey/3` on a denied budget | after commit; `scope: "second_factor"` |
-| `sign_in_locked` (second factor in settings) | `lib/kiln_cms/accounts/changes/throttle_second_factor.ex`: on a denied budget (turning 2FA off, regenerating recovery codes) | after commit; `scope: "settings"` |
+| `sign_in_locked` (second factor in settings) | `lib/kiln_cms/accounts/changes/throttle_second_factor.ex`: on a denied budget (turning 2FA off, regenerating recovery codes); and `lib/kiln_cms/cms/changes/saver_verified_second_factor.ex`, when a code given to save the two-step sign-in requirement meets a denied budget (#2247) | after commit; `scope: "settings"` |
 | `second_factor_enrolled` | `User` `:confirm_totp` (`lib/kiln_cms/accounts/user.ex`) | in txn; `kind: "totp"` |
 | `second_factor_removed` | `User` `:disable_totp`, and `lib/kiln_cms/accounts/changes/forget_prior_credentials.ex` on `User` `:accept_invitation_with_password` (#2453), `:reset_password_with_token` on an unconfirmed account and `:take_over_by_magic_link` (#2594) when the row it re-reads under lock had a confirmed factor | in txn; `kind: "totp"`; from a takeover, also `via` (`"invitation"`, `"password_reset"` or `"magic_link"`) and no person |
 | `recovery_code_used` | `User` `:consume_totp_recovery_code` | in txn; `remaining` is the count left |
@@ -479,6 +503,8 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `ip_block_refused` | `lib/kiln_cms/security/blocked_ip_alert.ex`: `note/4`, called by `KilnCMSWeb.Plugs.IpBlock` (`surface` `http`) and by `KilnCMSWeb.IpBlock.check_connect/2`, from its LiveView `on_mount` (`live`) and the `/ws/gql`, `/ws/collab` and `/ws/bridge` connects (`gql`, `collab`, `bridge`), with the rule `IpBlocklist.match/2` returned. Never by `IpBlocklist.blocked?/2`, which the scanner guard also asks | sampled, after commit, off the request path (a task under `KilnCMS.TaskSupervisor`); in-memory gates first; `request: nil`, so no IP or user agent |
 | `api_key_rate_limited` | `lib/kiln_cms/security/api_key_trip.ex`: `note/2`, called from the refusal branch of `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the `api`, `gql`, `media_upload`, `media_transform` and `plugin_endpoint` buckets | sampled, after commit, off the request path; only for a key in the node's verified-key cache (filled by `KilnCMSWeb.Plugs.ApiKeyAuth` and `KilnCMSWeb.Plugs.RememberApiKey`), reloaded and still valid; tenant from `ApiKeyTrip.owner_org_id/1`; `user: nil` |
 | `platform_alerts_changed` | `KilnCMS.Security.Changes.Record` on `Security.PlatformAlertSettings` `:save` (`lib/kiln_cms/security/platform_alert_settings.ex`), called from the Security alerts page | in txn, with the save: if the event cannot be written the setting does not change; `scope: :instance` |
+| `second_factor_policy_changed` | `lib/kiln_cms/cms/changes/record_second_factor_policy_change.ex`, on `CMS.SiteSecondFactorPolicy` `:save` and `:update` (the `audit: {:change, ...}` option of `use KilnCMS.CMS.OrgSettings`) and on `:operator_override`, run by `KilnCMS.Release.second_factor_requirement_off/1` | in txn: if the event cannot be written the setting does not change. Only for a user actor (`via: "admin"`) or the override (`via: "console"`, no person); the row as it stood is read in the same transaction (`Changes.StampSecondFactorRequirement`), and if it cannot be read the write fails |
+| `second_factor_required` | Nothing yet: the type and its keys exist for the enforcement of #2247 | — |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
@@ -488,8 +514,9 @@ KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
 `SiteMeilisearch`, `SitePasswordPolicy`, `SiteRegistration`, `SiteSafetyFields`, `SiteSecurityAlerts`, `SiteSecurityLog`,
 `SiteSecurityTxt`, `SiteSessionPolicy`, `SiteStorage`, `SiteVapidKey` and
 `Federation.SiteFederation`. (`SiteSsoProvider` is the exception that records
-`sso_config_changed` instead, and `SiteAdminAllowlist` the one that records
-`admin_allowlist_changed`.)
+`sso_config_changed` instead, `SiteAdminAllowlist` the one that records
+`admin_allowlist_changed`, and `SiteSecondFactorPolicy` the one that records
+`second_factor_policy_changed`.)
 
 Only a person's write is an event. `RecordOrgSetting` skips a write with no
 user as its actor (the VAPID key generated on first use, a federation sync, a
@@ -516,6 +543,7 @@ recorded as long as it names a user actor and a tenant.
 | An unlock request that mails nothing, or opening an unlock link | Not recorded | A request for an unknown, unpaused or non-member address is answered like any other and leaves no trace, so the log names no address that was not mailed. Opening the link only shows a button; mail scanners do it too. |
 | Unknown host | Not recorded | No site to attribute it to; the event is skipped. |
 | A save of the admin allowlist refused because it would lock you out | Not recorded | Nothing changed. |
+| A save of the two-step sign-in requirement refused for a missing or wrong second factor, or `second_factor_requirement_off/1` on a site that requires nothing | Not recorded | Nothing changed. A refusal because the account's second-factor budget ran out records `sign_in_locked` with `scope: "settings"`, as turning two-step sign-in off does. |
 | The admin allowlist kill switch (`KILN_ADMIN_ALLOWLIST_DISABLED`) | Not recorded | It is an environment variable read at boot, with no site and no person. The boot log warns while it is set, and your platform's own record of environment changes is the trail. See [admin-allowlist.md](admin-allowlist.md#recovering-from-a-lock-out). |
 | Anything that is not a person's write to a settings resource | Not recorded | See above. |
 

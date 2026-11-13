@@ -389,6 +389,105 @@ What an operator should know when a user reports it:
   nothing to hide here — whoever is asking already holds a signed token naming
   the account — and telling a user their correct code was wrong is worse.
 
+## Requiring two-step sign-in on a site
+
+A site will be able to require a second factor (an authenticator app or a
+passkey) of its administrators, of its editors and administrators, or of
+everyone, with a grace period of 0 to 90 days (14 by default) for each account
+to set one up (#2247). **This release lays the groundwork and enforces
+nothing:** there is no console page for the setting yet, no one is asked to
+set up a second factor, and no one is held. A site that never saved the
+setting, which is every site today, requires nothing. The page, the reminders
+and the enforcement come in a later release, along with this guide's
+walk-through.
+
+What is already in place, for operators:
+
+- **One additive migration.** It adds the `site_second_factor_policy` table
+  and a `users.inserted_at` column. Existing accounts get the time the
+  migration ran, and an account's grace period never starts before its
+  `inserted_at`, so when a site later turns the requirement on, no account
+  that existed before this upgrade starts out overdue. Rolling the release back
+  is safe: an older release ignores the table and the column.
+- **A way to turn the requirement off from the server**, below. It is here
+  before the requirement can be turned on, so the way back in exists first.
+- **Two security log types**, "Two-step sign-in requirement changed" and
+  "Held for two-step sign-in setup" (see
+  [What is recorded](security-events.md#what-is-recorded)). Only the first
+  can be recorded in this release.
+
+When the setting is saved, the person saving it must hold a second factor
+and prove it at that moment: a sign-in that verified one in the last 15
+minutes, or a current code from their authenticator app. That holds for every
+save, turning it off included, so a session left open, or a password alone,
+cannot switch the requirement off. If the setting cannot be read (a database
+error), the site is treated as requiring nothing until it can be, rather than
+holding every account; see
+[ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and-only-a-freshly-verified-admin-changes-it.md).
+
+### Turn the requirement off from the server
+
+If no administrator of a site can pass its requirement, for example the last
+administrator lost their only passkey, an operator with a shell on the
+running release turns it off. You need `bin/kiln_cms` on a node of the
+running cluster, and the site's slug if it is not the default site.
+
+1. Run the command with `rpc`, not `eval` (the change has to reach the running
+   application and clear every node's cached copy):
+
+   ```sh
+   bin/kiln_cms rpc 'KilnCMS.Release.second_factor_requirement_off()'
+   bin/kiln_cms rpc 'KilnCMS.Release.second_factor_requirement_off(org: "acme")'
+   ```
+
+   The first acts on the default site; `org: "<slug>"` acts on another one.
+
+2. Read what it printed. A site that required a second factor:
+
+   ```text
+   Turned off the two-step sign-in requirement (it was: admins).
+   The change reaches every node now, and is in the site's security log.
+   ```
+
+   A site that requires nothing (every site, in this release) is left as it
+   is:
+
+   ```text
+   This site does not require two-step sign-in; nothing to turn off.
+   ```
+
+3. As an admin of that site, open **Security log** under **Organization** in
+   the console sidebar. The change is at the top as "Two-step sign-in
+   requirement changed", with no one under **Who** and no IP address. (Its
+   metadata, `via: "console"` among it, is stored but not shown on the page.)
+
+The command sets the requirement to off and nothing else: the grace period is
+kept, and nobody's second factor is touched. It runs as the server's own
+`:operator` actor; an administrator cannot run the same action from the
+console. Once an administrator has set up a second factor, they can turn the
+requirement back on, from the console page that comes with the enforcement.
+
+`rpc` exits 0 whatever the command returns, which is `{:ok, :off}` or
+`{:error, message}`. A script that must fail on an error matches the result:
+
+```sh
+bin/kiln_cms rpc '{:ok, :off} = KilnCMS.Release.second_factor_requirement_off()'
+```
+
+What can go wrong:
+
+- **"This needs the running application … Run it against the live node with
+  `bin/kiln_cms rpc '...'`, not `bin/kiln_cms eval`."** You used `eval`. Run
+  the same call with `rpc`.
+- **"No organization with slug acme"**: no site has that slug. Leave `org:`
+  out for the default site.
+- **"Could not read the two-step sign-in requirement: …"**: the setting could
+  not be read, usually a database problem; the rest of the line says what.
+  Nothing changed.
+- **"Could not turn off the two-step sign-in requirement: …"**: the write
+  failed, and nothing changed, its security log event included. Fix the cause
+  the line names and run the command again.
+
 ## The TOTP implementation
 
 `KilnCMS.Accounts.Totp` implements RFC 6238 on Erlang's `:crypto` (HMAC-SHA1)

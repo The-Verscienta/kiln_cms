@@ -10452,6 +10452,11 @@ msgstr ""
 msgid "Held by the backend"
 msgstr ""
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Held for two-step sign-in setup"
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Held: sent without completing the check."
@@ -23743,6 +23748,11 @@ msgstr ""
 #: lib/kiln_cms/security/posture/checks/operator_second_factor.ex
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in for platform administrators"
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in requirement changed"
 msgstr ""
 
 #: lib/kiln_cms/security/alert_text.ex

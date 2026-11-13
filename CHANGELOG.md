@@ -83,6 +83,9 @@ Every summary line below that was shortened links to its own entry there.
 - **New scheduled egress: one node fetches Google's, Bing's, Apple's and DuckDuckGo's crawler IP lists over HTTPS every 6 h; allow the four hosts or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot outside its list is now charged as no user agent and counted by the 404 guard. No migration; rollback safe.**
   ([long form](docs/changelog/unreleased.md#crawler-ip-ranges-upgrade))
 
+- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced, and rolling back is safe. Part of #2247.**
+  ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
+
 ### Breaking
 
 - **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
@@ -116,6 +119,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Search-engine claims are checked against Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists before DNS, so DuckDuckBot can be verified; new `KILN_CRAWLER_RANGES`, `KILN_CRAWLER_RANGES_CRON` and `ranges_fetch` metric.**
   ([long form](docs/changelog/unreleased.md#crawler-ip-ranges))
+
+- **Groundwork for requiring two-step sign-in by role, not yet enforced (no page; part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
+  ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
 
 ### Changed
 
