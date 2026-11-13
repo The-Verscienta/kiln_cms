@@ -21,22 +21,27 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   ## Which node
 
   A backup directory is either shared by every node or one per host (#2218).
-  Only an in-app backup creates `<BACKUP_DIR>/.kiln-dir-id`
-  (`KilnCMS.Backups.DirId`); `scripts/backup.sh` never does, and this job
-  never creates one either. So the cron job (no args) routes by what the
-  nodes' heartbeats (`KilnCMS.Backups.NodeBeat`, beaten in the last
-  10 minutes) report:
+  Each node's heartbeat (`KilnCMS.Backups.Heartbeat`) gives its backup
+  directory an id (`<BACKUP_DIR>/.kiln-dir-id`, `KilnCMS.Backups.DirId`) while
+  this job is on and the directory already holds backups, and reports it in
+  its beat (`KilnCMS.Backups.NodeBeat`); this job itself never creates one
+  (#2789). The cron job (no args) then:
 
-    * **No node reports a directory id**, the usual cron-only deployment: the
-      sync runs on whichever node fetched the job. On a shared directory that
-      covers it. With a directory per host and no ids, only the fetching
-      node's directory is synced in that slot, and another node's in a later
-      slot it happens to fetch; nothing can tell the directories apart.
-    * **Some nodes report an id**: one job per id (`"dir"` in the args), which
-      snoozes for 30 s on a node whose directory has another id, at most
+    * **syncs the fetching node's own directory in place**, with or without an
+      id, so the node that fetched the job is covered every slot; and
+    * **queues one job per other id** reported by a beat of the last
+      10 minutes, judged on the database's clock (`"dir"` in the args). That
+      job snoozes for 30 s on a node whose directory has another id, at most
       20 times (about ten minutes), then gives up for that slot as
-      `StepWorker` does. The fetching node also syncs its own directory when
-      that directory has no id, since no routed job can reach it.
+      `StepWorker` does.
+
+  On a shared volume every node reports the same id, so no job is queued and
+  the in-place sync covers it. With a directory per host, each host is synced
+  every slot its node fetches one of the ~21 releases of its routed job: the
+  same assumption `StepWorker` makes. A directory with no id (no backup
+  directory yet, one the app can't write, or this job turned off) is synced
+  only in the slots its own node fetches the cron job. A node whose heartbeat
+  stopped (the node is down) gets no job until it beats again.
 
   ## Failures
 
@@ -86,18 +91,29 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
 
   def perform(%Oban.Job{}) do
     with {:ok, ids} <- reported_dir_ids() do
-      Enum.each(ids, &enqueue/1)
-      if ids == [] or DirId.current() == {:error, :enoent}, do: sync_here(), else: :ok
+      own =
+        case DirId.current() do
+          {:ok, id} -> id
+          {:error, _} -> nil
+        end
+
+      ids |> Enum.reject(&(&1 == own)) |> Enum.each(&enqueue/1)
+      sync_here()
     end
   end
 
-  # The directory ids the nodes' recent beats report. Fails closed: a refused
-  # or failed read is an error, never "no ids".
-  defp reported_dir_ids do
-    cutoff = DateTime.add(DateTime.utc_now(), -@beat_window_s, :second)
+  @doc """
+  Whether the job runs on this deployment: `KILN_BACKUP_MARKER_SYNC_CRON`
+  resolves to a cron expression (not `false`, blank or unparseable). The
+  heartbeat creates backup-directory ids only while it does.
+  """
+  @spec enabled?() :: boolean()
+  def enabled?, do: KilnCMS.Application.cron_expression(:backup_marker_sync_cron) != nil
 
-    case Backups.list_node_beats(
-           query: [filter: [beat_at: [greater_than: cutoff]]],
+  # The directory ids the nodes' recent beats report, on the database's clock.
+  # Fails closed: a refused or failed read is an error, never "no ids".
+  defp reported_dir_ids do
+    case Backups.list_live_node_beats(@beat_window_s,
            actor: Backups.system(),
            authorize_with: :error
          ) do

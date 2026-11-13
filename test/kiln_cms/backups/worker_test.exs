@@ -372,20 +372,163 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert File.exists?(partial)
     end
 
+    # Left by a job Oban's timeout killed, a node that restarted mid-dump, or
+    # a cron run killed outright (#2478). Nothing else in the app collects
+    # these, and each is potentially a full-database-sized file, which is how
+    # a backup directory fills a disk. But a cron run's partials are also the
+    # only evidence that it was killed, so the start step removes them only
+    # once the stamp has a row: the Importer has read it.
     @tag :pg_tools
-    test "an ABANDONED .partial is reclaimed", %{dir: dir} do
-      # Left by a job Oban's timeout killed or a node that restarted mid-dump.
-      # Nothing else collects these, and each is potentially a
-      # full-database-sized file — which is how a backup directory fills a
-      # disk. An hour's grace separates "abandoned" from "in flight"; this
-      # queue runs one job at a time and `timeout/1` caps one well inside it.
+    test "an ABANDONED .partial with no run is kept until the Importer records it, then reclaimed",
+         %{dir: dir} do
       partial = Path.join([dir, "db", "kiln-db-20200101-000000.dump.partial"])
       File.mkdir_p!(Path.dirname(partial))
       File.write!(partial, "abandoned")
-      File.touch!(partial, System.os_time(:second) - 7200)
+      File.touch!(partial, System.os_time(:second) - 2 * 3600)
 
       assert :ok = BackupChain.run()
+      # Two hours quiet: pending for the Importer, so kept.
+      assert File.exists?(partial)
+      assert {:ok, nil} = Backups.get_run_by_stamp("20200101-000000", actor: Backups.system())
+
+      File.touch!(partial, System.os_time(:second) - 4 * 3600)
+      assert :ok = BackupChain.run()
+
       refute File.exists?(partial)
+
+      assert %{origin: :imported, status: :failed, error: "Interrupted: " <> _, artifacts: []} =
+               Backups.get_run_by_stamp!("20200101-000000", actor: Backups.system())
+    end
+
+    @tag :pg_tools
+    test "the partials of a stamp with a run go once every file of it is past the grace",
+         %{dir: dir} do
+      assert :ok = BackupChain.run()
+      assert [%{stamp: stamp}] = Enum.filter(runs(), &(&1.origin == :app))
+
+      dump = Path.join([dir, "db", "kiln-db-#{stamp}.dump.partial"])
+      marker = Path.join([dir, "db", "kiln-db-#{stamp}.sha256.partial"])
+      File.write!(dump, "left by a killed attempt")
+      File.write!(marker, "")
+      two_hours_ago = System.os_time(:second) - 2 * 3600
+
+      # A finished file of the stamp still fresh keeps them.
+      for f <- [dump, marker], do: File.touch!(f, two_hours_ago)
+      assert :ok = BackupChain.run()
+      assert File.exists?(dump)
+      assert File.exists?(marker)
+
+      for f <- Path.wildcard(Path.join(dir, "{db,media}/kiln-*-#{stamp}*")),
+          do: File.touch!(f, two_hours_ago)
+
+      assert :ok = BackupChain.run()
+      refute File.exists?(dump)
+      refute File.exists?(marker)
+    end
+
+    # The bug this replaces: the start step swept a cron run's marker (an hour
+    # old) before anything had read the stamp, and the leftover dump then
+    # imported as a succeeded database-only backup.
+    @tag :pg_tools
+    test "a hybrid host: a killed cron run's stamp is recorded as interrupted, never " <>
+           "as a succeeded db-only backup",
+         %{dir: dir} do
+      stamp = "20200101-000000"
+      dump = Path.join([dir, "db", "kiln-db-#{stamp}.dump"])
+      marker = Path.join([dir, "media", "kiln-media-#{stamp}.sha256.partial"])
+      for f <- [dump, marker], do: File.mkdir_p!(Path.dirname(f))
+      File.write!(dump, "PGDMP from cron")
+      File.write!(marker, "")
+      for f <- [dump, marker], do: File.touch!(f, System.os_time(:second) - 2 * 3600)
+
+      assert :ok = BackupChain.run()
+      assert File.exists?(marker)
+      assert {:ok, nil} = Backups.get_run_by_stamp(stamp, actor: Backups.system())
+
+      for f <- [dump, marker], do: File.touch!(f, System.os_time(:second) - 4 * 3600)
+      assert :ok = BackupChain.run()
+
+      refute File.exists?(marker)
+      assert File.exists?(dump)
+
+      assert %{status: :failed, error: "Interrupted: " <> _, components: [:db, :media]} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+    end
+
+    # Read-before-delete comes from the row, not from the import succeeding:
+    # an Importer that fails (here, on a media/ it can't list) costs nothing
+    # but the stamps it would have recorded.
+    @tag :pg_tools
+    test "a media/ that can't be listed doesn't keep a run's db partials", %{dir: dir} do
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(original, :media_dir, nil))
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
+
+      stamp = "20200101-000000"
+      Backups.start_run!(%{stamp: stamp, trigger: "manual"}, actor: Backups.system())
+      dump = Path.join([dir, "db", "kiln-db-#{stamp}.dump.partial"])
+      sidecar = Path.join([dir, "db", "kiln-db-#{stamp}.sha256.partial"])
+      File.mkdir_p!(Path.dirname(dump))
+      media = Path.join(dir, "media")
+      File.mkdir_p!(media)
+
+      for f <- [dump, sidecar] do
+        File.write!(f, "")
+        File.touch!(f, System.os_time(:second) - 2 * 3600)
+      end
+
+      File.chmod!(media, 0o300)
+      on_exit(fn -> File.chmod(media, 0o700) end)
+
+      if match?({:ok, _}, File.ls(media)) do
+        # Running as root: permissions don't bind, so there is nothing to test.
+        :ok
+      else
+        assert {:error, {:ls, "media", :eacces}} = KilnCMS.Backups.Importer.run(dir)
+        assert :ok = BackupChain.run()
+        refute File.exists?(dump)
+        refute File.exists?(sidecar)
+      end
+    end
+  end
+
+  # Stand-ins for `KilnCMS.Backups.Importer` that fail in the ways its own
+  # rescue doesn't cover.
+  defmodule ExitingImporter do
+    @moduledoc false
+    def run(_dir), do: exit(:importer_down)
+  end
+
+  defmodule RaisingImporter do
+    @moduledoc false
+    def run(_dir), do: raise("importer crashed")
+  end
+
+  describe "an importer that fails before the partial sweep" do
+    for importer <- [ExitingImporter, RaisingImporter] do
+      @tag :pg_tools
+      test "#{inspect(importer)} doesn't fail the start step; the sweep still runs",
+           %{dir: dir} do
+        original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+
+        Application.put_env(
+          :kiln_cms,
+          KilnCMS.Backups,
+          Keyword.put(original, :importer, unquote(importer))
+        )
+
+        on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
+
+        # Named like no stamp: swept by age alone, so the sweep is seen to run.
+        stray = Path.join([dir, "db", "stray.partial"])
+        File.mkdir_p!(Path.dirname(stray))
+        File.write!(stray, "")
+        File.touch!(stray, System.os_time(:second) - 4 * 3600)
+
+        assert :ok = BackupChain.run()
+        assert [%{origin: :app, status: :succeeded}] = runs()
+        refute File.exists?(stray)
+      end
     end
   end
 

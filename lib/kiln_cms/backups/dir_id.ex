@@ -13,9 +13,15 @@ defmodule KilnCMS.Backups.DirId do
   (`KilnCMS.Backups.StepWorker`). Nodes sharing one directory (a shared volume)
   read the same id, so any of them may run any step.
 
-  The file is created on first use with an exclusive create, so two nodes
-  racing on a shared directory settle on one id. Cloning a backup directory to
-  another host clones its id: delete `.kiln-dir-id` on the copy.
+  The file is created by the first in-app backup (`local/1`), or by each node's
+  heartbeat when the last-good marker sync is on and the directory already
+  holds backups (`ensure_existing/1`, #2789), so the marker sync can route to
+  a directory only `scripts/backup.sh` writes to. It is published whole: the
+  id is written to a temporary file in the same directory and hard-linked into
+  place, so a reader never sees an empty or half-written id, and two nodes
+  racing on a shared directory settle on the first link. Cloning a backup
+  directory to another host clones its id: delete `.kiln-dir-id` on the copy
+  (`rsync --exclude .kiln-dir-id`), or the two directories look like one.
   """
   alias KilnCMS.Backups
 
@@ -55,17 +61,76 @@ defmodule KilnCMS.Backups.DirId do
     end
   end
 
+  @doc """
+  The id of `dir`, creating the id file (0600) when there is none yet and
+  `dir` already holds backups: it exists and has a `db/` or `media/`
+  subdirectory. What each node's heartbeat reports when the marker sync is on
+  (#2789). Never creates the directory: the runtime image makes an empty
+  `BACKUP_DIR` on every replica, and a mount that failed leaves an empty
+  mountpoint; neither is a backup directory to route to. `{:error, :enoent}`
+  when there is no id and none was created; a file that holds something that
+  is not an id is left as it is (`{:error, :malformed_dir_id}`).
+  """
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec ensure_existing(Path.t()) :: {:ok, String.t()} | {:error, term()}
+  def ensure_existing(dir \\ Backups.dir()) do
+    case current(dir) do
+      {:error, :enoent} -> if holds_backups?(dir), do: publish(dir), else: {:error, :enoent}
+      result -> result
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp holds_backups?(dir) do
+    File.dir?(dir) and
+      (File.dir?(Path.join(dir, "db")) or File.dir?(Path.join(dir, "media")))
+  end
+
   # sobelow_skip ["Traversal.FileModule"]
   defp create(dir) do
-    id = Ash.UUID.generate()
+    with :ok <- File.mkdir_p(dir), do: publish(dir)
+  end
 
-    with :ok <- File.mkdir_p(dir),
-         :ok <- write_exclusive(path(dir), id) do
-      {:ok, id}
-    else
-      # Another node (or process) created it first: theirs is the id.
-      {:error, :eexist} -> current(dir)
-      {:error, _} = error -> error
+  # The id goes to a temporary file in `dir` first, synced, and is then
+  # hard-linked to its name, which fails with `:eexist` when the name is taken:
+  # a reader sees no file or the whole id, never an empty one (an exclusive
+  # create of the name itself would show it empty until the write lands). The
+  # temporary file is removed whatever happens.
+  #
+  # A filesystem without hard links gets the exclusive create of the name
+  # itself: `link(2)` gives EPERM or ENOTSUP on FAT, ENOSYS on a FUSE mount
+  # without link support, EOPNOTSUPP on some CIFS mounts, and other errnos
+  # elsewhere, so every link error but `:eexist` falls back. The create still
+  # settles a race on one id, with the empty-file window the link avoids,
+  # rather than leaving that host without an id and so without in-app backups.
+  # An error the create would hit too (`:eacces`, `:erofs`, `:enospc`) comes
+  # back from the create. `ln` is `File.ln/2` outside tests.
+  @doc false
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec publish(Path.t(), (Path.t(), Path.t() -> :ok | {:error, term()})) ::
+          {:ok, String.t()} | {:error, term()}
+  def publish(dir, ln \\ &File.ln/2) do
+    id = Ash.UUID.generate()
+    tmp = Path.join(dir, "#{@file_name}.#{Ash.UUID.generate()}.tmp")
+
+    try do
+      with :ok <- write_exclusive(tmp, id),
+           :ok <- link(ln, tmp, path(dir), id) do
+        {:ok, id}
+      else
+        # Another node (or process) published first: theirs is the id.
+        {:error, :eexist} -> current(dir)
+        {:error, _} = error -> error
+      end
+    after
+      File.rm(tmp)
+    end
+  end
+
+  defp link(ln, tmp, file, id) do
+    case ln.(tmp, file) do
+      {:error, reason} when reason != :eexist -> write_exclusive(file, id)
+      result -> result
     end
   end
 
@@ -73,7 +138,9 @@ defmodule KilnCMS.Backups.DirId do
   defp write_exclusive(file, id) do
     with {:ok, io} <- File.open(file, [:write, :exclusive]) do
       try do
-        with :ok <- IO.binwrite(io, id <> "\n"), do: File.chmod(file, 0o600)
+        with :ok <- IO.binwrite(io, id <> "\n"),
+             :ok <- :file.sync(io),
+             do: File.chmod(file, 0o600)
       after
         File.close(io)
       end

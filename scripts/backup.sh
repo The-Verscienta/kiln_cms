@@ -10,7 +10,10 @@
 #   ./scripts/backup.sh prune    # delete backups older than $BACKUP_KEEP_DAYS,
 #                                # except recovery points (kiln-<stamp>.keep),
 #                                # last-good backups (kiln-<stamp>.good), the
-#                                # newest complete one, and work in flight
+#                                # newest complete one, and work in flight;
+#                                # and the .partial files of a run killed
+#                                # outright, once every file of its stamp is
+#                                # 12 hours old
 #
 # Environment:
 #   DATABASE_URL         source database (required for `db`/`all`; read-only).
@@ -75,6 +78,21 @@ set -euo pipefail
 
 # Set by `die` so a failure manifest can record what actually went wrong.
 LAST_ERROR=""
+# The background heartbeat (start_heartbeat), stopped by on_exit.
+HEARTBEAT_PID=""
+
+# A run killed outright (kill -9, the OOM killer, power loss: no trap runs)
+# leaves its `.partial` files behind (#2478). While the run lives, a
+# background loop touches every `.partial` of its stamp every HEARTBEAT_S
+# seconds, so "no file of this stamp has changed for hours" means "no writer":
+# the app's Importer records such a stamp as interrupted after 3 hours
+# (KilnCMS.Backups.Importer.interrupted_after_s/0), and `prune` removes its
+# partials once every file of the stamp is ABANDONED_PARTIAL_MIN minutes old,
+# so the Importer has had many chances to read the stamp first. The test suite
+# checks the two against the Importer's threshold. Not settings: changing one
+# without the other mislabels live runs.
+HEARTBEAT_S=300
+ABANDONED_PARTIAL_MIN=720
 
 die() {
   LAST_ERROR="$*"
@@ -527,6 +545,12 @@ on_exit() {
   local status=$?
   umask "$ORIG_UMASK"
 
+  # First, so nothing touches a file this trap is about to remove (the loop
+  # only ever touches with -c, which never creates one).
+  if [ -n "${HEARTBEAT_PID:-}" ]; then
+    kill "$HEARTBEAT_PID" 2>/dev/null || true
+  fi
+
   # Only OUR OWN files, tracked as they are created — never a blanket
   # `find … -name '*.partial' -delete` or a glob on the stamp. Since #484 two
   # writers share $BACKUP_DIR, and a blanket sweep here would unlink the
@@ -584,6 +608,56 @@ install_traps() {
   trap 'on_signal HUP 129' HUP
   trap 'on_signal INT 130' INT
   trap 'on_signal TERM 143' TERM
+}
+
+# Whether the heartbeat loop is still a child of this script ($1 = the
+# script's PID, $2 = 1 when `ps -o ppid= -p` works here). After a SIGKILL the
+# loop is re-parented, and the script's PID may be reused by another process,
+# so `kill -0` alone could keep a killed run's partials fresh for ever.
+#
+# The loop's own PID: bash 3.2 has no $BASHPID, and a subshell's $$ is the
+# script's. `exec` makes sh replace the command substitution's process, so its
+# $PPID is the loop itself; without the `exec`, bash 3.2 forks once more and
+# this prints a PID that is gone. Keep the form exactly as it is.
+#
+# Without a usable `ps` (busybox without procps) only `kill -0` is left.
+still_my_parent() {
+  [ "$2" = 1 ] || return 0
+  local me parent
+  me="$(exec sh -c 'echo "$PPID"')"
+  parent="$(ps -o ppid= -p "$me" 2>/dev/null)" || return 1
+  # ps pads the number with spaces.
+  parent="${parent//[!0-9]/}"
+  [ "$parent" = "$1" ]
+}
+
+# The heartbeat (see HEARTBEAT_S): touch every `.partial` of this stamp, both
+# kinds, until this script exits. It globs on each pass rather than reading
+# OWN_PARTIALS, whose copy in the subshell is frozen at the fork. Its stdio is
+# /dev/null, so it never holds open the pipe cron (or a caller) reads the
+# script's output from. on_exit stops it with TERM; the trap stops its sleep
+# too, so no `sleep` outlives the script. `disown`: the shell reports nothing
+# when it ends.
+start_heartbeat() {
+  local parent="$$" use_ps=0
+  if ps -o ppid= -p "$$" >/dev/null 2>&1; then use_ps=1; fi
+  (
+    trap - EXIT HUP INT
+    sleeper=""
+    trap 'if [ -n "$sleeper" ]; then kill "$sleeper" 2>/dev/null || true; fi; exit 0' TERM
+    while kill -0 "$parent" 2>/dev/null && still_my_parent "$parent" "$use_ps"; do
+      for f in "$BACKUP_DIR"/db/kiln-db-"$STAMP".*.partial \
+        "$BACKUP_DIR"/media/kiln-media-"$STAMP".*.partial; do
+        if [ -f "$f" ]; then touch -c -- "$f" 2>/dev/null || true; fi
+      done
+      sleep "$HEARTBEAT_S" &
+      sleeper=$!
+      wait "$sleeper" || true
+      sleeper=""
+    done
+  ) </dev/null >/dev/null 2>&1 &
+  HEARTBEAT_PID=$!
+  disown "$HEARTBEAT_PID" 2>/dev/null || true
 }
 
 cmd_db() {
@@ -1080,6 +1154,26 @@ archive_part() {
   chmod 600 "$final"
 }
 
+# In-progress marker: the Importer holds a stamp with a `.partial` beside it,
+# and records it as interrupted once it has been quiet for hours, so a run
+# killed outright (kill -9, power loss: no EXIT trap) never imports its
+# finished parts as a succeeded set. `all` opens it before the dump, so a run
+# killed in its db phase (or the dump's off-site copy) is not taken for a
+# finished database-only backup either. The heartbeat keeps it fresh; the
+# sidecar is written through it. Once per run.
+MEDIA_MARKER=""
+open_media_marker() {
+  [ -z "$MEDIA_MARKER" ] || return 0
+  local dir="$BACKUP_DIR/media"
+  # A media directory this script creates is private (0700), as the app makes
+  # it; an existing one keeps its mode.
+  mkdir -p "$BACKUP_DIR"
+  [ -d "$dir" ] || (umask 077 && mkdir -p "$dir")
+  MEDIA_MARKER="$dir/kiln-media-${STAMP}.sha256.partial"
+  track_partial "$MEDIA_MARKER"
+  (umask 077 && : > "$MEDIA_MARKER")
+}
+
 cmd_media() {
   require MEDIA_DIR
   [ -d "$MEDIA_DIR" ] || die "MEDIA_DIR does not exist: $MEDIA_DIR"
@@ -1103,13 +1197,9 @@ cmd_media() {
   WORK_DIR="$(cd "$WORK_DIR" && pwd -P)"
   probe_tar
 
-  # In-progress marker: the Importer holds a stamp with a `.partial` beside it,
-  # so a run killed outright (kill -9, power loss: no EXIT trap) never imports
-  # its finished parts as a succeeded set. The sidecar is written through it.
+  open_media_marker
   local sidecar="$dir/kiln-media-${STAMP}.sha256"
   local marker="${sidecar}.partial"
-  track_partial "$marker"
-  (umask 077 && : > "$marker")
 
   echo "==> Planning media archive of ${MEDIA_DIR}"
   walk_media
@@ -1176,6 +1266,9 @@ cmd_media() {
 }
 
 cmd_all() {
+  if [ -n "${MEDIA_DIR:-}" ] && [ -d "$MEDIA_DIR" ]; then
+    open_media_marker
+  fi
   cmd_db
   if [ -n "${MEDIA_DIR:-}" ]; then
     cmd_media
@@ -1330,9 +1423,20 @@ cmd_verify() {
 #
 # The app also keeps anything its run history says is running; this script has
 # no database, so it cannot, and it knows the newest VERIFIED backup only
-# through the `.good` marker the app keeps on it. It never deletes a
-# `.partial`, a symlink, a directory, or a file that is no unit's member.
-# Only regular files count, judged with `find` (`[ -f ]` follows symlinks).
+# through the `.good` marker the app keeps on it. It never deletes a symlink,
+# a directory, or a file that is no unit's member. Only regular files count,
+# judged with `find` (`[ -f ]` follows symlinks).
+#
+# Before the units, the `.partial` files of runs killed outright (#2478; see
+# HEARTBEAT_S): a stamp's partials go once EVERY file of that stamp in db/ and
+# media/, partial or finished, is older than ABANDONED_PARTIAL_MIN, unless
+# `.work/<stamp>` exists. A live run's heartbeat keeps its partials fresh, and
+# by then the app's Importer has recorded the stamp as interrupted (if the app
+# reaches this directory: without it, the stamp's finished files import as
+# what they are once the marker is gone). A recovery point does not keep them:
+# `restore.sh` refuses a set with a `.partial` beside it, so keeping one would
+# make the pinned set unrestorable. The finished files of the stamp are not
+# touched here; they age as an incomplete unit like any other.
 
 PART_NUM_ERE='(0[1-9]|[1-9][0-9]|[1-9][0-9]{2,})'
 
@@ -1510,6 +1614,48 @@ remove_unit() {
   fi
 }
 
+# The `.partial` files of abandoned runs ($1 = db names, $2 = media names; see
+# above). A stamp is judged by `find -mmin` over both directories; if that
+# fails, its partials are kept. Each removal is echoed; one that fails is
+# warned about and the rest go on.
+prune_abandoned_partials() {
+  local kind dir names name stamp ere recent
+  local -a dirs
+  dirs=()
+  for kind in db media; do
+    [ -d "$BACKUP_DIR/$kind" ] && dirs+=("$BACKUP_DIR/$kind")
+  done
+  [ "${#dirs[@]}" -gt 0 ] || return 0
+  for kind in db media; do
+    dir="$BACKUP_DIR/$kind"
+    if [ "$kind" = db ]; then
+      names="$1"
+      ere="^kiln-db-[0-9]{8}-[0-9]{6}\\.(dump|sha256)\\.partial\$"
+    else
+      names="$2"
+      ere="^kiln-media-[0-9]{8}-[0-9]{6}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)\\.partial\$"
+    fi
+    [ -n "$names" ] || continue
+    for name in $(printf '%s\n' "$names" | grep -E "$ere" || true); do
+      is_regular "$dir/$name" || continue
+      stamp="${name#kiln-"$kind"-}"
+      stamp="${stamp:0:15}"
+      has_line "$PRUNE_WORK" "$stamp" && continue
+      if ! recent="$(find "${dirs[@]}" -maxdepth 1 -name "kiln-*-${stamp}.*" \
+        -mmin "-${ABANDONED_PARTIAL_MIN}" -print)"; then
+        warn "could not look for recent files of ${stamp}; keeping its partials"
+        continue
+      fi
+      [ -z "$recent" ] || continue
+      if rm -f -- "$dir/$name"; then
+        echo "$dir/$name"
+      else
+        warn "could not remove $dir/$name"
+      fi
+    done
+  done
+}
+
 cmd_prune() {
   echo "==> Pruning backups older than ${KEEP_DAYS} days"
   local kind dir names stamp members newest fresh name db_names="" media_names=""
@@ -1547,6 +1693,8 @@ cmd_prune() {
     return 0
   fi
 
+  prune_abandoned_partials "$db_names" "$media_names"
+
   for kind in db media; do
     dir="$BACKUP_DIR/$kind"
     if [ "$kind" = db ]; then names="$db_names"; else names="$media_names"; fi
@@ -1580,11 +1728,11 @@ cmd_prune() {
 }
 
 case "${1:-}" in
-  db) install_traps; cmd_db ;;
-  media) install_traps; cmd_media ;;
+  db) install_traps; start_heartbeat; cmd_db ;;
+  media) install_traps; start_heartbeat; cmd_media ;;
   # BACKUP_KEEP_DAYS is read before the traps, so a failure manifest records
   # the value `prune` would have used.
-  all) WRITE_MANIFEST=1; read_keep_days; install_traps; cmd_all ;;
+  all) WRITE_MANIFEST=1; read_keep_days; install_traps; start_heartbeat; cmd_all ;;
   verify) cmd_verify ;;
   prune) read_keep_days; cmd_prune ;;
   *) die "usage: $0 {db|media|all|verify|prune}" ;;

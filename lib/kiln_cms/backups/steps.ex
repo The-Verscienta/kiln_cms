@@ -276,7 +276,7 @@ defmodule KilnCMS.Backups.Steps do
     work_dir = WorkState.path(dir, lease.stamp)
 
     reconcile_stale_runs()
-    sweep_stale_partials(dir)
+    import_then_sweep_partials(dir)
     sweep_work_dirs(dir)
 
     case WorkState.read(work_dir) do
@@ -386,7 +386,7 @@ defmodule KilnCMS.Backups.Steps do
              {:ok, %{run: run} = rec} <- reopen(lease) do
           dir = Backups.dir()
           reconcile_stale_runs()
-          sweep_stale_partials(dir)
+          import_then_sweep_partials(dir)
           sweep_work_dirs(dir)
 
           rec =
@@ -1712,27 +1712,155 @@ defmodule KilnCMS.Backups.Steps do
 
   ## Sweeps
 
-  # Partials left behind by a job Oban's timeout killed, or a node that
-  # restarted mid-dump. Nothing else reclaims them: the `else` cleanup in
-  # `dump_database`/`MediaArchive` doesn't run when the process is killed,
-  # and retention deliberately skips `.partial` so it can't delete a
-  # CONCURRENT run's work. An hour's grace makes that distinction. Run only by
-  # the start step, which holds the lock, so no other chain is writing.
+  # Partials left behind by a job Oban's timeout killed, a node that restarted
+  # mid-dump, or a cron run killed outright (#2478). Nothing else in the app
+  # reclaims them: the `else` cleanup in `dump_database`/`MediaArchive`
+  # doesn't run when the process is killed, and retention deliberately skips
+  # `.partial` so it can't delete a CONCURRENT run's work. Run only by the
+  # start step, which holds the lock, so no other chain is writing.
   #
   # Each of these is potentially a full-database-sized file, so leaving them
-  # is how a backup directory fills a disk.
+  # is how a backup directory fills a disk. But a cron run's marker is also the
+  # only evidence that its stamp was killed, so a stamp is read before its
+  # partials go: they are removed only when the stamp has a Run row (of any
+  # origin: the application's own, or one the Importer wrote, which it does
+  # for a stamp with partials only once it is recorded as interrupted) and
+  # every file of the stamp, partial or finished, in `db/` and `media/`, is
+  # older than the grace. A stamp with no row is a live cron run, or a killed
+  # one the Importer hasn't settled yet; `backup.sh prune` reclaims those once
+  # they are abandoned. The Importer runs first, best effort: its failure only
+  # means fewer stamps have rows, which keeps more.
+  #
+  # Files are grouped by stamp exactly as the Importer groups them
+  # (`Importer.classify/1`, sidecar and marker partials included). A directory
+  # that can't be listed is left out of the sweep with a warning, not a reason
+  # to keep the other one's partials; the row rule still holds for every stamp
+  # swept. A `.partial` named like no stamp (or with a stamp no Importer will
+  # ever record) can never get a row, so it is swept by age alone, as before.
+  defp import_then_sweep_partials(dir) do
+    import_best_effort(dir)
+    sweep_stale_partials(dir)
+  end
+
+  # Best effort, never a gate: see above. `Importer.run/1` already turns a
+  # raise into an error; this boundary also catches an exit (a call into a
+  # process that died) or a throw, so the start step carries on to the sweep,
+  # which fails closed on its own. `config :kiln_cms, KilnCMS.Backups,
+  # importer:` swaps the module in tests only.
+  defp import_best_effort(dir) do
+    importer =
+      Keyword.get(Application.get_env(:kiln_cms, KilnCMS.Backups, []), :importer, Importer)
+
+    _ = importer.run(dir)
+    :ok
+  rescue
+    error ->
+      Logger.warning(
+        "Backup import before the partial sweep crashed: #{Exception.message(error)}"
+      )
+  catch
+    kind, reason ->
+      Logger.warning("Backup import before the partial sweep failed: #{inspect({kind, reason})}")
+  end
+
   # sobelow_skip ["Traversal.FileModule"]
   defp sweep_stale_partials(dir) do
     cutoff = System.os_time(:second) - Retention.partial_grace_s()
+    listed = listable(dir)
+    {files, partials, sidecars} = Importer.classify(listed)
 
+    stamped =
+      for {stamp, names} <- partials,
+          real_stamp?(stamp),
+          name <- names,
+          into: MapSet.new(),
+          do: name
+
+    with {:ok, rows} <- row_stamps() do
+      for {stamp, names} <- partials,
+          MapSet.member?(rows, stamp),
+          all_older?(stamp_paths(dir, files[stamp], names, sidecars[stamp]), cutoff),
+          {sub, name} <- names,
+          do: remove_partial(Path.join([dir, sub, name]))
+    end
+
+    for {sub, name} = entry <- listed,
+        String.ends_with?(name, ".partial"),
+        not MapSet.member?(stamped, entry),
+        path = Path.join([dir, sub, name]),
+        older?(path, cutoff),
+        do: remove_partial(path)
+
+    :ok
+  end
+
+  defp listable(dir) do
     for sub <- ["db", "media"],
-        path <- Path.wildcard(Path.join([dir, sub, "*.partial"])),
-        match?({:ok, %{mtime: mtime}} when mtime < cutoff, File.stat(path, time: :posix)) do
+        names <- listing(dir, sub),
+        name <- names,
+        do: {sub, name}
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp listing(dir, sub) do
+    case File.ls(Path.join(dir, sub)) do
+      {:ok, names} ->
+        [names]
+
+      {:error, :enoent} ->
+        []
+
+      {:error, reason} ->
+        Logger.warning("Partial sweep skipped #{sub}/: it can't be listed (#{inspect(reason)})")
+        []
+    end
+  end
+
+  defp real_stamp?(stamp), do: match?({:ok, _}, Artifact.parse_stamp(stamp))
+
+  # Fails closed: when the rows can't be read, no stamped partial is swept.
+  defp row_stamps do
+    case Backups.list_runs(
+           query: [select: [:stamp]],
+           actor: Backups.system(),
+           authorize_with: :error
+         ) do
+      {:ok, runs} ->
+        {:ok, MapSet.new(runs, & &1.stamp)}
+
+      {:error, error} ->
+        Logger.warning("Partial sweep kept every stamped partial: #{inspect(error.__struct__)}")
+        :error
+    end
+  end
+
+  # Every file of one stamp, as `Importer.classify/1` grouped them.
+  defp stamp_paths(dir, files, partials, sidecars) do
+    finished = for {kind, name, _part} <- List.wrap(files), do: {Artifact.subdir(kind), name}
+    sidecars = for {kind, name} <- List.wrap(sidecars), do: {Artifact.subdir(kind), name}
+    for {sub, name} <- finished ++ partials ++ sidecars, do: Path.join([dir, sub, name])
+  end
+
+  defp all_older?(paths, cutoff), do: Enum.all?(paths, &older?(&1, cutoff))
+
+  # A file that vanished since the listing is no reason to keep the rest.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp older?(path, cutoff) do
+    case File.lstat(path, time: :posix) do
+      {:ok, %{mtime: mtime}} -> mtime < cutoff
+      {:error, :enoent} -> true
+      {:error, _} -> false
+    end
+  end
+
+  # Only a regular file: a symlink or directory named like a partial is not
+  # one this application wrote.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp remove_partial(path) do
+    with {:ok, %{type: :regular}} <- File.lstat(path) do
       Logger.warning("Removing an abandoned backup partial: #{Path.basename(path)}")
       File.rm(path)
     end
-
-    :ok
   end
 
   @work_dir_max_age_s 3 * 24 * 3600

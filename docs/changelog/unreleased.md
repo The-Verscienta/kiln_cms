@@ -165,6 +165,38 @@ carries the reasoning.
   old reading, but backups the new prune has already deleted are gone. The
   in-app backup already read the variable this way and is unchanged. (#2727)
 
+<a id="cron-killed-run-recovery-upgrade"></a>
+
+- **Replace `scripts/backup.sh` on every host with this release's copy. A cron run killed outright is now recorded as a failed "Interrupted" run after 3 hours, and `backup.sh prune` now deletes its `.partial` files after 12 hours.**
+  What changes on a deployed instance (the Fixed entry
+  [below](#cron-killed-run-recovery) has the whole mechanism):
+  - **Old leftovers show up once.** A `kiln-media-<stamp>.sha256.partial`
+    left by a run killed before the upgrade (the 1.9 known issue: a stamp
+    "pending" in History forever) is imported at the first import after the
+    deploy as a **Failed** run, "Interrupted: the backup stopped before it
+    finished and left .partial files behind". Its stamp is older than the
+    backups taken since, so the status panel's last attempt is unchanged.
+    You no longer need to delete the marker by hand.
+  - **`backup.sh prune` now deletes `.partial` files**, which the guide
+    used to say it never does: those of a stamp whose every file, in `db/`
+    and `media/`, is 12 hours old, unless `.work/<stamp>/` exists. A
+    recovery point (`.keep`) does not protect them. With the nightly cron
+    line that is the run after the kill; with an hourly cron, about the
+    twelfth. Deploy the app before replacing the script, so it reads old
+    leftovers first; if prune gets there first, the stamp still imports,
+    as what is left of it (parts with no sidecar import as failed).
+  - **An older `backup.sh` can be mislabeled.** This release's script
+    touches its `.partial` files every 5 minutes while it runs; an older
+    copy does not. Against this release's app, a live run on an older
+    script with a phase in which nothing is written for 3 hours (planning a
+    very large media tree on NFS, or `pg_dump` waiting for a lock) can be
+    recorded as Interrupted, and that row is never rewritten.
+  - **Rolling back** the app is safe: there is no migration. The
+    Interrupted rows stay as failed runs, and an older release's in-app
+    backup again removes any `.partial` older than an hour. Keep the new
+    `backup.sh` or put the old one back; both read the same files.
+  (#2478)
+
 <a id="crawler-ip-ranges-upgrade"></a>
 
 - **Kiln now fetches Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists over HTTPS every 6 hours, on by default: allow the four hosts, or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot claims from outside DuckDuckGo's list are now charged as no user agent.**
@@ -993,12 +1025,13 @@ carries the reasoning.
     unparseable value warns on stderr at boot and turns it off.
     `BACKUP_ENABLED=false` does not stop it: that switch is for the in-app
     backup path, and the marker is for the cron path.
-  - **Several hosts, each with its own `BACKUP_DIR`**: with no
-    `.kiln-dir-id` (only an in-app backup creates one), each slot syncs the
-    directory of the node that picked up the job. With ids, one sync per id
-    waits for a node that reads it, for up to about 10 minutes, then logs
-    "Backup last-good marker sync for backup directory `<id>` gave up: no
-    node with that directory picked it up".
+  - **Several hosts, each with its own `BACKUP_DIR`**: each node's
+    heartbeat gives its directory a `.kiln-dir-id` once it holds backups
+    (#2789, [below](#backup-marker-sync-every-host)). Each slot syncs the
+    directory of the node that picked up the job, and queues one sync for
+    every other directory id, which waits for a node that reads it, for up
+    to about 10 minutes, then logs "Backup last-good marker sync for backup
+    directory `<id>` gave up: no node with that directory picked it up".
   - **Watch it** with the new `[:kiln_cms, :backups, :last_good, :synced]`
     event (`%{count: 1}`; metadata `dir`, `db`, `media`). A failed run emits
     the existing `[:kiln_cms, :backups, :last_good, :failed]` and logs
@@ -1014,6 +1047,114 @@ carries the reasoning.
   takes a new `import: false` option for a caller that already ran the
   importer. See [The last-good marker](../backups.md#the-last-good-marker).
   (#2554)
+
+<a id="backup-marker-sync-every-host"></a>
+
+- **On a cluster with a `BACKUP_DIR` per host and only cron taking backups, the last-good marker sync now reaches every host's directory, not just the node that picked up the job.**
+  The sync (`KilnCMS.Backups.MarkerSyncWorker`, #2554) routes by the
+  `.kiln-dir-id` each node's heartbeat reports, and until now only an
+  in-app backup created that file. A cron-only cluster reported no ids, so
+  each 15-minute slot synced one directory, whichever node fetched the job,
+  and a host could go any number of slots without a marker; its
+  `backup.sh prune` then kept only the newest complete set. Now:
+  - **The heartbeat creates the id.** While the sync is scheduled, each
+    node's heartbeat (every 30 seconds) gives its `BACKUP_DIR` a
+    `.kiln-dir-id` when it has none, but only when the directory already
+    holds backups (a `db/` or `media/` subdirectory), so the empty
+    `/var/backups/kiln` the image creates on every replica, or the
+    mountpoint of a failed mount, never gets one. With
+    `KILN_BACKUP_MARKER_SYNC_CRON=false` no id is created; only an in-app
+    backup creates one, as before.
+  - **Each slot covers every live directory.** The node that fetches the
+    job syncs its own directory in place, and queues one sync for every
+    other id reported by a beat of the last 10 minutes. Each of those waits
+    for a node that reads its id, putting itself back every 30 seconds up
+    to 20 times. So a host's directory is synced in a slot as long as its
+    node picks up one of the about 21 releases of its job in those
+    10 minutes, the same assumption every backup step makes; a host whose
+    node is down is synced again once its node beats.
+  - **Liveness is judged on the database's clock.** The 10-minute window
+    was computed from the node's own clock, so a node whose clock ran ahead
+    saw no live beats and fell back to syncing only itself.
+  - **The id is published whole.** It is written to a temporary file,
+    synced and hard-linked into place, so no reader sees an empty id and
+    nodes racing on a shared volume settle on one. A filesystem without
+    hard links falls back to an exclusive create. This applies to the id an
+    in-app backup creates too.
+
+  Operators:
+  - **The app must be able to write `BACKUP_DIR`.** If it can't, the server
+    log says, once per boot for each error, "Backup heartbeat: no id for the backup
+    directory `<dir>` (`<reason>`)…", and that directory is synced only in
+    the slots its own node fetches the job.
+  - **A cloned backup directory now always carries an id.** Copying one to
+    another host (`rsync`, a volume snapshot) copies `.kiln-dir-id`, and
+    the two then look like one directory: the copy is never routed to on its
+    own. Leave the file out (`rsync --exclude .kiln-dir-id`) or delete it on
+    the copy.
+  - **Rolling back** is safe: there is no migration, and an older release
+    reads the ids the heartbeat created as an in-app backup would have
+    written them.
+
+  Developers: `KilnCMS.Backups.DirId.ensure_existing/1` creates the id
+  only in a directory that holds backups;
+  `KilnCMS.Backups.MarkerSyncWorker.enabled?/0` says whether the sync is
+  scheduled; the `NodeBeat` read action `:live` (code interface
+  `Backups.list_live_node_beats/2`) returns the beats of the last
+  `within_s` seconds on the database's clock. See
+  [The last-good marker](../backups.md#the-last-good-marker). (#2789)
+
+<a id="cron-killed-run-recovery"></a>
+
+- **A cron backup killed outright (`kill -9`, the OOM killer, a power cut) now shows in History as a failed "Interrupted" run, and its `.partial` files are cleared, with no one stepping in.**
+  Such a run leaves its `.partial` files behind, among them the media
+  marker `kiln-media-<stamp>.sha256.partial`. Only the app's in-app backup
+  ever removed them, so on a host where only cron takes backups the stamp
+  stayed "pending" in History forever and the marker had to be deleted by
+  hand (a 1.9.0 known issue). Now:
+  - **A live run keeps its files fresh.** `backup.sh db`, `media` and `all`
+    start a background loop that touches every `.partial` of the run's
+    stamp every 5 minutes and stops when the script exits, so a slow run is
+    never taken for a dead one. A loop orphaned by a kill stops at its next
+    pass.
+  - **History records it after 3 quiet hours.** The importer
+    (`KilnCMS.Backups.Importer`) keeps a stamp with a `.partial` beside it
+    pending while any of its files, partial or finished, changed in the
+    last 3 hours (`Importer.interrupted_after_s/0`). After that it imports
+    a **Failed** run, "Interrupted: the backup stopped before it finished
+    and left .partial files behind", with the finished files as artifacts,
+    the kinds of all its files as components, and a log line naming up to
+    five leftover files. A stamp with only partials (killed in its first
+    file) is recorded too. A file dated more than 5 minutes in the future
+    keeps the stamp pending, with a warning naming it. The row is never
+    rewritten, which is why the wait is long.
+  - **`backup.sh prune` clears the partials after 12 quiet hours**, once
+    every file of the stamp in `db/` and `media/` is that old, unless
+    `.work/<stamp>/` exists; a recovery point does not keep them, since
+    `restore.sh` refuses a set with a `.partial` beside it anyway. With the
+    nightly cron that is within one prune cycle; with an hourly cron about
+    twelve. The stamp's finished files age under `BACKUP_KEEP_DAYS` as
+    before.
+  - **`backup.sh all` opens the media marker before the dump**, when
+    `MEDIA_DIR` is set, so a run killed in its database phase or the dump's
+    off-site copy is recognized as interrupted instead of imported as a
+    succeeded database-only backup, and `backup.sh verify` skips that
+    stamp's media while the dump runs.
+  - **The in-app backup reads the stamp before it sweeps.** Its start step
+    runs the importer first, then removes the `.partial` files only of a
+    stamp that has a History row once every file of the stamp is over an
+    hour old. A cron leftover with no row waits for the importer. A
+    `.partial` whose name carries no stamp is still removed after an hour.
+  - **If the stamp was never read** (the marker sync off and nobody opening
+    the Backups page, or the host's app down more than 12 hours after the
+    kill), prune removes the marker first and the leftovers import as what
+    they are: media parts with no sidecar as failed "incomplete media set:
+    parts but no sidecar", a single finished archive or a finished dump
+    alone as succeeded.
+  Read the [upgrade note](#cron-killed-run-recovery-upgrade): replace
+  `backup.sh` on every host. See
+  [When a cron run is killed outright](../backups.md#when-a-cron-run-is-killed-outright-2478).
+  (#2478)
 
 <a id="resume-behind-queued-resume-already-fixed"></a>
 

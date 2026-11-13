@@ -31,9 +31,13 @@ defmodule KilnCMS.Backups.Importer do
       does nothing on a conflicting stamp, so a run the application owns (still
       `running`, or finished) or a previous import is never modified, and two
       concurrent calls cannot double-insert.
-    * **Settled.** A stamp with no covering manifest is left for a later call
-      until its newest file is at least #{10} minutes old and no matching
-      `.partial` exists, so a cron run still writing is not recorded half-done.
+    * **Settled.** A stamp with no covering manifest and no `.partial` is left
+      for a later call until its newest file is at least #{10} minutes old, so
+      a cron run still writing is not recorded half-done. A stamp WITH a
+      `.partial` (of any kind, a checksum sidecar's or the media marker's
+      included) is pending while the newest of all its files, partial or
+      finished, in `db/` and `media/`, is younger than
+      `interrupted_after_s/0`; after that it is a killed run (#2478, below).
     * **Bounded.** It lists two directories and stats files of new stamps only;
       it never walks the tree or reads a file's contents. A directory with
       thousands of backups costs one listing plus one insert per new stamp.
@@ -59,7 +63,31 @@ defmodule KilnCMS.Backups.Importer do
   `backup.sh verify` refuse such a set too). A manifest calling the parts
   verified does not stand in for the sidecar. A legacy single archive without
   a sidecar (from before checksums) imports as before. A `.partNN…partial`
-  holds the stamp's settle window like any other partial.
+  holds the stamp like any other partial. A set whose run was killed while its
+  `.partial` marker was still there is "Interrupted" (above); one whose marker
+  went before the stamp was read (the marker sync off, or the node down for
+  half a day) shows what is left: parts but no sidecar.
+
+  ## A run killed outright (#2478)
+
+  `kill -9`, the OOM killer or a power cut leaves a cron run's `.partial`
+  files behind: no trap runs. `backup.sh` touches every `.partial` of its stamp
+  every five minutes for as long as it lives, so a stamp whose newest file is
+  three hours old (36 missed touches, and room for clocks that disagree) has
+  no writer. It becomes a `failed` run, "Interrupted: the backup stopped
+  before it finished and left .partial files behind", with the finished files
+  it has as artifacts (none at all when only partials are left), the kinds of
+  its finished files and its partials as components, and a log entry naming
+  the partials. Such a row is never rewritten, which is
+  why the wait is long: a mislabel would be permanent, a late one only leaves
+  the stamp out of the history a little longer. A covering manifest still
+  wins, and a stamp that has a row (the application's own runs) is never
+  looked at. An mtime more than five minutes in the future reads as fresh,
+  with a warning: a clock that is off must not turn a live run into a dead
+  one. `backup.sh prune` removes the partials only once every file of the
+  stamp is four times older than this (`ABANDONED_PARTIAL_MIN`), and the
+  application's start step only once the stamp has a row, so the stamp is
+  always read before its evidence goes.
 
   `kiln-<kind>-<stamp>.sha256` sidecars are not artifacts and never make a run
   by themselves, but are accounted for by their stamp: a well-formed one
@@ -75,6 +103,10 @@ defmodule KilnCMS.Backups.Importer do
   require Logger
 
   @settle_ms :timer.minutes(10)
+  @interrupted_after_s 3 * 3600
+  @future_slack_s 300
+  @interrupted "Interrupted: the backup stopped before it finished and left .partial files behind"
+  @logged_partials 5
   @max_trigger 64
   @max_sidecar_bytes 4 * 1024 * 1024
   @sidecar ~r/\Akiln-(db|media)-(\d{8}-\d{6})\.sha256(\.partial)?\z/
@@ -99,12 +131,24 @@ defmodule KilnCMS.Backups.Importer do
   @spec run() :: {:ok, summary()} | {:error, term()}
   def run, do: run(Backups.dir())
 
+  @doc """
+  How long, in seconds, a stamp with a `.partial` beside it must have been
+  quiet (the newest of all its files, partial or finished) before it is
+  recorded as an interrupted run. `scripts/backup.sh` keeps its partials
+  fresh far inside this, and prunes them only well after it (#2478).
+  """
+  @spec interrupted_after_s() :: pos_integer()
+  def interrupted_after_s, do: @interrupted_after_s
+
   @doc false
-  @spec run(Path.t()) :: {:ok, summary()} | {:error, term()}
-  def run(dir) do
+  # `list` is `list/1` outside tests, which pass one that changes the
+  # directory between the listing and the stat.
+  @spec run(Path.t(), (Path.t() -> {:ok, [{String.t(), String.t()}]} | {:error, term()})) ::
+          {:ok, summary()} | {:error, term()}
+  def run(dir, list \\ &list/1) do
     reconcile_stale_runs()
 
-    with {:ok, names} <- list(dir),
+    with {:ok, names} <- list.(dir),
          {:ok, existing} <- existing_stamps() do
       import_new(dir, names, existing)
     end
@@ -137,7 +181,10 @@ defmodule KilnCMS.Backups.Importer do
   # `%{stamp => [%{kind, name, partial?}]}` from names alone — no stat yet. A
   # missing subdirectory is an empty one (S3 deployments have no `media/`); any
   # other failure aborts, since a half-seen stamp would be recorded wrong forever.
-  defp list(dir) do
+  @doc false
+  # The `{sub, name}` entries of `db/` and `media/`, for `classify/1`.
+  @spec list(Path.t()) :: {:ok, [{String.t(), String.t()}]} | {:error, term()}
+  def list(dir) do
     Enum.reduce_while(["db", "media"], {:ok, []}, fn sub, {:ok, acc} ->
       case File.ls(Path.join(dir, sub)) do
         {:ok, names} ->
@@ -161,23 +208,37 @@ defmodule KilnCMS.Backups.Importer do
     {valid, invalid} =
       files
       |> Map.keys()
-      |> Enum.split_with(&match?({:ok, _}, Artifact.parse_stamp(&1)))
+      |> Enum.split_with(&real_stamp?/1)
 
     for stamp <- invalid,
         do: Logger.warning("Skipping a backup with an impossible stamp: #{stamp}")
 
     covered = covered_stamps(manifest)
+    manifest_only = failed_manifest_attrs(manifest, existing, files)
 
-    new = valid |> Enum.reject(&MapSet.member?(existing, &1)) |> Enum.sort()
+    # A stamp with only partials is a candidate too (a run killed in its first
+    # file), unless the failed manifest already speaks for it. One whose stamp
+    # is no real instant is ignored silently: it would warn every slot.
+    partial_only =
+      for stamp <- Map.keys(partials),
+          not Map.has_key?(files, stamp),
+          real_stamp?(stamp),
+          not Enum.any?(manifest_only, &(&1.stamp == stamp)),
+          do: stamp
+
+    new = (valid ++ partial_only) |> Enum.reject(&MapSet.member?(existing, &1)) |> Enum.sort()
+    now = System.os_time(:second)
 
     {ready, pending} =
       new
-      |> Enum.map(&entry(dir, &1, files[&1]))
-      |> Enum.reject(&(&1.files == []))
-      |> Enum.split_with(&settled?(&1, partials, covered))
+      |> Enum.map(&entry(dir, &1, Map.get(files, &1, []), Map.get(partials, &1, [])))
+      |> Enum.reject(&(&1.files == [] and &1.partials == []))
+      |> Enum.map(&Map.put(&1, :state, settle(&1, covered, now)))
+      |> Enum.split_with(&(&1.state != :pending))
 
-    attrs = Enum.map(ready, &run_attrs(&1, manifest, covered, dir, sidecars))
-    manifest_only = failed_manifest_attrs(manifest, existing, files)
+    warn_future(pending, now)
+
+    attrs = Enum.map(ready, &run_attrs(&1, manifest, covered, dir, sidecars, now))
 
     results = Enum.map(attrs ++ manifest_only, &import_one/1)
 
@@ -190,17 +251,26 @@ defmodule KilnCMS.Backups.Importer do
      }}
   end
 
-  # `{files, partials, sidecars}`: artifact names grouped by stamp, the set of
-  # stamps that still have a `.partial` (of any kind, a sidecar's included)
-  # beside them, and the checksum sidecars (`%{stamp => [{kind, name}]}`).
-  defp classify(listed) do
-    Enum.reduce(listed, {%{}, MapSet.new(), %{}}, fn {sub, name}, {files, partials, sidecars} ->
+  defp real_stamp?(stamp), do: match?({:ok, _}, Artifact.parse_stamp(stamp))
+
+  @doc false
+  # `{files, partials, sidecars}` from `list/1`'s entries: artifact names
+  # grouped by stamp (`%{stamp => [{kind, name, part}]}`, each in the
+  # directory its kind lives in), the `.partial` files of each stamp
+  # (`%{stamp => [{sub, name}]}`, of any kind and in either directory: an
+  # artifact's, a part's, a checksum sidecar's, the media marker), and the
+  # checksum sidecars (`%{stamp => [{kind, name}]}`). The application's
+  # partial sweep reads the same grouping, so the two can't disagree on which
+  # stamp a file belongs to. A `.partial` named like neither is in none.
+  @spec classify([{String.t(), String.t()}]) :: {map(), map(), map()}
+  def classify(listed) do
+    Enum.reduce(listed, {%{}, %{}, %{}}, fn {sub, name}, {files, partials, sidecars} ->
       case Artifact.parse_file(name) do
         {:ok, %{partial?: false} = parsed} ->
           {add_file(files, sub, parsed, name), partials, sidecars}
 
         {:ok, %{stamp: stamp, partial?: true}} ->
-          {files, MapSet.put(partials, stamp), sidecars}
+          {files, add_partial(partials, stamp, sub, name), sidecars}
 
         :error ->
           classify_sidecar(sub, name, files, partials, sidecars)
@@ -208,10 +278,13 @@ defmodule KilnCMS.Backups.Importer do
     end)
   end
 
+  defp add_partial(partials, stamp, sub, name),
+    do: Map.update(partials, stamp, [{sub, name}], &[{sub, name} | &1])
+
   defp classify_sidecar(sub, name, files, partials, sidecars) do
     case Regex.run(@sidecar, name) do
       [_, _kind, stamp, ".partial"] ->
-        {files, MapSet.put(partials, stamp), sidecars}
+        {files, add_partial(partials, stamp, sub, name), sidecars}
 
       [_, kind, stamp] ->
         kind = String.to_existing_atom(kind)
@@ -234,8 +307,12 @@ defmodule KilnCMS.Backups.Importer do
   end
 
   # Stat (lstat: a symlink or directory named like an artifact is not one) only
-  # the files of a stamp we are about to create.
-  defp entry(dir, stamp, names) do
+  # the files of a stamp we are about to create. `held?` is whether any
+  # `.partial` is named beside the stamp; `partials` are the regular ones,
+  # which date it. `vanished?` is whether a listed `.partial` was gone by the
+  # time it was stat'ed: a run renaming its partials into place as it
+  # finishes, whose stamp can't be judged from this listing.
+  defp entry(dir, stamp, names, partial_names) do
     files =
       for {kind, name, part} <- names,
           path = Path.join([dir, Artifact.subdir(kind), name]),
@@ -244,17 +321,66 @@ defmodule KilnCMS.Backups.Importer do
         %{kind: kind, name: name, bytes: size, mtime: mtime, part: part}
       end
 
-    %{stamp: stamp, files: Enum.sort_by(files, &{&1.kind, &1.part || 0})}
+    stats =
+      for {sub, name} <- partial_names,
+          do: {name, File.lstat(Path.join([dir, sub, name]), time: :posix)}
+
+    partials =
+      for {name, {:ok, %File.Stat{type: :regular, mtime: mtime}}} <- stats do
+        %{kind: partial_kind(name), name: name, mtime: mtime}
+      end
+
+    %{
+      stamp: stamp,
+      files: Enum.sort_by(files, &{&1.kind, &1.part || 0}),
+      partials: Enum.sort_by(partials, & &1.name),
+      held?: partial_names != [],
+      vanished?: Enum.any?(stats, &match?({_, {:error, :enoent}}, &1))
+    }
   end
 
-  defp settled?(%{stamp: stamp, files: files}, partials, covered) do
-    MapSet.member?(covered, stamp) or
-      (not MapSet.member?(partials, stamp) and old_enough?(files))
+  defp partial_kind("kiln-db-" <> _), do: :db
+  defp partial_kind("kiln-media-" <> _), do: :media
+
+  # `:ready` (import it), `:interrupted` (import it as a killed run) or
+  # `:pending` (look again later). A stamp one of whose partials vanished
+  # between the listing and the stat is pending this call: dated by what is
+  # left, a run that just finished could be recorded as interrupted, and that
+  # row is never rewritten.
+  defp settle(%{stamp: stamp} = entry, covered, now) do
+    cond do
+      MapSet.member?(covered, stamp) -> :ready
+      entry.vanished? -> :pending
+      not entry.held? -> if old_enough?(entry.files, now), do: :ready, else: :pending
+      future?(entry, now) -> :pending
+      now - newest(entry) >= @interrupted_after_s -> :interrupted
+      true -> :pending
+    end
   end
 
-  defp old_enough?(files) do
-    newest = files |> Enum.map(& &1.mtime) |> Enum.max()
-    System.os_time(:millisecond) - newest * 1000 >= @settle_ms
+  defp old_enough?(files, now), do: (now - newest_of(files)) * 1000 >= @settle_ms
+
+  # The newest mtime of every file of the stamp, partial or finished.
+  defp newest(entry), do: newest_of(entry.files ++ entry.partials)
+
+  defp newest_of(files), do: files |> Enum.map(& &1.mtime) |> Enum.max()
+
+  defp future?(entry, now), do: newest(entry) > now + @future_slack_s
+
+  # Once per call, not per stamp: a skewed clock would otherwise flood the log
+  # every slot.
+  defp warn_future(pending, now) do
+    case Enum.filter(pending, &(&1.held? and future?(&1, now))) do
+      [] ->
+        :ok
+
+      skewed ->
+        Logger.warning(
+          "Backup files dated in the future (#{Enum.map_join(skewed, ", ", & &1.stamp)}): " <>
+            "kept pending, as if still being written; check the clocks of this node and " <>
+            "of the backup directory's file server"
+        )
+    end
   end
 
   # The stamps the manifest speaks for: those its artifact paths carry.
@@ -271,15 +397,16 @@ defmodule KilnCMS.Backups.Importer do
     |> MapSet.new()
   end
 
-  defp run_attrs(%{stamp: stamp, files: files}, manifest, covered, dir, sidecars) do
+  defp run_attrs(%{stamp: stamp, files: files} = entry, manifest, covered, dir, sidecars, now) do
     {:ok, started_at} = Artifact.parse_stamp(stamp)
-    finished_at = files |> Enum.map(& &1.mtime) |> Enum.max() |> DateTime.from_unix!()
+    finished_at = entry |> newest() |> DateTime.from_unix!()
     manifest = if MapSet.member?(covered, stamp), do: manifest
+    interrupted? = entry.state == :interrupted
 
     empty? = Enum.any?(files, &(&1.bytes == 0))
     problem = media_problem(files, media_sidecar?(sidecars, stamp))
 
-    {status, error} = outcome(manifest, problem, empty?)
+    {status, error} = outcome(interrupted?, manifest, problem, empty?)
 
     digests = digests(dir, stamp, sidecars)
 
@@ -287,7 +414,11 @@ defmodule KilnCMS.Backups.Importer do
       stamp: stamp,
       trigger: trigger(manifest),
       status: status,
-      components: files |> Enum.map(& &1.kind) |> Enum.uniq(),
+      # The partials' kinds too: a run killed with nothing finished still
+      # names what it was backing up. (`Backups.newest_attempt/1` counts an
+      # imported failure against every component regardless: a cron `all`
+      # killed in its db phase would have done media as well.)
+      components: (files ++ entry.partials) |> Enum.map(& &1.kind) |> Enum.uniq() |> Enum.sort(),
       started_at: (manifest && manifest.started_at) || started_at,
       finished_at: (manifest && manifest.finished_at) || finished_at,
       error: error,
@@ -297,22 +428,45 @@ defmodule KilnCMS.Backups.Importer do
           step: "import",
           message: "Found in the backup directory; this application did not record the run"
         }
+        | interrupted_log(interrupted?, entry.partials, now)
       ],
       artifacts:
         files |> Enum.map(&artifact_attrs(&1, manifest, digests)) |> Artifact.group_files()
     }
   end
 
-  defp outcome(%Manifest{ok: false, error: error}, _problem, _empty?), do: {:failed, error}
-  defp outcome(_manifest, problem, _empty?) when is_binary(problem), do: {:failed, problem}
-  defp outcome(_manifest, _problem, true), do: {:failed, "empty artifact"}
-  defp outcome(_manifest, _problem, _empty?), do: {:succeeded, nil}
+  defp outcome(true, _manifest, _problem, _empty?), do: {:failed, @interrupted}
+  defp outcome(_, %Manifest{ok: false, error: error}, _problem, _empty?), do: {:failed, error}
+  defp outcome(_, _manifest, problem, _empty?) when is_binary(problem), do: {:failed, problem}
+  defp outcome(_, _manifest, _problem, true), do: {:failed, "empty artifact"}
+  defp outcome(_, _manifest, _problem, _empty?), do: {:succeeded, nil}
+
+  defp interrupted_log(false, _partials, _now), do: []
+
+  defp interrupted_log(true, partials, now) do
+    named =
+      partials
+      |> Enum.take(@logged_partials)
+      |> Enum.map_join(", ", &"#{&1.name} (#{div(now - &1.mtime, 60)} min old)")
+
+    more = length(partials) - @logged_partials
+    more = if more > 0, do: " and #{more} more", else: ""
+
+    [
+      %{
+        level: :error,
+        step: "import",
+        message: "No backup has written to this stamp for hours; left behind: #{named}#{more}"
+      }
+    ]
+  end
 
   # What is wrong with the media files of a stamp, or `nil`: parts that don't
   # run 1..N, a legacy single archive sitting beside parts, or parts with no
   # sidecar. Every part set is written with a sidecar (one part keeps the legacy
   # name), by the app and by `backup.sh` alike, so parts without one are what a
-  # run killed mid-set leaves once its `.partial` marker is swept; a manifest
+  # run killed mid-set leaves once its `.partial` marker went before the stamp
+  # was read (with the marker there it is "Interrupted"); a manifest
   # does not excuse it, since `restore.sh` refuses such a set too. A legacy
   # single archive without one is a pre-checksum backup and stays fine. Part
   # numbers are unique per stamp (one file name each), so there is no duplicate

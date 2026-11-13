@@ -41,6 +41,18 @@ defmodule KilnCMS.Backups.NodeBeat do
       change atomic_update(:beat_at, expr(fragment("now()")))
     end
 
+    # The beats of the last `within_s` seconds, judged on the database's clock
+    # like the beat itself: a filter built from this node's `utc_now()` would
+    # see no live beats on a node whose clock runs ahead (#2789).
+    read :live do
+      argument :within_s, :integer do
+        allow_nil? false
+        constraints min: 1
+      end
+
+      filter expr(beat_at > fragment("now() - (? * interval '1 second')", ^arg(:within_s)))
+    end
+
     # Beats of nodes gone for a day: a decommissioned node's row.
     destroy :prune do
       change filter(expr(beat_at < ago(1, :day)))
