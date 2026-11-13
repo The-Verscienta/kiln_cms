@@ -229,6 +229,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`eq`, `not_eq` and `in` on a single string, URL, select, email, color, telephone, time or slug field (or a string, URL or select link field) also match the value as a save stores it (`#FFF` finds `#ffffff`, a label finds its option), fixing the 1.9.0 known issue #2677.**
   ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-filter-operands-tidied))
 
+- **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
+  ([long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
+
 ### Security
 
 - **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**

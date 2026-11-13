@@ -1527,6 +1527,39 @@ carries the reasoning.
   open. No migration and no config. Guide: [json-api.md](../json-api.md) → "Custom fields",
   "Equality operands also match the value as a save stores it".
 
+<a id="data-flows-breached-password-egress"></a>
+
+- **The data-flows guide and the "no third-party requests" checklists now include the breached-password check.**
+  Since 1.9.0, setting a password (registration, a change, a reset by token,
+  first-run setup, accepting an invitation with a password) sends the first
+  five hex characters of the password's SHA-1 to Have I Been Pwned
+  (`api.pwnedpasswords.com`), on by default. The
+  [subprocessor table](../data-flows.md#optional-subprocessors) in
+  `docs/data-flows.md` had no row for it, and its closing advice for a
+  deployment that must make no third-party requests named only
+  `KILN_UPDATE_CHECK=false` and the crawler-verification switches. The same
+  gap was in [environment-variables.md](../environment-variables.md#upstream-update-check)
+  and in the staging guides ([staging-environments.md](../staging-environments.md),
+  [deploy-staging.md](../deploy-staging.md)), so a DPA subprocessor list or a
+  staging clone built from them missed one call.
+
+  If you followed that advice, add Have I Been Pwned to your subprocessor
+  list, or set `BREACHED_PASSWORD_CHECK=false` to stop the call for the whole
+  deployment. Nothing else is a guarantee: `KILN_UPDATE_CHECK=false` does not
+  cover it, `BREACHED_PASSWORD_POLICY=off` is only the default for sites that
+  saved no choice, and a site's policy **Off** stops the call for that site
+  only while its saved policy can be read (an unreadable one is treated as
+  **Warn**). The call is never made at sign-in.
+
+  Two decision records now argue the defaults:
+  [ADR 0031](../decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
+  (why the breached-password check is on by default and accepts the password
+  when the lookup fails, #2409) and
+  [ADR 0032](../decisions/0032-a-default-on-check-that-tells-a-third-party-about-the-installation-follows-the-update-check-switch.md)
+  (the terms on which the plugin health check tells hex.pm which plugins a
+  server runs, #2568). Documentation only: no code, migration or config
+  change.
+
 ## Security
 
 <a id="backup-scripts-password-out-of-argv"></a>
