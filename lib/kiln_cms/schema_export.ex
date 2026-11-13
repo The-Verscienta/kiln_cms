@@ -111,13 +111,18 @@ defmodule KilnCMS.SchemaExport do
     * `:types` — restrict to these content-type names (strings or atoms);
       unknown names raise, so a typo in a build script fails loudly;
     * `:base_url` — origin used for the document `$id`;
-    * `:blocks_only` — skip content types entirely (no database read).
+    * `:blocks_only` — skip content types entirely (no database read);
+    * `:blocks` — describe these block modules instead of every registered
+      one (default: `KilnCMS.Blocks.modules/0`). A checked-in generation that
+      must not depend on which plugins are compiled in passes
+      `KilnCMS.Blocks.core_modules/0`.
   """
   @type option ::
           {:org_id, Ash.UUID.t()}
           | {:types, [atom() | String.t()]}
           | {:base_url, String.t() | nil}
           | {:blocks_only, boolean()}
+          | {:blocks, [module()]}
           | {:graphql, boolean()}
 
   @doc """
@@ -264,7 +269,8 @@ defmodule KilnCMS.SchemaExport do
 
     %{
       org_id: org_id,
-      block_modules: JsonSchema.block_modules(KilnCMS.Blocks.modules()),
+      block_modules:
+        opts |> Keyword.get_lazy(:blocks, &KilnCMS.Blocks.modules/0) |> JsonSchema.block_modules(),
       content_types: content_types
     }
   end

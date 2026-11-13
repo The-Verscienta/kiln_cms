@@ -3,7 +3,7 @@
 // The `:json` fired-artifact shape served by
 // `GET /api/content/:type/:slug?surface=json`.
 //
-// Artifact format version: 3
+// Artifact format version: 4
 
 
 // MARK: - Shared
@@ -857,19 +857,28 @@ public struct RecipeDocument: Codable, Hashable, Sendable {
     /// Portable Text renditions of the rich `:text` custom fields marked `deliver_portable`: the stored HTML as the same block tree a `rich_text` block's `body` holds. `null` where the record holds no value.
     public let customFieldsPortable: CustomFieldsPortable?
     public let id: String
+    /// Which `:fallback` fields this variant left empty and inherited along the site's locale fallback chain, and from which locale: `custom_fields` and `blocks` (by block `_id`) nest, a record attribute maps straight to a locale. Present only when something was inherited.
+    public let inheritedFields: [String: JSONValue]?
     public let locale: String?
+    /// The document's robots flags. Absent when neither is set; absent means both false.
+    public let robots: Robots?
     public let slug: String?
+    /// The document's link-preview fields, for Open Graph and X (Twitter) card tags: the effective SEO title (else the title), the effective SEO description and the SEO image as an absolute URL. `description` and `image` are absent when there is none. Site-level values (card type, the site's X account, the brand's fallback image) are not included.
+    public let social: Social?
     public let title: String?
     public let type: String
 
-    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, customFieldsPortable: CustomFieldsPortable? = nil, id: String, locale: String? = nil, slug: String? = nil, title: String? = nil, type: String) {
+    public init(blocks: [Block], customFields: CustomFields, customFieldsPlain: CustomFieldsPlain? = nil, customFieldsPortable: CustomFieldsPortable? = nil, id: String, inheritedFields: [String: JSONValue]? = nil, locale: String? = nil, robots: Robots? = nil, slug: String? = nil, social: Social? = nil, title: String? = nil, type: String) {
         self.blocks = blocks
         self.customFields = customFields
         self.customFieldsPlain = customFieldsPlain
         self.customFieldsPortable = customFieldsPortable
         self.id = id
+        self.inheritedFields = inheritedFields
         self.locale = locale
+        self.robots = robots
         self.slug = slug
+        self.social = social
         self.title = title
         self.type = type
     }
@@ -880,8 +889,11 @@ public struct RecipeDocument: Codable, Hashable, Sendable {
         case customFieldsPlain = "custom_fields_plain"
         case customFieldsPortable = "custom_fields_portable"
         case id
+        case inheritedFields = "inherited_fields"
         case locale
+        case robots
         case slug
+        case social
         case title
         case type
     }
@@ -931,6 +943,28 @@ public struct RecipeDocument: Codable, Hashable, Sendable {
 
         public init(method: [PortableTextBlock]? = nil) {
             self.method = method
+        }
+    }
+
+    public struct Robots: Codable, Hashable, Sendable {
+        public let nofollow: Bool
+        public let noindex: Bool
+
+        public init(nofollow: Bool, noindex: Bool) {
+            self.nofollow = nofollow
+            self.noindex = noindex
+        }
+    }
+
+    public struct Social: Codable, Hashable, Sendable {
+        public let description: String?
+        public let image: String?
+        public let title: String?
+
+        public init(description: String? = nil, image: String? = nil, title: String? = nil) {
+            self.description = description
+            self.image = image
+            self.title = title
         }
     }
 }
