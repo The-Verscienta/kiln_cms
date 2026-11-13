@@ -85,11 +85,12 @@ defmodule KilnCMS.Docs.ExtrasLinksTest do
   # #2167: `[\`KilnCMS.Keys\`](KilnCMS.Keys.html)` is an ExDoc *output* page. It
   # resolves in the generated hexdocs and nowhere else — github.com and the
   # kilncms.dev docs render the Markdown source, where that path is a 404. Link
-  # the file by its absolute
-  # `https://github.com/The-Verscienta/kiln_cms/blob/main/…` URL, the form
-  # `mix.exs` prescribes (a relative `../lib/…` link is passed through by ExDoc
-  # untouched and 404s on hexdocs). Both inline `[x](page.html)` links and
-  # reference definitions `[x]: page.html` are scanned.
+  # the source file instead: relatively (`../lib/kiln_cms/keys.ex`), which
+  # GitHub resolves at the ref being viewed and the kilncms.dev publisher
+  # rewrites to `blob/main` (#2397, see the `extras/0` comment in `mix.exs`),
+  # or by its absolute `https://github.com/The-Verscienta/kiln_cms/blob/main/…`
+  # URL. Both inline `[x](page.html)` links and reference definitions
+  # `[x]: page.html` are scanned.
   @reference_definition ~r/^[ ]{0,3}\[[^\]]+\]:[ ]*<?([^\s>]+)/m
 
   test "no extra links to a generated .html page by a relative path" do
@@ -109,8 +110,8 @@ defmodule KilnCMS.Docs.ExtrasLinksTest do
 
            #{Enum.join(html_links, "\n")}
 
-           Link the file by its absolute
-           https://github.com/The-Verscienta/kiln_cms/blob/main/<path> URL instead.
+           Link the source file instead: relatively (../lib/<path>), or by its
+           absolute https://github.com/The-Verscienta/kiln_cms/blob/main/<path> URL.
            """
   end
 
@@ -144,6 +145,93 @@ defmodule KilnCMS.Docs.ExtrasLinksTest do
 
     is_nil(uri.scheme) and is_nil(uri.host) and Path.extname(uri.path || "") == ".html"
   end
+
+  # #2397: a relative link to a repo file that is not an extra
+  # (`../lib/kiln_cms/search.ex#L56`, `../config/runtime.exs`) is the
+  # convention, not a defect — see the `extras/0` comment in `mix.exs` for why
+  # it is right on github.com and kilncms.dev. What can go wrong is the file
+  # moving, and nothing else notices: ExDoc passes these links through
+  # unchecked, and the publisher rewrites them to `blob/main/…` whether or not
+  # the file is there.
+  test "every relative link to a non-doc repo file names a file that exists" do
+    links = for extra <- @extras, link <- source_links(extra, File.read!(extra)), do: link
+
+    # A broken regex or a moved extras list would otherwise pass vacuously.
+    assert length(links) > 200,
+           "expected the extras to link hundreds of source files, found #{length(links)}"
+
+    dead = for {_, _, _, path} = link <- links, not in_repo?(path), do: dead_link(link)
+
+    assert dead == [],
+           """
+           These relative links name a repo file that does not exist:
+
+           #{Enum.join(dead, "\n")}
+
+           Point each one at where the file lives now, relative to the guide.
+           """
+  end
+
+  test "the source-link check finds a dead link, and skips doc, absolute and code links" do
+    markdown = """
+    See [search](../lib/kiln_cms/search.ex#L1) and [mix.exs](../mix.exs?plain=1).
+    The [old module](../lib/kiln_cms/gone_for_good.ex#L56) moved.
+
+    [def]: ../config/not_a_config.exs
+    [ok]: ../config/config.exs
+    [out]: ../../outside.ex
+
+    [a guide](getting-started.md), [abs](https://example.com/x.ex), `[code](../nope.ex)`
+
+    ```
+    [fenced](../also_nope.ex)
+    ```
+    """
+
+    links = source_links("docs/fake-guide.md", markdown)
+
+    assert Enum.map(links, &elem(&1, 3)) == [
+             "lib/kiln_cms/search.ex",
+             "mix.exs",
+             "lib/kiln_cms/gone_for_good.ex",
+             "config/not_a_config.exs",
+             "config/config.exs",
+             Path.expand("../outside.ex")
+           ]
+
+    assert for({_, _, _, path} = link <- links, not in_repo?(path), do: dead_link(link)) == [
+             "  docs/fake-guide.md:2  ../lib/kiln_cms/gone_for_good.ex#L56",
+             "  docs/fake-guide.md:4  ../config/not_a_config.exs",
+             "  docs/fake-guide.md:6  ../../outside.ex"
+           ]
+  end
+
+  # Relative links (inline or reference definitions, outside code) to a file
+  # ExDoc does not treat as an extra, as {source, line, href, path}, where
+  # `path` is the target resolved to a repo-root-relative path with its
+  # `#fragment` and `?query` dropped.
+  defp source_links(extra, markdown) do
+    for {line, number} <- markdown |> prose() |> String.split("\n") |> Enum.with_index(1),
+        href <- inline_hrefs(line) ++ definition_hrefs(line),
+        uri = URI.parse(href),
+        is_nil(uri.scheme) and is_nil(uri.host),
+        uri.path not in [nil, ""],
+        Path.extname(uri.path) not in @builtin_ext do
+      path =
+        uri.path
+        |> URI.decode()
+        |> Path.expand(Path.dirname(extra))
+        |> Path.relative_to_cwd()
+
+      {extra, number, href, path}
+    end
+  end
+
+  defp dead_link({source, line, href, _path}), do: "  #{source}:#{line}  #{href}"
+
+  # `relative_to_cwd/1` leaves a path that climbs out of the repo absolute; no
+  # renderer can serve that, whatever is on this machine.
+  defp in_repo?(path), do: Path.type(path) == :relative and File.exists?(path)
 
   test "every relative link between extras resolves to the file it names" do
     links = for extra <- @extras, link <- relative_links(extra), do: link

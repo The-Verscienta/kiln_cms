@@ -261,6 +261,18 @@ defmodule KilnCMS.MixProject do
   # between extras renders as a link to a different file than it names, for
   # README and for any basename that collides later. Reordering this list is not
   # a fix: it only changes which of the colliding links is wrong.
+  #
+  # **A source file that is not an extra is linked relatively** (#2397):
+  # `../lib/kiln_cms/search.ex#L56`, `../config/runtime.exs`. That is the
+  # convention, and the absolute-URL rule above is for README alone. ExDoc
+  # passes such a link through untouched, so it is dead in a local `doc/`
+  # build, but this app's `doc/` is never published (CI only checks that it
+  # builds). github.com resolves the link at the ref being viewed, so a tagged
+  # guide points at that tag's lines. The kilncms.dev publisher rewrites it to
+  # `blob/main/…` (`link/3` in `scripts/publish/docs.exs`). An absolute
+  # `blob/main/…#L56` written into the guide would drift from the line it means
+  # as `main` moves, for the reason `source_ref:` above pins a tag. The same
+  # test fails when such a link names a file that does not exist.
   defp extras do
     [
       # Getting started
