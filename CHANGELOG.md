@@ -77,6 +77,11 @@ Every summary line below that was shortened links to its own entry there.
 - **`backup.sh` now refuses a `BACKUP_KEEP_DAYS` that is not a whole number of days from 1 to 2147483647, and keeps 14. A host that set `0` keeps 14 days of backups (check the disk); one that set `14d` on Linux, which pruned nothing, deletes backups older than 14 days at its next prune.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
 
+### Breaking
+
+- **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
+  ([#2836](https://github.com/The-Verscienta/kiln_cms/pull/2836) · [long form](docs/changelog/unreleased.md#media-purge-quarantined))
+
 ### Added
 
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
@@ -177,6 +182,8 @@ Every summary line below that was shortened links to its own entry there.
 - **The Backups page shows recovery-point and last-good badges on History rows and a last-good summary, explains the backup queue under Back up now, and hides Cancel on a finishing row.**
   ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
 
+- **Media trash: Delete permanently no longer deletes a file someone restored (one trashed during upload processing included), and Restore or Delete on a stale row says whether it was restored or deleted.**
+  ([#2836](https://github.com/The-Verscienta/kiln_cms/pull/2836) · [long form](docs/changelog/unreleased.md#media-trash-stale-actions))
 - **The in-app backup, the demo reset and `backup.sh`, `restore.sh` and `staging.sh` accept an `ecto://` database URL, the documented form, which every dump used to fail on.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#database-url-ecto-scheme))
 

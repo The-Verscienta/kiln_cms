@@ -213,10 +213,11 @@ defmodule KilnCMS.Media.AVStripWorker do
     Storage.delete_private(key, item)
 
     # The pipeline may purge an item only while it is quarantined (#1659),
-    # which this one still is. A failure leaves a blob-less quarantined row,
-    # which the reaper takes; it is logged rather than retried, because a
-    # retry would find the private blob gone and could not strip again.
-    case CMS.purge_media_item(item, actor: Media.system(), tenant: tenant) do
+    # through `:purge_quarantined` (#2610), which this one still is. A
+    # failure leaves a blob-less quarantined row, which the reaper takes; it
+    # is logged rather than retried, because a retry would find the private
+    # blob gone and could not strip again.
+    case CMS.purge_quarantined_media_item(item, actor: Media.system(), tenant: tenant) do
       :ok ->
         :ok
 

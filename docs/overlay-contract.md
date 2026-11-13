@@ -101,14 +101,21 @@ that counting as a major.
   `KilnCMSWeb.AshJsonApiRouter` — LiveViews, components, the component kit's
   class names, and the `/editor/...` admin paths themselves.
 - **`KilnCMS.*` internals not named above** — changes, calculations, workers,
-  firing internals, and anything marked `@doc false`. 1.9 changed several that
-  overlay code calls, each listed under Breaking in its changelog:
+  firing internals, and anything marked `@doc false`. 1.9 and the releases
+  after it changed several that overlay code calls, each listed under Breaking
+  in its changelog:
   - `restore_<type>_version` filters on the record's `lock_version` and
     `state` and increments `lock_version`, so restoring from a struct read
     before a later write fails with `Ash.Error.Changes.StaleRecord`. Read the
     record again before restoring, and keep the struct the restore returns.
   - `purge_<type>` and `purge_media_item` refuse a record that is not in the
-    trash (`StaleRecord`); trash it first with `destroy_<type>`.
+    trash (`StaleRecord`); trash it first with `destroy_<type>`. After 1.9.2,
+    `purge_media_item` no longer takes an untrashed quarantined item either,
+    and `KilnCMS.Media.system/0` may not call it at all (`Forbidden`): the
+    media pipeline's purge of a quarantined upload is
+    `purge_quarantined_media_item`, which only that actor may run.
+    `restore_media_item` refuses an item that is no longer in the trash
+    (`StaleRecord`) instead of succeeding.
   - `KilnCMS.Backups.enqueue/1` returns `{:ok, %{status: status, chain: chain}}`
     (`status` is `:started`, `:queued` or `:folded`), not an `Oban.Job`, and
     `KilnCMS.Backups.Worker.run/3` requests a backup and waits for it instead

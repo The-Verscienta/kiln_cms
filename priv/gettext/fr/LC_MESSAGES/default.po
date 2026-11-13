@@ -6285,6 +6285,7 @@ msgstr "Suppression de ce formulaire impossible."
 msgid "Couldn't delete that funnel."
 msgstr "Impossible de supprimer cet entonnoir."
 
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
@@ -6483,6 +6484,7 @@ msgstr "Suppression de cet abonné impossible."
 msgid "Couldn't restore that content type."
 msgstr "Restauration de ce type de contenu impossible."
 
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't restore that item."
@@ -19995,6 +19997,7 @@ msgstr "Quelqu’un a modifié la page en ligne après l’enregistrement de vot
 msgid "Someone else already moved this to the trash or deleted it."
 msgstr "Quelqu’un d’autre a déjà placé ceci dans la corbeille ou l’a supprimé."
 
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else already restored that item."
@@ -21183,10 +21186,6 @@ msgid "That item is no longer available."
 msgstr "Cet élément n'est plus disponible."
 
 #: lib/kiln_cms_web/live/media_live.ex
-#, elixir-autogen, elixir-format
-msgid "That item is no longer in the trash — someone else restored or deleted it."
-msgstr "Cet élément n’est plus dans la corbeille — quelqu’un d’autre l’a restauré ou supprimé."
-
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "That item is no longer in the trash — someone permanently deleted it."
