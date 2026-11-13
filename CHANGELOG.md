@@ -162,7 +162,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2880](https://github.com/The-Verscienta/kiln_cms/pull/2880) · [long form](docs/changelog/unreleased.md#editor-input-help-line))
 
 - **Team says how long an invitation link lasts and links its guide, Settings says adding a passkey or authenticator app emails you, and `/sign-in/verify` says a passkey works too when one can.**
-  ([long form](docs/changelog/unreleased.md#account-screens-help-text))
+  ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#account-screens-help-text))
 
 ### Fixed
 
@@ -257,7 +257,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
 
 - **Password policy no longer describes Off as "not looked up at all": it covers this site only, and only `BREACHED_PASSWORD_CHECK=false` stops the check server-wide. Docs: the staging scrub table lists all its purges.**
-  ([long form](docs/changelog/unreleased.md#password-policy-off-description))
+  ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#password-policy-off-description))
 
 ### Security
 
