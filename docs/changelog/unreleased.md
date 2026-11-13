@@ -680,7 +680,10 @@ carries the reasoning.
   `blocked?/2` stays side-effect-free) and
   `KilnCMS.Security.Cidr.truncate_range/1`. See
   [Blocked addresses raise one alert per window](../security-alerts.md#blocked-addresses-raise-one-alert-per-window).
-  (Part of #2245.)
+  The cap of 20 networks is per server: on a cluster the window's summary
+  can count up to about 20 times the number of servers (see
+  [Running more than one server](../security-alerts.md#running-more-than-one-server);
+  #2813). (Part of #2245.)
 
 <a id="api-key-rate-limited-alerts"></a>
 
@@ -712,6 +715,13 @@ carries the reasoning.
   New telemetry: `kiln_cms.security.api_key_trip.count`, tagged `result`
   (`unverified`, `debounced`, `noted`) and `bucket`. See
   [API keys over a rate limit](../security-alerts.md#api-keys-over-a-rate-limit).
+  On more than one server, the limits that raise this alert are counted per
+  server, so a key trips them less often than the configured numbers
+  suggest, and a refusal alerts only if the refusing server verified the key
+  in the last 5 minutes; [Running more than one server](../security-alerts.md#running-more-than-one-server)
+  lists when it doesn't, and
+  [ADR 0053](../decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md)
+  argues why servers don't share what they remember (#2812, #2813).
   (The last part of #2245.)
 
 <a id="second-factor-requirement"></a>
