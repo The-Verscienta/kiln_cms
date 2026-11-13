@@ -74,6 +74,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `platform_security_alerts`). Blocked-address alerts are on for every site (up to one alert and one summary per 15 minutes; off under Security alerts → Blocked addresses). Existing webhook endpoints, Slack too, need `security.blocked_ip` ticked; until then a webhook-only site's "Security alerts reach someone" line reads Review.**
   ([long form](docs/changelog/unreleased.md#blocked-ip-alerts-upgrade))
 
+- **`backup.sh` now refuses a `BACKUP_KEEP_DAYS` that is not a whole number of days from 1 to 2147483647, and keeps 14. A host that set `0` keeps 14 days of backups (check the disk); one that set `14d` on Linux, which pruned nothing, deletes backups older than 14 days at its next prune.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
+
 ### Breaking
 
 - **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
@@ -181,6 +184,16 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Media trash: Delete permanently no longer deletes a file someone restored (one trashed during upload processing included), and Restore or Delete on a stale row says whether it was restored or deleted.**
   ([long form](docs/changelog/unreleased.md#media-trash-stale-actions))
+- **The in-app backup, the demo reset and `backup.sh`, `restore.sh` and `staging.sh` accept an `ecto://` database URL, the documented form, which every dump used to fail on.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#database-url-ecto-scheme))
+
+- **`backup.sh` reads `BACKUP_KEEP_DAYS` like the app: anything but a whole number of days from 1 to 2147483647 keeps 14 and warns, instead of pruning nothing (`14d`), pruning all but a day (`0`) or writing an unreadable `manifest.json`.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-validated))
+
+### Security
+
+- **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-scripts-password-out-of-argv))
 
 ## [1.9.2] - 2026-11-12
 

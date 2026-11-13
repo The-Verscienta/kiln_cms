@@ -112,6 +112,15 @@ defmodule KilnCMS.Backups.ManifestTest do
     assert Map.keys(entry) |> Enum.sort() == [:bytes, :kind, :path, :verified]
   end
 
+  test "keep_days is a whole number of days, 1 or more, or absent (#2727)", %{dir: dir} do
+    # The type says `pos_integer | nil`; a hand-edited or pre-#2727 cron
+    # manifest could say 0 or -1, which no retention ever meant.
+    for {raw, expected} <- [{14, 14}, {1, 1}, {0, nil}, {-1, nil}, {"14", nil}, {1.5, nil}] do
+      File.write!(Manifest.path(dir), Jason.encode!(%{"ok" => true, "keep_days" => raw}))
+      assert Manifest.read(dir).keep_days == expected, inspect(raw)
+    end
+  end
+
   describe "stamp" do
     test "round-trips, and a manifest without it reads nil and writes no key", %{dir: dir} do
       :ok = Manifest.write(dir, %Manifest{stamp: "20261111-145226"})

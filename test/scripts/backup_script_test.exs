@@ -1266,6 +1266,227 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
   # --- helpers ---------------------------------------------------------------
 
+  describe "the database connection (#2719, #2726)" do
+    # `pg_dump` logs its argv and whether PGPASSWORD reached it. argv is
+    # world-readable (/proc/<pid>/cmdline, `ps`); the environment is not.
+    setup ctx do
+      log = Path.join(ctx.tmp, "pg_dump")
+
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      printf '%s\\n' "$@" > "#{log}.args"
+      if [ -n "${PGPASSWORD+set}" ]; then printf 'set:%s' "$PGPASSWORD"; else printf unset; fi > "#{log}.env"
+      for a in "$@"; do
+        case "$a" in --file=*) printf 'PGDMP pretend dump' > "${a#--file=}" ;; esac
+      done
+      """)
+
+      %{log: log}
+    end
+
+    test "pg_dump gets a postgres:// URL and the password through PGPASSWORD only", ctx do
+      cases = [
+        {"postgres://kiln:hunter2@db:5432/kiln", "postgres://kiln@db:5432/kiln", "hunter2"},
+        {"ecto://kiln:hunter2@db/kiln_prod", "postgres://kiln@db/kiln_prod", "hunter2"},
+        {"ecto://kiln:p%40ss%3Aw%2Fd%25@db/kiln_prod", "postgres://kiln@db/kiln_prod",
+         "p@ss:w/d%"},
+        {"ecto://kiln:hunter2@db/kiln_prod?sslmode=require&connect_timeout=5",
+         "postgres://kiln@db/kiln_prod?sslmode=require&connect_timeout=5", "hunter2"},
+        {"ecto://kiln@db/kiln_prod?sslmode=require&password=hunter2",
+         "postgres://kiln@db/kiln_prod?sslmode=require", "hunter2"},
+        {"ecto://kiln:hunter2@[::1]:5432/kiln_prod", "postgres://kiln@[::1]:5432/kiln_prod",
+         "hunter2"},
+        {"postgres://kiln:hunter2%zz@db/kiln", "postgres://kiln@db/kiln", "hunter2%zz"},
+        {"postgres://kiln:hunter2@h1:5432,h2:5433/kiln?application_name=a@b",
+         "postgres://kiln@h1:5432,h2:5433/kiln?application_name=a@b", "hunter2"}
+      ]
+
+      for {input, url, password} <- cases do
+        assert {_out, 0} = backup(ctx, "db", [{"DATABASE_URL", input}, {"PGPASSWORD", nil}])
+
+        args = File.read!(ctx.log <> ".args")
+        assert List.last(String.split(args, "\n", trim: true)) == url, input
+        refute args =~ "hunter2", input
+        assert File.read!(ctx.log <> ".env") == "set:" <> password, input
+      end
+    end
+
+    test "without a password in the URL, the operator's own PGPASSWORD still applies", ctx do
+      url = "ecto://kiln@db/kiln_prod"
+
+      assert {_out, 0} = backup(ctx, "db", [{"DATABASE_URL", url}, {"PGPASSWORD", "from-env"}])
+      assert File.read!(ctx.log <> ".args") =~ "\npostgres://kiln@db/kiln_prod\n"
+      assert File.read!(ctx.log <> ".env") == "set:from-env"
+
+      assert {_out, 0} = backup(ctx, "db", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}])
+      assert File.read!(ctx.log <> ".env") == "unset"
+    end
+
+    test "the password never reaches rclone, tar or anything else the run starts", ctx do
+      rclone_log = Path.join(ctx.tmp, "rclone.env")
+
+      stub!(ctx.bin, "rclone", """
+      #!/bin/sh
+      env | grep '^PGPASSWORD' >> "#{rclone_log}"
+      echo -- >> "#{rclone_log}"
+      """)
+
+      assert {_out, 0} =
+               backup(ctx, "all", [
+                 {"DATABASE_URL", "ecto://kiln:hunter2@db/kiln_prod"},
+                 {"PGPASSWORD", nil},
+                 {"BACKUP_RCLONE_REMOTE", "r2:kiln"}
+               ])
+
+      assert File.read!(ctx.log <> ".env") == "set:hunter2"
+      copies = rclone_log |> File.read!() |> String.split("\n", trim: true)
+      assert [_ | _] = copies
+      assert Enum.uniq(copies) == ["--"]
+    end
+
+    test "a failed dump records no secret, and none reaches the log", ctx do
+      # libpq echoes the connection string it was given in its errors.
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: could not connect: $*" >&2
+      exit 1
+      """)
+
+      assert {out, status} =
+               backup(ctx, "all", [
+                 {"DATABASE_URL", "ecto://kiln:hunter2@db/kiln_prod"},
+                 {"PGPASSWORD", nil}
+               ])
+
+      assert status != 0
+      assert out =~ "could not connect"
+      refute out =~ "hunter2"
+      refute manifest!(ctx)["error"] =~ "hunter2"
+      refute manifest!(ctx)["ok"]
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI (Linux) has 5.x, so this
+    # only runs on a Mac.
+    bash3? =
+      File.exists?("/bin/bash") and
+        match?(
+          {"3\n", 0},
+          System.cmd("/bin/bash", ["-c", "echo ${BASH_VERSINFO[0]}"], stderr_to_stdout: true)
+        )
+
+    unless bash3?, do: @tag(skip: "needs /bin/bash 3.x (macOS)")
+
+    test "the split also works under /bin/bash 3.2", ctx do
+      # An encoded backslash before `c` (which `%b` would read as "stop
+      # here"), an `@`, and a trailing newline (which `$(…)` would drop).
+      url = "ecto://kiln:hun%5Cct%40er2%0A@db/kiln_prod?sslmode=require"
+
+      assert {_out, 0} =
+               backup(ctx, "db", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}], "/bin/bash")
+
+      args = File.read!(ctx.log <> ".args")
+      assert args =~ "\npostgres://kiln@db/kiln_prod?sslmode=require\n"
+      refute args =~ "hun"
+      assert File.read!(ctx.log <> ".env") == "set:hun\\ct@er2\n"
+    end
+  end
+
+  describe "BACKUP_KEEP_DAYS is read like the app reads it (#2727)" do
+    @parity_var "KILN_BACKUP_SCRIPT_KEEP_DAYS_PARITY"
+
+    test "the same value, or the same default and a warning, as Env.positive_integer/1", ctx do
+      on_exit(fn -> System.delete_env(@parity_var) end)
+
+      cases = [
+        nil,
+        "",
+        "  ",
+        "14",
+        " 14",
+        "14 ",
+        # A no-break space, not a duplicate of " 14".
+        "\u00A014",
+        "+14",
+        "014",
+        "1",
+        "2147483647",
+        "0",
+        "-1",
+        "14d",
+        "7 days",
+        "1.5",
+        "2147483648",
+        "99999999999999999999"
+      ]
+
+      for raw <- cases do
+        {app, warns?} = app_keep_days(raw)
+
+        assert {out, 0} = backup(ctx, "prune", [{"BACKUP_KEEP_DAYS", raw}])
+        assert out =~ "Pruning backups older than #{app} days", inspect(raw)
+
+        assert out =~ "is not a whole number of days from 1 to 2147483647; using 14" == warns?,
+               inspect(raw)
+      end
+    end
+
+    test "an unusable value still gives `all` a manifest the app can read", ctx do
+      assert {out, 0} = backup(ctx, "all", [{"BACKUP_KEEP_DAYS", "14d"}])
+      assert out =~ "BACKUP_KEEP_DAYS=14d is not a whole number of days"
+
+      assert %{"ok" => true, "keep_days" => 14} =
+               ctx.backups |> Path.join("manifest.json") |> File.read!() |> Jason.decode!()
+
+      assert %KilnCMS.Backups.Manifest{ok: true, keep_days: 14} =
+               KilnCMS.Backups.Manifest.read(ctx.backups)
+    end
+
+    test "leading zeros are not written into the manifest's JSON", ctx do
+      assert {_out, 0} = backup(ctx, "all", [{"BACKUP_KEEP_DAYS", "007"}])
+      assert %{"keep_days" => 7} = manifest!(ctx)
+    end
+
+    test "0 and -1 keep the default, so a backup three days old survives", ctx do
+      for raw <- ["0", "-1"] do
+        older = dump!(ctx, "20260801-000000")
+        newest = dump!(ctx, "20260805-000000")
+        age!([older, sidecar(older)], 3)
+        age!([newest, sidecar(newest)], 1)
+
+        assert {_out, 0} = backup(ctx, "prune", [{"BACKUP_KEEP_DAYS", raw}])
+        assert File.exists?(older), raw
+      end
+    end
+
+    test "14d prunes like 14, where nothing was pruned before", ctx do
+      older = dump!(ctx, "20260601-000000")
+      newest = dump!(ctx, "20260805-000000")
+      age!([older, sidecar(older)], 30)
+      age!([newest, sidecar(newest)], 1)
+
+      assert {_out, 0} = backup(ctx, "prune", [{"BACKUP_KEEP_DAYS", "14d"}])
+      refute File.exists?(older)
+      refute File.exists?(sidecar(older))
+      assert File.exists?(newest)
+    end
+  end
+
+  # What the app makes of `raw` as BACKUP_KEEP_DAYS (config/runtime/prod/backups.exs):
+  # `{days, warned?}`.
+  defp app_keep_days(raw) do
+    if raw, do: System.put_env(@parity_var, raw), else: System.delete_env(@parity_var)
+
+    {parsed, warning} =
+      ExUnit.CaptureIO.with_io(:stderr, fn -> KilnCMS.Config.Env.positive_integer(@parity_var) end)
+
+    case parsed do
+      {:ok, days} -> {days, warning != ""}
+      _unset_or_unrecognized -> {14, warning != ""}
+    end
+  end
+
+  defp sidecar(dump), do: Path.rootname(dump) <> ".sha256"
+
   # The eleven-part `all` run shared by the default-bash and bash-3.2 tests.
   defp eleven_part_run!(ctx, bash) do
     File.rm_rf!(ctx.media)

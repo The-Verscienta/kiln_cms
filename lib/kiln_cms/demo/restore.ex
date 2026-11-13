@@ -267,7 +267,10 @@ defmodule KilnCMS.Demo.Restore do
     {url, env} = Worker.split_credentials(url)
     env = [{"PGOPTIONS", "-c client_min_messages=warning"} | env]
 
+    # `--no-password`, here and in `dump/2`: a missing password fails at once
+    # instead of prompting on the port's stdin, which never answers.
     args = [
+      "--no-password",
       "--no-psqlrc",
       "--quiet",
       "--output=/dev/null",
@@ -298,7 +301,14 @@ defmodule KilnCMS.Demo.Restore do
          {:ok, _} <-
            cmd(
              "pg_dump",
-             ["--format=custom", "--no-owner", "--no-privileges", "--file=#{partial}", url],
+             [
+               "--no-password",
+               "--format=custom",
+               "--no-owner",
+               "--no-privileges",
+               "--file=#{partial}",
+               url
+             ],
              env
            ),
          {:ok, _} <- cmd("pg_restore", ["--list", partial]),

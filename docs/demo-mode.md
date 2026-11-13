@@ -166,7 +166,9 @@ same residue production has.
   production node given a demo `DATABASE_URL` by copy-paste still refuses.
 - **The tools connect where the app does.** `pg_restore`/`psql` use a URL, which
   `BACKUP_DATABASE_URL` can point anywhere, so that URL's host and database
-  must match the Repo's.
+  must match the Repo's. It is the in-app backup's URL, so `ecto://` works and
+  the password travels as `PGPASSWORD`
+  ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
 - **The snapshot came from a demo database.** Its archive header names the
   database it was dumped from, and that name must contain `demo`. Restoring a
   production backup here would publish production's accounts, password hashes

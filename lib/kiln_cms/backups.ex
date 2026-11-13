@@ -68,6 +68,7 @@ defmodule KilnCMS.Backups do
     Heartbeat,
     Lock,
     Manifest,
+    PgUrl,
     Refused,
     Run,
     Schedule,
@@ -1181,10 +1182,14 @@ defmodule KilnCMS.Backups do
   recoverable from there, and rebuilding one is lossy: it drops the query
   string (`?sslmode=require`) and has to re-encode a password Ecto already
   decoded. Rebuilding is the fallback, not the plan.
+
+  Always a URI libpq reads as one (#2719): whichever source wins, a leading
+  `ecto://` (the form `DATABASE_URL` is documented in) becomes `postgres://`,
+  and nothing else about the string changes (`KilnCMS.Backups.PgUrl.normalize/1`).
   """
   @spec database_url() :: String.t() | nil
   def database_url do
-    presence(config(:database_url)) || matching_env_url() || repo_url()
+    PgUrl.normalize(presence(config(:database_url)) || matching_env_url() || repo_url())
   end
 
   # `DATABASE_URL` is preferred over a rebuild — but ONLY when it describes the

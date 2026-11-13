@@ -13,7 +13,10 @@
 #                                # newest complete one, and work in flight
 #
 # Environment:
-#   DATABASE_URL         source database (required for `db`/`all`; read-only)
+#   DATABASE_URL         source database (required for `db`/`all`; read-only).
+#                        postgres://, postgresql:// or ecto:// (the form the
+#                        app documents); the password reaches pg_dump through
+#                        PGPASSWORD only, never its argv (see pg_conn_split)
 #   BACKUP_DIR           where backups land (default: /var/backups/kiln)
 #   MEDIA_DIR            uploads root when using the Local storage adapter.
 #                        Leave unset on S3/R2 deployments (back up the bucket
@@ -29,7 +32,9 @@
 #                        a pattern without `/` matches a name at any depth)
 #   TMPDIR               where the media file lists are built (default: /tmp);
 #                        removed when the script exits
-#   BACKUP_KEEP_DAYS     local retention in days (default: 14); see `prune`
+#   BACKUP_KEEP_DAYS     local retention in days (1-2147483647, default: 14;
+#                        anything else keeps 14 and warns on stderr, as the
+#                        app does); see `prune`
 #   BACKUP_RCLONE_REMOTE optional rclone target (e.g. "r2:kiln-backups") —
 #                        each new backup is copied off-site after it verifies;
 #                        each file is re-hashed right before its copy and the
@@ -92,7 +97,6 @@ BACKUP_DIR="${BACKUP_DIR:-/var/backups/kiln}"
 if [ -z "${MEDIA_DIR:-}" ] && [ -z "${S3_BUCKET+set}" ]; then
   MEDIA_DIR="${KILN_MEDIA_ROOT:-}"
 fi
-BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 # The stamp and the start from ONE reading of the clock: two `date` calls can
 # straddle a second boundary, and the importer keys a failure manifest by its
 # stamp — a start one second later names a run that doesn't exist.
@@ -204,6 +208,136 @@ rclone_split_remote() {
 
   OFFSITE_REMOTE="${name}:${rest}"
   OFFSITE_ENV=("${env_list[@]}")
+}
+
+# Keep the database password out of pg_dump/pg_restore/psql's argv (#2726) and
+# give libpq a URI it reads as one (#2719), as KilnCMS.Backups.PgUrl.split/1
+# does for the app. Keep the copies of pg_conn_decode and pg_conn_split in
+# scripts/backup.sh, scripts/restore.sh and scripts/staging.sh identical (a
+# test compares them): each script must run alone, so none of them sources a
+# shared file.
+#
+# $1 = percent-encoded text. Sets PG_CONN_DECODED: each valid `%HH` but `%00`
+# decoded, anything else, `+` included, as written.
+pg_conn_decode() {
+  local s="$1" out="" hh
+  # `printf -v … %b`, never `$(printf …)`: a substitution drops trailing
+  # newlines. Literal backslashes are doubled first so `%b` reads only the
+  # `\xHH` escapes made here (a bare `\c` would cut the text short).
+  s="${s//\\/\\\\}"
+  while :; do
+    case "$s" in
+      *%*) ;;
+      *) break ;;
+    esac
+    out+="${s%%\%*}"
+    s="${s#*\%}"
+    hh="${s:0:2}"
+    case "$hh" in
+      00) out+="%" ;;
+      [0123456789ABCDEFabcdef][0123456789ABCDEFabcdef])
+        out+="\\x${hh}"
+        s="${s:2}"
+        ;;
+      *) out+="%" ;;
+    esac
+  done
+  out+="$s"
+  # Not with an empty argument: bash 3.2 then assigns the output of the
+  # previous `printf -v` instead of "".
+  PG_CONN_DECODED=""
+  if [ -n "$out" ]; then printf -v PG_CONN_DECODED '%b' "$out"; fi
+}
+
+# $1 = a DATABASE_URL. Sets PG_CONN_URL (what goes in argv), PG_CONN_PASSWORD
+# and PG_CONN_HAS_PASSWORD (1 when PG_CONN_PASSWORD is to be exported as
+# PGPASSWORD, in a subshell around the one command that needs it):
+#   - `ecto://` (any case) becomes `postgres://`; nothing else is rewritten;
+#   - the userinfo password and every query `password` parameter (the key is
+#     decoded first, as libpq does: `pass%77ord=` is one) are removed and
+#     decoded. The query one wins, as in libpq. The userinfo ends where libpq
+#     ends it (fe-connect.c): at the first `@` before the first `/`, so a `?`
+#     or `#` before that `@` is part of the password; the password runs from
+#     the first `:` in it;
+#   - with no non-empty password the URL is left as written, so an inherited
+#     PGPASSWORD or ~/.pgpass still applies.
+# A string that is not a postgres:// or postgresql:// URI (a `key=value`
+# conninfo) is left unchanged.
+pg_conn_split() {
+  local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
+  local query="" has_query=0 q seg kept="" sep="" qpw="" has_qpw=0
+  PG_CONN_URL="$url"
+  PG_CONN_PASSWORD=""
+  PG_CONN_HAS_PASSWORD=0
+
+  case "$url" in
+    [Ee][Cc][Tt][Oo]://*) url="postgres://${url:7}" ;;
+  esac
+  PG_CONN_URL="$url"
+  case "$url" in
+    postgres://* | postgresql://*) ;;
+    *) return 0 ;;
+  esac
+
+  rest="${url#*://}"
+  userinfo="${rest%%[@/]*}"
+  host="$rest"
+  if [ "${rest:${#userinfo}:1}" = "@" ]; then
+    has_userinfo=1
+    host="${rest:$((${#userinfo} + 1))}"
+    user="$userinfo"
+    case "$userinfo" in
+      *:*)
+        user="${userinfo%%:*}"
+        pw="${userinfo#*:}"
+        has_pw=1
+        ;;
+    esac
+  fi
+
+  # From here `host` is the hosts and the path, up to the query.
+  case "$host" in
+    *\?*)
+      query="${host#*\?}"
+      host="${host%%\?*}"
+      has_query=1
+      ;;
+  esac
+  if [ "$has_query" = 1 ]; then
+    q="$query"
+    while :; do
+      seg="${q%%&*}"
+      PG_CONN_DECODED=""
+      case "$seg" in
+        *=*) pg_conn_decode "${seg%%=*}" ;;
+      esac
+      if [ "$PG_CONN_DECODED" = "password" ]; then
+        qpw="${seg#*=}"
+        has_qpw=1
+      else
+        kept="${kept}${sep}${seg}"
+        sep="&"
+      fi
+      [ "$seg" = "$q" ] && break
+      q="${q#*&}"
+    done
+    [ "$has_qpw" = 1 ] && query="$kept"
+  fi
+
+  if [ "$has_qpw" = 0 ] && { [ "$has_pw" = 0 ] || [ -z "$pw" ]; }; then
+    return 0
+  fi
+  [ "$has_qpw" = 1 ] && pw="$qpw"
+
+  PG_CONN_URL="${url%%://*}://"
+  [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${user}@"
+  PG_CONN_URL+="${host}"
+  [ -n "$query" ] && PG_CONN_URL+="?${query}"
+
+  pg_conn_decode "$pw"
+  PG_CONN_PASSWORD="$PG_CONN_DECODED"
+  [ -n "$PG_CONN_PASSWORD" ] && PG_CONN_HAS_PASSWORD=1
+  return 0
 }
 
 # $1 = file, $2 = recorded sha256, $3 = what it hashes to now (empty: missing
@@ -366,7 +500,7 @@ write_manifest() {
   "ok": $1,
   "artifacts": [${MANIFEST_ARTIFACTS}],
   "offsite": ${offsite},
-  "keep_days": ${BACKUP_KEEP_DAYS},
+  "keep_days": ${KEEP_DAYS},
   "error": ${err}
 }
 JSON
@@ -464,8 +598,14 @@ cmd_db() {
   # depend on the production role existing on the target.
   # Dump to a .partial name and rename only after verification, so an aborted
   # or unverified dump can never be picked up as a backup.
-  pg_dump --format=custom --no-owner --no-privileges \
-    --file="${out}.partial" "$DATABASE_URL"
+  # The password reaches pg_dump through PGPASSWORD only: `export` is a
+  # builtin, and the subshell keeps it from every other command (#2726).
+  pg_conn_split "$DATABASE_URL"
+  (
+    if [ "$PG_CONN_HAS_PASSWORD" = 1 ]; then export PGPASSWORD="$PG_CONN_PASSWORD"; fi
+    pg_dump --format=custom --no-owner --no-privileges \
+      --file="${out}.partial" "$PG_CONN_URL"
+  )
 
   echo "==> Verifying dump (pg_restore --list)"
   pg_restore --list "${out}.partial" >/dev/null ||
@@ -537,6 +677,33 @@ read_media_part_bytes() {
   fi
   MEDIA_PART_MB="${mb:-400}"
   MEDIA_PART_BYTES=$((MEDIA_PART_MB * 1048576))
+}
+
+# KEEP_DAYS from BACKUP_KEEP_DAYS, read like Env.positive_integer/1 (what
+# config/runtime/prod/backups.exs reads it with): blank is the default (14)
+# silently; a whole number from 1 to 2147483647 (an optional `+`, leading
+# zeros allowed) is used, written back without its zeros so the manifest holds
+# a valid JSON number; anything else keeps 14 and warns. `0` is not "keep
+# nothing", and `14d` is not 14: guessing either would delete backups or keep
+# them forever (#2727).
+read_keep_days() {
+  local raw="${BACKUP_KEEP_DAYS:-}" t digits days=""
+  t="$(trim_ws "$raw")"
+  if [ -n "$t" ]; then
+    if [[ "$t" =~ ^\+?[0-9]+$ ]]; then
+      digits="${t#+}"
+      while [ "${#digits}" -gt 1 ] && [ "${digits#0}" != "$digits" ]; do
+        digits="${digits#0}"
+      done
+      if [ "${#digits}" -le 10 ] && [ "$((10#$digits))" -ge 1 ] && [ "$((10#$digits))" -le 2147483647 ]; then
+        days="$((10#$digits))"
+      fi
+    fi
+    if [ -z "$days" ]; then
+      warn "BACKUP_KEEP_DAYS=${raw} is not a whole number of days from 1 to 2147483647; using 14"
+    fi
+  fi
+  KEEP_DAYS="${days:-14}"
 }
 
 # One BACKUP_MEDIA_EXCLUDE glob as an anchored POSIX ERE, the translation the
@@ -1159,7 +1326,7 @@ cmd_verify() {
 #     younger than 60 minutes (the app's partial grace).
 #   - it is the newest COMPLETE unit of its kind (see unit_complete) that is
 #     not in flight and whose stamp is a real date no later than tomorrow.
-#   - any of its regular files is not older than BACKUP_KEEP_DAYS (`-mtime +N`).
+#   - any of its regular files is not older than KEEP_DAYS (`-mtime +N`).
 #
 # The app also keeps anything its run history says is running; this script has
 # no database, so it cannot, and it knows the newest VERIFIED backup only
@@ -1344,7 +1511,7 @@ remove_unit() {
 }
 
 cmd_prune() {
-  echo "==> Pruning backups older than ${BACKUP_KEEP_DAYS} days"
+  echo "==> Pruning backups older than ${KEEP_DAYS} days"
   local kind dir names stamp members newest fresh name db_names="" media_names=""
   local work="$BACKUP_DIR/.work"
 
@@ -1400,7 +1567,7 @@ cmd_prune() {
       for name in $members; do
         is_regular "$dir/$name" || continue
         fresh=0
-        if [ -z "$(find "$dir/$name" -prune -mtime "+${BACKUP_KEEP_DAYS}" -print 2>/dev/null)" ]; then
+        if [ -z "$(find "$dir/$name" -prune -mtime "+${KEEP_DAYS}" -print 2>/dev/null)" ]; then
           fresh=1
           break
         fi
@@ -1415,8 +1582,10 @@ cmd_prune() {
 case "${1:-}" in
   db) install_traps; cmd_db ;;
   media) install_traps; cmd_media ;;
-  all) WRITE_MANIFEST=1; install_traps; cmd_all ;;
+  # BACKUP_KEEP_DAYS is read before the traps, so a failure manifest records
+  # the value `prune` would have used.
+  all) WRITE_MANIFEST=1; read_keep_days; install_traps; cmd_all ;;
   verify) cmd_verify ;;
-  prune) cmd_prune ;;
+  prune) read_keep_days; cmd_prune ;;
   *) die "usage: $0 {db|media|all|verify|prune}" ;;
 esac
