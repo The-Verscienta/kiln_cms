@@ -599,6 +599,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp link_condition(_link, op, _raw, label) when op in ~w(contains starts_with),
     do: {:error, "#{op} is not supported on link fields (#{inspect(label)})"}
 
+  # The shapes no link operator takes (#2739), as on a field: an object, and a
+  # list beside any operator but `in`.
+  defp link_condition(_link, op, raw, label)
+       when (is_map(raw) and not is_struct(raw)) or (is_list(raw) and op not in ~w(in null)),
+       do: operand_shape(raw, op, "link field #{inspect(label)}")
+
   defp link_condition(%{name: name}, "null", raw, label) do
     path = expr(get_path(metadata, [^name]))
 
@@ -625,7 +631,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     if ash_type(link) do
       {:error, "ilike is only supported on text-like link fields (#{inspect(label)})"}
     else
-      {:ok, expr(ilike(get_path(metadata, [^name]), ^to_string(raw)))}
+      with {:ok, pattern} <- cast_value(raw, nil, label) do
+        {:ok, expr(ilike(get_path(metadata, [^name]), ^pattern))}
+      end
     end
   end
 
@@ -641,11 +649,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   # `custom_filter[name][eq][x]=1` parses to a map operand. No operator takes
   # one, and the clauses below `to_string/1` theirs — a raise, so a 500, on a
-  # public read. Lists are each clause's own business (`in` casts them).
+  # public read. Lists are refused below, after `null` and the composite types.
   # Not a struct: GraphQL hands a date operand over as a `%Date{}`.
-  defp condition(%{name: name}, op, raw) when is_map(raw) and not is_struct(raw) do
-    {:error, "#{op} on custom field #{inspect(name)} takes a value, not a nested filter"}
-  end
+  defp condition(%{name: name}, op, raw) when is_map(raw) and not is_struct(raw),
+    do: operand_shape(raw, op, "custom field #{inspect(name)}")
 
   # Presence testing works for every field type, media/reference included.
   defp condition(%{name: name}, "null", raw) do
@@ -681,6 +688,11 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp condition(%{field_type: :group, name: name}, _op, _raw),
     do: {:error, "custom field #{inspect(name)} (group) only supports null"}
 
+  # A list is `in`'s operand only (#2739): beside `ilike` it was joined into
+  # one pattern, beside a media id into one id.
+  defp condition(%{name: name}, op, raw) when is_list(raw) and op != "in",
+    do: operand_shape(raw, op, "custom field #{inspect(name)}")
+
   # A gallery (`multiple` media) or a list of references (`multiple`
   # reference) holds a list of snapshots, so `eq` asks whether the list
   # *contains* the id, `not_eq` whether it does not, and `in` whether it
@@ -689,15 +701,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # Postgrex would encode the JSON string as a JSON string.
   defp condition(%{field_type: type, multiple: true, name: name}, op, raw)
        when type in [:media, :reference] do
-    probe = fn id -> Jason.encode!([%{"id" => to_string(id)}]) end
+    probe = fn id -> Jason.encode!([%{"id" => id}]) end
     contains = fn id -> list_contains(name, probe.(id)) end
 
     case op do
       "eq" ->
-        {:ok, contains.(raw)}
+        with {:ok, id} <- cast_value(raw, nil, name), do: {:ok, contains.(id)}
 
       "not_eq" ->
-        {:ok, expr(not (^absent_safe_contains(name, probe.(raw))))}
+        with {:ok, id} <- cast_value(raw, nil, name),
+             do: {:ok, expr(not (^absent_safe_contains(name, probe.(id))))}
 
       "in" ->
         cast_list(raw, nil, name, fn
@@ -717,10 +730,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
     case op do
       "eq" ->
-        {:ok, snapshot_id(name, raw)}
+        with {:ok, id} <- cast_value(raw, nil, name), do: {:ok, snapshot_id(name, id)}
 
       "not_eq" ->
-        {:ok, expr(^field != ^to_string(raw))}
+        with {:ok, id} <- cast_value(raw, nil, name), do: {:ok, expr(^field != ^id)}
 
       "in" ->
         cast_list(raw, nil, name, fn
@@ -761,7 +774,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     if ash_type(definition) do
       {:error, "ilike is only supported on text-like custom fields (#{inspect(name)})"}
     else
-      {:ok, expr(ilike(get_path(custom_fields, [^name]), ^to_string(raw)))}
+      with {:ok, pattern} <- cast_value(raw, nil, name) do
+        {:ok, expr(ilike(get_path(custom_fields, [^name]), ^pattern))}
+      end
     end
   end
 
@@ -907,14 +922,14 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     expr(fragment("(? -> ?::text) @> ?::text::jsonb", ^ref(:custom_fields), ^name, ^probe))
   end
 
-  # A single media/reference field matched by its snapshot's stable id.
+  # A single media/reference field matched by its snapshot's stable id (text).
   defp snapshot_id(name, id) do
     expr(
       fragment(
         "? @> jsonb_build_object(?::text, jsonb_build_object('id', ?::text))",
         ^ref(:custom_fields),
         ^name,
-        ^to_string(id)
+        ^id
       )
     )
   end
@@ -1254,13 +1269,32 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
+  @doc false
+  # The error for an operand of a shape no operator takes it in (#2739): an
+  # object (`custom_filter[x][eq][y]=1`, or JSON from GraphQL `customFilter` or
+  # MCP), or a list where one value goes. `subject` names the field ("custom
+  # field \"x\"", "link field \"a.link.b\""). Not a struct: GraphQL hands a
+  # date operand over as a `%Date{}`. Shared with `Lists`.
+  @spec operand_shape(term(), String.t(), String.t()) :: :ok | {:error, String.t()}
+  def operand_shape(raw, op, subject) when is_map(raw) and not is_struct(raw),
+    do: {:error, "#{op} on #{subject} takes a value, not a nested filter"}
+
+  def operand_shape(raw, op, subject) when is_list(raw),
+    do: {:error, "#{op} on #{subject} takes one value, not a list"}
+
+  def operand_shape(_raw, _op, _subject), do: :ok
+
+  # `in`'s items are each one value: an object or a list among them is refused
+  # before the cast (an Ecto date cast takes a `%{"year" => …}` map).
   defp cast_list(raw, type, name, build) do
     raw = List.wrap(raw)
 
     raw
     |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
-      case cast_value(item, type, name) do
-        {:ok, value} -> {:cont, {:ok, [value | acc]}}
+      with :ok <- operand_shape(item, "in", "custom field #{inspect(name)}"),
+           {:ok, value} <- cast_value(item, type, name) do
+        {:cont, {:ok, [value | acc]}}
+      else
         {:error, message} -> {:halt, {:error, message}}
       end
     end)

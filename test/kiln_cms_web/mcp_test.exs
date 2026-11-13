@@ -629,4 +629,36 @@ defmodule KilnCMSWeb.McpTest do
     assert text =~ "Subtitle (#{name}) must be a single value, not an object or a list"
     assert KilnCMS.CMS.get_page!(page.id, actor: admin).custom_fields == %{}
   end
+
+  # #2739: a read tool takes `custom_filter` / `custom_where` as JSON, so an
+  # operand can be an object; it is a tool error naming the field, not a 500.
+  test "read_pages with an object operand is a tool error", %{conn: conn} do
+    admin = user(:admin)
+    name = "subtitle#{System.unique_integer([:positive])}"
+    count = "count#{System.unique_integer([:positive])}"
+
+    for {field, type} <- [{name, :string}, {count, :integer}] do
+      KilnCMS.CMS.create_field_definition!(
+        %{content_type: :page, name: field, label: field, field_type: type},
+        actor: admin
+      )
+    end
+
+    key = mint(admin, :read)
+
+    for {input, expected} <- [
+          {%{custom_filter: %{name => %{"ilike" => %{"x" => 1}}}},
+           ~s(ilike on custom field "#{name}" takes a value, not a nested filter)},
+          {%{custom_where: [%{"name" => count, "int" => %{"eq" => %{"a" => 1}}}]},
+           ~s(eq on custom field "#{count}" takes a value, not a nested filter)}
+        ] do
+      conn =
+        rpc(conn, key, "tools/call", %{name: "read_pages", arguments: %{input: input}})
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               json_response(conn, 200)
+
+      assert text =~ expected
+    end
+  end
 end

@@ -246,6 +246,32 @@ defmodule KilnCMSWeb.GraphqlCustomWhereTest do
     end
   end
 
+  # #2739: `customFilter` is JSON, so an operand can be an object or a list of
+  # them; it is the argument's error, not a raise out of `to_string/1`.
+  describe "customFilter operand shapes" do
+    test "an object or a list of objects beside ilike is an error naming the field" do
+      for {operand, expected} <- [
+            {[%{}], ~s(ilike on custom field "title_text" takes one value, not a list)},
+            {%{"x" => 1},
+             ~s(ilike on custom field "title_text" takes a value, not a nested filter)}
+          ] do
+        assert {:ok, %{errors: [%{message: message}]}} =
+                 run(%{"f" => Jason.encode!(%{"title_text" => %{"ilike" => operand}})})
+
+        assert message =~ expected
+      end
+    end
+
+    test "an object among the items of in on a date list or field is an error" do
+      date = %{"year" => 2026, "month" => 3, "day" => 1}
+
+      assert {:ok, %{errors: [%{message: message}]}} =
+               run(%{"f" => Jason.encode!(%{"on" => %{"in" => [date]}})})
+
+      assert message =~ ~s(in on custom field "on" takes a value, not a nested filter)
+    end
+  end
+
   describe "customFilter regression" do
     test "customFilter still works alone, with ilike and bare equality", %{apple: a, plum: l} do
       assert filter_ids!(%{"count" => %{"gt" => 5}}) == sorted([l])

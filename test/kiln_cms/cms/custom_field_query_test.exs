@@ -234,6 +234,98 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
     end
   end
 
+  # #2739: an operand of a shape no operator takes — an object from
+  # `custom_filter[x][op][y]=1` or JSON, a list beside anything but `in` — is
+  # the argument's 400, never a raise out of `to_string/1` (a 500).
+  describe "operand shapes" do
+    defp shape_error(filter, admin) do
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Query.InvalidArgument{} = error]}} =
+               CMS.list_pages(%{custom_filter: filter}, actor: admin)
+
+      assert error.field == :custom_filter
+      error.message
+    end
+
+    defp media_item! do
+      Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+        filename: "cfq-shape-#{System.unique_integer([:positive])}.png",
+        url: "/uploads/cfq.png"
+      })
+    end
+
+    test "an object operand on a scalar field is refused for every operator" do
+      admin = admin()
+      name = field_name("subtitle")
+      define!(%{name: name, field_type: :string}, admin)
+
+      for op <- ~w(eq not_eq gt ilike contains starts_with) do
+        assert shape_error(%{name => %{op => %{"x" => "1"}}}, admin) ==
+                 ~s(#{op} on custom field "#{name}" takes a value, not a nested filter)
+      end
+    end
+
+    test "a list operand beside one-value operators is refused, not joined" do
+      admin = admin()
+      name = field_name("subtitle")
+      define!(%{name: name, field_type: :string}, admin)
+
+      for operand <- [[%{}], ["a"]], op <- ~w(ilike eq not_eq gte) do
+        assert shape_error(%{name => %{op => operand}}, admin) ==
+                 ~s(#{op} on custom field "#{name}" takes one value, not a list)
+      end
+
+      assert shape_error(%{name => %{"in" => [%{"x" => 1}]}}, admin) ==
+               ~s(in on custom field "#{name}" takes a value, not a nested filter)
+    end
+
+    test "a media or reference field refuses an object or a list where it takes an id" do
+      admin = admin()
+      cover = field_name("cover")
+      shots = field_name("shots")
+      refs = field_name("refs")
+      define!(%{name: cover, field_type: :media}, admin)
+      define!(%{name: shots, field_type: :media, multiple: true}, admin)
+      define!(%{name: refs, field_type: :reference, target_type: "page"}, admin)
+
+      assert shape_error(%{cover => %{"not_eq" => [%{}]}}, admin) =~ "takes one value, not a list"
+      assert shape_error(%{cover => %{"eq" => ["a", "b"]}}, admin) =~ "takes one value, not a list"
+      assert shape_error(%{shots => %{"eq" => [%{}]}}, admin) =~ "takes one value, not a list"
+      assert shape_error(%{shots => %{"not_eq" => %{"id" => "x"}}}, admin) =~ "nested filter"
+      assert shape_error(%{refs => %{"in" => [%{}]}}, admin) =~ "nested filter"
+
+      # A bare id still matches, alone or in a list for `in`.
+      item = media_item!()
+      page = page!(%{shots => [item.id]}, admin)
+      assert list_ids!(%{custom_filter: %{shots => %{"in" => [item.id]}}}, admin) == [page.id]
+      assert list_ids!(%{custom_filter: %{shots => item.id}}, admin) == [page.id]
+    end
+
+    test "a number or a boolean is still read as its text by ilike and eq" do
+      admin = admin()
+      name = field_name("code")
+      define!(%{name: name, field_type: :string}, admin)
+
+      forty_two = page!(%{name => "42"}, admin)
+      yes = page!(%{name => "true"}, admin)
+
+      assert list_ids!(%{custom_filter: %{name => %{"ilike" => 42}}}, admin) == [forty_two.id]
+      assert list_ids!(%{custom_filter: %{name => %{"eq" => 42}}}, admin) == [forty_two.id]
+      assert list_ids!(%{custom_filter: %{name => true}}, admin) == [yes.id]
+    end
+
+    test "nil is not a pattern, and null takes true or false, not a list" do
+      admin = admin()
+      name = field_name("subtitle")
+      define!(%{name: name, field_type: :string}, admin)
+
+      assert shape_error(%{name => %{"ilike" => nil}}, admin) ==
+               ~s(invalid value for custom field "#{name}")
+
+      assert shape_error(%{name => %{"null" => ["true"]}}, admin) ==
+               ~s(null for custom field "#{name}" must be true or false)
+    end
+  end
+
   describe "the entry tier (dynamic types)" do
     defp define_type!(actor) do
       CMS.create_type_definition!(

@@ -53,15 +53,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
   def condition(definition, op, raw)
 
   def condition(%{name: name} = definition, "eq", raw) do
-    with {:ok, value} <- cast(raw, definition), do: {:ok, contains_any(name, [value])}
+    with {:ok, value} <- cast(raw, definition, "eq"), do: {:ok, contains_any(name, [value])}
   end
 
   def condition(%{name: name} = definition, "not_eq", raw) do
-    with {:ok, value} <- cast(raw, definition), do: {:ok, does_not_contain(name, value)}
+    with {:ok, value} <- cast(raw, definition, "not_eq"),
+         do: {:ok, does_not_contain(name, value)}
   end
 
   def condition(%{name: name} = definition, "in", raw) do
-    with {:ok, values} <- cast_all(List.wrap(raw), definition) do
+    with {:ok, values} <- cast_all(List.wrap(raw), definition, "in") do
       {:ok, if(values == [], do: expr(false), else: contains_any(name, values))}
     end
   end
@@ -203,6 +204,14 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
   # Containment compares JSON exactly, so anything looser misses. An operand
   # the field could never hold falls back to the single field's cast, for
   # its error.
+  #
+  # An object or a list is refused first (#2739): an Ecto date cast would take
+  # `%{"year" => …, "month" => …, "day" => …}` where a single field refuses it.
+  defp cast(raw, %{name: name} = definition, op) do
+    with :ok <- CustomFieldQuery.operand_shape(raw, op, "custom field #{inspect(name)}"),
+         do: cast(raw, definition)
+  end
+
   defp cast(raw, %{name: name, field_type: type} = definition)
        when type in @typed and (is_binary(raw) or is_number(raw)) do
     case ApplyCustomFields.coerce_item(definition, raw) do
@@ -214,10 +223,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
   defp cast(raw, %{name: name} = definition),
     do: CustomFieldQuery.cast_value(raw, CustomFieldQuery.ash_type(definition), name)
 
-  defp cast_all(raw, definition) do
+  defp cast_all(raw, definition, op) do
     raw
     |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
-      case cast(item, definition) do
+      case cast(item, definition, op) do
         {:ok, value} -> {:cont, {:ok, [value | acc]}}
         error -> {:halt, error}
       end
@@ -242,7 +251,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
         {:error, "#{op} for #{inspect(name)} takes at most #{max} values"}
 
       true ->
-        with {:ok, values} <- cast_all(raw, definition), do: {:ok, Enum.uniq(values)}
+        with {:ok, values} <- cast_all(raw, definition, op), do: {:ok, Enum.uniq(values)}
     end
   end
 end

@@ -266,6 +266,34 @@ defmodule KilnCMS.CMS.ScalarListQueryTest do
       end
     end
 
+    # #2739: an Ecto date cast takes `%{"year" => …}`, so this was a 200 on a
+    # date list while the single field refused the same operand.
+    test "an object operand is a 400 on every list type, as on a single field" do
+      admin = admin()
+      date = %{"year" => "2026", "month" => "3", "day" => "1"}
+
+      for type <- [:date, :datetime, :integer, :url, :email, :string, :select] do
+        attrs = if type == :select, do: %{options: ["a"]}, else: %{}
+        field = list!(type, admin, attrs)
+
+        for {op, operand, expected} <- [
+              {"eq", date,
+               "eq on custom field #{inspect(field.name)} takes a value, not a nested filter"},
+              {"not_eq", date, "takes a value, not a nested filter"},
+              {"in", [date],
+               "in on custom field #{inspect(field.name)} takes a value, not a nested filter"},
+              {"has", [%{"x" => 1}], "has on custom field #{inspect(field.name)} takes a value"},
+              {"has_all", %{"x" => 1}, "takes a value, not a nested filter"},
+              {"eq", ["a"],
+               "eq on custom field #{inspect(field.name)} takes one value, not a list"},
+              {"in", [["a"]], "takes one value, not a list"}
+            ] do
+          message = error!(%{custom_filter: %{field.name => %{op => operand}}}, admin)
+          assert {type, op, message =~ expected} == {type, op, true}, message
+        end
+      end
+    end
+
     test "has and count on a single scalar are still relationship operators" do
       admin = admin()
 
