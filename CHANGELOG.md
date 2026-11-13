@@ -73,6 +73,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The editor's image picker (featured image, social image, image and gallery blocks, media fields) has its own Upload button and drop zone; the uploaded image is used right away.**
   ([long form](docs/changelog/unreleased.md#image-picker-upload))
 
+- **Security posture has a new site line, "Security alerts reach someone": Review when the site's alerts are turned off, or some or all of them would reach no admin and no webhook.**
+  ([long form](docs/changelog/unreleased.md#posture-security-alerts-reach-someone))
+
 ### Changed
 
 - **Webhook URLs are masked (`https://host/…/last4`) on the Webhooks page, in the governance trail and its JSON/CSV exports (now also with `endpoint_id`), and in notices and logs. Reveal URL shows one; the edit form starts blank, and blank keeps the URL.**
@@ -88,6 +91,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Security alerts: the inbox says each alert in the reader's language, a delivery that exhausts its attempts emits `alert_failed`, other sites' consoles show "N unread platform alerts", and the full-IP help text covers IPv6.**
   ([long form](docs/changelog/unreleased.md#security-alert-gaps-2642))
+
+- **Concurrent failed sign-ins on one site no longer queue on one database row; the failed-sign-in alert can now carry a count above 10.**
+  ([long form](docs/changelog/unreleased.md#failed-sign-in-tally-sharded))
 
 - **Duplicating a form whose autoresponder is on and uses `[field:…]` tokens works again; a `website` field is copied as `website_2`, and a field that can't be copied is named.**
   ([long form](docs/changelog/unreleased.md#form-duplicate-autoresponder))

@@ -16,8 +16,8 @@ its last answer for a site for 30 seconds, in memory, without any line's
 
 - **Site administrators** see **This site**: the lines about their own site.
   These cover which of the site's administrators and editors have two-step
-  sign-in, the idle sign-out, the admin allowlist and the breached-password
-  policy.
+  sign-in, the idle sign-out, the admin allowlist, the breached-password
+  policy, and whether the site's security alerts reach anyone.
 - **Platform administrators** see **This site** for the site they are on,
   and also **This installation**: lines about the whole deployment. These
   cover HTTPS, exposed endpoints, API keys, human verification, the Kiln
@@ -213,6 +213,7 @@ Each check has an id, used in logs, telemetry and by plugins. A check with no
 | Idle sign-out (`core.idle_timeout`) | This site | The site's session policy | | Neither timeout is set | Unknown: the policy can't be read | **Sign-in & access → Sessions** (`/editor/sessions`) |
 | Admin allowlist (`core.admin_allowlist`) | This site | The site's allowlist, and `KILN_ADMIN_ALLOWLIST_DISABLED` | A list is saved, but the switch turns it off | | N/A: no list. Unknown: the list can't be read | **Sign-in & access → Admin allowlist** (`/editor/admin-allowlist`) |
 | Breached passwords (`core.breached_passwords`) | This site | The policy for administrators: the site's choice, else `BREACHED_PASSWORD_POLICY`, and `BREACHED_PASSWORD_CHECK` | Off, or `BREACHED_PASSWORD_CHECK=false` | Warn | Unknown: the site's policy can't be read | **Sign-in & access → Password policy** (`/editor/password-policy`) |
+| Security alerts reach someone (`core.security_alerts_reach_someone`) | This site | The site's security alert settings, its admins (or the platform administrators when it has none) and whether each muted the alert email, its active webhook endpoints subscribed to `security.*` events, and the deployment's alerts switch | | Alerts are off for the deployment; every kind is off; no admin and no webhook would get one; or no admin gets them and some kind on has no webhook | Unknown: the settings or the webhook endpoints can't be read | **Security alerts** (`/editor/security-alerts`), **Team** (`/editor/team`) or **Your settings** (`/editor/settings`), by case |
 | Two-step sign-in for platform administrators (`core.operator_second_factor`) | This installation | Every platform administrator and whether each has an authenticator app | A platform administrator has none | | N/A: no platform administrators | **Your settings** (`/editor/settings`), by each person |
 | HTTPS and secure cookies (`core.transport`) | This installation | What the running release was built with: `force_ssl`, HSTS, the public URL's scheme, the session cookie's `Secure` flag | Any of the four is off | | N/A: not a production build | Environment |
 | Exposed endpoints (`core.exposed_endpoints`) | This installation | The metrics listener's settings, `API_DOCS_ENABLED`, `GRAPHQL_INTROSPECTION_ENABLED` | Metrics on every interface with no token | The API explorer or GraphQL introspection is on | | Environment |
@@ -279,6 +280,58 @@ policy the way it is enforced for an administrator: the site's own choice, or
 the operator's default (`BREACHED_PASSWORD_POLICY`) when the site has made
 none. Only **Block** is **OK**; **Warn** is **Review**; **Off**, or
 `BREACHED_PASSWORD_CHECK=false` for the installation, is **Fix now**.
+
+### Security alerts
+
+Whether the site's [security alerts](security-alerts.md) (lockouts, new
+administrators, removed second factors, sign-in changes) would reach anyone:
+by bell, by email or by a webhook. It reads what delivery reads, so a line
+marked **OK** means an alert raised now would go somewhere.
+
+It is **Review** when:
+
+- alerts are turned off for the whole deployment. This is set in the
+  application config (`config :kiln_cms, KilnCMS.Security.Alerts,
+  enabled: false`, which the test suite uses), not by an environment
+  variable or on any page, and the line has no **Fix** link;
+- every alert kind is unticked on **Security alerts**;
+- no one would get an alert: **Notify this site's admins by bell and email**
+  is off (or the site has no admins and the installation has no platform
+  administrators), and no active webhook endpoint is subscribed to an alert
+  kind the site has on;
+- no admin gets alerts, and some kind the site has on has no webhook
+  endpoint subscribed to it. An endpoint subscribed to `security.lockout`
+  does not carry `security.new_admin`.
+
+It is **OK**, and says how alerts arrive, when:
+
+- they reach the site's admins by bell and email;
+- they reach them by bell only, because every one of them muted the email
+  under **Your settings**. The bell still rings, so this is not a warning;
+- they go to the platform administrators, because the site has no admins of
+  its own ([who hears about it](security-alerts.md#who-hears-about-it));
+- they go only by webhook, and every kind the site has on has an endpoint
+  subscribed to it.
+
+**Unknown** means the site's alert settings or its webhook endpoints could
+not be read. An unreadable setting is not the site's choice, and a refused
+read of the endpoints is not "no endpoints".
+
+The **Fix** link depends on the case: **Security alerts**
+(`/editor/security-alerts`) when kinds or admin notifications are off or
+webhooks are the only route, **Team** (`/editor/team`, a platform
+administrator's page) when the site has no admins of its own, and **Your
+settings** (`/editor/settings`) when every admin muted the email: each of
+them turns it back on there for themselves.
+
+The `facts` in the [JSON](#monitor-the-posture-from-a-script) are counts and
+flags only, never who the recipients are: `deployment_enabled`,
+`enabled_kinds`, `notify_admins`, `member_admins`, `fallback` (alerts go to
+the platform administrators), `bell_recipients`, `email_recipients`,
+`subscribed_endpoints` (endpoints carrying at least one kind the site has
+on) and `uncovered_kinds` (kinds the site has on that no endpoint carries,
+whether or not admins get them). With alerts off for the deployment, only
+`deployment_enabled: false` is given.
 
 ### HTTPS and secure cookies
 

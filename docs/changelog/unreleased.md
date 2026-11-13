@@ -80,6 +80,30 @@ carries the reasoning.
   edit the document see the upload area. The Branding page's image drawer is
   unchanged. (#2791)
 
+<a id="posture-security-alerts-reach-someone"></a>
+
+- **Security posture has a new site line, "Security alerts reach someone" (`core.security_alerts_reach_someone`).**
+  A site could have security alerts that went nowhere: every kind unticked,
+  admin notifications off with no webhook, or webhooks covering only some
+  kinds, and nothing said so. The line reads what delivery reads (the site's
+  alert settings, its recipients, who muted the email, and the active
+  endpoints subscribed to an alert kind it has on) and is **Review** when
+  alerts are off for the deployment (`config :kiln_cms,
+  KilnCMS.Security.Alerts, enabled: false`), when every kind is off, when no
+  bell, email or webhook would carry an alert, or when no admin gets them
+  and some kind on has no endpoint. It is **OK**, saying how, for
+  webhook-only delivery that covers every kind, for a site with no admins
+  of its own (alerts go to the platform admins), and for admins who all
+  muted the email (the bell still rings); **Unknown** when the settings or
+  endpoints can't be read. Its `facts` in `/api/security/posture` are counts
+  and flags only (`deployment_enabled`, `enabled_kinds`, `notify_admins`,
+  `member_admins`, `fallback`, `bell_recipients`, `email_recipients`,
+  `subscribed_endpoints`, `uncovered_kinds`), never who the recipients are.
+  New `KilnCMS.Security.Alerts.read_settings/1` returns `:error` instead of
+  the fallback settings when the row can't be read. See
+  [Security alerts](../security-posture.md#security-alerts) in the posture
+  guide. (#2640)
+
 ## Changed
 
 <a id="form-field-name-website-reserved"></a>
@@ -164,6 +188,37 @@ carries the reasoning.
     alert shows only the address's network: its /24 for IPv4, its /48 for
     IPv6. The security log keeps the full address either way." (#2642)
 
+
+<a id="failed-sign-in-tally-sharded"></a>
+
+- **A burst of failed sign-ins on one site no longer queues on one database row, and the failed-sign-in alert can carry a count above 10.**
+  Every failed sign-in on a site with the `failed_sign_ins` alert on added
+  one to a single `throttle_counters` row, so concurrent attempts waited on
+  its row lock. The count is now spread over 8 rows per site, picked at
+  random (an attacker can't steer it), and summed by a second statement
+  after the increment commits (`ThrottleStore.count_sharded/5`,
+  `window_sum/3`). The alert fires when the total is at least 10 rather than
+  exactly 10, because attempts that arrive together can each read a total
+  past it; its `count` (`threshold_count`) is the total the first of them
+  saw, so it can be 11 or more. A node-local memo
+  (`KilnCMS.Security.AlertTrips`) lets only the first crossing per site and
+  window on each node be recorded unsampled and try to claim the alert, and
+  `AlertGate` still keeps it to one alert across nodes. If the sum can't be
+  read, the shard's own count is used, which undercounts, so the alert can
+  come late during that fault. A crossing counted on a node's local fallback
+  (database down) does not use up the window's shared crossing. The
+  window's summary reads the sum too (`Alerts.failed_sign_in_total/2`).
+  No migration. **Rolling deploy:** the sum includes the old single-row
+  key, so counts from a 1.9 node are kept; a 1.9 node reads only that key,
+  so in the window of the deploy or a rollback it can raise the alert late
+  and, if it sends the summary, show too low a count or skip it ("the
+  failed sign-in tally for its window is gone").
+  Measured with the new `:benchmark` test (excluded by default; `mix test
+  --only benchmark test/kiln_cms/accounts/throttle_store_sharded_benchmark_test.exs`)
+  on a loaded development host: with 16 concurrent writers on one site,
+  p50/p99 per charge went from about 0.97/5.95 ms (one row) to 0.76/2.69 ms
+  (8 shards); with 32 writers p50 improved and p99 was too noisy to call.
+  (#2639)
 
 <a id="form-duplicate-autoresponder"></a>
 
