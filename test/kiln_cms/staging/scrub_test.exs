@@ -204,6 +204,39 @@ defmodule KilnCMS.Staging.ScrubTest do
     end
   end
 
+  describe "the scrub table in docs/staging-environments.md" do
+    # The table drifted once (#2454): five purges were added to the scrub with
+    # no row. Every row now names its summary key, so the keys a real run
+    # returns are the list the table must cover.
+    @guide "docs/staging-environments.md"
+
+    test "names every key of the scrub's summary" do
+      keys = Scrub.run([]) |> Map.keys() |> Enum.sort()
+      table = scrub_table!()
+
+      missing = Enum.reject(keys, &String.contains?(table, "(`#{&1}`)"))
+
+      assert missing == [], """
+      The scrub table in #{@guide} ("## The scrub") has no row for:
+
+        #{Enum.map_join(missing, "\n  ", &inspect/1)}
+
+      Add a row for each that says what is purged or de-activated and why,
+      with its summary key in the Action column, e.g. "purged (`#{List.first(missing)}`)".
+      """
+    end
+
+    defp scrub_table! do
+      [_, section] = @guide |> File.read!() |> String.split("\n## The scrub\n", parts: 2)
+      [section | _] = String.split(section, "\n## ", parts: 2)
+
+      section
+      |> String.split("\n")
+      |> Enum.filter(&String.starts_with?(&1, "| "))
+      |> Enum.join("\n")
+    end
+  end
+
   describe "scrub!/1 guards" do
     test "refuses without explicit confirmation" do
       assert_raise RuntimeError, ~r/without explicit confirmation/, fn ->

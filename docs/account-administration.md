@@ -295,6 +295,8 @@ resend, because an accepted invitation would outlast the grant.
 Invitations work on an invite-only site (`:registration_enabled` false) too:
 that is what they are for there.
 
+Why an invitation is not an account until it is accepted: [ADR 0050](decisions/0050-a-site-invitation-is-its-own-row-not-an-account-written-up-front.md).
+
 1. Open the console on the host of the site you are inviting them to, then
    **Team** under **Operations** in the sidebar (`/editor/team`). Team acts on
    the site the console is showing.
