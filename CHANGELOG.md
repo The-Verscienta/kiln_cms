@@ -74,6 +74,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `platform_security_alerts`). Blocked-address alerts are on for every site (up to one alert and one summary per 15 minutes; off under Security alerts → Blocked addresses). Existing webhook endpoints, Slack too, need `security.blocked_ip` ticked; until then a webhook-only site's "Security alerts reach someone" line reads Review.**
   ([long form](docs/changelog/unreleased.md#blocked-ip-alerts-upgrade))
 
+- **`backup.sh` now refuses a `BACKUP_KEEP_DAYS` that is not a whole number of days from 1 to 2147483647, and keeps 14. A host that set `0` keeps 14 days of backups (check the disk); one that set `14d` on Linux, which pruned nothing, deletes backups older than 14 days at its next prune.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
+
 ### Added
 
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
@@ -173,6 +176,17 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The Backups page shows recovery-point and last-good badges on History rows and a last-good summary, explains the backup queue under Back up now, and hides Cancel on a finishing row.**
   ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
+
+- **The in-app backup, the demo reset and `backup.sh`, `restore.sh` and `staging.sh` accept an `ecto://` database URL, the documented form, which every dump used to fail on.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#database-url-ecto-scheme))
+
+- **`backup.sh` reads `BACKUP_KEEP_DAYS` like the app: anything but a whole number of days from 1 to 2147483647 keeps 14 and warns, instead of pruning nothing (`14d`), pruning all but a day (`0`) or writing an unreadable `manifest.json`.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-validated))
+
+### Security
+
+- **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-scripts-password-out-of-argv))
 
 ## [1.9.2] - 2026-11-12
 

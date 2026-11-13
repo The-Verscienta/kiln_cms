@@ -60,7 +60,7 @@ three starts and serves.
 
 | Variable | Purpose | Where it's read |
 |----------|---------|-----------------|
-| `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. | [`config/runtime/prod/database.exs:11`](../config/runtime/prod/database.exs#L11) |
+| `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. The in-app backup, the demo reset and `scripts/backup.sh` give it to `pg_dump` as `postgres://`, with the password in `PGPASSWORD` ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)). | [`config/runtime/prod/database.exs:11`](../config/runtime/prod/database.exs#L11) |
 | `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime/prod/web.exs:16`](../config/runtime/prod/web.exs#L16) |
 | `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime/prod/web.exs:247`](../config/runtime/prod/web.exs#L247) |
 
@@ -384,6 +384,10 @@ unix-socket repo, say). Unset, the app uses `DATABASE_URL` when it names the
 database the app is connected to, else a URL rebuilt from the Repo
 ([`config/runtime/prod/backups.exs:95`](../config/runtime/prod/backups.exs#L95),
 `KilnCMS.Backups.database_url/0`). `scripts/backup.sh` does not read it.
+Whichever URL wins may be `ecto://`, `postgres://` or `postgresql://`; it reaches
+`pg_dump` as `postgres://`, and an Ecto-only query parameter such as
+`pool_size` is refused by libpq, so set this variable without one
+([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
 
 **Read only by the scripts.** `scripts/backup.sh` also reads `BACKUP_PING_URL`
 (a URL it `curl`s after a successful run), `BACKUP_TRIGGER` (the label in the
@@ -405,7 +409,7 @@ Kiln neither reads nor checks them. The name `kiln_offsite` is reserved
 |----------|---------|---------|-----------------|
 | `BACKUP_ENABLED` | `true` | Set to an off-spelling to disable the **in-app** backup path — the console explains why and the button is disabled. Cron backups on the host are unaffected, which is the point: turning off the button is not turning off backups. Parsed by the shared [on/off rules](#boolean-variables). | [`config/runtime/prod/backups.exs:46`](../config/runtime/prod/backups.exs#L46) |
 | `BACKUP_DIR` | `/var/backups/kiln` | Where backups land, for both paths. | [`config/runtime/prod/backups.exs:47`](../config/runtime/prod/backups.exs#L47) |
-| `BACKUP_KEEP_DAYS` | `14` | Local retention in days, enforced by both paths: the age at which a local backup may be deleted, counted as `find -mtime +N` does. Recovery points, backups in flight and the newest good backup of each component are kept past it ([backups.md](backups.md#what-retention-deletes-and-what-it-keeps)). A non-positive or unparseable value keeps the default and warns — read literally, `0` would delete the backup it had just taken. | [`config/runtime/prod/backups.exs:48`](../config/runtime/prod/backups.exs#L48) |
+| `BACKUP_KEEP_DAYS` | `14` | Local retention in days, enforced by both paths: the age at which a local backup may be deleted, counted as `find -mtime +N` does. Recovery points, backups in flight and the newest good backup of each component are kept past it ([backups.md](backups.md#what-retention-deletes-and-what-it-keeps)). A non-positive or unparseable value keeps the default and warns, in the app at boot and in `scripts/backup.sh all`/`prune` on stderr (the script used the value unchecked before #2727) — read literally, `0` would delete the backup it had just taken. | [`config/runtime/prod/backups.exs:48`](../config/runtime/prod/backups.exs#L48) |
 | `BACKUP_STALE_AFTER_HOURS` | `36` | How old the newest backup may be before the console warns and the overview shows a red strip. Deliberately longer than a daily cadence: a warning that fires because a nightly job ran at 03:20 instead of 03:17 is one an admin learns to ignore. | [`config/runtime/prod/backups.exs:49`](../config/runtime/prod/backups.exs#L49) |
 | `BACKUP_MEDIA_PART_MB` | `400` | Target ceiling, in MB, on the input size of one media archive part (`kiln-media-<stamp>.partNN.tar.gz`), for the in-app path and `scripts/backup.sh` alike. Accepted range 16 to 10240; a value outside it, or not a whole number, keeps the default and warns (a boot warning in the app, a stderr line from the script) — it is refused, not clamped or interpreted. There is no off switch: splitting is always on. A target, not an exact size: a part closes when the next file would pass it, and one file larger than the cap becomes its own part. | [`config/runtime/prod/backups.exs:59`](../config/runtime/prod/backups.exs#L59) |
 | `BACKUP_MEDIA_EXCLUDE` | unset (nothing excluded) | Comma-separated glob patterns, matched against each file's path relative to the media directory, that the media archive leaves out, in the app and in `scripts/backup.sh` (for example `tmp/**,cache/**`). A pattern without `/` matches a name at any depth; one ending in `/` matches nothing. Blank entries are ignored; unset or blank turns exclusions off. | [`config/runtime/prod/backups.exs:67`](../config/runtime/prod/backups.exs#L67) |

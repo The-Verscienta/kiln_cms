@@ -236,7 +236,7 @@ defmodule KilnCMS.Backups.Manifest do
       components: components_list(map["components"]),
       artifacts: artifacts(map["artifacts"]),
       offsite: string(map["offsite"]),
-      keep_days: integer(map["keep_days"]),
+      keep_days: positive(map["keep_days"]),
       error: string(map["error"])
     }
   end

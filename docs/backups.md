@@ -109,6 +109,19 @@ deleted, not a promise that it will be. "Older than `BACKUP_KEEP_DAYS`" means
 what `find -mtime +N` means: at least N + 1 whole days old. With the default, a
 dump 14 days and 6 hours old stays and one 15 days old may go.
 
+Both paths read the value the same way: a whole number of days from 1 to
+2147483647, with surrounding spaces, a leading `+` and leading zeros allowed.
+Blank or unset means 14. Anything else (`0`, `-1`, `14d`, `1.5`) also means 14,
+with a warning; `backup.sh all` and `backup.sh prune` write it to stderr:
+
+```text
+warning: BACKUP_KEEP_DAYS=14d is not a whole number of days from 1 to 2147483647; using 14
+```
+
+`0` is not "keep nothing" and `14d` is not 14: guessing either way would delete
+backups or keep them forever. (Before #2727 the script used the value
+unchecked.)
+
 **The unit is one component of one stamp.** A stamp's database dump and its
 sidecar are one unit; its media archive (or every part of it) and the media
 sidecar are another. Each unit is aged by its own newest file and deleted
@@ -623,6 +636,86 @@ That constraint is why the app shells out to `pg_dump` and `tar` rather than
 implementing them in Elixir: a hand-rolled export would be a second format
 with a second restore procedure, and the restore path is where a backup system
 earns its keep.
+
+### Which database URL the backup tools accept (#2719)
+
+`pg_dump`, `pg_restore` and `psql` read a connection string as a URL only
+when it starts with `postgres://` or `postgresql://`. Kiln documents
+`DATABASE_URL` as `ecto://…`, so every Kiln path that hands a URL to them
+rewrites a leading `ecto://` (in any case) to `postgres://` first, and changes
+nothing else in the string:
+
+| Path | Reads |
+|---|---|
+| In-app backup | `BACKUP_DATABASE_URL`, else `DATABASE_URL` when it names the database the app is connected to, else a URL rebuilt from the Repo |
+| [Demo reset](demo-mode.md) | the same URL as the in-app backup |
+| `scripts/backup.sh` | `DATABASE_URL` |
+| `scripts/restore.sh` | `RESTORE_DATABASE_URL` |
+| `scripts/staging.sh` | `PROD_DATABASE_URL`, `STAGING_DATABASE_URL` |
+
+So `ecto://`, `postgres://` and `postgresql://` all work, and the query
+string (`?sslmode=require`, several hosts, an IPv6 `[::1]`) reaches libpq as
+you wrote it.
+
+**Ecto-only query parameters are not translated.** libpq refuses any
+parameter it doesn't know, by name:
+
+```text
+pg_dump: error: invalid URI query parameter: "pool_size"
+```
+
+`ssl=true` is the exception: libpq reads it itself, as `sslmode=require`,
+while `ssl=false` is refused like `pool_size`. When the app's `DATABASE_URL`
+carries such a parameter, set `BACKUP_DATABASE_URL` to the same connection
+without it for the in-app backup, and give `backup.sh` a `DATABASE_URL` in
+libpq's form:
+
+```bash
+BACKUP_DATABASE_URL=postgres://kiln:…@postgres/kiln_prod?sslmode=require
+```
+
+A `key=value` connection string (`host=postgres dbname=kiln_prod`) is passed
+through as written; see the next section for why a URL is better.
+
+### The database password stays out of the pg_dump command line (#2726)
+
+A process's arguments are readable by every user on the host, through
+`/proc/<pid>/cmdline` and `ps`, for as long as it runs. So neither the app nor
+the scripts put the database password there. Each takes it out of the URL and
+gives it to the one `pg_dump`, `pg_restore` or `psql` that needs it as
+`PGPASSWORD` (the scripts set it in a subshell around that command, so
+`rclone`, `tar` and `curl` never see it):
+
+| URL | the command's argument | its `PGPASSWORD` |
+|---|---|---|
+| `ecto://kiln:hunter2@postgres/kiln_prod` | `postgres://kiln@postgres/kiln_prod` | `hunter2` |
+| `postgres://kiln:p%40ss@db/kiln?sslmode=require` | `postgres://kiln@db/kiln?sslmode=require` | `p@ss` |
+| `postgres://kiln@db/kiln?sslmode=require&password=hunter2` | `postgres://kiln@db/kiln?sslmode=require` | `hunter2` |
+| `postgres://kiln:a@db/kiln?password=b` | `postgres://kiln@db/kiln` | `b` |
+| `postgres://kiln@db/kiln` | `postgres://kiln@db/kiln` | not set: yours, or `~/.pgpass`, applies |
+| `host=db password=hunter2 dbname=kiln` | as written, password included | not set |
+
+The URL is split where libpq splits it:
+
+- **The user and password end at the first `@` before the first `/`.** Write an
+  `@` in the password as `%40`: `postgres://u:p@ss@h/db` gives the password
+  `p`. A `?` or `#` before that `@` is part of the password.
+- **Percent-escapes in the password are decoded** (`%40` is `@`, `%25` is `%`);
+  `+` stays a `+`, and a malformed escape such as `%zz` stays as written.
+- **A `password=` query parameter is moved too**, also when its name is
+  escaped (`pass%77ord=`). With a password in both places, the query one
+  wins, as in libpq.
+- **A URL without a password** (or with an empty one, `kiln:@db`) is left as
+  written, apart from `ecto://`, so your own `PGPASSWORD` or `~/.pgpass`
+  decides.
+- **A `key=value` string is not a URL** and is passed as it is, password
+  included. Use a URL.
+
+The scripts don't print it either. `restore.sh drill` suggests a
+`STAGING_DATABASE_URL=… ./scripts/staging.sh scrub` line with the password
+removed, and `staging.sh up` prints the staging `DATABASE_URL=` the same way;
+both say "password not shown". Put the password back in the URL, or export
+`PGPASSWORD`, before using them.
 
 ### How an in-app backup runs (#2218)
 
@@ -2045,10 +2138,10 @@ The app reads them in production only.
 
 | Variable | Script | Meaning |
 |---|---|---|
-| `DATABASE_URL` | backup | source DB (read-only) |
+| `DATABASE_URL` | backup | source DB (read-only): `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_dump` as `PGPASSWORD` only ([connection URLs](#which-database-url-the-backup-tools-accept-2719)) |
 | `BACKUP_DIR` | backup + app | local backup root (default `/var/backups/kiln`) |
 | `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set |
-| `BACKUP_KEEP_DAYS` | backup + app | local retention (default 14): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)) |
+| `BACKUP_KEEP_DAYS` | backup + app | local retention, 1 to 2147483647 days (default 14; anything else keeps 14 and warns): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)) |
 | `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
 | `KILN_BACKUP_MARKER_SYNC_CRON` | app | when the app moves the [last-good markers](#the-last-good-marker) for cron's backups (default `*/15 * * * *`; `false` turns it off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
 | `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36); an in-app schedule replaces it for the components it covers ([threshold rules](#how-a-schedule-sets-the-alarm-threshold)) |
@@ -2059,9 +2152,9 @@ The app reads them in production only.
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused or failed copy fails the run. The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
-| `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo |
+| `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; Ecto-only query parameters are refused by libpq ([connection URLs](#which-database-url-the-backup-tools-accept-2719)) |
 | `RCLONE_CONFIG`, `RCLONE_CONFIG_<NAME>_*`, `RCLONE_RETRIES` | rclone | read by `rclone` itself, which inherits the environment of whichever path runs it: the named remote's configuration file or settings, and rclone's retry count (default 3). Kiln does not read them. `kiln_offsite` is reserved ([above](#off-site-credentials-stay-out-of-the-rclone-command-line-2690)) |
-| `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill` |
+| `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill`: `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_restore`/`psql` as `PGPASSWORD` only |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |
 | `RESTORE_CONFIRM=yes` | restore | skip the interactive confirmation |
 | `RESTORE_REQUIRE_CHECKSUM=1` | restore | `media`: abort when there is no checksum sidecar (default: warn and continue for a legacy single archive) |

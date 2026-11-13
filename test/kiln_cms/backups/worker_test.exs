@@ -69,6 +69,41 @@ defmodule KilnCMS.Backups.WorkerTest do
     end
 
     @tag :pg_tools
+    test "dumps through an ecto:// URL, with and without a password (#2719)", %{dir: dir} do
+      # `ecto://` is the documented DATABASE_URL form. Handed to pg_dump as it
+      # is, libpq reads it as a database name on the local socket and every
+      # in-app backup fails at the dump step.
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
+
+      # Without a password in the URL, the password comes from the
+      # environment, the documented path (a server that trusts local
+      # connections needs none, one that doesn't, CI's, does).
+      original_pgpassword = System.get_env("PGPASSWORD")
+
+      on_exit(fn ->
+        if original_pgpassword,
+          do: System.put_env("PGPASSWORD", original_pgpassword),
+          else: System.delete_env("PGPASSWORD")
+      end)
+
+      for {url, pgpassword} <- [
+            {ecto_url(password: true), nil},
+            {ecto_url(password: false), KilnCMS.Repo.config()[:password]}
+          ] do
+        Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(original, :database_url, url))
+        if pgpassword, do: System.put_env("PGPASSWORD", pgpassword)
+
+        assert :ok = BackupChain.run()
+
+        manifest = Manifest.read(dir)
+        assert manifest.ok, inspect(manifest.error)
+        assert [%{kind: "db", verified: true} = db | _] = manifest.artifacts
+        assert File.exists?(Path.join(dir, db.path))
+      end
+    end
+
+    @tag :pg_tools
     test "names artifacts exactly the way scripts/backup.sh does", %{dir: dir} do
       # The interchange guarantee: `scripts/restore.sh` finds a backup by
       # globbing these names, so a divergence here means the shell tooling
@@ -848,5 +883,20 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert seconds > 0 and seconds <= div(KilnCMS.Backups.Heartbeat.settled_after_ms(), 1000)
       assert Backups.in_flight() == nil
     end
+  end
+
+  # The test database as an `ecto://` URL, the way `.env.example` writes one.
+  defp ecto_url(password: password?) do
+    config = KilnCMS.Repo.config()
+    user = config[:username] && URI.encode(config[:username], &URI.char_unreserved?/1)
+
+    userinfo =
+      case {user, password? && config[:password]} do
+        {nil, _} -> ""
+        {user, pw} when pw in [nil, false] -> user <> "@"
+        {user, pw} -> user <> ":" <> URI.encode(pw, &URI.char_unreserved?/1) <> "@"
+      end
+
+    "ecto://#{userinfo}#{config[:hostname] || "localhost"}:#{config[:port] || 5432}/#{config[:database]}"
   end
 end
