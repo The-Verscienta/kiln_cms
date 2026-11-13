@@ -295,6 +295,8 @@ defmodule KilnCMS.MixProject do
       "docs/content-releases.md": [],
       "docs/content-lifecycles.md": [],
       "docs/working-copy.md": [],
+      # Every route for unpublishing and archiving, and the refusals (#2475).
+      "docs/take-content-down.md": [title: "Take content down"],
       "docs/trash.md": [],
       "docs/forms.md": [],
       "docs/seo.md": [],
@@ -508,6 +510,7 @@ defmodule KilnCMS.MixProject do
         "docs/content-releases.md",
         "docs/content-lifecycles.md",
         "docs/working-copy.md",
+        "docs/take-content-down.md",
         "docs/trash.md",
         "docs/forms.md",
         "docs/seo.md",
