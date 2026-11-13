@@ -169,11 +169,22 @@ Never counted, so a person or a service is not blocked by mistake:
 - An address already on the block list.
 - For the **miss threshold only**, a client whose `User-Agent` names a search
   engine (Googlebot, Google-InspectionTool, Bingbot, DuckDuckBot, Applebot,
-  YandexBot, Baiduspider) and no AI crawler, unless reverse DNS has proven the claim false (see
+  YandexBot, Baiduspider) and no AI crawler, unless crawler verification has proven the claim false (see
   [Verified search engines](bot-budgets.md#verified-search-engines)). A claim
   still being checked, or whose lookup could not start, keeps the exemption,
-  so a real crawler's first misses from a new address never count.
-  DuckDuckBot cannot be checked and is always exempt. When DNS gives no answer
+  so a real crawler's first misses from a new address never count. An
+  address inside the engine's fresh
+  [published IP list](bot-budgets.md#published-ip-ranges) is verified and
+  exempt.
+  DuckDuckBot has no DNS check: since #2586 a DuckDuckBot claim from an IPv4
+  address outside DuckDuckGo's fresh published list is proven false and
+  counted like any other client. While that list is missing or stale (or
+  ranges are off, `KILN_CRAWLER_RANGES=false`), and over IPv6, DuckDuckBot is
+  exempt as before. **A real DuckDuckBot on an address DuckDuckGo has just
+  added can be counted, and blocked**, until this node has a list that names
+  it: normally within 6 hours, at most 24 if fetches fail (after which the
+  list is stale and the exemption is back). Remove such a block on
+  `/editor/ip-blocks`. When DNS gives no answer
   (#2588):
   - **No answer to the reverse (PTR) query**: the claim keeps the exemption
     only while this node's resolver is itself failing. While the resolver
@@ -244,6 +255,7 @@ refuses raise `blocked_ip` like any rule's (see
 | Nothing is ever blocked | The variable is not set, or is set to a value Kiln did not recognise (a warning on stderr names it). Or the site is behind a proxy with no `TRUSTED_PROXIES`, or your test client is on a private network. |
 | A visitor reports an empty `403` | They tripped the limit (a crawler gone wrong, a link checker, a browser extension). Find the rule on `/editor/ip-blocks` by its note and **Remove** it, or wait for the expiry. Consider raising `KILN_SCANNER_BLOCKING_THRESHOLD`. |
 | A search engine's address is blocked (most often Baiduspider or YandexBot) | Its claim was proven false, or its reverse zone was slow to answer while this node's resolver answered others, so its misses counted (#2588). Check the address against [Verified search engines](bot-budgets.md#verified-search-engines); if it is the engine's, **Remove** the rule or wait for the expiry. |
+| A DuckDuckBot address is blocked | The address was not in DuckDuckGo's published list when this node last fetched it (#2586). If [duckduckbot.json](https://duckduckgo.com/duckduckbot.json) lists it now, the next fetch (within 6 hours) stops it happening again; **Remove** the rule or wait for the expiry. |
 | An address you expected is not blocked | It is exempt (see above), the trip was skipped (cap, recent sign-in) and the window has not rolled over, or the count straddled two windows. |
 | A warning `ScannerGuard: block skipped, at the automatic rule cap` | 300 automatic rules are active on the site. Wait for expiry, remove rules, or raise `max_auto_rules`. |
 | A warning `ScannerGuard: block skipped, could not store the rule` | The rule could not be saved (a database fault, or the range was refused). The request was served normally. |

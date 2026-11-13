@@ -303,7 +303,7 @@ defmodule KilnCMSWeb.Telemetry do
         tags: [:engine, :reason],
         description:
           "Delivery requests naming a search engine whose address was not verified " <>
-            "by DNS (#2254), by engine and reason (failed / pending / error / " <>
+            "by DNS or a published IP range list (#2254, #2586), by engine and reason (failed / pending / error / " <>
             "forward_error / skipped / unverifiable / not_public). Only failed is " <>
             "charged as empty."
       ),
@@ -323,6 +323,14 @@ defmodule KilnCMSWeb.Telemetry do
         description:
           "Crawler verification lookups not started (#2254): busy (concurrency " <>
             "limit) or rate_limited (per-network or per-node budget)"
+      ),
+      counter("kiln_cms.crawler_verification.ranges_fetch.count",
+        tags: [:engine, :result],
+        description:
+          "Fetches of a search engine's published crawler IP range list (#2586), by " <>
+            "engine and result (ok / http_error / transport_error / too_large / " <>
+            "blocked / invalid / no_prefixes / too_many / too_broad / not_public / " <>
+            "other). Anything but ok keeps the list held before until it goes stale."
       ),
 
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures

@@ -156,6 +156,12 @@ defmodule KilnCMS.Application do
       # deleted code-injection snippet stops executing everywhere rather than
       # on whichever node served the delete. After PubSub, which it needs.
       KilnCMS.Cache.ClusterBust,
+      # Installs the search engines' published crawler IP ranges another node
+      # fetched, answers peers asking for them, and queues a fetch when this
+      # node has none fresh (#2586). After PubSub, which it subscribes to, and
+      # Oban, which it queues on; before the Endpoint. Until it has a list,
+      # claims fall back to DNS.
+      KilnCMS.CrawlerVerification.RangesSync,
       # The change feed's local fan-out (#2083): one relay per scheduler,
       # keyed by org, so a publish hands its feed event off in one send
       # instead of delivering to every subscriber itself. After PubSub, which
@@ -484,6 +490,10 @@ defmodule KilnCMS.Application do
     {:backup_scheduler_cron, KilnCMS.Backups.Scheduler, "KILN_BACKUP_SCHEDULER_CRON",
      "in-app backup schedules will NOT run; backups come only from host cron or Back up " <>
        "now. Refs #2219."},
+    {:crawler_ranges_cron, KilnCMS.CrawlerVerification.RangesWorker, "KILN_CRAWLER_RANGES_CRON",
+     "search engines' published crawler IP ranges will NOT be fetched at all (no " <>
+       "boot or stale-list fetch either): once a list is stale, DuckDuckBot stays " <>
+       "unverified and other engines fall back to DNS. See #2586."},
     # Only ever set when KILN_DEMO_RESET=confirm (config/runtime.exs).
     {:demo_reset_cron, KilnCMS.Demo.ResetWorker, "KILN_DEMO_RESET_CRON",
      "the demo will NOT reset on a schedule. See docs/demo-mode.md."}
