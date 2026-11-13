@@ -1206,6 +1206,16 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
        when type in [:media, :reference] and is_list(value),
        do: Enum.all?(value, &blank?/1)
 
+  # An empty list sent to a single scalar field is not "no value" but a list
+  # where one value goes (#2743): refused as a group sub-field refuses it.
+  defp blank_for?(%{field_type: type} = def, [])
+       when type in @scalar_list_types and not is_map_key(def, :multiple),
+       do: false
+
+  defp blank_for?(%{field_type: type, multiple: multiple}, [])
+       when type in @scalar_list_types and multiple != true,
+       do: false
+
   # A multiple select's picker, a list of phrases and every other scalar list
   # post the same leading `""`, so the same rule — and a single one handed a
   # list follows it too.
@@ -1282,6 +1292,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # a working copy, a restored version — or an API client sending an array)
   # keeps its first item, as a single media field does, rather than
   # stringifying the whole list into one value.
+  defp coerce([], %{field_type: type}, _read_opts) when type in @scalar_list_types,
+    do: {:error, FieldValue.not_single()}
+
   defp coerce(value, %{field_type: type} = def, _read_opts)
        when type in @scalar_list_types and is_list(value) do
     case value |> Enum.reject(&blank?/1) |> List.first() do

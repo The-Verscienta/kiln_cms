@@ -279,7 +279,7 @@ defmodule KilnCMS.CMS.GroupFieldsTest do
     test "a nested value in a row is refused", %{admin: admin, name: name} do
       assert error_message!(fn ->
                post!(admin, %{name => [%{"unit" => %{"si" => "g"}}]})
-             end) =~ "Unit (#{name}[0].unit) must be a single value"
+             end) =~ "Unit (#{name}[0].unit) must be a single value, not an object or a list"
     end
 
     test "required and the item bounds apply to the rows", %{admin: admin} do

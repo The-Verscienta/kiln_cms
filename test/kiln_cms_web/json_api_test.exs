@@ -1503,6 +1503,79 @@ defmodule KilnCMSWeb.JsonApiTest do
     end
   end
 
+  # #2743: an object or a list sent for a field that holds one value is the
+  # field's 400, not a 500 out of `to_string/1`.
+  describe "custom field value shapes" do
+    defp api_patch(path, body, tok) do
+      conn =
+        build_conn()
+        |> put_req_header("accept", @accept)
+        |> put_req_header("content-type", @accept)
+        |> put_req_header("authorization", "Bearer #{tok}")
+        |> patch(path, Jason.encode!(body))
+
+      {conn.status, Jason.decode!(conn.resp_body)}
+    end
+
+    setup do
+      admin = user(:admin)
+      subtitle = "subtitle#{System.unique_integer([:positive])}"
+      notes = "notes#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: subtitle, label: "Subtitle", field_type: :string},
+        actor: admin
+      )
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: notes, label: "Notes", field_type: :text},
+        actor: admin
+      )
+
+      page = CMS.create_page!(%{title: "Shapes", slug: slug()}, actor: admin)
+      %{admin: admin, page: page, subtitle: subtitle, notes: notes, tok: token(admin)}
+    end
+
+    test "a locale map on a field that is not localized is a 400 naming the field", ctx do
+      body = %{
+        data: %{
+          type: "page",
+          id: ctx.page.id,
+          attributes: %{custom_fields: %{ctx.subtitle => %{"en" => "x"}}}
+        }
+      }
+
+      assert {400, body} = api_patch("/api/json/pages/#{ctx.page.id}", body, ctx.tok)
+
+      assert [
+               %{
+                 "code" => "invalid_attribute",
+                 "detail" => detail,
+                 "source" => %{"pointer" => "/data/attributes/custom_fields"}
+               }
+             ] = body["errors"]
+
+      assert detail ==
+               "Subtitle (#{ctx.subtitle}) must be a single value, not an object or a list"
+
+      assert CMS.get_page!(ctx.page.id, actor: ctx.admin).custom_fields == %{}
+    end
+
+    test "a list on a text field is a 400, not joined into one string", ctx do
+      body = %{
+        data: %{
+          type: "page",
+          id: ctx.page.id,
+          attributes: %{custom_fields: %{ctx.notes => ["a", "b"]}}
+        }
+      }
+
+      assert {400, body} = api_patch("/api/json/pages/#{ctx.page.id}", body, ctx.tok)
+      assert [%{"code" => "invalid_attribute", "detail" => detail}] = body["errors"]
+      assert detail == "Notes (#{ctx.notes}) must be a single value, not an object or a list"
+    end
+  end
+
   # Page equivalent of `published_post/2`.
   defp published_post_page(attrs, admin) do
     attrs
