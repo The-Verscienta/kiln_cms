@@ -14,6 +14,7 @@ defmodule KilnCMSWeb.SecondFactorSocketsTest do
 
   import KilnCMS.OrgFixtures, only: [org: 1]
   import Phoenix.ChannelTest, except: [connect: 2, connect: 3]
+  import Phoenix.LiveViewTest, only: [live: 2, has_element?: 2]
 
   use Absinthe.Phoenix.SubscriptionTest, schema: KilnCMSWeb.GraphqlSchema
 
@@ -231,6 +232,34 @@ defmodule KilnCMSWeb.SecondFactorSocketsTest do
                |> get(~p"/api/locales"),
                200
              )
+    end
+
+    test "gets no grace-period reminder", %{conn: conn} do
+      site = org("sfs-demo-banner")
+      grace_policy!(site, required_for: :everyone)
+      user = Fixtures.editor(site)
+
+      {:ok, view, _html} = conn |> Fixtures.signed_in(user, site) |> live(~p"/account")
+
+      refute has_element?(view, "#second-factor-banner")
+    end
+
+    test "is never evicted by a policy that holds everyone at once" do
+      site = org("sfs-demo-evict")
+      {admin, _secret} = KilnCMS.TwoFactorFixtures.enabled_user(role: :viewer)
+      admin = Fixtures.member!(admin, site, :admin)
+      user = Fixtures.editor(site)
+      topic = KilnCMS.Accounts.SessionEviction.topic(user.id)
+      @endpoint.subscribe(topic)
+
+      assert {:ok, _row} =
+               CMS.save_site_second_factor_policy(%{required_for: :everyone, grace_days: 0},
+                 actor: admin,
+                 tenant: site.id,
+                 context: %{second_factor_verified_at: DateTime.utc_now()}
+               )
+
+      refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "disconnect"}, 100
     end
   end
 end

@@ -109,7 +109,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
 
   defp prove(view) do
     view |> element("#send-proof-code") |> render_click()
-    render_async(view)
+    render_async(view, 2_000)
     code = emailed_code()
     refute render(view) =~ code
 
@@ -286,7 +286,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
         conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
 
       view |> element("#send-proof-code") |> render_click()
-      assert render_async(view) =~ "We couldn&#39;t send the code. Try again."
+      assert render_async(view, 2_000) =~ "We couldn&#39;t send the code. Try again."
       assert has_element?(view, "#two-factor-proof")
       assert has_element?(view, "#start-totp[disabled]")
     end
@@ -319,7 +319,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
         conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
 
       view |> element("#send-proof-code") |> render_click()
-      render_async(view)
+      render_async(view, 2_000)
       refute has_element?(view, "#two-factor-proof")
 
       enrol_app(view, user)

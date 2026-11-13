@@ -666,6 +666,11 @@ defmodule KilnCMSWeb.Router do
       # admin-only by the tier gate AND the resource policy; enforcement is
       # `KilnCMSWeb.Plugs.IdleTimeout` and `KilnCMSWeb.IdleSession`.
       live "/editor/sessions", SessionPolicyLive, :index
+      # The site's two-step sign-in requirement (#2247). Admin-only by the tier
+      # gate AND the resource policy, and every save needs the admin's own fresh
+      # second factor (`SaverVerifiedSecondFactor`). Not exempt from the
+      # second-factor gate: a held admin enrolls before reaching it.
+      live "/editor/two-factor", TwoFactorPolicyLive, :index
       # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.

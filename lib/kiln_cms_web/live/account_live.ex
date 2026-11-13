@@ -292,6 +292,9 @@ defmodule KilnCMSWeb.AccountLive do
     ~H"""
     <Layouts.public current_org={@current_org} locale={@locale} current_user={@current_user}>
       <Layouts.flash_group flash={@flash} />
+      <%!-- A reminder during the grace period of this site's two-step sign-in
+            requirement (#2247), from the status the gate assigned on mount. --%>
+      <Layouts.second_factor_banner status={@second_factor_status} />
 
       <div class="space-y-8">
         <header class="space-y-1">

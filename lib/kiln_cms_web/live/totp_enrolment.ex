@@ -30,6 +30,7 @@ defmodule KilnCMSWeb.TotpEnrolment do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Errors.DemoAccountLocked
   alias KilnCMS.Accounts.Errors.EnrolmentProofRequired
+  alias KilnCMS.Accounts.Errors.LastSecondFactorRequired
   alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.Totp
 
@@ -130,7 +131,7 @@ defmodule KilnCMSWeb.TotpEnrolment do
   @doc """
   What to tell the person about a refused second-factor action: the budget
   is spent, the account is the shared demo one, the email proof is missing,
-  or `fallback`. Takes an Ash error, a changeset, or what an `{:error, _}`
+  the factor is the last one a site requires, or `fallback`. Takes an Ash error, a changeset, or what an `{:error, _}`
   held.
   """
   @spec error_message(term(), String.t()) :: String.t()
@@ -145,6 +146,9 @@ defmodule KilnCMSWeb.TotpEnrolment do
       %EnrolmentProofRequired{} ->
         gettext("Confirm your email address before adding a second factor.")
 
+      %LastSecondFactorRequired{} ->
+        last_factor_message()
+
       _other ->
         nil
     end)
@@ -152,6 +156,14 @@ defmodule KilnCMSWeb.TotpEnrolment do
 
   def error_message({:error, error}, fallback), do: error_message(error, fallback)
   def error_message(_error, fallback), do: fallback
+
+  @doc "Why an account's last second factor can't be removed (#2247)."
+  @spec last_factor_message() :: String.t()
+  def last_factor_message do
+    gettext(
+      "A site you use requires two-step sign-in, so you can't remove your last second factor. Add another one first."
+    )
+  end
 
   @doc "Why the shared demo account's sign-in methods can't be changed."
   @spec demo_locked_message() :: String.t()

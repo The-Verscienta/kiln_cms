@@ -1337,8 +1337,13 @@ defmodule KilnCMS.Accounts.User do
       argument :code, :string, allow_nil?: false, sensitive?: true
 
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
-      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
-      validate KilnCMS.Accounts.Validations.ValidTotpCode
+
+      # Not the last factor while a site requires one (#2247). Ahead of the
+      # budget, which (like the code check) runs only on a changeset still
+      # valid here: a refusal spends no attempt and compares no code.
+      validate KilnCMS.Accounts.Validations.KeepsRequiredSecondFactor
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor, only_when_valid?: true
+      validate KilnCMS.Accounts.Validations.ValidTotpCode, only_when_valid?: true
 
       # Not guarded against an invitation's takeover (#2453): from a stale
       # session it can only clear the factor columns, which the takeover has

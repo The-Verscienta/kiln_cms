@@ -13,6 +13,7 @@ defmodule KilnCMSWeb.SettingsLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.EnrolmentProof
   alias KilnCMS.Accounts.Errors.DemoAccountLocked
+  alias KilnCMS.Accounts.Errors.LastSecondFactorRequired
   alias KilnCMS.Accounts.Errors.PasskeyLimitReached
   alias KilnCMS.Accounts.Errors.PasskeyRegistrationThrottled
   alias KilnCMS.Accounts.Passkey
@@ -67,6 +68,13 @@ defmodule KilnCMSWeb.SettingsLive do
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
      |> assign(:passkey_challenge, nil)
+     # Whether a site this account uses requires a second factor (#2247): if
+     # so, the last one left has no "Disable" or "Remove", and a note says
+     # why. The actions refuse regardless.
+     |> assign(
+       :second_factor_required?,
+       KilnCMS.Accounts.TwoFactorRequirement.required_somewhere?(user)
+     )
      # The most an account may hold (#2247): at it, the add form gives way to
      # a note, and the registration refuses regardless.
      |> assign(:passkey_limit, Passkey.max_per_account())
@@ -884,7 +892,15 @@ defmodule KilnCMSWeb.SettingsLive do
                   />
                   <.button type="submit" variant="ghost">{gettext("Regenerate")}</.button>
                 </form>
-                <form id="disable-totp-form" phx-submit="disable_totp" class="flex items-end gap-2">
+                <.last_factor_note :if={
+                  last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :totp)
+                } />
+                <form
+                  :if={!last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :totp)}
+                  id="disable-totp-form"
+                  phx-submit="disable_totp"
+                  class="flex items-end gap-2"
+                >
                   <.input
                     name="code"
                     value=""
@@ -962,7 +978,10 @@ defmodule KilnCMSWeb.SettingsLive do
                     </p>
                   </div>
                   <button
-                    :if={!@credentials_locked?}
+                    :if={
+                      !@credentials_locked? &&
+                        !last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
+                    }
                     type="button"
                     phx-click="remove_passkey"
                     phx-value-id={passkey.id}
@@ -976,6 +995,9 @@ defmodule KilnCMSWeb.SettingsLive do
               </ul>
 
               <.demo_locked_note :if={@credentials_locked?} />
+              <.last_factor_note :if={
+                last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
+              } />
               <p
                 :if={!@credentials_locked? && length(@passkeys) >= @passkey_limit}
                 id="passkeys-at-limit"
@@ -1387,13 +1409,16 @@ defmodule KilnCMSWeb.SettingsLive do
   defp second_factor_error(error, wrong_code_message),
     do: TotpEnrolment.error_message(error, wrong_code_message)
 
-  # A demo-mode refusal (`DemoAccountLocked`) says so; anything else keeps the
+  # A demo-mode refusal (`DemoAccountLocked`) or the last factor a site
+  # requires (`LastSecondFactorRequired`) says so; anything else keeps the
   # handler's own message. Takes an Ash error or a changeset (both carry
   # `errors`), or whatever an `{:error, _}` held.
   defp refusal_or(%{errors: errors}, fallback) do
-    if Enum.any?(List.wrap(errors), &match?(%DemoAccountLocked{}, &1)),
-      do: demo_locked_message(),
-      else: fallback
+    Enum.find_value(List.wrap(errors), fallback, fn
+      %DemoAccountLocked{} -> demo_locked_message()
+      %LastSecondFactorRequired{} -> TotpEnrolment.last_factor_message()
+      _other -> nil
+    end)
   end
 
   defp refusal_or({:error, error}, fallback), do: refusal_or(error, fallback)
@@ -1426,6 +1451,24 @@ defmodule KilnCMSWeb.SettingsLive do
   end
 
   defp demo_locked_message, do: TotpEnrolment.demo_locked_message()
+
+  # The one factor this account has left, while a site requires one (#2247):
+  # the authenticator app with no passkey, or the only passkey with no app.
+  defp last_factor?(false = _required?, _totp?, _passkeys, _kind), do: false
+  defp last_factor?(true, totp?, passkeys, :totp), do: totp? and passkeys == []
+  defp last_factor?(true, totp?, passkeys, :passkey), do: not totp? and length(passkeys) == 1
+
+  defp last_factor_note(assigns) do
+    ~H"""
+    <p
+      id="last-factor-note"
+      class="flex items-start gap-1.5 text-sm text-base-content/70"
+    >
+      <.icon name="hero-lock-closed" class="mt-0.5 size-4 shrink-0" />
+      {TotpEnrolment.last_factor_message()}
+    </p>
+    """
+  end
 
   defp demo_locked_note(assigns) do
     ~H"""

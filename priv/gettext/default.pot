@@ -151,6 +151,7 @@ msgstr[1] ""
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} day"
 msgid_plural "%{count} days"
@@ -161,6 +162,13 @@ msgstr[1] ""
 #, elixir-autogen, elixir-format
 msgid "%{count} day left"
 msgid_plural "%{count} days left"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} day left to set it up."
+msgid_plural "%{count} days left to set it up."
 msgstr[0] ""
 msgstr[1] ""
 
@@ -376,6 +384,13 @@ msgstr ""
 msgid "%{count} of %{max} rows"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} of them right away."
+msgid_plural "%{count} of them right away."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} of them touch a safety field — open each in the editor to publish and say how much the change matters."
@@ -425,6 +440,13 @@ msgstr[1] ""
 #, elixir-autogen, elixir-format
 msgid "%{count} part"
 msgid_plural "%{count} parts"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} person will be asked to set it up;"
+msgid_plural "%{count} people will be asked to set it up;"
 msgstr[0] ""
 msgstr[1] ""
 
@@ -2089,6 +2111,11 @@ msgstr ""
 msgid "A single-line box. Text that already has line breaks still opens on several."
 msgstr ""
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "A site you use requires two-step sign-in, so you can't remove your last second factor. Add another one first."
+msgstr ""
+
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
 msgid "A span between two numbers or two dates, with either end optional. For a price band, an age bracket or a date window. Cannot be filtered or sorted."
@@ -3060,6 +3087,7 @@ msgid "Administrator accounts cannot use a breached password. Block applies to a
 msgstr ""
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Administrators"
 msgstr ""
@@ -4947,6 +4975,16 @@ msgstr ""
 msgid "Changing this moves nothing. Files already uploaded stay where they were stored and are still read from there, so keep an old bucket and its key working until you have moved its files yourself."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Changing this setting needs a second factor from the last 15 minutes. Use a code, or sign in again with your passkey."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Changing this setting needs your own second factor, so that a stolen password alone can't turn it off."
+msgstr ""
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "Characters"
@@ -5259,6 +5297,7 @@ msgid "Choose how much this change matters before publishing."
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_components.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Choose one of the listed options."
 msgstr ""
@@ -5478,6 +5517,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Code from the email"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Code from your authenticator app"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
@@ -5731,6 +5775,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirm new password"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm with a code from your authenticator app, or sign in again with your passkey."
 msgstr ""
 
 #: lib/kiln_cms_web/live/auth_page_title.ex
@@ -6693,6 +6742,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/chart_components.ex
 #, elixir-autogen, elixir-format
 msgid "Count"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Counted from when an account was created, joined this site, or became covered, whichever is latest. Promotions don't restart it. After it, the account must set up a second factor before it can do anything else here."
 msgstr ""
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
@@ -8333,6 +8387,16 @@ msgstr ""
 msgid "Editorial — serif, narrower reading column"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editors and administrators"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Editors and admins of this site can open it. Your account has a different role."
@@ -9034,6 +9098,11 @@ msgstr ""
 msgid "Every settings screen, and what each one is for."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every signed-in account, readers included."
+msgstr ""
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every term is in use."
@@ -9050,6 +9119,7 @@ msgid "Every week on %{weekday} at %{time} (%{zone})"
 msgstr ""
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Everyone"
 msgstr ""
@@ -9067,6 +9137,11 @@ msgstr ""
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Everyone signed out"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Everyone who can edit content, and the administrators."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -10242,6 +10317,11 @@ msgstr ""
 msgid "Governance"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Grace period"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -10498,6 +10578,11 @@ msgstr ""
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Held for two-step sign-in setup"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Held until set up"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -10845,6 +10930,16 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
 #, elixir-autogen, elixir-format
 msgid "If an account with that address is paused after too many sign-in attempts, we've emailed it a link to lift the pause. The link works once, within %{minutes} minutes."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "If no administrator of this site can sign in with a second factor (say the last one lost their only passkey), whoever runs the server can turn the requirement off with the release command KilnCMS.Release.second_factor_requirement_off. It is recorded in this site's security log."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "If nobody can get in"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
@@ -11683,6 +11778,21 @@ msgstr[1] ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Last backup was %{ago} ago"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last changed %{date} by %{who}, from “%{previous}”."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last changed %{date} by %{who}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last changed %{date}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -14064,6 +14174,11 @@ msgstr ""
 msgid "Nobody has been rejected."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody has to set up a second factor."
+msgstr ""
+
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nobody is waiting."
@@ -14098,6 +14213,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "None — set in config without a plugin declaring it"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "None: right away"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -14537,6 +14657,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Off"
 msgstr ""
@@ -15591,10 +15712,20 @@ msgstr ""
 msgid "Pending invitations"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "People"
+msgstr ""
+
 #: lib/kiln_cms_web/live/preview_live.ex
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "People viewing"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "People who can change this site's settings."
 msgstr ""
 
 #: lib/kiln_cms_web/live/registrations_live.ex
@@ -17490,6 +17621,16 @@ msgstr ""
 msgid "Require admin approval"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Require people on this site to set up a second factor (an authenticator app or a passkey), and give them time to do it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Require two-step sign-in for"
+msgstr ""
+
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -17520,6 +17661,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "Required with a contact. Researchers treat the file as stale after this date; the RFC recommends less than a year ahead."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Requirement"
 msgstr ""
 
 #: lib/kiln_cms_web/live/team_live.ex
@@ -17828,6 +17974,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Right now editors submit their work for review and only an admin can publish. Pick what fits this site."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Role"
 msgstr ""
 
 #: lib/kiln_cms_web/live/team_live.ex
@@ -18187,6 +18338,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -18423,6 +18575,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_search_live.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saving…"
 msgstr ""
@@ -19208,6 +19361,11 @@ msgstr ""
 msgid "Set it up"
 msgstr ""
 
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "Set it up now"
+msgstr ""
+
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set it with KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS in the environment."
@@ -19221,6 +19379,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Set one up in Fields"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -19245,9 +19408,15 @@ msgstr ""
 msgid "Set up my account"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up two-step sign-in"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up two-step sign-in on your own account first."
 msgstr ""
 
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -20358,6 +20527,11 @@ msgstr ""
 msgid "Steps are counted independently — this is not a per-visitor conversion rate. A later step's count includes traffic that never saw an earlier one, so a ratio can read above 100%."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Still in grace"
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stock links (Blog, Search)"
@@ -21149,6 +21323,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid — try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "That code isn't valid. Check your authenticator app."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/two_factor_controller.ex
@@ -22395,6 +22574,11 @@ msgstr ""
 msgid "The title is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The two-step sign-in settings could not be saved."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "The update check is misconfigured: KILN_UPDATE_REPO must be owner/name, and KILN_UPDATE_RELEASES_URL a full http(s) URL. No check was made."
@@ -23218,6 +23402,11 @@ msgstr ""
 msgid "This site requires two-step sign-in for your role. Set it up to continue."
 msgstr ""
 
+#: lib/kiln_cms_web/components/layouts.ex
+#, elixir-autogen, elixir-format
+msgid "This site requires two-step sign-in."
+msgstr ""
+
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site sets its own policy. Without it the default would be: %{policy}."
@@ -23844,6 +24033,7 @@ msgstr ""
 msgid "Two-factor authentication turned off"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in"
@@ -23864,9 +24054,19 @@ msgstr ""
 msgid "Two-step sign-in is on for your account."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in is optional on this site."
+msgstr ""
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in requirement changed"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in settings saved."
 msgstr ""
 
 #: lib/kiln_cms/security/alert_text.ex
@@ -24699,6 +24899,11 @@ msgctxt "role"
 msgid "Viewer"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Viewers"
+msgstr ""
+
 #: lib/kiln_cms_web/components/chart_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -25259,6 +25464,11 @@ msgstr ""
 msgid "Who can publish?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Who it covers now"
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Who may embed this form"
@@ -25689,6 +25899,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to change this site's single sign-on."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to change this site's two-step sign-in."
 msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex
@@ -26274,6 +26489,11 @@ msgstr ""
 msgid "an admin"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "an administrator"
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
@@ -26828,6 +27048,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "file is too large for its type"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "first deadline %{date}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
@@ -27891,6 +28116,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "the rendered artifact: full block body, pre-compiled and CDN-cacheable."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "the server operator"
 msgstr ""
 
 #: lib/kiln_cms/cms/computed.ex

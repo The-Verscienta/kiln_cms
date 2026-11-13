@@ -44,7 +44,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/site-storage /editor/system /editor/system/image-backend /editor/tasks
     /editor/taxonomy /editor/team
     /editor/translations
-    /editor/translations/export.xlf /editor/trash /editor/types /editor/webhooks /media
+    /editor/translations/export.xlf /editor/trash /editor/two-factor /editor/types /editor/webhooks /media
   )
 
   @shared ~w(

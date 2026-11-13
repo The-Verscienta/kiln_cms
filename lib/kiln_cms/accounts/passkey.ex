@@ -60,6 +60,10 @@ defmodule KilnCMS.Accounts.Passkey do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
+      # The owner can't remove their last second factor while a site requires
+      # one (#2247). A platform admin removing it for them is unaffected.
+      validate KilnCMS.Accounts.Validations.KeepsRequiredSecondFactor
+
       # Audit log (#2241), in the transaction. Whoever removes it is the actor
       # (the owner, or a platform admin); the owner is the target.
       change {KilnCMS.Security.Changes.Record,
