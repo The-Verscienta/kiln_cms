@@ -85,7 +85,16 @@ Every summary line below that was shortened links to its own entry there.
 - **Platform admins are alerted when a verified API key goes over a rate limit (`api_key_rate_limited`), and can turn that alert off under Security alerts → Platform alerts.**
   ([long form](docs/changelog/unreleased.md#api-key-rate-limited-alerts))
 
+- **At the two-step sign-in code prompt, an account that also has a passkey can finish with Use a passkey instead of a code (on the main or console host, not a site's own host).**
+  ([long form](docs/changelog/unreleased.md#passkey-at-code-prompt))
+
+- **Account owners are emailed whenever an authenticator app is set up or replaced, or a passkey is added, with what to do if it wasn't them.**
+  ([long form](docs/changelog/unreleased.md#second-factor-added-email))
+
 ### Changed
+
+- **An account can hold at most 20 passkeys and add at most 5 an hour; the Passkeys section of the settings page says which limit refused.**
+  ([long form](docs/changelog/unreleased.md#passkey-limits))
 
 - **Webhook URLs are masked (`https://host/…/last4`) on the Webhooks page, in the governance trail and its JSON/CSV exports (now also with `endpoint_id`), and in notices and logs. Reveal URL shows one; the edit form starts blank, and blank keeps the URL.**
   ([long form](docs/changelog/unreleased.md#webhook-url-masking))

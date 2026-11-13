@@ -175,7 +175,7 @@ a type may carry only the keys below; anything else is dropped.
 | Type (CSV `type`) | Label on the page | Written when | `metadata` keys |
 |---|---|---|---|
 | `sign_in` | Sign-in | A sign-in completed, every factor passed | `method` |
-| `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below | `method`, `reason` |
+| `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code or a passkey refused at the code prompt, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below | `method`, `reason` |
 | `sign_in_locked` | Sign-in locked out | A throttle refused an attempt. First refusal per subject and scope each 15 minutes | `method`, `scope` |
 | `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind` |
 | `second_factor_removed` | Second factor removed | Two-factor sign-in was turned off, or removed when an invitation, a password reset or a magic link took over an unconfirmed account (see below) | `kind`, `via` |
@@ -434,14 +434,14 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 
 | Event | Emit site (file: function or action) | Method |
 |---|---|---|
-| `sign_in` | `lib/kiln_cms_web/controllers/auth_controller.ex`: `complete_sign_in/4`. Every password, magic-link, SSO and post-second-factor browser sign-in ends here; `TwoFactorController` reaches it through `complete_sign_in/3` | after commit; `method` from the strategy (`AuthEvents.method/1`) |
+| `sign_in` | `lib/kiln_cms_web/controllers/auth_controller.ex`: `establish_session/5`, through `complete_sign_in/3,4,5`. Every password, magic-link, SSO and post-second-factor browser sign-in ends here; `TwoFactorController` reaches it through `complete_sign_in/5` after a code and `establish_session/5` after a passkey at the prompt (#2247) | after commit; `method` from the strategy (`AuthEvents.method/1`); after the second factor, the first factor's |
 | `sign_in` | `lib/kiln_cms_web/controllers/passkey_controller.ex`: `verify/2` | after commit; `method: "passkey"` |
 | `sign_in` | `lib/kiln_cms_web/controllers/api_auth_controller.ex`: `issue_token/2` (the headless token API, `sign_in/2` and `verify/2`) | after commit; `method: "password"` |
 | `sign_in_failed` (wrong password) | `lib/kiln_cms/security/preparations/audit_sign_in.ex`, on `User` `:sign_in_with_password` (`lib/kiln_cms/accounts/user.ex`) | sampled, after commit; `method: "password"`, `reason: "invalid_credentials"` |
 | `sign_in_failed` (human verification) | `audit_sign_in.ex`, when `ThrottleSignIn` refuses with `KilnCMS.Accounts.Errors.ChallengeRequired` (`KilnCMS.Challenge.Gate`) | sampled, after commit; `method: "password"`, `reason: "challenge_failed"` or `"challenge_unavailable"` |
-| `sign_in_failed` (wrong code) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` (`audit_failure/3`), used by `TwoFactorController.verify` and `ApiAuthController.verify` | sampled; `method: "second_factor"`, `reason: "invalid_code"` |
+| `sign_in_failed` (wrong code) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` (`audit_failure/3`), used by `TwoFactorController.create` and `ApiAuthController.verify`; and `check_passkey/3`, used by `TwoFactorController.passkey_verify` for a passkey refused at the prompt (#2247) | sampled; `method: "second_factor"`, `reason: "invalid_code"` (a refused passkey too) |
 | `sign_in_locked` (account, address) | `audit_sign_in.ex`, via `AuthEvents.password_locked/3`, when `ThrottleSignIn` refuses | after commit; `method: "password"`, `scope: "account"` or `"address"` |
-| `sign_in_locked` (second factor at sign-in) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` on a denied budget | after commit; `scope: "second_factor"` |
+| `sign_in_locked` (second factor at sign-in) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` or `check_passkey/3` on a denied budget | after commit; `scope: "second_factor"` |
 | `sign_in_locked` (second factor in settings) | `lib/kiln_cms/accounts/changes/throttle_second_factor.ex`: on a denied budget (turning 2FA off, regenerating recovery codes) | after commit; `scope: "settings"` |
 | `second_factor_enrolled` | `User` `:confirm_totp` (`lib/kiln_cms/accounts/user.ex`) | in txn; `kind: "totp"` |
 | `second_factor_removed` | `User` `:disable_totp`, and `lib/kiln_cms/accounts/changes/forget_prior_credentials.ex` on `User` `:accept_invitation_with_password` (#2453), `:reset_password_with_token` on an unconfirmed account and `:take_over_by_magic_link` (#2594) when the row it re-reads under lock had a confirmed factor | in txn; `kind: "totp"`; from a takeover, also `via` (`"invitation"`, `"password_reset"` or `"magic_link"`) and no person |
@@ -496,7 +496,7 @@ recorded as long as it names a user actor and a tenant.
 |---|---|---|
 | Plugin install or enable | Not applicable | Plugins are compiled into the release; there is no runtime path that installs or enables one, so there is nothing to hook. A change shows up as a deploy. |
 | Remember-me sign-in | Not recorded | A valid remember-me cookie is turned into a session by the read plug (`store_in_session/2`), which never passes through `AuthController.complete_sign_in/4`. The original sign-in that issued the cookie is recorded. |
-| Failed magic-link, SSO and passkey sign-ins | Not recorded | Only the password action (`:sign_in_with_password`) and the second-factor prompt have an audit hook. The other strategies do not have a point where a refusal is observed. The successful ones are recorded (`sign_in` with `method`). |
+| Failed magic-link, SSO and passkey sign-ins | Not recorded | Only the password action (`:sign_in_with_password`) and the second-factor prompt have an audit hook. The other strategies do not have a point where a refusal is observed. The successful ones are recorded (`sign_in` with `method`). A passkey refused *at the second-factor prompt* is recorded, as a wrong code is (#2247). |
 | Sign-in with a token (`:sign_in_with_token`) | Not recorded | Not audited: no hook. |
 | Temporary elevation lapsing | Not recorded | `OrgMembership` `:expire_role_grant` and `User` `:expire_role_grant` clear a dead column. Expiry is a comparison, not an act; `elevation_granted` already carried the end time (`minutes`). |
 | Erasing a user | Not recorded as an event | `User` `:anonymize` forces the role through a different action and writes no event, and the recorder refuses any event whose acting user is the one being erased. The erasure scrubs the log instead (below). |

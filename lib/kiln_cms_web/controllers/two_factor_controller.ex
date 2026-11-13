@@ -3,7 +3,8 @@ defmodule KilnCMSWeb.TwoFactorController do
   Second-factor (TOTP) verification after the first factor for a 2FA-enabled
   account (issue #331). Reached only via the short-lived, signed `:pending_2fa`
   token that `KilnCMSWeb.AuthController` sets — the user is not signed in until a
-  valid code is entered here. Served on the `:browser_auth` pipeline (CSRF + the
+  valid code is entered here, or one of the account's passkeys answers instead
+  (#2247, below). Served on the `:browser_auth` pipeline (CSRF + the
   tight `:auth` rate limit slowing code brute-forcing).
 
   ## The per-IP limit is not the bound that matters here (#714)
