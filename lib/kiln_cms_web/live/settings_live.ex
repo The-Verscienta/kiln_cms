@@ -12,7 +12,10 @@ defmodule KilnCMSWeb.SettingsLive do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Errors.DemoAccountLocked
+  alias KilnCMS.Accounts.Errors.PasskeyLimitReached
+  alias KilnCMS.Accounts.Errors.PasskeyRegistrationThrottled
   alias KilnCMS.Accounts.Errors.SecondFactorThrottled
+  alias KilnCMS.Accounts.Passkey
   alias KilnCMS.Accounts.Sessions
   alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
@@ -68,6 +71,9 @@ defmodule KilnCMSWeb.SettingsLive do
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
      |> assign(:passkey_challenge, nil)
+     # The most an account may hold (#2247): at it, the add form gives way to
+     # a note, and the registration refuses regardless.
+     |> assign(:passkey_limit, Passkey.max_per_account())
      # The outcome of the last attempt, shown in the section itself (#1829):
      # `{:ok | :error, message}` or nil.
      |> assign(:passkey_status, nil)
@@ -114,18 +120,30 @@ defmodule KilnCMSWeb.SettingsLive do
   def handle_event("passkey_begin", _params, %{assigns: %{credentials_locked?: true}} = socket),
     do: {:noreply, put_flash(socket, :error, demo_locked_message())}
 
+  # At the cap (#2247), for the same reason. Re-read rather than taken from the
+  # list this page rendered: another tab may have added or removed one since.
   def handle_event("passkey_begin", params, socket) do
     user = socket.assigns.current_user
-    challenge = WebAuthn.registration_challenge()
+    passkeys = WebAuthn.list(user)
 
-    {:noreply,
-     socket
-     |> assign(:passkey_challenge, challenge)
-     |> assign(:passkey_status, nil)
-     |> push_event("passkey-register", %{
-       publicKey: WebAuthn.registration_options(challenge, user),
-       name: params["name"] || ""
-     })}
+    if length(passkeys) >= Passkey.max_per_account() do
+      {:noreply,
+       socket
+       |> assign(:passkeys, passkeys)
+       |> assign(:passkey_status, {:error, passkey_limit_message()})
+       |> put_flash(:error, passkey_limit_message())}
+    else
+      challenge = WebAuthn.registration_challenge()
+
+      {:noreply,
+       socket
+       |> assign(:passkey_challenge, challenge)
+       |> assign(:passkey_status, nil)
+       |> push_event("passkey-register", %{
+         publicKey: WebAuthn.registration_options(challenge, user),
+         name: params["name"] || ""
+       })}
+    end
   end
 
   def handle_event("passkey_attestation", payload, socket) do
@@ -151,10 +169,13 @@ defmodule KilnCMSWeb.SettingsLive do
              |> put_flash(:info, message)}
 
           {:error, reason} ->
-            message = refusal_or(reason, gettext("Couldn't verify that passkey — try again."))
+            message =
+              passkey_refusal(reason) ||
+                refusal_or(reason, gettext("Couldn't verify that passkey — try again."))
 
             {:noreply,
              socket
+             |> assign(:passkeys, WebAuthn.list(user))
              |> assign(:passkey_status, {:error, message})
              |> put_flash(:error, message)}
         end
@@ -1065,8 +1086,19 @@ defmodule KilnCMSWeb.SettingsLive do
               </ul>
 
               <.demo_locked_note :if={@credentials_locked?} />
+              <p
+                :if={!@credentials_locked? && length(@passkeys) >= @passkey_limit}
+                id="passkeys-at-limit"
+                class="flex items-center gap-1.5 text-sm text-base-content/70"
+              >
+                <.icon name="hero-information-circle" class="size-4 shrink-0" />
+                {passkey_limit_message()}
+              </p>
               <form
-                :if={!@credentials_locked? && !@passkey_challenge}
+                :if={
+                  !@credentials_locked? && !@passkey_challenge &&
+                    length(@passkeys) < @passkey_limit
+                }
                 phx-submit="passkey_begin"
                 class="flex items-end gap-2"
                 id="add-passkey-form"
@@ -1098,7 +1130,10 @@ defmodule KilnCMSWeb.SettingsLive do
                   {gettext("Cancel")}
                 </button>
               </div>
-              <p :if={!@credentials_locked?} class="mt-2 text-xs text-base-content/60">
+              <p
+                :if={!@credentials_locked? && length(@passkeys) < @passkey_limit}
+                class="mt-2 text-xs text-base-content/60"
+              >
                 {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
               </p>
               <p
@@ -1480,6 +1515,32 @@ defmodule KilnCMSWeb.SettingsLive do
 
   defp refusal_or({:error, error}, fallback), do: refusal_or(error, fallback)
   defp refusal_or(_error, fallback), do: fallback
+
+  # The registration's own refusals (#2247): the account is at the passkey cap,
+  # or has added too many this hour. `nil` for anything else.
+  defp passkey_refusal(%{errors: errors}) do
+    Enum.find_value(List.wrap(errors), fn
+      %PasskeyLimitReached{} ->
+        passkey_limit_message()
+
+      %PasskeyRegistrationThrottled{retry_after_seconds: seconds} ->
+        gettext(
+          "You've added several passkeys in a short time. Try again in %{minutes} minutes.",
+          minutes: max(div(seconds + 59, 60), 1)
+        )
+
+      _other ->
+        nil
+    end)
+  end
+
+  defp passkey_refusal(_reason), do: nil
+
+  defp passkey_limit_message do
+    gettext("You have %{max} passkeys, the most an account can hold. Remove one to add another.",
+      max: Passkey.max_per_account()
+    )
+  end
 
   defp demo_locked_message do
     gettext(

@@ -20,6 +20,14 @@ defmodule KilnCMS.Accounts.Passkey do
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer]
 
+  # The most passkeys one account may hold (#2247). Each one added mails the
+  # owner; twenty covers every device a person owns with room to spare.
+  @max_per_account 20
+
+  @doc "The most passkeys one account may hold (#2247, `Validations.PasskeyCap`)."
+  @spec max_per_account() :: pos_integer()
+  def max_per_account, do: @max_per_account
+
   postgres do
     table "passkeys"
     repo KilnCMS.Repo
@@ -88,6 +96,12 @@ defmodule KilnCMS.Accounts.Passkey do
       accept [:user_id, :name, :credential_id, :public_key, :sign_count]
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
+      # Every passkey added mails the owner (below), so the total and the rate
+      # are both bounded (#2247): a stolen session must not be able to turn
+      # "an email for every factor added" into a flood.
+      validate KilnCMS.Accounts.Validations.PasskeyCap
+      change KilnCMS.Accounts.Changes.ThrottlePasskeyRegistration
+
       # The account's row first, and refused when an invitation took the
       # account over after the enrolling request loaded it (#2453): the
       # stranger's session must not land a passkey on the invitee's account.
@@ -99,6 +113,9 @@ defmodule KilnCMS.Accounts.Passkey do
               type: :passkey_added,
               target: fn record, _changeset -> {"user", record.user_id} end,
               metadata: fn record, _changeset -> %{"name" => record.name} end}
+
+      # Tell the owner (#2247, decision 1a), after the commit.
+      change {KilnCMS.Accounts.Changes.NotifyFactorAdded, kind: :passkey}
     end
 
     # Post-authentication bookkeeping (clone-detection counter + last use).

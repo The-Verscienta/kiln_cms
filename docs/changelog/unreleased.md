@@ -143,6 +143,28 @@ carries the reasoning.
   - **Rolling back** is safe: nothing is stored outside each node's memory,
     and the previous release exempts every unanswered claim again.
 
+<a id="backup-keep-days-upgrade"></a>
+
+- **If your host's cron sets `BACKUP_KEEP_DAYS`, check its value: `backup.sh` now refuses anything but a whole number of days from 1 to 2147483647, keeps 14 instead, and warns.**
+  Until now the script used the value unchecked in `find -mtime +N`, so
+  its effect depended on what you wrote (see the Fixed entry
+  [below](#backup-keep-days-validated)). Two settings change what the
+  next `backup.sh all` or `backup.sh prune` deletes:
+  - **`BACKUP_KEEP_DAYS=0`** pruned every backup older than one day. It now
+    keeps 14 days, so the backup directory grows to about 14 days of
+    backups. Check the disk has room, or set the number of days you want.
+  - **`BACKUP_KEEP_DAYS=14d`** (or another value with a unit) pruned
+    nothing at all on Linux, where GNU `find` refuses `+14d`. It now means
+    14, so the first prune after the upgrade deletes every backup older
+    than 14 days that the [keep rules](../backups.md#what-retention-deletes-and-what-it-keeps)
+    don't protect. Copy off anything older you want to keep before the
+    upgrade, or mark it as a [recovery point](../backups.md#keep-a-backup-as-a-recovery-point).
+  Each refused value writes
+  `BACKUP_KEEP_DAYS=<value> is not a whole number of days from 1 to 2147483647; using 14`
+  to stderr, which lands in the cron log. Rolling the pin back restores the
+  old reading, but backups the new prune has already deleted are gone. The
+  in-app backup already read the variable this way and is unchanged. (#2727)
+
 ## Added
 
 <a id="backup-schedules"></a>
@@ -331,6 +353,85 @@ carries the reasoning.
   [API keys over a rate limit](../security-alerts.md#api-keys-over-a-rate-limit).
   (The last part of #2245.)
 
+<a id="passkey-at-code-prompt"></a>
+
+- **At the two-step sign-in prompt, an account that also has a passkey can finish with it instead of a code.**
+  After the first factor (a password, a magic link or single sign-on), an
+  account with an authenticator app is sent to `/sign-in/verify` for a code.
+  If the account also has a passkey, the page now shows **Use a passkey**
+  below the code form. The browser offers only that account's own passkeys
+  and asks for the device's screen lock, and the sign-in then completes as a
+  code would. The button appears only in a browser with WebAuthn, and only
+  where a passkey ceremony can run: the main host (`PHX_HOST`) or a console
+  host that sits under it (`KILN_CONSOLE_HOST`), never a site's own host.
+  **Who is asked for a second factor is unchanged:** only accounts with an
+  authenticator app reach the prompt, and a passkey sign-in from `/sign-in`
+  is still a complete sign-in on its own. A passkey refused at the prompt
+  counts against the same per-account budget as a wrong code (5 per 15
+  minutes), is recorded the same way (`sign_in_failed`, `method:
+  "second_factor"`, `reason: "invalid_code"`), and at the limit gets the
+  same "Too many attempts" refusal, lockout event and owner email. A verified
+  passkey clears the sign-in throttle as a code does. "Remember me" is issued
+  only after the passkey verifies. If the five-minute pending sign-in has
+  run out, the button sends the browser back to `/sign-in`. The completed
+  `sign_in` event's `method` is the first factor's (`password`,
+  `magic_link`, `sso`, …), as after a code.
+  For developers: two JSON routes on the prompt's pipeline, `POST
+  /sign-in/verify/passkey/options` and `POST /sign-in/verify/passkey`
+  (`KilnCMSWeb.TwoFactorController`), with their own session key and
+  challenges, so a nonce from the anonymous `/auth/passkey/*` ceremony is
+  never accepted there, nor the reverse. New:
+  `KilnCMS.Accounts.WebAuthn.step_up_challenge/1`,
+  `KilnCMS.Accounts.WebAuthn.verify_step_up/3`,
+  `KilnCMS.Accounts.WebAuthn.ceremony_host?/1`,
+  `KilnCMS.Accounts.SecondFactor.check_passkey/3`,
+  `KilnCMS.Accounts.second_factors/1`,
+  `KilnCMS.Accounts.has_second_factor?/1`, and
+  `KilnCMSWeb.SecondFactorStepUp.decide/2`, the one place the browser and
+  headless sign-in doors decide who is prompted.
+  `KilnCMS.Accounts.PendingSignIn.resolve/4` replaces `resolve/3`: the new
+  last argument names the factor the caller is about to check (`:totp`,
+  `:passkey` or `:any`), so a passkey-only account cannot spend the code
+  budget on the code form. Each browser session now also records how it
+  signed in (`KilnCMSWeb.SignInMarker`): session key `"sign_in"`, holding
+  the method and, when one was verified, when the second factor was. It is
+  keyed to the session token's `jti`, so a marker left over from an earlier
+  token (after an idle timeout, say) reads as `nil` and is never inherited;
+  a remember-me sign-in writes `method` `"remember_me"`. Nothing reads it yet. No migration, no
+  API change and no new setting; rolling back removes the button, and an
+  older release ignores the session key. See
+  [Using a passkey at the code prompt](../two-factor-auth.md#using-a-passkey-at-the-code-prompt).
+  (Part of #2247.)
+
+<a id="second-factor-added-email"></a>
+
+- **Account owners are emailed whenever a second factor is added: an authenticator app set up or replaced, or a passkey registered.**
+  Adding a factor needs a signed-in session, so whoever holds a stolen
+  session could add one and use it to sign in again after the owner's
+  session ends, and nothing told the owner. Now confirming an authenticator
+  app on `/editor/settings` (a first one or a new one replacing the old) and
+  every passkey registration mail the owner, after the change commits. A
+  wrong code or a refused registration mails nobody. Regenerating recovery
+  codes adds no factor and mails nobody. The subject is "A second factor was
+  added to your (instance name) account"; the body says which kind ("An
+  authenticator app was set up…", "A new authenticator app replaced the
+  one…", "A passkey was added…"), when (UTC), the browser and platform
+  family it was added from (for example "Firefox on macOS"), and the site,
+  when known. It never contains the secret, recovery codes, the passkey's
+  name or its credential id: the name was typed by whoever added it. "If it
+  wasn't you": reset your password, which signs out every session, then ask
+  an administrator of your site to check the account's sign-in methods. Not
+  "sign in and remove it": the new factor may now be the only one the
+  account has. Like the other account mail it goes through the instance
+  relay (`KilnCMS.Mailer`), never a site's own, in English, and cannot be
+  muted. An erased account gets nothing. A mail that cannot be queued is
+  logged ("Second-factor notice for user … not sent") and does not undo the
+  enrollment. New: `KilnCMS.Accounts.SecondFactorNotice` and the change
+  `KilnCMS.Accounts.Changes.NotifyFactorAdded` on `User` `:confirm_totp`
+  and `Passkey` `:register`. See
+  [We email you when a second factor is added](../two-factor-auth.md#we-email-you-when-a-second-factor-is-added).
+  (Part of #2247.)
+
 ## Changed
 
 <a id="form-field-name-website-reserved"></a>
@@ -414,6 +515,32 @@ carries the reasoning.
   after another, so the cross-process lock protects nothing there) and a
   5-minute step timeout. The real publish workflows are unchanged.
   (#2729, #2572)
+
+<a id="passkey-limits"></a>
+
+- **An account can hold at most 20 passkeys, and add at most 5 in an hour.**
+  Every passkey added now mails the owner (see the entry under Added), so
+  the total and the rate are both bounded: a stolen session must not be able
+  to turn "an email for every factor added" into a flood of the owner's
+  inbox and the instance's mail quota. At 20, the **Passkeys** section of
+  `/editor/settings` replaces the add form with "You have 20 passkeys, the
+  most an account can hold. Remove one to add another." Over the hourly
+  budget a registration is refused with "You've added several passkeys in a
+  short time. Try again in N minutes." The budget counts every registration
+  that passes the browser's verification and reaches the save, including one
+  that then fails (a passkey already registered); one the cap refuses is not
+  counted. An account that already holds more than 20 keeps them, and can add
+  another once it is below 20 again. The cap is fixed
+  (`KilnCMS.Accounts.Passkey.max_per_account/0`). Operators can change the
+  hourly budget, per account and shared by every node:
+  `config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
+  passkey_registration_budget: 5, passkey_registration_window:
+  :timer.hours(1)` (the window in milliseconds; read at run time, so
+  `config/runtime.exs` works). Both refusals are on the `:register` action,
+  so every caller gets them: `KilnCMS.Accounts.Errors.PasskeyLimitReached`
+  (forbidden class, `max`) and
+  `KilnCMS.Accounts.Errors.PasskeyRegistrationThrottled` (invalid class,
+  `retry_after_seconds`). (Part of #2247.)
 
 ## Fixed
 
@@ -799,7 +926,96 @@ carries the reasoning.
   **Console** instead of the raw value. No migration and no configuration.
   See [Backup history](../backups.md#backup-history-2217). (#2542)
 
+<a id="database-url-ecto-scheme"></a>
+
+- **The in-app backup, the demo reset and the backup, restore and staging scripts accept an `ecto://` database URL.**
+  libpq (`pg_dump`, `pg_restore`, `psql`) reads a string as a connection URI
+  only when it starts with `postgres://` or `postgresql://`. `ecto://` is the
+  form `DATABASE_URL` is documented in, and the default in
+  `docker-compose.prod.yml`, but every `pg_*` call passed it on unchanged, so
+  libpq took the whole string as a database name on the local socket and
+  every dump failed: each in-app backup and demo reset on a default compose
+  deployment, and the cron `backup.sh` given that same `DATABASE_URL`. With
+  a query string (`?sslmode=require`) libpq failed differently, with
+  `invalid connection option`. Now a leading `ecto://`, in any case, is
+  rewritten to `postgres://` and nothing else in the string changes. That
+  covers `DATABASE_URL` and `BACKUP_DATABASE_URL` for the in-app backup and
+  the demo reset, `DATABASE_URL` for `backup.sh`, `RESTORE_DATABASE_URL`
+  for `restore.sh`, and `PROD_DATABASE_URL` and `STAGING_DATABASE_URL` for
+  `staging.sh`.
+
+  Ecto-only query parameters are not translated. libpq refuses
+  `pool_size=10`, `ssl=false` and the like with
+  `invalid URI query parameter: "pool_size"`; it happens to read `ssl=true`
+  itself, as `sslmode=require`. If your `DATABASE_URL` carries one, give the
+  in-app backup a `BACKUP_DATABASE_URL` without it, and the script a
+  `DATABASE_URL` in libpq's form. See
+  [Which database URL the backup tools accept](../backups.md#which-database-url-the-backup-tools-accept-2719).
+
+  Developers: `KilnCMS.Backups.PgUrl` holds the rewrite (`normalize/1`) and
+  the password split (`split/1`). `KilnCMS.Backups.database_url/0` now always
+  returns a URL libpq reads as one. (#2719)
+
+<a id="backup-keep-days-validated"></a>
+
+- **`backup.sh` reads `BACKUP_KEEP_DAYS` the way the app does.**
+  The script used the value unchecked. `BACKUP_KEEP_DAYS=14d` made
+  `find -mtime +14d` fail on Linux into `/dev/null`, so nothing was ever
+  pruned and nothing warned, and wrote `"keep_days": 14d` into
+  `manifest.json`, which is not JSON, so the Backups page and the
+  importer could not read that run. `0` pruned every backup older than a
+  day, where the app refuses 0. The script now reads it like
+  `KilnCMS.Config.Env.positive_integer/1`: surrounding whitespace is ignored,
+  blank means 14 silently, a whole number from 1 to 2147483647 is used (an
+  optional `+` and leading zeros are accepted, and the manifest gets the
+  plain number), and anything else (`0`, `-1`, `14d`, `1.5`, `2147483648`)
+  keeps 14 and writes
+  `BACKUP_KEEP_DAYS=<value> is not a whole number of days from 1 to 2147483647; using 14`
+  to stderr. Only `backup.sh all` and `backup.sh prune` read it. The app's
+  `KilnCMS.Backups.Manifest` also reads a `keep_days` of 0 or below as
+  absent. If you set either `0` or a value with a unit, read the
+  [upgrade note](#backup-keep-days-upgrade) first. (#2727)
+
 ## Security
+
+<a id="backup-scripts-password-out-of-argv"></a>
+
+- **`backup.sh`, `restore.sh` and `staging.sh` keep the database password off the command line and out of what they print.**
+  A process's arguments are readable by any user on the host
+  (`/proc/<pid>/cmdline`, `ps`) for as long as it runs. The scripts passed
+  the whole database URL, password included, as an argument to `pg_dump`
+  (`backup.sh db` and `all`, `staging.sh up`), `pg_restore` (`restore.sh db`
+  and `drill`) and `psql` (the drill's checks, `staging.sh up`). They now
+  take the password out of the URL and give it to that one command as
+  `PGPASSWORD`, set in a subshell around it, so `rclone`, `tar`, `curl` and
+  the rest of the run never see it. `staging.sh up` gives `pg_dump` and
+  `psql` each their own URL's password. The in-app backup already did this.
+
+  The URL is read the way libpq reads it: the user and password end at the
+  first `@` before the first `/`, so an `@` in the password must be written
+  `%40`; percent-escapes in the password are decoded. A `password=` query
+  parameter is moved too (even as `pass%77ord=`), and wins over a password in
+  the user part, as it does in libpq. A URL with no password is left as
+  written, so your own `PGPASSWORD` or `~/.pgpass` still applies. A
+  `key=value` connection string (`host=db password=… dbname=kiln`) is passed
+  through unchanged, password included: use a URL.
+
+  Nothing prints the password any more either. `restore.sh drill`'s hint
+  for scrubbing the drill database, and `staging.sh up`'s closing
+  `DATABASE_URL=` line, print the URL without it and say so. Before, a cron
+  `backup.sh` given an `ecto://` `DATABASE_URL` failed with a libpq error
+  that quoted the whole URL, password included, into the cron log
+  (`database "ecto://user:password@host/db" does not exist`); rotate that
+  password if such a log was kept or shipped anywhere. See
+  [The database password stays out of the pg_dump command line](../backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726).
+
+  Developers: `KilnCMS.Backups.Steps.split_credentials/1` keeps its
+  signature, and now returns the URL rewritten from `ecto://`, moves a query
+  `password=` as well, and no longer raises on a malformed `%` escape (it
+  stays literal). The three scripts carry identical copies of
+  `pg_conn_split`, tested against the same table of URLs as
+  `KilnCMS.Backups.PgUrl.split/1`; the run under macOS's `/bin/bash` 3.2 is
+  skipped on Linux CI. (#2726)
 
 <a id="crawler-verification-hardening"></a>
 

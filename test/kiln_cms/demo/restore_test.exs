@@ -170,6 +170,18 @@ defmodule KilnCMS.Demo.RestoreTest do
       refute File.exists?(ctx.golden <> ".partial")
     end
 
+    test "dump/2 and run/2 take an ecto:// URL, the documented DATABASE_URL form (#2719)", ctx do
+      ecto = String.replace_prefix(ctx.url, "postgres://", "ecto://")
+      golden!(%{ctx | url: ecto})
+      vandalize!(ctx.conn)
+
+      {:ok, golden} = Restore.read_golden(ctx.golden)
+      {:ok, work} = Restore.prepare(golden, ctx.work)
+      assert Restore.run(work, ecto) == :ok
+
+      assert rows(ctx.conn, "SELECT id, name FROM items ORDER BY id") == [[1, "golden"]]
+    end
+
     test "an unreadable snapshot is refused", ctx do
       File.write!(ctx.golden, "this is not an archive")
 

@@ -261,5 +261,59 @@ defmodule KilnCMS.BackupsTest do
 
       assert Backups.database_url() == "postgres://someone@elsewhere/db"
     end
+
+    test "an ecto:// DATABASE_URL comes back as a URI libpq reads, and nothing else changes (#2719)" do
+      # `ecto://` is the documented form; libpq reads anything but
+      # `postgres://`/`postgresql://` as a database name or a conninfo string.
+      db = KilnCMS.Repo.config()[:database]
+
+      for {env_url, expected} <- [
+            {"ecto://kiln:p%40ss%25w@db.internal:5432/#{db}",
+             "postgres://kiln:p%40ss%25w@db.internal:5432/#{db}"},
+            {"ecto://kiln@db.internal/#{db}", "postgres://kiln@db.internal/#{db}"},
+            {"ECTO://kiln:pw@db.internal/#{db}?sslmode=require",
+             "postgres://kiln:pw@db.internal/#{db}?sslmode=require"}
+          ] do
+        put_database_url_env(env_url)
+        assert Backups.database_url() == expected
+      end
+    end
+
+    test "an ecto:// DATABASE_URL for another database is still ignored" do
+      put_database_url_env("ecto://someone:pw@elsewhere:5432/a_different_database")
+
+      refute Backups.database_url() =~ "a_different_database"
+      assert Backups.database_url() =~ KilnCMS.Repo.config()[:database]
+      assert Backups.database_url() =~ ~r{\Apostgres://}
+    end
+
+    test "an explicitly configured ecto:// URL is normalized too" do
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(
+          original,
+          :database_url,
+          "ecto://someone:s%3Acret@elsewhere/db?sslmode=require"
+        )
+      )
+
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
+
+      assert Backups.database_url() == "postgres://someone:s%3Acret@elsewhere/db?sslmode=require"
+    end
+  end
+
+  defp put_database_url_env(url) do
+    original = System.get_env("DATABASE_URL")
+    System.put_env("DATABASE_URL", url)
+
+    on_exit(fn ->
+      if original,
+        do: System.put_env("DATABASE_URL", original),
+        else: System.delete_env("DATABASE_URL")
+    end)
   end
 end

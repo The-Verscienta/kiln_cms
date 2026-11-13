@@ -148,6 +148,8 @@ on the production VPS.
 |----------|----------|---------|
 | `PROD_DATABASE_URL` | yes (`up`) | Source to `pg_dump`. Read-only; the script never writes to it. |
 | `STAGING_DATABASE_URL` | yes | Throwaway target. Its **name must look ephemeral** (see guards). |
+
+Both URLs may be `postgres://`, `postgresql://` or `ecto://`. The script gives each password only to its own `pg_dump` or `psql`, as `PGPASSWORD`, never as an argument, and its closing `DATABASE_URL=` line leaves the password out ([backups.md](backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726)).
 | `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` | recommended | Seed one usable admin; without them you can't sign in to staging. |
 | `KILN_BIN` | no (default `mix`) | How to run migrate + scrub: `mix` for a checkout, or a release bin path like `/app/bin/kiln_cms` in Docker. |
 
@@ -184,6 +186,11 @@ scrubbed database — no new build, no new service definition:
      -e STAGING_ADMIN_PASSWORD="a-strong-password" \
      your-kiln-image /app/bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'
    ```
+   Run by hand like this, `pg_dump` and `psql` need `postgres://` URLs (they
+   read `ecto://` as a database name), and a password in the URL is visible in
+   `ps` while they run. Leave the passwords out of the URLs and give each
+   command its own (`PGPASSWORD=… pg_dump … | PGPASSWORD=… psql …`), or use
+   `staging.sh up`, which does both for you.
 3. **Serve it.** In Coolify, add a second application (or a second resource) from the
    **same image/repo** whose only differences are:
    - `DATABASE_URL` → the staging clone,

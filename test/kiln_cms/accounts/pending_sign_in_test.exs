@@ -33,6 +33,45 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
     {%{user | __metadata__: Map.put(user.__metadata__, :token, "stub.jwt.token")}, secret}
   end
 
+  describe "each route asks for its own factor (#2247)" do
+    import KilnCMS.PasskeyFixtures, only: [enroll: 2]
+
+    test "a passkey-only account resolves for the passkey and the page, not the code" do
+      {user, _secret} = enabled_user(%{totp_confirmed_at: nil})
+      {:ok, _} = enroll(user, "psi-only-#{user.id}")
+      blob = PendingSignIn.mint_and_hold(:session, @endpoint, user)
+
+      assert {:ok, %{factors: %{totp?: false, passkeys: 1}}} =
+               PendingSignIn.resolve(:session, @endpoint, blob, :passkey)
+
+      assert {:ok, _} = PendingSignIn.resolve(:session, @endpoint, blob, :any)
+      assert :error = PendingSignIn.resolve(:session, @endpoint, blob, :totp)
+    end
+
+    test "an app-only account resolves for the code, not the passkey" do
+      {user, _secret} = enabled_user()
+      blob = PendingSignIn.mint_and_hold(:session, @endpoint, user)
+
+      assert {:ok, %{factors: %{totp?: true, passkeys: 0}}} =
+               PendingSignIn.resolve(:session, @endpoint, blob, :totp)
+
+      assert :error = PendingSignIn.resolve(:session, @endpoint, blob, :passkey)
+    end
+
+    test "an account that removed every factor mid-prompt resolves to nothing" do
+      {user, _secret} = enabled_user()
+      {:ok, passkey} = enroll(user, "psi-gone-#{user.id}")
+      blob = PendingSignIn.mint_and_hold(:session, @endpoint, user)
+
+      Ash.Seed.update!(user, %{totp_confirmed_at: nil})
+      :ok = Accounts.remove_passkey(passkey, actor: user)
+
+      for factor <- [:any, :totp, :passkey] do
+        assert :error = PendingSignIn.resolve(:session, @endpoint, blob, factor)
+      end
+    end
+  end
+
   describe "round trip" do
     for mode <- [:session, :encrypted] do
       @mode mode
@@ -42,7 +81,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
 
         blob = PendingSignIn.mint_and_hold(@mode, @endpoint, user)
 
-        assert {:ok, pending} = PendingSignIn.resolve(@mode, @endpoint, blob)
+        assert {:ok, pending} = PendingSignIn.resolve(@mode, @endpoint, blob, :totp)
         assert pending.user.id == user.id
         # Reattached so a completed sign-in has something to store.
         assert pending.user.__metadata__.token == "stub.jwt.token"
@@ -52,9 +91,9 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
         {user, _secret} = enabled_user()
         blob = PendingSignIn.mint_and_hold(@mode, @endpoint, user)
 
-        assert :error = PendingSignIn.resolve(@mode, @endpoint, "not-a-blob")
-        assert :error = PendingSignIn.resolve(@mode, @endpoint, nil)
-        assert :error = PendingSignIn.resolve(@mode, @endpoint, blob <> "x")
+        assert :error = PendingSignIn.resolve(@mode, @endpoint, "not-a-blob", :totp)
+        assert :error = PendingSignIn.resolve(@mode, @endpoint, nil, :totp)
+        assert :error = PendingSignIn.resolve(@mode, @endpoint, blob <> "x", :totp)
       end
 
       test "#{mode}: an account that turned 2FA off in between is refused" do
@@ -65,7 +104,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
 
         Ash.Seed.update!(user, %{totp_confirmed_at: nil})
 
-        assert :error = PendingSignIn.resolve(@mode, @endpoint, blob)
+        assert :error = PendingSignIn.resolve(@mode, @endpoint, blob, :totp)
       end
     end
   end
@@ -79,8 +118,8 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       session = PendingSignIn.mint_and_hold(:session, @endpoint, user)
       encrypted = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
 
-      assert :error = PendingSignIn.resolve(:encrypted, @endpoint, session)
-      assert :error = PendingSignIn.resolve(:session, @endpoint, encrypted)
+      assert :error = PendingSignIn.resolve(:encrypted, @endpoint, session, :totp)
+      assert :error = PendingSignIn.resolve(:session, @endpoint, encrypted, :totp)
     end
 
     test "the headless blob does not publish the first-factor JWT" do
@@ -123,14 +162,16 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       {user, _secret} = enabled_user()
       blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
 
-      assert {:ok, %{jti: jti} = resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, %{jti: jti} = resolved} =
+               PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
+
       assert is_binary(jti)
       assert :ok = PendingSignIn.claim(resolved)
 
       # `resolve/3` still succeeds on a spent blob — there is deliberately no
       # "is it spent?" read (see the moduledoc). The claim is the gate, and it
       # is what refuses the second redemption.
-      assert {:ok, again} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, again} = PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
       assert :taken = PendingSignIn.claim(again)
     end
 
@@ -142,7 +183,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       {user, _secret} = enabled_user()
       blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
 
-      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
 
       assert :ok = PendingSignIn.claim(resolved)
       assert :taken = PendingSignIn.claim(resolved)
@@ -163,7 +204,9 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       {user, _secret} = enabled_user()
       blob = PendingSignIn.mint_and_hold(:session, @endpoint, user)
 
-      assert {:ok, %{jti: nil} = resolved} = PendingSignIn.resolve(:session, @endpoint, blob)
+      assert {:ok, %{jti: nil} = resolved} =
+               PendingSignIn.resolve(:session, @endpoint, blob, :totp)
+
       assert :ok = PendingSignIn.claim(resolved)
     end
   end
@@ -175,8 +218,11 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       ticked = PendingSignIn.mint_and_hold(:session, @endpoint, user, remember_me?: true)
       plain = PendingSignIn.mint_and_hold(:session, @endpoint, user)
 
-      assert {:ok, %{remember_me?: true}} = PendingSignIn.resolve(:session, @endpoint, ticked)
-      assert {:ok, %{remember_me?: false}} = PendingSignIn.resolve(:session, @endpoint, plain)
+      assert {:ok, %{remember_me?: true}} =
+               PendingSignIn.resolve(:session, @endpoint, ticked, :totp)
+
+      assert {:ok, %{remember_me?: false}} =
+               PendingSignIn.resolve(:session, @endpoint, plain, :totp)
     end
 
     test "a headless blob never reports it, whatever was passed" do
@@ -187,7 +233,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user, remember_me?: true)
 
       assert {:ok, %{remember_me?: remember?}} =
-               PendingSignIn.resolve(:encrypted, @endpoint, blob)
+               PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
 
       refute remember?
     end
@@ -231,7 +277,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
         expiry = row(token).expires_at
 
         blob = PendingSignIn.mint_and_hold(@mode, @endpoint, user)
-        assert {:ok, resolved} = PendingSignIn.resolve(@mode, @endpoint, blob)
+        assert {:ok, resolved} = PendingSignIn.resolve(@mode, @endpoint, blob, :totp)
 
         assert :ok = PendingSignIn.claim(resolved)
 
@@ -271,7 +317,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       Ash.Seed.update!(row(token), %{purpose: "revocation"})
 
-      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
 
       # `:unavailable`, not `:ok`. The token cannot be made usable, and saying
       # otherwise hands the caller a 201 carrying a revoked credential whose
@@ -291,7 +337,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       {user, token} = held_user()
 
       blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
-      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
 
       # Someone else spends this blob's jti first.
       assert :ok =
@@ -319,7 +365,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       Ash.Seed.update!(row(token), %{expires_at: DateTime.add(DateTime.utc_now(), -5, :second)})
 
-      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
       assert :ok = PendingSignIn.claim(resolved)
       assert usable?(token)
       assert row(token).purpose == Token.user_purpose()
@@ -338,7 +384,7 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
       KilnCMS.Repo.delete!(row(token))
 
-      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob)
+      assert {:ok, resolved} = PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
       assert :ok = PendingSignIn.claim(resolved)
     end
 

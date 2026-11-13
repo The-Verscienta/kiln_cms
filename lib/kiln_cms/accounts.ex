@@ -423,6 +423,34 @@ defmodule KilnCMS.Accounts do
   @spec totp_enabled?(KilnCMS.Accounts.User.t()) :: boolean()
   def totp_enabled?(%KilnCMS.Accounts.User{totp_confirmed_at: at}), do: not is_nil(at)
 
+  @typedoc "Which second factors an account holds (#2247)."
+  @type second_factors :: %{totp?: boolean(), passkeys: non_neg_integer()}
+
+  @doc """
+  Which second factors `user` holds (#2247): whether the authenticator app is
+  enrolled, and how many passkeys are registered.
+
+  A passkey counts because every Kiln passkey is registered and asserted with
+  user verification required, so one assertion is possession and a PIN or
+  biometric together. The passkeys are read as the account itself, which the
+  `Passkey` read policy allows for its own rows; nothing else is loaded.
+  """
+  @spec second_factors(KilnCMS.Accounts.User.t()) :: second_factors()
+  def second_factors(%KilnCMS.Accounts.User{} = user) do
+    passkeys = list_passkeys!(user.id, actor: user, query: [select: [:id]])
+    %{totp?: totp_enabled?(user), passkeys: length(passkeys)}
+  end
+
+  @doc """
+  Whether `user` holds any second factor (#2247): the authenticator app or at
+  least one passkey. Pass the map `second_factors/1` returned to skip the read.
+  """
+  @spec has_second_factor?(KilnCMS.Accounts.User.t() | second_factors()) :: boolean()
+  def has_second_factor?(%KilnCMS.Accounts.User{} = user),
+    do: user |> second_factors() |> has_second_factor?()
+
+  def has_second_factor?(%{totp?: totp?, passkeys: passkeys}), do: totp? or passkeys > 0
+
   @doc """
   A JSON-serializable snapshot of a user's own data for an access/portability
   request (GDPR Art. 15/20, #212): profile fields and notification preferences.

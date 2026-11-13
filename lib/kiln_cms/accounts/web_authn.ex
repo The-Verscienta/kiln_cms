@@ -4,7 +4,7 @@ defmodule KilnCMS.Accounts.WebAuthn do
   attestation/assertion verification over `Wax`, wired to the
   `KilnCMS.Accounts.Passkey` store.
 
-  Two ceremonies:
+  Three ceremonies:
 
     * **Registration** (authenticated, from `/editor/settings` over the
       LiveView socket): mint a challenge, have the browser create a
@@ -15,6 +15,10 @@ defmodule KilnCMS.Accounts.WebAuthn do
       allow-list (the browser picks a discoverable credential), verify the
       assertion + clone-detection counter, and return the account with a
       session token minted — a passkey sign-in is complete on its own.
+    * **Step-up** (#2247, from the second-factor prompt via
+      `KilnCMSWeb.TwoFactorController`): a challenge whose allow-list is the
+      pending account's own credentials, verified for that account only, and
+      no token minted — it completes the sign-in the first factor started.
 
   Because every credential is registered with user verification required and
   every assertion must carry the UV flag, a passkey is possession *and*
@@ -159,6 +163,7 @@ defmodule KilnCMS.Accounts.WebAuthn do
              challenge,
              [{credential_raw, decode_cose_key(passkey.public_key)}]
            ),
+         :ok <- user_verified(auth_data),
          :ok <- check_sign_count(passkey, auth_data.sign_count) do
       bump_usage(passkey, auth_data.sign_count)
       sign_in(passkey.user_id)
@@ -167,6 +172,139 @@ defmodule KilnCMS.Accounts.WebAuthn do
       {:error, _reason} = error -> error
     end
   end
+
+  @doc """
+  Mint a step-up challenge for `user` (#2247): the second factor of a sign-in
+  that has already passed its first.
+
+  Unlike `authentication_challenge/0` it carries an allow-list — `user`'s own
+  credentials, with their keys — so Wax itself refuses an assertion from any
+  other credential (it looks the key up in the challenge, not in anything the
+  caller passes). `verify_step_up/3` checks the owner as well.
+  """
+  @spec step_up_challenge(KilnCMS.Accounts.User.t()) :: Wax.Challenge.t()
+  def step_up_challenge(%KilnCMS.Accounts.User{} = user) do
+    Wax.new_authentication_challenge(
+      origin: origin(),
+      rp_id: rp_id(),
+      user_verification: "required",
+      allow_credentials: allow_credentials(user)
+    )
+    |> verify_origins()
+  end
+
+  @doc """
+  The client-side `navigator.credentials.get/1` options for a step-up
+  `challenge`: `allowCredentials` names the account's credentials, so the
+  browser offers only those.
+  """
+  @spec step_up_options(Wax.Challenge.t()) :: map()
+  def step_up_options(%Wax.Challenge{} = challenge) do
+    %{
+      challenge: b64(challenge.bytes),
+      rpId: challenge.rp_id,
+      allowCredentials:
+        Enum.map(challenge.allow_credentials, fn {credential_raw, _cose_key} ->
+          %{type: "public-key", id: b64(credential_raw)}
+        end),
+      userVerification: "required",
+      timeout: challenge.timeout * 1000
+    }
+  end
+
+  @doc """
+  Verify a step-up assertion against `challenge` for `user` (#2247).
+
+  `{:ok, user}` — the same struct, so the first-factor token in its metadata
+  rides through — or `{:error, reason}`. **No session token is minted**: the
+  sign-in is the one the first factor started, and its held token is what a
+  verified step-up releases (`KilnCMS.Accounts.PendingSignIn.claim/1`).
+
+  Refused when the credential is not `user`'s, when the challenge has no
+  allow-list, when Wax refuses the assertion (an unlisted credential among
+  its reasons), when the authenticator did not verify the user, and on a
+  counter regression. Called through
+  `KilnCMS.Accounts.SecondFactor.check_passkey/3`, which charges the shared
+  second-factor budget first.
+  """
+  @spec verify_step_up(Wax.Challenge.t(), map(), KilnCMS.Accounts.User.t()) ::
+          {:ok, KilnCMS.Accounts.User.t()} | {:error, term()}
+  def verify_step_up(%Wax.Challenge{} = challenge, payload, %KilnCMS.Accounts.User{} = user)
+      when is_map(payload) do
+    with {:ok, credential_raw} <- decode(payload["credential_id"]),
+         {:ok, auth_data_bin} <- decode(payload["authenticator_data"]),
+         {:ok, signature} <- decode(payload["signature"]),
+         {:ok, client_data} <- decode(payload["client_data_json"]),
+         {:ok, passkey} <- lookup(b64(credential_raw)),
+         :ok <- owned_by(passkey, user),
+         :ok <- has_allow_list(challenge),
+         # No credentials passed: with an allow-list on the challenge, Wax takes
+         # the key from there, so a credential outside it has no key at all.
+         {:ok, auth_data} <-
+           verifier().authenticate(
+             credential_raw,
+             auth_data_bin,
+             signature,
+             client_data,
+             challenge,
+             []
+           ),
+         :ok <- user_verified(auth_data),
+         :ok <- check_sign_count(passkey, auth_data.sign_count) do
+      bump_usage(passkey, auth_data.sign_count)
+      {:ok, user}
+    else
+      :error -> {:error, :invalid_encoding}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def verify_step_up(_challenge, _payload, _user), do: {:error, :invalid_encoding}
+
+  @doc """
+  Whether a passkey ceremony can run on `host` (#2247): the canonical host, or
+  a console host while passkeys work there. The same hosts
+  `origin_allowed?/2` accepts as origins, so a page on any other host — a
+  tenant site host — offers no passkey it cannot verify.
+  """
+  @spec ceremony_host?(String.t() | nil) :: boolean()
+  def ceremony_host?(host) when is_binary(host) do
+    host = String.downcase(host)
+
+    host == rp_id() or
+      (KilnCMSWeb.Plugs.ConsoleHost.console_host_name?(host) and
+         KilnCMSWeb.Plugs.ConsoleHost.passkey_capable?())
+  end
+
+  def ceremony_host?(_host), do: false
+
+  # The account's credentials as Wax's allow-list: the raw credential id and
+  # the COSE key it verifies with. Read as the account itself, which the
+  # `Passkey` read policy allows for its own rows.
+  defp allow_credentials(user) do
+    user.id
+    |> Accounts.list_passkeys!(actor: user)
+    |> Enum.flat_map(fn passkey ->
+      case Base.url_decode64(passkey.credential_id, padding: false) do
+        {:ok, raw} -> [{raw, decode_cose_key(passkey.public_key)}]
+        :error -> []
+      end
+    end)
+  end
+
+  defp owned_by(%Passkey{user_id: user_id}, %KilnCMS.Accounts.User{id: user_id}), do: :ok
+  defp owned_by(_passkey, _user), do: {:error, :not_owner}
+
+  # An empty allow-list is Wax's "discoverable credential" mode, in which it
+  # takes keys from the caller instead — not a step-up.
+  defp has_allow_list(%Wax.Challenge{allow_credentials: [_ | _]}), do: :ok
+  defp has_allow_list(_challenge), do: {:error, :no_allow_list}
+
+  # Wax refuses a missing UV flag when the challenge requires it, which every
+  # Kiln challenge does. Checked here as well, so the guarantee a passkey
+  # counts as both factors on does not rest on one option.
+  defp user_verified(%{flag_user_verified: true}), do: :ok
+  defp user_verified(_auth_data), do: {:error, :user_not_verified}
 
   # The stored key is our own `term_to_binary` of Wax's CBOR-decoded COSE map
   # (see register_passkey/3) — decoded non-executably as defense-in-depth.
@@ -236,7 +374,10 @@ defmodule KilnCMS.Accounts.WebAuthn do
     nonce
   end
 
-  @doc "Consume a parked challenge (single use). `nil` when absent/expired."
+  @doc """
+  Consume a parked sign-in challenge (single use). `nil` when absent, expired,
+  or parked by `stash_step_up_challenge/2`.
+  """
   @spec take_challenge(term()) :: Wax.Challenge.t() | nil
   def take_challenge(nonce) when is_binary(nonce) do
     case Cachex.take(@challenge_cache, nonce) do
@@ -246,6 +387,39 @@ defmodule KilnCMS.Accounts.WebAuthn do
   end
 
   def take_challenge(_nonce), do: nil
+
+  @doc """
+  Park a step-up challenge for the pending sign-in of `user_id` (#2247),
+  returning an opaque nonce. Bound to that account: `take_step_up_challenge/2`
+  hands it back only for the same one, and `take_challenge/1` never does, so
+  neither ceremony's nonce completes the other.
+  """
+  @spec stash_step_up_challenge(Wax.Challenge.t(), String.t()) :: String.t()
+  def stash_step_up_challenge(%Wax.Challenge{} = challenge, user_id) when is_binary(user_id) do
+    nonce = 16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+
+    Cachex.put(@challenge_cache, nonce, {:step_up, user_id, challenge},
+      expire: :timer.seconds(challenge.timeout)
+    )
+
+    nonce
+  end
+
+  @doc """
+  Consume a parked step-up challenge (single use) for `user_id`'s pending
+  sign-in. `nil` when absent, expired, parked for another account, or parked by
+  `stash_challenge/1`. Taken either way, so a nonce tried against the wrong
+  account is spent.
+  """
+  @spec take_step_up_challenge(term(), String.t()) :: Wax.Challenge.t() | nil
+  def take_step_up_challenge(nonce, user_id) when is_binary(nonce) and is_binary(user_id) do
+    case Cachex.take(@challenge_cache, nonce) do
+      {:ok, {:step_up, ^user_id, %Wax.Challenge{} = challenge}} -> challenge
+      _ -> nil
+    end
+  end
+
+  def take_step_up_challenge(_nonce, _user_id), do: nil
 
   # Relying-party identity from the endpoint's canonical URL — passkeys are
   # scoped to this host. Ceremonies run on the main host and, with

@@ -123,7 +123,7 @@ authorization — anyone with the link can view that draft until it expires. The
 
 ### Transactional & workflow email
 
-Three kinds of email leave the system via the configured Swoosh adapter:
+These kinds of email leave the system via the configured Swoosh adapter:
 
 - **Auth email** — confirmation, password reset, magic-link sign-in, and a
   site invitation or "you were added to a site" notice (#2135). An invitation
@@ -131,6 +131,14 @@ Three kinds of email leave the system via the configured Swoosh adapter:
   account. The invitation mail names the site, the tier and the inviting
   admin's display name ("An administrator" if they have none, never their
   email).
+- **Second factor added** (#2247), to the account's own address, whenever an
+  authenticator app is set up or replaced or a passkey is added. It names the
+  kind of factor, the time, a browser and platform family ("Firefox on
+  macOS", reduced from the user agent, which is not sent) and the site it was
+  added from; never the secret, recovery codes, or the passkey's name or
+  credential id. It goes through the instance relay (`KilnCMS.Mailer`), never
+  a site's own, cannot be muted, and is not sent to an erased account
+  ([We email you when a second factor is added](two-factor-auth.md#we-email-you-when-a-second-factor-is-added)).
 - **Workflow email** — review-requested / published / changes-requested
   notifications to the relevant admins or author.
 - **Registration email** (#2251), about a site's registration approval queue:
@@ -534,6 +542,13 @@ the origin. For a funnel goal the goal page is the funnel's *final step*.
   contents are neither tamperable nor readable client-side. Both salts derive
   keys from `secret_key_base`; rotating that invalidates existing sessions. The
   `__Host-` prefix keeps a sibling org's origin from shadowing it (#686).
+  Since #2247 a signed-in session also holds a sign-in marker under
+  `"sign_in"`: the session token's `jti`, how it signed in (`password`,
+  `magic_link`, `sso`, `password_reset`, `passkey`, `remember_me`, …) and,
+  when one was verified, the Unix time of the second factor. No address, no
+  device and nothing about the factor itself. It lives in the cookie only, is
+  never written to the database, and is cleared with the rest of the session
+  at sign-out.
 - **Content-unlock cookie** (`_kiln_unlock`, #496) — the only cookie a *visitor*
   can end up with, and only ever by typing a passphrase into a page an editor
   locked. It is signed and http-only, expires in 12 hours, and holds short-lived

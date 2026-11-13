@@ -111,11 +111,171 @@ because an invitee took the account over is logged but raises no alert.
   the token in *that* session — a browser sitting at the code prompt is not
   signed in and carries none, so signing out elsewhere does not reach a held
   row.
-- **Where the code is checked:** `KilnCMS.Accounts.SecondFactor.check/2`, for
-  both gates, so neither can drift on what counts as a valid submission.
+- **Where the code is checked:** `KilnCMS.Accounts.SecondFactor.check/3`, for
+  both gates, so neither can drift on what counts as a valid submission. A
+  passkey at the browser prompt goes through its twin,
+  `KilnCMS.Accounts.SecondFactor.check_passkey/3`, which charges the same
+  budget in the same order (see
+  [Using a passkey at the code prompt](#using-a-passkey-at-the-code-prompt)).
   Whitespace normalization sits one level lower still, in
   `KilnCMS.Accounts.Totp.valid?/3`, because the enrolment and disable forms
   check a code too and used to reject the `123 456` an authenticator app copies.
+
+## Using a passkey at the code prompt
+
+An account that has both an authenticator app and a passkey can finish the
+second step with the passkey instead of typing a code (#2247). Who is asked
+for a second factor has not changed: only an account with an authenticator
+app is sent to the prompt, and a passkey sign-in from the sign-in page is
+still a complete sign-in on its own (see [Passkeys](passkeys.md)).
+
+You need an account with an authenticator app and at least one passkey, both
+added at `/editor/settings`, and a browser that supports passkeys. Then:
+
+1. Sign in at `/sign-in` with your password (a sign-in link by email or
+   single sign-on works the same). The **Two-factor authentication** page
+   opens at `/sign-in/verify`, asking for "the 6-digit code from your
+   authenticator app", with **Use a passkey** below **Use a recovery code
+   instead**.
+2. Click **Use a passkey**. The browser offers this account's passkeys, and
+   only those, and asks for the device's screen lock (PIN, fingerprint or
+   face).
+3. Confirm on the device. You are signed in, with "You are now signed in",
+   and land where the sign-in was taking you, exactly as after a code.
+
+If you ticked **Remember me** on the sign-in page, the 30-day cookie is set
+at step 3 and not before, for the reason in
+["Remember me" and the second factor](#remember-me-and-the-second-factor).
+
+The button is shown only where the passkey can be checked: on the main host
+(`PHX_HOST`) or a console host under it (`KILN_CONSOLE_HOST`), and never on a
+site's own host, because a passkey belongs to the main host and a browser
+refuses it anywhere else. On a site's own host the page shows the code form
+only. It is also hidden in a browser without passkey support.
+
+### What counts, and what is recorded
+
+A passkey at the prompt is the other way past the same step, so it is held to
+the same rules as a code:
+
+- A refused passkey costs one attempt from the account's second-factor budget,
+  the one codes and recovery codes share (five per fifteen minutes; see
+  [Why a wrong code can say "too many attempts"](#why-a-wrong-code-can-say-too-many-attempts)).
+  At the limit the prompt refuses the passkey too, the lockout is recorded,
+  and the owner gets the same lockout email.
+- A verified passkey clears that budget and the sign-in budget, as a verified
+  code does.
+- A refused passkey is recorded in the [security log](security-events.md) as
+  `sign_in_failed` with `method` `second_factor` and `reason` `invalid_code`,
+  the same as a wrong code. The completed sign-in is one `sign_in` event whose
+  `method` is the first factor's (`password`, `magic_link`, `sso`, …).
+- Only a passkey registered to the account waiting at the prompt is accepted,
+  it must have checked the screen lock, and its signature counter must not go
+  backwards (the clone check every passkey sign-in makes).
+
+### If it does not work
+
+- **No Use a passkey button.** The account has no passkey, you are on a site's
+  own host rather than the main or console host, or the browser has no passkey
+  support. The code and recovery-code forms still work.
+- **"That passkey couldn't be verified. Try again or use another method."**
+  The device prompt was canceled or timed out, or the passkey was refused (it
+  belongs to another account, did not check the screen lock, or failed the
+  clone check). The sign-in is still waiting: try again, or type a code. A
+  refusal the server saw used one attempt; a canceled prompt did not.
+- **"Too many attempts. Wait a few minutes and try again."** The account's
+  second-factor budget is spent, by codes, passkeys, or the settings forms
+  that share it. The answer carries `Retry-After`.
+- **You are sent back to `/sign-in`.** The pending sign-in lasts five minutes,
+  and it had run out, or it was already completed in another tab. Sign in
+  again.
+- **"Sign-in could not be completed right now. Try again in a moment."** The
+  passkey verified but the sign-in could not be finished on the server (a
+  503). Try again; the passkey was not the problem.
+- **The page says "This sign-in can't be finished here. Start again." and
+  offers nothing.** The account no longer has a factor this page can check
+  here: for example, its authenticator app was removed while the prompt was
+  open and the page is on a site's own host, where a passkey cannot run. Go
+  back to sign in, on the main host if the account has a passkey.
+
+For developers: the button drives a two-step JSON exchange,
+`POST /sign-in/verify/passkey/options` then `POST /sign-in/verify/passkey`
+(`KilnCMSWeb.TwoFactorController`, `initPasskeyStepUp` in
+`assets/js/passkeys.js`), on the same pipeline as `/sign-in/verify`: CSRF
+protection, the per-address `:auth` rate limit, and the
+[admin allowlist](admin-allowlist.md)'s **Also restrict sign-in**. The
+first answers `{"publicKey": …}`, a challenge limited to the waiting account's
+credentials (`KilnCMS.Accounts.WebAuthn.step_up_challenge/1`), parked
+server-side and bound to that account. The second verifies the assertion
+(`KilnCMS.Accounts.WebAuthn.verify_step_up/3`, which mints no token: it
+releases the first-factor token held since the first step) and answers
+`{"redirect_to": …}`. A refusal is a 401 with `{"error": …}`, plus
+`"redirect_to": "/sign-in"` when the pending sign-in is over; 429 and 503 as
+above. The two passkey ceremonies keep separate session keys and challenge
+entries, so a nonce from `/auth/passkey/*` is never accepted here, nor the
+reverse. Who is sent to the prompt at all is
+`KilnCMSWeb.SecondFactorStepUp.decide/2`, shared by the browser and headless
+doors; today it answers `:prompt` exactly when the authenticator app is on.
+
+Every completed browser sign-in now also records, in the session, how it
+signed in and whether a second factor was verified (`KilnCMSWeb.SignInMarker`,
+session key `"sign_in"`). It is keyed to the session token, so a marker from
+an earlier token reads as nothing. Nothing reads it yet.
+
+## We email you when a second factor is added
+
+Whenever a second factor is added to an account, its owner gets an email
+(#2247):
+
+- an authenticator app is set up on `/editor/settings` (the first one, or a
+  new one that replaces the old);
+- a passkey is added.
+
+One email per factor, every time. Regenerating recovery codes adds no factor
+and sends nothing; nor does a wrong code or a refused passkey.
+
+Why: adding a factor needs only a signed-in session. Someone who got hold of
+a session could add a passkey of their own and use it to sign in again after
+the owner's session ends. No sign-in fails, and the new factor sits in a
+settings list the owner has no reason to open, so the email is how they find
+out.
+
+The email is titled "A second factor was added to your (name) account", with
+the instance's name. It says:
+
+- what was added: "An authenticator app was set up…", "A new authenticator app
+  replaced the one your account used… Codes from the old one no longer work."
+  or "A passkey was added… A passkey signs in on its own, without your
+  password.";
+- **When**, in UTC;
+- **Browser**, as a browser and platform family, for example "Firefox on
+  macOS", never the raw browser string;
+- **Site**, the site it was added from, when known.
+
+It never contains the secret, a recovery code, the passkey's credential id or
+its name. The name was typed by whoever added it, and text chosen by an
+intruder has no place in a mail sent from your own address.
+
+### If it wasn't you
+
+The email gives two steps, in this order:
+
+1. **Reset your password** (the link goes to `/reset`). That signs out every
+   session, including the intruder's.
+2. **Ask an administrator of your site** to check your account's sign-in
+   methods. The factor just added may now be the only second factor the
+   account has, so you may not be able to get past it to remove it yourself.
+
+### For operators
+
+The email goes through the instance mail relay (`KilnCMS.Mailer`), never a
+site's own, in English, like the other account email, and it cannot be
+muted. An erased account gets none. It is queued only after the factor is
+saved: a mail that cannot be queued is logged as "Second-factor notice for
+user (id) not sent" and does not undo the new factor.
+
+Because every passkey added sends an email, an account can hold at most 20
+passkeys and add at most 5 an hour (see [Limits on adding passkeys](passkeys.md#limits-on-adding-passkeys)).
 
 ## "Remember me" and the second factor
 
@@ -285,8 +445,11 @@ Shipped since, and no longer out of scope:
   completes sign-in **without** a TOTP prompt, on purpose: every Kiln passkey is
   registered *and* asserted with user verification required, so the ceremony
   already proves possession + PIN/biometric. That is policy, and
-  `docs/threat-model.md` records it as such. Passkeys are browser-only — there
-  is no headless ceremony.
+  `docs/threat-model.md` records it as such. An account with both can also use
+  its passkey *at* the TOTP prompt instead of a code
+  ([Using a passkey at the code prompt](#using-a-passkey-at-the-code-prompt)).
+  Passkeys are browser-only — there is no headless ceremony, so the headless
+  `POST /api/auth/sign_in/verify` still takes a code.
 - **SSO (OAuth2/OIDC)** — built on `assent` (bundled with
   `ash_authentication`), compile-gated off by default: set
   `config :kiln_cms, :sso_oidc, enabled: true` plus the `OIDC_*` env and

@@ -77,7 +77,7 @@ the router so preflights are answered before route matching).
 | Calendars / feeds | `/calendar.ics`, `/:plural/calendar.ics`, `/:plural/:slug/calendar.ics`, `/:plural/index.json`, `/feed.xml`, `/feed.json`, `/:plural/feed.{xml,json}` (and the category/tag variants) | none (published only) | `:probe` |
 | Membership (paid audiences) | `/membership` | optional session | `:delivery` |
 | Auth flows | `/sign-in`, `/register`, `/reset`, `/auth/**`, `/auth/passkey/*`, `/auth/site-sso[/callback]` | varies | `:auth`, except `POST /auth/*/password/register`, which takes `:register` **instead** so the two registration doors agree (#724) |
-| Second factor | `GET`/`POST /sign-in/verify` | signed `:pending_2fa` token + TOTP or recovery code | `:auth`; the `POST` also per-account, tighter than sign-in (#714) |
+| Second factor | `GET`/`POST /sign-in/verify`; `POST /sign-in/verify/passkey/options` and `/sign-in/verify/passkey` (#2247) | signed `:pending_2fa` token + TOTP or recovery code, or an assertion from one of that account's own passkeys | `:auth`; a submitted code or passkey assertion also per-account, tighter than sign-in (#714), one bucket for both |
 | Sign-in unlock (#2250) | `GET`/`POST /sign-in/unlock` (ask for a link), `GET`/`POST /auth/unlock/:unlock_token` (the emailed link) | none to ask; the signed, stored `sign_in_unlock` token is the credential, and only the `POST` spends it | `:auth`; the mail also `mail:sign_in_unlock` per address (3/h), charged only for a paused member of the site |
 | Credential submits over `/live` | LiveView `"submit"` on the sign-in, register, reset-request and magic-link forms — **all four render on all three auth pages** | credentials → session / account / mail | charged on the *action*, since no plug can reach them: sign-in `:auth` (#715) + per-account (#478); registration `:register` (#724); reset and magic-link `:auth` (#724) + the per-address mail budget |
 | Editor / admin LiveViews | `/editor/**`, `/media` | session cookie + role | none, except the three TOTP actions on `/editor/settings`: per-account, the second factor's own bucket (#727) |
@@ -569,6 +569,16 @@ build if a resource is ever registered without that authorizer.
   verification required, so the ceremony proves possession + PIN/biometric — the
   bar the TOTP flow enforces. It is also browser-only; there is no headless
   passkey route, so it is not a second door onto this surface.
+  Since #2247 a passkey can also answer the browser's code prompt. That is
+  not a second, unbudgeted factor: `SecondFactor.check_passkey/3` charges the
+  same per-account bucket as a code before verifying, records the same
+  failure event and raises the same owner alert at the limit. The challenge
+  lists only the pending account's credentials and is parked bound to that
+  account under its own session key, so neither a challenge minted for
+  another pending sign-in nor one from the anonymous `/auth/passkey/*`
+  ceremony completes it; the assertion's owner, user-verification flag and
+  counter are each checked; and it mints no token, only releasing the held
+  first-factor one. The headless verify endpoint still takes codes only.
 - **Token theft** — JWTs are bearer tokens; clients must store them securely and
   use TLS. Tokens are revocable via the token store.
 
@@ -623,6 +633,20 @@ build if a resource is ever registered without that authorizer.
   five wrong codes here deny the real owner `/sign-in/verify` for the rest of
   the window. That is strictly less than what the session already grants, so
   the trade is accepted.
+- **A second factor added from a stolen session** — adding a passkey, or
+  an authenticator app to an account that has none, needs only a signed-in
+  session. Whoever holds a stolen one can add a factor of their own and sign
+  in again with it after the owner's session ends, with no failed sign-in for
+  the owner to notice. *Mitigated (#2247):* every factor added mails the owner
+  after the commit (`KilnCMS.Accounts.SecondFactorNotice`), with the advice
+  to reset the password (which revokes every session) and ask a site admin.
+  The mail names no passkey, because its name is attacker-chosen text. An
+  account holds at most 20 passkeys and registers at most 5 an hour
+  (`Validations.PasskeyCap`, `Changes.ThrottlePasskeyRegistration`, per
+  account in `ThrottleStore`), so "a mail per factor" cannot become a flood
+  of the owner's inbox or the instance's relay quota.
+  *Watch:* the mail detects; it does not prevent. A thief who also controls
+  the owner's mailbox is not stopped by it.
 - **`setup_totp` as a second, code-free door to the same removal** —
   `confirm_totp` was never scoped to an enrolment in progress, so on an already
   -enrolled account it checked the account's **live** secret; a session that

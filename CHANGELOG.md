@@ -77,6 +77,9 @@ Every summary line below that was shortened links to its own entry there.
 - **With the smart 404 guard on (`KILN_SCANNER_BLOCKING`), a search-engine claim whose reverse DNS gets no answer now counts toward the miss threshold unless the node's resolver is itself failing, checked by at most one PTR query a minute for `8.8.8.8`. No migration; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#crawler-verification-silent-ptr-upgrade))
 
+- **`backup.sh` now refuses a `BACKUP_KEEP_DAYS` that is not a whole number of days from 1 to 2147483647, and keeps 14. A host that set `0` keeps 14 days of backups (check the disk); one that set `14d` on Linux, which pruned nothing, deletes backups older than 14 days at its next prune.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
+
 ### Added
 
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
@@ -97,7 +100,16 @@ Every summary line below that was shortened links to its own entry there.
 - **Platform admins are alerted when a verified API key goes over a rate limit (`api_key_rate_limited`), and can turn that alert off under Security alerts → Platform alerts.**
   ([long form](docs/changelog/unreleased.md#api-key-rate-limited-alerts))
 
+- **At the two-step sign-in code prompt, an account that also has a passkey can finish with Use a passkey instead of a code (on the main or console host, not a site's own host).**
+  ([long form](docs/changelog/unreleased.md#passkey-at-code-prompt))
+
+- **Account owners are emailed whenever an authenticator app is set up or replaced, or a passkey is added, with what to do if it wasn't them.**
+  ([long form](docs/changelog/unreleased.md#second-factor-added-email))
+
 ### Changed
+
+- **An account can hold at most 20 passkeys and add at most 5 an hour; the Passkeys section of the settings page says which limit refused.**
+  ([long form](docs/changelog/unreleased.md#passkey-limits))
 
 - **Webhook URLs are masked (`https://host/…/last4`) on the Webhooks page, in the governance trail and its JSON/CSV exports (now also with `endpoint_id`), and in notices and logs. Reveal URL shows one; the edit form starts blank, and blank keeps the URL.**
   ([long form](docs/changelog/unreleased.md#webhook-url-masking))
@@ -168,7 +180,16 @@ Every summary line below that was shortened links to its own entry there.
 - **The Backups page shows recovery-point and last-good badges on History rows and a last-good summary, explains the backup queue under Back up now, and hides Cancel on a finishing row.**
   ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
 
+- **The in-app backup, the demo reset and `backup.sh`, `restore.sh` and `staging.sh` accept an `ecto://` database URL, the documented form, which every dump used to fail on.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#database-url-ecto-scheme))
+
+- **`backup.sh` reads `BACKUP_KEEP_DAYS` like the app: anything but a whole number of days from 1 to 2147483647 keeps 14 and warns, instead of pruning nothing (`14d`), pruning all but a day (`0`) or writing an unreadable `manifest.json`.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-validated))
+
 ### Security
+
+- **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**
+  ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-scripts-password-out-of-argv))
 
 - **Crawler verification: a lookup turned away as busy no longer spends the network and node lookup budgets, and verified crawlers keep their cached result through a flood of rejected lookups (own 10,000-entry cache).**
   ([long form](docs/changelog/unreleased.md#crawler-verification-hardening))

@@ -8,7 +8,10 @@
 #   ./scripts/restore.sh drill <dump>    # restore into a throwaway DB + sanity checks
 #
 # Environment:
-#   RESTORE_DATABASE_URL  target database (required for `db`/`drill`)
+#   RESTORE_DATABASE_URL  target database (required for `db`/`drill`):
+#                         postgres://, postgresql:// or ecto://; the password
+#                         reaches pg_restore/psql through PGPASSWORD only,
+#                         never their argv (see pg_conn_split)
 #   RESTORE_MEDIA_DIR     target uploads root (required for `media`)
 #   RESTORE_CONFIRM=yes   skip the interactive confirmation (for scripted drills)
 #   RESTORE_REQUIRE_CHECKSUM=1  `media`: abort when no checksum sidecar is found
@@ -66,6 +69,136 @@ db_name() {
   echo "${path%%\?*}"
 }
 
+# Keep the database password out of pg_dump/pg_restore/psql's argv (#2726) and
+# give libpq a URI it reads as one (#2719), as KilnCMS.Backups.PgUrl.split/1
+# does for the app. Keep the copies of pg_conn_decode and pg_conn_split in
+# scripts/backup.sh, scripts/restore.sh and scripts/staging.sh identical (a
+# test compares them): each script must run alone, so none of them sources a
+# shared file.
+#
+# $1 = percent-encoded text. Sets PG_CONN_DECODED: each valid `%HH` but `%00`
+# decoded, anything else, `+` included, as written.
+pg_conn_decode() {
+  local s="$1" out="" hh
+  # `printf -v … %b`, never `$(printf …)`: a substitution drops trailing
+  # newlines. Literal backslashes are doubled first so `%b` reads only the
+  # `\xHH` escapes made here (a bare `\c` would cut the text short).
+  s="${s//\\/\\\\}"
+  while :; do
+    case "$s" in
+      *%*) ;;
+      *) break ;;
+    esac
+    out+="${s%%\%*}"
+    s="${s#*\%}"
+    hh="${s:0:2}"
+    case "$hh" in
+      00) out+="%" ;;
+      [0123456789ABCDEFabcdef][0123456789ABCDEFabcdef])
+        out+="\\x${hh}"
+        s="${s:2}"
+        ;;
+      *) out+="%" ;;
+    esac
+  done
+  out+="$s"
+  # Not with an empty argument: bash 3.2 then assigns the output of the
+  # previous `printf -v` instead of "".
+  PG_CONN_DECODED=""
+  if [ -n "$out" ]; then printf -v PG_CONN_DECODED '%b' "$out"; fi
+}
+
+# $1 = a DATABASE_URL. Sets PG_CONN_URL (what goes in argv), PG_CONN_PASSWORD
+# and PG_CONN_HAS_PASSWORD (1 when PG_CONN_PASSWORD is to be exported as
+# PGPASSWORD, in a subshell around the one command that needs it):
+#   - `ecto://` (any case) becomes `postgres://`; nothing else is rewritten;
+#   - the userinfo password and every query `password` parameter (the key is
+#     decoded first, as libpq does: `pass%77ord=` is one) are removed and
+#     decoded. The query one wins, as in libpq. The userinfo ends where libpq
+#     ends it (fe-connect.c): at the first `@` before the first `/`, so a `?`
+#     or `#` before that `@` is part of the password; the password runs from
+#     the first `:` in it;
+#   - with no non-empty password the URL is left as written, so an inherited
+#     PGPASSWORD or ~/.pgpass still applies.
+# A string that is not a postgres:// or postgresql:// URI (a `key=value`
+# conninfo) is left unchanged.
+pg_conn_split() {
+  local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
+  local query="" has_query=0 q seg kept="" sep="" qpw="" has_qpw=0
+  PG_CONN_URL="$url"
+  PG_CONN_PASSWORD=""
+  PG_CONN_HAS_PASSWORD=0
+
+  case "$url" in
+    [Ee][Cc][Tt][Oo]://*) url="postgres://${url:7}" ;;
+  esac
+  PG_CONN_URL="$url"
+  case "$url" in
+    postgres://* | postgresql://*) ;;
+    *) return 0 ;;
+  esac
+
+  rest="${url#*://}"
+  userinfo="${rest%%[@/]*}"
+  host="$rest"
+  if [ "${rest:${#userinfo}:1}" = "@" ]; then
+    has_userinfo=1
+    host="${rest:$((${#userinfo} + 1))}"
+    user="$userinfo"
+    case "$userinfo" in
+      *:*)
+        user="${userinfo%%:*}"
+        pw="${userinfo#*:}"
+        has_pw=1
+        ;;
+    esac
+  fi
+
+  # From here `host` is the hosts and the path, up to the query.
+  case "$host" in
+    *\?*)
+      query="${host#*\?}"
+      host="${host%%\?*}"
+      has_query=1
+      ;;
+  esac
+  if [ "$has_query" = 1 ]; then
+    q="$query"
+    while :; do
+      seg="${q%%&*}"
+      PG_CONN_DECODED=""
+      case "$seg" in
+        *=*) pg_conn_decode "${seg%%=*}" ;;
+      esac
+      if [ "$PG_CONN_DECODED" = "password" ]; then
+        qpw="${seg#*=}"
+        has_qpw=1
+      else
+        kept="${kept}${sep}${seg}"
+        sep="&"
+      fi
+      [ "$seg" = "$q" ] && break
+      q="${q#*&}"
+    done
+    [ "$has_qpw" = 1 ] && query="$kept"
+  fi
+
+  if [ "$has_qpw" = 0 ] && { [ "$has_pw" = 0 ] || [ -z "$pw" ]; }; then
+    return 0
+  fi
+  [ "$has_qpw" = 1 ] && pw="$qpw"
+
+  PG_CONN_URL="${url%%://*}://"
+  [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${user}@"
+  PG_CONN_URL+="${host}"
+  [ -n "$query" ] && PG_CONN_URL+="?${query}"
+
+  pg_conn_decode "$pw"
+  PG_CONN_PASSWORD="$PG_CONN_DECODED"
+  [ -n "$PG_CONN_PASSWORD" ] && PG_CONN_HAS_PASSWORD=1
+  return 0
+}
+
 confirm() {
   if [ "${RESTORE_CONFIRM:-}" != "yes" ]; then
     local name
@@ -86,8 +219,15 @@ do_restore() {
   echo "==> pg_restore $(basename "$dump") → ${name}"
   # --clean --if-exists: idempotent over a previous restore. --no-owner /
   # --no-privileges mirrors how the dump was taken.
-  pg_restore --no-owner --no-privileges --clean --if-exists \
-    --dbname="$RESTORE_DATABASE_URL" "$dump"
+  # The password reaches pg_restore through PGPASSWORD only, in a subshell
+  # (#2726).
+  pg_conn_split "$RESTORE_DATABASE_URL"
+  (
+    # shellcheck disable=SC2030,SC2031 # PGPASSWORD is meant for this subshell only
+    if [ "$PG_CONN_HAS_PASSWORD" = 1 ]; then export PGPASSWORD="$PG_CONN_PASSWORD"; fi
+    pg_restore --no-owner --no-privileges --clean --if-exists \
+      --dbname="$PG_CONN_URL" "$dump"
+  )
   echo "    done."
 }
 
@@ -412,8 +552,13 @@ cmd_drill() {
 
   echo "==> Sanity checks"
   local failed=0 t count
+  pg_conn_split "$RESTORE_DATABASE_URL"
   for t in users pages posts media_items schema_migrations; do
-    count="$(psql -Atc "select count(*) from ${t}" "$RESTORE_DATABASE_URL" 2>/dev/null)" ||
+    count="$(
+      # shellcheck disable=SC2030,SC2031 # PGPASSWORD is meant for this subshell only
+      if [ "$PG_CONN_HAS_PASSWORD" = 1 ]; then export PGPASSWORD="$PG_CONN_PASSWORD"; fi
+      psql -Atc "select count(*) from ${t}" "$PG_CONN_URL" 2>/dev/null
+    )" ||
       {
         echo "    FAIL ${t}: table missing"
         failed=1
@@ -431,7 +576,8 @@ cmd_drill() {
 
 ==> Drill restore looks sane.
     * To poke at it with a real instance, scrub it first (it holds prod PII):
-        STAGING_DATABASE_URL="${RESTORE_DATABASE_URL}" ./scripts/staging.sh scrub
+        STAGING_DATABASE_URL="${PG_CONN_URL}" ./scripts/staging.sh scrub
+      (password not shown: put it back in the URL, or export PGPASSWORD)
     * Tear down when done:
         dropdb ${name}
     Record the drill (date, backup file, outcome) per docs/backups.md.
