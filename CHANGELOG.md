@@ -275,7 +275,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-docs-import-and-manual-restore))
 
 - **`mix kiln.gen.plugin` no longer tells you to run `mix kiln.gen.content <Type> --domain …`, which fails as an unknown option; its notice now lists the steps to write a plugin's content types by hand.**
-  ([long form](docs/changelog/unreleased.md#gen-plugin-content-types-next-step))
+  ([#2911](https://github.com/The-Verscienta/kiln_cms/pull/2911) · [long form](docs/changelog/unreleased.md#gen-plugin-content-types-next-step))
 
 ### Security
 
