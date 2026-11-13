@@ -107,6 +107,13 @@ defmodule KilnCMSWeb.LiveUserAuth do
     {:cont, KilnCMSWeb.IdleSession.screen(socket, session)}
   end
 
+  # For an anonymous-tolerant live session (`/membership`, plugin public
+  # pages), after `:assign_current_org`: a signed-in account its site holds for
+  # a second factor it has not set up goes to set one up (#2247), as on every
+  # signed-in page. Anonymous visitors are left alone.
+  def on_mount(:second_factor, _params, _session, socket),
+    do: KilnCMSWeb.SecondFactorGate.screen(socket)
+
   def on_mount(:live_user_optional, _params, _session, socket) do
     socket =
       if socket.assigns[:current_user] do
@@ -164,16 +171,16 @@ defmodule KilnCMSWeb.LiveUserAuth do
     end
   end
 
+  # The session is judged first (idle, signed out elsewhere), then whether the
+  # site holds the account for a second factor it has not set up (#2247) —
+  # a session that is no longer good goes to sign-in, not to setup.
   defp attach_signed_in(socket, session) do
-    case KilnCMSWeb.IdleSession.attach(socket, session) do
-      {:cont, socket} ->
-        {:cont,
-         socket
-         |> KilnCMSWeb.NavPreset.attach()
-         |> KilnCMSWeb.SessionTracking.attach(session)}
-
-      halt ->
-        halt
+    with {:cont, socket} <- KilnCMSWeb.IdleSession.attach(socket, session),
+         {:cont, socket} <- KilnCMSWeb.SecondFactorGate.attach(socket, session) do
+      {:cont,
+       socket
+       |> KilnCMSWeb.NavPreset.attach()
+       |> KilnCMSWeb.SessionTracking.attach(session)}
     end
   end
 

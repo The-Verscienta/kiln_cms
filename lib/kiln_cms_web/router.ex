@@ -87,6 +87,9 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
+    # A JWT whose account its site holds for a second factor is refused on
+    # every request (#2247). API keys are exempt.
+    plug KilnCMSWeb.Plugs.SecondFactorBearer
     # A mutation is a `POST` like any other — see the JSON:API pipeline.
     plug KilnCMSWeb.Plugs.Idempotency
     # `X-Kiln-On-Behalf-Of` on a mutation: provenance for a draft-write key (#2273).
@@ -115,6 +118,11 @@ defmodule KilnCMSWeb.Router do
     # user it judges, and writing no session or cookie — this pipeline serves
     # public pages a shared cache may store (#699).
     plug KilnCMSWeb.Plugs.IdleTimeout, :session
+    # A signed-in account its site holds for a second factor it has not set
+    # up goes to `/account/two-factor` before anything else (#2247). After the
+    # idle timeout, so a session that is no longer good goes to sign-in
+    # instead; writes no session either, and its redirect is not cacheable.
+    plug KilnCMSWeb.Plugs.SecondFactorGate, :redirect
   end
 
   # Dev-only browser tooling (AshAdmin, LiveDashboard, API explorers) ships its
@@ -138,6 +146,9 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
+    # A JWT whose account its site holds for a second factor is refused on
+    # every request (#2247). API keys are exempt.
+    plug KilnCMSWeb.Plugs.SecondFactorBearer
     # The OpenAPI document is served from inside the `KilnCMSWeb.AshJsonApiRouter`
     # forward below, so there is no route here to gate. This plug knows the two
     # documentation paths and passes every other `/api` request through (#567).
@@ -157,6 +168,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
+    plug KilnCMSWeb.Plugs.SecondFactorBearer
   end
 
   # `:api` plus a guard against the specific query-param shapes `ash_json_api`
@@ -348,6 +360,9 @@ defmodule KilnCMSWeb.Router do
     # A session no longer good under the site's idle timeout or "sign out
     # everyone" (#2246) is served as anonymous. Reads only.
     plug KilnCMSWeb.Plugs.IdleTimeout, :read_only
+    # An image cannot follow a redirect: an account held for a second factor
+    # (#2247) is served as anonymous here instead.
+    plug KilnCMSWeb.Plugs.SecondFactorGate, :read_only
   end
 
   pipeline :delivery do
@@ -1551,6 +1566,9 @@ defmodule KilnCMSWeb.Router do
       on_mount: [
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        # A signed-in account held for a second factor goes to set one up
+        # (#2247); anonymous visitors are untouched.
+        {KilnCMSWeb.LiveUserAuth, :second_factor},
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       live "/membership", MembershipLive, :index
@@ -1568,6 +1586,9 @@ defmodule KilnCMSWeb.Router do
       on_mount: [
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        # A signed-in account held for a second factor goes to set one up
+        # (#2247); anonymous visitors are untouched.
+        {KilnCMSWeb.LiveUserAuth, :second_factor},
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       import KilnCMSWeb.PluginRouter

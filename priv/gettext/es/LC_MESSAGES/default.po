@@ -25944,6 +25944,11 @@ msgstr "Tu cuenta está lista: inicia sesión en %{site}."
 msgid "Your account is ready. You were already a member of %{site} as %{tier}, and that is unchanged."
 msgstr "Tu cuenta está lista. Ya eras miembro de %{site} como %{tier}, y eso no cambia."
 
+#: lib/kiln_cms_web/controllers/auth_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Your account's second factor is a passkey, which works at %{host}. Sign in there, or add an authenticator app."
+msgstr "El segundo factor de tu cuenta es una llave de acceso, que funciona en %{host}. Inicia sesión allí o añade una aplicación de autenticación."
+
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
 #, elixir-autogen, elixir-format
 msgid "Your address appears as %{ip}."

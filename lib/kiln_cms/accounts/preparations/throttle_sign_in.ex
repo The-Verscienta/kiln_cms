@@ -105,7 +105,9 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.Errors.ChallengeRequired
   alias KilnCMS.Accounts.SignInAlert
+  alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMS.Challenge.Gate
+  alias KilnCMS.Security.Recorder
 
   # Named here rather than at the caller so the two ends cannot drift into
   # writing and reading different keys — which would fail silently, as "no IP in
@@ -231,8 +233,12 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   end
 
   defp forgive_on_success(query, identifier) do
+    org_id = Map.get(query.context, Recorder.tenant_key())
+
     Query.after_action(query, fn _query, records ->
-      if Enum.any?(records, &completed_sign_in?/1), do: AccountThrottle.forgive(identifier)
+      if Enum.any?(records, &completed_sign_in?(&1, org_id)),
+        do: AccountThrottle.forgive(identifier)
+
       {:ok, records}
     end)
   end
@@ -253,8 +259,18 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
   # it when the second factor actually lands. A user who abandons the code
   # prompt ten times in a window is refused for its tail, which is the same
   # bargain every other account here makes.
-  defp completed_sign_in?(record) do
-    signed_in?(record) and not KilnCMS.Accounts.totp_enabled?(record)
+  #
+  # "Owes a second factor" is `TwoFactorRequirement.step_up/3`'s answer, the
+  # one the sign-in doors divert on (`KilnCMSWeb.SecondFactorStepUp`), on the
+  # site the attempt resolved to (#2247): the authenticator app, or a passkey
+  # once a site's requirement holds a passkey-only account. A password that
+  # stops at the passkey prompt, or that a tenant host refuses because the
+  # passkey cannot run there, is not a completed sign-in either;
+  # `SecondFactor.check_passkey/3` forgives it at the step-up. An attempt
+  # that carries no site (no caller here omits it) is judged with the policy
+  # off, which still holds the counter for every authenticator-app account.
+  defp completed_sign_in?(record, org_id) do
+    signed_in?(record) and TwoFactorRequirement.step_up(record, org_id) == :none
   end
 
   # The per-IP refusal, which is deliberately *not* the per-account one.

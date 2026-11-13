@@ -25944,6 +25944,11 @@ msgstr "Votre compte est prêt — connectez-vous à %{site}."
 msgid "Your account is ready. You were already a member of %{site} as %{tier}, and that is unchanged."
 msgstr "Votre compte est prêt. Vous étiez déjà membre de %{site} en tant que %{tier}, et cela ne change pas."
 
+#: lib/kiln_cms_web/controllers/auth_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Your account's second factor is a passkey, which works at %{host}. Sign in there, or add an authenticator app."
+msgstr "Le second facteur de votre compte est une clé d'accès, qui fonctionne sur %{host}. Connectez-vous là-bas, ou ajoutez une application d'authentification."
+
 #: lib/kiln_cms_web/controllers/admin_allowlist_html/refused.html.heex
 #, elixir-autogen, elixir-format
 msgid "Your address appears as %{ip}."

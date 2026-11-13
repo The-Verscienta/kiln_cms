@@ -48,6 +48,11 @@ defmodule KilnCMSWeb.CollabSocket do
          # return `{:ok, nil}`, and an anonymous actor reads published content.
          {:ok, %{} = actor} <- fetch_actor(user_id),
          {:ok, org} <- fetch_org(connect_info),
+         # The token is minted for a day, possibly during the grace period of
+         # a site that requires a second factor: an account the site now
+         # holds for one it has not set up is refused (#2247). The channel's
+         # periodic re-check closes a socket that crosses the deadline.
+         false <- KilnCMSWeb.SecondFactorGate.held?(actor, org.id, fresh?: true),
          # The admin allowlist (#2248): the console's own socket. After the
          # site is resolved, so an unserved host is refused (and alerted) there
          # first; the address is kept for the channel's periodic re-check.
