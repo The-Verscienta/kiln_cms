@@ -3,7 +3,13 @@
 - **Status** — accepted (2026-11-07). Refines the "#2161 commitment" in
   [ADR 0012](0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md).
   The default has already flipped (it ships on); this records why that is a
-  minor and what was added so operators can see it coming.
+  minor and what was added so operators can see it coming. Amended 2026-11-10
+  by [#2318](https://github.com/The-Verscienta/kiln_cms/issues/2318) (the
+  escape hatch's removal is gated on the count), 2026-11-13 by
+  [#2634](https://github.com/The-Verscienta/kiln_cms/issues/2634) (the GraphQL
+  socket refuses too) and 2026-11-13 by
+  [#2635](https://github.com/The-Verscienta/kiln_cms/issues/2635) (the count is
+  exported); see the "Amendment" sections.
 - **References** — [#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161),
   [#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273).
 - **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md).
@@ -153,3 +159,27 @@ and now gets no socket:
 bad `preview_token`, and still connects an `api_key` that does not verify as
 anonymous (published-only), as its moduledoc says.
 
+## Amendment (2026-11-13): the count is exported (#2635)
+
+[#2635](https://github.com/The-Verscienta/kiln_cms/issues/2635). This
+supersedes the 2026-11-10 amendment's "Core attaches no handler or metric to
+the event": `KilnCMSWeb.Telemetry.metrics/0` now counts it, so the reporting
+sites need no handler of their own.
+
+- **Metric.** `kiln_cms_api_invalid_bearer_count` in the Prometheus exporter,
+  labeled `enforced`, `surface`, `read` and `reason`. `read` is the event's
+  `read?`, renamed because a `?` is not valid in a Prometheus label name; the
+  event itself is unchanged. No token, user or address is a label.
+- **Query.** The signal the removal is gated on is whether any
+  `enforced="false", read="true"` series exists in the release window:
+  `max_over_time(kiln_cms_api_invalid_bearer_count{enforced="false",read="true"}[<release window>]) > 0`,
+  with `enforced="true"` beside it, as above. Not `increase()`: a series is
+  created by its first event and first scraped at `1`, so `increase()` misses
+  the first event of every label set after a restart.
+- **Limits.** The count exists only where the exporter is on
+  (`KILN_METRICS_ENABLED`), which is off by default, so each reporting site
+  turns it on and scrapes it. The counter is in memory and starts again from
+  zero when the node restarts, so a deploy inside the window drops whatever
+  was counted after its last scrape.
+
+See [observability.md](../observability.md#refused-api-credentials).

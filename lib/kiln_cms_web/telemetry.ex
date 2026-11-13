@@ -257,6 +257,22 @@ defmodule KilnCMSWeb.Telemetry do
             "debounced: already noted this window; noted: recorded for the platform " <>
             "alert) and bucket. No key, user or address is a tag."
       ),
+      # Stale bearer tokens on the API (#2161, #2635): the count that gates
+      # removing KILN_API_REJECT_INVALID_BEARER (ADR 0017). The event's
+      # `read?` is exported as `read`: Peep writes a tag's name into the
+      # scrape as is, and `read?` is not a valid Prometheus label name, so it
+      # would break the whole scrape. `surface` and `reason` are closed sets
+      # set by KilnCMSWeb.Plugs.ApiKeyAuth.
+      counter("kiln_cms.api.invalid_bearer.count",
+        tags: [:enforced, :surface, :read, :reason],
+        tag_values: &Map.put(&1, :read, &1[:read?]),
+        description:
+          "Requests and GraphQL socket connects presenting a bearer token that does " <>
+            "not verify (#2635), by enforced (refused 401/403, or served as anonymous " <>
+            "under KILN_API_REJECT_INVALID_BEARER=false), surface (json_api / graphql / " <>
+            "media / other), read (a GET/HEAD, or anything GraphQL) and reason " <>
+            "(expired / malformed / invalid). No token, user or address is a tag."
+      ),
       counter("kiln_cms.admin_allowlist.refused.count",
         tags: [:surface, :reason],
         description:
