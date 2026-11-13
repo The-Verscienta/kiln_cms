@@ -17,6 +17,38 @@ defmodule KilnCMSWeb.Plugs.RateLimitTest do
     assert %{auth: {40, 60_000}} = Map.take(KilnCMSWeb.RateLimit.default_limits(), [:auth])
   end
 
+  # #2588: crawler verification charges its lookup caps before it knows the
+  # lookup can start, and gives a charge back when it cannot. An hour-long
+  # window keeps the test from straddling a rollover.
+  test "refund/3 gives back one charge and never goes below zero" do
+    key = "refund-test-#{System.unique_integer([:positive])}"
+    scale = :timer.hours(1)
+    index = KilnCMSWeb.RateLimit.window_index(scale)
+
+    assert {:allow, 1} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
+    assert {:allow, 2} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index) == 1
+    assert {:allow, 2} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
+
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index) == 1
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index) == 0
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index) == 0
+    assert KilnCMSWeb.RateLimit.refund("never-charged-#{key}", scale, index) == 0
+  end
+
+  # #2588: a charge made in a window that has since closed expired with it;
+  # refunding it must not lower the current window's count.
+  test "refund/3 for a closed window touches nothing" do
+    key = "refund-stale-#{System.unique_integer([:positive])}"
+    scale = :timer.hours(1)
+    index = KilnCMSWeb.RateLimit.window_index(scale)
+
+    assert {:allow, 1} = KilnCMSWeb.RateLimit.hit(key, scale, 5)
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index - 1) == 0
+    assert KilnCMSWeb.RateLimit.get(key, scale) == 1
+    assert :ets.lookup(KilnCMSWeb.RateLimit, {key, index - 1}) == []
+  end
+
   test "returns 429 when the auth bucket is exceeded", %{conn: conn} do
     # Deliberately NOT under ConnCase's default `10.128.0.0/9` range
     # (`RateLimitHelpers.client_address/0`): this file drives `10.1` / `10.3` /

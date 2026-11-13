@@ -303,8 +303,9 @@ defmodule KilnCMSWeb.Telemetry do
         tags: [:engine, :reason],
         description:
           "Delivery requests naming a search engine whose address was not verified " <>
-            "by DNS (#2254), by engine and reason (failed / pending / error / skipped / " <>
-            "unverifiable / not_public). Only failed is charged as empty."
+            "by DNS (#2254), by engine and reason (failed / pending / error / " <>
+            "forward_error / skipped / unverifiable / not_public). Only failed is " <>
+            "charged as empty."
       ),
       counter("kiln_cms.crawler_verification.lookup.count",
         tags: [:engine, :result],

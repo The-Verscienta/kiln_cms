@@ -110,6 +110,39 @@ carries the reasoning.
   security event, so the site's admins get a `webhook_changed` silencing
   notice. Tick it again after rolling forward. (Part of #2245.)
 
+<a id="crawler-verification-silent-ptr-upgrade"></a>
+
+- **With the smart 404 guard on, a search-engine claim whose reverse DNS gets no answer now counts toward the miss threshold, unless the node's resolver is itself failing.**
+  Only matters with `KILN_SCANNER_BLOCKING` on (it is off by default). Until
+  now, a claim to be Googlebot, bingbot, Applebot, YandexBot or Baiduspider
+  whose PTR query timed out or failed (SERVFAIL, refused) kept the guard's
+  miss-threshold exemption, so a scanner on addresses whose reverse zone it
+  leaves silent was never counted (#2588). Now the silence is read as the
+  address's own zone, and its misses count, while the node's resolver is
+  otherwise answering. The exemption is kept, as before, when the resolver
+  itself is failing: no lookup got an answer in the last minute and a
+  *canary* PTR query also went unanswered. The guard starts the canary only
+  while that is the case. It is one PTR query for a fixed address, `8.8.8.8`
+  (`dns.google`), never a visitor's, at most once a minute per node, and it
+  goes to the same resolvers as every other verification query. Nothing to
+  configure; no migration and no new environment variable.
+  - **Watch for real crawlers being blocked.** A crawler whose reverse zone
+    is slow or flaky (Baidu's and Yandex's are the likeliest) can now pass
+    the miss threshold and have its address blocked for
+    `KILN_SCANNER_BLOCKING_BLOCK_MINUTES`. Remove such a block on
+    `/editor/ip-blocks`. Bait paths counted for everyone already.
+  - **A forward query is different.** When the PTR names a host under the
+    engine's own domain and *that* host's A/AAAA query gets no answer, the
+    claim keeps the exemption: the silence is in the engine's zone, which
+    the address's owner does not control. It is reported with the new
+    `unverified_crawler` reason `forward_error`
+    ([below](#crawler-verification-hardening)).
+  - **Firewalls.** The canary is an ordinary PTR query to the nameservers in
+    `/etc/resolv.conf`. A node that can verify crawlers can send it; one that
+    cannot gets no canary answer either, so the exemption stays as before.
+  - **Rolling back** is safe: nothing is stored outside each node's memory,
+    and the previous release exempts every unanswered claim again.
+
 <a id="backup-keep-days-upgrade"></a>
 
 - **If your host's cron sets `BACKUP_KEEP_DAYS`, check its value: `backup.sh` now refuses anything but a whole number of days from 1 to 2147483647, keeps 14 instead, and warns.**
@@ -145,6 +178,41 @@ carries the reasoning.
   migration as usual. **Rolling back is safe:** an older release ignores the
   table and the column, and reads the two new security log types as
   unrecognized events ("Unrecognized event (…)"). (Part of #2247.)
+
+## Breaking
+
+<a id="media-purge-quarantined"></a>
+
+- **Overlay and plugin code: `purge_media_item` takes only a trashed item, the media system actor purges through the new `purge_quarantined_media_item`, and `restore_media_item` refuses an item no longer in the trash (#2610, #2611).**
+  1.9 let `KilnCMS.CMS.MediaItem`'s `:purge` hard-delete a trashed item *or*
+  a quarantined one, the second for the media pipeline's purge of an upload
+  it refused or that never finished processing. That branch applied to the
+  admin trash too, so an item trashed while still quarantined and restored
+  since could be hard-deleted from a stale trash list (see
+  [Fixed](#media-trash-stale-actions)). Now:
+  - **`CMS.purge_media_item` (`:purge`)** takes only a trashed item. An
+    untrashed one, quarantined or not, returns `Ash.Error.Invalid` holding
+    `Ash.Error.Changes.StaleRecord` and changes nothing. Trash it first with
+    `destroy_media_item`.
+  - **`KilnCMS.Media.system/0` can no longer run `:purge`** (`Ash.Error.Forbidden`).
+    The pipeline's purge is the new `CMS.purge_quarantined_media_item`
+    (`:purge_quarantined`), which `AVStripWorker` and `QuarantineReaper` now
+    call. It deletes only a row that is still quarantined, and only the media
+    system actor may run it: an editor, an admin of the site and a platform
+    admin are all refused (`Forbidden`), and so is the system actor on an
+    item whose quarantine has been released. Overlay code that purged a
+    quarantined upload as `Media.system()` through `purge_media_item` must
+    switch to `purge_quarantined_media_item`.
+  - **`CMS.restore_media_item` (`:restore`)** takes only a trashed item. On
+    an item someone already restored or permanently deleted it returns the
+    same `StaleRecord` error, where before it succeeded (or, for a deleted
+    item, failed with whatever error the missing row produced).
+
+  The API never exposed either action, so no JSON:API, GraphQL or MCP
+  response changes. The AshAdmin delete actions for media are unchanged
+  (`:purge_quarantined` is not offered there). No migration and no config;
+  rolling back is safe (nothing is stored differently). Guide:
+  [Trash and restore](../trash.md#for-developers).
 
 ## Added
 
@@ -945,6 +1013,38 @@ carries the reasoning.
   **Console** instead of the raw value. No migration and no configuration.
   See [Backup history](../backups.md#backup-history-2217). (#2542)
 
+<a id="media-trash-stale-actions"></a>
+
+- **The media library's trash no longer permanently deletes a file someone restored after the list loaded, and its Restore and Delete permanently say what happened when someone else got there first (#2610, #2611).**
+  Two gaps left by #2531, which gave content's Trash page this handling and
+  gave media only part of it.
+  - **A restored upload could still be deleted (#2610).** `:purge` deleted
+    any row still quarantined as well as any trashed one, for the media
+    pipeline. So a file trashed while its upload was still being processed,
+    then restored by another admin, was hard-deleted, with its stored
+    original, variants and cached transforms, when someone clicked
+    **Delete permanently** on the stale row. That click is now refused and
+    every file kept. The pipeline purges through its own action (see
+    [Breaking](#media-purge-quarantined)).
+  - **Restore on a stale row (#2611).** `:restore` took any row, so
+    **Restore** on a file another admin had already restored "succeeded" and
+    flashed *Restored …*, and on one someone had deleted for good it said
+    *You don't have permission to restore media.* It now acts only on a file
+    still in the trash.
+  - **What admins see** in **Media** → **Trash**: **Restore** or **Delete
+    permanently** on a file someone else restored says *Someone else already
+    restored that item.*; on one someone permanently deleted it says *That
+    item is no longer in the trash — someone permanently deleted it.* These
+    are the Trash page's messages, and they replace *That item is no longer
+    in the trash — someone else restored or deleted it.* The trash list
+    reloads either way. A refusal by the policy keeps *You don't have
+    permission to restore media.* / *…to delete media.*; any other failure
+    now says *Couldn't restore that item.* / *Couldn't delete that item.*
+    instead of the permission message, and the row stays listed.
+
+  No migration and no config. Guide:
+  [Trash and restore](../trash.md#what-can-go-wrong).
+
 <a id="database-url-ecto-scheme"></a>
 
 - **The in-app backup, the demo reset and the backup, restore and staging scripts accept an `ecto://` database URL.**
@@ -1035,3 +1135,55 @@ carries the reasoning.
   `pg_conn_split`, tested against the same table of URLs as
   `KilnCMS.Backups.PgUrl.split/1`; the run under macOS's `/bin/bash` 3.2 is
   skipped on Linux CI. (#2726)
+
+<a id="crawler-verification-hardening"></a>
+
+- **Crawler verification holds up better against lookup starvation, cache churn and silent reverse zones (#2588).**
+  #2254's verifier was bounded, but an attacker could still keep real
+  crawlers unverified for longer, or keep a fake one exempt from the smart
+  404 guard. None of this could push a real crawler below the browser
+  ceiling; it mattered when an operator set the search-engine value above
+  100% (the default is 200%), or had the 404 guard on.
+  - **A busy start no longer spends the lookup budgets.** The per-network
+    caps (IPv4 `/24`, `/16`; IPv6 `/64`, `/48`, `/32`) and the node's 600 a
+    minute are charged before a lookup starts. When it then cannot start
+    because all 16 lookup slots are busy, it gives back every charge it made,
+    so a flood of turned-away starts no longer uses up a network's or the
+    node's budget. A refund only applies in the minute the charge was made;
+    a charge that straddled a minute boundary is kept. If a refund cannot be
+    made, a warning is logged once per node ("Crawler verification could not
+    refund a rate-limit charge ...") and the lookup keeps its charge. A start
+    refused by a cap keeps its charges, as before.
+  - **Verified crawlers keep their results.** Confirmed names now live in a
+    cache of their own (10,000 addresses per node), separate from the 50,000
+    rejections and DNS errors. An attacker rotating through IPv6 addresses
+    can only write rejections, so it can no longer evict a real crawler's
+    result (about 80 minutes of rotation used to be enough). One exception:
+    a lookup that confirmed one name but got no answer for another is still
+    judged verified, but is kept for 5 minutes, as before, in the larger
+    cache, where a flood can evict it.
+  - **A silent reverse zone counts toward the 404 guard.** See the
+    [upgrade note](#crawler-verification-silent-ptr-upgrade).
+  - **New reason `forward_error`.** A claim whose PTR names a host under the
+    engine's domain, and whose forward (A/AAAA) query for that host got no
+    answer although it had a full per-query budget (1 second), is now
+    `{:unverified, :forward_error}` from `KilnCMS.CrawlerVerification.check/3`
+    and `reason="forward_error"` on
+    `kiln_cms_delivery_unverified_crawler_count`. Rate limiting treats it
+    like `error` (search engine, held to the browser limit); the 404 guard
+    keeps its exemption. A forward query squeezed by a slow PTR answer is
+    still `error`. Dashboards that list reasons should add it; see
+    [Observability](../observability.md#crawler-verification).
+  - **Developers.** New `KilnCMS.CrawlerVerification.resolver_failing?/1`
+    (never waits on DNS), `KilnCMSWeb.RateLimit.window_index/1` and
+    `KilnCMSWeb.RateLimit.refund/3` (gives back one fixed-window charge,
+    floored at zero, only while that window is current). New config keys on
+    `config :kiln_cms, KilnCMS.CrawlerVerification`: `:max_verified_entries`
+    (10,000), `:health_window_ms` (60,000) and `:canary_address`
+    (`{8, 8, 8, 8}`). No environment variable and no migration.
+  - **Still open.** A claim whose lookup is pending or was skipped keeps the
+    404 exemption, so a spoofer rotating addresses inside one IPv6 `/64`
+    stays exempt once the `/64`'s 30 lookups a minute are spent; several
+    rented networks can still spend the node's 600 lookups a minute with
+    real lookups; and published IP ranges are not read yet (#2586). See
+    [the threat model](../threat-model.md#bot-budgets).

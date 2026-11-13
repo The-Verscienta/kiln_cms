@@ -346,6 +346,17 @@ defmodule KilnCMS.CMS.PoliciesTest do
       refute CMS.can_restore_media_item?(editor, media)
       refute CMS.can_purge_media_item?(editor, media)
     end
+
+    # #2610: the pipeline's purge of an untrashed quarantined upload is above
+    # the admin bypass — an admin deletes through the trash's `:purge`.
+    test "the pipeline's purge admits no person, an admin included", %{
+      admin: admin,
+      editor: editor
+    } do
+      quarantined = media_item(%{quarantined: true})
+      refute CMS.can_purge_quarantined_media_item?(admin, quarantined)
+      refute CMS.can_purge_quarantined_media_item?(editor, quarantined)
+    end
   end
 
   describe "WebhookEndpoint policies" do

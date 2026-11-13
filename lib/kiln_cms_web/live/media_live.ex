@@ -478,13 +478,7 @@ defmodule KilnCMSWeb.MediaLive do
           put_flash(socket, :error, gettext("That item no longer exists."))
 
         item ->
-          case CMS.restore_media_item(item, actor: actor, tenant: socket.assigns.current_org) do
-            {:ok, _} ->
-              put_flash(socket, :info, gettext("Restored %{name}.", name: item.filename))
-
-            _ ->
-              put_flash(socket, :error, gettext("You don't have permission to restore media."))
-          end
+          restore_item(socket, item, actor)
       end
 
     {:noreply,
@@ -813,25 +807,70 @@ defmodule KilnCMSWeb.MediaLive do
         Derivatives.delete_blobs(derivatives, item)
         put_flash(socket, :info, gettext("Permanently deleted %{name}.", name: item.filename))
 
-      {:error, %Ash.Error.Invalid{errors: errors}} = error ->
-        if Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)),
-          do:
-            put_flash(
-              socket,
-              :error,
-              gettext(
-                "That item is no longer in the trash — someone else restored or deleted it."
-              )
-            ),
-          else: purge_refused(socket, error)
+      {:error, %Ash.Error.Forbidden{}} ->
+        put_flash(socket, :error, gettext("You don't have permission to delete media."))
 
-      other ->
-        purge_refused(socket, other)
+      {:error, error} ->
+        failed = gettext("Couldn't delete that item.")
+
+        message =
+          if stale?(error), do: stale_media_message(socket, item, failed), else: failed
+
+        put_flash(socket, :error, message)
     end
   end
 
-  defp purge_refused(socket, _error),
-    do: put_flash(socket, :error, gettext("You don't have permission to delete media."))
+  # `:restore` takes only a row still in the trash (#2611), so a held item
+  # someone else restored or purged since the trash rendered is a
+  # `StaleRecord`, reported as which of the two it was. A refusal keeps the
+  # permission message; anything else gets a generic one.
+  defp restore_item(socket, item, actor) do
+    case CMS.restore_media_item(item, actor: actor, tenant: socket.assigns.current_org) do
+      {:ok, _} ->
+        put_flash(socket, :info, gettext("Restored %{name}.", name: item.filename))
+
+      {:error, %Ash.Error.Forbidden{}} ->
+        put_flash(socket, :error, gettext("You don't have permission to restore media."))
+
+      {:error, error} ->
+        failed = gettext("Couldn't restore that item.")
+
+        message =
+          if stale?(error), do: stale_media_message(socket, item, failed), else: failed
+
+        put_flash(socket, :error, message)
+    end
+  end
+
+  # `:restore` and `:purge` both take only a row still in the trash (#2531,
+  # #2611), so a held item someone else restored or purged meanwhile comes
+  # back as a `StaleRecord` (mirrors `KilnCMSWeb.TrashLive`).
+  defp stale?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+
+  defp stale?(_error), do: false
+
+  # Which of the two it was: one read by id, which never sees trashed rows —
+  # found means it is live again, not found means it is gone. The caller
+  # reloads the trash either way, so the next click can't fail the same way.
+  # Any other read failure keeps the action's own `failed` message.
+  defp stale_media_message(socket, item, failed) do
+    case CMS.get_media_item(item.id,
+           actor: socket.assigns.actor,
+           tenant: socket.assigns.current_org
+         ) do
+      {:ok, _live} ->
+        gettext("Someone else already restored that item.")
+
+      {:error, %Ash.Error.Invalid{errors: errors}} ->
+        if Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1)),
+          do: gettext("That item is no longer in the trash — someone permanently deleted it."),
+          else: failed
+
+      {:error, _error} ->
+        failed
+    end
+  end
 
   defp find_trashed(socket, id), do: Enum.find(socket.assigns.trashed, &(&1.id == id))
 

@@ -17,13 +17,15 @@ defmodule KilnCMS.Media do
   @doc """
   The actor the media pipeline runs as: the workers' re-read of the item they
   were enqueued for, their `:record_processing` and `:release_quarantine`
-  writes, the regeneration scan, and the reaper's scan and `:purge`.
+  writes, the regeneration scan, and the strip's and the reaper's
+  `:purge_quarantined`.
 
   A `KilnCMS.SystemActor`, admitted by action name on `CMS.MediaItem` (see
   `docs/policy-matrix.md`, "The system actor"), rather than `authorize?:
   false`, which would skip every policy on it. It may not run `:update`
   (which can gate an item and relocate its blob), `:update_metadata`, the soft
-  `:destroy`, or `:purge` on an item that is not quarantined.
+  `:destroy`, the trash's `:purge`, or `:purge_quarantined` on an item that is
+  not quarantined.
   """
   @spec system() :: KilnCMS.SystemActor.t() | nil
   def system do

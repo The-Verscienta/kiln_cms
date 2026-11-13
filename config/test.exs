@@ -478,6 +478,12 @@ config :kiln_cms, KilnCMS.Search, query_budget: 10_000
 # record unless a test plants one, so nothing reaches the network. Tests that
 # need a settled result without a lookup plant it with
 # `KilnCMS.CrawlerVerification.put_result/4`.
+#
+# Both caches are scaled down from 50,000 and 10,000 so a test can write more
+# entries than a cache holds in well under a second and show that the bound
+# evicts, and that a flood of rejections never evicts a verified result (#2588).
 config :kiln_cms, KilnCMS.CrawlerVerification,
   enabled: true,
-  resolver: KilnCMS.Test.StubCrawlerResolver
+  resolver: KilnCMS.Test.StubCrawlerResolver,
+  max_entries: 2_000,
+  max_verified_entries: 200

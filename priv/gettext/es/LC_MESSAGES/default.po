@@ -6285,6 +6285,7 @@ msgstr "No se pudo eliminar ese formulario."
 msgid "Couldn't delete that funnel."
 msgstr "No se pudo eliminar ese embudo."
 
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
@@ -6483,6 +6484,7 @@ msgstr "No se pudo eliminar ese suscriptor."
 msgid "Couldn't restore that content type."
 msgstr "No se pudo restaurar ese tipo de contenido."
 
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't restore that item."
@@ -20000,6 +20002,7 @@ msgstr "Alguien cambió la página publicada después de que guardaras tu borrad
 msgid "Someone else already moved this to the trash or deleted it."
 msgstr "Otra persona ya movió esto a la papelera o lo eliminó."
 
+#: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "Someone else already restored that item."
@@ -21188,10 +21191,6 @@ msgid "That item is no longer available."
 msgstr "Ese elemento ya no está disponible."
 
 #: lib/kiln_cms_web/live/media_live.ex
-#, elixir-autogen, elixir-format
-msgid "That item is no longer in the trash — someone else restored or deleted it."
-msgstr "Ese elemento ya no está en la papelera — otra persona lo restauró o lo eliminó."
-
 #: lib/kiln_cms_web/live/trash_live.ex
 #, elixir-autogen, elixir-format
 msgid "That item is no longer in the trash — someone permanently deleted it."

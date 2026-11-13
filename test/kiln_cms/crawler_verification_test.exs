@@ -15,8 +15,10 @@ defmodule KilnCMS.CrawlerVerificationTest do
   alias KilnCMS.CrawlerVerification
   alias KilnCMS.CrawlerVerification.Engines
   alias KilnCMS.CrawlerVerification.InFlight
+  alias KilnCMS.Security.Cidr
   alias KilnCMS.Test.PublicAddress
   alias KilnCMS.Test.StubCrawlerResolver, as: Stub
+  alias KilnCMSWeb.RateLimit
 
   doctest KilnCMS.CrawlerVerification.Engines
 
@@ -182,15 +184,79 @@ defmodule KilnCMS.CrawlerVerificationTest do
       end
     end
 
-    test "a forward servfail is an error, not a mismatch", %{opts: opts} do
+    # #2588: the PTR query was answered, so the silence is the engine's own
+    # zone, not the address's; `:forward_error` tells a caller so.
+    for reason <- [:servfail, :timeout] do
+      test "a forward #{reason} for an engine-domain name is a forward error, not a mismatch",
+           %{opts: opts} do
+        ip = v4()
+        host = unique_host("crawl.googlebot.com")
+        Stub.put_ptr(ip, [host])
+        Stub.put_addresses(host, {:error, unquote(reason)})
+
+        assert CrawlerVerification.verify(:google, ip, opts) == {:error, unquote(reason)}
+        assert settle(:google, ip, opts) == {:unverified, :forward_error}
+        assert_error_ttl(ip)
+
+        assert {:ok, {:ptr, %{budgeted: [^host]}}} =
+                 Cachex.get(CrawlerVerification.cache_name(), ip)
+      end
+    end
+
+    # A reverse zone that answers late leaves the forward query less than its
+    # full budget; its failure may be the late answer's doing, so it is the
+    # address's silence, never the engine's.
+    test "a forward error after a PTR answer that left less than a query's budget is an error",
+         %{opts: opts} do
+      opts = Keyword.merge(opts, deadline_ms: 1_200, query_timeout_ms: 1_000)
       ip = v4()
       host = unique_host("crawl.googlebot.com")
-      Stub.put_ptr(ip, [host])
-      Stub.put_addresses(host, {:error, :servfail})
+      Stub.put_ptr(ip, {:block, self(), [host]})
+      Stub.put_addresses(host, {:error, :timeout})
 
-      assert CrawlerVerification.verify(:google, ip, opts) == {:error, :servfail}
+      assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :pending}
+      assert_receive {Stub, :blocked, resolver, _callers, :ptr, ^ip}, 2_000
+      # Past the point where a full query budget is left before the deadline.
+      Process.sleep(300)
+      Stub.release(resolver)
+
       assert settle(:google, ip, opts) == {:unverified, :error}
-      assert_error_ttl(ip)
+      assert Stub.calls(:addresses, host) == 1
+      assert {:ok, {:ptr, %{budgeted: []}}} = Cachex.get(CrawlerVerification.cache_name(), ip)
+    end
+
+    test "a cached forward error from before budgets were recorded reads as an error",
+         %{opts: opts} do
+      ip = v4()
+      host = unique_host("crawl.googlebot.com")
+      old_shape = {:ptr, %{names: [host], confirmed: [], errors: [{host, :timeout}]}}
+      Cachex.put(CrawlerVerification.cache_name(), ip, old_shape)
+
+      assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :error}
+    end
+
+    test "a PTR naming another engine's host whose forward query fails is not a forward error",
+         %{opts: opts} do
+      ip = v4()
+      host = unique_host("msnbot.search.msn.com")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, {:error, :timeout})
+
+      # Claimed as Googlebot: the name is not Google's, so the claim fails.
+      assert settle(:google, ip, opts) == {:unverified, :failed}
+      # Claimed as bingbot, the same cached result is Bing's own zone failing.
+      assert CrawlerVerification.check(:bing, ip, opts) == {:unverified, :forward_error}
+    end
+
+    test "a PTR naming a host under no engine's domain makes no forward query and fails",
+         %{opts: opts} do
+      ip = v4()
+      host = unique_host("crawl.example.net")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, {:error, :timeout})
+
+      assert settle(:google, ip, opts) == {:unverified, :failed}
+      assert Stub.calls(:addresses, host) == 0
     end
 
     test "a lookup past its deadline is killed and cached as a timeout", %{opts: opts} do
@@ -250,7 +316,8 @@ defmodule KilnCMS.CrawlerVerificationTest do
       Stub.put_ptr(verified, [host])
       Stub.put_addresses(host, [verified])
       assert settle(:google, verified, opts) == :verified
-      assert ttl(verified) > :timer.hours(5)
+      assert ttl(CrawlerVerification.verified_cache_name(), verified) > :timer.hours(5)
+      assert {:ok, false} = Cachex.exists?(CrawlerVerification.cache_name(), verified)
 
       rejected = v4()
       assert settle(:google, rejected, opts) == {:unverified, :failed}
@@ -273,6 +340,53 @@ defmodule KilnCMS.CrawlerVerificationTest do
       CrawlerVerification.forget(ip)
       assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :pending}
       assert Stub.calls(:ptr, ip) <= 1
+    end
+
+    test "forget/2 drops the address from both caches" do
+      ip = v4()
+      CrawlerVerification.put_result(:google, ip, :verified)
+      Cachex.put(CrawlerVerification.cache_name(), ip, :no_ptr)
+
+      CrawlerVerification.forget(ip)
+
+      assert {:ok, false} = Cachex.exists?(CrawlerVerification.verified_cache_name(), ip)
+      assert {:ok, false} = Cachex.exists?(CrawlerVerification.cache_name(), ip)
+    end
+
+    # #2588: a rotating attacker writes rejections as fast as the lookup caps
+    # allow; with one cache, least-recently-written eviction dropped verified
+    # crawlers first. `config/test.exs` scales `max_entries` down.
+    test "a flood of rejections twice the cache's size never evicts a verified result",
+         %{opts: opts} do
+      verified = v4()
+      CrawlerVerification.put_result(:google, verified, :verified)
+
+      max_entries = Application.fetch_env!(:kiln_cms, CrawlerVerification)[:max_entries]
+      flood = for _ <- 1..(max_entries * 2), do: PublicAddress.v4()
+
+      for ip <- flood,
+          do: CrawlerVerification.put_result(:google, ip, {:rejected, :wrong_domain})
+
+      # The bound evicted: the oldest rejections are gone.
+      eventually(fn -> cache_size(CrawlerVerification.cache_name()) <= max_entries end)
+      assert {:ok, false} = Cachex.exists?(CrawlerVerification.cache_name(), hd(flood))
+
+      assert CrawlerVerification.check(:google, verified, opts) == :verified
+      assert Stub.calls(:ptr, verified) == 0
+    end
+
+    # Cachex orders eviction by write time in milliseconds, so which of
+    # entries written in the same millisecond goes first is not fixed: assert
+    # the bound, not which entry it dropped.
+    test "the verified cache is bounded on its own" do
+      max_verified = Application.fetch_env!(:kiln_cms, CrawlerVerification)[:max_verified_entries]
+
+      for _ <- 1..(max_verified * 2),
+          do: CrawlerVerification.put_result(:google, PublicAddress.v4(), :verified)
+
+      eventually(fn ->
+        cache_size(CrawlerVerification.verified_cache_name()) <= max_verified
+      end)
     end
   end
 
@@ -389,6 +503,84 @@ defmodule KilnCMS.CrawlerVerificationTest do
 
       {:ok, _pid} = Supervisor.restart_child(supervisor, InFlight)
       assert CrawlerVerification.check(:google, v4(), opts) == {:unverified, :pending}
+    end
+  end
+
+  # #2588: the caps are charged before the start, so a start turned away as
+  # busy gives its charges back; otherwise a flood of busy starts would spend
+  # a network's budget, and the node's, without a single lookup.
+  describe "a start turned away as busy" do
+    for {family, prefixes} <- [inet: [{24, 1}, {16, 1}], inet6: [{64, 1}, {48, 1}, {32, 1}]] do
+      test "spends no #{family} network budget and no node budget", %{opts: opts} do
+        family = unquote(family)
+        supervisor = start_supervised!({Task.Supervisor, max_children: 1})
+
+        opts =
+          Keyword.merge(opts,
+            task_supervisor: supervisor,
+            prefix_lookups_per_minute: [{family, unquote(prefixes)}],
+            lookups_per_minute: 2
+          )
+
+        # The other family, so it spends the node's budget and no network's.
+        blocker = address(other_family(family))
+        Stub.put_ptr(blocker, {:block, self()})
+        assert CrawlerVerification.check(:google, blocker, opts) == {:unverified, :pending}
+        assert_receive {Stub, :blocked, resolver, _callers, :ptr, ^blocker}, 2_000
+
+        ip = address(family)
+        before = spent(ip, opts)
+        assert before["node"] == 1
+
+        capture_log(fn ->
+          assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :skipped}
+        end)
+
+        assert spent(ip, opts) == before
+        assert Stub.calls(:ptr, ip) == 0
+
+        Stub.release(resolver)
+        assert settle(:google, blocker, opts) == {:unverified, :failed}
+        eventually(fn -> Task.Supervisor.children(supervisor) == [] end)
+
+        # Every one of its networks is at a cap of 1, and the node at 2: the
+        # next address in them still gets its lookup.
+        assert CrawlerVerification.check(:google, neighbor(ip), opts) == {:unverified, :pending}
+      end
+    end
+
+    test "a refund that cannot be made still frees the claim, and never raises",
+         %{opts: opts} do
+      CrawlerVerification.reset_warnings()
+      attach(@skipped)
+      node_key = "#{opts[:rate_scope]}:node"
+      index = RateLimit.window_index(opts[:rate_window_ms])
+
+      # A stand-in for a full task supervisor that, between the charge and the
+      # refund, leaves the node cap's counter row in a shape the refund cannot
+      # update, so `RateLimit.refund/3` raises.
+      supervisor =
+        spawn_link(fn ->
+          receive do
+            {:"$gen_call", from, _start_child} ->
+              :ets.insert(RateLimit, {{node_key, index}, :not_a_count, 0})
+              GenServer.reply(from, {:error, :max_children})
+          end
+        end)
+
+      on_exit(fn -> :ets.delete(RateLimit, {node_key, index}) end)
+      ip = v4()
+
+      log =
+        capture_log(fn ->
+          assert CrawlerVerification.check(:google, ip, [task_supervisor: supervisor] ++ opts) ==
+                   {:unverified, :skipped}
+        end)
+
+      assert :ets.lookup(InFlight.table(), ip) == []
+      assert_receive {:telemetry, @skipped, %{count: 1}, %{engine: :google, reason: :busy}}
+      assert log =~ "could not refund a rate-limit charge"
+      refute log =~ inspect(ip)
     end
   end
 
@@ -639,6 +831,96 @@ defmodule KilnCMS.CrawlerVerificationTest do
     end
   end
 
+  describe "resolver_failing?/1 (#2588)" do
+    setup %{opts: opts} do
+      CrawlerVerification.reset_health()
+      on_exit(&CrawlerVerification.reset_health/0)
+
+      canary = v4()
+      %{canary: canary, opts: Keyword.put(opts, :canary_address, canary)}
+    end
+
+    test "is false after an answered lookup, with no canary", %{opts: opts, canary: canary} do
+      assert settle(:google, v4(), opts) == {:unverified, :failed}
+
+      refute CrawlerVerification.resolver_failing?(opts)
+      assert Stub.calls(:ptr, canary) == 0
+    end
+
+    test "with no recent answer, starts one canary a window and stays false while it runs",
+         %{opts: opts, canary: canary} do
+      Stub.put_ptr(canary, {:block, self()})
+
+      for _ <- 1..5, do: refute(CrawlerVerification.resolver_failing?(opts))
+
+      assert_receive {Stub, :blocked, resolver, _callers, :ptr, ^canary}, 2_000
+      refute_receive {Stub, :blocked, _resolver, _callers, :ptr, ^canary}, 100
+      assert Stub.calls(:ptr, canary) == 1
+      assert [{{:probe, :canary}, _window}] = :ets.lookup(InFlight.table(), {:probe, :canary})
+
+      Stub.release(resolver)
+      eventually(fn -> InFlight.health(:canary) == :healthy end)
+      refute CrawlerVerification.resolver_failing?(opts)
+    end
+
+    test "a canary that gets no answer turns it true; one that answers turns it false",
+         %{opts: opts, canary: canary} do
+      opts = Keyword.put(opts, :health_window_ms, 50)
+      Stub.put_ptr(canary, {:error, :timeout})
+
+      eventually(fn -> CrawlerVerification.resolver_failing?(opts) end)
+
+      Stub.put_ptr(canary, [])
+      eventually(fn -> not CrawlerVerification.resolver_failing?(opts) end)
+    end
+
+    test "the canary runs with every lookup slot busy and no lookup budget, and charges nothing",
+         %{opts: opts, canary: canary} do
+      supervisor = start_supervised!({Task.Supervisor, max_children: 1})
+      busy = v4()
+      Stub.put_ptr(busy, {:block, self()})
+
+      opts = Keyword.merge(opts, task_supervisor: supervisor, lookups_per_minute: 1)
+      assert CrawlerVerification.check(:google, busy, opts) == {:unverified, :pending}
+      assert_receive {Stub, :blocked, resolver, _callers, :ptr, ^busy}, 2_000
+      before = spent(canary, opts)
+
+      Stub.put_ptr(canary, {:error, :timeout})
+      eventually(fn -> CrawlerVerification.resolver_failing?(opts) end)
+      assert Stub.calls(:ptr, canary) == 1
+      assert spent(canary, opts) == before
+
+      Stub.release(resolver)
+    end
+
+    test "a canary that cannot start leaves the last verdict, healthy by default",
+         %{opts: opts, canary: canary} do
+      opts = Keyword.put(opts, :canary_supervisor, :"no-such-canary-supervisor")
+
+      refute CrawlerVerification.resolver_failing?(opts)
+      assert Stub.calls(:ptr, canary) == 0
+    end
+
+    test "with verification off, is false and asks nothing", %{opts: opts, canary: canary} do
+      refute CrawlerVerification.resolver_failing?([enabled: false] ++ opts)
+      assert Stub.calls(:ptr, canary) == 0
+    end
+
+    test "reset_latches/0 lets a canary start in the same window again", %{canary: canary} do
+      window = 1
+
+      assert InFlight.claim_probe(:canary, window)
+      refute InFlight.claim_probe(:canary, window)
+      assert InFlight.claim_probe(:canary, window + 1)
+      assert [_one_row] = :ets.lookup(InFlight.table(), {:probe, :canary})
+
+      InFlight.reset_latches()
+      assert :ets.lookup(InFlight.table(), {:probe, :canary}) == []
+      assert InFlight.claim_probe(:canary, window)
+      assert Stub.calls(:ptr, canary) == 0
+    end
+  end
+
   describe "the consecutive-failure warning" do
     test "names the switch once after enough lookups in a row get no answer",
          %{opts: opts} do
@@ -741,10 +1023,41 @@ defmodule KilnCMS.CrawlerVerificationTest do
     end)
   end
 
-  defp ttl(ip) do
-    {:ok, ttl} = Cachex.ttl(CrawlerVerification.cache_name(), ip)
+  defp ttl(cache \\ CrawlerVerification.cache_name(), ip) do
+    {:ok, ttl} = Cachex.ttl(cache, ip)
     ttl
   end
+
+  defp cache_size(cache) do
+    {:ok, size} = Cachex.size(cache)
+    size
+  end
+
+  # What each of `ip`'s rate caps has counted in this window, by cap key.
+  defp spent(ip, opts) do
+    family = if tuple_size(ip) == 4, do: :inet, else: :inet6
+    text = ip |> :inet.ntoa() |> to_string()
+
+    networks =
+      for {bits, _limit} <- Keyword.get(opts[:prefix_lookups_per_minute] || [], family, []) do
+        {:ok, cidr} = Cidr.parse("#{text}/#{bits}")
+        Cidr.format(cidr)
+      end
+
+    Map.new(networks ++ ["node"], fn key ->
+      {key, RateLimit.get("#{opts[:rate_scope]}:#{key}", opts[:rate_window_ms])}
+    end)
+  end
+
+  defp address(:inet), do: v4()
+  defp address(:inet6), do: v6()
+
+  defp other_family(:inet), do: :inet6
+  defp other_family(:inet6), do: :inet
+
+  # Another address in `ip`'s /24 (IPv4) or /64 (IPv6), never used before.
+  defp neighbor({a, b, c, d}), do: fresh({a, b, c, rem(d + 128, 254) + 1})
+  defp neighbor({a, b, c, d, e, f, g, h}), do: fresh({a, b, c, d, e, f, g, h + 0x8000})
 
   defp assert_error_ttl(ip) do
     assert ttl(ip) <= :timer.minutes(5)
