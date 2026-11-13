@@ -500,11 +500,7 @@ defmodule KilnCMS.Security.AlertsTest do
 
       assert Enum.count(results, &(&1 == :counted)) == threshold + 4
 
-      assert KilnCMS.Accounts.ThrottleStore.window_count(
-               Alerts.failed_sign_in_bucket(),
-               org.id,
-               idx
-             ) == threshold + 5
+      assert Alerts.failed_sign_in_total(org.id, idx) == threshold + 5
 
       # Another site's tally is its own.
       other = org("alerts-tally-other")
@@ -521,5 +517,70 @@ defmodule KilnCMS.Security.AlertsTest do
 
       assert result == :counted
     end
+  end
+end
+
+defmodule KilnCMS.Security.AlertsFallbackTripTest do
+  @moduledoc """
+  `Alerts.charge_failed_sign_in/2` across a database outage (#2639): a
+  crossing counted only on this node's fallback must not use up the window's
+  shared crossing, or the alert is never claimed once the database is back.
+
+  Sync and not a `DataCase`: the database is made unreachable by leaving the
+  sandbox in `:manual` without a checkout, and the fallback table is
+  node-wide.
+  """
+  use ExUnit.Case, async: false
+
+  import KilnCMS.OrgFixtures
+
+  alias Ecto.Adapters.SQL.Sandbox
+  alias KilnCMS.Accounts
+  alias KilnCMS.CMS
+  alias KilnCMS.Security.Alerts
+  alias KilnCMS.Test.BudgetWindow
+
+  @moduletag :capture_log
+
+  setup do
+    Sandbox.mode(KilnCMS.Repo, :manual)
+    on_exit(fn -> Sandbox.mode(KilnCMS.Repo, :manual) end)
+    :ok
+  end
+
+  test "a crossing on the node's fallback leaves the database's crossing to claim" do
+    org_id = Ash.UUID.generate()
+    window = BudgetWindow.fresh_window_ms()
+    threshold = Alerts.failed_sign_in_threshold()
+
+    # The database is down: the settings cannot be read, which counts, and the
+    # tally counts on this node.
+    down = for _ <- 1..threshold, do: Alerts.charge_failed_sign_in(org_id, window_ms: window)
+    assert [{:threshold, idx, ^threshold}] = Enum.filter(down, &match?({:threshold, _, _}, &1))
+
+    # It is back, in the same window: its own tally reaches the threshold too.
+    :ok = Sandbox.checkout(KilnCMS.Repo)
+    on_exit(fn -> Sandbox.checkin(KilnCMS.Repo) end)
+
+    org = org("alerts-fallback-trip", id: org_id)
+
+    admin =
+      Ash.Seed.seed!(Accounts.User, %{
+        email: "alerts-trip-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :viewer
+      })
+
+    Ash.Seed.seed!(Accounts.OrgMembership, %{
+      organization_id: org.id,
+      user_id: admin.id,
+      role: :admin
+    })
+
+    {:ok, _} = CMS.save_site_security_alerts(%{disabled_kinds: []}, actor: admin, tenant: org.id)
+
+    up = for _ <- 1..threshold, do: Alerts.charge_failed_sign_in(org_id, window_ms: window)
+    assert [{:threshold, ^idx, ^threshold}] = Enum.filter(up, &match?({:threshold, _, _}, &1))
   end
 end

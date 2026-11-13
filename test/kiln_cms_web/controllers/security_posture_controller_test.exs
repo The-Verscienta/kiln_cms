@@ -367,6 +367,37 @@ defmodule KilnCMSWeb.SecurityPostureControllerTest do
       refute conn.resp_body =~ "leak@example.com"
     end
 
+    # #2640: whether the site's security alerts reach someone is published as
+    # counts and flags, never as who the recipients are.
+    test "reports who security alerts reach as scalar counts, naming nobody", %{site: site} do
+      KilnCMS.Test.SecurityAlerts.enable()
+      admin = site_admin(site)
+      muted = user(:viewer, %{notify_on_security_alert: false}) |> member!(site, :admin)
+
+      conn = req(site, token(admin))
+      assert conn.status == 200
+
+      assert %{"status" => "pass", "fix_path" => nil, "facts" => facts} =
+               check(conn, "core.security_alerts_reach_someone")
+
+      assert facts == %{
+               "deployment_enabled" => true,
+               "enabled_kinds" => length(KilnCMS.Security.Alerts.site_kinds()) - 1,
+               "notify_admins" => true,
+               "member_admins" => 2,
+               "fallback" => false,
+               "bell_recipients" => 2,
+               "email_recipients" => 1,
+               "subscribed_endpoints" => 0,
+               "uncovered_kinds" => length(KilnCMS.Security.Alerts.site_kinds()) - 1
+             }
+
+      for user <- [admin, muted] do
+        refute conn.resp_body =~ to_string(user.email)
+        refute conn.resp_body =~ user.id
+      end
+    end
+
     test "names a plugin's checks by source and plugin", %{site: site} do
       conn = req(site, token(site_admin(site)))
 

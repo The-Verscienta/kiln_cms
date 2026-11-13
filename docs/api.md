@@ -2081,7 +2081,7 @@ curl -s https://cms.example.com/api/security/posture \
   "org_id": "5b1f0c9e-…",
   "scopes": ["site"],
   "status": "warn",
-  "counts": {"fail": 0, "warn": 1, "error": 0, "unknown": 0, "pass": 2, "n_a": 1},
+  "counts": {"fail": 0, "warn": 1, "error": 0, "unknown": 0, "pass": 3, "n_a": 1},
   "checks": [
     {"id": "core.admin_allowlist", "scope": "site", "source": "core", "plugin": null,
      "status": "n_a", "title": "Admin allowlist",
@@ -2105,7 +2105,15 @@ curl -s https://cms.example.com/api/security/posture \
      "summary": "1 editor has no authenticator app.",
      "fix_path": "/editor/settings",
      "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#two-step-sign-in",
-     "facts": {"admins": 2, "admins_without": 0, "editors": 3, "editors_without": 1}, "error": null}
+     "facts": {"admins": 2, "admins_without": 0, "editors": 3, "editors_without": 1}, "error": null},
+    {"id": "core.security_alerts_reach_someone", "scope": "site", "source": "core", "plugin": null,
+     "status": "pass", "title": "Security alerts reach someone",
+     "summary": "Security alerts on this site reach its administrators.",
+     "fix_path": null,
+     "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#security-alerts",
+     "facts": {"bell_recipients": 2, "deployment_enabled": true, "email_recipients": 2,
+               "enabled_kinds": 5, "fallback": false, "member_admins": 2, "notify_admins": true,
+               "subscribed_endpoints": 0, "uncovered_kinds": 5}, "error": null}
   ]
 }
 ```
