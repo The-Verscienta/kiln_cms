@@ -11,8 +11,10 @@ page away, and it needs publish rights even on a draft. Any editor may
 **Unarchive**, which brings an archived page back as a draft. Why the rule
 covers dates and archive too is in [ADR 0051](decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md).
 
-Kiln offers these controls only to someone who may use them. If you don't see
-**Unpublish**, ask an admin. Deleting is different: it moves a page to the
+The editor and the content list offer these controls only to someone who may
+use them, and the unpublish date is locked for anyone else. If you don't see
+**Unpublish**, ask an admin. The calendar is the exception: anyone may drag a
+chip there, and a move they may not make is refused when it is dropped. Deleting is different: it moves a page to the
 trash, and only an admin can do it ([Trash and restore](trash.md)).
 
 ## Unpublish a page from its editor
@@ -31,7 +33,8 @@ content list.
 ## Unpublish or archive from the content list
 
 To take down one page, open the **More actions** menu at the end of its row
-and choose **Unpublish**. It is offered on published rows.
+and choose **Unpublish**. It is offered on published rows. To archive one
+page, tick its row and use **Archive** in the bar, as below.
 
 To take down several at once:
 
@@ -42,6 +45,11 @@ To take down several at once:
 
 The message afterwards counts the rows updated and the rows skipped. A row
 that can't make the move, such as a draft ticked for Unpublish, is skipped.
+
+If someone else moved one of the pages to the trash after the list loaded,
+the action currently fails without a message: the list reloads, and the
+pages after that one are left as they were. The same happens to a single
+row's **Unpublish** (#2781). Tick the remaining pages and try again.
 
 To bring archived pages back, choose **Unarchive** on an archived row, on the
 page's editor, or in the bar.
@@ -64,8 +72,10 @@ the page is published.
 ## Move the date on the calendar
 
 1. Open **Calendar** (`/editor/calendar`).
-2. Drag a chip in the **Scheduled unpublish** lane to another day, or focus it
-   and use the arrow keys. The time of day stays the same.
+2. Drag a chip in the **Scheduled unpublish**, **Scheduled archive** or
+   **Expired (flagged)** lane to another day, or focus it and use the arrow
+   keys. Each moves the page's unpublish date. The time of day stays the
+   same.
 
 Editors who may not publish can still drag the chip. The move is refused when
 it is dropped, and the chip snaps back. The calendar's own messages are listed
@@ -74,10 +84,12 @@ under [Rescheduling from the grid](content-lifecycles.md#rescheduling-from-the-g
 ## Take pages down with a release
 
 1. In the content list, tick the pages and choose **Add to release**. The
-   button appears once a release exists.
-2. Pick the release, set **On go-live** to **Unpublish**, and choose the
-   **Add** button. From a page's own **Settings**, the **Release** panel does
-   the same for that page, with **Unpublish on go-live**.
+   button appears once a release you can still change exists: one that is
+   open, scheduled or failed.
+2. Pick the release, set **On go-live** to **Unpublish**, and choose
+   **Add N item(s)**, where N is how many you ticked. From a page's own
+   **Settings**, the **Release** panel does the same for that page: choose
+   **Unpublish on go-live**, then **Add to release**.
 3. An admin ships the release from its page under **Releases**: set
    **Go live at** and choose **Schedule**, or choose **Publish now**.
 
@@ -89,18 +101,18 @@ See [Content releases](content-releases.md).
 ## What a refusal means
 
 If the switch was turned off, or your role changed, after the page loaded,
-the button is still there but the click is refused. The message says why:
+the button is still there but the click is refused. On the page's editor and
+on a row's **Unpublish**, the message says why:
 
 | Message | Why |
 |---|---|
 | *Only an admin can unpublish content on this site.* | You are an editor, and only admins publish on this site. |
-| *Only an admin can archive content on this site.* | The same, for Archive. |
 | *You can't edit this content type.* | Your role does not cover this content type ([Granular RBAC](granular-rbac.md)). |
 | *You don't have permission to do that.* | Any other refusal. |
 | *Someone else changed this item's status first — reload to see where it stands.* | Someone moved the page first. |
 
-In the bar, a refused row is counted as skipped and gets no message of its
-own.
+The bar shows no such message. It keeps offering what it offered when the
+list loaded, and counts each refused row as skipped.
 
 ## Where next
 

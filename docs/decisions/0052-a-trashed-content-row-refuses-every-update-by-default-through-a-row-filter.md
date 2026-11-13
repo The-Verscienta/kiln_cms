@@ -36,7 +36,11 @@ compare-and-swap the workflow transitions use for their states. When the row
 is trashed, the write matches nothing and raises
 `Ash.Error.Changes.StaleRecord`, and nothing after it runs: no artifacts, no
 webhook, no job. The editors read that error as "moved to the trash or
-deleted", and the APIs answer not-found.
+deleted". Over the APIs, a write caught in the race answers like any other
+compare-and-swap miss, a `409` with code `invalid_state_transition` on
+JSON:API and the same code on GraphQL (`KilnCMSWeb.AshStateMachineErrors`).
+A row trashed before the request's own read answers not-found, because that
+read finds nothing.
 
 ## Rejected
 
@@ -46,7 +50,8 @@ deleted", and the APIs answer not-found.
 - **A policy.** It would judge the same held struct. It would also be skipped
   wherever policies are: `authorize?: false` callers and the AshOban bypass,
   which runs the scheduled transitions. And the refusal would be a `403`,
-  which tells a client it lacks permission when the record is in fact gone.
+  which tells a client it lacks permission. The row filter gives the answer
+  every other lost race gets: the record changed since it was read.
 - **A database trigger.** Postgres sees an `UPDATE`, not the Ash action, so a
   trigger cannot tell `:restore` from `:autosave`. It would also be SQL that
   `mix ash.codegen` does not generate, in a repository whose migrations are
@@ -74,9 +79,14 @@ other update action carries the filter. Today there are four
   trash too (#2533), so a row trashed before a contract step and restored
   after it comes back in the new shape.
 
-An exempt write that can fire decides on the row its `UPDATE` returned, not
-on the struct it read: `KilnCMS.CMS.Changes.FireArtifacts` with
-`skip_trashed: true` fires only a row that is out of the trash.
+An exempt write that can fire must not fire a trashed row, and must judge
+that on a row nobody can trash in between. `:convert_custom_field` and
+`:resnapshot_media` decide on the row their `UPDATE` returned:
+`KilnCMS.CMS.Changes.FireArtifacts` with `skip_trashed: true` fires only a row
+that is out of the trash. `:clear_reference_target` gates `FireArtifacts` and
+`NotifyWebhooks` on the struct instead (`attribute_equals(:archived_at, nil)`),
+which is safe only because `KilnCMS.CMS.ContentLinks.TargetDelete` read that
+struct inside the purge's transaction.
 
 Writing a trashed row is not a reason on its own. `:set_next_occurrence` is
 not exempt: the value it writes is relative to the clock, so it would be
