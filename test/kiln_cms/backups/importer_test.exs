@@ -801,6 +801,24 @@ defmodule KilnCMS.Backups.ImporterTest do
                run!(@stamp)
     end
 
+    test "a partial that vanishes between the listing and the stat leaves the stamp pending",
+         %{dir: dir} do
+      # A run renaming its partials into place as it finishes: the dump is
+      # done, the media part's partial is listed and gone before its stat.
+      # Dated by the old dump alone, the stamp would be recorded interrupted.
+      put(dir, :db, @stamp, age: 200)
+      marker = marker!(dir, @stamp, 200)
+
+      list_then_finish = fn dir ->
+        {:ok, listed} = Importer.list(dir)
+        File.rm!(marker)
+        {:ok, listed}
+      end
+
+      assert {:ok, %{imported: 0, pending: 1}} = Importer.run(dir, list_then_finish)
+      assert all_runs() == []
+    end
+
     test "a finished dump with the media marker beside it is both components", %{dir: dir} do
       put(dir, :db, @stamp, age: 200)
       marker!(dir, @stamp, 200)

@@ -492,6 +492,46 @@ defmodule KilnCMS.Backups.WorkerTest do
     end
   end
 
+  # Stand-ins for `KilnCMS.Backups.Importer` that fail in the ways its own
+  # rescue doesn't cover.
+  defmodule ExitingImporter do
+    @moduledoc false
+    def run(_dir), do: exit(:importer_down)
+  end
+
+  defmodule RaisingImporter do
+    @moduledoc false
+    def run(_dir), do: raise("importer crashed")
+  end
+
+  describe "an importer that fails before the partial sweep" do
+    for importer <- [ExitingImporter, RaisingImporter] do
+      @tag :pg_tools
+      test "#{inspect(importer)} doesn't fail the start step; the sweep still runs",
+           %{dir: dir} do
+        original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+
+        Application.put_env(
+          :kiln_cms,
+          KilnCMS.Backups,
+          Keyword.put(original, :importer, unquote(importer))
+        )
+
+        on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
+
+        # Named like no stamp: swept by age alone, so the sweep is seen to run.
+        stray = Path.join([dir, "db", "stray.partial"])
+        File.mkdir_p!(Path.dirname(stray))
+        File.write!(stray, "")
+        File.touch!(stray, System.os_time(:second) - 4 * 3600)
+
+        assert :ok = BackupChain.run()
+        assert [%{origin: :app, status: :succeeded}] = runs()
+        refute File.exists?(stray)
+      end
+    end
+  end
+
   describe "run history (#2217)" do
     defp runs, do: Backups.list_runs!(actor: Backups.system())
 

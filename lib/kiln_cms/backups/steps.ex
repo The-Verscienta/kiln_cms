@@ -1738,9 +1738,29 @@ defmodule KilnCMS.Backups.Steps do
   # swept. A `.partial` named like no stamp (or with a stamp no Importer will
   # ever record) can never get a row, so it is swept by age alone, as before.
   defp import_then_sweep_partials(dir) do
-    # Best effort, never a gate: see above.
-    _ = Importer.run(dir)
+    import_best_effort(dir)
     sweep_stale_partials(dir)
+  end
+
+  # Best effort, never a gate: see above. `Importer.run/1` already turns a
+  # raise into an error; this boundary also catches an exit (a call into a
+  # process that died) or a throw, so the start step carries on to the sweep,
+  # which fails closed on its own. `config :kiln_cms, KilnCMS.Backups,
+  # importer:` swaps the module in tests only.
+  defp import_best_effort(dir) do
+    importer =
+      Keyword.get(Application.get_env(:kiln_cms, KilnCMS.Backups, []), :importer, Importer)
+
+    _ = importer.run(dir)
+    :ok
+  rescue
+    error ->
+      Logger.warning(
+        "Backup import before the partial sweep crashed: #{Exception.message(error)}"
+      )
+  catch
+    kind, reason ->
+      Logger.warning("Backup import before the partial sweep failed: #{inspect({kind, reason})}")
   end
 
   # sobelow_skip ["Traversal.FileModule"]

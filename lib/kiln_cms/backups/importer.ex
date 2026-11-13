@@ -141,11 +141,14 @@ defmodule KilnCMS.Backups.Importer do
   def interrupted_after_s, do: @interrupted_after_s
 
   @doc false
-  @spec run(Path.t()) :: {:ok, summary()} | {:error, term()}
-  def run(dir) do
+  # `list` is `list/1` outside tests, which pass one that changes the
+  # directory between the listing and the stat.
+  @spec run(Path.t(), (Path.t() -> {:ok, [{String.t(), String.t()}]} | {:error, term()})) ::
+          {:ok, summary()} | {:error, term()}
+  def run(dir, list \\ &list/1) do
     reconcile_stale_runs()
 
-    with {:ok, names} <- list(dir),
+    with {:ok, names} <- list.(dir),
          {:ok, existing} <- existing_stamps() do
       import_new(dir, names, existing)
     end
@@ -306,7 +309,9 @@ defmodule KilnCMS.Backups.Importer do
   # Stat (lstat: a symlink or directory named like an artifact is not one) only
   # the files of a stamp we are about to create. `held?` is whether any
   # `.partial` is named beside the stamp; `partials` are the regular ones,
-  # which date it.
+  # which date it. `vanished?` is whether a listed `.partial` was gone by the
+  # time it was stat'ed: a run renaming its partials into place as it
+  # finishes, whose stamp can't be judged from this listing.
   defp entry(dir, stamp, names, partial_names) do
     files =
       for {kind, name, part} <- names,
@@ -316,10 +321,12 @@ defmodule KilnCMS.Backups.Importer do
         %{kind: kind, name: name, bytes: size, mtime: mtime, part: part}
       end
 
-    partials =
+    stats =
       for {sub, name} <- partial_names,
-          {:ok, %File.Stat{type: :regular, mtime: mtime}} <-
-            [File.lstat(Path.join([dir, sub, name]), time: :posix)] do
+          do: {name, File.lstat(Path.join([dir, sub, name]), time: :posix)}
+
+    partials =
+      for {name, {:ok, %File.Stat{type: :regular, mtime: mtime}}} <- stats do
         %{kind: partial_kind(name), name: name, mtime: mtime}
       end
 
@@ -327,7 +334,8 @@ defmodule KilnCMS.Backups.Importer do
       stamp: stamp,
       files: Enum.sort_by(files, &{&1.kind, &1.part || 0}),
       partials: Enum.sort_by(partials, & &1.name),
-      held?: partial_names != []
+      held?: partial_names != [],
+      vanished?: Enum.any?(stats, &match?({_, {:error, :enoent}}, &1))
     }
   end
 
@@ -335,10 +343,14 @@ defmodule KilnCMS.Backups.Importer do
   defp partial_kind("kiln-media-" <> _), do: :media
 
   # `:ready` (import it), `:interrupted` (import it as a killed run) or
-  # `:pending` (look again later).
+  # `:pending` (look again later). A stamp one of whose partials vanished
+  # between the listing and the stat is pending this call: dated by what is
+  # left, a run that just finished could be recorded as interrupted, and that
+  # row is never rewritten.
   defp settle(%{stamp: stamp} = entry, covered, now) do
     cond do
       MapSet.member?(covered, stamp) -> :ready
+      entry.vanished? -> :pending
       not entry.held? -> if old_enough?(entry.files, now), do: :ready, else: :pending
       future?(entry, now) -> :pending
       now - newest(entry) >= @interrupted_after_s -> :interrupted

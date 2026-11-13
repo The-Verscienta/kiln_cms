@@ -11,7 +11,10 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
   `prune` removes the marker once every file of the stamp is 12 hours old.
   While the run lives, a background heartbeat keeps its partials fresh, so a
   slow run is never taken for a dead one. "Aging" a stamp here means setting
-  its files' mtimes back; the heartbeat's `sleep` is stubbed to 50 ms.
+  its files' mtimes back; the heartbeat's `sleep` is stubbed to 50 ms, and
+  logs the heartbeat loop's PID (its parent). A test that kills the script
+  waits for that loop to exit before aging anything: until it notices, the
+  orphaned loop may touch the partials once more.
 
   `pg_dump` / `pg_restore` are stubbed on `PATH`; tar and the rest are real.
   Sparse files keep the 16 MB parts cheap. The script is started through a
@@ -43,7 +46,13 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
   end
 
   setup do
-    tmp = Path.join(System.tmp_dir!(), "kiln_backup_import_#{System.unique_integer([:positive])}")
+    # The OS pid too: another VM running this file counts from the same start.
+    tmp =
+      Path.join(
+        System.tmp_dir!(),
+        "kiln_backup_import_#{System.pid()}_#{System.unique_integer([:positive])}"
+      )
+
     media = Path.join(tmp, "uploads")
     backups = Path.join(tmp, "backups")
     bin = Path.join(tmp, "bin")
@@ -61,8 +70,13 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
     """)
 
     stub!(bin, "pg_restore", "#!/bin/sh\nexit 0\n")
-    # A fast heartbeat: every 50 ms instead of every 5 minutes.
-    stub!(bin, "sleep", "#!/bin/sh\nexec #{@real_sleep} 0.05\n")
+    # A fast heartbeat: every 50 ms instead of every 5 minutes. Only the
+    # heartbeat calls `sleep`; its parent is the loop.
+    stub!(bin, "sleep", """
+    #!/bin/sh
+    echo "$PPID" >> "#{Path.join(tmp, "heartbeat")}"
+    exec #{@real_sleep} 0.05
+    """)
 
     %{tmp: tmp, media: media, backups: backups, bin: bin, scratch: scratch}
   end
@@ -121,6 +135,7 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       assert {out, status} = backup(ctx)
       assert status != 0
       refute out =~ "Terminated"
+      heartbeat_gone!(ctx)
 
       stamp = only_stamp(ctx)
       part01 = Path.join(ctx.backups, "media/kiln-media-#{stamp}.part01.tar.gz")
@@ -174,6 +189,7 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       kill_at_part02!(ctx)
       assert {_, status} = backup(ctx)
       assert status != 0
+      heartbeat_gone!(ctx)
       killed = only_stamp(ctx)
 
       age!(ctx, killed, 4 * 60)
@@ -206,6 +222,7 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       kill_at_part02!(ctx)
       assert {_, status} = backup(ctx)
       assert status != 0
+      heartbeat_gone!(ctx)
       stamp = only_stamp(ctx)
       part01 = Path.join(ctx.backups, "media/kiln-media-#{stamp}.part01.tar.gz")
 
@@ -232,6 +249,7 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
 
       assert {_, status} = backup(ctx)
       assert status != 0
+      heartbeat_gone!(ctx)
       first = only_stamp(ctx)
       assert File.exists?(Path.join(ctx.backups, "media/kiln-media-#{first}.tar.gz"))
       assert File.exists?(marker(ctx, first))
@@ -247,6 +265,7 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       Process.sleep(1100)
       assert {_, status} = backup(ctx)
       assert status != 0
+      heartbeat_gone!(ctx)
       [second] = ctx |> stamps() |> Enum.reject(&(&1 == first))
       age!(ctx, second, 13 * 60)
       assert {_, 0} = run_script(ctx, @script, ["prune"])
@@ -263,11 +282,13 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       for a in "$@"; do
         case "$a" in --file=*) printf 'PGDMP half a dump' > "${a#--file=}" ;; esac
       done
+      #{await_heartbeat(ctx)}
       kill -KILL "$KILN_TEST_SCRIPT_PID"
       """)
 
       assert {_, status} = backup(ctx)
       assert status != 0
+      heartbeat_gone!(ctx)
 
       assert [dump_partial] = Path.wildcard(Path.join(ctx.backups, "db/kiln-db-*.dump.partial"))
       [_, stamp] = Regex.run(~r/kiln-db-(\d{8}-\d{6})\.dump\.partial\z/, dump_partial)
@@ -292,6 +313,7 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
 
       assert {_, status} = backup(ctx)
       assert status != 0
+      heartbeat_gone!(ctx)
       stamp = only_stamp(ctx)
       assert File.exists?(marker(ctx, stamp))
       assert Path.wildcard(Path.join(ctx.backups, "media/*.tar.gz")) == []
@@ -307,37 +329,54 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       kill_at_part02!(ctx)
       assert {_, status} = backup(ctx)
       assert status != 0
+      heartbeat_gone!(ctx)
       stamp = only_stamp(ctx)
 
-      # Two intervals for the orphan to notice, then twenty for it to betray
-      # itself.
-      Process.sleep(100)
+      # The loop ran while the script lived (the kill waited for it, and
+      # `heartbeat_gone!/1` above saw its PID) and has exited since: nothing
+      # touches the marker.
       age!(ctx, stamp, 4 * 60)
-      aged = File.stat!(marker(ctx, stamp), time: :posix).mtime
-      Process.sleep(1000)
-      assert File.stat!(marker(ctx, stamp), time: :posix).mtime == aged
+      refute fresh?(marker(ctx, stamp))
+    end
+
+    # The script's PID reused after a SIGKILL: `kill -0` on it succeeds, but
+    # the loop's parent is no longer that process. Here `ps` reports another
+    # parent while the script is alive and stalled; the loop must stop at its
+    # first check, before touching anything.
+    test "a heartbeat whose parent is not the script stops without touching", ctx do
+      ps_log = Path.join(ctx.tmp, "ps")
+
+      stub!(ctx.bin, "ps", """
+      #!/bin/sh
+      echo "$4" >> "#{ps_log}"
+      echo 1
+      """)
+
+      {fifo, flag} = stall_at_tar_probe!(ctx)
+      task = Task.async(fn -> backup(ctx) end)
+      wait_until(fn -> File.exists?(flag) end)
+
+      # The first `ps` is start_heartbeat's probe of the script itself; the
+      # next is the loop asking for its own parent.
+      wait_until(fn -> ps_log |> read_lines() |> length() >= 2 end)
+      [script, loop | _] = read_lines(ps_log)
+      assert script != loop
+      wait_until(fn -> gone?(loop) end)
+
+      # The script is still running, and the loop never reached a sleep, so it
+      # never touched.
+      assert Task.yield(task, 0) == nil
+      refute File.exists?(Path.join(ctx.tmp, "heartbeat"))
+
+      release(fifo)
+      assert {_, 0} = Task.await(task, 60_000)
     end
   end
 
   describe "a live run is never taken for a dead one (#2478)" do
     test "a run stalled for hours keeps its partials fresh; it is pending, then succeeds",
          ctx do
-      real_tar = System.find_executable("tar")
-      fifo = Path.join(ctx.tmp, "release")
-      flag = Path.join(ctx.tmp, "stalled")
-      {_, 0} = System.cmd("mkfifo", [fifo])
-      # A failed assertion must not leave the script blocked for ever.
-      on_exit(fn -> release(fifo) end)
-
-      # The first archive check (the tar probe) blocks until the test
-      # releases it.
-      stub!(ctx.bin, "tar", """
-      #!/bin/sh
-      case "$*" in
-        *-tzf*) if [ ! -e "#{flag}" ]; then : > "#{flag}"; cat "#{fifo}" > /dev/null; fi ;;
-      esac
-      exec #{real_tar} "$@"
-      """)
+      {fifo, flag} = stall_at_tar_probe!(ctx)
 
       task = Task.async(fn -> backup(ctx) end)
       wait_until(fn -> File.exists?(flag) end)
@@ -437,6 +476,55 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
     System.cmd(bash, ["-c", wrapper, bash, script | args], env: env, stderr_to_stdout: true)
   end
 
+  # The first archive check (the tar probe) blocks until the test releases
+  # the fifo; the flag says it is blocked.
+  defp stall_at_tar_probe!(ctx) do
+    real_tar = System.find_executable("tar")
+    fifo = Path.join(ctx.tmp, "release")
+    flag = Path.join(ctx.tmp, "stalled")
+    {_, 0} = System.cmd("mkfifo", [fifo])
+    # A failed assertion must not leave the script blocked for ever.
+    on_exit(fn -> release(fifo) end)
+
+    stub!(ctx.bin, "tar", """
+    #!/bin/sh
+    case "$*" in
+      *-tzf*) if [ ! -e "#{flag}" ]; then : > "#{flag}"; cat "#{fifo}" > /dev/null; fi ;;
+    esac
+    exec #{real_tar} "$@"
+    """)
+
+    {fifo, flag}
+  end
+
+  # Shell for a kill stub: wait (up to 10 s) until the heartbeat loop has
+  # logged its PID, so the test knows which process to wait for.
+  defp await_heartbeat(ctx) do
+    log = Path.join(ctx.tmp, "heartbeat")
+
+    ~s{n=0; while [ ! -s "#{log}" ] && [ "$n" -lt 1000 ]; do #{@real_sleep} 0.01; n=$((n+1)); done}
+  end
+
+  defp heartbeat_pids(ctx),
+    do: ctx.tmp |> Path.join("heartbeat") |> read_lines() |> Enum.uniq()
+
+  # A killed script's heartbeat loop is orphaned and exits at its next check;
+  # until then it may touch the partials once more, after a test aged them.
+  # The log is cleared, so the next killed run's stub waits for its own loop.
+  defp heartbeat_gone!(ctx) do
+    pids = heartbeat_pids(ctx)
+    assert pids != []
+    wait_until(fn -> Enum.all?(pids, &gone?/1) end)
+    File.rm!(Path.join(ctx.tmp, "heartbeat"))
+  end
+
+  defp read_lines(path) do
+    case File.read(path) do
+      {:ok, text} -> String.split(text, "\n", trim: true)
+      {:error, :enoent} -> []
+    end
+  end
+
   # The script is killed (SIGKILL, so no trap runs) as it starts part 2 of 3.
   defp kill_at_part02!(ctx) do
     real_tar = System.find_executable("tar")
@@ -444,7 +532,9 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
     stub!(ctx.bin, "tar", """
     #!/bin/sh
     case "$*" in
-      *-czf*part02.tar.gz.partial*) kill -KILL "$KILN_TEST_SCRIPT_PID"; exit 1 ;;
+      *-czf*part02.tar.gz.partial*)
+        #{await_heartbeat(ctx)}
+        kill -KILL "$KILN_TEST_SCRIPT_PID"; exit 1 ;;
     esac
     exec #{real_tar} "$@"
     """)
@@ -457,7 +547,10 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
     stub!(ctx.bin, "du", """
     #!/bin/sh
     for a in "$@"; do
-      case "${a##*/}" in #{glob}) kill -KILL "$KILN_TEST_SCRIPT_PID"; exit 1 ;; esac
+      case "${a##*/}" in #{glob})
+        #{await_heartbeat(ctx)}
+        kill -KILL "$KILN_TEST_SCRIPT_PID"; exit 1 ;;
+      esac
     done
     exec #{real_du} "$@"
     """)

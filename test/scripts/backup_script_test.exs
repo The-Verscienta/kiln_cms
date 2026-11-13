@@ -43,7 +43,13 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   end
 
   setup do
-    tmp = Path.join(System.tmp_dir!(), "kiln_backup_script_#{System.unique_integer([:positive])}")
+    # The OS pid too: another VM running this file counts from the same start.
+    tmp =
+      Path.join(
+        System.tmp_dir!(),
+        "kiln_backup_script_#{System.pid()}_#{System.unique_integer([:positive])}"
+      )
+
     media = Path.join(tmp, "uploads")
     backups = Path.join(tmp, "backups")
     bin = Path.join(tmp, "bin")
@@ -529,6 +535,10 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert File.exists?(finished)
     end
 
+    # Permissions don't bind root, so the partial would be removed after all.
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0500 directory doesn't stop root removing a file")
+
     test "a partial that can't be removed is warned about, and the rest go on", ctx do
       stuck = abandoned!(ctx, "db/kiln-db-20260101-000000.dump.partial", 2 * 24 * 60)
       other = abandoned!(ctx, "media/kiln-media-20260201-000000.sha256.partial", 2 * 24 * 60)
@@ -539,10 +549,8 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert {out, 0} = backup(ctx, "prune")
       File.chmod!(db, 0o700)
 
-      if File.exists?(stuck) do
-        assert out =~ "could not remove #{stuck}"
-      end
-
+      assert File.exists?(stuck)
+      assert out =~ "could not remove #{stuck}"
       refute File.exists?(other)
     end
 

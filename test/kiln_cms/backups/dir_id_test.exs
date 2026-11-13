@@ -60,6 +60,42 @@ defmodule KilnCMS.Backups.DirIdTest do
     assert id_files(dir) == []
   end
 
+  # A filesystem without hard links: FAT gives EPERM, a FUSE mount without
+  # link support ENOSYS, some CIFS mounts EOPNOTSUPP. The id is still
+  # published, by the exclusive create of its name.
+  for reason <- [:enosys, :eopnotsupp, :eperm, :enotsup] do
+    test "a link that fails with #{reason} still publishes a valid id", %{dir: dir} do
+      File.mkdir_p!(dir)
+      assert {:ok, id} = DirId.publish(dir, fn _, _ -> {:error, unquote(reason)} end)
+      assert DirId.current(dir) == {:ok, id}
+      assert File.read!(DirId.path(dir)) == id <> "\n"
+      assert id_files(dir) == [".kiln-dir-id"]
+    end
+  end
+
+  test "with no link support, a second publisher reads the first one's id", %{dir: dir} do
+    no_link = fn _, _ -> {:error, :enosys} end
+    File.mkdir_p!(dir)
+    assert {:ok, id} = DirId.publish(dir, no_link)
+    assert DirId.publish(dir, no_link) == {:ok, id}
+    assert id_files(dir) == [".kiln-dir-id"]
+  end
+
+  test "with no link support, an error the create also hits is returned", %{dir: dir} do
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.chmod(dir, 0o700) end)
+
+    # The directory turns read-only between the temporary file and the link,
+    # so the create of the name fails as the link would have.
+    ln = fn _, _ ->
+      File.chmod!(dir, 0o500)
+      {:error, :enosys}
+    end
+
+    assert DirId.publish(dir, ln) == {:error, :eacces}
+    refute File.exists?(DirId.path(dir))
+  end
+
   # Reads the id until one is there; any read that is neither "none yet" nor
   # an id is returned.
   defp spin_read(dir) do
