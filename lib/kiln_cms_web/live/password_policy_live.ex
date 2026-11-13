@@ -164,9 +164,14 @@ defmodule KilnCMSWeb.PasswordPolicyLive do
         />
 
         <ul class="-mt-2 space-y-2 text-sm text-base-content/70">
-          <li>
+          <%!-- Off is this site's egress switch only, and only while its row
+                can be read (`CheckBreachedPassword` falls back to :warn);
+                the server-wide one is BREACHED_PASSWORD_CHECK=false (#2868). --%>
+          <li id="password-policy-off">
             <span class="font-medium">{gettext("Off")}</span>
-            - {gettext("Passwords are not looked up at all.")}
+            - {gettext(
+              "Passwords set on this site are not checked, and nothing about them is sent to Have I Been Pwned. If this setting can't be read, Warn applies instead; only the server's operator can stop the check for every site (BREACHED_PASSWORD_CHECK=false)."
+            )}
           </li>
           <li>
             <span class="font-medium">{gettext("Warn")}</span>

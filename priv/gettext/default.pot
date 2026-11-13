@@ -1409,6 +1409,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "(opens in a new tab)"
 msgstr ""
@@ -12039,6 +12040,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Learn more"
 msgstr ""
@@ -12266,6 +12268,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Links to"
+msgstr ""
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Links work for %{days} days. Resending mails a new link and restarts the clock; the old link stops working. Expired invitations stay listed for %{keep} days, and inviting the address again resends it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
@@ -15782,7 +15789,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
-msgid "Passwords are not looked up at all."
+msgid "Passwords set on this site are not checked, and nothing about them is sent to Have I Been Pwned. If this setting can't be read, Warn applies instead; only the server's operator can stop the check for every site (BREACHED_PASSWORD_CHECK=false)."
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
@@ -25297,6 +25304,16 @@ msgstr ""
 msgid "We sent a code to %{email}."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "We'll email you each time a passkey is added to your account."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "We'll email you when an authenticator app is added or replaced."
+msgstr ""
+
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "We've sent several codes already. Wait a while, then try again."
@@ -25941,6 +25958,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #, elixir-autogen, elixir-format
 msgid "You are signed in, but your account has no role on %{site}."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "You can also use a passkey."
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiments_live.ex

@@ -7,6 +7,7 @@ defmodule KilnCMSWeb.TeamLiveTest do
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Invitations
   alias KilnCMS.Accounts.User
   alias KilnCMS.Test.AccessibleNames
 
@@ -210,6 +211,45 @@ defmodule KilnCMSWeb.TeamLiveTest do
       assert invitation.role == :editor
       assert has_element?(view, "#invitation-#{invitation.id}", email)
       assert has_element?(view, "#team-invitations-heading", "Pending invitations")
+    end
+
+    test "Pending invitations says how long a link lasts and what resend does (#2454)", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+      refute has_element?(view, "#team-invitations-help")
+
+      view
+      |> form("#add-member-form", %{
+        "member" => %{"email" => "help-#{System.unique_integer([:positive])}@example.com"}
+      })
+      |> render_submit()
+
+      help = view |> element("#team-invitations-help") |> render()
+
+      # The numbers come from the code, not the string.
+      assert help =~ "Links work for #{Invitations.ttl_days()} days."
+
+      assert help =~
+               "Resending mails a new link and restarts the clock; the old link stops working."
+
+      assert help =~
+               "Expired invitations stay listed for #{Invitations.prune_after_days()} days, and inviting the address again resends it."
+    end
+
+    test "the add form links to the invitation guide, at a heading that exists (#2454)", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+
+      assert has_element?(
+               view,
+               ~s(#add-member-form a#add-member-docs[href$="docs/account-administration.md#invite-someone-to-a-site"][target="_blank"]),
+               "Learn more"
+             )
+
+      # GitHub's anchor for this heading is the fragment the link names.
+      assert File.read!("docs/account-administration.md") =~ ~r/^## Invite someone to a site$/m
     end
 
     test "an address already on the site is refused by name", %{conn: conn} do

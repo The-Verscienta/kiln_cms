@@ -3,8 +3,15 @@
     <%!-- An h2: `Layouts.auth/1` draws the page's one (sr-only) h1 from this
           same title (#2162). --%>
     <h2 class="auth-title mb-2">{gettext("Two-factor authentication")}</h2>
+    <%!-- With a passkey too, the hint is shipped `hidden` and revealed with
+          the passkey button by `initPasskeyStepUp`, so it never offers a
+          passkey the browser cannot use. One `#two-factor-help`: the code
+          field's `aria-describedby` names it. --%>
     <p :if={@code?} id="two-factor-help" class="auth-muted mb-6">
       {gettext("Enter the 6-digit code from your authenticator app.")}
+      <span :if={@passkey?} id="two-factor-passkey-hint" data-passkey-step-up-hint hidden>
+        {gettext("You can also use a passkey.")}
+      </span>
     </p>
     <p :if={!@code? && @passkey?} id="two-factor-help" class="auth-muted mb-6">
       {gettext("Confirm it's you with your passkey.")}

@@ -920,6 +920,16 @@ defmodule KilnCMSWeb.SettingsLive do
                   {gettext("Enable two-factor authentication")}
                 </.button>
               </div>
+
+              <%!-- `User.:confirm_totp` mails the owner on a first setup and on
+                    a replacement alike (`NotifyFactorAdded`). --%>
+              <p
+                :if={!@credentials_locked?}
+                id="totp-added-mail"
+                class="mt-3 text-xs text-base-content/70"
+              >
+                {gettext("We'll email you when an authenticator app is added or replaced.")}
+              </p>
             </section>
 
             <section
@@ -1044,9 +1054,14 @@ defmodule KilnCMSWeb.SettingsLive do
               </div>
               <p
                 :if={!@credentials_locked? && length(@passkeys) < @passkey_limit}
-                class="mt-2 text-xs text-base-content/60"
+                class="mt-2 text-xs text-base-content/70"
               >
                 {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
+                <%!-- `Passkey.:register` mails the owner every time
+                      (`NotifyFactorAdded`, `SecondFactorNotice`). --%>
+                <span id="passkey-added-mail">
+                  {gettext("We'll email you each time a passkey is added to your account.")}
+                </span>
               </p>
               <p
                 :if={@passkey_status}

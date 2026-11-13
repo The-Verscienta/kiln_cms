@@ -43,6 +43,27 @@ defmodule KilnCMSWeb.PasswordPolicyLiveTest do
     assert html =~ "editors and everyone else are warned"
   end
 
+  # #2868: Off stops this site's lookups, only while the saved policy can be
+  # read, and only the operator stops them for the whole server.
+  test "says what Off does to this site's lookups, and what it does not", %{
+    conn: conn,
+    org: org
+  } do
+    {:ok, lv, html} = admin_live(conn, org)
+
+    off = lv |> element("#password-policy-off") |> render()
+
+    assert off =~
+             "Passwords set on this site are not checked, and nothing about them is sent to Have I Been Pwned."
+
+    assert off =~ "If this setting can&#39;t be read, Warn applies instead;"
+
+    assert off =~
+             "only the server&#39;s operator can stop the check for every site (BREACHED_PASSWORD_CHECK=false)."
+
+    refute html =~ "Passwords are not looked up at all."
+  end
+
   test "an admin saves a policy, and only for this org", %{conn: conn, org: org} do
     other = org("pwpolicyother")
     {:ok, lv, _html} = admin_live(conn, org)
