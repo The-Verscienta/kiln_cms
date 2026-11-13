@@ -28,9 +28,36 @@ biometric), so the single ceremony already proves possession **and**
 knowledge/biometric — the same bar the password+TOTP flow reaches in two
 steps. That is also why a passkey can stand in for the code at the prompt.
 
-Having a passkey does not change who is asked for a second factor: an account
-with a passkey and no authenticator app still signs in with its password
-alone, and is not sent to the prompt.
+Having a passkey does not, by itself, change who is asked for a second
+factor: an account with a passkey and no authenticator app signs in with its
+password alone, and is not sent to the prompt. The exception is a site that
+[requires two-step sign-in](two-factor-auth.md#requiring-two-step-sign-in-on-a-site).
+A passkey satisfies that requirement, so a passkey-only account is never held
+for setup; but once its deadline has passed, its password alone no longer
+signs it in on that site:
+
+- on the main or console host, the password (or a magic link, or single
+  sign-on) stops at `/sign-in/verify`, which says "Confirm it's you with your
+  passkey." and offers **Use a passkey**;
+- on a site's own host, where the passkey cannot run, the password is refused
+  with "Your account's second factor is a passkey, which works at (main host).
+  Sign in there, or add an authenticator app.";
+- a session that signed in with the password before the deadline, or that a
+  "Remember me" cookie restores, goes through the same prompt;
+- the account's headless sign-in and its JWTs are refused (`403`
+  `second_factor_required`, `meta.reason: "passkey_only"` at sign-in), since a
+  passkey cannot be used outside a browser.
+
+A passkey has no recovery codes. On such a site, add an authenticator app as
+well, so losing the device does not lock the account out
+([Passkey-only accounts](two-factor-auth.md#passkey-only-accounts)). Passkeys
+can also be added at `/account/two-factor`, the setup page a site's
+requirement sends people to; there, a session that signed in with only a
+password may first have to confirm a code sent by email.
+
+While a site requires a second factor of the account, its last passkey can't
+be removed if it has no authenticator app: the trash button is replaced by a
+note saying so.
 
 Adding or removing a passkey is recorded in the site's
 [security log](security-events.md) as `passkey_added` / `passkey_removed`,

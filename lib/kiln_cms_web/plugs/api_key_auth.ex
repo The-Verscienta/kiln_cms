@@ -139,6 +139,26 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   defp classify_claims({:ok, _claims}), do: :invalid
   defp classify_claims(_error), do: :malformed
 
+  @doc """
+  For a transport with no conn (`KilnCMSWeb.GraphqlSocket`, #2634): emits the
+  same `[:kiln_cms, :api, :invalid_bearer]` event for `token`, a bearer that
+  did not verify, and answers whether it is refused
+  (`reject_invalid_bearer?/0`).
+  """
+  @spec note_invalid_bearer(String.t(), atom(), boolean()) :: boolean()
+  def note_invalid_bearer(token, surface, read?) do
+    enforced? = reject_invalid_bearer?()
+
+    :telemetry.execute([:kiln_cms, :api, :invalid_bearer], %{count: 1}, %{
+      enforced: enforced?,
+      surface: surface,
+      read?: read?,
+      reason: classify_token(token)
+    })
+
+    enforced?
+  end
+
   @doc "Whether an unverifiable bearer token is a `401` (`KILN_API_REJECT_INVALID_BEARER`)."
   @spec reject_invalid_bearer?() :: boolean()
   def reject_invalid_bearer? do

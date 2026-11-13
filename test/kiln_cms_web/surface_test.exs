@@ -44,11 +44,11 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/site-storage /editor/system /editor/system/image-backend /editor/tasks
     /editor/taxonomy /editor/team
     /editor/translations
-    /editor/translations/export.xlf /editor/trash /editor/types /editor/webhooks /media
+    /editor/translations/export.xlf /editor/trash /editor/two-factor /editor/types /editor/webhooks /media
   )
 
   @shared ~w(
-    /account /api /api/ask /api/auth/sign_in /api/auth/sign_in/verify /api/content/:type
+    /account /account/two-factor /api /api/ask /api/auth/sign_in /api/auth/sign_in/verify /api/content/:type
     /api/content/:type/:id/preview-token /api/content/:type/:id/revisions
     /api/content/:type/:id/revisions/:version_id
     /api/content/:type/:id/revisions/:version_id/restore /api/content/:type/:slug

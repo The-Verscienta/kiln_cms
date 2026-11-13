@@ -289,6 +289,43 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
     end
   end
 
+  @doc """
+  Whether some site holds `user` now (`{:enforced, _}` from `status/3`), over
+  the same sites `required_somewhere?/1` reads. For an enrolment that arrives
+  without the site it was made on (`KilnCMS.Accounts.Changes.RequireEnrolmentProof`),
+  which must assume the strictest of them.
+  """
+  @spec enforced_somewhere?(Accounts.User.t()) :: boolean()
+  def enforced_somewhere?(user) do
+    if exempt?(user) do
+      false
+    else
+      user
+      |> candidate_orgs()
+      |> Enum.any?(&match?({:enforced, _deadline}, status(user, &1)))
+    end
+  end
+
+  @doc """
+  The deadlines of every site that holds `user` now (`{:enforced, deadline}`
+  from `status/3`), over the same sites `required_somewhere?/1` reads, so a
+  caller can apply the strictest of them: a factor is account-wide, and the
+  site a page happens to be served from is not the only one it counts on.
+  `[]` when no site holds the account. Option: `:now`.
+  """
+  @spec enforced_deadlines(Accounts.User.t(), keyword()) :: [DateTime.t()]
+  def enforced_deadlines(user, opts \\ []) do
+    if exempt?(user) do
+      []
+    else
+      opts = Keyword.take(opts, [:now])
+
+      for org_id <- candidate_orgs(user),
+          {:enforced, deadline} <- [status(user, org_id, opts)],
+          do: deadline
+    end
+  end
+
   defp candidate_orgs(user) do
     if RoleGrant.effective_role(user) == :admin do
       Accounts.list_org_ids()
@@ -365,47 +402,67 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
   end
 
   defp tier_roster(org_id, tier, policy, now) do
-    base = roster_query(org_id, tier)
-
     # authorize?: false — a roster of the site's people, as the review-request
     # and posture rosters read it (`Scoping.users_with_tier/2`): `User`'s read
     # policy is self-only, and a system grant on it would be a standing read of
     # every account (#1402). Unauthorized, the read cannot be filtered to
     # nothing, so a lost grant can never undercount; only counts and deadlines
     # leave this function.
-    total = Ash.count!(base, authorize?: false)
+    total = Ash.count!(roster_query(org_id, tier), authorize?: false)
 
-    unenrolled =
-      base
-      |> Ash.Query.filter(
-        is_nil(totp_confirmed_at) and
-          not exists(KilnCMS.Accounts.Passkey, user_id == parent(id))
-      )
-      |> Ash.Query.select([:id, :inserted_at, :role, :granted_role, :granted_role_expires_at])
-      |> Ash.Query.load(
-        org_memberships:
-          KilnCMS.Accounts.OrgMembership
-          |> Ash.Query.filter(organization_id == ^org_id)
-          |> Ash.Query.select([:id, :inserted_at, :organization_id])
-      )
-      # authorize?: false — the same roster read as the count above, narrowed
-      # to the accounts without a factor.
-      |> then(&Accounts.list_users!(query: &1, authorize?: false))
-
-    deadlines =
-      Enum.map(unenrolled, fn user ->
-        deadline(user, roster_source(user, tier), policy)
-      end)
+    deadlines = org_id |> unenrolled(tier, policy) |> Enum.map(&elem(&1, 1))
 
     {grace, overdue} = Enum.split_with(deadlines, &(DateTime.compare(now, &1) == :lt))
 
     %{
       total: total,
-      enrolled: total - length(unenrolled),
+      enrolled: total - length(deadlines),
       in_grace: length(grace),
       overdue: length(overdue),
       earliest_deadline: if(grace == [], do: nil, else: Enum.min(grace, DateTime))
     }
+  end
+
+  @doc """
+  The ids of the site's covered accounts that are past their deadline with no
+  second factor: the ones `status/3` holds now. Over the same accounts
+  `roster/3` counts as `overdue`, so the two cannot disagree.
+
+  For dropping their open connections when a policy change holds them
+  (`KilnCMS.Accounts.SecondFactorEviction`). Raises on a failed read rather
+  than answering nobody.
+  """
+  @spec overdue_user_ids(Ash.UUID.t(), Policy.t(), keyword()) :: [Ash.UUID.t()]
+  def overdue_user_ids(org_id, %Policy{} = policy, opts \\ []) do
+    now = now(opts)
+
+    for tier <- SiteSecondFactorPolicy.tiers(),
+        covers?(policy, tier),
+        {id, deadline} <- unenrolled(org_id, tier, policy),
+        DateTime.compare(now, deadline) != :lt,
+        uniq: true,
+        do: id
+  end
+
+  # Each covered account of `tier` without a second factor, with its deadline.
+  defp unenrolled(org_id, tier, policy) do
+    org_id
+    |> roster_query(tier)
+    |> Ash.Query.filter(
+      is_nil(totp_confirmed_at) and
+        not exists(KilnCMS.Accounts.Passkey, user_id == parent(id))
+    )
+    |> Ash.Query.select([:id, :inserted_at, :role, :granted_role, :granted_role_expires_at])
+    |> Ash.Query.load(
+      org_memberships:
+        KilnCMS.Accounts.OrgMembership
+        |> Ash.Query.filter(organization_id == ^org_id)
+        |> Ash.Query.select([:id, :inserted_at, :organization_id])
+    )
+    # authorize?: false — the same roster read as `tier_roster/4`'s count,
+    # narrowed to the accounts without a factor; only ids and deadlines leave.
+    |> then(&Accounts.list_users!(query: &1, authorize?: false))
+    |> Enum.map(fn user -> {user.id, deadline(user, roster_source(user, tier), policy)} end)
   end
 
   defp roster_query(org_id, tier) do

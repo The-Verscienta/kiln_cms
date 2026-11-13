@@ -33,6 +33,12 @@ a bearer token that does not verify (garbled, expired, another instance's) is a
 `401` (`code: "invalid_token"`, `extensions.code: "unauthenticated"`), not an anonymous read (#2161; see
 [`KILN_API_REJECT_INVALID_BEARER`](environment-variables.md)).
 
+On a site that [requires two-step sign-in](two-factor-auth.md#requiring-two-step-sign-in-on-a-site),
+the JWT of an account past its deadline with no second factor is answered
+`403` with `extensions.code: "second_factor_required"`, public reads included;
+drop the header to read as the public. API keys are never affected
+([API § Accounts a site requires two-step sign-in of](api.md#accounts-a-site-requires-two-step-sign-in-of)).
+
 ## Design: delivery reads, authenticated writes
 
 The **reads** are a delivery surface: anonymous-friendly, shaped around what a
@@ -533,6 +539,27 @@ never in the feed, stays silent for anonymous subscribers.
 Under load, notification fan-out batches through an out-of-band worker
 (`AshGraphql.Subscription.Batcher`), so publishing never blocks on slow
 subscribers.
+
+### Connecting with a token
+
+The `token` connection param (or `Authorization: "Bearer <jwt>"` as a
+connection param) takes a **user JWT only**. Leave it out to connect
+anonymously. A token that does not verify is **refused**, and the websocket
+handshake answers `403` (#2634): an expired, revoked or garbled JWT, and a
+`kiln_` API key, which this socket has never accepted. Until this release those
+connected as anonymous and read only published content, so a client with a
+broken credential could not tell. Use `POST /gql` for API-key access.
+`KILN_API_REJECT_INVALID_BEARER=false` restores the anonymous connect for one
+more release, as it does on `/gql`; each refused connect emits
+`[:kiln_cms, :api, :invalid_bearer]` with `surface: :graphql`.
+
+A verified JWT is also refused at connect when the site holds the account for
+a second factor it has not set up. A socket opened during the account's grace
+period is closed at its deadline, and every document sent on an open socket
+after it is answered with
+`{"errors":[{"message":"…","extensions":{"code":"second_factor_required"}}]}`
+and nothing else runs. Changing the site's requirement so that it holds the
+account at once drops its sockets.
 
 ## Mutations (writing)
 

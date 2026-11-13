@@ -87,6 +87,9 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
+    # A JWT whose account its site holds for a second factor is refused on
+    # every request (#2247). API keys are exempt.
+    plug KilnCMSWeb.Plugs.SecondFactorBearer
     # A mutation is a `POST` like any other — see the JSON:API pipeline.
     plug KilnCMSWeb.Plugs.Idempotency
     # `X-Kiln-On-Behalf-Of` on a mutation: provenance for a draft-write key (#2273).
@@ -115,6 +118,11 @@ defmodule KilnCMSWeb.Router do
     # user it judges, and writing no session or cookie — this pipeline serves
     # public pages a shared cache may store (#699).
     plug KilnCMSWeb.Plugs.IdleTimeout, :session
+    # A signed-in account its site holds for a second factor it has not set
+    # up goes to `/account/two-factor` before anything else (#2247). After the
+    # idle timeout, so a session that is no longer good goes to sign-in
+    # instead; writes no session either, and its redirect is not cacheable.
+    plug KilnCMSWeb.Plugs.SecondFactorGate, :redirect
   end
 
   # Dev-only browser tooling (AshAdmin, LiveDashboard, API explorers) ships its
@@ -138,6 +146,9 @@ defmodule KilnCMSWeb.Router do
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
+    # A JWT whose account its site holds for a second factor is refused on
+    # every request (#2247). API keys are exempt.
+    plug KilnCMSWeb.Plugs.SecondFactorBearer
     # The OpenAPI document is served from inside the `KilnCMSWeb.AshJsonApiRouter`
     # forward below, so there is no route here to gate. This plug knows the two
     # documentation paths and passes every other `/api` request through (#567).
@@ -157,6 +168,7 @@ defmodule KilnCMSWeb.Router do
     plug :load_from_bearer
     plug :set_actor, :user
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
+    plug KilnCMSWeb.Plugs.SecondFactorBearer
   end
 
   # `:api` plus a guard against the specific query-param shapes `ash_json_api`
@@ -298,6 +310,11 @@ defmodule KilnCMSWeb.Router do
     # As on `:browser`, and this pipeline may write: the token leaves the
     # session and the remember-me cookie is deleted (#2246).
     plug KilnCMSWeb.Plugs.IdleTimeout, {:session, writes_session?: true}
+    # A passkey-only account past its site's deadline whose session never
+    # passed the passkey (a password session from before the deadline, or one
+    # the remember-me cookie restored above) goes through the passkey step-up
+    # rather than keeping password-only access (#2247).
+    plug KilnCMSWeb.Plugs.PasskeyStepUp
     # After the two above, because it needs whichever of them resolved the user
     # — and it covers the remember-me path, which never reaches
     # `AuthController.complete_sign_in/3` (#675).
@@ -348,6 +365,9 @@ defmodule KilnCMSWeb.Router do
     # A session no longer good under the site's idle timeout or "sign out
     # everyone" (#2246) is served as anonymous. Reads only.
     plug KilnCMSWeb.Plugs.IdleTimeout, :read_only
+    # An image cannot follow a redirect: an account held for a second factor
+    # (#2247) is served as anonymous here instead.
+    plug KilnCMSWeb.Plugs.SecondFactorGate, :read_only
   end
 
   pipeline :delivery do
@@ -651,6 +671,11 @@ defmodule KilnCMSWeb.Router do
       # admin-only by the tier gate AND the resource policy; enforcement is
       # `KilnCMSWeb.Plugs.IdleTimeout` and `KilnCMSWeb.IdleSession`.
       live "/editor/sessions", SessionPolicyLive, :index
+      # The site's two-step sign-in requirement (#2247). Admin-only by the tier
+      # gate AND the resource policy, and every save needs the admin's own fresh
+      # second factor (`SaverVerifiedSecondFactor`). Not exempt from the
+      # second-factor gate: a held admin enrolls before reaching it.
+      live "/editor/two-factor", TwoFactorPolicyLive, :index
       # Per-site custom head/footer HTML for the DELIVERY site (#490). Admin-only
       # by the live session's tier gate AND the resource policy; the snippet is
       # rendered only by the `:delivery` pipeline, never here.
@@ -808,10 +833,18 @@ defmodule KilnCMSWeb.Router do
       on_mount: [
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        # The setup page is not served on a tenant site host (#2247): it goes
+        # to the main host's before sign-in is asked. After the site is known,
+        # whose hook vouches the socket's host.
+        {KilnCMSWeb.LiveUserAuth, :second_factor_setup_host},
         {KilnCMSWeb.LiveUserAuth, :live_user_required},
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       live "/account", AccountLive, :show
+      # Setting up a second factor (#2247): where a site that requires one
+      # sends an account that has none, so open to every signed-in tier. On
+      # the main host and console hosts only.
+      live "/account/two-factor", TwoFactorSetupLive, :show
     end
 
     # Member payment handoffs. Plain CSRF-protected posts rather than LiveView
@@ -1548,6 +1581,9 @@ defmodule KilnCMSWeb.Router do
       on_mount: [
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        # A signed-in account held for a second factor goes to set one up
+        # (#2247); anonymous visitors are untouched.
+        {KilnCMSWeb.LiveUserAuth, :second_factor},
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       live "/membership", MembershipLive, :index
@@ -1565,6 +1601,9 @@ defmodule KilnCMSWeb.Router do
       on_mount: [
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        # A signed-in account held for a second factor goes to set one up
+        # (#2247); anonymous visitors are untouched.
+        {KilnCMSWeb.LiveUserAuth, :second_factor},
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       import KilnCMSWeb.PluginRouter

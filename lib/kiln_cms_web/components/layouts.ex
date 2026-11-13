@@ -653,6 +653,7 @@ defmodule KilnCMSWeb.Layouts do
               the shell keeps its single hairline. --%>
         <div class="sticky top-0 z-20">
           <.environment_banner />
+          <.second_factor_banner current_user={@current_user} current_org={@current_org} />
           <header class="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 border-b border-base-content/10 bg-base-100/90 px-4 py-2 backdrop-blur sm:px-6">
             <%!-- Still a <label>, so the drawer opens with no JS — but one that
                   says what it is and what it controls. app.js keeps
@@ -887,6 +888,97 @@ defmodule KilnCMSWeb.Layouts do
       &larr; {@parent.label}
     </.link>
     """
+  end
+
+  @doc """
+  Reminds an account in its grace period that its site requires two-step
+  sign-in, and how many days it has left to set it up (#2247). Renders nothing
+  for anyone else: an account that holds a factor, one the site does not
+  cover, the shared demo account, an anonymous visitor, and an account already
+  held (the gate sends that one to the setup page before any page renders).
+
+  `status` is `KilnCMS.Accounts.TwoFactorRequirement.status/3`'s answer, as
+  `KilnCMSWeb.SecondFactorGate` assigns it (`:second_factor_status`). Without
+  it, the status of `current_user` on `current_org` is asked here: the console
+  layout is drawn by every console page, which pass it the user and the site
+  but not the gate's assign. Asked once per mount, not per event: LiveView
+  re-renders this only when the user or the site changes.
+
+  `role="status"` because it is a reminder with a date, not standing chrome:
+  a screen reader hears it once per page.
+
+  The setup page is not served on a tenant site host (#2247), so a page that
+  knows its host passes `setup_url` (`KilnCMSWeb.SecondFactorGate.setup_href/1`)
+  and the link names the main host's page outright. The console layout does
+  not know its host and links the local path, which a site host redirects.
+  """
+  attr :status, :any, default: nil, doc: "the gate's `:second_factor_status`, if known"
+
+  attr :setup_url, :string,
+    default: nil,
+    doc:
+      "where the link goes: `KilnCMSWeb.SecondFactorGate.setup_href/1` for this host; " <>
+        "the local path when absent, which a site host redirects to the main host's"
+
+  attr :current_user, :map, default: nil
+  attr :current_org, :any, default: nil
+  attr :now, :any, default: nil, doc: "the clock, for tests"
+
+  def second_factor_banner(assigns) do
+    status = assigns.status || second_factor_status(assigns.current_user, assigns.current_org)
+
+    assigns =
+      case status do
+        {:grace, %DateTime{} = deadline} ->
+          now = assigns.now || DateTime.utc_now()
+          assign(assigns, deadline: deadline, days: days_left(deadline, now))
+
+        _not_in_grace ->
+          assign(assigns, deadline: nil, days: nil)
+      end
+
+    ~H"""
+    <div
+      :if={@deadline}
+      id="second-factor-banner"
+      role="status"
+      class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-warning/20 px-4 py-1.5 text-sm text-warning-ink"
+    >
+      <.icon name="hero-shield-exclamation" class="size-4 shrink-0" />
+      <span>
+        {gettext("This site requires two-step sign-in.")}
+        <time datetime={DateTime.to_iso8601(@deadline)} class="font-semibold">
+          {ngettext(
+            "%{count} day left to set it up.",
+            "%{count} days left to set it up.",
+            @days
+          )}
+        </time>
+      </span>
+      <.link
+        href={@setup_url || ~p"/account/two-factor"}
+        id="second-factor-banner-link"
+        class="font-semibold underline underline-offset-2"
+      >
+        {gettext("Set it up now")}
+      </.link>
+    </div>
+    """
+  end
+
+  defp second_factor_status(%KilnCMS.Accounts.User{} = user, %{id: org_id})
+       when is_binary(org_id),
+       do: KilnCMS.Accounts.TwoFactorRequirement.status(user, org_id)
+
+  defp second_factor_status(_user, _org), do: :not_required
+
+  @doc false
+  # Public for the test that pins the count at each boundary. Whole days,
+  # rounded up, and never "0 days": a deadline later today is "1 day left".
+  @spec days_left(DateTime.t(), DateTime.t()) :: pos_integer()
+  def days_left(deadline, now) do
+    seconds = DateTime.diff(deadline, now, :second)
+    max(1, ceil(seconds / 86_400))
   end
 
   @doc """

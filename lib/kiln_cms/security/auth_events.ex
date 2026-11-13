@@ -80,6 +80,36 @@ defmodule KilnCMS.Security.AuthEvents do
   end
 
   @doc """
+  A sign-in held, or refused, for want of the second factor its site requires
+  (#2247). Recorded by the sign-in doors only, once per sign-in: never per
+  request a held session makes afterwards, which would be an unbounded write.
+
+  `surface` is `"browser"` or `"api"`; `reason` is `"not_enrolled"` (sent to
+  set one up), `"passkey_host"` (a passkey-only account's password on a host
+  where the passkey cannot run) or `"headless_passkey"` (the same at
+  `POST /api/auth/sign_in`). `context` is an action context
+  (`context/2`), which names the site.
+  """
+  @spec second_factor_required(map(), Accounts.User.t(), String.t(), String.t()) :: :ok
+  def second_factor_required(context, %Accounts.User{} = user, surface, reason) do
+    safe(:second_factor_required, fn ->
+      tenant = context[Recorder.tenant_key()]
+
+      if is_binary(tenant) do
+        tier = KilnCMS.Accounts.Scoping.effective_tier(user, tenant)
+
+        Recorder.record_after_commit(
+          :second_factor_required,
+          [
+            user: user,
+            metadata: %{"tier" => to_string(tier), "surface" => surface, "reason" => reason}
+          ] ++ opts(context)
+        )
+      end
+    end)
+  end
+
+  @doc """
   A refused sign-in (sampled per IP). `email` is only used to find the account
   when there is one; an address with none records no actor and no label.
   """

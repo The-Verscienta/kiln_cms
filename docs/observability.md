@@ -452,6 +452,23 @@ tells you which limits real clients run into.
 
 Useful Grafana panel: `sum(rate(kiln_cms_security_api_key_trip_count[5m])) by (result, bucket)`.
 
+### Refused API credentials
+
+Two events count user tokens the API refused. Neither is in
+`KilnCMSWeb.Telemetry.metrics/0` and neither writes a security event (a client
+retrying in a loop must not become a write per request): attach a `:telemetry`
+handler to count them. Neither carries a token, user or address.
+
+| Event | Emitted when | Measurements | Metadata |
+|-------|--------------|--------------|----------|
+| `[:kiln_cms, :api, :invalid_bearer]` | A `Bearer` token that does not verify reached `/api/*` or `/gql`, or a `token` connect param that does not verify reached `/ws/gql` (#2161, #2634). Emitted whether or not it is refused (`KILN_API_REJECT_INVALID_BEARER`) | `count` (always `1`) | `enforced` (refused or not), `surface` (`:json_api`, `:graphql`, `:media`, `:other`; `/ws/gql` is `:graphql`), `read?`, `reason` (`:expired`, `:malformed`, `:invalid`) |
+| `[:kiln_cms, :api, :second_factor_required]` | A verified user JWT on `/api/*`, `/gql` or `/api/feed` was refused `403` because the site requires a second factor of its account and the deadline has passed (#2247). Not emitted for `/ws/gql` or `/ws/collab` refusals | `count` (always `1`) | `surface` (`:json_api`, `:graphql`, `:feed`, `:other`) |
+
+A steady `second_factor_required` rate after a site turns on a requirement is
+a script or app signing in as a person who has not set up a second factor:
+move it to an API key. The sign-ins themselves are in the security log as
+`second_factor_required` ([Security log](security-events.md#what-is-recorded)).
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in

@@ -84,6 +84,7 @@ defmodule KilnCMSWeb.ApiAuthController do
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.SecondFactor
+  alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMS.Accounts.User
   alias KilnCMS.Challenge
   alias KilnCMS.Security.AuthEvents
@@ -101,6 +102,19 @@ defmodule KilnCMSWeb.ApiAuthController do
   Or, for an account with two-factor enabled,
   `200 OK {"two_factor_required": true, "pending_token": "...", "expires_in": 300}`
   — finish at `verify/2`.
+
+  Where the site requires a second factor of the account (#2247):
+
+    * past the deadline with none set up — `403 second_factor_required`, with
+      `meta.deadline` and `meta.setup_url`. The token the password minted is
+      revoked, not returned;
+    * a passkey-only account past the deadline — the same `403` with
+      `meta.reason: "passkey_only"`: a passkey cannot be asserted headlessly;
+    * during the grace period — the `201` gains
+      `"second_factor": {"required": true, "deadline": "<ISO 8601>"}`.
+
+  A token issued during the grace period stops working at the deadline:
+  `KilnCMSWeb.Plugs.SecondFactorBearer` checks every request it makes.
   """
   def sign_in(conn, params) do
     email = params["email"]
@@ -124,12 +138,11 @@ defmodule KilnCMSWeb.ApiAuthController do
            ) do
       # The same decision the browser door takes (#2247). Only the
       # authenticator app diverts here: a passkey cannot be asserted
-      # headlessly, and nothing requires a second factor of a passkey-only
-      # account yet.
-      if KilnCMSWeb.SecondFactorStepUp.decide(conn, user) == :prompt do
-        two_factor_required(conn, user)
-      else
-        issue_token(conn, user)
+      # headlessly, so a passkey-only account its site holds is refused.
+      case KilnCMSWeb.SecondFactorStepUp.decide(conn, user, surface: :api) do
+        :prompt -> two_factor_required(conn, user)
+        {:refuse, :headless_passkey} -> second_factor_refused(conn, user, "passkey_only")
+        :none -> first_factor_only(conn, user)
       end
     else
       {:missing, detail} ->
@@ -284,6 +297,43 @@ defmodule KilnCMSWeb.ApiAuthController do
     end
   end
 
+  # No second factor was asked for. An account its site holds for one it has
+  # not set up (#2247) gets no token: the one the action minted is revoked and
+  # the answer is a 403 naming where to set it up, which is a browser page.
+  # During the grace period the token is issued and says when that ends.
+  defp first_factor_only(conn, user) do
+    case TwoFactorRequirement.status(user, conn.assigns.current_org.id) do
+      {:enforced, deadline} -> second_factor_refused(conn, user, "not_enrolled", deadline)
+      {:grace, deadline} -> issue_token(conn, user, %{required: true, deadline: deadline})
+      _not_required_or_enrolled -> issue_token(conn, user)
+    end
+  end
+
+  # `meta.reason` is `"passkey_only"` when the account does hold a factor, a
+  # passkey, that this door cannot take; absent when it holds none.
+  defp second_factor_refused(conn, user, reason, deadline \\ nil) do
+    KilnCMSWeb.AuthController.revoke_first_factor(user.__metadata__[:token])
+
+    event_reason = if reason == "passkey_only", do: "headless_passkey", else: reason
+    AuthEvents.second_factor_required(AuthEvents.context(conn), user, "api", event_reason)
+
+    meta =
+      %{setup_url: url(conn, ~p"/account/two-factor")}
+      |> put_present(:deadline, deadline && DateTime.to_iso8601(deadline))
+      |> put_present(:reason, if(reason == "passkey_only", do: reason))
+
+    ApiError.send(
+      conn,
+      :forbidden,
+      "second_factor_required",
+      "This site requires two-step sign-in for your account. Set it up in a browser, then sign in again.",
+      meta: meta
+    )
+  end
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
   # 200 rather than 201: nothing was created, and a client that keys off the
   # status alone must not mistake this for a token.
   defp two_factor_required(conn, user) do
@@ -296,31 +346,43 @@ defmodule KilnCMSWeb.ApiAuthController do
     })
   end
 
-  defp issue_token(conn, user) do
+  defp issue_token(conn, user, second_factor \\ nil) do
     # Both steps (password, or password then code) end here: the sign-in is
     # complete (#2241).
     AuthEvents.signed_in(conn, user, "password")
 
     conn
     |> put_status(:created)
-    |> json(%{
-      token: user.__metadata__.token,
-      # One shape for both steps, so the contract cannot drift between them.
-      #
-      # `role` is the caller's EFFECTIVE TIER on the org the request resolved to,
-      # not `User.role` (the global one) — since #419 the authorization boundary
-      # on org-scoped resources is the per-org tier, so a client pre-shaping its
-      # UI (show/hide Approve) on the global role would offer actions the server
-      # then refuses on any org where the membership tier is lower (#627). The
-      # value therefore changes with the host the client dials; `SetTenant` has
-      # already put that org on the conn. `:none` when the user has no tier there.
-      user: %{
-        id: user.id,
-        email: to_string(user.email),
-        role: Scoping.effective_tier(user, conn.assigns.current_org.id)
-      }
-    })
+    |> json(
+      with_second_factor(
+        %{
+          token: user.__metadata__.token,
+          # One shape for both steps, so the contract cannot drift between them.
+          #
+          # `role` is the caller's EFFECTIVE TIER on the org the request resolved to,
+          # not `User.role` (the global one) — since #419 the authorization boundary
+          # on org-scoped resources is the per-org tier, so a client pre-shaping its
+          # UI (show/hide Approve) on the global role would offer actions the server
+          # then refuses on any org where the membership tier is lower (#627). The
+          # value therefore changes with the host the client dials; `SetTenant` has
+          # already put that org on the conn. `:none` when the user has no tier there.
+          user: %{
+            id: user.id,
+            email: to_string(user.email),
+            role: Scoping.effective_tier(user, conn.assigns.current_org.id)
+          }
+        },
+        second_factor
+      )
+    )
   end
+
+  # Additive (#2247): only a sign-in in its grace period carries it, so a
+  # client that never meets a requirement sees the shape it always did.
+  defp with_second_factor(body, nil), do: body
+
+  defp with_second_factor(body, %{required: true, deadline: deadline}),
+    do: Map.put(body, :second_factor, %{required: true, deadline: DateTime.to_iso8601(deadline)})
 
   # Absent means absent. A field that was *supplied* with the wrong JSON type
   # falls through to the step that owns it, because "pending_token and code are

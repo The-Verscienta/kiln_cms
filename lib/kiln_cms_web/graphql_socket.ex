@@ -12,8 +12,10 @@ defmodule KilnCMSWeb.GraphqlSocket do
     schema: KilnCMSWeb.GraphqlSchema,
     pipeline: {KilnCMSWeb.GraphqlLimits, :socket_pipeline}
 
+  alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMSWeb.BearerAuth
   alias KilnCMSWeb.GraphqlLimits.SocketDocumentBudget
+  alias KilnCMSWeb.Plugs.ApiKeyAuth
 
   @impl true
   def connect(params, socket, connect_info) do
@@ -41,27 +43,9 @@ defmodule KilnCMSWeb.GraphqlSocket do
     # (#563).
     case KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info) do
       {:ok, org} ->
-        context =
-          params
-          |> actor_context()
-          |> Map.put(:tenant, org.id)
-          # The context is the only socket state the document pipeline sees,
-          # and it outlives every document, so the key each document is charged
-          # under lives here.
-          |> Map.put(
-            SocketDocumentBudget.context_key(),
-            KilnCMSWeb.SocketJoinBudget.client_key(connect_info)
-          )
-
-        socket =
-          socket
-          # Kept as an assign as well as in the Absinthe context, because `id/1`
-          # is given the Phoenix socket and cannot see the Absinthe options
-          # (#675).
-          |> Phoenix.Socket.assign(:kiln_actor_id, actor_id(context))
-          |> Absinthe.Phoenix.Socket.put_options(context: context)
-
-        {:ok, socket}
+        with {:ok, context} <- actor_context(params, org.id) do
+          {:ok, put_context(socket, context, org.id, connect_info)}
+        end
 
       :error ->
         # The decision point, not `Tenant.fetch_org_from_connect_info/1` itself
@@ -82,23 +66,101 @@ defmodule KilnCMSWeb.GraphqlSocket do
     end
   end
 
+  defp put_context(socket, context, org_id, connect_info) do
+    context =
+      context
+      |> Map.put(:tenant, org_id)
+      # The context is the only socket state the document pipeline sees, and
+      # it outlives every document, so the key each document is charged under
+      # lives here.
+      |> Map.put(
+        SocketDocumentBudget.context_key(),
+        KilnCMSWeb.SocketJoinBudget.client_key(connect_info)
+      )
+
+    socket
+    # Kept as an assign as well as in the Absinthe context, because `id/1`
+    # is given the Phoenix socket and cannot see the Absinthe options
+    # (#675).
+    |> Phoenix.Socket.assign(:kiln_actor_id, actor_id(context))
+    |> Absinthe.Phoenix.Socket.put_options(context: context)
+  end
+
   defp actor_id(%{actor: %{id: id}}), do: id
   defp actor_id(_context), do: nil
 
-  # An unusable or absent bearer token connects anonymously rather than being
-  # refused — the public read surface is reachable without one, and the
-  # resource policies are what gate everything past it.
-  defp actor_context(params) do
+  # No bearer connects anonymously: the public read surface is reachable
+  # without one, and the resource policies gate everything past it.
+  #
+  # A bearer that does not verify — expired, revoked, garbage, or not a JWT
+  # at all (this socket takes no API keys) — is REFUSED, not downgraded to
+  # anonymous (#2634): the same answer `/api/*` and `/gql` give it over HTTP
+  # (`KilnCMSWeb.Plugs.ApiKeyAuth`, #2161, #2318), so a client with a broken
+  # credential learns it instead of reading public content as if signed in.
+  # It honours the same escape hatch (`KILN_API_REJECT_INVALID_BEARER`) and
+  # counts on the same telemetry event.
+  #
+  # A verified account its site holds for a second factor (#2247) is refused
+  # too; in its grace period the socket is closed at the deadline.
+  defp actor_context(params, org_id) do
     case BearerAuth.token_from_params(params) do
       nil ->
-        BearerAuth.graphql_context(nil)
+        {:ok, BearerAuth.graphql_context(nil)}
 
       token ->
         case BearerAuth.user_from_token(token) do
-          {:ok, user} -> BearerAuth.graphql_context(user)
-          :error -> BearerAuth.graphql_context(nil)
+          {:ok, user} -> signed_in_context(user, org_id)
+          :error -> unverified_bearer(token)
         end
     end
+  end
+
+  defp unverified_bearer(token) do
+    if ApiKeyAuth.note_invalid_bearer(token, :graphql, true),
+      do: :error,
+      else: {:ok, BearerAuth.graphql_context(nil)}
+  end
+
+  defp signed_in_context(user, org_id) do
+    case bearer_status(user, org_id) do
+      :refused ->
+        :error
+
+      {:grace, deadline} ->
+        close_at(deadline)
+        {:ok, BearerAuth.graphql_context(user)}
+
+      _not_held ->
+        {:ok, BearerAuth.graphql_context(user)}
+    end
+  end
+
+  # Held, or a passkey-only account past its deadline, whose JWT never passed
+  # the passkey (`KilnCMSWeb.SecondFactorGate.bearer_refused?/3`).
+  defp bearer_status(user, org_id) do
+    if KilnCMSWeb.SecondFactorGate.bearer_refused?(user, org_id),
+      do: :refused,
+      else: TwoFactorRequirement.status(user, org_id)
+  end
+
+  # `connect/3` runs in the transport's own process, which becomes the
+  # socket's (`Phoenix.Transports.WebSocket` upgrades in place), and
+  # `Phoenix.Socket` closes on a `"disconnect"` broadcast it receives
+  # (`KilnCMS.Accounts.SessionEviction` relies on the same). The reconnect is
+  # then refused above. `KilnCMSWeb.GraphqlLimits.SocketSecondFactor` refuses
+  # every document past the deadline as well, in case this never arrives.
+  # Erlang caps a timer at about 49 days; a longer grace closes early and the
+  # reconnect re-arms it.
+  @max_timer_ms 4_294_967_295
+
+  defp close_at(deadline) do
+    wait = deadline |> DateTime.diff(DateTime.utc_now(), :millisecond) |> max(0)
+
+    Process.send_after(
+      self(),
+      %Phoenix.Socket.Broadcast{event: "disconnect", topic: nil, payload: %{}},
+      min(wait, @max_timer_ms)
+    )
   end
 
   # `nil` is Phoenix's way of saying a socket can never be disconnected, which

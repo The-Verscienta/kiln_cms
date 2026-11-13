@@ -529,7 +529,23 @@ defmodule KilnCMS.Security.ApiKeyTripTest do
       assert trip_events() == []
     end
 
-    test "/ws/gql cannot carry a key: a kiln_ token connects as anonymous", ctx do
+    # The socket verifies JWTs only, so a key is a bearer that does not
+    # verify: refused at connect (#2634), never an actor. With the escape
+    # hatch off it is anonymous again, still with no actor, so no document on
+    # the socket can ever be a verified key's (`SocketDocumentBudget`).
+    test "/ws/gql cannot carry a key: a kiln_ token is refused, never a verified key", ctx do
+      assert :error = GraphqlSocket.connect(%{"token" => ctx.secret}, %Phoenix.Socket{}, %{})
+      assert trip_events() == []
+
+      previous = Application.get_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth)
+      Application.put_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, reject_invalid_bearer: false)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, previous),
+          else: Application.delete_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth)
+      end)
+
       assert {:ok, socket} =
                GraphqlSocket.connect(%{"token" => ctx.secret}, %Phoenix.Socket{}, %{})
 

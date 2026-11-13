@@ -28,6 +28,7 @@ defmodule KilnCMSWeb.EnumerationAuthorRoutesTest do
   @account_routes %{
     # Authenticated console screens (login required by their live_session).
     "/account" => :console,
+    "/account/two-factor" => :console,
     "/membership" => :console,
     "/editor/team" => :console,
     "/editor/accounts" => :console,

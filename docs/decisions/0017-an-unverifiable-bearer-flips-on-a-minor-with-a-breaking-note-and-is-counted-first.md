@@ -112,3 +112,44 @@ This changes the "removed in the next release" wording in the release note
 above and in ADR 0012's table: removal is *planned* for the next release and
 happens only when the count is zero.
 
+## Amendment (2026-11-13): the GraphQL socket refuses too, and MCP is key-only
+
+[#2634](https://github.com/The-Verscienta/kiln_cms/issues/2634). The decision
+above covered only the pipelines that run `KilnCMSWeb.Plugs.ApiKeyAuth`
+(`/api/*`, `/gql`). Two surfaces sit outside it, and each was checked:
+
+- **`/ws/gql` now refuses a connect whose bearer does not verify.** The socket
+  takes a JWT as its `token` connect param (or `Authorization: "Bearer …"`),
+  and one that failed verification (expired, revoked, garbled) used to connect
+  as anonymous: the same silent downgrade this record removed over HTTP. So
+  did a `kiln_` API key, which the socket has never verified. `connect/3`
+  now answers `:error` for all of them, and Phoenix answers the handshake
+  `403`. No token still connects anonymously. It follows the HTTP rule in
+  every respect: the same `KILN_API_REJECT_INVALID_BEARER=false` escape hatch
+  restores the anonymous connect, and every such connect emits
+  `[:kiln_cms, :api, :invalid_bearer]` (`surface: :graphql`, `read?: true`),
+  so the count that gates the hatch's removal includes it.
+- **`/mcp` needs no change.** It accepts API keys only
+  (`AshAuthentication.Strategy.ApiKey.Plug`, `required?: true`), so a JWT, a
+  stale or expired one, or garbage is a `401` already, and is now pinned by a
+  test. It never had an anonymous fallback to remove.
+
+Consistency won over leaving the socket lenient, for the reason the record
+gives: a client with a broken credential should learn it rather than read
+public content as if signed in. It goes under **Breaking** in the release
+note, as the HTTP flip did, because a client that connected with a stale
+token, or that passed an API key to the socket, used to get published content
+and now gets no socket:
+
+> **Breaking: `/ws/gql` refuses a token that does not verify.** A GraphQL
+> websocket connect whose `token` param is an expired, revoked or malformed
+> JWT, or a `kiln_` API key (which this socket never accepted), used to
+> connect as anonymous. It is now refused (`403` at the handshake). Connect
+> with no token to read as the public, or sign in again; use `POST /gql` with
+> an API key. `KILN_API_REJECT_INVALID_BEARER=false` restores the old
+> behavior for now.
+
+`/ws/bridge` was outside #2634 and is unchanged: it takes no JWT, refuses a
+bad `preview_token`, and still connects an `api_key` that does not verify as
+anonymous (published-only), as its moduledoc says.
+
