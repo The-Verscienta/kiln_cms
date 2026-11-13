@@ -2204,7 +2204,9 @@ rclone connection-string remotes are replaced with `***`. The status panel's
 off-site remote and `manifest.json`'s `offsite` are redacted the same way. Read
 access is the platform admin only. The table is written by the `:backups`
 system actor, and by one person's action: a platform admin's `:cancel` of a
-running backup, which writes only its status and finish time. It is purged by
+running backup, which sets its status, finish time and error ("Canceled by a
+platform admin") and appends a log line naming that admin by email. It is
+purged by
 the staging scrub (`backup_runs_purged`).
 
 ### It needs the client tools in the image
@@ -2380,15 +2382,19 @@ supported record. The reasoning is in [ADR 0035](decisions/0035-the-per-stamp-si
 
 ```bash
 cd /backups/media &&
-  sha256sum -c kiln-media-20260805-031700.sha256 &&
+  sha256sum --strict -c kiln-media-20260805-031700.sha256 &&
   for p in kiln-media-20260805-031700.part*.tar.gz; do
     tar -xzf "$p" -C /data/kiln/uploads
   done
 ```
 
-On macOS, use `shasum -a 256 -c` in place of `sha256sum -c`. The `&&` is the
-point: without it a failed check still extracts. Unlike `restore.sh`, the check
-does not catch a damaged sidecar: `-c` skips a line it cannot parse. The order
+On macOS, use `shasum -a 256 --strict -c` in place of `sha256sum --strict -c`.
+The `&&` is the point: without it a failed check still extracts, and `--strict`
+fails on a sidecar line it cannot parse instead of skipping it. Unlike
+`restore.sh`, the check only covers the parts the sidecar lists: a stray
+`.partNN` file that it doesn't list passes the check and the glob extracts it
+anyway, so first make sure the directory holds only the parts the sidecar
+names (`restore.sh` refuses such a set). The order
 of the parts does not matter, past `part99` too: each file is in exactly one
 part, and directories are not archived, so no part overwrites another. Plain
 `tar -xzf` per part is the supported manual form. `cat parts | tar -xzi` works

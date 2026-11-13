@@ -956,7 +956,10 @@ defmodule KilnCMSWeb.BackupLive do
             >
               {ngettext("%{count} part", "%{count} parts", count)}
               <.icon name="hero-arrow-top-right-on-square" class="size-3" />
-              <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+              <span class="sr-only">
+                {gettext("How to restore a media backup written in several parts")}
+                {gettext("(opens in a new tab)")}
+              </span>
             </a>
             <span
               :for={{label, status} <- destination_chips(run)}
