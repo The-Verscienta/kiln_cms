@@ -41,7 +41,8 @@ defmodule KilnCMS.Security.AlertMail do
   defp label(kind), do: english(fn -> AlertText.kind_label(kind) end)
 
   # The labels are gettext'd for the bell (#2642); the email pins English.
-  # A future per-user locale is this one call.
+  # A per-user locale needs more than this call: the subject, body and footer
+  # prose below is plain English, not gettext (ADR 0029).
   defp english(fun), do: Gettext.with_locale(KilnCMSWeb.Gettext, "en", fun)
 
   @doc "The email's subject."
