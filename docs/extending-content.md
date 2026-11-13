@@ -1981,6 +1981,18 @@ callback: build them on `KilnCMS.CMS.Content` in the plugin's own Ash domain
 and register that domain in `:ash_domains`/`:content_domains` — admin CRUD,
 webhooks, delivery and workers follow automatically.
 
+**Filters on a plugin field type compare text.** `cast/2` runs on writes
+only. A `custom_filter` or `customWhere` operand on a plugin type's field is
+compared as the text the client sent, not passed through `cast/2`, because
+the `Kiln.FieldType` contract does not promise that `cast/2` is
+deterministic. So if `cast/2` tidies a value (lowercases it, say), a client
+must filter with the stored spelling. The built-in format types (`email`,
+`color`, `telephone`, `time`, `slug`) are the exception: their `eq`,
+`not_eq` and `in` operands also match as a save would store them
+([json-api.md](json-api.md) → "Custom fields"). A value that is an object or
+a list reaches your `cast/2` unchanged, as before: refusing it there, with
+`{:error, message}`, is your type's decision.
+
 **Choosing a field type's GraphQL kind.** The GraphQL API serves every custom
 field through typed readers ([headless-graphql-api.md](headless-graphql-api.md#read-custom-fields-typed-by-kind)).
 A plugin `Kiln.FieldType` whose stored value is a plain scalar can say which

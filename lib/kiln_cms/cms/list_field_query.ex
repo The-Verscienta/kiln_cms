@@ -43,7 +43,7 @@ defmodule KilnCMS.CMS.ListFieldQuery do
   is `KilnCMSWeb.EditorLive.Filters`.
   """
 
-  alias KilnCMS.CMS.FieldTypes
+  alias KilnCMS.CMS.FieldValue
 
   @max_value_length 100
   @format_types [:email, :telephone, :color, :slug, :time]
@@ -116,11 +116,12 @@ defmodule KilnCMS.CMS.ListFieldQuery do
     do: {:ok, raw}
 
   # A format type's own `cast/2` is the canonical spelling (a colour's case, a
-  # time's padding, an email's domain), so a condition matches what is stored.
+  # time's padding, an email's domain), so a condition matches what is stored
+  # — the same spelling a `custom_filter` operand is tidied to (`FieldValue`).
   defp cast_value(type, definition, raw) when type in @format_types do
-    case FieldTypes.get(type).cast(raw, definition) do
+    case FieldValue.canonical(definition, raw) do
       {:ok, value} when is_binary(value) -> {:ok, value}
-      _ -> :error
+      _none -> :error
     end
   end
 

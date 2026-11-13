@@ -100,6 +100,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
   ([#2836](https://github.com/The-Verscienta/kiln_cms/pull/2836) · [long form](docs/changelog/unreleased.md#media-purge-quarantined))
 
+- **Custom-field API: requests that used to succeed are now a `400`: `[]` for a single custom field (it cleared it), a list beside `ilike` or a media or reference `eq`/`not_eq` (it was joined into one string), a `null` `ilike` operand, and a `{year, month, day}` object as a date or date-time filter operand. `not_eq` on a tidied field can now exclude more records.**
+  ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-field-api-stricter-shapes))
+
 ### Added
 
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
@@ -222,6 +225,18 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`backup.sh` reads `BACKUP_KEEP_DAYS` like the app: anything but a whole number of days from 1 to 2147483647 keeps 14 and warns, instead of pruning nothing (`14d`), pruning all but a day (`0`) or writing an unreadable `manifest.json`.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-validated))
+
+- **A cached setting read inside a write transaction (site branding in a confirmation mail, the content-type registry) no longer takes a second pool connection while the transaction holds one, a deadlock risk under load: a hit is served, a miss reads on the transaction's connection and is not cached.**
+  ([#2859](https://github.com/The-Verscienta/kiln_cms/pull/2859) · [long form](docs/changelog/unreleased.md#cache-fetch-in-transaction))
+
+- **An object, or a list where one value goes, sent for a single custom field or a link value over JSON:API, GraphQL or MCP is a field error naming the field (`must be a single value, not an object or a list`), not a 500; a list on a text field is no longer joined into one string.**
+  ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-field-value-shapes))
+
+- **A custom-field filter with an object operand, or a list beside any operator but `in`, on a field, link field or list field is a `400 invalid_argument` naming the operator and field, not a 500 or a silently joined value.**
+  ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-filter-operand-shapes))
+
+- **`eq`, `not_eq` and `in` on a single string, URL, select, email, color, telephone, time or slug field (or a string, URL or select link field) also match the value as a save stores it (`#FFF` finds `#ffffff`, a label finds its option), fixing the 1.9.0 known issue #2677.**
+  ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-filter-operands-tidied))
 
 ### Security
 

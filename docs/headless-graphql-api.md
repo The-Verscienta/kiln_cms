@@ -165,6 +165,18 @@ reads):
 - `contains` and `startsWith` ignore case and take their text literally: `%`,
   `_` and `\` are not wildcards. `customFilter` accepts them too, as
   `contains` / `starts_with`, on text-like fields.
+- On a `string` condition, `eq`, `notEq` and each item of `in` match the
+  operand both as sent and as a save stores it, on a single string, URL,
+  select, email, color, telephone, time or slug field: `{name: "accent",
+  string: {eq: "#FFF"}}` finds a stored `#ffffff`, and a select option's
+  label finds the option. `notEq` leaves out both spellings. `contains` and
+  `startsWith` take the text as sent. `customFilter` does the same for `eq`,
+  `not_eq` and `in`; see
+  [json-api.md](json-api.md) → "Custom fields", Filtering.
+- `customFilter` is JSON, so an operand can be an object or a list. An
+  object, or a list beside any operator other than `in`, is an error in
+  `errors` naming the operator and the field (`ilike on custom field
+  "subtitle" takes one value, not a list`), never a server error.
 - A **list of values** (`multiple` on a string, select, number, date, link, …
   field) takes the kind of its items, with the list's meaning: `eq` (contains),
   `notEq` (does not contain), `in` (contains any) and `isNull`. A list of
@@ -653,6 +665,30 @@ and takes `tagIds` alone. The related-content arrays carry the same verbs
 `removeRelatedPostIds`, with the same rules, and the sibling
 `addRelatedPageIds` / `removeRelatedPageIds` (and `…RelatedEntryIds` on the
 dynamic tier).
+
+### Writing custom fields
+
+`customFields` on `create…` / `update…` is a JSON-encoded object, checked
+as the JSON:API write is. A single `text`, `string`, `url`, `select`,
+`integer`, `float`, `boolean`, `date` or `datetime` field takes one value:
+an object (a map of locales included), an empty list, or any list on a
+`text` or `boolean` field fails the mutation with `result: null` and the
+field's error, and nothing is written:
+
+```graphql
+mutation ($id: ID!, $input: UpdatePageInput!) {
+  updatePage(id: $id, input: $input) { result { id } errors { code message fields } }
+}
+```
+
+```json
+{ "id": "<uuid>", "input": { "customFields": "{\"subtitle\": {\"en\": \"x\"}}" } }
+```
+
+The error's `message` contains `Subtitle (subtitle) must be a single value,
+not an object or a list`. Send `null` or `""` to clear a field. The full
+rules are in [json-api.md](json-api.md) → "A single custom field takes one
+value".
 
 ### Writing relationships
 

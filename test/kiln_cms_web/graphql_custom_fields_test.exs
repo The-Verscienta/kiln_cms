@@ -631,4 +631,36 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
     {Enum.count(sqls, &(&1 =~ ~s(FROM "field_definitions"))),
      Enum.count(sqls, &(&1 =~ ~s(FROM "posts")))}
   end
+
+  # #2743: an object sent for a field that holds one value is the mutation's
+  # field error, not a raise out of `to_string/1`.
+  describe "value shapes on a write" do
+    test "updatePage with a locale map on a plain field returns the field error" do
+      admin = user(:admin)
+      name = "subtitle#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: name, label: "Subtitle", field_type: :string},
+        actor: admin
+      )
+
+      page = CMS.create_page!(%{title: "Shapes", slug: slug()}, actor: admin)
+
+      mutation = """
+      mutation ($id: ID!, $input: UpdatePageInput!) {
+        updatePage(id: $id, input: $input) { result { id } errors { code message fields } }
+      }
+      """
+
+      input = %{"customFields" => Jason.encode!(%{name => %{"en" => "x"}})}
+
+      assert %{"updatePage" => %{"result" => nil, "errors" => [error]}} =
+               run!(mutation, %{"id" => page.id, "input" => input}, admin)
+
+      assert error["message"] =~
+               "Subtitle (#{name}) must be a single value, not an object or a list"
+
+      assert CMS.get_page!(page.id, actor: admin).custom_fields == %{}
+    end
+  end
 end

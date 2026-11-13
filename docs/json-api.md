@@ -278,6 +278,44 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
   an `integer`/`float` field compares numerically (`9 < 10`), `boolean` as a
   boolean, and `date`/`datetime` (ISO-8601 strings) chronologically.
 - `in` matches any of a list: `custom_filter[color][in][]=red&custom_filter[color][in][]=blue`.
+- **Equality operands also match the value as a save stores it.** A save
+  tidies some types: it trims a string or URL, stores a select option's
+  value when given its label, and gives an email, color, telephone, time or
+  slug its canonical spelling ([Built-in format types](extending-content.md#built-in-format-types)).
+  On a single field of one of those types, `eq` (or a bare value), `not_eq`
+  and each item of `in` match the operand both as sent and as a save would
+  have stored it: `#FFF` finds `#ffffff`, `a@Example.com` finds
+  `a@example.com`, `+44 20 7946 0958` finds `+442079460958`, `9:30` finds
+  `09:30`, `Hello World` finds the slug `hello-world`, and an option's label
+  (in any letter case) finds the option. Matching the operand as sent as
+  well means a value stored before the field's type changed (a string field
+  holding `#FFF`, since made a color field) is still found by its own
+  spelling. `not_eq` leaves out both spellings, so
+  `custom_filter[accent][not_eq]=#FFF` drops records holding `#FFF` and
+  `#ffffff`.
+  - Range operators (`gt`, `gte`, `lt`, `lte`) and `ilike`, `contains` and
+    `starts_with` take the operand as sent: a time's tidy drops its seconds,
+    which would move a range bound, and a pattern is not a value.
+  - A `text` field and a plugin's field type compare the operand as the text
+    sent; numbers, booleans, dates and date-times are cast as above.
+  - An operand the field could never hold (`custom_filter[email]=foo` on an
+    email field) matches nothing. It is not a `400`.
+- **One value per operator, a list only for `in`.** An object operand
+  (`custom_filter[subtitle][eq][x]=1`, or a JSON object from GraphQL
+  `customFilter` or an MCP read tool), or a list beside any operator other
+  than `in` (`custom_filter[subtitle][ilike][]=a`), is a `400`
+  `invalid_argument` whose `detail` names the operator and the field:
+
+  | Operand | `detail` |
+  |---|---|
+  | an object | `eq on custom field "subtitle" takes a value, not a nested filter` |
+  | a list beside `ilike`, `eq`, `gt`, … | `ilike on custom field "subtitle" takes one value, not a list` |
+  | an object or a list as an item of `in` | `in on custom field "subtitle" takes a value, not a nested filter` (or `takes one value, not a list`) |
+  | `null` (JSON) for `ilike` | `invalid value for custom field "subtitle"` |
+
+  A link field says `link field "cta.link.label"` instead. This holds on
+  media and reference fields too, so `[eq][]=<id>` is refused: write
+  `[in][]=<id>`.
 - `ilike` (text-like fields only) takes the usual `%` wildcards:
   `custom_filter[subtitle][ilike]=%leather%`.
 - `contains` / `starts_with` (text-like fields only) match case-insensitively
@@ -377,6 +415,11 @@ GET /api/json/posts?custom_filter[ingredients.link.quantity][gte]=100
   It takes one id or a list (`[target][]=…`, at most 100), and needs an
   operator beside it (a bare value can't carry one, so write `[eq]`).
   Several targets match a record where any one of them has the value.
+- On a string, URL or select link field, `eq`, `not_eq` and `in` match the
+  operand as sent and as a save stores it (trimmed, an option's label as its
+  value), as on a field. An object operand, or a list beside any operator
+  other than `in`, is a `400`: `ilike on link field
+  "ingredients.link.role" takes one value, not a list`.
 - An unknown link field, or a field that is not a reference, is a **400**.
   `customFilter` in GraphQL takes the same key: `{"ingredients.link.role":
   "main"}`, and `{"contributors.link.role": {"eq": "photographer",
@@ -480,7 +523,12 @@ GET /api/json/posts?custom_filter[scores][count][gte]=2
   finds `09:30`, `a@Example.com` finds `a@example.com`, `"10"` finds the
   number `10` on an integer list, and `10` finds `10.0` on a float list. An
   operand the field could never hold is a `400` (`invalid date value`).
-  (Single email, colour and time fields do not tidy their operands yet.)
+  A single email, color, telephone, time, slug, string, URL or select field
+  tidies its `eq`, `not_eq` and `in` operands too, and also matches them as
+  sent (see "Equality operands also match the value as a save stores it"
+  under **Filtering** above). An object operand
+  (`custom_filter[event_dates][eq][year]=2026`) is a `400` on every list, as
+  on a single field.
 - **A value stored before the field was a list** (a field retyped, or
   switched to a list while a reshape did not finish) is read as a one-item
   list by every operator: `eq` matches it, `count` counts it as 1, and it
@@ -992,6 +1040,39 @@ curl -s http://localhost:4000/api/json/posts \
 `tag_ids` / `category_id` / `featured_image_id` and the SEO / `audience` /
 `custom_fields` / scheduling attributes are all writable. Relationship arrays
 (`tag_ids`, `related_post_ids`) are passed as attributes.
+
+**A single custom field takes one value.** On a `text`, `string`, `url`,
+`select`, `integer`, `float`, `boolean`, `date` or `datetime` field that is
+not a list (`multiple`), an object, or an empty list `[]`, is refused with a
+`400` `invalid_attribute` on `custom_fields`. So is any list on a `text` or
+`boolean` field. Send `null` or `""` to clear a field. A number or a
+boolean sent to a text-like field is stored as its text (`42` as `"42"`).
+A non-empty list on a single `string`, `url`, `select`, number or date
+field still keeps its first item, as before. Each locale of a document is
+its own record, so a map of locales (`{"en": …, "fr": …}`) is an object
+like any other: write each value on its locale's record. A map of locales
+sent to a string field `subtitle`:
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/json/pages/$ID \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{"data": {"type": "page", "id": "'$ID'", "attributes": {
+        "custom_fields": {"subtitle": {"en": "Spring menu"}}}}}'
+```
+
+```json
+{"errors": [{"code": "invalid_attribute",
+             "detail": "Subtitle (subtitle) must be a single value, not an object or a list",
+             "source": {"pointer": "/data/attributes/custom_fields"}, …}]}
+```
+
+Nothing is written. The same rule holds for a reference's link values
+(`"link": {"role": {"x": 1}}` names the field, the item and the link field)
+and for GraphQL and MCP writes. The format types (`email`, `color`, …) and a
+plugin's field type decide in their own `cast/2`, so a composite such as a
+geolocation still takes an object.
 
 `scheduled_at` takes publish rights (an admin, or an editor on a site that lets
 editors publish). Without them, write **`proposed_publish_at`** instead: a date
