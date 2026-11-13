@@ -2992,6 +2992,7 @@ msgid "Added %{count} item(s); %{skipped} skipped — already in another open re
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Added %{date}"
 msgstr ""
@@ -6645,7 +6646,7 @@ msgstr ""
 msgid "Couldn't remove that member."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't remove that passkey."
 msgstr ""
@@ -15775,7 +15776,7 @@ msgstr ""
 msgid "Passkey removed"
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey removed."
 msgstr ""
@@ -17493,6 +17494,7 @@ msgid "Remove item %{position}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove passkey"
 msgstr ""
@@ -17578,6 +17580,7 @@ msgid "Remove this new block"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this passkey? You can no longer sign in with it."
 msgstr ""
@@ -27729,6 +27732,7 @@ msgid "last used %{ago} ago"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "last used %{date}"
 msgstr ""

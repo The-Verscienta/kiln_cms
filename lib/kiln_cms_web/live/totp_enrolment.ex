@@ -22,6 +22,11 @@ defmodule KilnCMSWeb.TotpEnrolment do
 
   `confirm/3` takes the action context to add (the email proof's, see
   `KilnCMS.Accounts.EnrolmentProof`); the action decides, not this module.
+
+  Removing a passkey is shared the same way (#2900): `remove_passkey/3` runs
+  `Passkey.:destroy` and says what happened, and `last_factor?/4` with
+  `last_factor_note/1` hide the remove button where the action would refuse
+  it. Each page keeps its own event and assigns.
   """
   use KilnCMSWeb, :html
 
@@ -156,6 +161,50 @@ defmodule KilnCMSWeb.TotpEnrolment do
 
   def error_message({:error, error}, fallback), do: error_message(error, fallback)
   def error_message(_error, fallback), do: fallback
+
+  @doc """
+  Remove one of `user`'s own passkeys by `id`, with `context` (the page's
+  `:security_context`) as the action context: the `passkey_removed` audit
+  event takes its site from it, and without it the removal commits with no
+  event. `{:ok, message}`, or `{:error, message}` saying why not: the
+  shared demo account, the last factor a site requires, or a generic refusal
+  for an id that is not this account's passkey.
+  """
+  @spec remove_passkey(Accounts.User.t(), String.t(), map()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  def remove_passkey(user, id, context) do
+    with {:ok, passkey} <- Accounts.get_passkey(id, actor: user),
+         :ok <- Accounts.remove_passkey(passkey, actor: user, context: context) do
+      {:ok, gettext("Passkey removed.")}
+    else
+      error -> {:error, error_message(error, gettext("Couldn't remove that passkey."))}
+    end
+  end
+
+  @doc """
+  Whether a factor of `kind` (`:totp` or `:passkey`) is the one this account
+  has left while a site requires one (#2247): the authenticator app with no
+  passkey, or the only passkey with no app. `required?` is
+  `KilnCMS.Accounts.TwoFactorRequirement.required_somewhere?/1`. Only hides a
+  control; the action refuses regardless.
+  """
+  @spec last_factor?(boolean(), boolean(), list(), :totp | :passkey) :: boolean()
+  def last_factor?(false = _required?, _totp?, _passkeys, _kind), do: false
+  def last_factor?(true, totp?, passkeys, :totp), do: totp? and passkeys == []
+  def last_factor?(true, totp?, passkeys, :passkey), do: not totp? and length(passkeys) == 1
+
+  @doc "Drawn where `last_factor?/4` hides a remove or disable control."
+  def last_factor_note(assigns) do
+    ~H"""
+    <p
+      id="last-factor-note"
+      class="flex items-start gap-1.5 text-sm text-base-content/70"
+    >
+      <.icon name="hero-lock-closed" class="mt-0.5 size-4 shrink-0" />
+      {last_factor_message()}
+    </p>
+    """
+  end
 
   @doc "Why an account's last second factor can't be removed (#2247)."
   @spec last_factor_message() :: String.t()

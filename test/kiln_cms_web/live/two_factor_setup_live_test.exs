@@ -478,6 +478,174 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
     end
   end
 
+  describe "removing a passkey (#2900)" do
+    # The reader's only place to manage passkeys: `/editor/settings` is
+    # editors only. The rules are `Passkey.:destroy`'s; the page hides the
+    # button only where the action would refuse anyway.
+
+    defp passkey!(user) do
+      Ash.Seed.seed!(Accounts.Passkey, %{
+        user_id: user.id,
+        name: "Key",
+        credential_id: "cred-#{System.unique_integer([:positive])}",
+        public_key: <<1, 2, 3>>,
+        sign_count: 0
+      })
+    end
+
+    defp remove_button(passkey),
+      do: ~s(#passkey-#{passkey.id} button[phx-click="remove_passkey"])
+
+    # A passkey-only account a site holds owes the passkey step-up after a
+    # password sign-in (`SecondFactorGate.passkey_step_up_owed?/3`), so the
+    # held tests sign in with a passkey.
+    defp passkey_count(user), do: Accounts.second_factors(user).passkeys
+
+    defp removed_events(site, user) do
+      admin = seed_user(%{role: :admin})
+
+      KilnCMS.Security.list_events!(actor: admin, tenant: site.id, page: [limit: 200])
+      |> then(fn
+        %{results: results} -> results
+        list -> list
+      end)
+      |> Enum.filter(&(&1.type == :passkey_removed and &1.target_id == user.id))
+    end
+
+    test "a viewer at the limit removes one; the add form comes back, and it is audited",
+         %{conn: conn} do
+      site = held_site()
+      user = seed_user() |> member!(site)
+      [first | _] = for _ <- 1..Accounts.Passkey.max_per_account(), do: passkey!(user)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "passkey") |> live(~p"/account/two-factor")
+
+      assert has_element?(view, "#two-factor-passkey #passkeys-at-limit")
+      refute has_element?(view, "#add-passkey-form")
+      assert has_element?(view, remove_button(first))
+      refute has_element?(view, "#last-factor-note")
+
+      view |> element(remove_button(first)) |> render_click()
+
+      assert passkey_count(user) == Accounts.Passkey.max_per_account() - 1
+      refute has_element?(view, "#passkey-#{first.id}")
+      refute has_element?(view, "#passkeys-at-limit")
+      assert has_element?(view, "#two-factor-passkey #add-passkey-form")
+      assert render(view) =~ "Passkey removed."
+      assert [_one] = removed_events(site, user)
+    end
+
+    test "the last factor a site requires has a note, not the button; a forged click is refused",
+         %{conn: conn} do
+      site = held_site()
+      user = seed_user() |> member!(site)
+      passkey = passkey!(user)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "passkey") |> live(~p"/account/two-factor")
+
+      refute has_element?(view, remove_button(passkey))
+      assert has_element?(view, "#two-factor-passkey #last-factor-note")
+
+      html = render_click(view, "remove_passkey", %{"id" => passkey.id})
+
+      assert html =~ "you can&#39;t remove your last second factor"
+      assert has_element?(view, "#passkey-#{passkey.id}")
+      assert passkey_count(user) == 1
+    end
+
+    test "with an authenticator app too, the passkey can go where one is required",
+         %{conn: conn} do
+      site = held_site()
+      user = seed_user(%{totp_confirmed_at: DateTime.utc_now()}) |> member!(site)
+      passkey = passkey!(user)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      refute has_element?(view, "#last-factor-note")
+      view |> element(remove_button(passkey)) |> render_click()
+
+      assert passkey_count(user) == 0
+      refute has_element?(view, "#passkey-#{passkey.id}")
+    end
+
+    test "where nothing is required, the last passkey can go", %{conn: conn} do
+      site = org("tfs-pk-none")
+      user = seed_user() |> member!(site)
+      passkey = passkey!(user)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      refute has_element?(view, "#last-factor-note")
+      view |> element(remove_button(passkey)) |> render_click()
+
+      assert passkey_count(user) == 0
+      refute has_element?(view, "#passkey-list")
+    end
+
+    test "another account's passkey id is refused, and its row survives", %{conn: conn} do
+      site = org("tfs-pk-other")
+      user = seed_user() |> member!(site)
+      passkey!(user)
+      other = seed_user() |> member!(site)
+      theirs = passkey!(other)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      refute has_element?(view, "#passkey-#{theirs.id}")
+
+      html = render_click(view, "remove_passkey", %{"id" => theirs.id})
+
+      assert html =~ "Couldn&#39;t remove that passkey."
+      assert passkey_count(other) == 1
+      assert passkey_count(user) == 1
+    end
+
+    test "an id that is not a UUID is refused without a crash", %{conn: conn} do
+      site = org("tfs-pk-junk")
+      user = seed_user() |> member!(site)
+      passkey!(user)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      html = render_click(view, "remove_passkey", %{"id" => "not-a-uuid"})
+
+      assert html =~ "Couldn&#39;t remove that passkey."
+      assert passkey_count(user) == 1
+    end
+
+    test "on a host that can't register passkeys, the list and Remove still show",
+         %{conn: conn} do
+      # A console host outside the endpoint's host: no ceremony can run there
+      # (`ConsoleHost.passkey_capable?/0`), but removing needs none.
+      Application.put_env(
+        :kiln_cms,
+        :console_host,
+        "sfconsole#{System.unique_integer([:positive])}.elsewhere.example"
+      )
+
+      KilnCMS.Cache.Hosts.clear()
+
+      site = org("tfs-pk-host")
+      user = seed_user() |> member!(site)
+      passkey = passkey!(user)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      refute has_element?(view, "#add-passkey-form")
+      refute has_element?(view, "#passkey-added-mail")
+      view |> element(remove_button(passkey)) |> render_click()
+
+      assert passkey_count(user) == 0
+    end
+  end
+
   describe "grace and readers" do
     test "Not now appears only with ?reminder=1 during the grace period", %{conn: conn} do
       grace =
@@ -577,5 +745,29 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveDemoTest do
 
     render_click(view, "passkey_begin", %{})
     refute has_element?(view, "#passkey-waiting")
+  end
+
+  test "a forged passkey removal is refused, and the passkey survives (#2900)", %{conn: conn} do
+    site = org("tfs-demo-pk")
+    user = Fixtures.seed_user() |> Fixtures.member!(site)
+
+    passkey =
+      Ash.Seed.seed!(KilnCMS.Accounts.Passkey, %{
+        user_id: user.id,
+        name: "Key",
+        credential_id: "cred-#{System.unique_integer([:positive])}",
+        public_key: <<1, 2, 3>>,
+        sign_count: 0
+      })
+
+    {:ok, view, _html} =
+      conn |> Fixtures.signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+    refute has_element?(view, "#two-factor-passkey")
+
+    html = render_click(view, "remove_passkey", %{"id" => passkey.id})
+
+    assert html =~ "This is a shared demo account"
+    assert KilnCMS.Accounts.second_factors(user).passkeys == 1
   end
 end

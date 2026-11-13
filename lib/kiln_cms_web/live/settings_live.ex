@@ -24,6 +24,7 @@ defmodule KilnCMSWeb.SettingsLive do
   alias KilnCMSWeb.TotpEnrolment
 
   import KilnCMSWeb.RoleDisplay, only: [role_summary: 1]
+  import KilnCMSWeb.TotpEnrolment, only: [last_factor?: 4, last_factor_note: 1]
 
   @status_marks %{"words" => :words, "trigrams" => :trigrams}
 
@@ -244,19 +245,15 @@ defmodule KilnCMSWeb.SettingsLive do
     user = socket.assigns.current_user
 
     socket =
-      with {:ok, passkey} <- Accounts.get_passkey(id, actor: user),
-           :ok <-
-             Accounts.remove_passkey(passkey,
-               actor: user,
-               context: socket.assigns.security_context
-             ) do
-        socket
-        |> assign(:passkeys, WebAuthn.list(user))
-        |> assign(:passkey_status, {:ok, gettext("Passkey removed.")})
-        |> put_flash(:info, gettext("Passkey removed."))
-      else
-        error ->
-          put_flash(socket, :error, refusal_or(error, gettext("Couldn't remove that passkey.")))
+      case TotpEnrolment.remove_passkey(user, id, socket.assigns.security_context) do
+        {:ok, message} ->
+          socket
+          |> assign(:passkeys, WebAuthn.list(user))
+          |> assign(:passkey_status, {:ok, message})
+          |> put_flash(:info, message)
+
+        {:error, message} ->
+          put_flash(socket, :error, message)
       end
 
     {:noreply, socket}
@@ -1503,24 +1500,6 @@ defmodule KilnCMSWeb.SettingsLive do
   defp passkey_limit_message, do: TotpEnrolment.passkey_limit_message()
 
   defp demo_locked_message, do: TotpEnrolment.demo_locked_message()
-
-  # The one factor this account has left, while a site requires one (#2247):
-  # the authenticator app with no passkey, or the only passkey with no app.
-  defp last_factor?(false = _required?, _totp?, _passkeys, _kind), do: false
-  defp last_factor?(true, totp?, passkeys, :totp), do: totp? and passkeys == []
-  defp last_factor?(true, totp?, passkeys, :passkey), do: not totp? and length(passkeys) == 1
-
-  defp last_factor_note(assigns) do
-    ~H"""
-    <p
-      id="last-factor-note"
-      class="flex items-start gap-1.5 text-sm text-base-content/70"
-    >
-      <.icon name="hero-lock-closed" class="mt-0.5 size-4 shrink-0" />
-      {TotpEnrolment.last_factor_message()}
-    </p>
-    """
-  end
 
   attr :id, :string, required: true
   attr :setup_url, :string, required: true

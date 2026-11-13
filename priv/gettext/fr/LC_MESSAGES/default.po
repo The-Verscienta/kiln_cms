@@ -2992,6 +2992,7 @@ msgid "Added %{count} item(s); %{skipped} skipped — already in another open re
 msgstr "%{count} élément(s) ajouté(s) ; %{skipped} ignoré(s) — déjà dans un autre lancement ouvert, ou non ajoutables"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Added %{date}"
 msgstr "Ajouté le %{date}"
@@ -6645,7 +6646,7 @@ msgstr "Impossible de retirer cet élément."
 msgid "Couldn't remove that member."
 msgstr "Retrait de ce membre impossible."
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't remove that passkey."
 msgstr "Suppression de cette clé d'accès impossible."
@@ -15775,7 +15776,7 @@ msgstr "Clé d'accès ajoutée — vous pouvez désormais l'utiliser pour vous c
 msgid "Passkey removed"
 msgstr "Clé d'accès supprimée"
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey removed."
 msgstr "Clé d'accès supprimée."
@@ -17493,6 +17494,7 @@ msgid "Remove item %{position}"
 msgstr "Retirer l’élément %{position}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove passkey"
 msgstr "Supprimer la clé d'accès"
@@ -17578,6 +17580,7 @@ msgid "Remove this new block"
 msgstr "Retirer ce nouveau bloc"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this passkey? You can no longer sign in with it."
 msgstr "Supprimer cette clé d'accès ? Vous ne pourrez plus l'utiliser pour vous connecter."
@@ -27729,6 +27732,7 @@ msgid "last used %{ago} ago"
 msgstr "dernière utilisation il y a %{ago}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "last used %{date}"
 msgstr "dernière utilisation le %{date}"
