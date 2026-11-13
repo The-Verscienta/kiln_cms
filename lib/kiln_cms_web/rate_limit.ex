@@ -268,6 +268,47 @@ defmodule KilnCMSWeb.RateLimit do
   end
 
   @doc """
+  The index of the fixed `scale` window a `hit/3` or `hit/4` made now is
+  counted in (`Hammer.ETS.FixWindow` keys a row `{key, index}`). Read it
+  before charging to hand `refund/3` the window the charge landed in.
+  """
+  @spec window_index(pos_integer()) :: non_neg_integer()
+  def window_index(scale) when is_integer(scale) and scale > 0,
+    do: div(System.system_time(:millisecond), scale)
+
+  @doc """
+  Gives back one charge a `hit/3` or `hit/4` made on `key` in window `index`
+  (`window_index/1`), never taking the count below zero, and returns the new
+  count. For a caller that charged before it knew whether the work could run
+  (`KilnCMS.CrawlerVerification`, #2588).
+
+  Only while window `index` is still the current one: once it has closed,
+  the charge expired with it, so the refund touches nothing and answers `0`
+  rather than lowering the next window's count.
+
+  Hammer's own `inc/3` takes a positive increment only; this is the same
+  counter update on the same row, with a floor. Raises `ArgumentError` if the
+  row is not in the shape Hammer stores.
+  """
+  @spec refund(String.t(), pos_integer(), non_neg_integer()) :: non_neg_integer()
+  def refund(key, scale, index)
+      when is_binary(key) and is_integer(scale) and scale > 0 and is_integer(index) and
+             index >= 0 do
+    if window_index(scale) == index do
+      full_key = {key, index}
+
+      :ets.update_counter(
+        __MODULE__,
+        full_key,
+        {2, -1, 0, 0},
+        {full_key, 0, (index + 1) * scale}
+      )
+    else
+      0
+    end
+  end
+
+  @doc """
   Milliseconds until `bucket`'s current fixed window closes: the retry-after of
   a refusal decided after the charge (a site's ceiling under `check_limit/3`'s).
   Hammer's windows are clock-aligned, so this is the same for every key.

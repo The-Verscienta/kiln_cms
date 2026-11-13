@@ -21,7 +21,7 @@ defmodule KilnCMS.Media.QuarantineReaper do
   :bypass` action — a tenant-less read of the primary action is refused under
   strict tenancy), then each row is purged under its own tenant. Both run as
   `KilnCMS.Media.system/0` (#1659), which may purge an item only while it is
-  quarantined.
+  quarantined, through `:purge_quarantined` (#2610).
   """
   use Oban.Worker, queue: :media, max_attempts: 1, unique: [period: 3_000]
 
@@ -64,7 +64,7 @@ defmodule KilnCMS.Media.QuarantineReaper do
 
     Storage.delete_private(item.storage_key, item)
 
-    case CMS.purge_media_item(item, actor: Media.system(), tenant: item.org_id) do
+    case CMS.purge_quarantined_media_item(item, actor: Media.system(), tenant: item.org_id) do
       :ok ->
         true
 

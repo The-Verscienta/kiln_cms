@@ -20,9 +20,11 @@ defmodule KilnCMS.CrawlerVerification.InFlight do
     * every `:sweep_interval_ms` (a minute) this process deletes the expired
       rows nothing released.
 
-  The same table holds the verifier's node-wide counters and warning
-  latches, under keys that can never be an address (`{:counter, name}`,
-  `{:warned, name}`); the sweep leaves them alone.
+  The same table holds the verifier's node-wide counters, warning latches,
+  resolver-health values and the canary's probe latch, under keys that can
+  never be an address (`{:counter, name}`, `{:warned, name}`,
+  `{:health, name}`, `{:probe, name}`). Those rows have two elements and the
+  sweep leaves them alone.
   """
   use GenServer
 
@@ -90,10 +92,50 @@ defmodule KilnCMS.CrawlerVerification.InFlight do
   @spec latch(atom()) :: boolean()
   def latch(name), do: :ets.insert_new(@table, {{:warned, name}, true})
 
+  @doc """
+  `true` when this call is the first to claim probe `name` for `window` (an
+  integer that only grows): the row holds the last window claimed, and a
+  later window replaces it. One row per probe, never one per window. Both
+  steps are single ETS operations, so two callers never both win a window.
+  """
+  @spec claim_probe(atom(), integer()) :: boolean()
+  def claim_probe(name, window) do
+    key = {:probe, name}
+
+    :ets.insert_new(@table, {key, window}) or
+      :ets.select_replace(@table, [
+        {{key, :"$1"}, [{:<, :"$1", window}], [{{{:const, key}, window}}]}
+      ]) == 1
+  end
+
+  @doc "Stores the node-wide health value `name`."
+  @spec put_health(atom(), term()) :: :ok
+  def put_health(name, value) do
+    :ets.insert(@table, {{:health, name}, value})
+    :ok
+  end
+
+  @doc "The node-wide health value `name`, or `nil` when none is stored."
+  @spec health(atom()) :: term()
+  def health(name) do
+    case :ets.lookup(@table, {:health, name}) do
+      [{_key, value}] -> value
+      [] -> nil
+    end
+  end
+
   @doc false
-  # Test seam: open every latch again.
+  # Test seam: open every latch again, the probe latches included.
   def reset_latches do
     :ets.match_delete(@table, {{:warned, :_}, :_})
+    :ets.match_delete(@table, {{:probe, :_}, :_})
+    :ok
+  end
+
+  @doc false
+  # Test seam: forget every health value.
+  def reset_health do
+    :ets.match_delete(@table, {{:health, :_}, :_})
     :ok
   end
 
@@ -126,7 +168,8 @@ defmodule KilnCMS.CrawlerVerification.InFlight do
     {:noreply, state}
   end
 
-  # Only address rows have three elements; counters and latches have two.
+  # Only address rows have three elements; counters, latches and health
+  # values have two.
   defp sweep_expired do
     :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:"=<", :"$1", now()}], [true]}])
   end

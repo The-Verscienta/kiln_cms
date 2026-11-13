@@ -182,11 +182,15 @@ it. None carries an address, a hostname, a user agent or an org.
   `:apple`: what the user agent claims.
 - `reason` on `unverified_crawler` -- `:failed` (proven false: charged as
   `empty`), `:pending` (a lookup is running or was just started), `:error` (the
-  last lookup got no DNS answer), `:skipped` (no lookup could start),
+  last lookup got no DNS answer), `:forward_error` (the PTR named a host under
+  the engine's domain and that host's A/AAAA query got no answer, though it
+  had a full per-query budget, #2588; a forward query cut short by a slow PTR
+  answer is `:error`), `:skipped` (no lookup could start),
   `:unverifiable` (DuckDuckBot) or `:not_public` (a private or
   `TRUSTED_PROXIES` address, or a forwarding header nothing trusts). Every
   reason but `:failed` keeps the search-engine class, held to the browser
-  limit. A verified claim, and every claim while `KILN_CRAWLER_VERIFICATION` is
+  limit. The `lookup` event of a lookup that leaves a claim at
+  `:forward_error` reports `result` `:error` (or `:timeout`). A verified claim, and every claim while `KILN_CRAWLER_VERIFICATION` is
   off, emits nothing here.
 - `result` on `lookup` -- `:verified`, `:rejected`, `:timeout` (the 3-second
   deadline, or the resolver's own timeout) or `:error`. Its `reason` is `nil`,
@@ -220,9 +224,18 @@ Useful panels:
 - `sum(rate(kiln_cms_crawler_verification_skipped_count[5m])) by (reason)`:
   should be near zero. A steady `busy` rate means lookups are slow.
 
-Two warnings are also logged, each once per node: the first time the
-concurrency limit turns a lookup away, and after 20 lookups in a row got no DNS
-answer (that one names `KILN_CRAWLER_VERIFICATION=false`).
+Three warnings are also logged, each once per node: the first time the
+concurrency limit turns a lookup away, after 20 lookups in a row got no DNS
+answer (that one names `KILN_CRAWLER_VERIFICATION=false`), and "Crawler
+verification could not refund a rate-limit charge ..." if a lookup turned away
+as busy could not give back its lookup-budget charge (#2588; it then keeps the
+charge, and requests are unaffected).
+
+The resolver-health canary (#2588) emits no event and is not counted in
+`lookup`: with the smart 404 guard on, a node whose lookups have had no answer
+for a minute sends one PTR query a minute for `8.8.8.8` to tell a failing
+resolver from a silent reverse zone (see
+[Block scanners automatically](ip-blocking.md#block-scanners-automatically)).
 
 ## Breached-password checks
 

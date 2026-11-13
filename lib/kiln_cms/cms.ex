@@ -376,6 +376,7 @@ defmodule KilnCMS.CMS do
       define :release_media_quarantine, action: :release_quarantine
       define :adopt_media_item_into_image_backend, action: :adopt_into_image_backend
       define :list_expired_quarantined_media, action: :quarantine_expired, args: [:cutoff]
+      define :purge_quarantined_media_item, action: :purge_quarantined
     end
 
     # Cached on-the-fly transforms (`KilnCMS.Media.Derivatives`) — system-only,
@@ -886,6 +887,17 @@ defmodule KilnCMS.CMS do
       define :save_site_session_policy, action: :save
       define :record_sessions_revoked, action: :record_sessions_revoked
       define :sign_out_all_sessions, action: :sign_out_all
+    end
+
+    # Whether the site requires two-step sign-in, from whom, after how long
+    # (#2247). Read through `KilnCMS.Accounts.TwoFactorRequirement` (cached);
+    # `override_site_second_factor_policy` is the operator's way back in
+    # (`KilnCMS.Release.second_factor_requirement_off/1`).
+    resource KilnCMS.CMS.SiteSecondFactorPolicy do
+      define :list_site_second_factor_policy, action: :read
+      define :save_site_second_factor_policy, action: :save
+      define :update_site_second_factor_policy, action: :update
+      define :override_site_second_factor_policy, action: :operator_override
     end
 
     # The networks a site's console and sign-in may be reached from (#2248).
