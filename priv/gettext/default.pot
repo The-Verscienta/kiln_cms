@@ -5022,6 +5022,21 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
+msgid "Changing this setting needs a second factor from the last 15 minutes. A passkey can't confirm it at this address: add an authenticator app, then enter its code here."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Changing this setting needs a second factor from the last 15 minutes. Enter a current code from your authenticator app."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Changing this setting needs a second factor from the last 15 minutes. No authenticator app? Sign out and sign in again with your passkey, then save within 15 minutes."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
 msgid "Changing this setting needs a second factor from the last 15 minutes. Use a code, or sign in again with your passkey."
 msgstr ""
 
@@ -19628,6 +19643,7 @@ msgstr ""
 msgid "Set up a new authenticator app so you can keep signing in without using another recovery code."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up an authenticator app"
@@ -19639,6 +19655,7 @@ msgid "Set up my account"
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
@@ -23438,6 +23455,8 @@ msgid "This one's for members"
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "This opens on %{host}, where you sign in again."
 msgstr ""
@@ -25326,11 +25345,12 @@ msgid "We sent a code to %{email}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "We'll email you each time a passkey is added to your account."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "We'll email you when an authenticator app is added or replaced."
 msgstr ""
@@ -26272,7 +26292,7 @@ msgid_plural "You have %{count} passkeys set up."
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "You have %{max} passkeys, the most an account can hold. Remove one to add another."
 msgstr ""
@@ -26301,6 +26321,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "You need admin access to run a check."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You need to confirm your email address before you add a second factor. Do that on the two-step sign-in page, and add it there."
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex

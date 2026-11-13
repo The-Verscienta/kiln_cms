@@ -5022,6 +5022,21 @@ msgstr "Cambiar esto no mueve nada. Los archivos ya subidos se quedan donde se g
 
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
+msgid "Changing this setting needs a second factor from the last 15 minutes. A passkey can't confirm it at this address: add an authenticator app, then enter its code here."
+msgstr "Para cambiar este ajuste hace falta un segundo factor de los últimos 15 minutos. Una clave de acceso no puede confirmarlo en esta dirección: añade una aplicación de autenticación y luego introduce aquí su código."
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Changing this setting needs a second factor from the last 15 minutes. Enter a current code from your authenticator app."
+msgstr "Para cambiar este ajuste hace falta un segundo factor de los últimos 15 minutos. Introduce un código actual de tu aplicación de autenticación."
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Changing this setting needs a second factor from the last 15 minutes. No authenticator app? Sign out and sign in again with your passkey, then save within 15 minutes."
+msgstr "Para cambiar este ajuste hace falta un segundo factor de los últimos 15 minutos. ¿No tienes aplicación de autenticación? Cierra sesión, vuelve a iniciarla con tu clave de acceso y guarda antes de que pasen 15 minutos."
+
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
+#, elixir-autogen, elixir-format
 msgid "Changing this setting needs a second factor from the last 15 minutes. Use a code, or sign in again with your passkey."
 msgstr "Para cambiar este ajuste hace falta un segundo factor de los últimos 15 minutos. Usa un código o vuelve a iniciar sesión con tu clave de acceso."
 
@@ -19628,6 +19643,7 @@ msgstr "Configurar un nuevo autenticador"
 msgid "Set up a new authenticator app so you can keep signing in without using another recovery code."
 msgstr "Configura una nueva app de autenticación para seguir iniciando sesión sin gastar otro código de recuperación."
 
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up an authenticator app"
@@ -19639,6 +19655,7 @@ msgid "Set up my account"
 msgstr "Configurar mi cuenta"
 
 #: lib/kiln_cms_web/live/account_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
@@ -23438,6 +23455,8 @@ msgid "This one's for members"
 msgstr "Este texto es solo para miembros"
 
 #: lib/kiln_cms_web/live/account_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "This opens on %{host}, where you sign in again."
 msgstr "Se abre en %{host}, donde vuelves a iniciar sesión."
@@ -25326,11 +25345,12 @@ msgid "We sent a code to %{email}."
 msgstr "Enviamos un código a %{email}."
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "We'll email you each time a passkey is added to your account."
 msgstr "Le enviaremos un correo cada vez que se añada una clave de acceso a su cuenta."
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "We'll email you when an authenticator app is added or replaced."
 msgstr "Le enviaremos un correo cuando se añada o se sustituya una aplicación de autenticación."
@@ -26272,7 +26292,7 @@ msgid_plural "You have %{count} passkeys set up."
 msgstr[0] "Tiene %{count} clave de acceso configurada."
 msgstr[1] "Tiene %{count} claves de acceso configuradas."
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "You have %{max} passkeys, the most an account can hold. Remove one to add another."
 msgstr "Tienes %{max} claves de acceso, el máximo que admite una cuenta. Elimina una para añadir otra."
@@ -26302,6 +26322,11 @@ msgstr "Necesitas acceso de administrador para hacer eso."
 #, elixir-autogen, elixir-format
 msgid "You need admin access to run a check."
 msgstr "Necesitas acceso de administrador para ejecutar una comprobación."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You need to confirm your email address before you add a second factor. Do that on the two-step sign-in page, and add it there."
+msgstr "Necesitas confirmar tu dirección de correo antes de añadir un segundo factor. Hazlo en la página de inicio de sesión en dos pasos y añádelo allí."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format

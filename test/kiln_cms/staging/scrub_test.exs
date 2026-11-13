@@ -141,6 +141,34 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Security.Event, :count) == 0
     end
 
+    test "purges the instance security log (platform admins' addresses and IPs)" do
+      KilnCMS.Security.record_instance_event!(%{type: :backup_canceled},
+        actor: KilnCMS.Security.system()
+      )
+
+      assert Repo.aggregate(KilnCMS.Security.InstanceEvent, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.instance_security_events_purged >= 1
+      assert Repo.aggregate(KilnCMS.Security.InstanceEvent, :count) == 0
+    end
+
+    test "purges recorded 404 paths (production traffic data)" do
+      # authorize?: false: the 404 recorder runs with no actor, as a request does.
+      CMS.record_missed_path!(%{path: "/scrub-missed", locale: "en"},
+        authorize?: false,
+        tenant: KilnCMS.Accounts.default_org_id()
+      )
+
+      assert Repo.aggregate(KilnCMS.CMS.MissedPath, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.missed_paths_purged >= 1
+      assert Repo.aggregate(KilnCMS.CMS.MissedPath, :count) == 0
+    end
+
     test "purges pending security alerts (they would notify production admins)" do
       KilnCMS.Repo.transaction(fn ->
         KilnCMS.Security.AlertGate.insert_notice!(KilnCMS.Accounts.default_org_id(), %{

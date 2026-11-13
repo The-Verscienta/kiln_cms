@@ -51,6 +51,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.EnrolmentProof
+  alias KilnCMS.Accounts.Passkey
   alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMS.Accounts.WebAuthn
   alias KilnCMSWeb.SafeRedirect
@@ -178,16 +179,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
         {:noreply, put_flash(socket, :error, proof_first())}
 
       true ->
-        user = socket.assigns.current_user
-        challenge = WebAuthn.registration_challenge()
-
-        {:noreply,
-         socket
-         |> assign(:passkey_challenge, challenge)
-         |> push_event("passkey-register", %{
-           publicKey: WebAuthn.registration_options(challenge, user),
-           name: params["name"] || ""
-         })}
+        begin_passkey(socket, params)
     end
   end
 
@@ -330,6 +322,32 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
     end
   end
 
+  # As `/editor/settings`: the list is re-read, so a page opened below the cap
+  # does not start a ceremony the registration would refuse.
+  defp begin_passkey(socket, params) do
+    user = socket.assigns.current_user
+    passkeys = WebAuthn.list(user)
+
+    if at_passkey_limit?(passkeys) do
+      {:noreply,
+       socket
+       |> assign(:passkeys, passkeys)
+       |> put_flash(:error, TotpEnrolment.passkey_limit_message())}
+    else
+      challenge = WebAuthn.registration_challenge()
+
+      {:noreply,
+       socket
+       |> assign(:passkey_challenge, challenge)
+       |> push_event("passkey-register", %{
+         publicKey: WebAuthn.registration_options(challenge, user),
+         name: params["name"] || ""
+       })}
+    end
+  end
+
+  defp at_passkey_limit?(passkeys), do: length(passkeys) >= Passkey.max_per_account()
+
   defp default_return(tier) when tier in [:editor, :admin], do: ~p"/editor/overview"
   defp default_return(_tier), do: ~p"/account"
 
@@ -447,10 +465,14 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
               <.button phx-click="start_totp" variant="primary" class="mt-3">
                 {gettext("Set up a new authenticator")}
               </.button>
+              <TotpEnrolment.added_mail_note />
             </div>
           </div>
 
-          <TotpEnrolment.setup :if={@enrolling} enrolling={@enrolling} />
+          <div :if={@enrolling}>
+            <TotpEnrolment.setup enrolling={@enrolling} />
+            <TotpEnrolment.added_mail_note />
+          </div>
 
           <div :if={!@totp_enabled? && !@enrolling} class="space-y-3">
             <p class="text-sm text-base-content/70">
@@ -476,6 +498,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
             >
               {gettext("Set up an authenticator app")}
             </.button>
+            <TotpEnrolment.added_mail_note />
           </div>
         </section>
 
@@ -499,8 +522,16 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
               count: length(@passkeys)
             )}
           </p>
+          <p
+            :if={length(@passkeys) >= Passkey.max_per_account()}
+            id="passkeys-at-limit"
+            class="flex items-center gap-1.5 text-sm text-base-content/70"
+          >
+            <.icon name="hero-information-circle" class="size-4 shrink-0" />
+            {TotpEnrolment.passkey_limit_message()}
+          </p>
           <form
-            :if={!@passkey_challenge}
+            :if={!@passkey_challenge && length(@passkeys) < Passkey.max_per_account()}
             id="add-passkey-form"
             phx-submit="passkey_begin"
             class="flex items-end gap-2"
@@ -516,6 +547,16 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
               {gettext("Add a passkey")}
             </.button>
           </form>
+          <%!-- `Passkey.:register` mails the owner every time
+                (`NotifyFactorAdded`, `SecondFactorNotice`). Hidden with the
+                form once the account holds the most it may. --%>
+          <p
+            :if={length(@passkeys) < Passkey.max_per_account()}
+            id="passkey-added-mail"
+            class="text-xs text-base-content/70"
+          >
+            {gettext("We'll email you each time a passkey is added to your account.")}
+          </p>
           <div
             :if={@passkey_challenge}
             id="passkey-waiting"

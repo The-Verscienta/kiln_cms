@@ -403,6 +403,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
         |> live(~p"/account/two-factor")
 
       assert has_element?(view, "#two-factor-recovery-login")
+      assert has_element?(view, "#two-factor-recovery-login #totp-added-mail")
       view |> element("#two-factor-recovery-login button") |> render_click()
 
       staged = reload(user)
@@ -410,6 +411,70 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
       view |> form("#confirm-totp-form", %{"code" => code}) |> render_submit()
 
       assert reload(user).totp_secret != old_secret
+    end
+  end
+
+  # `NotifyFactorAdded` mails from this page as from `/editor/settings`
+  # (#2886): each line sits beside the control that adds a factor, and only
+  # while that control is there.
+  describe "the factor-added mail lines" do
+    @app_line "We'll email you when an authenticator app is added or replaced."
+    @passkey_line "We'll email you each time a passkey is added to your account."
+
+    test "the app line is beside setting one up and the setup form, and gone once it is on",
+         %{conn: conn} do
+      site = org("tfs-mail-app")
+      user = seed_user() |> member!(site)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      assert has_element?(view, "#two-factor-app #totp-added-mail", @app_line)
+
+      view |> element("#start-totp") |> render_click()
+      assert has_element?(view, "#confirm-totp-form")
+      assert has_element?(view, "#two-factor-app #totp-added-mail", @app_line)
+
+      staged = reload(user)
+      code = Totp.code_at(staged.totp_pending_secret, System.system_time(:second))
+      view |> form("#confirm-totp-form", %{"code" => code}) |> render_submit()
+
+      assert reload(user).totp_confirmed_at
+      refute has_element?(view, "#totp-added-mail")
+    end
+
+    test "the passkey line is beside the add form; at the limit the form and line give way to a note",
+         %{conn: conn} do
+      site = org("tfs-mail-passkey")
+      user = seed_user() |> member!(site)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      assert has_element?(view, "#two-factor-passkey #add-passkey-form")
+      assert has_element?(view, "#two-factor-passkey #passkey-added-mail", @passkey_line)
+
+      for _ <- 1..Accounts.Passkey.max_per_account() do
+        Ash.Seed.seed!(Accounts.Passkey, %{
+          user_id: user.id,
+          name: "Key",
+          credential_id: "cred-#{System.unique_integer([:positive])}",
+          public_key: <<1, 2, 3>>,
+          sign_count: 0
+        })
+      end
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      refute has_element?(view, "#add-passkey-form")
+      refute has_element?(view, "#passkey-added-mail")
+
+      assert has_element?(
+               view,
+               "#two-factor-passkey #passkeys-at-limit",
+               "the most an account can hold"
+             )
     end
   end
 
