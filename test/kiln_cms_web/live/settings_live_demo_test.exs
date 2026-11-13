@@ -93,6 +93,9 @@ defmodule KilnCMSWeb.SettingsLiveDemoTest do
     refute has_element?(lv, "#password-form")
     refute has_element?(lv, ~s(button[phx-click="start_totp"]))
     refute has_element?(lv, "#add-passkey-form")
+    # Nothing can be added, so neither line about mail for adding a factor.
+    refute has_element?(lv, "#totp-added-mail")
+    refute has_element?(lv, "#passkey-added-mail")
     # Every visitor shares the account, so its session list is everyone's
     # browsers — and "sign out of all other sessions" would sign them all out.
     refute has_element?(lv, "#session-list")

@@ -127,6 +127,17 @@ defmodule KilnCMSWeb.TwoFactorPasskeyTest do
       # Shipped hidden for the script to reveal; no inline script for it.
       assert count(html, "#two-factor-passkey[data-passkey-step-up][hidden]") == 1
       assert count(html, "#two-factor-passkey button[data-role='passkey-step-up']") == 1
+      # One help line (the code field's `aria-describedby`): the code, and a
+      # passkey hint shipped hidden, revealed with the button (#2828).
+      assert count(html, "#two-factor-help") == 1
+      assert html =~ "Enter the 6-digit code from your authenticator app."
+
+      assert count(
+               html,
+               "#two-factor-help #two-factor-passkey-hint[data-passkey-step-up-hint][hidden]"
+             ) == 1
+
+      assert html =~ "You can also use a passkey."
       refute Regex.match?(~r/<script(?![^>]*\ssrc=)(?![^>]*\snonce=)[^>]*>/, html)
     end
 
@@ -138,6 +149,10 @@ defmodule KilnCMSWeb.TwoFactorPasskeyTest do
 
       assert count(html, "#two-factor-form") == 1
       assert count(html, "#two-factor-passkey") == 0
+      assert count(html, "#two-factor-help") == 1
+      assert html =~ "Enter the 6-digit code from your authenticator app."
+      assert count(html, "#two-factor-passkey-hint") == 0
+      refute html =~ "You can also use a passkey."
     end
 
     test "offers no passkey on a tenant site host, where the ceremony cannot run", %{
@@ -150,6 +165,7 @@ defmodule KilnCMSWeb.TwoFactorPasskeyTest do
 
       assert count(html, "#two-factor-form") == 1
       assert count(html, "#two-factor-passkey") == 0
+      assert count(html, "#two-factor-passkey-hint") == 0
     end
 
     test "shows a passkey-only account no code fields", %{conn: conn} do
@@ -161,6 +177,10 @@ defmodule KilnCMSWeb.TwoFactorPasskeyTest do
       assert count(html, "#two-factor-form") == 0
       assert count(html, "#two-factor-recovery") == 0
       assert count(html, "#two-factor-passkey") == 1
+      assert count(html, "#two-factor-help") == 1
+      assert html =~ "Confirm it&#39;s you with your passkey."
+      assert count(html, "#two-factor-passkey-hint") == 0
+      refute html =~ "Enter the 6-digit code"
     end
   end
 

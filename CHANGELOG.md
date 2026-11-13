@@ -164,6 +164,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The fields admin says under Editor input that the choice changes only how editors fill a field in; the field's type and text format stay as they are.**
   ([#2880](https://github.com/The-Verscienta/kiln_cms/pull/2880) · [long form](docs/changelog/unreleased.md#editor-input-help-line))
 
+- **Team says how long an invitation link lasts and links its guide, Settings says adding a passkey or authenticator app emails you, and `/sign-in/verify` says a passkey works too when one can.**
+  ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#account-screens-help-text))
+
 - **Backups → History: a resumable run has a `?` tip beside Resume explaining what a resume reuses, and a media backup's "N parts" label links to how to restore a part set.**
   ([long form](docs/changelog/unreleased.md#backup-history-resume-tip-parts-link))
 
@@ -258,6 +261,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
   ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
+
+- **Password policy no longer describes Off as "not looked up at all": it covers this site only, and only `BREACHED_PASSWORD_CHECK=false` stops the check server-wide. Docs: the staging scrub table lists all its purges.**
+  ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#password-policy-off-description))
 
 - **Backup docs: the History import command for cron's backups now works (`bin/kiln_cms rpc`, not `bin/kiln eval`), and the manual multi-part media restore extracts only after a `--strict` checksum check passes.**
   ([long form](docs/changelog/unreleased.md#backup-docs-import-and-manual-restore))
