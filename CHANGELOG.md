@@ -80,6 +80,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`backup.sh` now refuses a `BACKUP_KEEP_DAYS` that is not a whole number of days from 1 to 2147483647, and keeps 14. A host that set `0` keeps 14 days of backups (check the disk); one that set `14d` on Linux, which pruned nothing, deletes backups older than 14 days at its next prune.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
 
+- **New scheduled egress: one node fetches Google's, Bing's, Apple's and DuckDuckGo's crawler IP lists over HTTPS every 6 h; allow the four hosts or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot outside its list is now charged as no user agent and counted by the 404 guard. No migration; rollback safe.**
+  ([long form](docs/changelog/unreleased.md#crawler-ip-ranges-upgrade))
+
 ### Breaking
 
 - **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
@@ -110,6 +113,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Account owners are emailed whenever an authenticator app is set up or replaced, or a passkey is added, with what to do if it wasn't them.**
   ([long form](docs/changelog/unreleased.md#second-factor-added-email))
+
+- **Search-engine claims are checked against Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists before DNS, so DuckDuckBot can be verified; new `KILN_CRAWLER_RANGES`, `KILN_CRAWLER_RANGES_CRON` and `ranges_fetch` metric.**
+  ([long form](docs/changelog/unreleased.md#crawler-ip-ranges))
 
 ### Changed
 

@@ -95,15 +95,17 @@ defmodule KilnCMS.CrawlerVerification.Engines do
   @doc """
   The HTTPS URL of `engine`'s published crawler range list, or `nil` when it
   publishes none or the operator turned it off. The operator's `:sources`
-  map overrides one engine at a time (see the moduledoc).
+  map overrides one engine at a time (see the moduledoc). An override that is
+  not an `https://` URL is ignored and the engine has no list: the list
+  decides which addresses are verified, so it is never fetched in the clear.
   """
   @spec range_source(atom()) :: String.t() | nil
   def range_source(engine) do
     overrides = Map.new(ranges_config()[:sources] || %{})
 
     case Map.fetch(overrides, engine) do
-      {:ok, url} when is_binary(url) -> if known?(engine), do: url
-      {:ok, _off} -> nil
+      {:ok, "https://" <> _ = url} -> if known?(engine), do: url
+      {:ok, _off_or_insecure} -> nil
       :error -> Map.get(@range_sources, engine)
     end
   end

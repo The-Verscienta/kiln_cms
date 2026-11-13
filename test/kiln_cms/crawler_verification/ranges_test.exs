@@ -317,6 +317,7 @@ defmodule KilnCMS.CrawlerVerification.RangesTest do
         Keyword.put(previous, :sources, %{
           bing: false,
           google: "https://mirror.example/g.json",
+          apple: "http://mirror.example/a.json",
           altavista: "https://x"
         })
       )
@@ -324,7 +325,8 @@ defmodule KilnCMS.CrawlerVerification.RangesTest do
       assert Engines.range_source(:bing) == nil
       assert Engines.range_source(:google) == "https://mirror.example/g.json"
       assert Engines.range_source(:duckduckgo) == Engines.default_range_sources().duckduckgo
-      assert Engines.range_source(:apple) == Engines.default_range_sources().apple
+      # A plain-http override is ignored outright: no list rather than one fetched in the clear.
+      assert Engines.range_source(:apple) == nil
       assert Engines.range_source(:altavista) == nil
       refute :bing in Engines.range_engines()
     end
