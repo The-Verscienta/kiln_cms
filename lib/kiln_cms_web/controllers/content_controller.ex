@@ -78,7 +78,8 @@ defmodule KilnCMSWeb.ContentController do
   # only way a reader reaches a non-default home (`/` is the default locale's,
   # and `/fr` alone is a slug), and the layout cannot ask whether a Home page
   # is published without a query on every cached render. So the address always
-  # answers, and a published Home page, an alias or a redirect still wins.
+  # answers, and a published Home page, an alias or a redirect still wins: it is
+  # a generated page in the funnel's last slot (`docs/decisions/0059-*`).
   defp stock_home(conn, slug, params) do
     if slug == StarterContent.home_slug() do
       conn
@@ -108,16 +109,17 @@ defmodule KilnCMSWeb.ContentController do
            payload(fetch, locale, ct, org_id, audiences)
          end) do
       nil ->
-        # A single segment that names no page may still name an event-shaped
-        # type's index (#766) — `/gigs` for a type served at `/gigs/<slug>`.
+        # A single segment that names no page may still name a generated page:
+        # an event-shaped type's index (#766) — `/gigs` for a type served at
+        # `/gigs/<slug>` — or the stock home at `/home` (#2636).
         #
         # LAST in the funnel, after the page, the alias, the redirect table, the
         # lock page and the teaser, and only ahead of the 404 itself. That order
-        # is the whole safety argument: this can only turn a 404 into an index,
+        # is the whole safety argument: this can only turn a 404 into a page,
         # never take a URL away from something that already answers there — a
         # `path_alias` of `/gigs` on some record, say, which nothing forbids.
-        # It also leaves an operator a way to replace the generated listing with
-        # a hand-built page at the same address.
+        # It also leaves an operator a way to replace a generated page: an alias
+        # or a redirect at the same address (`docs/decisions/0059-*`).
         follow_redirect_or_404(conn, "/" <> slug, ct, fn ->
           event_index(conn, slug, params) || stock_home(conn, slug, params)
         end)
@@ -195,9 +197,10 @@ defmodule KilnCMSWeb.ContentController do
   # alias, redirect, lock page or teaser at the address still wins.
   #
   # Not a route of its own, and `forms` is not a reserved path segment: either
-  # would have taken `/forms/<slug>` away from such a type outright. Before
-  # this the only browser GET under `/forms/` was the iframe document
-  # (`/forms/:slug/embed`), and the address the editor shows 404ed.
+  # would have taken `/forms/<slug>` away from such a type outright
+  # (`docs/decisions/0059-*`). Before this the only browser GET under `/forms/`
+  # was the iframe document (`/forms/:slug/embed`), and the address the editor
+  # shows 404ed.
   #
   # The form read goes through `KilnCMS.Forms.get_active/2` — the form's own
   # policies, scoped to this site's org — so an inactive form, or another
@@ -278,16 +281,17 @@ defmodule KilnCMSWeb.ContentController do
     follow_redirect_or_404(conn, "/" <> Enum.join(segments, "/"))
   end
 
-  # Every URL miss funnels here: first a multi-segment path alias (#485) —
-  # the canonical home of aliased content — then the redirect table (a
-  # published rename leaves a `CMS.Redirect` behind; resolution is live, no
-  # chains); anything unresolvable 404s as before.
-  # `ct` (when known) lets the flat-slug miss try a paywall teaser for that type.
+  # Every URL miss funnels here: first a path alias (#485) — the canonical home
+  # of aliased content, with its own lock page and teaser — then the redirect
+  # table (a published rename leaves a `CMS.Redirect` behind; resolution is
+  # live, no chains); anything unresolvable 404s as before.
+  # `ct` (when known) lets the flat-slug miss try a lock page and a paywall
+  # teaser for that type.
   #
   # Order matters: alias, then the redirect table, then the lock page, then the
-  # teaser, then 404. Both interstitials come after the redirect table, so a
-  # document that also has a legacy redirect still redirects — neither may shadow
-  # an editor's explicit routing decision.
+  # teaser, then `fallback`, then 404. Both interstitials come after the
+  # redirect table, so a document that also has a legacy redirect still
+  # redirects — neither may shadow an editor's explicit routing decision.
   #
   # Lock before teaser (#496), because the lock read already requires the reader
   # to satisfy the audience axis. A locked members-only post therefore shows the
@@ -295,11 +299,14 @@ defmodule KilnCMSWeb.ContentController do
   # is, which is the AND the two axes are supposed to compose to. The other order
   # would have shown every member a paywall they had already paid past.
   #
-  # `fallback` is one last thing to try before the 404 — the event index (#766)
-  # and the standalone form page (#2138) are the callers that pass one. It sits at the very end deliberately:
-  # a generated listing must never outrank a record that actually resolves at
-  # the same URL, and putting it here means the ordering is stated once, in the
-  # funnel, rather than inferred from which branch called what.
+  # `fallback` is one last thing to try before the 404: a generated page.
+  # `show_page/2` passes the event index (#766) and the stock `/home` (#2636),
+  # and `show_content/2` passes the standalone form page (#2138). It sits at the
+  # very end deliberately: a generated page must never outrank a record that
+  # actually resolves at the same URL, and putting it here means the ordering
+  # is stated once, in the funnel, rather than inferred from which branch called
+  # what. The rule, and when a page may have a route of its own instead, is
+  # `docs/decisions/0059-*`.
   defp follow_redirect_or_404(conn, path, ct \\ nil, fallback \\ fn -> nil end) do
     serve_alias(conn, path) ||
       case KilnCMS.CMS.Redirects.resolve(path, locale(conn), current_org_id(conn)) do
@@ -659,7 +666,7 @@ defmodule KilnCMSWeb.ContentController do
   # Not a route of its own: `/:slug` already owns single-segment delivery, and a
   # second route competing for it would have decided the page-vs-index
   # precedence in the router, where it is invisible. Here it is one branch, in
-  # order, with the reason next to it.
+  # order, with the reason next to it (`docs/decisions/0059-*`).
   #
   # No `Cache.fetch`: `from`/`until`/`page` are caller-chosen, so a cache key
   # built from them is unbounded — see `EventIndexController`'s moduledoc. The

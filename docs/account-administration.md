@@ -157,7 +157,9 @@ path alias under `/access-denied`, made before the upgrade that added this
 page is shadowed by it. Operators list such records with
 `mix kiln.reserved_paths` (in a release,
 `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) and give each a new
-slug or alias.
+slug or alias. When a built-in page reserves its address and when it waits
+behind your content instead:
+[ADR 0059](decisions/0059-a-generated-page-is-served-only-as-the-last-fallback-of-the-404-funnel-not-as-a-route-or-a-reserved-segment.md).
 
 Paging is `limit`/`offset` with one extra row read to decide whether "Next"
 exists — the authentication resource's primary read carries no `pagination`, and
