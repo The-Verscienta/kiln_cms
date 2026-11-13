@@ -74,6 +74,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `platform_security_alerts`). Blocked-address alerts are on for every site (up to one alert and one summary per 15 minutes; off under Security alerts → Blocked addresses). Existing webhook endpoints, Slack too, need `security.blocked_ip` ticked; until then a webhook-only site's "Security alerts reach someone" line reads Review.**
   ([long form](docs/changelog/unreleased.md#blocked-ip-alerts-upgrade))
 
+### Breaking
+
+- **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
+  ([long form](docs/changelog/unreleased.md#media-purge-quarantined))
+
 ### Added
 
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
@@ -164,6 +169,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The Backups page shows recovery-point and last-good badges on History rows and a last-good summary, explains the backup queue under Back up now, and hides Cancel on a finishing row.**
   ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
+
+- **Media trash: Delete permanently no longer deletes a file someone restored (one trashed during upload processing included), and Restore or Delete on a stale row says whether it was restored or deleted.**
+  ([long form](docs/changelog/unreleased.md#media-trash-stale-actions))
 
 ## [1.9.2] - 2026-11-12
 

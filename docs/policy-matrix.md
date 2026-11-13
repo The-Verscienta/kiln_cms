@@ -387,8 +387,9 @@ copy links a shared tag set through `Tagging`.
 |--------|:-----:|:------:|:------:|:---------:|
 | read | ✅ | ✅ | ✅ | ✅ |
 | `create`, `update` | ✅ | ✅ | ❌ | ❌ |
-| `destroy` (soft), `purge` (hard) | ✅ | ❌ | ❌ | ❌ |
-| `trashed` (read), `restore` (untrash) | ✅ | ❌ | ❌ | ❌ |
+| `destroy` (soft), `purge` (hard, trashed items only) | ✅ | ❌ | ❌ | ❌ |
+| `trashed` (read), `restore` (untrash, trashed items only) | ✅ | ❌ | ❌ | ❌ |
+| `purge_quarantined` (the pipeline's hard delete) | ❌ | ❌ | ❌ | ❌ |
 
 Media is world-readable because published content embeds it (featured images,
 inline assets).
@@ -398,9 +399,15 @@ flag as the **system actor**, through the plain `read` only (#1659); see
 [The system actor](#the-system-actor).
 
 The pipeline's own actions — `record_processing`, `release_quarantine`,
-`adopt_into_image_backend` and the cross-site `quarantine_expired` scan — are
-not an editor's. The first three are admin (bypass) or system actor only; `quarantine_expired` is the system
-actor's alone, admin included. See "The system actor" above.
+`adopt_into_image_backend`, the cross-site `quarantine_expired` scan and
+`purge_quarantined` — are not an editor's. The first three are admin (bypass)
+or system actor only. `quarantine_expired` and `purge_quarantined` are the
+system actor's alone, refused to admins too by policies above the admin
+bypass. `purge_quarantined` (#2610) is how the A/V strip and the quarantine
+reaper hard-delete an upload that was never trashed, and it takes only a row
+that is still quarantined. An admin deletes through the trash: `purge` takes
+only a trashed item, quarantined or not, and the system actor may not run it.
+See "The system actor" above.
 
 The routes that serve a media item's **bytes** — `/media/:id/download`,
 `/media/:id/stream` and the on-the-fly transforms at `/media/:id/t/:ops` — all

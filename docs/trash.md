@@ -101,7 +101,10 @@ The media library's trash (**Media**, then **Trash**, admins only) works the
 same way: **Delete permanently** removes a file that is still in the trash,
 along with its stored original, variants and cached transforms. If someone
 restored the file after your list loaded, the file and everything stored for
-it stay.
+it stay, including a file that was trashed while its upload was still being
+processed. **Restore** there likewise acts only on a file still in the
+trash. Either way, a refused click says what happened (see
+[What can go wrong](#what-can-go-wrong)) and the trash list reloads.
 
 ## What can go wrong
 
@@ -141,10 +144,22 @@ it stay.
   Delete permanently on a document that a "Don't allow it" reference field
   still links to says which field instead (see
   [Delete permanently](#delete-permanently)).
-- *That item is no longer in the trash — someone else restored or deleted
-  it.* (Media, Trash view) You clicked **Delete permanently** on a file another
-  admin restored or deleted after the trash list loaded. A restored file is
-  left in the library with all its stored files. The trash list reloads.
+- *Someone else already restored that item.* (Media, Trash view) You
+  clicked **Restore** or **Delete permanently** on a file another admin
+  restored after the trash list loaded. Nothing more was done: the file is
+  back in the library with all its stored files. The trash list reloads
+  without the row.
+- *That item is no longer in the trash — someone permanently deleted it.*
+  (Media, Trash view) You clicked **Restore** or **Delete permanently** on a
+  file another admin deleted for good after the trash list loaded. The trash
+  list reloads without the row.
+- *You don't have permission to restore media.* or *You don't have
+  permission to delete media.* (Media, Trash view) The policy refused you,
+  usually because you are no longer an admin of the site. Nothing was
+  written, and the row stays in the list.
+- *Couldn't restore that item.* or *Couldn't delete that item.* (Media,
+  Trash view) The action failed for another reason. Nothing was written, and
+  the row stays in the list.
 
 ## If someone is still editing it
 
@@ -243,10 +258,21 @@ were never saved, so paste them in again after the restore.
   :ok = CMS.purge_page!(page, actor: admin)
   ```
 
-  `KilnCMS.CMS.MediaItem`'s `:purge` takes a trashed item or a quarantined
-  one, the second being the media pipeline's purge of an upload it refused
-  or that never finished processing. A caller that deletes stored files
-  should do so only after the purge returns `:ok`, as the media library does.
+  `KilnCMS.CMS.MediaItem`'s `:purge` (`CMS.purge_media_item`) takes only a
+  trashed item too, quarantined or not (#2610). The media pipeline's purge of
+  an upload it refused or that never finished processing, which is never
+  trashed, is a separate action, `:purge_quarantined`
+  (`CMS.purge_quarantined_media_item`). It takes only a row that is still
+  quarantined, and only `KilnCMS.Media.system/0` may run it: every person,
+  admins included, is refused (`Ash.Error.Forbidden`), and the system actor
+  may not run `:purge`. A caller that deletes stored files should do so only
+  after the purge returns `:ok`, as the media library does.
+- `KilnCMS.CMS.MediaItem`'s `:restore` (`CMS.restore_media_item`) takes only
+  a row that is still trashed (#2611), like content's. A struct loaded while
+  the item was in the trash gets the same `StaleRecord` once someone has
+  restored or purged it, instead of a restore that "succeeds" on a live item.
+  The media trash tells the two apart with one ordinary read by id
+  (`CMS.get_media_item`): found means restored, not found means deleted.
 - `KilnCMS.CMS.ContentTypes.can_restore?/4` and
   `KilnCMS.CMS.ContentTypes.can_purge?/4` ask the `:restore` and `:purge`
   policies for one record, like `can_destroy?/4` above. The Trash page asks

@@ -110,6 +110,41 @@ carries the reasoning.
   security event, so the site's admins get a `webhook_changed` silencing
   notice. Tick it again after rolling forward. (Part of #2245.)
 
+## Breaking
+
+<a id="media-purge-quarantined"></a>
+
+- **Overlay and plugin code: `purge_media_item` takes only a trashed item, the media system actor purges through the new `purge_quarantined_media_item`, and `restore_media_item` refuses an item no longer in the trash (#2610, #2611).**
+  1.9 let `KilnCMS.CMS.MediaItem`'s `:purge` hard-delete a trashed item *or*
+  a quarantined one, the second for the media pipeline's purge of an upload
+  it refused or that never finished processing. That branch applied to the
+  admin trash too, so an item trashed while still quarantined and restored
+  since could be hard-deleted from a stale trash list (see
+  [Fixed](#media-trash-stale-actions)). Now:
+  - **`CMS.purge_media_item` (`:purge`)** takes only a trashed item. An
+    untrashed one, quarantined or not, returns `Ash.Error.Invalid` holding
+    `Ash.Error.Changes.StaleRecord` and changes nothing. Trash it first with
+    `destroy_media_item`.
+  - **`KilnCMS.Media.system/0` can no longer run `:purge`** (`Ash.Error.Forbidden`).
+    The pipeline's purge is the new `CMS.purge_quarantined_media_item`
+    (`:purge_quarantined`), which `AVStripWorker` and `QuarantineReaper` now
+    call. It deletes only a row that is still quarantined, and only the media
+    system actor may run it: an editor, an admin of the site and a platform
+    admin are all refused (`Forbidden`), and so is the system actor on an
+    item whose quarantine has been released. Overlay code that purged a
+    quarantined upload as `Media.system()` through `purge_media_item` must
+    switch to `purge_quarantined_media_item`.
+  - **`CMS.restore_media_item` (`:restore`)** takes only a trashed item. On
+    an item someone already restored or permanently deleted it returns the
+    same `StaleRecord` error, where before it succeeded (or, for a deleted
+    item, failed with whatever error the missing row produced).
+
+  The API never exposed either action, so no JSON:API, GraphQL or MCP
+  response changes. The AshAdmin delete actions for media are unchanged
+  (`:purge_quarantined` is not offered there). No migration and no config;
+  rolling back is safe (nothing is stored differently). Guide:
+  [Trash and restore](../trash.md#for-developers).
+
 ## Added
 
 <a id="backup-schedules"></a>
@@ -765,3 +800,35 @@ carries the reasoning.
   failed or interrupted, and the trigger reads **Manual**, **Cron** or
   **Console** instead of the raw value. No migration and no configuration.
   See [Backup history](../backups.md#backup-history-2217). (#2542)
+
+<a id="media-trash-stale-actions"></a>
+
+- **The media library's trash no longer permanently deletes a file someone restored after the list loaded, and its Restore and Delete permanently say what happened when someone else got there first (#2610, #2611).**
+  Two gaps left by #2531, which gave content's Trash page this handling and
+  gave media only part of it.
+  - **A restored upload could still be deleted (#2610).** `:purge` deleted
+    any row still quarantined as well as any trashed one, for the media
+    pipeline. So a file trashed while its upload was still being processed,
+    then restored by another admin, was hard-deleted, with its stored
+    original, variants and cached transforms, when someone clicked
+    **Delete permanently** on the stale row. That click is now refused and
+    every file kept. The pipeline purges through its own action (see
+    [Breaking](#media-purge-quarantined)).
+  - **Restore on a stale row (#2611).** `:restore` took any row, so
+    **Restore** on a file another admin had already restored "succeeded" and
+    flashed *Restored …*, and on one someone had deleted for good it said
+    *You don't have permission to restore media.* It now acts only on a file
+    still in the trash.
+  - **What admins see** in **Media** → **Trash**: **Restore** or **Delete
+    permanently** on a file someone else restored says *Someone else already
+    restored that item.*; on one someone permanently deleted it says *That
+    item is no longer in the trash — someone permanently deleted it.* These
+    are the Trash page's messages, and they replace *That item is no longer
+    in the trash — someone else restored or deleted it.* The trash list
+    reloads either way. A refusal by the policy keeps *You don't have
+    permission to restore media.* / *…to delete media.*; any other failure
+    now says *Couldn't restore that item.* / *Couldn't delete that item.*
+    instead of the permission message, and the row stays listed.
+
+  No migration and no config. Guide:
+  [Trash and restore](../trash.md#what-can-go-wrong).
