@@ -88,13 +88,21 @@ defmodule KilnCMS.Backups.StepWorker do
   def perform(%Oban.Job{args: args} = job) do
     with :ok <- affinity(job) do
       # `:duplicate` keys: a test drains every step in one process. The
-      # heartbeat's self-fence kills what is registered here.
-      {:ok, _} = Registry.register(KilnCMS.Backups.StepRegistry, args["chain"], args["step"])
+      # heartbeat kills what is registered here: every step on its self-fence,
+      # and a step whose job is canceled or otherwise over, by the job id
+      # (#2538). Unregistered on the way out, so a step that returned is never
+      # seen with its job already acked.
+      value = {args["step"], job.id}
+      {:ok, _} = Registry.register(KilnCMS.Backups.StepRegistry, args["chain"], value)
 
-      case Chain.begin_step(job) do
-        {:ok, lease} -> run(lease, job)
-        {:error, :superseded} -> {:cancel, :superseded}
-        {:error, reason} -> {:error, reason}
+      try do
+        case Chain.begin_step(job) do
+          {:ok, lease} -> run(lease, job)
+          {:error, :superseded} -> {:cancel, :superseded}
+          {:error, reason} -> {:error, reason}
+        end
+      after
+        Registry.unregister_match(KilnCMS.Backups.StepRegistry, args["chain"], value)
       end
     end
   end

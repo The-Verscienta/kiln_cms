@@ -22,7 +22,9 @@ defmodule KilnCMS.Backups.Recorder do
   in `state.json` (`to_state/1`, `load/3`), which a step must write, rather than
   in the Run row, which is best-effort: a step that missed a Run write still
   hands the next step everything, and the run is closed from that. A step only
-  writes a Run whose `chain_id` is its own chain's.
+  writes a Run whose `chain_id` is its own chain's, and the UPDATE enforces it
+  (`KilnCMS.Backups.Run.Changes.OwnChain`, #2538): a step that outlived its
+  Cancel can't write over a resume of the same run.
   """
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Redact}

@@ -174,6 +174,46 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
                :canceled
     end
 
+    test "record_progress, finish and fail refuse a run another chain re-opened (#2538)" do
+      chain_a = Ash.UUID.generate()
+      chain_b = Ash.UUID.generate()
+      ours = run!(%{chain_id: chain_a})
+
+      failed = Backups.fail_run!(ours, %{error: "boom"}, actor: Backups.system())
+      Backups.resume_run!(failed, %{chain_id: chain_b}, actor: Backups.system())
+
+      # `ours` is what a step of chain a still holds: running, under a.
+      for call <- [
+            &Backups.record_run_progress(&1, %{}, actor: Backups.system()),
+            &Backups.finish_run(&1, %{}, actor: Backups.system()),
+            &Backups.fail_run(&1, %{error: "late"}, actor: Backups.system())
+          ] do
+        assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+                 call.(ours)
+      end
+
+      assert %{status: :running, chain_id: ^chain_b} =
+               Backups.get_run!(ours.id, actor: Backups.system())
+    end
+
+    test "a run with no chain is written through a struct with no chain, and only that" do
+      # A run from before #2218: the stale-run sweep fails it as it reads it.
+      legacy = run!()
+      assert legacy.chain_id == nil
+
+      assert {:ok, %{status: :failed} = failed} =
+               Backups.fail_run(legacy, %{error: "Interrupted"}, actor: Backups.system())
+
+      chain = Ash.UUID.generate()
+      Backups.resume_run!(failed, %{chain_id: chain}, actor: Backups.system())
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.fail_run(legacy, %{error: "late"}, actor: Backups.system())
+
+      assert %{status: :running, chain_id: ^chain} =
+               Backups.get_run!(legacy.id, actor: Backups.system())
+    end
+
     test "mark_pruned updates a finished run's artifacts" do
       run = Backups.finish_run!(run!(), %{}, actor: Backups.system())
 

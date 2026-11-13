@@ -89,6 +89,16 @@ defmodule KilnCMS.Backups.StepWorkerTest do
     assert {:snooze, 30} = perform_job(StepWorker, args(Ash.UUID.generate()))
   end
 
+  test "a step is unregistered once it returns, so the heartbeat never sees it done (#2538)", %{
+    local: local
+  } do
+    %{"chain" => chain} = job_args = args(local)
+    {:ok, _job} = Oban.insert(StepWorker.new(job_args))
+
+    assert %{cancelled: 1} = Oban.drain_queue(queue: :backup_steps, with_scheduled: false)
+    assert Registry.lookup(KilnCMS.Backups.StepRegistry, chain) == []
+  end
+
   test "a shared directory id runs anywhere: the step goes on to claim the lock", %{
     local: local
   } do

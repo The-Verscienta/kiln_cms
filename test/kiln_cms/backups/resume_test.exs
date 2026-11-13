@@ -771,6 +771,100 @@ defmodule KilnCMS.Backups.ResumeTest do
 
   # -- the work-directory sweep ----------------------------------------------
 
+  # -- #2538: the wait after a Cancel ----------------------------------------
+
+  describe "resumable_run/3 right after a Cancel (#2538)" do
+    setup %{dir: dir} do
+      now = DateTime.utc_now()
+      window = Backups.Heartbeat.settled_after_ms()
+
+      at = fn offset_ms -> DateTime.add(now, -window + offset_ms, :millisecond) end
+
+      seed = fn stamp, status, finished_at ->
+        run =
+          Ash.Seed.seed!(Backups.Run, %{stamp: stamp, status: status, finished_at: finished_at})
+
+        work = WorkState.path(dir, stamp)
+        File.mkdir_p!(work)
+        :ok = WorkState.write(work, WorkState.new(stamp))
+        run
+      end
+
+      %{now: now, at: at, seed: seed}
+    end
+
+    test "is refused until the window has passed, with the seconds left", %{
+      now: now,
+      at: at,
+      seed: seed
+    } do
+      seed.("20260101-000001", :canceled, at.(1_000))
+      seed.("20260101-000002", :canceled, at.(-1_000))
+      seed.("20260101-000003", :canceled, at.(window_ms() - 1))
+
+      assert {:error, {:canceled_recently, 1}} = Backups.resumable_run("20260101-000001", now)
+      assert {:ok, _} = Backups.resumable_run("20260101-000002", now)
+
+      assert {:error, {:canceled_recently, seconds}} =
+               Backups.resumable_run("20260101-000003", now)
+
+      assert seconds == div(window_ms(), 1000)
+    end
+
+    test "a run that just failed, or a canceled one with no finished_at, is not held back", %{
+      now: now,
+      seed: seed
+    } do
+      seed.("20260101-000004", :failed, now)
+      seed.("20260101-000005", :canceled, nil)
+
+      assert {:ok, _} = Backups.resumable_run("20260101-000004", now)
+      assert {:ok, _} = Backups.resumable_run("20260101-000005", now)
+    end
+
+    defp window_ms, do: Backups.Heartbeat.settled_after_ms()
+  end
+
+  describe "a resume start inside the window (#2538)" do
+    @describetag :pg_tools
+
+    # A promoted or retried start (no request-path check) waits out what is
+    # left of the window in the step, then resumes.
+    test "waits, logs the wait on the run, and succeeds", %{base: base, dir: dir} do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp} = fail_at_part_3(dir, tools)
+      window = Backups.Heartbeat.settled_after_ms()
+
+      canceled_at = fn offset_ms ->
+        at = DateTime.add(DateTime.utc_now(), -window + offset_ms, :millisecond)
+
+        {1, _} =
+          KilnCMS.Repo.update_all(
+            from(r in "backup_runs", where: r.id == type(^failed.id, :binary_id)),
+            set: [status: "canceled", finished_at: at]
+          )
+      end
+
+      # Settled when requested; one second inside the window when it starts.
+      canceled_at.(-1_000)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        canceled_at.(1_000)
+        started = System.monotonic_time(:millisecond)
+        BackupChain.drain()
+        assert System.monotonic_time(:millisecond) - started >= 1_000
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded} = run] = runs()
+      assert Enum.any?(run.log, &(&1.message =~ ~r/\AWaited \d+ s after the Cancel/))
+      assert dump_count(tools) == 1
+    end
+  end
+
   describe "Worker.sweep_work_dirs/2" do
     test "removes stamp-named work dirs older than three days, and only those", %{dir: dir} do
       old = work_dir!(dir, "20200101-000000", 4)

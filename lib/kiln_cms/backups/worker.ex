@@ -39,7 +39,9 @@ defmodule KilnCMS.Backups.Worker do
   # A refusal is final (`{:cancel, reason}`): retrying a request the lock or
   # `resumable_run/2` refused would only refuse again. Except a queue holding a
   # request of another kind (#2540): that clears, so the job waits a minute and
-  # asks again (logged on the first wait only).
+  # asks again (logged on the first wait only). And a resume of a backup
+  # canceled moments ago (#2538): that clears too, so the job waits out what
+  # is left of the window.
   @impl Oban.Worker
   def perform(%Oban.Job{args: args} = job) do
     opts = [trigger: Map.get(args, "trigger", "manual")]
@@ -57,6 +59,10 @@ defmodule KilnCMS.Backups.Worker do
           do: Logger.info("Legacy backup job waits: #{inspect(queued)} is queued; asking again")
 
         {:snooze, 60}
+
+      {:error, {:canceled_recently, seconds}} ->
+        Logger.info("Legacy backup job waits #{seconds} s: that backup was canceled moments ago")
+        {:snooze, seconds}
 
       {:error, reason} ->
         Logger.warning("Legacy backup job refused: #{inspect(reason)}")

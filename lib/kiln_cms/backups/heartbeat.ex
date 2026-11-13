@@ -8,13 +8,14 @@ defmodule KilnCMS.Backups.Heartbeat do
     1. **Beat**: upsert this node's `KilnCMS.Backups.NodeBeat` (its Oban node
        name, this boot's `KilnCMS.Backups.boot_id/0`, its backup-dir id), with
        the database's `now()`, never this node's clock.
-    2. **Sweep**: `KilnCMS.Backups.Chain.reclaim_stale/0` (a holder whose node
+    2. **Stop canceled steps**, after a successful beat only (below).
+    3. **Sweep**: `KilnCMS.Backups.Chain.reclaim_stale/0` (a holder whose node
        has not beaten for 180 s, or
        restarted, loses the lock and its step is requeued with the attempts it
        has left) and `KilnCMS.Backups.Chain.reap/0` (a holder whose step job
        ended without moving the chain on: the run fails as interrupted and the
        queued request starts). Through the Lock's `:reclaim_stale` action.
-    3. Hourly, prune the beats of nodes gone for a day.
+    4. Hourly, prune the beats of nodes gone for a day.
 
   ## Self-fence
 
@@ -25,6 +26,26 @@ defmodule KilnCMS.Backups.Heartbeat do
   `KilnCMS.Backups.StepRegistry` (a step job registers itself), and
   `KilnCMS.ExternalCommand`'s watchers kill the `pg_dump`, `tar` or `rclone`
   each started. Two nodes must never write the same backup's files at once.
+
+  ## A step whose job was canceled (#2538)
+
+  Cancel (`Oban.cancel_all_jobs/2`) and a reclaim (`Oban.cancel_job/2`) stop
+  an executing step through Oban's notifier, which a node cut off from the
+  database misses, and a partition that heals before the self-fence fires
+  never fences. So after every successful beat this node looks up the Oban
+  job of each step registered here (a step registers `{step, job_id}`) and
+  kills each one whose job is `cancelled`, `completed` or `discarded`; the
+  watchers stop its external command as above. A live step's job is
+  `executing` until its own ack, and the step unregisters before it returns,
+  so a step in its normal tail, or a new chain's, is never stopped.
+
+  A job row that is missing is NOT a reason to kill: a failover to a lagging
+  standby or a database restore can lose a row whose step is legitimately
+  running. Such a step is left to the self-fence and the lock's lease.
+
+  A node that reconnects stops the step on its first successful beat, at
+  most one interval later. A beat that hangs on a half-open connection
+  (database timeouts) delays that, and the self-fence with it.
 
   ## Node names must be unique
 
@@ -39,6 +60,8 @@ defmodule KilnCMS.Backups.Heartbeat do
   """
   use GenServer
 
+  import Ecto.Query
+
   alias KilnCMS.Backups
   alias KilnCMS.Backups.DirId
 
@@ -47,11 +70,13 @@ defmodule KilnCMS.Backups.Heartbeat do
   @interval_ms 30_000
   @fence_after_ms 90_000
   @prune_every_ms :timer.hours(1)
+  @terminal_job_states ["cancelled", "completed", "discarded"]
 
   @type state :: %{
           node: String.t(),
           boot_id: String.t(),
           last_beat: integer() | nil,
+          beat_ok?: boolean(),
           started: integer(),
           last_prune: integer() | nil
         }
@@ -104,21 +129,24 @@ defmodule KilnCMS.Backups.Heartbeat do
       node: Keyword.get_lazy(opts, :node, fn -> Oban.config().node end),
       boot_id: Keyword.get_lazy(opts, :boot_id, &Backups.boot_id/0),
       last_beat: nil,
+      beat_ok?: false,
       started: now_ms(),
       last_prune: nil
     }
   end
 
   @doc """
-  One beat: check the row, beat, fence if beating has failed for too long,
-  sweep the lock, prune. Returns the next state. Never raises: each part logs
-  its own failure and the next tick tries again.
+  One beat: check the row, beat, stop the steps whose job was canceled (after
+  a successful beat), fence if beating has failed for too long, sweep the
+  lock, prune. Returns the next state. Never raises: each part logs its own
+  failure and the next tick tries again.
   """
   @spec tick(state()) :: state()
   def tick(state) do
     state
     |> check_shared_name()
     |> beat()
+    |> stop_canceled()
     |> fence()
     |> sweep()
     |> prune()
@@ -159,16 +187,65 @@ defmodule KilnCMS.Backups.Heartbeat do
 
     case Backups.beat_node(attrs, actor: Backups.system()) do
       {:ok, _beat} ->
-        %{state | last_beat: now_ms()}
+        Map.merge(state, %{last_beat: now_ms(), beat_ok?: true})
 
       {:error, error} ->
         Logger.warning("Backup heartbeat failed: #{Exception.message(error)}")
-        state
+        Map.put(state, :beat_ok?, false)
     end
   rescue
     error ->
       Logger.warning("Backup heartbeat failed: #{Exception.message(error)}")
+      Map.put(state, :beat_ok?, false)
+  end
+
+  # Only after a successful beat: the job states it reads are then the
+  # database's current ones, not a guess from a node that can't reach it.
+  defp stop_canceled(%{beat_ok?: true} = state) do
+    case registered_jobs() do
+      [] -> :ok
+      steps -> stop_terminal(steps)
+    end
+
+    state
+  rescue
+    error ->
+      Logger.warning(
+        "Backup heartbeat couldn't check its steps' jobs: #{Exception.message(error)}"
+      )
+
       state
+  end
+
+  defp stop_canceled(state), do: state
+
+  # `{pid, job_id}` of every step registered with a job id. Other values (a
+  # step from before #2538 registered its name alone) are left to the fence.
+  defp registered_jobs do
+    Registry.select(KilnCMS.Backups.StepRegistry, [
+      {{:_, :"$1", {:_, :"$2"}}, [{:is_integer, :"$2"}], [{{:"$1", :"$2"}}]}
+    ])
+  end
+
+  defp stop_terminal(steps) do
+    ids = steps |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+
+    states =
+      KilnCMS.Repo.all(from(j in Oban.Job, where: j.id in ^ids, select: {j.id, j.state}))
+      |> Map.new()
+
+    # A missing row is not terminal: see the moduledoc.
+    pids =
+      for {pid, id} <- steps, Map.get(states, id) in @terminal_job_states, uniq: true, do: pid
+
+    if pids != [] do
+      Logger.error(
+        "Backup heartbeat: stopping #{length(pids)} backup step(s) whose job was canceled " <>
+          "or has ended, a signal this node missed while it couldn't reach the database"
+      )
+
+      Enum.each(pids, &Process.exit(&1, :kill))
+    end
   end
 
   defp fence(state) do

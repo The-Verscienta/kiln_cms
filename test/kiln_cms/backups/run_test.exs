@@ -208,6 +208,35 @@ defmodule KilnCMS.Backups.RunTest do
       assert %{chain_id: ^chain_a} = Backups.get_run!(quiet.id, actor: Backups.system())
     end
 
+    # #2538: the Cancel cooldown lives only in the filter (the early check
+    # keeps the Resume button visible), so a refusal here is the filter's.
+    test "a run canceled moments ago passes the early check but the filter refuses it" do
+      now = DateTime.utc_now()
+
+      canceled =
+        Ash.Seed.seed!(Backups.Run, %{stamp: stamp(), status: :canceled, finished_at: now})
+
+      assert Backups.run_resumable?(canceled)
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.resume_run(canceled, %{}, actor: Backups.system())
+
+      settled =
+        DateTime.add(now, -(Backups.Heartbeat.settled_after_ms() + 1_000), :millisecond)
+
+      for finished_at <- [settled, nil] do
+        run =
+          Ash.Seed.seed!(Backups.Run, %{
+            stamp: stamp(),
+            status: :canceled,
+            finished_at: finished_at
+          })
+
+        assert {:ok, %{status: :running}} =
+                 Backups.resume_run(run, %{}, actor: Backups.system())
+      end
+    end
+
     test "refuses a succeeded, skipped or imported run" do
       done = Backups.finish_run!(start!(), %{}, actor: Backups.system())
 

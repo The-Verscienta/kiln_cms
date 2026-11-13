@@ -33,7 +33,7 @@ defmodule KilnCMS.Backups.Run do
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer]
 
-  alias KilnCMS.Backups.Run.Changes.{Cancel, Normalize, Resume}
+  alias KilnCMS.Backups.Run.Changes.{Cancel, Normalize, OwnChain, Resume}
 
   # `:canceled` (#2218) comes last: a platform admin stopped the run. Widening
   # the check constraint is expand-safe; an older node READING a canceled row
@@ -119,13 +119,15 @@ defmodule KilnCMS.Backups.Run do
     end
 
     # The chain's writes (`record_progress`, `finish`, `fail`) only land on a
-    # run that is still `running` (#2218): a step canceled or superseded meanwhile
-    # gets a `StaleRecord` error (the recorder logs it) instead of overwriting
-    # `canceled` or a newer outcome.
+    # run that is still `running` (#2218) under the writer's own chain
+    # (`OwnChain`, #2538): a step canceled or superseded meanwhile gets a
+    # `StaleRecord` error (the recorder logs it) instead of overwriting
+    # `canceled`, a newer outcome, or a resume's progress.
     update :record_progress do
       accept [:components, :artifacts, :log]
       require_atomic? false
       change filter(expr(status == :running))
+      change OwnChain
       change Normalize
     end
 
@@ -133,6 +135,7 @@ defmodule KilnCMS.Backups.Run do
       accept [:components, :artifacts, :log]
       require_atomic? false
       change filter(expr(status == :running))
+      change OwnChain
       change set_attribute(:status, :succeeded)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize
@@ -142,6 +145,7 @@ defmodule KilnCMS.Backups.Run do
       accept [:components, :artifacts, :log, :error]
       require_atomic? false
       change filter(expr(status == :running))
+      change OwnChain
       change set_attribute(:status, :failed)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize

@@ -13,6 +13,8 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
   import Phoenix.LiveViewTest
 
+  require Ecto.Query
+
   alias KilnCMS.Accounts.User
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Manifest
@@ -868,7 +870,26 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
       assert has_element?(lv, ~s|#{row} button[data-role="resume"]|)
 
-      # Resume on the canceled row requests it again.
+      # Right after the Cancel, Resume says how long to wait (#2538)...
+      html = lv |> element(~s|#{row} button[data-role="resume"]|) |> render_click()
+      assert html =~ "canceled moments ago"
+      assert html =~ ~r/Resume it again in \d+ seconds?/
+      assert Backups.in_flight() == nil
+
+      # ...and once the Cancel has settled, it requests it again.
+      settled =
+        DateTime.add(
+          DateTime.utc_now(),
+          -(Backups.Heartbeat.settled_after_ms() + 1_000),
+          :millisecond
+        )
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          Ecto.Query.from(r in "backup_runs", where: r.stamp == ^stamp),
+          set: [finished_at: settled]
+        )
+
       html = lv |> element(~s|#{row} button[data-role="resume"]|) |> render_click()
       assert html =~ "Backup resumed"
       assert %{stamp: ^stamp} = Backups.in_flight()
@@ -1481,7 +1502,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       assert has_element?(
                lv,
-               ~s|#backup-run-#{canceled.id} button[data-role="resume"][title="Continue this canceled backup from the files it already wrote."]|
+               ~s|#backup-run-#{canceled.id} button[data-role="resume"][title="Continue this canceled backup from the files it already wrote. Right after a Cancel, wait about two and a half minutes."]|
              )
 
       assert has_element?(
@@ -1619,11 +1640,11 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
     for {locale, help, canceled, failed, keep} <- [
           {"es", "solo una espera",
-           "Continúa esta copia de seguridad cancelada a partir de los archivos que ya escribió.",
+           "Continúa esta copia de seguridad cancelada a partir de los archivos que ya escribió. Justo después de cancelarla, espera unos dos minutos y medio.",
            "Continúa esta copia de seguridad fallida a partir de los archivos que ya escribió.",
            "Punto de recuperación"},
           {"fr", "une seule attend",
-           "Reprendre cette sauvegarde annulée à partir des fichiers déjà écrits.",
+           "Reprendre cette sauvegarde annulée à partir des fichiers déjà écrits. Juste après une annulation, attendez environ deux minutes et demie.",
            "Reprendre cette sauvegarde échouée à partir des fichiers déjà écrits.",
            "Point de restauration"}
         ] do
