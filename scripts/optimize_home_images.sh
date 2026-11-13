@@ -50,6 +50,7 @@ WEBP_Q="${WEBP_QUALITY:-80}"
 JPG_Q="${JPEG_QUALITY:-78}"
 
 die() { echo "optimize_home_images: $*" >&2; exit 1; }
+warn() { echo "optimize_home_images: $*" >&2; }
 
 command -v cwebp >/dev/null || die "cwebp not found (brew install webp / apt install webp)"
 
@@ -135,31 +136,63 @@ image_width() {
 # docs [<guide>...] — derive the named guides' screenshots, or every guide's
 # under raw/ when none is named.
 docs() {
-  local guides=() dir
+  local guide dir derived=()
+  old_layout_hint
   if [ "$#" -gt 0 ]; then
-    guides=("$@")
+    # Every name is checked before anything is written.
+    for guide in "$@"; do
+      guide_name_ok "$guide" || die "a guide is named like its docs/<guide>.md basename (lowercase letters, digits, '-' and '.'), not '$guide'"
+    done
+    for guide in "$@"; do
+      docs_guide "$guide"
+      derived+=("$guide")
+    done
   else
     for dir in "$RAW"/*/; do
-      if [ -d "$dir" ]; then guides+=("$(basename "$dir")"); fi
+      [ -d "$dir" ] || continue
+      guide="$(basename "$dir")"
+      if ! guide_name_ok "$guide"; then
+        warn "skipping $dir: not named like a docs/<guide>.md basename"
+      elif ! has_file "$dir" '*.jpg'; then
+        warn "skipping $dir: no .jpg in it"
+      else
+        docs_guide "$guide"
+        derived+=("$guide")
+      fi
     done
   fi
-  # `${guides[@]}` of an empty array is an unbound variable to bash 3.2's `set -u`.
-  [ "${#guides[@]}" -gt 0 ] || die "no $RAW/<guide>/ folder — run a guide's capture spec under e2e/screenshots/ first"
+  # `${derived[@]}` of an empty array is an unbound variable to bash 3.2's `set -u`.
+  [ "${#derived[@]}" -gt 0 ] || die "no $RAW/<guide>/*.jpg — run a guide's capture spec under e2e/screenshots/ first"
 
-  local guide
-  for guide in "${guides[@]}"; do
-    docs_guide "$guide"
-  done
-  for guide in "${guides[@]}"; do
+  for guide in "${derived[@]}"; do
     ( cd "$ROOT" && find "docs/images/$guide" -type f -name '*.webp' -exec ls -l {} + | awk '{print $5, $9}' )
   done
+}
+
+# The name becomes a path under docs/images/, as the guide's basename does
+# (`roadmap-1.0` for docs/roadmap-1.0.md). It cannot start with a dot, so
+# neither `.` nor `..` passes.
+guide_name_ok() { [[ "$1" =~ ^[a-z0-9][a-z0-9.-]*$ ]]; }
+
+# Captures from before #2460 sat in raw/ itself as workflow-<n>-<name>.jpg.
+old_layout_hint() {
+  if has_file "$RAW" 'workflow-*.jpg'; then
+    warn "$RAW/workflow-*.jpg is the old layout and is not read: move them to $RAW/editorial-workflow/ and drop the 'workflow-' prefix"
+  fi
+}
+
+# has_file <dir> <glob> — whether the glob matches a file in dir.
+has_file() {
+  local src
+  for src in "$1"/$2; do
+    if [ -f "$src" ]; then return 0; fi
+  done
+  return 1
 }
 
 # docs_guide <guide> — raw/<guide>/*.jpg -> docs/images/<guide>/*.webp
 docs_guide() {
   local guide="$1"
-  # The name becomes a path under docs/images/, as the guide's basename does.
-  [[ "$guide" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "a guide is named like its docs/<guide>.md basename (lowercase, digits, hyphens), not '$guide'"
   local in="$RAW/$guide" out="$ROOT/docs/images/$guide"
   local found=0 src name w
   for src in "$in"/*.jpg; do

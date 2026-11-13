@@ -54,6 +54,9 @@ defmodule KilnCMS.Docs.GuideImagesTest do
     assert "docs/editorial-workflow.md" in check(File.cwd!(), @extras).guides
   end
 
+  @not_block " is not published as an image: it is not alone in a top-level paragraph " <>
+               "(kilncms.dev would publish only its alt text)"
+
   @tag :tmp_dir
   test "the check can fail", %{tmp_dir: root} do
     write!(root, "docs/ok.md", """
@@ -84,6 +87,14 @@ defmodule KilnCMS.Docs.GuideImagesTest do
     In a sentence ![inline](images/bad/5-inline.webp) here.
 
     <img src="images/bad/6-html.webp" alt="HTML">
+
+    - ![In a list.](images/bad/8-list.webp)
+
+    > ![In a quote.](images/bad/9-quote.webp)
+
+    ![Rooted.](/docs/images/bad/1-no-alt.webp)
+
+    ![Queried.](images/bad/1-no-alt.webp?v=2)
     """)
 
     webp!(root, "docs/images/bad/1-no-alt.webp", 100)
@@ -92,6 +103,8 @@ defmodule KilnCMS.Docs.GuideImagesTest do
     webp!(root, "docs/images/bad/5-inline.webp", 100)
     webp!(root, "docs/images/bad/6-html.webp", 100)
     webp!(root, "docs/images/bad/7-unused.webp", 100)
+    webp!(root, "docs/images/bad/8-list.webp", 100)
+    webp!(root, "docs/images/bad/9-quote.webp", 100)
 
     write!(root, "docs/nested/deep.md", "![Deep.](../images/deep/1.webp)\n")
     webp!(root, "docs/images/deep/1.webp", 100)
@@ -104,13 +117,18 @@ defmodule KilnCMS.Docs.GuideImagesTest do
 
     for n <- 1..9, do: webp!(root, "docs/images/many/#{n}.webp", 100)
 
+    # Not every extra is `.md`; its folder is named after the basename all the same.
+    write!(root, "docs/cheat.cheatmd", "![A described card.](images/cheat/1.webp)\n")
+    webp!(root, "docs/images/cheat/1.webp", 100)
+
     write!(root, "docs/images/stray.webp", "")
     webp!(root, "docs/images/orphan/1.webp", 100)
 
     %{guides: guides, problems: problems} =
-      check(root, ~w(docs/ok.md docs/bad.md docs/nested/deep.md docs/many.md))
+      check(root, ~w(docs/ok.md docs/bad.md docs/nested/deep.md docs/many.md docs/cheat.cheatmd))
 
-    assert guides == ~w(docs/ok.md docs/bad.md docs/nested/deep.md docs/many.md)
+    assert guides ==
+             ~w(docs/ok.md docs/bad.md docs/nested/deep.md docs/many.md docs/cheat.cheatmd)
 
     assert problems == [
              "  docs/bad.md: images/bad/1-no-alt.webp has no alt text",
@@ -118,16 +136,20 @@ defmodule KilnCMS.Docs.GuideImagesTest do
              "  docs/bad.md: images/bad/3-png.webp is not a WebP file",
              "  docs/bad.md: images/bad/4-gone.webp does not exist",
              "  docs/bad.md: images/ok/1-shot.webp is not in docs/images/bad/",
-             "  docs/bad.md: images/bad/5-inline.webp is not on a paragraph of its own " <>
-               "(kilncms.dev would publish only its alt text)",
+             "  docs/bad.md: images/bad/5-inline.webp" <> @not_block,
              "  docs/bad.md: an HTML <img> is not checked or published; " <>
                "write ![alt](images/bad/…) on a paragraph of its own",
+             "  docs/bad.md: images/bad/8-list.webp" <> @not_block,
+             "  docs/bad.md: images/bad/9-quote.webp" <> @not_block,
+             "  docs/bad.md: /docs/images/bad/1-no-alt.webp is not a file in the repo " <>
+               "(kilncms.dev would publish only its alt text)",
+             "  docs/bad.md: images/bad/1-no-alt.webp?v=2 does not exist",
              "  docs/nested/deep.md: only a guide directly under docs/ may have screenshots " <>
                "(in docs/images/deep/)",
              "  docs/many.md: 9 images, over #{@max_images}",
              "  docs/images/bad/7-unused.webp is not shown by docs/bad.md",
-             "  docs/images/deep/ belongs to no guide: docs/deep.md is not in mix.exs extras",
-             "  docs/images/orphan/ belongs to no guide: docs/orphan.md is not in mix.exs extras",
+             "  docs/images/deep/ belongs to no guide: no docs/deep.* is in mix.exs extras",
+             "  docs/images/orphan/ belongs to no guide: no docs/orphan.* is in mix.exs extras",
              "  docs/images/stray.webp belongs to no guide: put it in docs/images/<guide>/"
            ]
   end
@@ -181,7 +203,10 @@ defmodule KilnCMS.Docs.GuideImagesTest do
     per_image = Enum.flat_map(images, &image_problems(root, guide, folder, &1))
 
     files =
-      for %{path: path} <- images, File.regular?(Path.join(root, path)), uniq: true, do: path
+      for %{path: path} <- images,
+          path != nil and File.regular?(Path.join(root, path)),
+          uniq: true,
+          do: path
 
     bytes = files |> Enum.map(&File.stat!(Path.join(root, &1)).size) |> Enum.sum()
 
@@ -199,8 +224,11 @@ defmodule KilnCMS.Docs.GuideImagesTest do
 
   defp image_problems(_root, guide, _folder, %{html?: true}),
     do: [
-      "an HTML <img> is not checked or published; write ![alt](images/#{Path.basename(guide, ".md")}/…) on a paragraph of its own"
+      "an HTML <img> is not checked or published; write ![alt](images/#{Path.basename(folder(guide))}/…) on a paragraph of its own"
     ]
+
+  defp image_problems(_root, _guide, _folder, %{path: nil} = image),
+    do: ["#{image.src} is not a file in the repo (kilncms.dev would publish only its alt text)"]
 
   defp image_problems(root, _guide, folder, image) do
     file = Path.join(root, image.path)
@@ -217,7 +245,8 @@ defmodule KilnCMS.Docs.GuideImagesTest do
           [
             String.trim(image.alt) == "" && "#{image.src} has no alt text",
             not image.standalone? &&
-              "#{image.src} is not on a paragraph of its own (kilncms.dev would publish only its alt text)"
+              "#{image.src} is not published as an image: it is not alone in a top-level " <>
+                "paragraph (kilncms.dev would publish only its alt text)"
             | file_problems(image.src, file)
           ],
           &(&1 == false)
@@ -253,14 +282,16 @@ defmodule KilnCMS.Docs.GuideImagesTest do
 
     Enum.flat_map(entries, fn entry ->
       folder = "docs/images/#{entry}"
-      guide = "docs/#{entry}.md"
+      # The guide `folder/1` gives this folder to: directly under docs/, with
+      # whatever extension it has.
+      guide = Enum.find(extras, &(Path.dirname(&1) == "docs" and folder(&1) == folder))
 
       cond do
         not File.dir?(Path.join(root, folder)) ->
           ["  #{folder} belongs to no guide: put it in docs/images/<guide>/"]
 
-        guide not in extras ->
-          ["  #{folder}/ belongs to no guide: #{guide} is not in mix.exs extras"]
+        guide == nil ->
+          ["  #{folder}/ belongs to no guide: no docs/#{entry}.* is in mix.exs extras"]
 
         true ->
           unreferenced(root, folder, guide, shown[guide])
@@ -290,25 +321,33 @@ defmodule KilnCMS.Docs.GuideImagesTest do
       |> File.read!()
       |> EarmarkParser.as_ast(gfm: true, breaks: false, pure_links: true, math: true)
 
-    for image <- collect(ast, false),
-        local?(image.src),
-        do: Map.put(image, :path, resolve(image.src, extra))
+    for image <- collect_top(ast),
+        not external?(image.src),
+        do: Map.put(image, :path, repo_path(image.src, extra))
   end
 
-  # `{"img", …}` nodes, noting whether each is alone in its paragraph (the
-  # publisher's test for an image block), and raw HTML `<img>` wherever it
+  # `{"img", …}` nodes, noting whether each is the only thing in a top-level
+  # paragraph — the publisher's test for an image block: `Markdown.blocks/2`
+  # maps over the top-level nodes only, so an image in a list item or a
+  # blockquote publishes as its alt text — and raw HTML `<img>` wherever it
   # appears outside code.
+  defp collect_top(ast) do
+    Enum.flat_map(ast, fn
+      {"p", _attrs, children, _meta} = paragraph ->
+        case Enum.reject(children, &(is_binary(&1) and String.trim(&1) == "")) do
+          [{"img", _, _, _} = only] -> collect(only, true)
+          _ -> collect(paragraph, false)
+        end
+
+      node ->
+        collect(node, false)
+    end)
+  end
+
   defp collect(nodes, standalone?) when is_list(nodes),
     do: Enum.flat_map(nodes, &collect(&1, standalone?))
 
   defp collect({tag, _attrs, _children, _meta}, _standalone?) when tag in ["code", "pre"], do: []
-
-  defp collect({"p", _attrs, children, _meta}, _standalone?) do
-    case Enum.reject(children, &(is_binary(&1) and String.trim(&1) == "")) do
-      [{"img", _, _, _} = only] -> collect(only, true)
-      _ -> collect(children, false)
-    end
-  end
 
   defp collect({"img", attrs, _children, meta}, standalone?) do
     [
@@ -330,19 +369,22 @@ defmodule KilnCMS.Docs.GuideImagesTest do
 
   defp attr(attrs, name), do: Enum.find_value(attrs, "", fn {k, v} -> k == name && v end)
 
-  defp local?(src) do
-    uri = URI.parse(src)
-    src != "" and is_nil(uri.scheme) and is_nil(uri.host)
-  end
+  # An `http(s)` image is the publisher's to show as a link, not ours to budget.
+  defp external?(src), do: URI.parse(src).scheme in ["http", "https"]
 
-  # As the publisher's `Markdown.repo_path/2` resolves it.
-  defp resolve(src, extra) do
-    src
-    |> URI.parse()
-    |> Map.fetch!(:path)
-    |> URI.decode()
-    |> Path.expand("/" <> Path.dirname(extra))
-    |> String.trim_leading("/")
+  # `KilnPublish.Markdown.repo_path/2` (scripts/publish/common.exs), ported
+  # rather than loaded: test/scripts/publish_docs_test.exs already requires
+  # that script, and two async files requiring it would race. The repo path
+  # it publishes from, with the `#fragment` dropped and nothing else touched,
+  # so a `?query` or a `%20` fails here as "does not exist" as it would fail
+  # the upload; nil where the publisher shows only the alt text.
+  defp repo_path(src, source) do
+    if src == "" or URI.parse(src).scheme != nil or String.starts_with?(src, ["#", "/"]) do
+      nil
+    else
+      [path | _] = String.split(src, "#", parts: 2)
+      path |> Path.expand("/" <> Path.dirname(source)) |> String.trim_leading("/")
+    end
   end
 
   # ── Fixtures ───────────────────────────────────────────────────────────────
