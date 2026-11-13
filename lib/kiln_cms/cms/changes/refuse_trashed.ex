@@ -48,6 +48,10 @@ defmodule KilnCMS.CMS.Changes.RefuseTrashed do
       fires only when the row its write returned is out of the trash
       (`Changes.FireArtifacts`, `skip_trashed: true`): a trashed row's
       artifacts were purged when it was trashed.
+
+  Not exempt, deliberately: `:set_next_occurrence`. The value it writes is
+  relative to the clock, so one written into a trashed row is stale again by
+  the time the row is restored; `:restore` recomputes it instead (#2621).
   """
   use Ash.Resource.Change
 

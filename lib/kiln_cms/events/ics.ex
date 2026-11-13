@@ -105,7 +105,7 @@ defmodule KilnCMS.Events.ICS do
     all_day? = DatetimeRange.all_day?(schedule)
     zone = Map.get(schedule, "time_zone") || Events.default_time_zone()
     url = url_for(record, opts)
-    # Read once. `rrule_line/2` and `exdate_line/4` each used to ask
+    # Read once. `rrule_line/3` and `exdate_line/4` each used to ask
     # `Events.recurrence_rule/2` for themselves, which is a field-definition
     # query and an RRULE re-parse per line, per record.
     rule = Events.recurrence_rule(record, org_id)
@@ -120,7 +120,7 @@ defmodule KilnCMS.Events.ICS do
     ]
     |> maybe(url && "URL:#{escape(url)}")
     |> maybe(description(record))
-    |> maybe(rrule_line(rule, all_day?))
+    |> maybe(rrule_line(rule, all_day?, zone))
     |> maybe(exdate_line(rule, start_utc, zone, all_day?))
     |> Kernel.++(["END:VEVENT"])
     # `dtend/4` is legitimately nil for an open-ended event, and it sits in the
@@ -152,11 +152,13 @@ defmodule KilnCMS.Events.ICS do
   end
 
   # `UNTIL` must carry the same value type as `DTSTART` (RFC 5545 §3.3.10), so
-  # the rule renders against the same all-day flag the DTSTART used.
-  defp rrule_line(nil, _all_day?), do: nil
+  # the rule renders against the same all-day flag the DTSTART used. A timed
+  # one is the end of the stored date in the event's own zone, which is how
+  # Kiln's expansion reads it (#2751), so the zone goes with it.
+  defp rrule_line(nil, _all_day?, _zone), do: nil
 
-  defp rrule_line(rule, all_day?),
-    do: "RRULE:#{Recurrence.to_rrule(rule, until: until_type(all_day?))}"
+  defp rrule_line(rule, all_day?, zone),
+    do: "RRULE:#{Recurrence.to_rrule(rule, until: until_type(all_day?), time_zone: zone)}"
 
   # The skipped dates ride as EXDATE so the client honours them too — otherwise
   # a subscriber sees the occurrences an editor explicitly cancelled.

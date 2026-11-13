@@ -73,7 +73,7 @@ end
 # And whether booting queues the one-off backfill that gives pre-existing
 # content its first value. On by default because the alternative is an upgrade
 # step someone has to remember, and the index is simply empty until they do.
-# Deduplicated for a day, and a redundant run writes nothing — so the honest
+# Deduplicated per recurrence engine per day, a redundant run writes nothing — so the honest
 # reason to turn this off is wanting to run `mix kiln.occurrences.backfill`
 # yourself, at a time you choose.
 #
