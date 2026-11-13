@@ -10,7 +10,7 @@ defmodule KilnCMSWeb.GraphqlLimits.SocketSecondFactor do
   this phase holds even if that close never arrives, for queries, mutations
   and new subscriptions alike. A subscription's pushes skip it, as they skip
   `KilnCMSWeb.GraphqlLimits.SocketDocumentBudget`: both run before
-  `Absinthe.Phase.Init`.
+  Absinthe.Phase.Init.
 
   The refusal is a GraphQL error with `extensions.code`
   `"second_factor_required"`, the code `/gql` answers with, and runs no other

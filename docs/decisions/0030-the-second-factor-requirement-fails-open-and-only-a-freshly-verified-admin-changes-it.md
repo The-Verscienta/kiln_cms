@@ -1,9 +1,11 @@
 # 0030. The second-factor requirement fails open, and only a freshly verified admin changes it
 
 - **Status** — accepted (2026-11-13). The policy, its requirement logic and
-  the save guard shipped first, with nothing enforced; the enforcement this
-  record describes (the sign-in doors, the per-request JWT check) is the last
-  part of #2247.
+  the save guard shipped first, with nothing enforced. The enforcement this
+  record describes (the sign-in doors, the per-request JWT check, the
+  `/editor/two-factor` page) shipped with the last part of #2247, in the same
+  release. The promotion warning named under Decision is not in that release
+  yet; it follows with the posture check of #2252.
 - **References** — [#2247](https://github.com/The-Verscienta/kiln_cms/issues/2247)
   and the owner's decisions on it of 2026-11-09;
   [ADR 0026](0026-the-ip-block-list-fails-open-and-covers-dynamic-routes-only.md)
@@ -103,3 +105,25 @@ each has an obvious answer that is wrong:
   server, not the console, and the recovery is in the site's security log.
 - Rolling back past the enforcement drops it silently: the table stays, and an
   older release ignores it.
+
+## As built (2026-11-13)
+
+The enforcement landed as decided above. Where it does more than the decision
+says:
+
+- **A passkey-only account's password is not enough once enforced.** Past the
+  deadline it stops at the passkey step-up on a host where WebAuthn runs, and
+  is refused on a site's own host and at the headless door; its JWTs are
+  refused like a held account's.
+- **The policy page is behind the gate it configures,** so an administrator
+  the site holds sets up their own factor before reaching it.
+- **Enrolling past the deadline from a password-only session needs an
+  emailed code** (owner decision 1b), skipped only when the site has no
+  working relay, never on a transient send failure. The check is on the
+  enrollment actions, and fails closed when they are called without the
+  page's context.
+- **The last required factor cannot be removed** by its owner while any site
+  the account uses requires one.
+
+See [Requiring two-step sign-in on a site](../two-factor-auth.md#requiring-two-step-sign-in-on-a-site)
+and the [threat model](../threat-model.md#two-step-sign-in-requirement-2247).

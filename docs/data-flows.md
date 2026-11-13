@@ -50,7 +50,7 @@ your deployment.
 | Security alert queue | `security_alert_dispatches` | Pseudonymous (transient) | One row per security alert window or silencing notice (#2245): the site, the alert kind, the window, the id of the security event that raised it, delivery stamps, and for a notice what changed, the kinds, the webhook endpoint's id and the acting user's id. Never an address, email, URL or token. Deleted by an hourly prune a day after its window ends, and by the staging scrub. Not touched by erasure: it holds ids only and is gone within a day. See [Security alerts](security-alerts.md). |
 | Security alert settings | `site_security_alerts` | No | Per site (#2245): the alert kinds turned off, whether admins get the bell and email, whether alerts show full IP addresses. |
 | Platform security alert settings | `platform_security_alerts` | No | One row for the installation (#2245): the platform alert kinds a platform admin turned off (today only `api_key_rate_limited` can be). No person, address or key. Each save is recorded in the instance security log (`platform_alerts_changed`). |
-| Two-step sign-in requirement | `site_second_factor_policy` | No | Per site (#2247): who must hold a second factor (`required_for`: off, administrators, editors and administrators, or everyone), the grace period in days, when each role became covered and when the row last changed. No person, address or factor. Each save is recorded in the site's security log (`second_factor_policy_changed`). Not yet enforced: no console page writes it in this release. |
+| Two-step sign-in requirement | `site_second_factor_policy` | No | Per site (#2247): who must hold a second factor (`required_for`: off, administrators, editors and administrators, or everyone), the grace period in days, when each role became covered and when the row last changed. No person, address or factor. Each save is recorded in the site's security log (`second_factor_policy_changed`). Written from `/editor/two-factor`. |
 | Account creation time | `users.inserted_at` | Pseudonymous | When the account was created (#2247), the earliest a required second factor's grace period can start. Accounts that existed before the column was added carry the time of that migration. Not shown anywhere and not exposed by any API. |
 | Verified API keys | **memory only**, on each node | Pseudonymous (transient) | The SHA-256 of each API key that authenticated on the node in the last 5 minutes, with the key's id and when (#2245, `KilnCMS.Security.ApiKeyTrip`), so a rate-limit refusal can tell a real key from a forged one without a database read. Never the key itself, a user or an address. At most 10,000 entries; swept every minute, gone on restart, never shared between nodes or written to disk. |
 | Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
@@ -144,6 +144,14 @@ These kinds of email leave the system via the configured Swoosh adapter:
   credential id. It goes through the instance relay (`KilnCMS.Mailer`), never
   a site's own, cannot be muted, and is not sent to an erased account
   ([We email you when a second factor is added](two-factor-auth.md#we-email-you-when-a-second-factor-is-added)).
+- **Two-step sign-in setup code** (#2247), to the account's own address, when
+  a session that signed in with only a password sets up a second factor its
+  site requires, past the deadline. It holds a six-digit code (valid 10
+  minutes), the site's name and a link to reset the password. It goes through
+  the site's own relay when it has one, in English, at most three an hour per
+  address. The code is never stored: the setup page keeps only a keyed hash in
+  memory for the length of the visit
+  ([When the emailed code is asked for](two-factor-auth.md#when-the-emailed-code-is-asked-for)).
 - **Workflow email** — review-requested / published / changes-requested
   notifications to the relevant admins or author.
 - **Registration email** (#2251), about a site's registration approval queue:

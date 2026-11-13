@@ -133,8 +133,11 @@ Anonymous means **no `Authorization` header**. A bearer token that does not
 verify (malformed, expired, or signed by another instance), a bare `Bearer`,
 or a JWT under the scheme spelled `bearer` is answered `401` `invalid_token` with
 `WWW-Authenticate: Bearer error="invalid_token"` on `/api/json`, `/gql` and
-the other `/api` routes, not served as an anonymous read (#2161). Treat it as
-"sign in again", and send no header when you mean to read as the public.
+the other `/api` routes, not served as an anonymous read (#2161). The
+GraphQL WebSocket `/ws/gql` refuses the connect for the same token (the
+handshake answers `403`), and for a `kiln_` API key, which that socket has
+never accepted (#2634). Treat it as "sign in again", and send no header when
+you mean to read as the public.
 Details, and the one-release opt-out `KILN_API_REJECT_INVALID_BEARER=false`:
 [headless-consumer-guide.md](headless-consumer-guide.md#a-bad-bearer-token-is-a-401).
 
@@ -407,6 +410,75 @@ strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
 })
 token = user.__metadata__.token
 ```
+
+### Accounts a site requires two-step sign-in of
+
+A site administrator can require a second factor of the site's admins, its
+editors and admins, or everyone, with a grace period
+([Requiring two-step sign-in on a site](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)).
+Nothing changes for a client until a site does. Then, for an account the
+setting covers that has no second factor:
+
+**During the grace period** the sign-in `201` carries one more field, and
+only then (a client that never meets a requirement sees the shape it always
+did):
+
+```jsonc
+// 201 Created
+{
+  "token": "<JWT>",
+  "user": { "id": "…", "email": "editor@example.com", "role": "editor" },
+  "second_factor": { "required": true, "deadline": "2026-12-01T09:30:00Z" }
+}
+```
+
+From `deadline` on, that token stops working.
+
+**After the deadline** the sign-in issues no token (the one the password
+minted is revoked) and answers:
+
+```jsonc
+// 403 Forbidden
+{
+  "errors": [{
+    "status": "403",
+    "code": "second_factor_required",
+    "detail": "This site requires two-step sign-in for your account. Set it up in a browser, then sign in again.",
+    "meta": {
+      "setup_url": "https://acme.example.com/account/two-factor",
+      "deadline": "2026-12-01T09:30:00Z"
+    }
+  }]
+}
+```
+
+`meta.setup_url` is a browser page. An account whose only second factor is a
+passkey gets the same `403` with `meta.reason: "passkey_only"` and no
+`deadline`: a passkey cannot be used outside a browser. An account with an
+authenticator app is unaffected here: it still gets the `200`
+`two_factor_required` step above.
+
+**Every request with that account's JWT** is refused from the deadline, a
+token issued during the grace period included (and a passkey-only account's,
+which never passed the passkey), on `/api/*` (JSON:API, media,
+the content and posture routes), `/gql` (`GET` and `POST`) and `/api/feed`.
+The answer is `403`, `Cache-Control: private, no-store`, `Vary:
+Authorization`: on `/api` the envelope above with `meta.setup_url` only, on
+`/gql` GraphQL's shape:
+
+```json
+{"errors":[{"message":"This site requires two-step sign-in for your account. Set it up in a browser, then sign in again, or use an API key.","extensions":{"code":"second_factor_required"}}]}
+```
+
+A public read is refused too, because the client is sending a credential
+that is no longer good. Drop the `Authorization` header to read public
+content, or have the person set up a second factor and sign in again. Over
+`/ws/gql` the connect is refused, a socket opened during the grace period is
+closed at the deadline, and a document sent on an open one is answered with
+`extensions.code: "second_factor_required"`.
+
+**API keys are never affected.** A held person's own keys keep working on
+every surface; for unattended use, switch the client to a key.
 
 ### API keys (third-party access)
 
@@ -2489,7 +2561,9 @@ version-history (`unauthenticated`, `invalid_id`, `invalid_cursor`,
 endpoints — **and from the 429 when you exceed a rate-limit bucket**
 (`too_many_requests`, alongside `retry-after`), and from the `401`
 `invalid_token` a bearer token that does not verify gets on any `/api` route
-([Authentication](#authentication)). All of them render through one
+([Authentication](#authentication)), and the `403` `second_factor_required`
+a held account's JWT gets there
+([Accounts a site requires two-step sign-in of](#accounts-a-site-requires-two-step-sign-in-of)). All of them render through one
 implementation, `KilnCMSWeb.ApiError.send/4`, and a test fails the build if a
 new endpoint writes its own (#190, #744).
 
