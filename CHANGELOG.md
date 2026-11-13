@@ -189,7 +189,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2914](https://github.com/The-Verscienta/kiln_cms/pull/2914) · [long form](docs/changelog/unreleased.md#mcp-custom-field-filters-documented))
 
 - **`/account/two-factor` lists your passkeys with a trash button to remove one, so a reader, who can't open Settings, can remove a passkey and get past the 20-passkey limit.**
-  ([long form](docs/changelog/unreleased.md#setup-page-passkey-removal))
+  ([#2920](https://github.com/The-Verscienta/kiln_cms/pull/2920) · [long form](docs/changelog/unreleased.md#setup-page-passkey-removal))
 
 ### Fixed
 
