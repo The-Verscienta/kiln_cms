@@ -1545,6 +1545,8 @@ What to know before relying on it:
   change, then deletes layouts no field names any more, reading both fresh,
   so a section another admin has just added keeps its layout.
 
+Why a layout is its own row, keyed by the section name: [ADR 0047](decisions/0047-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md).
+
 If something does not save, the page shows one of these:
 
 | Message | Meaning |

@@ -139,7 +139,9 @@ must fail on a refused import.
   stored and that some field of the owner still carries; a section with no
   entry is a default accordion. On import, a section name may appear once per
   owner, and the same unknown-key rule applies as for fields. See
-  [Lay out custom fields as tabs, fieldsets or columns](extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).
+  [Lay out custom fields as tabs, fieldsets or columns](extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns),
+  and [ADR 0047](decisions/0047-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md)
+  for why a layout is keyed by the section name and when it is pruned.
 - A key you leave out of a hand-written file takes the attribute's default; an
   unknown key is refused (a typo would otherwise be silently ignored).
 - A dynamic type's `definition` is optional on import if the type exists in
@@ -147,18 +149,25 @@ must fail on a refused import.
 - `version` is bumped only for a change old readers cannot understand; a file
   with a newer version is refused rather than half-read. A new field
   attribute does not bump it, so an older build refuses such a file by the
-  unknown key instead (below).
+  unknown key instead (below). Every release with field sync, 1.9.0 onward,
+  reads and writes the same version-1 keys, `width`, `widget` and `sections`
+  included; [ADR 0048](decisions/0048-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
+  records why the file is still version 1.
 
 ### Moving a file to an older build
+
+Field sync, `width`, `widget` and `sections` all first shipped in 1.9.0, so
+any 1.9.x build reads a file from any other. What follows is the rule for a
+field attribute a **later** release adds.
 
 A file is read by the build that wrote it and by any later one. Going the
 other way can fail, because every field in an export carries every attribute
 the writing build knows, and an older build refuses a key it does not know.
-For example, a file exported once fields gained `width` is refused by a build
-from before it, with one error per field:
+For example, if a later release added a field attribute `hint`, a 1.9.x
+build would refuse a file exported by that release, with one error per field:
 
 ```text
-ERROR document: owners[0].post.rating: unknown key(s) width
+ERROR document: owners[0].post.rating: unknown key(s) hint
 ```
 
 Nothing is written. Export from the older build instead, or, if you must use
@@ -166,16 +175,19 @@ the newer file, remove the key first and accept that the target keeps its own
 value for it:
 
 ```bash
-jq 'walk(if type == "object" and has("field_type") then del(.width) else . end)' \
+jq 'walk(if type == "object" and has("field_type") then del(.hint) else . end)' \
   fields.json > fields-for-older.json
 ```
 
-The owners' `sections` key needs no such edit: a build from before section
-layouts ignores it (and the layouts it describes are not imported).
+An owner key a build doesn't know is not refused the same way: a build reads
+an owner's `kind`, `type`, `definition`, `fields` and `sections` and ignores
+any other key, along with what it describes.
 
-A file from an older build imports into a newer one as it is: a field without
-`width` is full width, and an owner without `sections` keeps the target's
-layouts.
+A file from an older build imports into a newer one as it is: a key the file
+leaves out takes the attribute's default, normally what every field had
+before the attribute existed. The import then sets that attribute back to the
+default on every field that holds something else, and the dry run lists it
+as `~`.
 
 ### Editor inputs (`widget`)
 
@@ -192,14 +204,14 @@ default. See
   this field (use one of: tags, checkboxes)`, and nothing is written. Set `"widget"` to `null` or to one of the names the
   message lists. The fields admin behaves differently on purpose: there, a
   retype just drops the card that no longer applies.
-- **A file without the key resets widgets.** A file exported before field
-  widgets existed has no `"widget"`, and a key the file leaves out takes the
-  default, so importing it shows `~ post.kind: widget` for every field with a
-  chosen input and sets it back to the default. Export again from an upgraded
-  source.
-- **An older release refuses the key.** A file exported by a release with
-  widgets carries `"widget"` on every field, which an older release's import
-  reports as `unknown key(s) widget`. Upgrade the target before importing.
+- **Every release with field sync carries the key.** `widget` shipped with
+  field sync itself, in 1.9.0, so no released build writes a file without it
+  or refuses one with it. A hand-written file that leaves it out follows the
+  general rule: the key takes the default, so the import shows
+  `~ post.kind: widget` for every field with a chosen input and sets it back
+  to the default. See
+  [Moving a file to an older build](#moving-a-file-to-an-older-build) and
+  [ADR 0048](decisions/0048-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md).
 
 ### What it does not carry
 
