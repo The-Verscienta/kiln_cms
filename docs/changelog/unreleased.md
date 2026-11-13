@@ -1055,6 +1055,36 @@ carries the reasoning.
   `KilnCMS.Accounts.Errors.PasskeyRegistrationThrottled` (invalid class,
   `retry_after_seconds`). (Part of #2247.)
 
+<a id="editor-input-help-line"></a>
+
+- **The fields admin now says, under Editor input, that the choice changes only how editors fill a field in.**
+  At `/editor/fields`, the **Editor input** cards (radio buttons or a
+  dropdown for a select, tags or checkboxes, one line or several) sit next
+  to settings such as the field's type and, for text, its **Editing**
+  format, and they read alike: both look like "how this field is edited".
+  They are not the same kind of setting. The type and the format decide
+  what a record stores and how it is delivered; the editor input decides
+  neither, so an admin can switch it on a field that already holds data,
+  and switch back, without converting a record. A line under the legend now
+  says so: "How editors fill this in. The type and text format of the field
+  stay as they are." It shows whenever the cards do, that is, whenever the
+  field offers more than one input, and the fieldset names it as its
+  description for screen readers. Translated into Spanish and French. The
+  one input that touches stored data is unchanged and still documented in
+  [Choose how editors fill in a field](../extending-content.md#choose-how-editors-fill-in-a-field):
+  checkboxes store a record's terms in the field's option order the next
+  time it is saved.
+  For developers, two new decision records explain the design this line
+  describes: [ADR 0048](../decisions/0048-a-fields-editor-input-is-an-editor-only-string-separate-from-its-text-format.md)
+  (why `widget` is its own editor-only string attribute rather than a value
+  of `format`) and [ADR 0049](../decisions/0049-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md)
+  (why a code interface call or field sync import that names an input the
+  field doesn't offer is refused, while the fields admin resets it to the
+  default). Two more record decisions behind section layouts and the field
+  sync file: [ADR 0046](../decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md)
+  and [ADR 0047](../decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md).
+  No behavior changes. (#2674, #2656)
+
 ## Fixed
 
 <a id="backup-resume-safety"></a>

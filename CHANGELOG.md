@@ -158,6 +158,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Contributors: the required `Compile, lint, scan & test` check also waits on docs, strict-tenancy, overlay drift, both clients and the ML job; every required job has a time limit.**
   ([#2801](https://github.com/The-Verscienta/kiln_cms/pull/2801) · [long form](docs/changelog/unreleased.md#ci-required-check-covers-more-jobs))
 
+- **The fields admin says under Editor input that the choice changes only how editors fill a field in; the field's type and text format stay as they are.**
+  ([#2880](https://github.com/The-Verscienta/kiln_cms/pull/2880) · [long form](docs/changelog/unreleased.md#editor-input-help-line))
+
 ### Fixed
 
 - **Backup Resume is safe: the re-open is atomic, Resume waits ~2.5 min after a Cancel, a step that outlived its Cancel can't overwrite state or history, a resume runs on the node with its files, and a refused one says why on its row.**
