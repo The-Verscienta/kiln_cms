@@ -171,6 +171,20 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlertsTest do
       assert facts.uncovered_kinds == kinds - 2
     end
 
+    test "blocked_ip, on by default, is uncovered by an endpoint made before it existed",
+         %{site: site} do
+      admin = admin!(site)
+      settings!(site, admin, %{notify_admins: false})
+
+      endpoint!(
+        site,
+        admin,
+        Enum.map(KilnCMS.Security.Alerts.site_kinds() -- [:blocked_ip], &"security.#{&1}")
+      )
+
+      assert %{status: :warn, facts: %{uncovered_kinds: 1}} = run(site)
+    end
+
     test "a webhook for some kinds only, with admins who get them: passes", %{site: site} do
       admin = admin!(site)
       endpoint!(site, admin, ["security.lockout"])
