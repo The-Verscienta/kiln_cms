@@ -27,8 +27,9 @@ defmodule Mix.Tasks.SwitchContractTest do
   ## What is checked, and what is not
 
   Documented → declared, which is the direction that breaks operators: they read
-  the moduledoc, type the flag, and get "unknown option" or silence. 94 flags
-  across 18 of the 28 tasks, at the time of writing.
+  the moduledoc, type the flag, and get "unknown option" or silence. 183
+  distinct flags across 45 of the 58 tasks, at the time of writing (94 across
+  18 of 28 when this gate read moduledocs only).
 
   A flag is charged to the task that runs it, not the file it is written in
   (#2733). `kiln.gen.plugin`'s notice told users to run

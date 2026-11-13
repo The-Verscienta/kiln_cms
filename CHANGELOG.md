@@ -274,6 +274,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Backup docs: the History import command for cron's backups now works (`bin/kiln_cms rpc`, not `bin/kiln eval`), and the manual multi-part media restore extracts only after a `--strict` checksum check passes.**
   ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-docs-import-and-manual-restore))
 
+- **`mix kiln.gen.plugin` no longer tells you to run `mix kiln.gen.content <Type> --domain …`, which fails as an unknown option; its notice now lists the steps to write a plugin's content types by hand.**
+  ([long form](docs/changelog/unreleased.md#gen-plugin-content-types-next-step))
+
 ### Security
 
 - **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**

@@ -35,8 +35,19 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
 
       assert notice =~ ~r/^\s+projects\/example\/catalog\/\*\.ex as the template:$/m
       assert notice =~ ~r/^\s+- uncomment domains\/0 in projects\/ratings\/plugin\.ex$/m
-      assert notice =~ ~r/^\s+config\/project\.exs \(projects\/example\/project\.exs/m
-      assert notice =~ ~r/^\s+it writes under projects\/ratings\/priv\/$/m
+      # The registration lives in the overlay, not in the git-ignored
+      # config/project.exs, which is only where dev activation copies it.
+      assert notice =~ ~r/^\s+in projects\/ratings\/project\.exs, with$/m
+      assert notice =~ ~r/^\s+rather than merging, so keep Ratings\.Plugin in it\.$/m
+
+      assert notice =~
+               ~r/^\s+- activate it: cp projects\/ratings\/project\.exs config\/project\.exs$/m
+
+      assert notice =~ ~r/^\s+in dev; docker build --build-arg PROJECT=ratings for an image$/m
+      assert notice =~ ~r/^\s+- mix ash\.codegen <migration_name>, then move what it wrote to$/m
+      assert notice =~ ~r/^\s+priv\/ into projects\/ratings\/priv\/repo\/migrations\/ and$/m
+      assert notice =~ ~r/^\s+projects\/ratings\/priv\/resource_snapshots\/repo\/\. Before the$/m
+      assert notice =~ ~r/^\s+cp -R projects\/ratings\/priv\/\. priv\/$/m
       refute notice =~ "--domain"
     end
   end

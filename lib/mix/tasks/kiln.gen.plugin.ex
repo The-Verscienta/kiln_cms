@@ -43,10 +43,18 @@ if Code.ensure_loaded?(Igniter) do
     `KilnCMS.CMS`. Write them by hand on `KilnCMS.CMS.Content` with
     `domain: <Plugin>.Catalog`, using `projects/example` (`catalog.ex` and
     `catalog/`) as the template; uncomment `domains/0` in the generated
-    plugin; add the domain to `:ash_domains` and `:content_domains` in
-    `config/project.exs`; then run `mix ash.codegen` and move the migration
-    and snapshots it writes under `projects/<name>/priv/`. The notice lists
-    these steps, and `docs/extending-content.md` ("Plugins") and
+    plugin; register the domain in `:ash_domains` and `:content_domains` in
+    `projects/<name>/project.exs`, with `projects/example/project.exs` as the
+    template (its `:plugins` list replaces the one this task writes to
+    `config/config.exs`, so keep the plugin in it); activate it by copying
+    that file to `config/project.exs` in dev, or with
+    `docker build --build-arg PROJECT=<name>` for an image; then run
+    `mix ash.codegen <migration_name>` and move what it writes into
+    `projects/<name>/priv/repo/migrations/` and
+    `projects/<name>/priv/resource_snapshots/repo/`. Copy those back into
+    `priv/` before the next `mix ash.codegen`: without its snapshots, codegen
+    writes create-table migrations into the core `priv/` again. The notice
+    lists these steps, and `docs/extending-content.md` ("Plugins") and
     `projects/example/README.md` explain them. Then verify the install with
     `mix kiln.plugins.doctor` (it runs in precommit too).
     """
@@ -421,10 +429,20 @@ if Code.ensure_loaded?(Igniter) do
               each type in projects/#{snake}/catalog/ built with
               use KilnCMS.CMS.Content, type: :<type>, domain: #{camel}.Catalog
             - uncomment domains/0 in projects/#{snake}/plugin.ex
-            - add #{camel}.Catalog to :ash_domains and :content_domains in
-              config/project.exs (projects/example/project.exs shows the shape)
-            - mix ash.codegen <name>, then move the migration and snapshots
-              it writes under projects/#{snake}/priv/
+            - register #{camel}.Catalog in :ash_domains and :content_domains
+              in projects/#{snake}/project.exs, with
+              projects/example/project.exs as the template. Its :plugins list
+              replaces the one this generator wrote to config/config.exs
+              rather than merging, so keep #{camel}.Plugin in it.
+            - activate it: cp projects/#{snake}/project.exs config/project.exs
+              in dev; docker build --build-arg PROJECT=#{snake} for an image
+            - mix ash.codegen <migration_name>, then move what it wrote to
+              priv/ into projects/#{snake}/priv/repo/migrations/ and
+              projects/#{snake}/priv/resource_snapshots/repo/. Before the
+              next ash.codegen, copy them back with
+                cp -R projects/#{snake}/priv/. priv/
+              and remove them again after: without its snapshots, codegen
+              writes create-table migrations into the core priv/ again
               (see projects/example/README.md)
         * Verify the install: mix kiln.plugins.doctor (also runs in precommit).
       """
