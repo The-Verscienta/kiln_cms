@@ -69,11 +69,12 @@ defmodule KilnCMS.Accounts.Changes.NotifyFactorAdded do
     end)
   end
 
-  # authorize?: false — a re-read of the very row this action is already
-  # authorized to update, for one column that decides the mail's wording and
-  # nothing else. Nothing read here leaves the changeset. A missing row falls
-  # back to the loaded struct; the update itself then fails.
+  # A re-read of the very row this action is already authorized to update,
+  # for one column that decides the mail's wording and nothing else. Nothing
+  # read here leaves the changeset. A missing row falls back to the loaded
+  # struct; the update itself then fails.
   defp confirmed_before(changeset) do
+    # authorize?: false — re-reads the row this authorized action is updating
     case Accounts.get_user(changeset.data.id, authorize?: false, not_found_error?: false) do
       {:ok, %{totp_confirmed_at: %DateTime{}}} -> :replaced
       {:ok, %{}} -> :added
