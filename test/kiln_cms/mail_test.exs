@@ -8,6 +8,7 @@ defmodule KilnCMS.MailTest do
   """
   use KilnCMS.DataCase, async: true
   # `except: from/2` — DataCase already imports Ecto.Query.from/2.
+  import KilnCMS.MailAssertions
   import Swoosh.Email, except: [from: 2]
   import Swoosh.TestAssertions
 
@@ -82,15 +83,19 @@ defmodule KilnCMS.MailTest do
 
       drain_oban()
 
-      assert_email_sent(fn sent ->
-        sent.to == [{"Two", "two@example.com"}] and sent.subject == "Hello" and
-          sent.html_body == "<p>Hi</p>" and sent.text_body == "Hi" and
-          sent.reply_to == {"", "replies@example.com"} and
-          sent.from == {"KilnCMS", "cms@example.com"} and
-          sent.headers["Message-ID"] =~ ~r/^<.+@example\.com>$/
-      end)
-
-      assert_email_sent(fn sent -> sent.to == [{"", "one@example.com"}] end)
+      # Drained together, the mails arrive in no fixed order: Oban fetches the
+      # :mail queue through UPDATE ... RETURNING, whose row order Postgres does
+      # not guarantee. So assert the set (#2602).
+      assert_delivered([
+        fn sent ->
+          sent.to == [{"Two", "two@example.com"}] and sent.subject == "Hello" and
+            sent.html_body == "<p>Hi</p>" and sent.text_body == "Hi" and
+            sent.reply_to == {"", "replies@example.com"} and
+            sent.from == {"KilnCMS", "cms@example.com"} and
+            sent.headers["Message-ID"] =~ ~r/^<.+@example\.com>$/
+        end,
+        &(&1.to == [{"", "one@example.com"}])
+      ])
     end
 
     test "rejects attachments, cc/bcc, and empty recipients" do
