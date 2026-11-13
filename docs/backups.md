@@ -169,7 +169,7 @@ reads `partly pruned (retention)` ([Backup history](#backup-history-2217)).
 
 Pin one backup, say the last one before a migration, so retention never deletes
 it. You need a shell on the host, as the user that runs the backups. The Backups
-page does not show or set recovery points yet.
+page shows recovery points but cannot set or release one.
 
 1. Find the backup's stamp: the `YYYYMMDD-HHMMSS` (UTC) in its file names.
 
@@ -188,6 +188,11 @@ page does not show or set recovery points yet.
 3. The next prune, in-app or cron, keeps every file of that stamp. Nothing is
    printed for a kept backup; `backup.sh prune` prints only the files it
    removes.
+4. Open **Backups** (`/editor/backups`) as a platform admin. The backup's row
+   in **History** now carries a **Recovery point** badge (one per row, whether
+   the marker is in `db/` or `media/`). The page reads the marker from this
+   server's `BACKUP_DIR` whenever it loads History, so reload the page if it
+   was already open.
 
 To release it, delete the marker. The backup then ages like any other, so one
 already older than `BACKUP_KEEP_DAYS` goes at the next prune unless it is the
@@ -334,8 +339,13 @@ and the app able to see the backup directory.
    it), otherwise a run after the stamp's newest file is 10 minutes old (see
    *Cron's backups appear in History* below). With the default schedule,
    allow up to about 25 minutes after a cron backup finishes.
-4. List the backup directories. Each component with a verified backup has one
-   marker:
+4. Open **Backups** (`/editor/backups`) as a platform admin. Under
+   **History**, **Last-good marker (kept by backup.sh prune)** lists each
+   component the deployment backs up (**Database**, and **Media** when media
+   backups are configured) with the stamp its marker names, or "none yet". The
+   backup's row in History carries a **Last good: Database** and/or **Last
+   good: Media** badge. Or list the backup directories on the host; each
+   component with a verified backup has one marker:
 
    ```bash
    ls /var/backups/kiln/db/ /var/backups/kiln/media/
@@ -655,7 +665,10 @@ as before.
 ### Back up while another backup runs
 
 **Back up now** stays enabled while a backup runs. Platform admins only, like
-the rest of the page.
+the rest of the page. The help under the button sums up the rules below: "A
+backup asked for while another runs waits for it; only one waits. A request of
+a different kind, or a resume of a different backup, is refused until the
+queue clears."
 
 1. Open **Backups** (`/editor/backups`). While a backup runs, a strip below
    **Back up now** says which step it is on: "Starting a backup", "Dumping the
@@ -723,7 +736,7 @@ so it can be resumed later.
 1. Open **Backups** (`/editor/backups`) as a platform admin.
 2. Click **Cancel**, on the in-flight strip or on the `Running` row in
    **History**. There is none until the backup's row appears in History, and
-   the strip drops it once the backup is finishing.
+   both the strip and the row drop it once the backup is finishing.
 3. Confirm "Cancel this backup? Its files are kept, so it can be resumed
    later." (with "A queued backup will start next." when one is waiting).
 4. The page says "Backup canceled. Its files are kept, so it can be resumed."
@@ -1289,14 +1302,39 @@ fails when every media stamp it found is unfinished.
 admins only, like the rest of the page.
 
 1. Open **Backups** (`/editor/backups`) as a platform admin.
-2. Scroll to **History**. Each row shows the trigger, a status (`Succeeded`,
+2. Scroll to **History**. Each row shows the trigger (**Manual**, **Cron** or
+   **Console**; any other value as recorded), a status (`Succeeded`,
    `Failed`, `Running`, `Skipped` or `Canceled`), **Database** and **Media** badges, the
    size, whether it was verified, its destinations, and whether its files are
    still on this host. A media set written in several parts shows "N parts".
    A failed, interrupted or canceled run shows **Resume**
-   ([above](#media-backups-in-parts-2218)), and a running in-app one
-   **Cancel** ([above](#cancel-a-running-backup)).
+   ([above](#media-backups-in-parts-2218)); its tooltip names which of the
+   three it is. A running in-app one shows **Cancel**
+   ([above](#cancel-a-running-backup)) until it is finishing.
 3. Use **Previous** / **Next** to page ("Page 1 of 3").
+
+**Retention markers on the page (#2542).** The page shows which backups the
+on-disk markers protect, so you don't need a shell to check:
+
+- A **Recovery point** badge on a row: a `kiln-<stamp>.keep` for that stamp is
+  in `db/` or `media/`, so retention keeps every file of that backup
+  ([Keep a backup as a recovery point](#keep-a-backup-as-a-recovery-point)).
+- A **Last good: Database** or **Last good: Media** badge: that component's
+  `kiln-<stamp>.good` names this backup, so `backup.sh prune` keeps that
+  component of it ([The last-good marker](#the-last-good-marker)).
+- **Last-good marker (kept by backup.sh prune)**, above the list: the stamp each
+  component's marker names, or "none yet". It is there even when the marked
+  backup is on another page of History. It lists only the components this
+  deployment backs up (**Media** only when media backups are configured).
+  Should a directory hold more than one `.good`, the newest stamp is shown.
+
+The markers are read from this server's `BACKUP_DIR` whenever the page loads
+History (opening it, paging, after an action, and on each refresh while a
+backup runs); they are never stored. With a backup directory per host,
+another server may show different markers. A `db/` or `media/` the app can't
+list contributes no badges, and the summary reads "none yet" for that component
+even if a marker is there; the page itself still loads. Check the host with `ls`
+when the summary disagrees with what you expect.
 
 The files column reads:
 

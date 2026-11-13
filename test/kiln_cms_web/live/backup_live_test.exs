@@ -361,7 +361,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       row = lv |> element("#backup-history li") |> render()
       assert row =~ "2026-01-01 03:00 UTC"
-      assert row =~ "manual"
+      assert row =~ "Manual"
       assert row =~ "Succeeded"
       assert row =~ "Database"
       assert row =~ "2.0 KB"
@@ -485,7 +485,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       render_async(lv, 2_000)
 
       assert has_element?(lv, "#backup-history li", "2026-01-02 03:00 UTC")
-      assert has_element?(lv, "#backup-history li", "cron")
+      assert has_element?(lv, ~s|#backup-history li [data-role="trigger"]|, "Cron")
       assert has_element?(lv, "#backup-history li", "unverified (imported)")
     end
 
@@ -1075,6 +1075,25 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
     end
 
+    @tag :pg_tools
+    test "the History row drops Cancel once the backup is finishing (#2542)" do
+      %{run: run} = started!()
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row_cancel = ~s|#backup-run-#{run.id} [data-role="cancel"]|
+      assert has_element?(lv, row_cancel)
+
+      Backups.mark_backup_lock_finishing!(lock_row(), %{}, actor: Backups.system())
+      send(lv.pid, :refresh)
+
+      refute has_element?(lv, row_cancel)
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="cancel"]|)
+      # The run is still running: only the button went, not the row's state.
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-role="status"]|, "Running")
+    end
+
     test "a forged cancel of a finished run says it already finished", %{dir: dir} do
       run = app_run!(dir, 2, :succeeded)
 
@@ -1414,6 +1433,238 @@ defmodule KilnCMSWeb.BackupLiveTest do
                :admin
 
       refute html =~ "overview-backup-warning"
+    end
+  end
+
+  describe "page help, trigger labels and retention markers (#2542)" do
+    alias KilnCMS.Backups.WorkState
+
+    defp touch_marker!(dir, sub, name) do
+      File.mkdir_p!(Path.join(dir, sub))
+      File.write!(Path.join([dir, sub, name]), "")
+    end
+
+    defp mount_admin(conn, locale \\ nil) do
+      conn = admin_conn(conn)
+      conn = if locale, do: Plug.Conn.put_session(conn, "locale", locale), else: conn
+      {:ok, lv, _html} = live(conn, ~p"/editor/backups")
+      render_async(lv, 2_000)
+      lv
+    end
+
+    # An in-app run in `status` whose state file is kept, so it is resumable.
+    defp resumable_run!(dir, stamp, status) do
+      run = Ash.Seed.seed!(KilnCMS.Backups.Run, %{stamp: stamp, status: status})
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+      run
+    end
+
+    test "Back up now explains queuing, in the words of the refusal", %{conn: conn} do
+      lv = mount_admin(conn)
+
+      assert has_element?(
+               lv,
+               ~s|button[phx-click="backup_now"][aria-describedby="backup-now-help"]|
+             )
+
+      assert has_element?(lv, "#backup-now-help", "only one waits")
+      assert has_element?(lv, "#backup-now-help", "refused until the queue clears")
+    end
+
+    test "Resume's tooltip says what kind of backup it continues", %{conn: conn, dir: dir} do
+      canceled = resumable_run!(dir, "20261106-101010", :canceled)
+      failed = resumable_run!(dir, "20261107-101010", :failed)
+
+      lv = mount_admin(conn)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{canceled.id} button[data-role="resume"][title="Continue this canceled backup from the files it already wrote."]|
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{failed.id} button[data-role="resume"][title="Continue this failed backup from the files it already wrote."]|
+             )
+    end
+
+    test "manual, cron and console read as labels; anything else as recorded", %{
+      conn: conn,
+      dir: dir
+    } do
+      runs =
+        for {trigger, n} <- Enum.with_index(["manual", "cron", "console", "schedule"], 1),
+            do: {trigger, seed_run!(dir, n, trigger: trigger)}
+
+      lv = mount_admin(conn)
+
+      for {trigger, run} <- runs do
+        label = %{"manual" => "Manual", "cron" => "Cron", "console" => "Console"}[trigger]
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-run-#{run.id} [data-role="trigger"]|,
+                 label || trigger
+               )
+      end
+    end
+
+    test "a recovery point and the last-good markers badge their rows", %{conn: conn, dir: dir} do
+      kept = seed_run!(dir, 1, stamp: "20260101-010000")
+      good = seed_run!(dir, 2, stamp: "20260102-020000")
+      plain = seed_run!(dir, 3, stamp: "20260103-030000")
+
+      touch_marker!(dir, "media", "kiln-20260101-010000.keep")
+      touch_marker!(dir, "db", "kiln-20260102-020000.good")
+      touch_marker!(dir, "media", "kiln-20260102-020000.good")
+
+      lv = mount_admin(conn)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{kept.id} [data-role="recovery-point"]|,
+               "Recovery point"
+             )
+
+      refute has_element?(lv, ~s|#backup-run-#{kept.id} [data-role="last-good"]|)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{good.id} [data-role="last-good"][data-component="db"]|,
+               "Last good: Database"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{good.id} [data-role="last-good"][data-component="media"]|,
+               "Last good: Media"
+             )
+
+      refute has_element?(lv, ~s|#backup-run-#{good.id} [data-role="recovery-point"]|)
+
+      refute has_element?(lv, ~s|#backup-run-#{plain.id} [data-role="recovery-point"]|)
+      refute has_element?(lv, ~s|#backup-run-#{plain.id} [data-role="last-good"]|)
+    end
+
+    test "the summary names each component's last-good stamp, even off this page", %{
+      conn: conn,
+      dir: dir
+    } do
+      # No run row for this stamp at all: the line still says it.
+      touch_marker!(dir, "db", "kiln-20250101-010000.good")
+
+      lv = mount_admin(conn)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-last-good [data-role="last-good"][data-component="db"]|,
+               "20250101-010000"
+             )
+
+      assert has_element?(lv, "#backup-markers-help", "kiln-<stamp>.keep")
+      assert has_element?(lv, "#backup-markers-help", "every 15 minutes")
+      assert has_element?(lv, "#backup-markers-help", "this server's backup directory")
+    end
+
+    test "the summary says none yet for each component without a marker", %{conn: conn} do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :media_dir, "/srv/media")
+      )
+
+      lv = mount_admin(conn)
+
+      for component <- ["db", "media"] do
+        assert has_element?(
+                 lv,
+                 ~s|#backup-last-good [data-role="last-good"][data-component="#{component}"]|,
+                 "none yet"
+               )
+      end
+    end
+
+    test "a db/ that can't be listed shows no badges and doesn't crash the page", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = seed_run!(dir, 1, stamp: "20260101-010000", file?: false)
+      # A file where the directory should be: unlistable for every user.
+      File.rm_rf!(Path.join(dir, "db"))
+      File.write!(Path.join(dir, "db"), "")
+      touch_marker!(dir, "media", "kiln-20260101-010000.good")
+
+      lv = mount_admin(conn)
+
+      assert has_element?(lv, "#backup-run-#{run.id}")
+
+      refute has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role="last-good"][data-component="db"]|
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role="last-good"][data-component="media"]|
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-last-good [data-role="last-good"][data-component="db"]|,
+               "none yet"
+             )
+    end
+
+    for {locale, help, canceled, failed, keep} <- [
+          {"es", "solo una espera",
+           "Continúa esta copia de seguridad cancelada a partir de los archivos que ya escribió.",
+           "Continúa esta copia de seguridad fallida a partir de los archivos que ya escribió.",
+           "Punto de recuperación"},
+          {"fr", "une seule attend",
+           "Reprendre cette sauvegarde annulée à partir des fichiers déjà écrits.",
+           "Reprendre cette sauvegarde échouée à partir des fichiers déjà écrits.",
+           "Point de restauration"}
+        ] do
+      test "help text, tooltips and badges are translated (#{locale})", %{conn: conn, dir: dir} do
+        canceled = resumable_run!(dir, "20261106-101010", :canceled)
+        failed = resumable_run!(dir, "20261107-101010", :failed)
+        touch_marker!(dir, "db", "kiln-20261106-101010.keep")
+
+        lv = mount_admin(conn, unquote(locale))
+
+        assert has_element?(lv, "#backup-now-help", unquote(help))
+        refute has_element?(lv, "#backup-now-help", "only one waits")
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-run-#{canceled.id} button[data-role="resume"][title="#{unquote(canceled)}"]|
+               )
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-run-#{failed.id} button[data-role="resume"][title="#{unquote(failed)}"]|
+               )
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-run-#{canceled.id} [data-role="recovery-point"]|,
+                 unquote(keep)
+               )
+
+        refute has_element?(lv, "#backup-markers-help", "every 15 minutes")
+      end
+    end
+
+    test "a non-platform-admin still can't reach the page, markers or not", %{
+      conn: conn,
+      dir: dir
+    } do
+      touch_marker!(dir, "db", "kiln-20250101-010000.good")
+      conn = log_in(conn, authed_user(:editor))
+
+      assert {:error, {:redirect, _}} = live(conn, ~p"/editor/backups")
     end
   end
 end

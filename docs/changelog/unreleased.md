@@ -419,3 +419,29 @@ carries the reasoning.
   - The script is removed from the builder before `mix release`, and never
     reaches the runtime image. See
     [Building the image](../deploy.md#building-the-image). (#2462)
+
+<a id="backups-page-markers-and-queue-help"></a>
+
+- **The Backups page shows recovery points and last-good markers, explains the backup queue, and no longer offers Cancel on a backup that is finishing.**
+  Whether a backup was pinned by a `kiln-<stamp>.keep` recovery point, or
+  named by the `kiln-<stamp>.good` marker that `backup.sh prune` keeps, could
+  only be seen by listing `BACKUP_DIR` on the host. In **History**, a row now
+  carries a **Recovery point** badge when a `.keep` for its stamp is in `db/`
+  or `media/`, and **Last good: Database** / **Last good: Media** for each
+  component whose `.good` names it. Above the list, **Last-good marker (kept
+  by backup.sh prune)** shows the stamp each backed-up component's marker
+  names, or "none yet", so the marked backup is visible even when it is on
+  another page. The markers are read from this server's backup directory each
+  time History loads, never stored; with a directory per host, another server
+  may show different ones. A `db/` or `media/` the app cannot list shows no
+  markers, and the page still loads. Help text explains both markers and the
+  15-minute default marker sync (`KILN_BACKUP_MARKER_SYNC_CRON`).
+  **Back up now** now has help saying that a backup asked for while another
+  runs waits, only one waits, and a request of a different kind or a resume
+  of a different backup is refused until the queue clears (#2540). On a
+  History row, **Cancel** disappears once that backup is finishing, as it
+  already did on the in-flight strip; clicking it there was refused with "Too
+  late to cancel". **Resume**'s tooltip says whether the backup was canceled,
+  failed or interrupted, and the trigger reads **Manual**, **Cron** or
+  **Console** instead of the raw value. No migration and no configuration.
+  See [Backup history](../backups.md#backup-history-2217). (#2542)

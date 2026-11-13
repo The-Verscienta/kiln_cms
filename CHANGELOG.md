@@ -135,6 +135,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The image build retries a failed GitHub release-asset download for about 4 minutes before failing, so a short CDN outage no longer fails `docker build`.**
   ([long form](docs/changelog/unreleased.md#image-build-retries-downloads))
 
+- **The Backups page shows recovery-point and last-good badges on History rows and a last-good summary, explains the backup queue under Back up now, and hides Cancel on a finishing row.**
+  ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
+
 ## [1.9.2] - 2026-11-12
 
 Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —
