@@ -95,6 +95,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Yearly rules with BYMONTH, BYMONTHDAY or BYDAY, monthly BYDAY with BYMONTHDAY, BYMONTH on daily and weekly rules, and a repeated weekly BYDAY now expand per RFC 5545, as subscribed calendars showed them (`FREQ=YEARLY;BYDAY=2TU` is January's). Next dates are recomputed ~10 min after boot on the new `occurrence_backfill` queue; a hand-built Oban `queues:` must add `occurrence_backfill: 1`. Rollback safe.**
   ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#event-recurrence-rfc-upgrade))
 
+- **Check your own rclone, monitoring or retention filters over backups: `kiln-media-*.tar.gz` already matched media parts (1.9.0's note was wrong), but it and `kiln-db-*.dump` drop the `.sha256` sidecars, and a part set without one won't restore by default. Add `--include "kiln-media-*.sha256"` and `"kiln-db-*.sha256"`; don't widen to `kiln-media-*`.**
+  ([long form](docs/changelog/unreleased.md#backup-offsite-filter-sidecar-upgrade))
+
 ### Breaking
 
 - **`/ws/gql` refuses a connect whose token does not verify (expired, revoked, garbled JWT, or a `kiln_` API key), with a `403` handshake, where it connected as anonymous; `KILN_API_REJECT_INVALID_BEARER=false` restores that.**
@@ -160,6 +163,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The fields admin says under Editor input that the choice changes only how editors fill a field in; the field's type and text format stay as they are.**
   ([#2880](https://github.com/The-Verscienta/kiln_cms/pull/2880) · [long form](docs/changelog/unreleased.md#editor-input-help-line))
+
+- **Backups → History: a resumable run has a `?` tip beside Resume explaining what a resume reuses, and a media backup's "N parts" label links to how to restore a part set.**
+  ([long form](docs/changelog/unreleased.md#backup-history-resume-tip-parts-link))
 
 ### Fixed
 
@@ -252,6 +258,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
   ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
+
+- **Backup docs: the History import command for cron's backups now works (`bin/kiln_cms rpc`, not `bin/kiln eval`), and the manual multi-part media restore extracts only after a `--strict` checksum check passes.**
+  ([long form](docs/changelog/unreleased.md#backup-docs-import-and-manual-restore))
 
 ### Security
 
