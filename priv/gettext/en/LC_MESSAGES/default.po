@@ -1541,7 +1541,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "A backup asked for while another runs waits for it; only one waits. A request of a different kind is refused until the queue clears."
+msgid "A backup asked for while another runs waits for it; only one waits. A request of a different kind, or a resume of a different backup, is refused until the queue clears."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex

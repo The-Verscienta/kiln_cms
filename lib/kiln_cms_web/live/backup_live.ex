@@ -525,7 +525,7 @@ defmodule KilnCMSWeb.BackupLive do
                   request gets, so the two never disagree. --%>
             <p id="backup-now-help" class="text-xs text-base-content/70 sm:text-right">
               {gettext(
-                "A backup asked for while another runs waits for it; only one waits. A request of a different kind is refused until the queue clears."
+                "A backup asked for while another runs waits for it; only one waits. A request of a different kind, or a resume of a different backup, is refused until the queue clears."
               )}
             </p>
           </div>

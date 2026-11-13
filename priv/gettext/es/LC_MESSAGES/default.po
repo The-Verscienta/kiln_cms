@@ -1541,8 +1541,8 @@ msgstr "Un objeto o lista JSON, de hasta 64 KB. Para datos estructurados de otro
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "A backup asked for while another runs waits for it; only one waits. A request of a different kind is refused until the queue clears."
-msgstr "Una copia de seguridad pedida mientras otra está en curso espera a que termine; solo una espera. Una petición de otro tipo se rechaza hasta que la cola se vacíe."
+msgid "A backup asked for while another runs waits for it; only one waits. A request of a different kind, or a resume of a different backup, is refused until the queue clears."
+msgstr "Una copia de seguridad pedida mientras otra está en curso espera a que termine; solo una espera. Una petición de otro tipo, o la reanudación de otra copia de seguridad, se rechaza hasta que la cola se vacíe."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
