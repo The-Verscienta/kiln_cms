@@ -1353,8 +1353,8 @@ defmodule KilnCMSWeb.Router do
     # credential, and every write the page makes is a system-only action that
     # checks it. Opening the page only peeks at the token; nothing is consumed
     # until a button is pressed. `invite_token` is in `:filter_parameters`,
-    # which keeps it out of the logged params map only: the request path, token
-    # included, is still logged, as for `/magic_link` and `/password-reset`.
+    # which keeps it out of the logged params map; the request line logs the
+    # path with the token as `[FILTERED]` (`KilnCMSWeb.RequestRedaction`, #2449).
     live_session :invitation,
       layout: {KilnCMSWeb.Layouts, :auth},
       session: {KilnCMSWeb.AdminAllowlist, :live_session, []},
@@ -1368,7 +1368,8 @@ defmodule KilnCMSWeb.Router do
     # The sign-in unlock link (#2250): a plain form that asks for one, and the
     # emailed link's page. Before `auth_routes` for the same reason as the
     # routes above. Opening the link spends nothing (a mail scanner may follow
-    # it); only the POST redeems. `unlock_token` is in `:filter_parameters`.
+    # it); only the POST redeems. `unlock_token` is in `:filter_parameters`,
+    # and the request line logs the path with it as `[FILTERED]` (#2449).
     get "/sign-in/unlock", SignInUnlockController, :new
     post "/sign-in/unlock", SignInUnlockController, :create
     get "/auth/unlock/:unlock_token", SignInUnlockController, :show

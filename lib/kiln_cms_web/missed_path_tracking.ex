@@ -38,13 +38,17 @@ defmodule KilnCMSWeb.MissedPathTracking do
       rate limit puts a price on.
 
   Privacy: the path and the request locale, nothing else — no IP, user agent,
-  referrer or actor is read here, let alone stored.
+  referrer or actor is read here, let alone stored. A path that carries a
+  credential (`KilnCMSWeb.RequestRedaction` — a mangled `/magic_link/<token>/x`
+  falls through to the catch-all and lands here) is not recorded at all: the
+  list is visible to editors, and a stored token is a working one (#2449).
   """
 
   require Ash.Query
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.MissedPath
+  alias KilnCMSWeb.RequestRedaction
 
   # Extensions that mark a request as a probe or an asset fetch rather than a
   # page an editor could redirect. Deliberately a denylist, not an allowlist:
@@ -184,7 +188,8 @@ defmodule KilnCMSWeb.MissedPathTracking do
       not String.contains?(path, <<0>>) and
       not junk_prefix?(path) and
       not dotfile?(path) and
-      not junk_extension?(path)
+      not junk_extension?(path) and
+      not RequestRedaction.secret?(path)
   end
 
   # Any segment beginning with a dot. `junk_extension?/1` reads only the last
