@@ -27,6 +27,10 @@ defmodule KilnCMS.CrawlerVerificationTest do
   @skipped [:kiln_cms, :crawler_verification, :skipped]
 
   setup do
+    # No range list another test planted or fetched may answer for an
+    # address here before DNS does (#2586).
+    KilnCMS.CrawlerVerification.Ranges.clear()
+
     # Each test charges rate-limit keys of its own, so no test spends the
     # per-network budget another needs (test addresses share a few /16s).
     # An hour-long window keeps a test from straddling a window boundary.

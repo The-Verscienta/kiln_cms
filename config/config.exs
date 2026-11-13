@@ -1012,9 +1012,13 @@ config :kiln_cms, :backup_scheduler_cron, "* * * * *"
 # When one node fetches the search engines' published crawler IP ranges
 # (#2586, KilnCMS.CrawlerVerification.RangesWorker) and sends them to the
 # others. Every 6 hours; a list stays fresh for 24, so three runs in a row may
-# fail before a list stops answering. `false` disables the schedule; the lists
-# then go stale and claims fall back to DNS. KILN_CRAWLER_RANGES=false turns
-# the lists off altogether. Down here so the line anchors
+# fail before a list stops answering. A node with a stale list also queues a
+# fetch of that list at boot and every 10 minutes (at most one job per 10
+# minutes cluster-wide). `false` stops every automatic fetch, those included:
+# nothing fetches a list unless the operator queues the job, so the lists go
+# stale within a day and claims fall back to DNS (DuckDuckBot's go
+# unverified). KILN_CRAWLER_RANGES=false turns the lists off altogether.
+# Down here so the line anchors
 # docs/environment-variables.md keeps into this file stay put.
 config :kiln_cms, :crawler_ranges_cron, "17 */6 * * *"
 

@@ -5,19 +5,23 @@ defmodule KilnCMS.CrawlerVerification.RangesWorker do
   (`KilnCMS.CrawlerVerification.Ranges`, `KilnCMS.CrawlerVerification.RangesSync`).
 
   Scheduled from `KilnCMS.Application` (`KILN_CRAWLER_RANGES_CRON`, every 6
-  hours by default), so one node fetches per run, and queued once more by a
-  node that finds no fresh list shortly after boot. With ranges off
+  hours by default), so one node fetches per run, and queued by a node that
+  finds a list not fresh shortly after boot or at its 10-minute check
+  (`KilnCMS.CrawlerVerification.RangesSync`); such a job names only the
+  stale engines (`%{"engines" => [...]}`). With ranges off
   (`KILN_CRAWLER_RANGES=false`, or verification off) it makes **no request**.
 
   Every fetch goes through `KilnCMS.SafeFetch`: pinned, HTTPS, no redirects
   followed, at most `:max_bytes` read. A list the parser refuses, a non-200
   answer or a failed request keeps the list held before, with its old age,
   so it goes stale rather than being replaced by something worse. Every
-  vendor is tried even when one fails; the job then answers an error naming
-  the failed engines, and the next run tries again.
+  vendor is tried even when one fails, and a failure is telemetry and one
+  log line naming the engines, not a failed job: the job completes, and the
+  next run tries again.
 
-  Queued on `:default`, `max_attempts: 1` and unique for 10 minutes, so
-  nodes booting together and the cron queue one job between them.
+  Queued on `:default` with `max_attempts: 1`, and unique for 10 minutes by
+  worker alone, whatever it asks for and however the last run ended, so the
+  nodes and the cron queue at most one job per 10 minutes between them.
 
   ## Telemetry
 
@@ -26,7 +30,14 @@ defmodule KilnCMS.CrawlerVerification.RangesWorker do
   `:http_error`, `:transport_error`, `:too_large`, `:blocked`, `:invalid`,
   `:no_prefixes`, `:too_many`, `:too_broad`, `:not_public` or `:other`.
   """
-  use Oban.Worker, queue: :default, max_attempts: 1, unique: [period: 600]
+  # Unique by worker alone (`keys: []`), over every state: a run that ended
+  # `discarded` or `completed` still holds the 10 minutes, so a vendor that
+  # keeps failing cannot turn every node's 10-minute check into a fresh fetch
+  # of all four lists (#2586 review).
+  use Oban.Worker,
+    queue: :default,
+    max_attempts: 1,
+    unique: [period: 600, keys: [], states: Oban.Job.states()]
 
   require Logger
 
@@ -45,18 +56,35 @@ defmodule KilnCMS.CrawlerVerification.RangesWorker do
           | Parser.error()
 
   @impl Oban.Worker
-  def perform(%Oban.Job{}) do
+  def perform(%Oban.Job{args: args}) do
     if Ranges.enabled?() do
       config = Ranges.config()
 
-      case Enum.reject(Engines.range_engines(), &(refresh(&1, config) == :ok)) do
-        [] -> :ok
-        failed -> {:error, {:crawler_ranges_failed, failed}}
+      case Enum.reject(engines(args), &(refresh(&1, config) == :ok)) do
+        [] ->
+          :ok
+
+        failed ->
+          Logger.warning(
+            "Crawler verification: could not refresh the published crawler IP ranges of " <>
+              "#{Enum.join(failed, ", ")}; each keeps the list held before until it goes stale"
+          )
+
+          :ok
       end
     else
       :ok
     end
   end
+
+  # The engines a job names (`"engines"`, from `RangesSync`'s check of the
+  # stale ones), or every engine with a source (the cron's job). A name that
+  # is not a current range engine is dropped, never turned into an atom.
+  defp engines(%{"engines" => names}) when is_list(names) do
+    Enum.filter(Engines.range_engines(), &(Atom.to_string(&1) in names))
+  end
+
+  defp engines(_args), do: Engines.range_engines()
 
   @doc """
   Fetches, checks and installs `engine`'s list, and sends it to the other
@@ -117,12 +145,5 @@ defmodule KilnCMS.CrawlerVerification.RangesWorker do
       %{count: 1},
       %{engine: engine, result: result}
     )
-
-    if result != :ok do
-      Logger.warning(
-        "Crawler verification: could not refresh #{engine}'s published crawler IP " <>
-          "ranges (#{result}); the list held before is kept until it goes stale"
-      )
-    end
   end
 end

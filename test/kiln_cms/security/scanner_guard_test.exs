@@ -26,6 +26,9 @@ defmodule KilnCMS.Security.ScannerGuardTest do
 
   setup do
     previous_proxies = Application.get_env(:kiln_cms, :trusted_proxies)
+    # Search-engine claims here are settled by DNS answers the tests plant;
+    # no range list left by another test may answer first (#2586).
+    KilnCMS.CrawlerVerification.Ranges.clear()
 
     Application.put_env(:kiln_cms, :scanner_blocking,
       enabled: true,

@@ -5,8 +5,8 @@ defmodule KilnCMS.CrawlerVerification.RangesSyncTest do
   queues a fetch of its own. Driven through the callbacks and pure helpers,
   so no second node is needed.
   """
-  # Not async: the lists are VM-global, and one test changes the `Ranges`
-  # config with `Application.put_env/3`.
+  # Not async: the lists are VM-global, `RangesSync` is the app's own process,
+  # and some tests change `:crawler_ranges_cron` with `Application.put_env/3`.
   use KilnCMS.DataCase, async: false
   use Oban.Testing, repo: KilnCMS.Repo
 
@@ -120,20 +120,34 @@ defmodule KilnCMS.CrawlerVerification.RangesSyncTest do
   end
 
   describe "a node with no fresh list" do
-    test "queues one fetch at bootstrap" do
+    test "queues one fetch of the stale engines at bootstrap" do
+      Ranges.put_fixture(:google, [@v4])
+
+      assert {:noreply, _state} = RangesSync.handle_info(:bootstrap, state(bootstrap?: true))
+      assert [job] = all_enqueued(worker: RangesWorker)
+      assert Enum.sort(job.args["engines"]) == ["apple", "bing", "duckduckgo"]
+    end
+
+    test "queues nothing at bootstrap with bootstrap off or the schedule off" do
       assert {:noreply, _state} = RangesSync.handle_info(:bootstrap, state())
-      assert [_one] = all_enqueued(worker: RangesWorker)
+      refute_enqueued(worker: RangesWorker)
+
+      cron_off()
+      assert {:noreply, _state} = RangesSync.handle_info(:bootstrap, state(bootstrap?: true))
+      refute_enqueued(worker: RangesWorker)
     end
 
     test "queues none at bootstrap when every list is fresh" do
       for engine <- Engines.range_engines(), do: Ranges.put_fixture(engine, [@v4])
 
-      assert {:noreply, _state} = RangesSync.handle_info(:bootstrap, state())
+      assert {:noreply, _state} = RangesSync.handle_info(:bootstrap, state(bootstrap?: true))
       refute_enqueued(worker: RangesWorker)
     end
 
     test "queues none at bootstrap with ranges off" do
-      assert {:noreply, _state} = RangesSync.handle_info(:bootstrap, state(enabled: false))
+      assert {:noreply, _state} =
+               RangesSync.handle_info(:bootstrap, state(enabled: false, bootstrap?: true))
+
       refute_enqueued(worker: RangesWorker)
     end
 
@@ -151,7 +165,8 @@ defmodule KilnCMS.CrawlerVerification.RangesSyncTest do
       assert log =~ "KILN_CRAWLER_RANGES=false"
       refute log =~ "google"
       assert_receive {:crawler_ranges_sync, ^me}
-      assert [_one] = all_enqueued(worker: RangesWorker)
+      assert [job] = all_enqueued(worker: RangesWorker)
+      assert job.args == %{"engines" => ["duckduckgo"]}
 
       {_second, log} = with_log(fn -> RangesSync.tick(first) end)
       refute log =~ "duckduckgo"
@@ -171,6 +186,104 @@ defmodule KilnCMS.CrawlerVerification.RangesSyncTest do
       refute_enqueued(worker: RangesWorker)
       refute_receive {:crawler_ranges_sync, _}, 50
     end
+  end
+
+  describe "a vendor that keeps failing (#2586 review)" do
+    test "costs one fetch of that vendor per 10 minutes, however often nodes check" do
+      test = self()
+
+      Req.Test.stub(KilnCMS.CrawlerVerification.Ranges, fn conn ->
+        send(test, {:request, conn.host})
+
+        if conn.host == "duckduckgo.com",
+          do: Plug.Conn.send_resp(conn, 404, ""),
+          else: Req.Test.json(conn, %{"prefixes" => [%{"ipv4Prefix" => @v4}]})
+      end)
+
+      # The cron's run: three vendors install, DuckDuckGo 404s, the job completes.
+      capture_log(fn -> assert perform_job(RangesWorker, %{}) == :ok end)
+      for _ <- 1..4, do: assert_received({:request, _host})
+      assert Ranges.fresh?(:google) and Ranges.fresh?(:bing) and Ranges.fresh?(:apple)
+      refute Ranges.fresh?(:duckduckgo)
+
+      # The next check queues a fetch of DuckDuckGo alone, which fetches only it.
+      capture_log(fn -> RangesSync.tick(state(bootstrap?: true)) end)
+      assert [job] = all_enqueued(worker: RangesWorker)
+      assert job.args == %{"engines" => ["duckduckgo"]}
+
+      capture_log(fn -> assert perform_job(RangesWorker, job.args) == :ok end)
+      assert_received {:request, "duckduckgo.com"}
+      refute_received {:request, _host}
+
+      # That job ended, and failed again; checks within the 10 minutes, on any
+      # node, queue nothing more, whether it completed or was discarded.
+      Repo.update_all(Oban.Job, set: [state: "completed", completed_at: DateTime.utc_now()])
+
+      for _node <- 1..3 do
+        capture_log(fn -> RangesSync.tick(state(bootstrap?: true)) end)
+      end
+
+      assert [_still_one] = Repo.all(Oban.Job)
+
+      Repo.update_all(Oban.Job, set: [state: "discarded", discarded_at: DateTime.utc_now()])
+      capture_log(fn -> RangesSync.tick(state(bootstrap?: true)) end)
+      assert [_still_one] = Repo.all(Oban.Job)
+    end
+
+    test "with the schedule off, a check queues nothing" do
+      cron_off()
+
+      log = capture_log(fn -> RangesSync.tick(state(bootstrap?: true)) end)
+
+      refute_enqueued(worker: RangesWorker)
+      assert log =~ "KILN_CRAWLER_RANGES=false"
+    end
+  end
+
+  describe "puts are serialized" do
+    test "a put waits for RangesSync, which decides it" do
+      sync = Process.whereis(RangesSync)
+      :sys.suspend(sync)
+      task = Task.async(fn -> Ranges.put_fixture(:duckduckgo, [@v4]) end)
+
+      try do
+        assert Task.yield(task, 100) == nil
+        assert Ranges.lookup(:duckduckgo, @inside_v4) == :unknown
+      after
+        :sys.resume(sync)
+      end
+
+      assert Task.await(task) == :installed
+      assert Ranges.lookup(:duckduckgo, @inside_v4) == :in
+    end
+
+    test "an older list put alongside a newer one never wins" do
+      for _round <- 1..20 do
+        Ranges.clear()
+        now = System.monotonic_time(:millisecond)
+
+        [newer, older] =
+          [
+            fn -> Ranges.put_fixture(:duckduckgo, [@v4], now: now, age_ms: 0) end,
+            fn ->
+              Ranges.put_fixture(:duckduckgo, ["45.143.202.0/24"], now: now, age_ms: 5_000)
+            end
+          ]
+          |> Enum.map(&Task.async/1)
+          |> Enum.map(&Task.await/1)
+
+        assert newer == :installed
+        assert older in [:installed, :ignored]
+        assert Ranges.lookup(:duckduckgo, @inside_v4, now: now) == :in
+        assert Ranges.status().duckduckgo.age_ms < 5_000
+      end
+    end
+  end
+
+  defp cron_off do
+    previous = Application.get_env(:kiln_cms, :crawler_ranges_cron)
+    Application.put_env(:kiln_cms, :crawler_ranges_cron, false)
+    on_exit(fn -> Application.put_env(:kiln_cms, :crawler_ranges_cron, previous) end)
   end
 
   defp state(opts \\ []), do: %{warned: MapSet.new(), opts: opts}

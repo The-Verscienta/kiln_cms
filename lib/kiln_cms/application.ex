@@ -491,8 +491,9 @@ defmodule KilnCMS.Application do
      "in-app backup schedules will NOT run; backups come only from host cron or Back up " <>
        "now. Refs #2219."},
     {:crawler_ranges_cron, KilnCMS.CrawlerVerification.RangesWorker, "KILN_CRAWLER_RANGES_CRON",
-     "search engines' published crawler IP ranges will NOT be refreshed: DuckDuckBot " <>
-       "stays unverified and other engines fall back to DNS. See #2586."},
+     "search engines' published crawler IP ranges will NOT be fetched at all (no " <>
+       "boot or stale-list fetch either): once a list is stale, DuckDuckBot stays " <>
+       "unverified and other engines fall back to DNS. See #2586."},
     # Only ever set when KILN_DEMO_RESET=confirm (config/runtime.exs).
     {:demo_reset_cron, KilnCMS.Demo.ResetWorker, "KILN_DEMO_RESET_CRON",
      "the demo will NOT reset on a schedule. See docs/demo-mode.md."}

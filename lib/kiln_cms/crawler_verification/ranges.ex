@@ -45,9 +45,11 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
   ## Outbound requests
 
   This is the first scheduled outbound call a default install makes: a GET
-  of each vendor's list every 6 hours from one node, plus at most one at
-  boot when no node has a fresh list. Nothing about the instance or its
-  visitors is sent. `KILN_CRAWLER_RANGES=false` turns it off, as does
+  of each vendor's list every 6 hours from one node, plus a fetch of just
+  the stale lists that a node queues at boot or every 10 minutes while one
+  is not fresh: at most one job per 10 minutes across the cluster
+  (`KilnCMS.CrawlerVerification.RangesSync`). `KILN_CRAWLER_RANGES_CRON=false`
+  stops all of these. Nothing about the instance or its visitors is sent. `KILN_CRAWLER_RANGES=false` turns it off, as does
   `KILN_CRAWLER_VERIFICATION=false`; with it off no request is made and every
   claim falls back to DNS (DuckDuckBot to `:unverifiable`).
 
@@ -173,9 +175,24 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
 
   The index is rewritten only when the content differs from what is
   installed; an unchanged list only moves the fetch time.
+
+  "Is it newer?" and the install are one decision only if nothing else
+  installs in between, so every put runs inside
+  `KilnCMS.CrawlerVerification.RangesSync`, one at a time: a fetch on this
+  node and a list from a peer cannot interleave and leave an older index
+  under a newer fetch time. The age is measured here, before the wait. Run
+  directly when that process is not running (or is the caller).
   """
   @spec put(atom(), [Cidr.t()], keyword()) :: :installed | :ignored
   def put(engine, cidrs, opts \\ []) when is_list(cidrs) do
+    opts = Keyword.put_new_lazy(opts, :now, &now/0)
+    serialized({:put, engine, cidrs, opts}, fn -> put_now(engine, cidrs, opts) end)
+  end
+
+  @doc false
+  # The put itself; only `RangesSync` and `put/3`'s fallback call it.
+  @spec put_now(atom(), [Cidr.t()], keyword()) :: :installed | :ignored
+  def put_now(engine, cidrs, opts) do
     now = Keyword.get(opts, :now, now())
     fetched_at = now - Keyword.get(opts, :age_ms, 0)
 
@@ -240,9 +257,15 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
   end
 
   @doc false
-  # Test seam: forget every list.
+  # Test seam: forget every list. Serialized like `put/3`, so a list another
+  # test's broadcast left in `RangesSync`'s mailbox is installed before this
+  # clears it, never after.
   @spec clear() :: :ok
-  def clear do
+  def clear, do: serialized(:clear, &clear_now/0)
+
+  @doc false
+  @spec clear_now() :: :ok
+  def clear_now do
     for engine <- Engines.engines() do
       :persistent_term.erase(index_key(engine))
       if clock = clock(), do: :atomics.put(clock, slot(engine) + 2, 0)
@@ -258,6 +281,23 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
   def put_fixture(engine, strings, opts \\ []) do
     {:ok, cidrs} = Parser.parse_strings(strings)
     put(engine, cidrs, opts)
+  end
+
+  # In `RangesSync` when it runs and is not the caller; otherwise right here.
+  # A sync process that dies or stalls mid-call costs the serialization for
+  # that one write, never the write.
+  defp serialized(message, direct) do
+    case Process.whereis(KilnCMS.CrawlerVerification.RangesSync) do
+      pid when is_pid(pid) and pid != self() ->
+        try do
+          GenServer.call(pid, message)
+        catch
+          :exit, _reason -> direct.()
+        end
+
+      _none_or_self ->
+        direct.()
+    end
   end
 
   # ---- the index ------------------------------------------------------------

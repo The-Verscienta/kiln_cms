@@ -81,8 +81,9 @@ defmodule KilnCMS.CrawlerVerification.RangesWorkerTest do
       _engine -> {200, list(["45.143.202.0/24"])}
     end)
 
-    log = capture_log(fn -> assert {:error, _} = perform_job(RangesWorker, %{}) end)
+    log = capture_log(fn -> assert perform_job(RangesWorker, %{}) == :ok end)
 
+    assert [_one] = Regex.scan(~r/could not refresh/, log)
     assert log =~ "duckduckgo"
     refute log =~ "45.143."
     assert_received {:fetch, _, %{engine: :duckduckgo, result: :http_error}}
@@ -102,9 +103,12 @@ defmodule KilnCMS.CrawlerVerification.RangesWorkerTest do
     Ranges.put_fixture(:bing, [@v4])
     stub_all(fn _engine -> :transport_error end)
 
-    assert {:error, {:crawler_ranges_failed, failed}} = perform_job(RangesWorker, %{})
-    assert Enum.sort(failed) == Enum.sort(Engines.range_engines())
-    assert_received {:fetch, _, %{engine: :bing, result: :transport_error}}
+    assert perform_job(RangesWorker, %{}) == :ok
+
+    for engine <- Engines.range_engines() do
+      assert_received {:fetch, _, %{engine: ^engine, result: :transport_error}}
+    end
+
     assert Ranges.lookup(:bing, @inside_v4) == :in
   end
 
@@ -115,7 +119,7 @@ defmodule KilnCMS.CrawlerVerification.RangesWorkerTest do
 
     stub_all(fn _engine -> {200, big} end)
 
-    assert {:error, _} = perform_job(RangesWorker, %{})
+    assert perform_job(RangesWorker, %{}) == :ok
     assert_received {:fetch, _, %{engine: :duckduckgo, result: :too_large}}
     assert Ranges.lookup(:duckduckgo, @inside_v4) == :unknown
   end
@@ -130,7 +134,7 @@ defmodule KilnCMS.CrawlerVerification.RangesWorkerTest do
       Ranges.put_fixture(:apple, [@v4])
       stub_all(fn _engine -> {200, unquote(body)} end)
 
-      assert {:error, _} = perform_job(RangesWorker, %{})
+      assert perform_job(RangesWorker, %{}) == :ok
       assert_received {:fetch, _, %{engine: :apple, result: unquote(result)}}
       assert Ranges.lookup(:apple, @inside_v4) == :in
       assert Ranges.lookup(:apple, {45, 143, 1, 1}) == :out
@@ -140,17 +144,18 @@ defmodule KilnCMS.CrawlerVerification.RangesWorkerTest do
   test "a redirect is not followed" do
     stub_all(fn _engine -> {301, ""} end)
 
-    assert {:error, _} = perform_job(RangesWorker, %{})
+    assert perform_job(RangesWorker, %{}) == :ok
     assert_received {:fetch, _, %{engine: :google, result: :http_error}}
   end
 
-  test "one vendor failing does not keep the others from installing" do
+  test "one vendor failing does not keep the others from installing, and the job completes" do
     stub_all(fn
-      :google -> 503
+      :google -> 404
       _engine -> {200, list([@v4])}
     end)
 
-    assert {:error, {:crawler_ranges_failed, [:google]}} = perform_job(RangesWorker, %{})
+    assert perform_job(RangesWorker, %{}) == :ok
+    assert_received {:fetch, _, %{engine: :google, result: :http_error}}
     assert Ranges.lookup(:google, @inside_v4) == :unknown
     assert Ranges.lookup(:duckduckgo, @inside_v4) == :in
     assert Ranges.lookup(:bing, @inside_v4) == :in
@@ -165,7 +170,7 @@ defmodule KilnCMS.CrawlerVerification.RangesWorkerTest do
 
     stub_all(fn _engine -> {200, list([@v4])} end)
 
-    assert {:error, {:crawler_ranges_failed, [:google]}} = perform_job(RangesWorker, %{})
+    assert perform_job(RangesWorker, %{}) == :ok
     assert_received {:fetch, _, %{engine: :google, result: :blocked}}
   end
 
@@ -188,6 +193,31 @@ defmodule KilnCMS.CrawlerVerification.RangesWorkerTest do
       refute_received :requested
       refute_received {:fetch, _, _}
     end
+  end
+
+  test "a job naming engines fetches only those, and ignores names it does not know" do
+    test = self()
+
+    Req.Test.stub(@stub, fn conn ->
+      send(test, {:request, conn.host})
+      Req.Test.json(conn, %{"prefixes" => [%{"ipv4Prefix" => @v4}]})
+    end)
+
+    assert perform_job(RangesWorker, %{"engines" => ["bing", "yandex", "no_such_engine"]}) == :ok
+
+    bing = URI.parse(Engines.range_source(:bing)).host
+    assert_received {:request, ^bing}
+    refute_received {:request, _}
+    assert Ranges.lookup(:bing, @inside_v4) == :in
+    assert Ranges.lookup(:google, @inside_v4) == :unknown
+  end
+
+  test "is unique for 10 minutes by worker alone, over every state" do
+    unique = RangesWorker.new(%{}).changes.unique
+
+    assert unique.period == 600
+    assert unique.keys == []
+    assert Enum.sort(unique.states) == Enum.sort(Oban.Job.states())
   end
 
   test "runs from the crontab every 6 hours" do

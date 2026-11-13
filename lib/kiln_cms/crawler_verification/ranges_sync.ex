@@ -26,12 +26,24 @@ defmodule KilnCMS.CrawlerVerification.RangesSync do
   ## A node with no fresh list
 
   `:bootstrap_after_ms` (20 s) after boot, a node that still has no fresh
-  list for some engine queues one fetch job, unique for 10 minutes so nodes
-  booting together queue one. Every 10 minutes it checks again: while a list
-  is not fresh it asks the cluster again, queues a fetch again, and logs a
-  warning once per engine until the list is fresh. (`:tick_ms` in the
-  `Ranges` config overrides the 10 minutes, for the test env.) With `:bootstrap?` off
-  (dev, e2e, test) it never queues a fetch itself, leaving the cron.
+  list for some engine queues one fetch job for the engines whose list is
+  not fresh. Every 10 minutes it checks again: while a list is not fresh it
+  asks the cluster again, queues a fetch of the stale engines again, and logs
+  a warning once per engine until the list is fresh. (`:tick_ms` in the
+  `Ranges` config overrides the 10 minutes, for the test env.)
+
+  The job is unique for 10 minutes across the cluster whatever it asks for
+  and however its last run ended (`KilnCMS.CrawlerVerification.RangesWorker`),
+  so however many nodes check, and however often a vendor fails, each vendor
+  is asked at most about once per 10 minutes.
+
+  A node queues nothing itself with `:bootstrap?` off (dev, e2e, test), or
+  with the schedule off (`KILN_CRAWLER_RANGES_CRON=false`): then nothing
+  fetches a list on its own, not even at boot, and lists come only from a
+  job the operator queues. It still asks peers and still warns.
+
+  Every `KilnCMS.CrawlerVerification.Ranges.put/3` runs in this process, one
+  at a time (`handle_call/3`), so a fetch and a peer's list cannot interleave.
 
   Distribution peers are trusted already; PubSub delivery is best effort,
   and a node that misses a list falls back to DNS (or `:unverifiable` for
@@ -85,7 +97,11 @@ defmodule KilnCMS.CrawlerVerification.RangesSync do
   end
 
   def handle_info(:bootstrap, state) do
-    if Ranges.enabled?(state.opts) and stale_engines(state.opts) != [], do: insert_job()
+    with true <- Ranges.enabled?(state.opts) and auto_fetch?(state.opts),
+         [_ | _] = stale <- stale_engines(state.opts) do
+      insert_job(stale)
+    end
+
     {:noreply, state}
   end
 
@@ -145,6 +161,12 @@ defmodule KilnCMS.CrawlerVerification.RangesSync do
     end
   end
 
+  @impl true
+  def handle_call({:put, engine, cidrs, opts}, _from, state),
+    do: {:reply, Ranges.put_now(engine, cidrs, opts), state}
+
+  def handle_call(:clear, _from, state), do: {:reply, Ranges.clear_now(), state}
+
   @doc false
   # The 10-minute check, callable directly from a test.
   def tick(state) do
@@ -152,7 +174,7 @@ defmodule KilnCMS.CrawlerVerification.RangesSync do
 
     if stale != [] do
       request_sync()
-      if Ranges.config(state.opts)[:bootstrap?] == true, do: insert_job()
+      if auto_fetch?(state.opts), do: insert_job(stale)
     end
 
     for engine <- stale, not MapSet.member?(state.warned, engine) do
@@ -173,14 +195,23 @@ defmodule KilnCMS.CrawlerVerification.RangesSync do
     Enum.reject(Engines.range_engines(), &Ranges.fresh?(&1, opts))
   end
 
+  @doc false
+  # Does this node queue fetches of its own? Not with `:bootstrap?` off, and
+  # not with the schedule off: `KILN_CRAWLER_RANGES_CRON=false` means nothing
+  # fetches on its own.
+  def auto_fetch?(opts \\ []) do
+    Ranges.config(opts)[:bootstrap?] == true and
+      KilnCMS.Application.cron_expression(:crawler_ranges_cron) != nil
+  end
+
   defp request_sync do
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, Ranges.topic(), {:crawler_ranges_sync, node()})
   end
 
   # Oban or the repo may be down or not started yet; a missed bootstrap is
   # covered by the next check and the cron, so a failed insert is not a crash.
-  defp insert_job do
-    RangesWorker.new(%{}) |> Oban.insert()
+  defp insert_job(engines) do
+    %{"engines" => Enum.map(engines, &Atom.to_string/1)} |> RangesWorker.new() |> Oban.insert()
   rescue
     error ->
       Logger.warning("Crawler verification: could not queue a range fetch: #{inspect(error)}")
