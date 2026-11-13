@@ -1,6 +1,8 @@
 defmodule KilnCMS.CMS.Changes.RefuseTrashed do
   @moduledoc """
-  Refuses an update on a content row that is in the trash (#2332).
+  Refuses an update on a content row that is in the trash (#2332). The
+  decision, the alternatives rejected and the exemption policy are in
+  `docs/decisions/0052-a-trashed-content-row-refuses-every-update-by-default-through-a-row-filter.md`.
 
   Trashing is a soft delete (AshArchival): it stamps `archived_at` and the
   archival read preparation hides the row from every ordinary read. It does

@@ -324,7 +324,9 @@ runs through its bypass. On an unscheduled draft, or a create, they do nothing
 until someone with publish rights publishes or schedules the record, so an
 editor may write them there. Sending the value a record already has is not a
 change and is allowed. The two fields have a policy each, because
-`changing_attributes([a, b])` matches only when both change.
+`changing_attributes([a, b])` matches only when both change. The reasoning is
+in [ADR 0051](decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md),
+and the steps for each route are in [Take content down](take-content-down.md).
 
 ## Version history — `Page.Version`, `Post.Version`, `Entry.Version` (`KilnCMS.CMS.VersionPolicies`)
 
