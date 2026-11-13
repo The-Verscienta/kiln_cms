@@ -21,7 +21,7 @@
   pointed the forms list at `/forms/<slug>/embed` because nothing answered at
   `/forms/<slug>`, and which #2341 superseded;
   [#2143](https://github.com/The-Verscienta/kiln_cms/issues/2143) and
-  [#2374](https://github.com/The-Verscienta/kiln_cms/pull/2374) for what
+  [#2374](https://github.com/The-Verscienta/kiln_cms/issues/2374) for what
   reserving a segment later costs;
   [#2898](https://github.com/The-Verscienta/kiln_cms/issues/2898) for the
   routes the reserved list misses;
@@ -94,8 +94,9 @@ which branch called what.
 | Standalone form page | `/forms/<slug>` | `show_content/2` | `form_page/3` | 1.9.0, #2138 |
 
 `show_page/2` passes `event_index(...) || stock_home(...)` as one fallback.
-The two cannot both match: `home` would have to be an event-shaped type's
-segment. `show_post/2` (`/blog/<slug>`) and `fallback/2` (three or more
+The two cannot both match unless `home` is an event-shaped type's segment
+(nothing reserves `home`); then the event index takes `/home`, a page slugged
+`home` is refused, and only an alias or a redirect can replace it. `show_post/2` (`/blog/<slug>`) and `fallback/2` (three or more
 segments) pass none, so no generated page lives under `/blog/` or at a deep
 path today.
 
@@ -145,8 +146,8 @@ address, or when the route itself checks content first:
 
 - **Content cannot own the address.** The path is under a namespace the
   router owns and has reserved (`/api/`, `/editor/`, `/auth/`), or it is a
-  two-segment `/<plural>/<file>` whose last segment is reserved as a slug, so
-  no record can be stored there (`/<plural>/index.json`, the event index's JSON
+  two-segment `/<plural>/<file>` whose last segment cannot be a slug or an
+  alias (both formats allow no dot), so no record can be stored there (`/<plural>/index.json`, the event index's JSON
   twin; `/<plural>/calendar.ics`; `/<plural>/feed.xml`).
 - **The route checks content first.** `ContentController.home/2` answers `/`
   with the published Home page when the site has one, through `show_page/2`,
@@ -158,11 +159,11 @@ A route that takes a whole first segment (`/blog`, `/search`, `/membership`,
 collisions. The change also needs an upgrade note telling operators to run
 `mix kiln.reserved_paths` (`KilnCMS.CMS.ReservedPathAudit`), because reserving
 a segment later shadows records stored before it. That is what happened when
-`access-denied` was added in #2143, which #2374 audited.
+`access-denied` was added in #2143; #2374 asked for an audit of what it shadowed, and #2666 shipped it (`mix kiln.reserved_paths`).
 
 The cost of this path is that the list is kept in sync with the router by
 hand. #2898 found single-segment routes ahead of `/:slug` that are not in it
-(`developers`, `actor`, `sitemap.xml` and others): a page with such a slug is
+(`developers`, `actor`, `ap`, `ready`, `sign-out` and others): a page with such a slug is
 accepted and can never be reached. A plugin's pages (`Kiln.Plugins.public_routes/0`
 and `plug_routes/0`) are declared ahead of the catch-alls the same way and are
 not in the list either. Until a test ties the two together, a new route of

@@ -78,8 +78,9 @@ defmodule KilnCMSWeb.ContentController do
   # only way a reader reaches a non-default home (`/` is the default locale's,
   # and `/fr` alone is a slug), and the layout cannot ask whether a Home page
   # is published without a query on every cached render. So the address always
-  # answers, and a published Home page, an alias or a redirect still wins: it is
-  # a generated page in the funnel's last slot (`docs/decisions/0059-*`).
+  # answers, and a published Home page, an alias or a redirect still wins: the
+  # stock home is a generated page in the funnel's last slot
+  # (`docs/decisions/0059-*`).
   defp stock_home(conn, slug, params) do
     if slug == StarterContent.home_slug() do
       conn
