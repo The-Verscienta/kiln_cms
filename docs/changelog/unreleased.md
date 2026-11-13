@@ -1235,6 +1235,71 @@ carries the reasoning.
   (why a trashed page refuses updates through a row filter, and how an
   action earns an exemption). No behavior changes. (#2475, #2534)
 
+<a id="second-factor-help-follows-the-host"></a>
+
+- **The second-factor pages now say what works at the address you are on, and say before you click when adding a factor needs the email code first.**
+  The setup page (`/account/two-factor`) is served only on the main host
+  (`PHX_HOST`) and console hosts, and a passkey can only be used where its
+  ceremony runs (the main host, or a console host under it). The pages
+  around it gave the same help everywhere. Now:
+  - **`/editor/two-factor`, Set up two-step sign-in.** For an admin with no
+    second factor, the button goes to the setup page on this host, or, where
+    the console is served on a site's own address (no console host is
+    configured), straight to the main host's page, with the line "This opens
+    on (main host), where you sign in again." Before, the link went to
+    `/account/two-factor` on the site's address, which redirected to the
+    main host without saying so.
+  - **`/editor/two-factor`, the line under Code from your authenticator
+    app.** It depends on the admin's factors and the host. With an
+    authenticator app and a passkey, where a passkey works: "Use a code, or
+    sign in again with your passkey." (as before). With a passkey only,
+    where a passkey works: "No authenticator app? Sign out and sign in
+    again with your passkey, then save within 15 minutes." With a passkey
+    only, where it does not (a site's own address, or a console host outside
+    `PHX_HOST`): "A passkey can't confirm it at this address: add an
+    authenticator app, then enter its code here.", with a **Set up an
+    authenticator app** link to the setup page (the main host's, on a site's
+    own address, and it says so). Otherwise: "Enter a current code from
+    your authenticator app." Each starts "Changing this setting needs a
+    second factor from the last 15 minutes." Before, every admin was told
+    to use a code or sign in again with a passkey, including where a
+    passkey cannot be used.
+  - **`/editor/settings`.** That page has no step for the emailed
+    confirmation code some sites ask for before a factor is added, so it
+    refused the add afterwards with "Confirm your email address before
+    adding a second factor." When the code is owed, the page now says so
+    beside **Enable two-factor authentication**, **Set up a new
+    authenticator** (after a recovery-code sign-in) and the passkey form:
+    "You need to confirm your email address before you add a second
+    factor. Do that on the two-step sign-in page, and add it there.", with
+    a **Set up two-step sign-in** button to `/account/two-factor` (the main
+    host's, on a site's own address, and it says so). The refusal still
+    backs it up.
+  - **"We'll email you" lines.** "We'll email you when an authenticator
+    app is added or replaced." now sits beside the controls that set one
+    up (the enable button, the setup form, and the button for a new one
+    after a recovery-code sign-in) on both `/editor/settings` and
+    `/account/two-factor`, and nowhere else: Settings used to show it under
+    an app already set up, with nothing to add. `/account/two-factor` now
+    also shows "We'll email you each time a passkey is added to your
+    account." beside its passkey form.
+  - **`/account/two-factor` at the passkey limit.** An account holding the
+    most passkeys it may (20) sees "You have 20 passkeys, the most an
+    account can hold. Remove one to add another." in place of the add form,
+    as on Settings. Before, the form stayed and the registration was refused
+    only after the browser's passkey prompt.
+
+  All new text is translated into Spanish and French. The guide's
+  [Require two-step sign-in on your site](../two-factor-auth.md#require-two-step-sign-in-on-your-site)
+  steps and [When the emailed code is asked for](../two-factor-auth.md#when-the-emailed-code-is-asked-for)
+  are updated to match. Also corrected: the staging guide's list of the keys
+  and credentials kept in the database and how a staging copy with its own
+  `SECRET_KEY_BASE` treats them
+  ([Staging environments](../staging-environments.md), "What's already safe by default"), and the
+  `KilnCMS.Accounts.Invitations` moduledoc. No migration, API or config
+  change; rolling back restores the earlier wording. (Part of #2872;
+  #2886, #2888)
+
 ## Fixed
 
 <a id="backup-resume-safety"></a>

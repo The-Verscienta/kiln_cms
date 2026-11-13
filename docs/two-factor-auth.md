@@ -631,7 +631,8 @@ if you did not ask for it: reset your password, which signs out every session.
 The check is made again by the enrollment itself (`User` `:confirm_totp`,
 `Passkey` `:register`), not only by the page, so a page that skipped the step
 cannot add a factor. `/editor/settings` has no email step. For an account
-that owes one, it says so beside **Enable two-factor authentication** and the
+that owes one, it says so beside **Enable two-factor authentication**, beside
+**Set up a new authenticator** after a recovery-code sign-in, and beside the
 passkey form: "You need to confirm your email address before you add a second
 factor. Do that on the two-step sign-in page, and add it there." with
 a **Set up two-step sign-in** button to `/account/two-factor` (on a site's own

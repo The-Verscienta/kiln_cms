@@ -173,6 +173,9 @@ Every summary line below that was shortened links to its own entry there.
 - **New guide "Take content down": unpublishing and archiving from the editor, the content list, a date, the calendar or a release, who may use each, and what each refusal message means.**
   ([#2893](https://github.com/The-Verscienta/kiln_cms/pull/2893) · [long form](docs/changelog/unreleased.md#take-content-down-guide))
 
+- **Second-factor help matches the address: `/editor/two-factor` links to the main host's setup page from a site's own address and tells a passkey-only admin what works there, Settings says up front when the email code is owed, and "we'll email you" sits beside each add control on both setup pages.**
+  ([long form](docs/changelog/unreleased.md#second-factor-help-follows-the-host))
+
 ### Fixed
 
 - **Backup Resume is safe: the re-open is atomic, Resume waits ~2.5 min after a Cancel, a step that outlived its Cancel can't overwrite state or history, a resume runs on the node with its files, and a refused one says why on its row.**
