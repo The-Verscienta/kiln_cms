@@ -134,15 +134,115 @@ defmodule KilnCMS.Security.FailedSignInAlertTest do
     assert scope == ctx.org.id
   end
 
+  # #2639: the tally is sharded, so attempts arriving together can each read a
+  # total at or past the threshold. One of them alerts on this node; the rest
+  # are counted and sampled like any other.
+  test "forty at once alert once, and only one of them is recorded unsampled", ctx do
+    enable!(ctx)
+
+    1..40
+    |> Enum.map(fn _ ->
+      Task.async(fn ->
+        Recorder.record_sampled(:sign_in_failed,
+          tenant: ctx.org.id,
+          request: %{ip: "198.51.100.9"}
+        )
+      end)
+    end)
+    |> Task.await_many(10_000)
+
+    assert [alert] = alerts()
+    assert alert["threshold_count"] >= Alerts.failed_sign_in_threshold()
+    # Five sampled for the one address, plus the attempt that alerted.
+    assert length(recorded(ctx.org.id)) == 6
+
+    assert Alerts.failed_sign_in_total(ctx.org.id, alert["window_index"]) == 40
+  end
+
+  test "charges arriving together: exactly one is the threshold", ctx do
+    enable!(ctx)
+    threshold = Alerts.failed_sign_in_threshold()
+
+    results =
+      1..40
+      |> Enum.map(fn _ -> Task.async(fn -> Alerts.charge_failed_sign_in(ctx.org.id) end) end)
+      |> Task.await_many(10_000)
+
+    assert [{:threshold, idx, count}] = Enum.filter(results, &match?({:threshold, _, _}, &1))
+    assert count >= threshold
+    assert Enum.count(results, &(&1 == :counted)) == 39
+    assert Alerts.failed_sign_in_total(ctx.org.id, idx) == 40
+  end
+
+  test "the summary counts every shard, and a previous release's unsharded row", ctx do
+    enable!(ctx)
+    bucket = Alerts.failed_sign_in_bucket()
+
+    # A node of the previous release counted three on the unsharded key.
+    for _ <- 1..3, do: KilnCMS.Accounts.ThrottleStore.count(bucket, ctx.org.id, window())
+
+    fail(ctx.org.id, Alerts.failed_sign_in_threshold() + 7)
+    assert [alert] = alerts()
+    assert alert["threshold_count"] == Alerts.failed_sign_in_threshold()
+
+    %{rows: [[rows]]} =
+      Repo.query!("SELECT count(*) FROM throttle_counters WHERE bucket = $1", [bucket])
+
+    assert rows > 2
+
+    SecurityAlerts.deliver()
+    SecurityAlerts.close_window(alert["id"])
+    SecurityAlerts.deliver()
+
+    assert Enum.any?(
+             Repo.all(Notification),
+             &(&1.excerpt ==
+                 "Failed sign-ins reached the alert threshold: 20 in this alert window")
+           )
+  end
+
   test "off by default: nothing is counted and nothing alerts", ctx do
     fail(ctx.org.id, 20)
 
     assert alerts() == []
 
-    assert KilnCMS.Accounts.ThrottleStore.window_count(
-             Alerts.failed_sign_in_bucket(),
+    assert Alerts.failed_sign_in_total(
              ctx.org.id,
              div(System.system_time(:millisecond), window())
            ) == nil
+  end
+end
+
+defmodule KilnCMS.Security.FailedSignInTallyFallbackTest do
+  @moduledoc """
+  The failed-sign-in tally with no database (#2639): the settings cannot be
+  read, so the tally counts (the direction that can still alert), on this
+  node's fallback, and the threshold is still reached. Sync and not a
+  `DataCase`: the sandbox is put in `:manual` mode with nothing checked out.
+  """
+  use ExUnit.Case, async: false
+
+  alias KilnCMS.Security.Alerts
+  alias KilnCMS.Test.BudgetWindow
+
+  @moduletag :capture_log
+
+  setup do
+    Ecto.Adapters.SQL.Sandbox.mode(KilnCMS.Repo, :manual)
+    :ok
+  end
+
+  test "an unreachable store still reaches the threshold, once" do
+    org_id = Ecto.UUID.generate()
+    window = BudgetWindow.fresh_window_ms()
+    threshold = Alerts.failed_sign_in_threshold()
+
+    results =
+      for _ <- 1..(threshold + 3), do: Alerts.charge_failed_sign_in(org_id, window_ms: window)
+
+    assert Enum.take(results, threshold - 1) |> Enum.all?(&(&1 == :counted))
+    assert {:threshold, idx, ^threshold} = Enum.at(results, threshold - 1)
+    assert idx == div(System.system_time(:millisecond), window)
+    assert Enum.drop(results, threshold) |> Enum.all?(&(&1 == :counted))
   end
 end

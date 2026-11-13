@@ -8840,6 +8840,11 @@ msgstr ""
 msgid "Every screen stays in search (⌘K) either way; this only decides what the sidebar lists."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Every security alert is turned off on this site."
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -18404,6 +18409,46 @@ msgstr ""
 msgid "Security alerts"
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts are turned off for this whole deployment."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site go out only by webhook."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site go to the platform admins: this site has no admins of its own."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site reach its administrators by bell only: each of them muted the email."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site reach its administrators."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site reach nobody."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts reach someone"
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts tell someone about lockouts, new administrators, removed second factors and sign-in changes. An alert that reaches nobody tells nobody."
+msgstr ""
+
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "Security alerts were made quieter"
@@ -21805,9 +21850,19 @@ msgstr ""
 msgid "The site's password policy could not be read."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "The site's security alert settings could not be read."
+msgstr ""
+
 #: lib/kiln_cms/security/posture/checks/idle_timeout.ex
 #, elixir-autogen, elixir-format
 msgid "The site's session settings could not be read."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "The site's webhook endpoints could not be read."
 msgstr ""
 
 #: lib/kiln_cms_web/components/seo_components.ex

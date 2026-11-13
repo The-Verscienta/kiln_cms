@@ -153,6 +153,13 @@ kotlinc_exclusion =
 # sparse file; this tag is the 3 GiB run recorded in the PR.
 backup_scale_exclusion = [:backup_scale]
 
+# Latency measurements, not assertions about behavior: the failed-sign-in
+# tally's concurrent-writer benchmark (#2639). They print numbers for a PR to
+# record, and timings vary with the host, so they run only when asked:
+#
+#     mix test --only benchmark test/kiln_cms/accounts/throttle_store_sharded_test.exs
+benchmark_exclusion = [:benchmark]
+
 # Not a test: rewrites the schema-export fixture and goldens. Run it with
 # `--only regenerate_schema_goldens` (see its moduledoc).
 regenerate_exclusion = [:regenerate_schema_goldens]
@@ -190,7 +197,8 @@ else
         table_lock_exclusion ++
         swiftc_exclusion ++
         kotlinc_exclusion ++
-        regenerate_exclusion ++ backup_scale_exclusion ++ core_registry_exclusion
+        regenerate_exclusion ++
+        backup_scale_exclusion ++ benchmark_exclusion ++ core_registry_exclusion
   )
 end
 

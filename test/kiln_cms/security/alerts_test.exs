@@ -500,11 +500,7 @@ defmodule KilnCMS.Security.AlertsTest do
 
       assert Enum.count(results, &(&1 == :counted)) == threshold + 4
 
-      assert KilnCMS.Accounts.ThrottleStore.window_count(
-               Alerts.failed_sign_in_bucket(),
-               org.id,
-               idx
-             ) == threshold + 5
+      assert Alerts.failed_sign_in_total(org.id, idx) == threshold + 5
 
       # Another site's tally is its own.
       other = org("alerts-tally-other")

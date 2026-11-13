@@ -46,6 +46,10 @@ defmodule KilnCMS.Accounts.ThrottleStore do
   row an hour past the window's end (through `expires_at`, so the prune needs
   no special case) for the summary that reads the closed window's total.
 
+  `count_sharded/5` and `window_sum/3` are the same tally spread over several
+  rows per key (#2639), so concurrent charges to one site do not queue on one
+  row lock; the failed-sign-in tally uses them.
+
   ## Never inside a transaction
 
   A charge made inside a transaction is **refunded by its rollback** — and a
@@ -193,10 +197,14 @@ defmodule KilnCMS.Accounts.ThrottleStore do
 
       {:unavailable, reason} ->
         log_fallback(bucket, reason)
-        # A limit no tally reaches: the fallback is only counting.
-        {:allow, count} = Local.hit({bucket, hash}, scale, 1_000_000_000)
-        {count, div(System.system_time(:millisecond), scale)}
+        local_count(bucket, hash, scale)
     end
+  end
+
+  defp local_count(bucket, hash, scale) do
+    # A limit no tally reaches: the fallback is only counting.
+    {:allow, count} = Local.hit({bucket, hash}, scale, 1_000_000_000)
+    {count, div(System.system_time(:millisecond), scale)}
   end
 
   @window_count_sql """
@@ -222,6 +230,125 @@ defmodule KilnCMS.Accounts.ThrottleStore do
       {:ok, %{rows: [[count]]}} -> count
       {:ok, %{rows: []}} -> nil
       {:unavailable, _reason} -> nil
+    end
+  end
+
+  @window_sum_sql """
+  SELECT sum(c.count)::bigint FROM throttle_counters AS c
+  WHERE c.bucket = $1 AND c.key_hash = ANY($2::bytea[]) AND c.window_index = $3
+  """
+
+  @doc """
+  The keys a tally of `key` sharded `shards` ways is spread over (#2639):
+  `key` itself, the unsharded key `count/3` writes, then `"key:0"` …
+  `"key:<shards - 1>"`. `count_sharded/5` writes one of the shard keys and
+  sums all of them; `window_sum/3` reads the same set.
+
+  The unsharded key stays in the set so a window that a node of the previous
+  release counted on `count/3` (a rolling deploy mid-window) still adds up.
+  """
+  @spec sharded_keys(String.t(), pos_integer()) :: [String.t(), ...]
+  def sharded_keys(key, shards) when is_binary(key) and is_integer(shards) and shards > 0,
+    do: [key | Enum.map(0..(shards - 1), &"#{key}:#{&1}")]
+
+  @doc """
+  `count/3` spread over `shards` rows (#2639): adds one to a randomly chosen
+  shard of `key`'s **current** window and returns `{total, window_index}`,
+  the total across every shard (`sharded_keys/2`) as this call saw it.
+
+  A single row per key serializes concurrent tallies on its row lock. A random
+  shard spreads them, and cannot be steered: an attacker choosing the address
+  or account tried still lands on any of the `shards` rows.
+
+  ## Two statements, no transaction
+
+    1. `count/3`'s upsert on the chosen shard, which also gives the window
+       index by the database clock.
+    2. A separate read of the sum over every key in the set for that index.
+
+  Each runs on its own and commits on its own. So the sum is read after the
+  call's own increment committed, and the call that commits last reads every
+  increment: when `n` concurrent calls take the total to `n`, at least one of
+  them sees `total >= n`. It may be more than one, and `total` may be past
+  any threshold the caller cares about: a caller wanting "once" decides that
+  itself. A single statement (a CTE that upserts and sums) would not do: its
+  snapshot is taken before its own write commits, so two concurrent calls can
+  both read the total without the other's increment and both miss `n`.
+
+  ## When the database cannot answer
+
+    * **The upsert fails:** the call counts on this node's fallback against
+      the *unsharded* key, exactly as `count/3` does, so the node-local total
+      is one number that still climbs to a threshold.
+    * **The upsert succeeded but the sum fails:** the shard's own count is
+      returned. It is lower than the total, never higher, and the increment
+      it reports is already in the shared table — counting it again on the
+      fallback would restart the total from one.
+
+  Raises `ArgumentError` inside a transaction, as `count/3` does.
+
+  Options: `:shard` picks the shard (tests), and `:after_count`, a zero-arity
+  function run between the two statements (tests).
+  """
+  @spec count_sharded(String.t(), String.t(), pos_integer(), pos_integer(), keyword()) ::
+          {pos_integer(), integer()}
+  def count_sharded(bucket, key, scale, shards, opts \\ [])
+      when is_binary(bucket) and is_binary(key) and is_integer(scale) and scale > 0 and
+             is_integer(shards) and shards > 0 do
+    refuse_in_transaction!(bucket)
+    shard = Keyword.get_lazy(opts, :shard, fn -> :rand.uniform(shards) - 1 end)
+    shard_hash = key_hash("#{key}:#{shard}")
+
+    case shared(fn ->
+           Repo.query!(@count_sql, [bucket, shard_hash, scale, @count_grace], timeout: @timeout)
+         end) do
+      {:ok, %{rows: [[shard_count, window_index]]}} ->
+        Keyword.get(opts, :after_count, fn -> :ok end).()
+        {sharded_total(bucket, key, shards, window_index, shard_count), window_index}
+
+      {:unavailable, reason} ->
+        log_fallback(bucket, reason)
+        local_count(bucket, key_hash(key), scale)
+    end
+  end
+
+  # `count_sharded/5`'s second statement. Never nil when it answers: the shard
+  # row the first one just wrote is in the set.
+  defp sharded_total(bucket, key, shards, window_index, shard_count) do
+    case window_total(bucket, sharded_keys(key, shards), window_index) do
+      {:ok, total} ->
+        total || shard_count
+
+      {:unavailable, reason} ->
+        log_sum_fallback(bucket, reason)
+        shard_count
+    end
+  end
+
+  @doc """
+  The total `count_sharded/5` (or `count/3`) reached in window `window_index`
+  over `keys` in `bucket`, current or closed — pass `sharded_keys/2`. `nil`
+  when none of the keys has a row in that window (pruned, or never counted on
+  the shared store) or the database cannot answer: as with `window_count/3`,
+  the caller must not read `nil` as zero.
+  """
+  @spec window_sum(String.t(), [String.t()], integer()) :: non_neg_integer() | nil
+  def window_sum(bucket, keys, window_index)
+      when is_binary(bucket) and is_list(keys) and is_integer(window_index) do
+    case window_total(bucket, keys, window_index) do
+      {:ok, total} -> total
+      {:unavailable, _reason} -> nil
+    end
+  end
+
+  defp window_total(bucket, keys, window_index) do
+    hashes = Enum.map(keys, &key_hash/1)
+
+    case shared(fn ->
+           Repo.query!(@window_sum_sql, [bucket, hashes, window_index], timeout: @timeout)
+         end) do
+      {:ok, %{rows: [[total]]}} -> {:ok, total}
+      {:unavailable, _reason} = unavailable -> unavailable
     end
   end
 
@@ -436,6 +563,21 @@ defmodule KilnCMS.Accounts.ThrottleStore do
           "Auth throttle store unavailable (#{Exception.message(reason)}); " <>
             "counting #{inspect(bucket)} and every other shared budget on this node only " <>
             "until it answers, so each budget holds per node rather than across the cluster."
+        )
+
+      {:deny, _retry_after} ->
+        :ok
+    end
+  end
+
+  # Once a minute per node, as above. The increment was counted on the shared
+  # store; only the total could not be read.
+  defp log_sum_fallback(bucket, reason) do
+    case Local.hit(:sum_fallback_logged, :timer.minutes(1), 1) do
+      {:allow, _count} ->
+        Logger.warning(
+          "Throttle store could not sum #{inspect(bucket)}'s shards " <>
+            "(#{Exception.message(reason)}); using the one shard's count, which undercounts."
         )
 
       {:deny, _retry_after} ->

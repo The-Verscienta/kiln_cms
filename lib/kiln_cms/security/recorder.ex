@@ -71,8 +71,9 @@ defmodule KilnCMS.Security.Recorder do
   `KilnCMS.Security.Changes.RaiseAlert` classifies it in the event's own
   transaction. A failed sign-in raises one only on the site's tally
   (`KilnCMS.Security.Alerts.charge_failed_sign_in/2`): `record_sampled/2`
-  charges every `:sign_in_failed` to its site, and the one attempt that brings
-  the window's count to the threshold is recorded **unsampled** and flagged,
+  charges every `:sign_in_failed` to its site, and the first attempt on this
+  node to see the window's count reach the threshold is recorded
+  **unsampled** and flagged,
   so the alert has its event even when the address behind it has used up its
   sample. The tally is keyed on the site alone, never on an address or
   account an attacker chooses.

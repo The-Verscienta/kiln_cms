@@ -44,8 +44,8 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   A summary says how many of the kind the window held, and is sent only when
   that is more than the alert already said: more than one, or for
   `failed_sign_ins` more than the count that crossed the threshold. The
-  count is the failed-sign-in tally's closed window
-  (`KilnCMS.Accounts.ThrottleStore.window_count/3`), or the window's events
+  count is the failed-sign-in tally's closed window, summed over its shards
+  (`KilnCMS.Security.Alerts.failed_sign_in_total/2`), or the window's events
   re-classified (`KilnCMS.Security.Alerts.classify/2`) — a site alert's in
   its own org, a platform alert's across every org. A tally that is gone is
   logged and the summary skipped; it is never read as zero.
@@ -56,7 +56,6 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   require Logger
 
   alias KilnCMS.Accounts
-  alias KilnCMS.Accounts.ThrottleStore
   alias KilnCMS.CMS
   alias KilnCMS.Notifications
   alias KilnCMS.Security
@@ -283,11 +282,7 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   end
 
   defp summary_count(dispatch, :failed_sign_ins) do
-    case ThrottleStore.window_count(
-           Alerts.failed_sign_in_bucket(),
-           dispatch.org_id,
-           dispatch.window_index
-         ) do
+    case Alerts.failed_sign_in_total(dispatch.org_id, dispatch.window_index) do
       nil ->
         Logger.warning(
           "Security alert summary #{dispatch.id}: the failed sign-in tally for its window " <>
