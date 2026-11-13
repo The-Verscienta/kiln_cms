@@ -22,7 +22,11 @@ defmodule KilnCMS.Security.ApiKeyTrip do
   An entry is the SHA-256 of that token and the key's id, and is written only
   when it verifies against the key the actor carries. A per-address, per-node
   limit can only trip after that many requests from the address were allowed
-  on this node, so a real key that trips it has been seen here.
+  on this node, so a real key that trips it on `/api`, `/gql` or `/mcp` has
+  usually been seen here. Not always: the allowed requests may have come from
+  other clients on a shared address, and the transform, plugin and ActivityPub
+  inbox routes charge a limit without authenticating a key (ADR 0053,
+  `docs/decisions/0053-*`).
 
   At a refusal (`note/2`):
 
