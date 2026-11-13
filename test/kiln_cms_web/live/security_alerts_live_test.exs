@@ -247,6 +247,7 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
 
       refute has_element?(lv, "#security-alerts-platform")
       refute has_element?(lv, "#platform-alerts-form")
+      refute has_element?(lv, "#api-key-rate-limit-servers-help")
 
       # The event a crafted client could still send is refused.
       html =
@@ -273,6 +274,22 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
                lv,
                "#platform-alert-kind-api_key_rate_limited input[type=checkbox][checked]"
              )
+
+      # The kind's `?` says a cluster raises fewer of these, and links the
+      # section that explains why (#2896).
+      assert has_element?(
+               lv,
+               "#platform-alert-kind-api_key_rate_limited #api-key-rate-limit-servers-help",
+               "an alert is raised only by a server that recently verified the key"
+             )
+
+      assert has_element?(
+               lv,
+               ~s{#api-key-rate-limit-servers-help a[href$="/docs/security-alerts.md#running-more-than-one-server"]}
+             )
+
+      # The link's anchor is the heading's slug; a renamed heading breaks it.
+      assert File.read!("docs/security-alerts.md") =~ ~r/^### Running more than one server$/m
 
       html =
         lv
