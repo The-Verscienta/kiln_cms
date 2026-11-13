@@ -10,7 +10,10 @@ defmodule KilnCMS.Backups.MediaArchive do
   its own. (Byte-splitting one gzip stream gives pieces that are none of those.)
 
   `scripts/backup.sh` mirrors this planner (walk order, exclusion globs, part
-  assignment, names, `tar` flags, retry): keep the two in step.
+  assignment, names, `tar` flags, retry): keep the two in step. Why the script
+  re-implements this planner instead of calling it, what the two must agree
+  on, and the rule that both change in the same pull request are ADR 0042
+  (`docs/decisions/0042-*`).
 
   ## Planning
 
