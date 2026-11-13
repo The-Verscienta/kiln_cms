@@ -422,6 +422,15 @@ defmodule KilnCMS.Backups.StatusTest do
       assert Date.compare(DateTime.to_date(next_at), next_month) != :lt
     end
 
+    test "D1: no pg_dump on the node computing the status: the environment's threshold" do
+      scheduled!(%{components: [:db], interval: :weekly})
+      assert %{stale_source: {:schedule, _}} = Backups.status().components.db
+
+      without_pg_tools(fn ->
+        assert %{stale_source: {:env, _}} = Backups.status().components.db
+      end)
+    end
+
     test "an unreadable schedule list falls back to the environment with schedules: :unreadable" do
       scheduled!(%{components: [:db], interval: :weekly})
       :persistent_term.erase({Backups, :schedules_warned_at})

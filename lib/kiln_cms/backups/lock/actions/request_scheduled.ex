@@ -18,14 +18,17 @@ defmodule KilnCMS.Backups.Lock.Actions.RequestScheduled do
     3. Takes each enabled schedule's due window
        (`KilnCMS.Backups.Schedule.Window`). A schedule whose window can't be
        computed is skipped and reported in `invalid`.
-    4. Narrows each to the components this deployment has
-       (`Backups.expected_components/0`): a database and media schedule with
-       no media directory backs up the database (`narrowed`); a media-only
-       one has nothing to back up, and its window is refused
+    4. Narrows each to the components this node's configuration has
+       (`Backups.expected_components/0`): a database and media schedule on a
+       node with no media directory backs up the database (`narrowed`); a
+       media-only one has nothing to back up, and its window is refused
        (`"no_media_dir"`).
-    5. When backups can't run here (`Backups.availability/0`), refuses every
-       due window with the reason: claimed, so nothing asks again until the
-       next window.
+    5. When backups are turned off for the deployment (`BACKUP_ENABLED=false`,
+       `Backups.availability/0` is `{:error, :disabled}`), refuses every due
+       window: claimed, so nothing asks again until the next window. Any
+       other availability error (no `pg_dump` or `pg_restore`, no database
+       URL) is this node's, not the deployment's: every due window is
+       deferred, so a node that can run backups takes it.
     6. Asks for **one** backup covering every due schedule, with the claims
        (`Backups.claim_backup_schedule_window/3`) inside the lock
        transaction (`KilnCMS.Backups.Chain.request/1`'s `:claim`). Schedules
@@ -43,7 +46,8 @@ defmodule KilnCMS.Backups.Lock.Actions.RequestScheduled do
       conflict, any other error, or an exception: nothing is claimed, and the
       window stays due for the next tick. Each schedule is noted as
       `:deferred` once per window (`first?` says whether this call did).
-    * Backups unavailable (a race with step 5): refused as in step 5.
+    * Backups unavailable (a race with step 5): refused or deferred as in
+      step 5.
 
   Returns `%{status, chain, claimed, refused, deferred, narrowed, missed,
   invalid}`; see `KilnCMS.Backups.request_scheduled/3`.
@@ -59,7 +63,6 @@ defmodule KilnCMS.Backups.Lock.Actions.RequestScheduled do
 
   @future_slack_s 60
   @retries 2
-  @unavailable [:disabled, :no_database_url, :no_pg_dump, :no_pg_restore]
 
   @impl true
   def run(input, _opts, _context) do
@@ -115,18 +118,18 @@ defmodule KilnCMS.Backups.Lock.Actions.RequestScheduled do
 
     result = if media_less != [], do: %{result | status: :refused}, else: result
 
-    cond do
-      runnable == [] ->
-        result
-
-      match?({:error, _}, Backups.availability()) ->
-        {:error, reason} = Backups.availability()
-        refuse_all(result, runnable, reason)
-
-      true ->
-        request(result, runnable, at, @retries)
-    end
+    if runnable == [], do: result, else: ask(result, runnable, at, Backups.availability())
   end
+
+  # Only a deployment-wide `BACKUP_ENABLED=false` refuses a window for good.
+  # A missing `pg_dump`, `pg_restore` or database URL is this node's: another
+  # node may be able to run the backup, so the window stays due.
+  defp ask(result, runnable, at, :ok), do: request(result, runnable, at, @retries)
+
+  defp ask(result, runnable, _at, {:error, :disabled}),
+    do: refuse_all(result, runnable, :disabled)
+
+  defp ask(result, runnable, _at, {:error, reason}), do: defer_all(result, runnable, reason)
 
   # `{[{schedule, window, effective_components}], invalid_ids}`. A paused
   # schedule is never due. A schedule that raises is as invalid as one that
@@ -184,8 +187,8 @@ defmodule KilnCMS.Backups.Lock.Actions.RequestScheduled do
       {:error, :window_taken} ->
         result
 
-      {:error, reason} when reason in @unavailable ->
-        refuse_all(result, runnable, reason)
+      {:error, :disabled} ->
+        refuse_all(result, runnable, :disabled)
 
       {:error, reason} ->
         defer_all(result, runnable, reason)

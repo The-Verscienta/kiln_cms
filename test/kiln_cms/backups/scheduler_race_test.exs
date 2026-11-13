@@ -201,6 +201,57 @@ defmodule KilnCMS.Backups.SchedulerRaceTest do
     assert %{enabled: false, last_window_at: nil} = get(schedule)
   end
 
+  test "two due schedules, one paused between the read and the claim: the attempt rolls back, the retry claims the other alone" do
+    a = seed_schedule!()
+    b = seed_schedule!(%{time_of_day: ~T[04:00:00]})
+    parent = self()
+
+    # Holds A's row, so the tick's claim of A waits on it (B's, if B sorts
+    # first, is already written in the same transaction).
+    holder =
+      Task.async(fn ->
+        unboxed(fn ->
+          Repo.transaction(fn ->
+            {:ok, id} = Ecto.UUID.dump(a.id)
+            Repo.query!("SELECT 1 FROM backup_schedules WHERE id = $1 FOR UPDATE", [id])
+            send(parent, {:holding, self()})
+
+            receive do
+              :pause -> pause_sql(a)
+            end
+          end)
+        end)
+      end)
+
+    assert_receive {:holding, pid}, 10_000
+
+    at = DateTime.utc_now()
+
+    tick =
+      Task.async(fn ->
+        unboxed(fn -> Backups.request_scheduled([a.id, b.id], at, Backups.system()) end)
+      end)
+
+    # Read both, decided to start one backup for both, and waits on A's claim.
+    assert Task.yield(tick, 500) == nil
+
+    send(pid, :pause)
+    Task.await(holder, 10_000)
+
+    assert {:ok, %{status: :started, chain: chain, claimed: [{b_id, _w}]}} =
+             Task.await(tick, 30_000)
+
+    assert b_id == b.id
+
+    # One start job, the retry's: the first attempt's (for A and B) rolled back.
+    assert [%{args: %{"schedule_ids" => [job_b], "chain" => ^chain}}] = start_jobs()
+    assert job_b == b.id
+    assert %{chain: ^chain, waiting: nil} = unboxed(fn -> Backups.in_flight() end)
+
+    assert %{enabled: false, last_window_at: nil, last_outcome: nil} = get(a)
+    assert %{last_window_at: %DateTime{}, last_outcome: :started} = get(b)
+  end
+
   test "a pause racing a tick: the window either fired before the pause or not at all" do
     for _ <- 1..5 do
       schedule = seed_schedule!()

@@ -746,7 +746,7 @@ defmodule KilnCMSWeb.BackupLive do
 
       <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
         <%= for component <- @status.expected do %>
-          <dt class="text-base-content/60">{component_label(component)}</dt>
+          <dt class="text-base-content/70">{component_label(component)}</dt>
           <dd id={"backup-threshold-#{component}"}>
             {threshold_label(@status.components[component])}
           </dd>

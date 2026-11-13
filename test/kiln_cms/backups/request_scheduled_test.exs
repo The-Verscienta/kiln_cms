@@ -2,12 +2,13 @@ defmodule KilnCMS.Backups.RequestScheduledTest do
   @moduledoc """
   `Backups.request_scheduled/3` (part of #2219): one backup for every due
   window, the windows claimed in the lock transaction that starts, queues or
-  folds it; refused windows claimed as refused; deferred ones (#2540) left due
-  and noted once per window. Every outcome is driven through the public
+  folds it; refused windows (`BACKUP_ENABLED=false`, a media-only schedule
+  with no media directory) claimed as refused; deferred ones (#2540, or a node
+  with no `pg_dump`) left due and noted once per window. Every outcome is driven through the public
   function, nothing stubbed. Concurrency (two nodes, a pause racing a tick) is
   in `SchedulerRaceTest`.
 
-  `async: false`: it changes the VM-wide backup config.
+  `async: false`: it changes the VM-wide backup config and `PATH`.
   """
   use KilnCMS.DataCase, async: false
 
@@ -299,6 +300,64 @@ defmodule KilnCMS.Backups.RequestScheduledTest do
 
       assert {:ok, %{status: :nothing_due, refused: []}} = fire([a.id, b.id], at)
       assert start_jobs() == []
+    end
+
+    test "no pg_dump on this node: deferred, not claimed, noted once per window; a node that has it claims the window" do
+      s = due!()
+      at = DateTime.utc_now()
+      w = window(s, at)
+
+      without_pg_tools(fn ->
+        assert {:ok,
+                %{
+                  status: :deferred,
+                  claimed: [],
+                  refused: [],
+                  deferred: [{id, ^w, :no_pg_dump, true}]
+                }} = fire(s.id, at)
+
+        assert id == s.id
+
+        assert %{
+                 last_window_at: nil,
+                 last_deferred_window_at: ^w,
+                 last_outcome: :deferred,
+                 last_error: "no_pg_dump"
+               } = reload(s)
+
+        # The next tick in the same window: asked again, deferred again, not noted.
+        assert {:ok, %{status: :deferred, deferred: [{_, ^w, :no_pg_dump, false}]}} =
+                 fire(s.id, at)
+      end)
+
+      assert start_jobs() == []
+      assert Backups.in_flight() == nil
+
+      # Another node, with pg_dump: the window is still due there.
+      assert {:ok, %{status: :started, claimed: [{_, ^w}]}} = fire(s.id, at)
+      assert %{last_window_at: ^w, last_outcome: :started} = reload(s)
+    end
+
+    test "no pg_dump on this node and a media-only schedule with no media directory: the media one refused, the other deferred" do
+      media = due!(%{components: [:media]})
+      db = due!()
+      set_config(media_dir: nil)
+      at = DateTime.utc_now()
+
+      without_pg_tools(fn ->
+        assert {:ok,
+                %{
+                  status: :deferred,
+                  refused: [{media_id, _, :no_media_dir, true}],
+                  deferred: [{db_id, _, :no_pg_dump, true}]
+                }} = fire([media.id, db.id], at)
+
+        assert media_id == media.id
+        assert db_id == db.id
+      end)
+
+      assert %{last_outcome: :refused} = reload(media)
+      assert %{last_window_at: nil, last_outcome: :deferred} = reload(db)
     end
 
     test "an unexpected error is deferred, not claimed" do

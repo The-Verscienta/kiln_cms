@@ -8,7 +8,8 @@ defmodule KilnCMS.Backups.SchedulerTest do
   Ticks are driven with `Scheduler.tick/1` at chosen instants (in the past:
   `request_scheduled/3` refuses a future one). Real `pg_dump` and `tar` run
   where a chain is drained (`:pg_tools`). `async: false`: it changes the
-  VM-wide backup config, the crontab key and a `persistent_term` rate limit.
+  VM-wide backup config, `PATH`, the crontab key and a `persistent_term`
+  rate limit.
   """
   use KilnCMS.DataCase, async: false
 
@@ -202,6 +203,45 @@ defmodule KilnCMS.Backups.SchedulerTest do
 
       assert %{last_outcome: :refused, last_window_at: ~U[2026-03-10 03:00:00.000000Z]} =
                reload(s)
+    end
+
+    test "no pg_dump on this node: deferred every tick, logged once per window as this node's, never claimed" do
+      s = due!()
+
+      {received, log} =
+        without_pg_tools(fn ->
+          with_log(fn ->
+            events([:deferred, :refused], fn ->
+              :ok = Scheduler.tick(~U[2026-03-10 03:00:05Z])
+              :ok = Scheduler.tick(~U[2026-03-10 03:01:05Z])
+            end)
+          end)
+        end)
+
+      assert length(Regex.scan(~r/waits: :no_pg_dump on this node/, log)) == 1
+      refute log =~ "can't run here"
+      assert [{:deferred, 1, _}, {:deferred, 1, _}] = received
+
+      assert %{
+               last_window_at: nil,
+               last_outcome: :deferred,
+               last_deferred_window_at: ~U[2026-03-10 03:00:00.000000Z]
+             } = reload(s)
+
+      # Back on a node with pg_dump, the same window fires.
+      assert [{:fired, 1, _}] =
+               events([:fired], fn -> :ok = Scheduler.tick(~U[2026-03-10 03:02:05Z]) end)
+    end
+
+    test "no media directory on this node: the narrowing and the media-only refusal say it is this node's configuration" do
+      due!(%{components: [:db, :media]})
+      due!(%{components: [:media]})
+      set_config(media_dir: nil)
+
+      {:ok, log} = with_log(fn -> Scheduler.tick(~U[2026-03-10 03:00:05Z]) end)
+
+      assert log =~ "this node has no media directory configured (MEDIA_DIR): only the database"
+      assert log =~ "can't run here: :no_media_dir (this node has no media directory configured"
     end
 
     test "an unreadable schedule list logs (rate-limited) and does nothing" do

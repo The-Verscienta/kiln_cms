@@ -25,10 +25,11 @@ defmodule KilnCMS.Backups.Schedule do
   so editing a schedule never fires a window it did not have before the edit.
 
   `last_outcome` is what the last window's request did: `:started`, `:queued`,
-  `:folded`, `:deferred` (another kind of request was queued, #2540; retried
-  each minute and noted once per window in `last_deferred_window_at`) or
-  `:refused` (backups can't run here; the window is claimed so nothing
-  retries it).
+  `:folded`, `:deferred` (another kind of request was queued, #2540, or the
+  node that ticked can't run backups; retried each minute and noted once per
+  window in `last_deferred_window_at`) or `:refused` (`BACKUP_ENABLED=false`,
+  or a media-only schedule with no media directory; the window is claimed so
+  nothing retries it).
 
   ## Instance-wide, platform admins only
 
@@ -197,7 +198,8 @@ defmodule KilnCMS.Backups.Schedule do
       change Changes.SetLastError
     end
 
-    # A window whose request was refused for now (a queued Resume, #2540): it
+    # A window whose request was refused for now (a queued Resume, #2540, or a
+    # node without `pg_dump`, `pg_restore` or a database URL): it
     # stays due, and is asked for again on the next tick. Zero rows means it
     # was already noted for this window (or claimed meanwhile): the caller
     # logs only the first. Never touches `last_window_at`.

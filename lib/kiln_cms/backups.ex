@@ -965,8 +965,10 @@ defmodule KilnCMS.Backups do
 
     * `status`: `:started`, `:queued` or `:folded` (the backup asked for, as
       in `request/2`), `:deferred` (refused for now, e.g. a Resume is
-      queued, #2540: nothing claimed, asked again next tick), `:refused`
-      (backups can't run here: the windows are claimed as refused) or
+      queued, #2540, or this node can't run backups: no `pg_dump`,
+      `pg_restore` or database URL; nothing claimed, asked again next tick),
+      `:refused` (`BACKUP_ENABLED=false`, or a media-only schedule on a node
+      with no media directory: the windows are claimed as refused) or
       `:nothing_due`;
     * `chain`: as in `request/2`, or nil;
     * `claimed`: `[{schedule_id, window}]`;

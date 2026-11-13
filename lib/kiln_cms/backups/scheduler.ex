@@ -27,8 +27,9 @@ defmodule KilnCMS.Backups.Scheduler do
   is `:fired`, `:deferred`, `:refused`, `:narrowed`, `:missed`, `:invalid` or
   `:unreadable`. A fired backup is logged at info. A window that waits behind
   a queued Resume (#2540) is logged once per window (the schedule row records
-  that it was), though it is asked for again every minute; a refused window
-  once (it is claimed as refused). An invalid schedule is logged at most once
+  that it was), though it is asked for again every minute, and so is one this
+  node can't run (no `pg_dump`, `pg_restore` or database URL here: another
+  node may take it); a refused window once (it is claimed as refused). An invalid schedule is logged at most once
   an hour per schedule on this node, an unreadable schedule list at most once
   every 15 minutes.
 
@@ -135,8 +136,8 @@ defmodule KilnCMS.Backups.Scheduler do
 
     for id <- result.narrowed do
       Logger.warning(
-        "Scheduled backup #{id} covers the media, but this deployment has no media " <>
-          "directory: only the database is backed up"
+        "Scheduled backup #{id} covers the media, but this node has no media directory " <>
+          "configured (MEDIA_DIR): only the database is backed up"
       )
     end
 
@@ -169,7 +170,7 @@ defmodule KilnCMS.Backups.Scheduler do
 
   defp report_refused(refused) do
     for {id, _w, reason, true} <- refused do
-      Logger.warning("Scheduled backup #{id} can't run here: #{inspect(reason)}")
+      Logger.warning("Scheduled backup #{id} can't run here: #{refused_text(reason)}")
     end
 
     event(:refused, length(refused), %{schedule_ids: Enum.map(refused, &elem(&1, 0))})
@@ -179,8 +180,18 @@ defmodule KilnCMS.Backups.Scheduler do
     "a resume of #{stamp} is queued; it is asked for again each minute until the queue clears"
   end
 
+  defp waits(reason) when reason in [:no_database_url, :no_pg_dump, :no_pg_restore] do
+    "#{inspect(reason)} on this node; it is asked for again each minute, and a node " <>
+      "that can run backups takes it"
+  end
+
   defp waits(reason),
     do: "#{inspect(reason)}; it is asked for again each minute until it can start"
+
+  defp refused_text(:no_media_dir),
+    do: ":no_media_dir (this node has no media directory configured, MEDIA_DIR)"
+
+  defp refused_text(reason), do: inspect(reason)
 
   defp chain_text(nil), do: ""
   defp chain_text(chain), do: ", chain #{chain}"

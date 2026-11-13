@@ -58,6 +58,26 @@ defmodule KilnCMS.Test.BackupSchedules do
   end
 
   @doc """
+  Runs `fun` with `PATH` pointing at an empty directory, so this node finds no
+  `pg_dump` (`Backups.availability/0` is `{:error, :no_pg_dump}`), and puts
+  `PATH` back after. `PATH` is VM-wide: only for `async: false` modules.
+  """
+  @spec without_pg_tools((-> result)) :: result when result: term()
+  def without_pg_tools(fun) do
+    path = System.get_env("PATH")
+    empty = Path.join(System.tmp_dir!(), "kiln_nopg_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(empty)
+    System.put_env("PATH", empty)
+
+    try do
+      fun.()
+    after
+      System.put_env("PATH", path)
+      File.rm_rf!(empty)
+    end
+  end
+
+  @doc """
   Set columns no action accepts (`baseline_at`, `last_window_at`, the keep
   values), straight in the table: the way a test reaches a state that only
   time, the scheduler or a later release produces.

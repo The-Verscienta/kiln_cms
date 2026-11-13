@@ -1002,7 +1002,7 @@ config :opentelemetry, traces_exporter: :none
 config :kiln_cms, :backup_marker_sync_cron, "*/15 * * * *"
 
 # When the in-app backup schedules are checked (part of #2219,
-# `KilnCMS.Backups.Scheduler`): every minute, one indexed read of the enabled
+# `KilnCMS.Backups.Scheduler`): every minute, one read of the enabled
 # schedules, and a backup asked for only when a schedule's window is due. A
 # window is a schedule's occurrence, not a tick, so a coarser cadence
 # (`*/5 * * * *`) only fires up to that much later. `false` disables it; the
