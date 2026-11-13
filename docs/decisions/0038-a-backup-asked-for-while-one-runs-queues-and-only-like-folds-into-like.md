@@ -50,8 +50,10 @@ Each answer loses something:
 - **A request while a chain runs queues behind it; at most one waits.**
   `Chain.request/1` writes the request onto the row's `waiting_*` fields
   (`:queue_waiting`). When the running chain ends, by success, failure,
-  Cancel, a reclaim with no attempts left, or a reap, `Chain.release_in_txn/1` promotes it to a new
-  chain with its own stamp, in the same transaction as the release.
+  Cancel, a reclaim with no attempts left, or a reap,
+  `Chain.release_in_txn/1` promotes it to a new chain (a fresh backup under a
+  new stamp, a resume under the stamp it resumes), in the same transaction as
+  the release.
 - **A later request folds into the queued one, but only when it does the
   same work** (#2540). A fresh backup folds into a queued fresh backup, and a
   resume into a queued resume of the same stamp (`:fold`, which counts it in
@@ -102,7 +104,9 @@ Each answer loses something:
 - Folded requests leave no run of their own. The promoted chain's log in
   History says how many folded into it.
 - `scripts/backup.sh` does not take the lock, so a cron backup and an in-app
-  backup can run at the same time. They write different stamps.
+  backup can run at the same time. They normally write different stamps;
+  nothing coordinates them, so a cron run and an in-app backup started in the
+  same second would share one.
 
 ## When to revisit
 

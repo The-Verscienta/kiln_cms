@@ -1008,7 +1008,7 @@ step after `start` runs only on a node that reads the same id:
   resume follows the files, not the id, so a backup whose `.work/<stamp>/`
   came along with the copy can still be resumed there.
 
-Why each step runs where its backup directory is, and the bounded wait: [ADR 0040](decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md).
+Why each step runs where its backup directory is, and the bounded wait, is argued in [ADR 0040](decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md).
 
 **A resume runs on the host with the files (#2539).** The Resume button shows
 only on a node that can see the backup's `.work/<stamp>/`. Each run records
@@ -1061,7 +1061,7 @@ its node stops it ([above](#several-nodes-and-the-backup-lock)). Until then:
   else.
 - **The History row**: it can't write it. A step's progress, success and
   failure land only on a `Running` run that is still on that step's chain,
-  so it can't overwrite a Cancel or the progress of a resume of the same run. The reasoning is in [ADR 0046](decisions/0046-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md).
+  so it can't overwrite a Cancel or the progress of a resume of the same run. The fence is argued in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md), and why History writes stay out of the lock transaction in [ADR 0046](decisions/0046-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md).
 - **Its own temporary files** (`kiln-db-<stamp>.dump.partial`, a media part's
   `.partial`): these are not fenced. A resume of the same backup could share
   them, and only the wait after a Cancel

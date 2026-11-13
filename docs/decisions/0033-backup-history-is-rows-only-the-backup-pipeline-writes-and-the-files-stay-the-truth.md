@@ -73,10 +73,12 @@ history can be trusted:
   run per new stamp with an upsert whose `upsert_fields` are empty, so a row
   the application wrote, or an earlier import, is never modified.
   `manifest.json` only enriches a stamp whose files it names. The importer
-  never reads a file's contents and never hashes or verifies one: an imported
-  artifact is `verified: false` ("unverified (imported)"), and its SHA-256,
-  taken from `manifest.json` or else from a well-formed checksum sidecar, is
-  recorded as it stands, not checked against the file. It runs when a platform admin opens the Backups page, inside the chain
+  never reads a file's contents and never hashes or verifies one. An imported
+  artifact is `verified: false` ("unverified (imported)") unless a covering
+  `manifest.json` vouches for it, in which case the manifest's `verified` flag
+  is copied as it stands. Its SHA-256, taken from `manifest.json` or else from
+  a well-formed checksum sidecar, is recorded the same way, not checked against
+  the file. It runs when a platform admin opens the Backups page, inside the chain
   (before the start step's `.partial` sweep, before retention prunes, and when
   a step fails), and in every marker sync.
 - **`pruned` is stored; unexplained absence is computed on read.** Retention
@@ -127,9 +129,10 @@ history can be trusted:
   `:cancel` is, not a way into the pipeline's actions.
 - **Rows can be deleted** (#2225): retention or an admin removing history
   needs its own action and decides whether a row outlives its files.
-- **Imported runs get verified** (#2225): a verification that hashes files
-  is a separate action that can set `verified`, never the import upsert,
-  which must stay unable to modify a row.
+- **Imported runs get verified by Kiln itself** (#2225): today an imported
+  `verified` only repeats what cron's manifest said. A verification that
+  hashes files is a separate action that can set `verified`, never the import
+  upsert, which must stay unable to modify a row.
 - **A directory per host makes `missing` common.** Runs now carry the
   `dir_id` of their directory (#2539); presence could say "on another host"
   instead of `missing` once it reads it.

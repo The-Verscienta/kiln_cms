@@ -26,12 +26,15 @@ resume, the queued request's log line. It is tempting to write it in the same
 transaction, so the row and the lock never disagree.
 
 But a Run write can fail for reasons that have nothing to do with the lock: a
-validation, a policy, a row filtered away because it is no longer `running`
-or no longer this chain's (`Run.Changes.OwnChain`, #2538). In PostgreSQL a
-failed statement aborts the whole transaction, and every statement after it.
-Catching the error in Elixir does not bring the transaction back. A History
-write that failed inside the lock transaction would roll back the step insert
-it rode with, and stall the chain on bookkeeping.
+validation, a policy, a database error such as a constraint or a timeout. An
+Ash action that fails that way inside a transaction rolls the enclosing
+transaction back (`Ash.DataLayer.rollback`), and a failed PostgreSQL
+statement aborts it outright; catching the error in Elixir does not bring the
+transaction back. A History write that failed inside the lock transaction
+would roll back the step insert it rode with, and stall the chain on
+bookkeeping. The one exemption is a stale record: a zero-row update that
+returns `Ash.Error.Changes.StaleRecord` (a row filtered away by
+`Run.Changes.OwnChain`, #2538) leaves the enclosing transaction alone.
 
 ## Decision
 
@@ -59,9 +62,9 @@ it rode with, and stall the chain on bookkeeping.
   chain was stopped. When that write fails, the whole cancel rolls back and
   the admin sees the error; nothing is half-canceled.
 - **The other write inside the lock transaction is not a Run write**: a
-  scheduled request's window claim (#2219), which returns an error rather than
-  failing a statement when the window was taken elsewhere, and rolls back
-  with the request.
+  scheduled request's window claim (#2219). When the window was taken
+  elsewhere it comes back as a stale record, which leaves the transaction
+  alone, and the claim rolls back with the request.
 
 ## Rejected
 
@@ -79,7 +82,8 @@ it rode with, and stall the chain on bookkeeping.
   that holds the run's stamp even when the row's `chain_id` has not caught up
   ("a resume or retry whose Run write lagged"), and the stale-run sweep
   (`Backups.reconcile_stale_runs/1`) fails a `running` row nothing has
-  touched for longer than a step's timeout, unless the lock holds it.
+  touched for longer than a step's timeout plus 15 minutes, unless the lock
+  holds it.
 - A late Run write from a superseded step is refused by `Run.Changes.OwnChain`
   rather than by the lock, with an `Ash.Error.Changes.StaleRecord`.
 - A failed Run write is visible only in the server log; History may miss a

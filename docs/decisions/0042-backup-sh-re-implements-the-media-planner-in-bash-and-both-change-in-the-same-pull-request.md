@@ -83,8 +83,8 @@ app cannot boot: a broken deploy, a bad runtime configuration, a host that has
     `"version": 1`.
 - **Cleanup is the one deliberate difference.** The app keeps a failed run's
   finished parts and its `.work/<stamp>/` so that Resume can reuse them. Cron
-  has no resume: a failed run, or one ended by `HUP`, `INT` or `TERM`, removes
-  the parts it wrote, by the paths it tracked and never by a glob, and keeps a
+  has no resume: a run that fails, or is ended by `HUP`, `INT` or `TERM`,
+  before its media set's sidecar is written removes the parts it wrote, by the paths it tracked and never by a glob, and keeps a
   finished database dump. A `kiln-media-<stamp>.sha256.partial` marker covers
   a run killed outright. The set's whole-set SHA-256 (all parts concatenated)
   is also the app's alone; the script records only the per-part digests.
@@ -92,7 +92,8 @@ app cannot boot: a broken deploy, a bad runtime configuration, a host that has
   walks, excludes, sizes, splits, archives or names, or to the sidecar or the
   manifest's part keys it shares with the script, updates `scripts/backup.sh`
   and `test/scripts/backup_script_test.exs` in the same pull request. The
-  `MediaArchive` moduledoc says so, and so does the script's header. The
+  `MediaArchive` moduledoc says so; the script's header points back at
+  `MediaArchive` ("keep the two in step"). The
   parity tests run the real script and the app's `MediaArchive.plan/3` on one
   tree and compare part membership and order ("the parts hold the same files,
   in the same order, as the app's planner"), the exclusion matrix

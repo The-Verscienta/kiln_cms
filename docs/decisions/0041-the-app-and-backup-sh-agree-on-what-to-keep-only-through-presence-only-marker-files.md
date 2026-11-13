@@ -50,9 +50,9 @@ The contract is two marker names in `db/` and `media/`, and nothing else:
   component.** `db/kiln-<stamp>.good` keeps that dump and its sidecar from
   `backup.sh prune`, never the media of the same stamp, because retention's
   unit is one component of one stamp and the newest verified dump and media
-  set can have different stamps. Only the app writes and moves it
-  (`Retention.sync_last_good/2`): after each successful in-app backup, before
-  an in-app prune deletes anything, and every 15 minutes from
+  set can have different stamps. Only the app writes and moves it: after each
+  successful in-app backup (`Retention.sync_last_good/2`), before an in-app
+  prune deletes anything (`Retention.run/2`), and every 15 minutes from
   `KilnCMS.Backups.MarkerSyncWorker` for cron-made backups (#2554). The new
   marker is written before the old one is removed; only regular files are
   removed. `backup.sh` reads markers and writes none.

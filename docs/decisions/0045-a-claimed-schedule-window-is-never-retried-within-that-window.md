@@ -15,8 +15,9 @@
 ## The problem
 
 A schedule's **window** is one occurrence of it ("03:00 Paris on 12
-November"). `KilnCMS.Backups.Scheduler` ticks every minute on every node and
-asks for a backup for each schedule whose latest window is due
+November"). `KilnCMS.Backups.Scheduler` ticks every minute (one cron job, run by
+whichever node fetches it; ticks can overlap across a leader change, a deploy
+or a console `tick/1`) and asks for a backup for each schedule whose latest window is due
 (`KilnCMS.Backups.Schedule.Window.due/2`). Whatever records "this window was
 taken" decides three things at once:
 
@@ -92,7 +93,9 @@ taken" decides three things at once:
 - A deferral that lasts past the next window becomes a missed window: only
   the latest window fires, and the earlier one is logged as missed.
 - Restoring a database dump restores `last_window_at` as it was, so each
-  enabled schedule's latest window is due again and fires within a minute.
+  enabled schedule whose latest window is newer than that fires within a
+  minute. Restoring the newest scheduled dump before the next window fires
+  nothing: that dump was taken after its own window was claimed.
 
 ## When to revisit
 
