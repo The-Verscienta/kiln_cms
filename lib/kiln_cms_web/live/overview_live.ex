@@ -454,12 +454,12 @@ defmodule KilnCMSWeb.OverviewLive do
               callers rely on "never" counting as stale — so the branch is
               here, on `@backup_state`. A backup that ran and failed, or went
               stale, is the red strip below. --%>
-        <%!-- #1772: the schedule is NOT set in the product. Scheduled backups
-              are the operator's cron job (`scripts/backup.sh`, docs/backups.md);
-              `/editor/backups` can take one now and read the manifest, nothing
-              more. So the copy says who sets the schedule, and the strip is a
-              plain box with two links — the panel, and the guide — rather than
-              one link promising a control that page does not have. --%>
+        <%!-- #1772: without an in-app schedule, scheduled backups are the
+              operator's cron job (`scripts/backup.sh`, docs/backups.md), so the
+              copy says who sets the schedule, and the strip is a plain box with
+              two links — the panel, and the guide. Once an enabled in-app
+              schedule exists (part of #2219) the copy names both, rather than
+              claiming the schedule lives only in cron. --%>
         <.overview_strip
           :if={@platform_admin? and @backup_state == :never}
           id="overview-backup-setup"
@@ -470,9 +470,14 @@ defmodule KilnCMSWeb.OverviewLive do
           <span class="block text-sm font-medium">
             {gettext("Backups aren't set up yet — turn them on before you go live.")}
           </span>
-          <span class="block text-xs text-base-content/70">
+          <span :if={!@backup_scheduled?} class="block text-xs text-base-content/70">
             {gettext(
               "Scheduled backups are a cron job set up by whoever runs this server. You can take the first one now from Backups."
+            )}
+          </span>
+          <span :if={@backup_scheduled?} class="block text-xs text-base-content/70">
+            {gettext(
+              "Scheduled backups run from the in-app schedules listed on the Backups page or from a cron job set up by whoever runs this server. You can take the first one now from Backups."
             )}
           </span>
           <.backup_strip_links />
@@ -492,9 +497,14 @@ defmodule KilnCMSWeb.OverviewLive do
           >
             {line}
           </span>
-          <span class="block text-xs text-base-content/70">
+          <span :if={!@backup_scheduled?} class="block text-xs text-base-content/70">
             {gettext(
               "Scheduled backups run from the server's cron job — ask whoever runs this server to check it, or take one now from Backups."
+            )}
+          </span>
+          <span :if={@backup_scheduled?} class="block text-xs text-base-content/70">
+            {gettext(
+              "Scheduled backups run from the in-app schedules listed on the Backups page or from the server's cron job — check both, or take one now from Backups."
             )}
           </span>
           <.backup_strip_links />
@@ -1041,13 +1051,21 @@ defmodule KilnCMSWeb.OverviewLive do
     socket
     |> assign(:backup_state, backup_state(status))
     |> assign(:backup_headline, backup_headline(status))
+    |> assign(:backup_scheduled?, backup_scheduled?(status))
   end
 
   defp assign_backup_warning(socket) do
     socket
     |> assign(:backup_state, :ok)
     |> assign(:backup_headline, [])
+    |> assign(:backup_scheduled?, false)
   end
+
+  # An enabled in-app backup schedule exists (part of #2219).
+  defp backup_scheduled?(%{schedules: schedules}) when is_list(schedules),
+    do: Enum.any?(schedules, & &1.schedule.enabled)
+
+  defp backup_scheduled?(_status), do: false
 
   # Per component (#2219).
   #

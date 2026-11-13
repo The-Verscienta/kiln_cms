@@ -235,6 +235,7 @@ msgstr[0] "%{count} archivo mostrado"
 msgstr[1] "%{count} archivos mostrados"
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -331,6 +332,7 @@ msgstr[0] "%{count} min de lectura"
 msgstr[1] "%{count} min de lectura"
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -3071,6 +3073,27 @@ msgstr "Tras cambiar las convenciones de slug, todos los slugs existentes parece
 msgid "Age in years"
 msgstr "Edad en años"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Alarm after %{count} hour without a good backup (%{var})"
+msgid_plural "Alarm after %{count} hours without a good backup (%{var})"
+msgstr[0] "Alerta tras %{count} hora sin una copia válida (%{var})"
+msgstr[1] "Alerta tras %{count} horas sin una copia válida (%{var})"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Alarm after %{count} hour without a good backup (%{var}; host cron backs it up too)"
+msgid_plural "Alarm after %{count} hours without a good backup (%{var}; host cron backs it up too)"
+msgstr[0] "Alerta tras %{count} hora sin una copia válida (%{var}; el cron del servidor también la copia)"
+msgstr[1] "Alerta tras %{count} horas sin una copia válida (%{var}; el cron del servidor también la copia)"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Alarm after %{count} hour without a good backup (its schedule)"
+msgid_plural "Alarm after %{count} hours without a good backup (its schedule)"
+msgstr[0] "Alerta tras %{count} hora sin una copia válida (su programación)"
+msgstr[1] "Alerta tras %{count} horas sin una copia válida (su programación)"
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Alerts"
@@ -3428,6 +3451,11 @@ msgstr "Una imagen de la biblioteca de medios: una sola o una galería entera. P
 #, elixir-autogen, elixir-format
 msgid "An imported link is a row with a URL and no file in Kiln, so Kiln can't make its sizes, rotate it or delete the image. Adopting hands the backend the ones it already holds."
 msgstr "Un enlace importado es una fila con una URL y sin archivo en Kiln, así que Kiln no puede generar sus tamaños, girarla ni eliminar la imagen. Adoptarlas entrega al servicio las que ya guarda."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "An interval this release doesn't know (%{value})"
+msgstr "Una periodicidad que esta versión no conoce (%{value})"
 
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
@@ -4190,6 +4218,21 @@ msgstr "Copia de seguridad cancelada. Sus archivos se conservan, así que puede 
 #, elixir-autogen, elixir-format
 msgid "Backup resumed — this page updates when it finishes."
 msgstr "Copia reanudada: esta página se actualiza cuando termine."
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup schedule changed"
+msgstr "Programación de copia de seguridad modificada"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup schedule created"
+msgstr "Programación de copia de seguridad creada"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup schedule deleted"
+msgstr "Programación de copia de seguridad eliminada"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -6285,6 +6328,11 @@ msgstr "No se pudo importar esa foto de Unsplash."
 #, elixir-autogen, elixir-format
 msgid "Couldn't load the backup history."
 msgstr "No se pudo cargar el historial de copias de seguridad."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't load the backup schedules."
+msgstr "No se pudieron cargar las programaciones de copias de seguridad."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
@@ -8785,6 +8833,16 @@ msgstr "Los eventos se conservan para siempre."
 msgid "Events marked “includes unpublished content” send the full body of drafts and embargoed documents. They are off by default: select them only if this receiver should see content before it is published."
 msgstr "Los eventos marcados con «incluye contenido no publicado» envían el cuerpo completo de borradores y documentos embargados. Están desactivados por defecto: selecciónalos solo si este receptor debe ver el contenido antes de su publicación."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every %{hours} hours from %{time} (%{zone})"
+msgstr "Cada %{hours} horas desde las %{time} (%{zone})"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every 2 weeks on %{weekday} at %{time} (%{zone}), from %{date}"
+msgstr "Cada 2 semanas el %{weekday} a las %{time} (%{zone}), desde el %{date}"
+
 #: lib/kiln_cms/security/posture/checks/second_factor.ex
 #, elixir-autogen, elixir-format
 msgid "Every administrator and editor uses an authenticator app."
@@ -8805,6 +8863,11 @@ msgstr "Todas las comprobaciones han pasado."
 msgid "Every checkpoint has been published to the witness."
 msgstr "El testigo ha recibido todos los puntos de control."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every day at %{time} (%{zone})"
+msgstr "Todos los días a las %{time} (%{zone})"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every delivery attempt is recorded; failures retry with backoff, and %{count} exhausted deliveries in a row disable an endpoint. History is kept for %{days} days."
@@ -8819,6 +8882,11 @@ msgstr "Todos los documentos tienen al menos una etiqueta."
 #, elixir-autogen, elixir-format
 msgid "Every field"
 msgstr "Todos los campos"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every month on day %{day} at %{time} (%{zone})"
+msgstr "Todos los meses el día %{day} a las %{time} (%{zone})"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -8885,6 +8953,11 @@ msgstr "Todos los términos están en uso."
 #, elixir-autogen, elixir-format
 msgid "Every variant is over the floor and no arm leads outright."
 msgstr "Todas las variantes superan el mínimo y ninguna lidera claramente."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every week on %{weekday} at %{time} (%{zone})"
+msgstr "Todas las semanas el %{weekday} a las %{time} (%{zone})"
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -9756,6 +9829,11 @@ msgstr "Al día"
 #, elixir-autogen, elixir-format
 msgid "Fri"
 msgstr "vie"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Friday"
+msgstr "viernes"
 
 #: lib/kiln_cms/cms/field_types/range.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -10843,6 +10921,11 @@ msgstr "En uso (CHALLENGE_PROVIDER=%{id})"
 msgid "In-app backups are turned off (BACKUP_ENABLED)."
 msgstr "Las copias desde la aplicación están desactivadas (BACKUP_ENABLED)."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
+msgstr "Las programaciones integradas están desactivadas (KILN_BACKUP_SCHEDULER_CRON)."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "In:"
@@ -11576,6 +11659,26 @@ msgstr "Última actualización"
 #, elixir-autogen, elixir-format
 msgid "Last viewed"
 msgstr "Última visualización"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last window refused: %{reason}"
+msgstr "Última ejecución rechazada: %{reason}"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last window: joined a queued backup"
+msgstr "Última ejecución: unida a una copia en cola"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last window: queued behind another backup"
+msgstr "Última ejecución: en cola detrás de otra copia"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last window: started"
+msgstr "Última ejecución: iniciada"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -12392,6 +12495,11 @@ msgstr "Módulo"
 msgid "Mon"
 msgstr "lun"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Monday"
+msgstr "lunes"
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -13026,6 +13134,11 @@ msgstr "Siguiente"
 #, elixir-autogen, elixir-format
 msgid "Next month"
 msgstr "Mes siguiente"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Next run: %{when}"
+msgstr "Próxima ejecución: %{when}"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -13665,6 +13778,11 @@ msgstr "No se aplica ninguna regla, así que cada documento se informa como no c
 #, elixir-autogen, elixir-format
 msgid "No saved versions yet."
 msgstr "Aún no hay versiones guardadas."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "No schedules yet. Backups run when you click Back up now, or from the host's cron job."
+msgstr "Aún no hay programaciones. Las copias se ejecutan al pulsar Hacer copia ahora o desde la tarea cron del servidor."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
@@ -15319,6 +15437,11 @@ msgstr "Rutas que pidieron los visitantes y que el sitio no pudo servir, las má
 #, elixir-autogen, elixir-format
 msgid "Pattern"
 msgstr "Patrón"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Paused"
+msgstr "En pausa"
 
 #: lib/kiln_cms_web/live/sign_in_live.ex
 #, elixir-autogen, elixir-format
@@ -17889,6 +18012,11 @@ msgstr "Texto de cuerpo de ejemplo para la vista previa. "
 msgid "Sat"
 msgstr "sáb"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saturday"
+msgstr "sábado"
+
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
@@ -18169,6 +18297,7 @@ msgstr "Programar"
 msgid "Schedule a publish, set an embargo end, or give content a review cadence."
 msgstr "Programe una publicación, fije un fin de embargo o asigne una cadencia de revisión al contenido."
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -18190,6 +18319,21 @@ msgstr "Programado para"
 #, elixir-autogen, elixir-format
 msgid "Scheduled backups are a cron job set up by whoever runs this server. You can take the first one now from Backups."
 msgstr "Las copias programadas son una tarea cron que configura quien administra este servidor. Puedes hacer la primera ahora desde Copias de seguridad."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled backups can't run here: %{reason}"
+msgstr "Las copias programadas no pueden ejecutarse aquí: %{reason}"
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled backups run from the in-app schedules listed on the Backups page or from a cron job set up by whoever runs this server. You can take the first one now from Backups."
+msgstr "Las copias programadas se ejecutan según las programaciones integradas que aparecen en la página Copias de seguridad o mediante una tarea cron configurada por quien administra este servidor. Puedes hacer la primera ahora desde Copias de seguridad."
+
+#: lib/kiln_cms_web/live/overview_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled backups run from the in-app schedules listed on the Backups page or from the server's cron job — check both, or take one now from Backups."
+msgstr "Las copias programadas se ejecutan según las programaciones integradas que aparecen en la página Copias de seguridad o mediante la tarea cron del servidor: revisa ambas o haz una ahora desde Copias de seguridad."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -18235,6 +18379,11 @@ msgstr "Despublicación programada"
 #, elixir-autogen, elixir-format
 msgid "Scheduled unpublish at"
 msgstr "Despublicación programada para"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Schedules"
+msgstr "Programaciones"
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -20220,6 +20369,11 @@ msgstr "Resumen"
 #, elixir-autogen, elixir-format
 msgid "Sun"
 msgstr "dom"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sunday"
+msgstr "domingo"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -22965,6 +23119,11 @@ msgstr "Tres pasos rápidos: tu cuenta de administración, el aspecto de tu siti
 msgid "Thu"
 msgstr "jue"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Thursday"
+msgstr "jueves"
+
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
 msgid "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. With any of these ticked, creating a document is held to them too."
@@ -23325,6 +23484,11 @@ msgstr "Probar estos idiomas, en orden"
 #, elixir-autogen, elixir-format
 msgid "Tue"
 msgstr "mar"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Tuesday"
+msgstr "martes"
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #: lib/kiln_cms_web/live/link_report_live.ex
@@ -24319,6 +24483,11 @@ msgstr "En espera de revisión: un contenido de tipo %{kind}."
 msgid "Waiting for your device… Follow your browser's prompt to finish."
 msgstr "Esperando a su dispositivo… Siga las indicaciones del navegador para terminar."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting: another kind of backup is queued; this one starts once the queue clears."
+msgstr "En espera: hay en cola una copia de otro tipo; esta empieza cuando la cola quede libre."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Walk through the workflow"
@@ -24397,6 +24566,11 @@ msgstr "Webhooks cuando cambia el contenido"
 #, elixir-autogen, elixir-format
 msgid "Wed"
 msgstr "mié"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Wednesday"
+msgstr "miércoles"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -26150,6 +26324,11 @@ msgstr "borrador creado"
 msgid "due %{date}"
 msgstr "vence el %{date}"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "due now"
+msgstr "pendiente ahora"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "e.g. /about/team"
@@ -26363,6 +26542,11 @@ msgstr "búsqueda híbrida por palabras clave y semántica en todos los tipos de
 #, elixir-autogen, elixir-format
 msgid "image dimensions are too large"
 msgstr "las dimensiones de la imagen son demasiado grandes"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "in %{duration}"
+msgstr "en %{duration}"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format

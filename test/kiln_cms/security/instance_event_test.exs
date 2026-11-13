@@ -236,5 +236,23 @@ defmodule KilnCMS.Security.InstanceEventTest do
     end
   end
 
+  describe "types" do
+    # `SanitizeMetadata` sorts the keys and keeps the first eight: an
+    # allowlist longer than that silently drops keys from every event.
+    test "every instance type's metadata allowlist fits max_metadata_keys" do
+      for type <- InstanceEvent.types() do
+        assert length(InstanceEvent.metadata_keys(type)) <= InstanceEvent.max_metadata_keys(),
+               "#{type} allows more metadata keys than an event keeps"
+      end
+    end
+
+    test "every instance type has a type_label" do
+      for type <- InstanceEvent.types() do
+        refute KilnCMSWeb.SecurityLog.type_label(type) == Atom.to_string(type),
+               "#{type} has no label in KilnCMSWeb.SecurityLog.type_label/1"
+      end
+    end
+  end
+
   defp later(seconds), do: DateTime.add(DateTime.utc_now(), seconds, :second)
 end

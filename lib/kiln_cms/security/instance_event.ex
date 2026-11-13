@@ -43,11 +43,22 @@ defmodule KilnCMS.Security.InstanceEvent do
 
   @types [
     # A platform admin stopped a running in-app backup (#2218).
-    :backup_canceled
+    :backup_canceled,
+    # A platform admin created, changed or deleted an in-app backup schedule
+    # (part of #2219). The target is the schedule; the keep fields are
+    # recorded before part 3 makes them editable, so the keys stay put.
+    :backup_schedule_created,
+    :backup_schedule_changed,
+    :backup_schedule_deleted
   ]
 
   @metadata_keys %{
-    backup_canceled: ~w(stamp step)
+    backup_canceled: ~w(stamp step),
+    backup_schedule_created:
+      ~w(components interval time_of_day time_zone starts_on enabled keep_count keep_days),
+    backup_schedule_changed:
+      ~w(changed components interval enabled keep_count_before keep_count_after keep_days_before keep_days_after),
+    backup_schedule_deleted: ~w(components interval enabled keep_count keep_days)
   }
 
   # Alerts: none of these types raises one today. Instance events could carry

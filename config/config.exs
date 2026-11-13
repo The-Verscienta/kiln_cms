@@ -1001,6 +1001,14 @@ config :opentelemetry, traces_exporter: :none
 # docs/environment-variables.md keeps into this file.
 config :kiln_cms, :backup_marker_sync_cron, "*/15 * * * *"
 
+# When the in-app backup schedules are checked (part of #2219,
+# `KilnCMS.Backups.Scheduler`): every minute, one indexed read of the enabled
+# schedules, and a backup asked for only when a schedule's window is due. A
+# window is a schedule's occurrence, not a tick, so a coarser cadence
+# (`*/5 * * * *`) only fires up to that much later. `false` disables it; the
+# schedules then never run. Down here for the same reason as the line above.
+config :kiln_cms, :backup_scheduler_cron, "* * * * *"
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

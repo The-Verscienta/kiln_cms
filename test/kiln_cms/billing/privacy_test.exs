@@ -282,6 +282,7 @@ defmodule KilnCMS.Billing.PrivacyTest do
             :billing_settings_purged,
             :billing_events_purged,
             :backup_runs_purged,
+            :backup_schedules_disabled,
             :memberships_scrubbed,
             :tiers_deactivated
           ] do

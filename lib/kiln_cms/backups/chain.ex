@@ -19,6 +19,12 @@ defmodule KilnCMS.Backups.Chain do
   would abort the transaction that inserts the next step. Run writes happen
   before (a step's progress) or after the commit (bookkeeping here).
 
+  One other write does happen inside it: a scheduled request's window claims
+  (part of #2219; `request/1`'s `:claim`), so a window is claimed exactly when
+  the backup it asked for is started, queued or folded. A claim that matches
+  zero rows (the window taken by another node) is a returned error, not a
+  failed statement, and rolls the whole transaction back.
+
   Every Lock write passes `actor: Backups.system()` explicitly.
 
   ## Fencing
@@ -137,9 +143,19 @@ defmodule KilnCMS.Backups.Chain do
   folding would drop it: a fresh backup folded into a queued resume never takes
   its own (the resume backs up the old stamp), and a resume folded into a
   queued fresh backup (or another stamp's resume) never resumes. The caller
-  asks again once the queue clears; a scheduler (#2219, not yet built) must
-  roll its window back and retry on a later tick, so a scheduled backup is
-  never folded into a Resume.
+  asks again once the queue clears; the scheduler's claim rolls back with the
+  refusal and it asks again on a later tick, so a scheduled backup is never
+  folded into a Resume.
+
+  ## Claiming a schedule's window (part of #2219)
+
+  `:claim` is a function of the outcome (`:started`, `:queued` or
+  `:folded`) returning `:ok` or `{:error, reason}`, run inside the lock
+  transaction only after the decision succeeded. An error rolls everything
+  back, the decision's Lock write and `Oban.insert/2` included, and is the
+  result. A refused decision (`{:queue_busy, _}`, #2540) never runs it, so
+  nothing is claimed. `:scheduled` and `:schedule_ids` say what the schedules
+  asked for (`KilnCMS.Backups.Lock.Actions.RequestScheduled`).
   """
   @spec request(map()) :: {:ok, map()} | {:error, term()}
   def request(attrs) do
@@ -152,7 +168,8 @@ defmodule KilnCMS.Backups.Chain do
       by: Map.get(attrs, :requested_by),
       components: Map.get(attrs, :components),
       scheduled: Map.get(attrs, :scheduled) || [],
-      schedule_ids: Map.get(attrs, :schedule_ids) || []
+      schedule_ids: Map.get(attrs, :schedule_ids) || [],
+      claim: Map.get(attrs, :claim)
     }
 
     with :ok <- Backups.availability(),
@@ -167,12 +184,24 @@ defmodule KilnCMS.Backups.Chain do
       _ = if heartbeat?(), do: reclaim_stale()
       _ = reap()
 
-      result = with_lock(fn row -> decide(row, req) end)
+      result = with_lock(&decide_and_claim(&1, req))
 
       with {:ok, %{status: :folded}} <- result, do: announce_fold(req)
       result
     end
   end
+
+  defp decide_and_claim(row, req) do
+    with {:ok, %{status: status} = decided} <- decide(row, req),
+         :ok <- run_claim(req.claim, status),
+         do: {:ok, decided}
+  end
+
+  # Inside the lock transaction. The claim stops at its first error and
+  # returns it; nothing here rescues and carries on, because a failed
+  # statement aborts the PostgreSQL transaction and every statement after it.
+  defp run_claim(nil, _status), do: :ok
+  defp run_claim(claim, status) when is_function(claim, 1), do: claim.(status)
 
   defp precheck_resume(nil), do: {:ok, nil}
 
