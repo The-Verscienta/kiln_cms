@@ -1,4 +1,4 @@
-# 0056. The crawler IP lists are fetched on a schedule by default, because the fetch discloses nothing
+# 0056. The crawler IP lists are fetched on a schedule by default, because the fetch discloses nothing about the installation
 
 - **Status** — accepted (2026-11-13), recording the choice #2851 shipped for
   #2586. It does not decide the general rule for scheduled calls, which
@@ -15,7 +15,7 @@
   for what a list decides, and
   [ADR 0057](0057-one-node-fetches-the-crawler-ip-lists-and-the-others-re-check-what-it-sends.md)
   for how one fetch reaches every node.
-- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md):
+- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md) (quoted from its long form in `docs/changelog/unreleased.md`):
   the upgrade note "Kiln now fetches Google's, Bing's, Apple's and
   DuckDuckGo's published crawler IP lists over HTTPS every 6 hours, on by
   default", and the Added entry it points to.

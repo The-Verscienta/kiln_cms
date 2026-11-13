@@ -6,11 +6,11 @@
   and [#2851](https://github.com/The-Verscienta/kiln_cms/pull/2851), which
   built it; [#2853](https://github.com/The-Verscienta/kiln_cms/issues/2853),
   which asked for this record;
-  [ADR 0056](0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing.md)
+  [ADR 0056](0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing-about-the-installation.md)
   for why the lists are fetched on a schedule, and
   [ADR 0055](0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md)
   for what a fresh list decides.
-- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md):
+- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md) (quoted from its long form in `docs/changelog/unreleased.md`):
   "Search-engine claims are checked against the engines' published crawler
   IP lists before DNS" (Added).
 

@@ -83,9 +83,11 @@ YandexBot or Baiduspider (`KilnCMS.BotClass.search_engine/1`), and only:
 
 A DuckDuckBot claim never reaches DNS. A browser's own user agent names no
 search engine, so a person browsing the site is not looked up. The address
-that leaves is that of a client claiming to be a crawler: either the
-engine's own crawler, whose address the engine publishes as its own, or
-someone pretending to be one.
+that leaves is that of a client claiming to be a crawler: either a real
+crawler, whose address the engine vouches for in its own DNS zone, or
+someone pretending to be one. (An address inside the engine's fresh published
+list is verified there and never sent to DNS; Yandex and Baidu publish no
+list.)
 
 ### Why on by default
 
@@ -117,7 +119,7 @@ guard exempts the engines by name.
   and Apple, an address outside a lagging list would have to be a failure
   (as it is for DuckDuckBot), so every lag in a vendor's list would charge a
   real crawler as no user agent; DNS is what settles those addresses. Since
-  #2586 the lists already answer most real crawler traffic with no query.
+  #2586 the lists answer, with no query, every address they name.
 
 ## When to revisit
 

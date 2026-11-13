@@ -264,7 +264,7 @@ rather than one per request.
 
 A user agent is easy to fake, so since #2254 Kiln checks a claim to be a search
 engine before it trusts it with that class's ceiling
-(`KilnCMS.CrawlerVerification`). The check sends the client's address to the
+(`KilnCMS.CrawlerVerification`). The DNS check sends the client's address to the
 node's DNS resolver; [ADR 0058](decisions/0058-crawler-verification-sends-a-visitors-address-to-the-dns-resolver-by-default.md) records why that is on by default. Since #2586 the first check is the engine's
 own published list of its crawlers' addresses, where it has one (see
 [Published IP ranges](#published-ip-ranges)): an address inside a fresh list is
@@ -348,7 +348,7 @@ user agent, no redirect followed and at most 512 KB read. It carries nothing
 about the instance or its visitors; each vendor sees the fetching node's IP
 address. Allow it out of your firewall, or turn it off (see
 [Turn the published lists off](#turn-the-published-lists-off)). Why a
-schedule is allowed for this call by default: [ADR 0056](decisions/0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing.md).
+schedule is allowed for this call by default: [ADR 0056](decisions/0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing-about-the-installation.md).
 
 **What makes Kiln refuse a list.** A list is a claim that every address in it
 is the vendor's crawler, so a list that would verify too much is refused
@@ -391,7 +391,7 @@ search-engine percentage. A site's lower value applies in every row.
 
 The smart 404 guard reads a claim DNS could not answer differently: a silent
 reverse zone counts against the claim while the resolver works, and a silent
-engine zone does not (see
+engine zone, given its full lookup budget, does not (see
 [What counts, and what never does](ip-blocking.md#what-counts-and-what-never-does)
 and [ADR 0054](decisions/0054-in-crawler-verification-a-silence-the-claimant-controls-counts-against-it-and-one-the-vendor-controls-does-not.md)).
 

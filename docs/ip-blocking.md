@@ -199,7 +199,7 @@ Never counted, so a person or a service is not blocked by mistake:
   - **No answer to the forward (A or AAAA) query** for a name under the
     engine's own domain, when that query had its full one-second budget: the
     claim keeps the exemption. (A forward query cut short because the lookup
-    ran out of time counts like any other miss.) That silence is in
+    ran out of time is read like an unanswered PTR query, above.) That silence is in
     the engine's zone, which the address's owner does not control. With `KILN_CRAWLER_VERIFICATION=false`
   the six names Googlebot, Bingbot, DuckDuckBot, Applebot, YandexBot and
   Baiduspider in the user agent are enough. **Bait paths count for everyone**:

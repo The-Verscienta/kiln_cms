@@ -10,11 +10,11 @@
   which asked for this record;
   [#2852](https://github.com/The-Verscienta/kiln_cms/issues/2852) for the
   404 guard;
-  [ADR 0056](0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing.md)
+  [ADR 0056](0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing-about-the-installation.md)
   and
   [ADR 0057](0057-one-node-fetches-the-crawler-ip-lists-and-the-others-re-check-what-it-sends.md)
   for how the lists are fetched and shared.
-- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md):
+- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md) (quoted from its long form in `docs/changelog/unreleased.md`):
   "Search-engine claims are checked against the engines' published crawler
   IP lists before DNS" (Added), and its upgrade note.
 
@@ -93,7 +93,9 @@ list nobody can refresh stops vouching for addresses within a day.
   [threat model](../threat-model.md#bot-budgets)'s "DuckDuckBot list lag"
   residual. [#2852](https://github.com/The-Verscienta/kiln_cms/issues/2852)
   decides whether the guard should exempt a claim the list alone proved
-  false; this record does not.
+  false, and may also give `:out` a shorter freshness window than `:in`,
+  which would change this record's single 24-hour rule; this record decides
+  neither.
 - A list verifies whatever the vendor put in it. Kiln refuses a list whole
   when it would verify too much (a range wider than IPv4 `/20` or IPv6 `/48`,
   non-public space, too many entries), but an address the vendor listed is

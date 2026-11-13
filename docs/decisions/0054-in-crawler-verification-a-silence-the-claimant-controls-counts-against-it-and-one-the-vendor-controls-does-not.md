@@ -14,7 +14,7 @@
   last section);
   [ADR 0055](0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md)
   for the claims a published list decides instead.
-- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md):
+- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md) (quoted from its long form in `docs/changelog/unreleased.md`):
   "Crawler verification holds up better against lookup starvation, cache
   churn and silent reverse zones" (Security), and its upgrade note on the
   404 guard.

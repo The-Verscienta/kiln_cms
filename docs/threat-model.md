@@ -981,7 +981,7 @@ see [bot-budgets.md](bot-budgets.md).
   software. `KILN_CRAWLER_RANGES=false` (or `KILN_CRAWLER_VERIFICATION=false`)
   stops every request; `KILN_CRAWLER_RANGES_CRON=false` stops the automatic
   ones. See [data-flows.md](data-flows.md#optional-subprocessors), and
-  [ADR 0056](decisions/0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing.md) for why it is on a schedule by default and
+  [ADR 0056](decisions/0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing-about-the-installation.md) for why it is on a schedule by default and
   [ADR 0057](decisions/0057-one-node-fetches-the-crawler-ip-lists-and-the-others-re-check-what-it-sends.md) for why one node fetches.
 - **Outbound DNS to the system resolver.** Each node sends PTR, A and AAAA
   queries for visitors' addresses (never for one inside the claimed engine's
