@@ -344,7 +344,7 @@ The new marker is written first, and the component's other `.good` markers are
 removed only once it is there, so a cron prune that runs in between keeps both
 units, never neither. The app itself does not read `.good` markers: it works out
 the newest verified backup from History every time, so a stale marker pins
-nothing in the app, and its unit ages there like any other.
+nothing in the app, and its unit ages there like any other. The reasoning is in [ADR 0041](decisions/0041-the-app-and-backup-sh-agree-on-what-to-keep-only-through-presence-only-marker-files.md).
 
 **Turn it on.** Nothing to configure; you only need the new script on the host,
 and the app able to see the backup directory.
@@ -657,7 +657,7 @@ settings, both put the same files in the same parts under the same names. Every
 part is a complete archive, so `tar -tzf` works on each and `restore.sh media`
 accepts either shape. Anything of yours that globs `kiln-media-*.tar.gz` (a
 rclone filter, a monitoring script, a retention job) must accept the `.partNN`
-names too.
+names too. The reasoning is in [ADR 0042](decisions/0042-backup-sh-re-implements-the-media-planner-in-bash-and-both-change-in-the-same-pull-request.md).
 
 The one difference is recovery. A failed in-app backup keeps its finished parts
 so it can be [resumed](#media-backups-in-parts-2218); a failed cron run removes
@@ -856,7 +856,7 @@ fresh backup folded into it would never be taken, and a resume folded into a
 fresh backup would never resume. In-app schedules (part of #2219) get the same
 answer: a scheduled backup is never folded into a queued Resume. Its window
 stays due and is asked for again every minute until the queue clears
-([When a schedule fires](#when-a-schedule-fires)).
+([When a schedule fires](#when-a-schedule-fires)). The reasoning is in [ADR 0038](decisions/0038-a-backup-asked-for-while-one-runs-queues-and-only-like-folds-into-like.md).
 
 **What the queued backup covers after a fold.** A request that folds into a
 queued backup never leaves it covering less than either asked for:
@@ -941,7 +941,7 @@ depend on the window ([below](#what-a-step-that-outlives-its-cancel-can-write)).
 
 The lock is held by a step job on some node. If that node stops, its step must
 not hold every later backup for ever, and two nodes must never write the same
-backup's files at once. Three things keep both true.
+backup's files at once. Three things keep both true. The reasoning is in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md).
 
 **A heartbeat on every node.** Every 30 seconds each node writes a beat to
 `backup_node_beats`, timed by the database's clock, never the node's. It also
@@ -1008,6 +1008,8 @@ step after `start` runs only on a node that reads the same id:
   resume follows the files, not the id, so a backup whose `.work/<stamp>/`
   came along with the copy can still be resumed there.
 
+Why each step runs where its backup directory is, and the bounded wait: [ADR 0040](decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md).
+
 **A resume runs on the host with the files (#2539).** The Resume button shows
 only on a node that can see the backup's `.work/<stamp>/`. Each run records
 the id of the directory its files are in (its `dir_id`, set when it starts and
@@ -1059,7 +1061,7 @@ its node stops it ([above](#several-nodes-and-the-backup-lock)). Until then:
   else.
 - **The History row**: it can't write it. A step's progress, success and
   failure land only on a `Running` run that is still on that step's chain,
-  so it can't overwrite a Cancel or the progress of a resume of the same run.
+  so it can't overwrite a Cancel or the progress of a resume of the same run. The reasoning is in [ADR 0046](decisions/0046-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md).
 - **Its own temporary files** (`kiln-db-<stamp>.dump.partial`, a media part's
   `.partial`): these are not fenced. A resume of the same backup could share
   them, and only the wait after a Cancel
@@ -1340,7 +1342,7 @@ window fires once however many nodes tick.
 - **No retry within a window.** A window is claimed when its backup is asked
   for. If that backup then fails (after its steps' own retries), the schedule
   waits for its next window; take one with **Back up now** or **Resume** in
-  the meantime.
+  the meantime. The reasoning is in [ADR 0045](decisions/0045-a-claimed-schedule-window-is-never-retried-within-that-window.md).
 - **Editing rebaselines it.** Changing the interval, time, time zone, start
   date or components, or resuming a paused schedule, means no window from
   before the change fires: moving a 03:00 schedule to 02:00 at 02:30 doesn't
@@ -1396,7 +1398,7 @@ the components it covers, but only while it is known to run: this node can
 run backups, the scheduler is on, the schedule is enabled, its last window was
 not refused, and at least one of its windows has come since it was created or
 last rebaselined (and since `starts_on`). Until then the environment's
-threshold applies, so a schedule that never fires never silences the alarm.
+threshold applies, so a schedule that never fires never silences the alarm. The reasoning is in [ADR 0044](decisions/0044-a-schedule-sets-a-components-alarm-threshold-only-while-it-can-run-here.md).
 
 The threshold is the interval plus half of it, at least six hours, for the
 shortest such schedule on that component:
@@ -1474,7 +1476,7 @@ verify, upload and, after a failure, rebuild from nothing. The app and
 `backup.sh` split the **set of files** instead. Each part is an ordinary `tar.gz` holding a disjoint
 share of the files, so it can be listed, hashed, copied off-site and restored
 on its own. (A byte-split of one gzip stream would give pieces that are none of
-those.)
+those.) The reasoning is in [ADR 0034](decisions/0034-media-backups-are-split-by-file-set-into-independent-archives-not-by-bytes.md).
 
 **Settings** (read by the app and by `backup.sh`, by the same names; both are
 optional, see [environment-variables.md](environment-variables.md)):
@@ -1591,7 +1593,7 @@ converges over repeated resumes. From a release console, pass `resume:` to
 console](#start-a-backup-from-a-release-console)). A stamp with no failed,
 canceled or stale-running run, or whose work files are gone, is refused; a
 resume never turns into a fresh backup. Re-running the whole backup remains
-the fallback.
+the fallback. The reasoning is in [ADR 0037](decisions/0037-a-resume-reuses-a-file-only-on-a-recorded-hash-match-and-the-run-row-decides-whether-it-may-run.md).
 
 > **Operators who copy the backup directory with `rclone sync $BACKUP_DIR`:**
 > exclude `.work/**`. It holds lists of media file names (and is removed on
@@ -1668,7 +1670,7 @@ once, verified it and recorded its SHA-256, and then something else wrote to
 it: a disk fault, a second process with access to `BACKUP_DIR`, a person. The
 file is not uploaded, not retried, and not rebuilt in that run, because a
 changed backup file is the operator's to look at, not the backup's to paper
-over.
+over. The reasoning is in [ADR 0043](decisions/0043-a-file-that-changed-before-its-off-site-copy-is-refused-and-only-a-resume-rebuilds-it.md).
 
 **Where it shows (in-app backup).** The run is `Failed`. The error appears in
 the **Last run failed** box on `/editor/backups` and on the History row. The
@@ -1960,7 +1962,7 @@ The files column reads:
 | `missing` | Gone with no recorded reason: deleted by hand, or recorded by another node. |
 
 "Missing" is worked out when the page is shown, for the 25 rows in view only; it
-is never stored, so a restored file turns back to `on disk`.
+is never stored, so a restored file turns back to `on disk`. The reasoning is in [ADR 0033](decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md).
 
 **Multi-node.** `BACKUP_DIR` belongs to one host. A run recorded by another node
 reads `missing` on this one. That is the node's view, not data loss.
@@ -2185,7 +2187,7 @@ What the script checks **before it extracts anything** (a failure stops with
 - every part lists cleanly with `tar -tzf`, and no member has an absolute path
   or a `..` component, nor is a symlink or hardlink whose target is absolute or
   contains `..`. That last rule also refuses a harmless `d/x -> ../y` link:
-  extract such a set by hand once you have looked at it.
+  extract such a set by hand once you have looked at it. The reasoning is in [ADR 0036](decisions/0036-restore-refuses-absolute-and-dot-dot-members-and-links-even-harmless-ones.md).
 
 It also refuses a set with a `kiln-media-<stamp>.*.partial` file beside it: a
 backup is still writing that stamp, or was killed while writing it.
@@ -2198,7 +2200,7 @@ so one without is most likely what a killed run left behind and would restore
 with files missing. If you know the set is whole (you removed the sidecar
 yourself, say), set `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` to restore it
 anyway. It never falls back to the hashes in `manifest.json`; the sidecar is the
-supported record.
+supported record. The reasoning is in [ADR 0035](decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
 
 **By hand** (no script): check the sidecar, then extract in numeric order.
 
