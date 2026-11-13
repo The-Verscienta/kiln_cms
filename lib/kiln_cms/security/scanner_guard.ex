@@ -52,11 +52,14 @@ defmodule KilnCMS.Security.ScannerGuard do
       bingbot, ...) is exempt from the miss threshold only, and only until
       `KilnCMS.CrawlerVerification` proves it false (#2254): verified, pending
       and skipped claims keep the exemption, a claim whose address fails the
-      reverse-DNS check counts like any other client. A claim whose lookup got
-      no answer (a timeout, SERVFAIL) keeps it only while this node's resolver
-      is itself failing (`CrawlerVerification.resolver_failing?/1`, #2588):
-      while other lookups get answers, the silence is the address's own
-      reverse zone, which a scanner can choose, and its misses count. With
+      reverse-DNS check counts like any other client. A claim whose PTR query
+      got no answer (a timeout, SERVFAIL) keeps it only while this node's
+      resolver is itself failing (`CrawlerVerification.resolver_failing?/1`,
+      #2588): while other lookups get answers, the silence is the address's
+      own reverse zone, which a scanner can choose, and its misses count. A
+      claim whose PTR named a host under the engine's domain and whose
+      forward query for that host got no answer, with its full time budget,
+      keeps it: that silence is the engine's own zone. With
       verification off (`KILN_CRAWLER_VERIFICATION=false`) the engine's name
       in the user agent is enough. Link-preview fetchers (facebookexternalhit,
       Twitterbot, LinkedInBot) and Slurp are not exempt. **Bait paths count
@@ -230,8 +233,10 @@ defmodule KilnCMS.Security.ScannerGuard do
   # A search-engine claim is exempt from the miss threshold unless DNS has
   # proven it false (#2254): a lookup still pending or skipped keeps the
   # exemption, so a real crawler's first misses from a new address never
-  # count. An unanswered lookup keeps it only while the resolver itself is
+  # count. An unanswered PTR query keeps it only while the resolver itself is
   # failing (#2588); otherwise the silence is the address's own reverse zone.
+  # An unanswered forward query for an engine-domain name, given its full
+  # budget, keeps it.
   # `context/2` has already turned away untrusted forwarding and non-public
   # addresses, so the check sees the client's own address. With verification
   # off, the name in the user agent is enough, as before.
@@ -249,7 +254,12 @@ defmodule KilnCMS.Security.ScannerGuard do
     end
   end
 
+  # A forward query that got no answer for a name under the engine's own
+  # domain, with its full time budget, is silence in the engine's zone, which
+  # a scanner cannot cause from its own reverse zone, so it keeps the
+  # exemption like a pending one. One a slow PTR answer starved is `:error`.
   defp exempt_claim?({:unverified, :failed}), do: false
+  defp exempt_claim?({:unverified, :forward_error}), do: true
   defp exempt_claim?({:unverified, :error}), do: CrawlerVerification.resolver_failing?()
   defp exempt_claim?(_verified_or_unproven), do: true
 

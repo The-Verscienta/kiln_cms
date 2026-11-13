@@ -184,15 +184,79 @@ defmodule KilnCMS.CrawlerVerificationTest do
       end
     end
 
-    test "a forward servfail is an error, not a mismatch", %{opts: opts} do
+    # #2588: the PTR query was answered, so the silence is the engine's own
+    # zone, not the address's; `:forward_error` tells a caller so.
+    for reason <- [:servfail, :timeout] do
+      test "a forward #{reason} for an engine-domain name is a forward error, not a mismatch",
+           %{opts: opts} do
+        ip = v4()
+        host = unique_host("crawl.googlebot.com")
+        Stub.put_ptr(ip, [host])
+        Stub.put_addresses(host, {:error, unquote(reason)})
+
+        assert CrawlerVerification.verify(:google, ip, opts) == {:error, unquote(reason)}
+        assert settle(:google, ip, opts) == {:unverified, :forward_error}
+        assert_error_ttl(ip)
+
+        assert {:ok, {:ptr, %{budgeted: [^host]}}} =
+                 Cachex.get(CrawlerVerification.cache_name(), ip)
+      end
+    end
+
+    # A reverse zone that answers late leaves the forward query less than its
+    # full budget; its failure may be the late answer's doing, so it is the
+    # address's silence, never the engine's.
+    test "a forward error after a PTR answer that left less than a query's budget is an error",
+         %{opts: opts} do
+      opts = Keyword.merge(opts, deadline_ms: 1_200, query_timeout_ms: 1_000)
       ip = v4()
       host = unique_host("crawl.googlebot.com")
-      Stub.put_ptr(ip, [host])
-      Stub.put_addresses(host, {:error, :servfail})
+      Stub.put_ptr(ip, {:block, self(), [host]})
+      Stub.put_addresses(host, {:error, :timeout})
 
-      assert CrawlerVerification.verify(:google, ip, opts) == {:error, :servfail}
+      assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :pending}
+      assert_receive {Stub, :blocked, resolver, _callers, :ptr, ^ip}, 2_000
+      # Past the point where a full query budget is left before the deadline.
+      Process.sleep(300)
+      Stub.release(resolver)
+
       assert settle(:google, ip, opts) == {:unverified, :error}
-      assert_error_ttl(ip)
+      assert Stub.calls(:addresses, host) == 1
+      assert {:ok, {:ptr, %{budgeted: []}}} = Cachex.get(CrawlerVerification.cache_name(), ip)
+    end
+
+    test "a cached forward error from before budgets were recorded reads as an error",
+         %{opts: opts} do
+      ip = v4()
+      host = unique_host("crawl.googlebot.com")
+      old_shape = {:ptr, %{names: [host], confirmed: [], errors: [{host, :timeout}]}}
+      Cachex.put(CrawlerVerification.cache_name(), ip, old_shape)
+
+      assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :error}
+    end
+
+    test "a PTR naming another engine's host whose forward query fails is not a forward error",
+         %{opts: opts} do
+      ip = v4()
+      host = unique_host("msnbot.search.msn.com")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, {:error, :timeout})
+
+      # Claimed as Googlebot: the name is not Google's, so the claim fails.
+      assert settle(:google, ip, opts) == {:unverified, :failed}
+      # Claimed as bingbot, the same cached result is Bing's own zone failing.
+      assert CrawlerVerification.check(:bing, ip, opts) == {:unverified, :forward_error}
+    end
+
+    test "a PTR naming a host under no engine's domain makes no forward query and fails",
+         %{opts: opts} do
+      ip = v4()
+      host = unique_host("crawl.example.net")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, {:error, :timeout})
+
+      assert settle(:google, ip, opts) == {:unverified, :failed}
+      assert Stub.calls(:addresses, host) == 0
     end
 
     test "a lookup past its deadline is killed and cached as a timeout", %{opts: opts} do
@@ -481,8 +545,42 @@ defmodule KilnCMS.CrawlerVerificationTest do
 
         # Every one of its networks is at a cap of 1, and the node at 2: the
         # next address in them still gets its lookup.
-        assert CrawlerVerification.check(:google, neighbour(ip), opts) == {:unverified, :pending}
+        assert CrawlerVerification.check(:google, neighbor(ip), opts) == {:unverified, :pending}
       end
+    end
+
+    test "a refund that cannot be made still frees the claim, and never raises",
+         %{opts: opts} do
+      CrawlerVerification.reset_warnings()
+      attach(@skipped)
+      node_key = "#{opts[:rate_scope]}:node"
+      index = RateLimit.window_index(opts[:rate_window_ms])
+
+      # A stand-in for a full task supervisor that, between the charge and the
+      # refund, leaves the node cap's counter row in a shape the refund cannot
+      # update, so `RateLimit.refund/3` raises.
+      supervisor =
+        spawn_link(fn ->
+          receive do
+            {:"$gen_call", from, _start_child} ->
+              :ets.insert(RateLimit, {{node_key, index}, :not_a_count, 0})
+              GenServer.reply(from, {:error, :max_children})
+          end
+        end)
+
+      on_exit(fn -> :ets.delete(RateLimit, {node_key, index}) end)
+      ip = v4()
+
+      log =
+        capture_log(fn ->
+          assert CrawlerVerification.check(:google, ip, [task_supervisor: supervisor] ++ opts) ==
+                   {:unverified, :skipped}
+        end)
+
+      assert :ets.lookup(InFlight.table(), ip) == []
+      assert_receive {:telemetry, @skipped, %{count: 1}, %{engine: :google, reason: :busy}}
+      assert log =~ "could not refund a rate-limit charge"
+      refute log =~ inspect(ip)
     end
   end
 
@@ -958,8 +1056,8 @@ defmodule KilnCMS.CrawlerVerificationTest do
   defp other_family(:inet6), do: :inet
 
   # Another address in `ip`'s /24 (IPv4) or /64 (IPv6), never used before.
-  defp neighbour({a, b, c, d}), do: fresh({a, b, c, rem(d + 128, 254) + 1})
-  defp neighbour({a, b, c, d, e, f, g, h}), do: fresh({a, b, c, d, e, f, g, h + 0x8000})
+  defp neighbor({a, b, c, d}), do: fresh({a, b, c, rem(d + 128, 254) + 1})
+  defp neighbor({a, b, c, d, e, f, g, h}), do: fresh({a, b, c, d, e, f, g, h + 0x8000})
 
   defp assert_error_ttl(ip) do
     assert ttl(ip) <= :timer.minutes(5)

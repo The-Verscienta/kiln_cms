@@ -22,9 +22,16 @@ defmodule KilnCMS.CrawlerVerification do
       name outside the engine's domain, or a forward lookup that does not
       contain the address).
     * `{:unverified, :pending}`: a lookup is running, or was just started.
-    * `{:unverified, :error}`: the last lookup could not get an answer (a
-      timeout, SERVFAIL, a refused query). Cached for a short while and never
-      read as a failure.
+    * `{:unverified, :error}`: the last lookup's PTR query could not get an
+      answer (a timeout, SERVFAIL, a refused query). Cached for a short while
+      and never read as a failure. The silence may be the address's own
+      reverse zone, which its owner controls.
+    * `{:unverified, :forward_error}`: the PTR record named a host under the
+      engine's domain, and that host's forward query could not get an answer
+      (#2588), though it was given at least `:query_timeout_ms` before the
+      deadline. Cached and read like `:error`, but the silence is in the
+      engine's own zone, which the address's owner does not control. A
+      forward query left less time by a slow PTR answer is plain `:error`.
     * `{:unverified, :skipped}`: no lookup was started, because the node is
       at its concurrent-lookup limit or the address's network has used its
       lookup budget.
@@ -175,7 +182,8 @@ defmodule KilnCMS.CrawlerVerification do
   # tag can never take an unbounded value.
   @error_reasons [:timeout, :servfail, :refused, :formerr, :notimp, :econnrefused, :nxdomain]
 
-  @type reason :: :pending | :failed | :unverifiable | :not_public | :skipped | :error
+  @type reason ::
+          :pending | :failed | :unverifiable | :not_public | :skipped | :error | :forward_error
   @type status :: :verified | :disabled | {:unverified, reason()}
   @type verdict ::
           {:verified, String.t()}
@@ -323,7 +331,7 @@ defmodule KilnCMS.CrawlerVerification do
   defp check_address(engine, ip, config) do
     if worth_a_lookup?(ip, config) do
       case cached(ip) do
-        {:ok, stored} when not is_nil(stored) -> engine |> judge(stored) |> status()
+        {:ok, stored} when not is_nil(stored) -> engine |> judge(stored) |> status(engine, stored)
         _miss -> request_lookup(engine, ip, config)
       end
     else
@@ -350,9 +358,33 @@ defmodule KilnCMS.CrawlerVerification do
     |> Enum.any?(&Cidr.contains?(to_string(&1), ip))
   end
 
-  defp status({:verified, _host}), do: :verified
-  defp status({:rejected, _reason}), do: {:unverified, :failed}
-  defp status({:error, _reason}), do: {:unverified, :error}
+  # `judge/2` only answers an error for a `{:ptr, _}` result when a forward
+  # query for a name under the claimed engine's domain got no answer. That
+  # silence is the engine's zone, not the address's (#2588), but only if the
+  # query had its full budget: a PTR answer slow enough to starve it is the
+  # address's own zone at work, so that reads as plain `:error`.
+  defp status({:verified, _host}, _engine, _stored), do: :verified
+  defp status({:rejected, _reason}, _engine, _stored), do: {:unverified, :failed}
+
+  defp status({:error, _reason}, engine, {:ptr, result}) do
+    if engine_silent?(engine, result),
+      do: {:unverified, :forward_error},
+      else: {:unverified, :error}
+  end
+
+  defp status({:error, _reason}, _engine, _stored), do: {:unverified, :error}
+
+  # The error `judge/2` reports for `engine`, given its full budget. A result
+  # cached before `:budgeted` existed has none, so it reads as plain `:error`:
+  # an unknown budget counts toward the client, never toward the exemption.
+  defp engine_silent?(engine, result) do
+    budgeted = Map.get(result, :budgeted, [])
+
+    case Enum.find(result.errors, fn {host, _reason} -> Engines.matches?(engine, host) end) do
+      {host, _reason} -> host in budgeted
+      nil -> false
+    end
+  end
 
   defp request_lookup(engine, ip, config) do
     case InFlight.claim(ip, claim_ttl(config)) do
@@ -369,15 +401,17 @@ defmodule KilnCMS.CrawlerVerification do
 
   # A lookup that could not start gives back what it charged (#2588), or a
   # flood of turned-away starts would spend every network's budget, and the
-  # node's, without a lookup.
+  # node's, without a lookup. The claim is released first, so nothing the
+  # refund does can leave it held.
   defp start_or_refund(engine, ip, claim, charged, config) do
     case start(engine, ip, claim, config) do
       :ok ->
         {:unverified, :pending}
 
       {:skipped, :busy} ->
+        skipped = turn_away(engine, claim, :busy)
         refund(charged, config)
-        turn_away(engine, claim, :busy)
+        skipped
     end
   end
 
@@ -392,35 +426,55 @@ defmodule KilnCMS.CrawlerVerification do
 
   # Narrowest network first, then the node: a network over its budget is
   # turned away before it spends the node's. Answers the keys it charged and
-  # the window they were charged in, for `refund/2`. A refusal keeps its
-  # charges, as it always has: Hammer counts a denied hit too.
+  # the window they were charged in, for `refund/2`: none when the charges
+  # straddled a window boundary, since the index then names only some of
+  # them. A refusal keeps its charges, as it always has: Hammer counts a
+  # denied hit too.
   defp within_caps(ip, config) do
     window = config[:rate_window_ms]
     scope = config[:rate_scope]
     keys = for {key, limit} <- caps(ip, config), do: {"#{scope}:#{key}", limit}
+    index = RateLimit.window_index(window)
 
-    Enum.reduce_while(keys, {:ok, {rate_window(window), []}}, fn {key, limit},
-                                                                 {:ok, {index, charged}} ->
-      case RateLimit.hit(key, window, limit) do
-        {:allow, _count} -> {:cont, {:ok, {index, [key | charged]}}}
-        {:deny, _retry_after} -> {:halt, {:skipped, :rate_limited}}
-      end
-    end)
-  end
+    result =
+      Enum.reduce_while(keys, {:ok, []}, fn {key, limit}, {:ok, charged} ->
+        case RateLimit.hit(key, window, limit) do
+          {:allow, _count} -> {:cont, {:ok, [key | charged]}}
+          {:deny, _retry_after} -> {:halt, {:skipped, :rate_limited}}
+        end
+      end)
 
-  # Gives back each charge, only inside the window it was charged in: once
-  # that window has closed, the charge expired with it, and a refund would
-  # lower the next window's count instead.
-  defp refund({index, charged}, config) do
-    window = config[:rate_window_ms]
+    case result do
+      {:ok, charged} ->
+        if RateLimit.window_index(window) == index,
+          do: {:ok, {index, charged}},
+          else: {:ok, {index, []}}
 
-    if rate_window(window) == index do
-      Enum.each(charged, &RateLimit.refund(&1, window))
+      refused ->
+        refused
     end
   end
 
-  # The fixed window Hammer counts a hit in (`Hammer.ETS.FixWindow`).
-  defp rate_window(window_ms), do: div(System.system_time(:millisecond), window_ms)
+  # Gives back each charge in the window it was charged in; `RateLimit.refund/3`
+  # leaves a window that has since closed alone. Never raises into `check/3`:
+  # a row Hammer stores in a shape the refund does not expect costs the
+  # refund, logged once per node, never the request.
+  defp refund({index, charged}, config) do
+    window = config[:rate_window_ms]
+    Enum.each(charged, &RateLimit.refund(&1, window, index))
+  rescue
+    # The message is not logged: it can carry the key, which names a network.
+    ArgumentError ->
+      if InFlight.latch(:refund_failed) do
+        Logger.warning(
+          "Crawler verification could not refund a rate-limit charge (the rate " <>
+            "limiter's counter row is not in the shape it expects); a lookup " <>
+            "turned away as busy keeps its charge"
+        )
+      end
+
+      :ok
+  end
 
   defp caps(ip, config) do
     family = if tuple_size(ip) == 4, do: :inet, else: :inet6
@@ -514,9 +568,10 @@ defmodule KilnCMS.CrawlerVerification do
   end
 
   # What is cached for an address: `:no_ptr`, `{:error, reason}`, or
-  # `{:ptr, %{names, confirmed, errors}}` — the readable PTR names, the ones a
-  # forward query confirmed, and `{name, reason}` for each forward query that
-  # got no answer. `judge/2` reads it for one engine.
+  # `{:ptr, %{names, confirmed, errors, budgeted}}` — the readable PTR names,
+  # the ones a forward query confirmed, `{name, reason}` for each forward
+  # query that got no answer, and the names among those whose query was given
+  # at least `:query_timeout_ms` before the deadline (#2588). `judge/2` reads it for one engine.
   defp resolve(ip, config, deadline_at) do
     case call(config, deadline_at, &config[:resolver].ptr(ip, &1)) do
       {:ok, []} -> :no_ptr
@@ -534,7 +589,7 @@ defmodule KilnCMS.CrawlerVerification do
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
 
-    initial = %{names: names, confirmed: [], errors: []}
+    initial = %{names: names, confirmed: [], errors: [], budgeted: []}
 
     {result, _forwarded} =
       names
@@ -557,8 +612,13 @@ defmodule KilnCMS.CrawlerVerification do
     end)
   end
 
+  # A forward query that errors is `budgeted` only when it was given at least
+  # `:query_timeout_ms`: one the PTR answer left less time (or none, so
+  # `call/3` never asked) may have failed for want of time, which the
+  # address's own reverse zone can arrange by answering late.
   defp forward(acc, host, ip, config, deadline_at) do
     family = if tuple_size(ip) == 4, do: :inet, else: :inet6
+    full_budget? = deadline_at - now() >= config[:query_timeout_ms]
 
     case call(config, deadline_at, &config[:resolver].addresses(host, family, &1)) do
       {:ok, addresses} ->
@@ -568,6 +628,9 @@ defmodule KilnCMS.CrawlerVerification do
 
       {:error, :nxdomain} ->
         acc
+
+      {:error, reason} when full_budget? ->
+        %{acc | errors: acc.errors ++ [{host, reason}], budgeted: acc.budgeted ++ [host]}
 
       {:error, reason} ->
         %{acc | errors: acc.errors ++ [{host, reason}]}

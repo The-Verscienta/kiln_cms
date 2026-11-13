@@ -20,19 +20,33 @@ defmodule KilnCMSWeb.Plugs.RateLimitTest do
   # #2588: crawler verification charges its lookup caps before it knows the
   # lookup can start, and gives a charge back when it cannot. An hour-long
   # window keeps the test from straddling a rollover.
-  test "refund/2 gives back one charge and never goes below zero" do
+  test "refund/3 gives back one charge and never goes below zero" do
     key = "refund-test-#{System.unique_integer([:positive])}"
     scale = :timer.hours(1)
+    index = KilnCMSWeb.RateLimit.window_index(scale)
 
     assert {:allow, 1} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
     assert {:allow, 2} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
-    assert KilnCMSWeb.RateLimit.refund(key, scale) == 1
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index) == 1
     assert {:allow, 2} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
 
-    assert KilnCMSWeb.RateLimit.refund(key, scale) == 1
-    assert KilnCMSWeb.RateLimit.refund(key, scale) == 0
-    assert KilnCMSWeb.RateLimit.refund(key, scale) == 0
-    assert KilnCMSWeb.RateLimit.refund("never-charged-#{key}", scale) == 0
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index) == 1
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index) == 0
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index) == 0
+    assert KilnCMSWeb.RateLimit.refund("never-charged-#{key}", scale, index) == 0
+  end
+
+  # #2588: a charge made in a window that has since closed expired with it;
+  # refunding it must not lower the current window's count.
+  test "refund/3 for a closed window touches nothing" do
+    key = "refund-stale-#{System.unique_integer([:positive])}"
+    scale = :timer.hours(1)
+    index = KilnCMSWeb.RateLimit.window_index(scale)
+
+    assert {:allow, 1} = KilnCMSWeb.RateLimit.hit(key, scale, 5)
+    assert KilnCMSWeb.RateLimit.refund(key, scale, index - 1) == 0
+    assert KilnCMSWeb.RateLimit.get(key, scale) == 1
+    assert :ets.lookup(KilnCMSWeb.RateLimit, {key, index - 1}) == []
   end
 
   test "returns 429 when the auth bucket is exceeded", %{conn: conn} do
