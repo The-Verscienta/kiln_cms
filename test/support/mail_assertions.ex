@@ -30,9 +30,10 @@ defmodule KilnCMS.MailAssertions do
   A few tests still carry a local collect-everything helper that predates this
   module and could move onto it: `security/api_key_trip_test.exs` and
   `security/deliver_alert_test.exs` (`collect/1`),
-  `accounts/registration_notifications_test.exs` (`delivered/0`),
-  `kiln_cms_web/draft_write_key_rotation_test.exs` (`sent_mail/1`) and
-  `kiln_cms_web/enumeration_newsletter_test.exs` (`flush_mail/0`).
+  `accounts/registration_notifications_test.exs` (`delivered/0`) and
+  `kiln_cms_web/draft_write_key_rotation_test.exs` (`sent_mail/1`). The
+  `flush_mail/0` helpers some tests carry are different: they discard setup
+  mail before the action under test.
   """
   import ExUnit.Assertions
 

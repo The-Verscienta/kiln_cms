@@ -379,21 +379,25 @@ defmodule KilnCMSWeb.InviteLiveTest do
       # Drained together, the mails arrive in no fixed order: Oban fetches the
       # :mail queue through UPDATE ... RETURNING, whose row order Postgres does
       # not guarantee. So assert the set (#2602).
-      assert_delivered(
-        for {invitation, token, host} <- [
-              {viewer_invitation, viewer_token, site_host},
-              {editor_invitation, editor_token, console_host}
-            ] do
-          fn mail ->
-            if mail.to == [{"", to_string(invitation.email)}] do
-              [link] = Regex.run(~r{href="([^"]+)"}, mail.html_body, capture: :all_but_first)
-              assert URI.parse(link).host == host
-              assert URI.parse(link).path == "/auth/invite/#{token}"
-              true
-            end
+      expected = [
+        {viewer_invitation, viewer_token, site_host},
+        {editor_invitation, editor_token, console_host}
+      ]
+
+      # Pick each mail out by recipient first, then assert on it, so a wrong
+      # host or path fails with its values rather than as "unmatched".
+      mails =
+        assert_delivered(
+          for {invitation, _token, _host} <- expected do
+            &(&1.to == [{"", to_string(invitation.email)}])
           end
-        end
-      )
+        )
+
+      for {mail, {_invitation, token, host}} <- Enum.zip(mails, expected) do
+        [link] = Regex.run(~r{href="([^"]+)"}, mail.html_body, capture: :all_but_first)
+        assert URI.parse(link).host == host
+        assert URI.parse(link).path == "/auth/invite/#{token}"
+      end
 
       # The viewer's link opened on the site's console host goes to the site host.
       assert {:error, {:redirect, %{to: to}}} =
