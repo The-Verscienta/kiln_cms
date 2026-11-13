@@ -52,7 +52,7 @@ defmodule KilnCMS.Test.BackupCluster do
   end
 
   @doc "The beat `node` last reported, or nil."
-  @spec beat_of(String.t()) :: %KilnCMS.Backups.NodeBeat{} | nil
+  @spec beat_of(String.t()) :: struct() | nil
   def beat_of(node), do: Backups.get_node_beat!(node, actor: Backups.system())
 
   @doc """

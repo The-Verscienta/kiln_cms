@@ -197,6 +197,52 @@ carries the reasoning.
     `backup.sh` or put the old one back; both read the same files.
   (#2478)
 
+<a id="crawler-ip-ranges-upgrade"></a>
+
+- **Kiln now fetches Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists over HTTPS every 6 hours, on by default: allow the four hosts, or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot claims from outside DuckDuckGo's list are now charged as no user agent.**
+  This is the first outbound call a default install makes **on a schedule**;
+  every other default call answers something a person did (#2586, see
+  [Added](#crawler-ip-ranges)).
+  - **Egress.** One node fetches
+    `https://developers.google.com/static/crawling/ipranges/common-crawlers.json`,
+    `https://www.bing.com/toolbox/bingbot.json`,
+    `https://search.developer.apple.com/applebot.json` and
+    `https://duckduckgo.com/duckduckbot.json` every 6 hours (Oban cron
+    `17 */6 * * *`, `KILN_CRAWLER_RANGES_CRON`), and shares them with the
+    other nodes over PubSub. A node with no fresh list also queues a fetch
+    about 20 seconds after it starts, and again at its 10-minute checks while
+    a list is stale; at most one fetch job runs per 10 minutes across the
+    cluster. Any node may be the one that fetches, so a firewall that lists
+    allowed hosts must allow all four on every node, port 443. The requests
+    carry a bare `KilnCMS` user agent and nothing about the instance or its
+    visitors. Add the four vendors to your DPA's list if you keep one
+    ([data-flows.md](../data-flows.md#optional-subprocessors)).
+  - **If you do nothing on a closed network**, nothing breaks: each list
+    stays missing, claims are checked by DNS as before, DuckDuckBot stays
+    unverified as before, and each node logs "Crawler verification:
+    <engine>'s published crawler IP ranges are missing or stale ..." once
+    per engine. Set `KILN_CRAWLER_RANGES=false` to stop the attempts and the
+    warnings.
+  - **DuckDuckBot changes.** An address in DuckDuckGo's list now gets the
+    verified search-engine ceiling (600 a minute with the defaults, was 300).
+    An IPv4 address outside it is proven false: charged as no user agent (60
+    a minute) and, with the smart 404 guard on (`KILN_SCANNER_BLOCKING`, off
+    by default), counted toward the miss threshold. **A real DuckDuckBot on an
+    address DuckDuckGo has just added can be throttled, and blocked by the
+    guard, until the next successful fetch**: normally within 6 hours, at most
+    24 if fetches keep failing, after which the list is stale and DuckDuckBot
+    claims are unproven again. Remove such a block on `/editor/ip-blocks`.
+    DuckDuckGo publishes IPv4 only, so DuckDuckBot over IPv6 is unchanged.
+  - **Google, Bing and Apple** gain: an address in their list is verified
+    with no DNS query. One outside it goes to DNS exactly as before.
+  - **Staging and dev.** Dev has the lists off (`KILN_CRAWLER_RANGES=true`
+    turns them on); a staging env built for production fetches them unless
+    you set `KILN_CRAWLER_RANGES=false`
+    ([staging-environments.md](../staging-environments.md)).
+  - **Rolling back** is safe: nothing is stored outside each node's memory
+    and there is no migration. In a cluster upgraded node by node, older
+    nodes ignore the lists the new ones send.
+
 <a id="second-factor-policy-upgrade"></a>
 
 - **Run `mix ash.migrate` (new table `site_second_factor_policy`, and a `users.inserted_at` column). Nothing is enforced; rolling back is safe.**
@@ -512,6 +558,54 @@ carries the reasoning.
   and `Passkey` `:register`. See
   [We email you when a second factor is added](../two-factor-auth.md#we-email-you-when-a-second-factor-is-added).
   (Part of #2247.)
+
+<a id="crawler-ip-ranges"></a>
+
+- **Search-engine claims are checked against the engines' published crawler IP lists before DNS: an address in Google's, Bing's, Apple's or DuckDuckGo's fresh list is verified with no DNS query, and DuckDuckBot can be verified at last.**
+  Until now every claim went to reverse and forward DNS (#2254), and
+  DuckDuckBot, which publishes addresses rather than a reverse-DNS domain,
+  could never be verified or proven false (#2586).
+  - **What a list decides.** An address inside the claimed engine's list is
+    verified, with no lookup charged against the per-network limits and
+    nothing cached. Outside it, Google, Bing and Apple fall back to DNS, so
+    a list that lags the vendor never fails a real crawler; DuckDuckBot,
+    with no DNS to fall back on, is proven false (see the
+    [upgrade note](#crawler-ip-ranges-upgrade)). A list is fresh for 24
+    hours after it was fetched; a missing or stale one decides nothing.
+    Yandex and Baidu publish no list and stay DNS-only.
+  - **What refuses a list.** A list is refused whole, keeping the one held
+    before, when it is not the expected JSON, has no usable range or more
+    than 5,000, holds a range wider than IPv4 `/20` or IPv6 `/48` or more
+    than 65,536 IPv4 or 2^80 IPv6 addresses in total, or overlaps private,
+    loopback, shared, link-local, multicast, documentation, benchmarking,
+    6to4, Teredo or NAT64 space (IPv6 must be inside `2000::/3`). A match is
+    only as good as the vendor's list: Bing's includes `/28`s in Microsoft
+    Azure space.
+  - **Operators.** New `KILN_CRAWLER_RANGES` (default on; `false` makes no
+    request and reads no list; off whenever `KILN_CRAWLER_VERIFICATION` is
+    `false`) and `KILN_CRAWLER_RANGES_CRON` (default `17 */6 * * *`; `false`
+    stops every automatic fetch, the boot and stale-list ones included). New
+    metric `kiln_cms.crawler_verification.ranges_fetch.count`, tagged
+    `engine` and `result` (`ok`, `http_error`, `transport_error`,
+    `too_large`, `blocked`, `invalid`, `no_prefixes`, `too_many`,
+    `too_broad`, `not_public`, `other`). For a health check,
+    `bin/kiln_cms rpc 'IO.inspect(KilnCMS.CrawlerVerification.Ranges.status())'`
+    prints each list's source, range count, age in milliseconds and
+    `fresh?`. Guide:
+    [Published IP ranges](../bot-budgets.md#published-ip-ranges).
+  - **Developers.** New `KilnCMS.CrawlerVerification.Ranges` (with
+    `lookup/3`, `fresh?/2`, `status/0`), `Ranges.Parser`, `RangesWorker`
+    and `RangesSync`; `KilnCMS.CrawlerVerification.Engines` gains
+    `known?/1`, `range_source/1`, `range_engines/0` and
+    `default_range_sources/0`; `KilnCMS.Security.Cidr` gains
+    `global_unicast_range?/1`. Code config
+    `config :kiln_cms, KilnCMS.CrawlerVerification.Ranges`: `:enabled`,
+    `:sources` (`%{engine => url | false}`, per engine), `:max_age_ms`,
+    `:max_bytes`, `:max_prefixes`, `:bootstrap?`, `:bootstrap_after_ms`,
+    `:req_options`. `KilnCMS.CrawlerVerification.check/3`'s answers are
+    unchanged in shape: `{:unverified, :failed}` now also means DuckDuckBot
+    outside its list, and `{:unverified, :unverifiable}` means DuckDuckBot
+    with no fresh list or over IPv6.
 
 <a id="second-factor-policy-groundwork"></a>
 

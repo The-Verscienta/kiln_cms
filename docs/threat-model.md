@@ -831,8 +831,10 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   otherwise. A claim whose PTR names a host under
   the engine's domain, and whose forward query for that host got no answer
   with its full one-second budget, keeps the exemption: that silence is in
-  the engine's zone, not the address owner's. A DuckDuckBot claim cannot be
-  checked and is always exempt. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
+  the engine's zone, not the address owner's. A DuckDuckBot claim has no DNS
+  check; since #2586 one from an IPv4 address outside DuckDuckGo's fresh
+  published list is proven false and counted, and while that list is missing
+  or stale, or over IPv6, it is exempt. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
   names in the user agent are enough, as before. Link-preview fetchers
   (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and `Slurp` are not
   exempt in either mode: anyone can claim them and there is nothing to check.
@@ -874,13 +876,17 @@ see [bot-budgets.md](bot-budgets.md).
   to 200% (#2587), but their claims are checked (next point), and the part
   above 100% goes only to verified addresses; with verification off the
   default is 100%.
-- **Search-engine claims are checked by DNS (#2254).**
+- **Search-engine claims are checked by published IP ranges and DNS (#2254,
+  #2586).** An address inside the claimed engine's fresh published list
+  (Google, Bing, Apple, DuckDuckGo) is verified with no DNS query; a
+  DuckDuckBot claim from outside DuckDuckGo's is proven false. Otherwise
   `KilnCMS.CrawlerVerification` looks up the address's PTR name, requires it
   under the engine's published domain (label-aligned, so `evilgooglebot.com`
   fails), and requires the name's forward lookup to contain the address. Only a
-  claim **proven** false (no PTR, wrong domain, forward mismatch) is charged as
-  no user agent. Everything not proven either way (lookup pending, skipped, DNS
-  error or timeout, DuckDuckBot, a non-public address, untrusted forwarding)
+  claim **proven** false (no PTR, wrong domain, forward mismatch, DuckDuckBot
+  outside its list) is charged as no user agent. Everything not proven either
+  way (lookup pending, skipped, DNS error or timeout, DuckDuckBot with no fresh
+  list or over IPv6, a non-public address, untrusted forwarding)
   keeps the search-engine class but held to the `:delivery` limit, so a
   search-engine value above 100% (the default 200% included) is spent only on
   verified addresses: a spoofer typing "Googlebot" never gets more than a
@@ -932,11 +938,50 @@ see [bot-budgets.md](bot-budgets.md).
   canary's included) marks the resolver working for a minute, while queries
   it must recurse for fail, and real crawlers' misses are counted meanwhile.
   The 404 guard is off by default.
-- **Residual: no IP-range verification.** DuckDuckBot publishes IP ranges only,
-  so its claims are never verified (and never proven false); the other
-  engines' published ranges are not read either (#2586).
+- **Trust in vendor lists (#2586).** An address in a vendor's published list
+  is verified with no other check, so the list is a trust anchor. It is
+  fetched over HTTPS through `KilnCMS.SafeFetch` (pinned resolution, public
+  addresses only, no redirect, at most 512 KB) from a fixed URL, and refused
+  whole if it is not the expected JSON, holds no range or more than 5,000,
+  holds a range wider than IPv4 `/20` or IPv6 `/48` or more than 65,536 IPv4
+  or 2^80 IPv6 addresses in total, or overlaps any non-global space
+  (private, loopback, shared, link-local, multicast, documentation,
+  benchmarking, 6to4, Teredo, NAT64, IPv6 outside `2000::/3`), so a
+  compromised or reformatted list cannot verify the world or a proxy's
+  address. A non-public client address is never looked up in a list. A
+  list's age is how long ago a node fetched it, never the `creationTime` it
+  states; a list over 24 hours old, or a refused or failed fetch, verifies
+  nothing and proves nothing false, so a vendor outage fails toward
+  unverified. Lists travel between nodes over Erlang distribution, whose
+  peers are already trusted; a receiving node runs every range through the
+  same checks and dates the list by its own clock from the age the sender
+  measured.
+- **Residual: a list verifies whatever the vendor put in it.** Bing's list
+  includes `/28`s in Microsoft Azure space, so whoever holds one of those
+  addresses gets the verified search-engine ceiling as Bingbot. The cost is
+  bounded by that ceiling (600 a minute with the defaults) and the 404 guard's
+  miss exemption; bait paths still count.
+- **Residual: DuckDuckBot list lag.** A DuckDuckBot claim outside
+  DuckDuckGo's list is proven false, with no DNS to correct it. A real
+  DuckDuckBot on an address DuckDuckGo added since the last successful fetch is
+  charged as no user agent and, with the 404 guard on, can be blocked, until
+  the next fetch (normally within 6 hours; at most 24, after which the list is
+  stale and claims are unproven again). For Google, Bing and Apple an address
+  outside the list falls back to DNS, so lag costs nothing there.
+- **Outbound HTTPS to four vendors (#2586).** One node per cluster fetches
+  `developers.google.com`, `www.bing.com`, `search.developer.apple.com` and
+  `duckduckgo.com` every 6 hours, and a node with no fresh list queues a fetch
+  of the stale ones at boot and every 10 minutes; a cluster-wide unique job
+  caps that at one per 10 minutes. It is the first scheduled outbound call of
+  a default install. Each request is an unauthenticated `GET` of a fixed URL
+  with a bare `KilnCMS` user agent; it names no visitor, site or version, and
+  the vendor learns only that the fetching node's IP address runs this
+  software. `KILN_CRAWLER_RANGES=false` (or `KILN_CRAWLER_VERIFICATION=false`)
+  stops every request; `KILN_CRAWLER_RANGES_CRON=false` stops the automatic
+  ones. See [data-flows.md](data-flows.md#optional-subprocessors).
 - **Outbound DNS to the system resolver.** Each node sends PTR, A and AAAA
-  queries for visitors' addresses to the nameservers in its `/etc/resolv.conf`
+  queries for visitors' addresses (never for one inside the claimed engine's
+  fresh published list, nor for DuckDuckBot) to the nameservers in its `/etc/resolv.conf`
   (`:inet_res`, not `SafeFetch`: no HTTP, and the names queried are the
   `in-addr.arpa` / `ip6.arpa` name of the client's address, then PTR names
   that matched an engine's domain). The resolver, and the authoritative server

@@ -118,3 +118,14 @@ end
 if cron = System.get_env("KILN_BACKUP_SCHEDULER_CRON") do
   config :kiln_cms, :backup_scheduler_cron, cron
 end
+
+# ## Published crawler IP ranges (#2586)
+#
+# When one node fetches the search engines' published crawler IP range lists.
+# Every 6 hours by default. `false` stops every automatic fetch, including the
+# one a node queues at boot or every 10 minutes while a list is stale: nothing
+# fetches unless the operator queues the job, and the lists go stale within a
+# day. KILN_CRAWLER_RANGES=false turns the lists off.
+if cron = System.get_env("KILN_CRAWLER_RANGES_CRON") do
+  config :kiln_cms, :crawler_ranges_cron, cron
+end

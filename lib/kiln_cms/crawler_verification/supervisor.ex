@@ -44,6 +44,10 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
 
   @impl true
   def init(opts) do
+    # The range lists' fetch-time array, made once per VM before anything can
+    # fetch or read a list; a restart keeps the one there (#2586).
+    KilnCMS.CrawlerVerification.Ranges.setup()
+
     config = Keyword.merge(Application.get_env(:kiln_cms, CrawlerVerification, []), opts)
     max_entries = Keyword.get(config, :max_entries, @default_max_entries)
 

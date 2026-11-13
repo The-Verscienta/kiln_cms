@@ -149,3 +149,9 @@ config :kiln_cms, :cors_origins, :all
 # frame `/forms/:slug/embed` without setting EMBED_ORIGINS first, so the feature
 # can be exercised in dev. Prod is same-origin only unless EMBED_ORIGINS is set.
 config :kiln_cms, :embed_origins, :all
+
+# Published crawler IP ranges (#2586) are off in dev, so `mix phx.server` makes
+# no request to Google, Bing, Apple or DuckDuckGo at boot or on a schedule. To
+# try them, start with KILN_CRAWLER_RANGES=true (config/runtime/delivery.exs);
+# a node then queues one fetch 20 seconds after boot.
+config :kiln_cms, KilnCMS.CrawlerVerification.Ranges, enabled: false

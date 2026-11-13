@@ -83,6 +83,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Replace `scripts/backup.sh` on every host: an older copy doesn't keep a live run's `.partial` files fresh, so a run quiet for 3 h can be recorded as Interrupted. Old killed-run leftovers appear once as failed "Interrupted" runs, and `prune` now deletes abandoned `.partial` files.**
   ([#2850](https://github.com/The-Verscienta/kiln_cms/pull/2850) · [long form](docs/changelog/unreleased.md#cron-killed-run-recovery-upgrade))
 
+- **New scheduled egress: one node fetches Google's, Bing's, Apple's and DuckDuckGo's crawler IP lists over HTTPS every 6 h; allow the four hosts or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot outside its list is now charged as no user agent and counted by the 404 guard. No migration; rollback safe.**
+  ([long form](docs/changelog/unreleased.md#crawler-ip-ranges-upgrade))
+
 - **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced, and rolling back is safe. Part of #2247.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
 
@@ -116,6 +119,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Account owners are emailed whenever an authenticator app is set up or replaced, or a passkey is added, with what to do if it wasn't them.**
   ([long form](docs/changelog/unreleased.md#second-factor-added-email))
+
+- **Search-engine claims are checked against Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists before DNS, so DuckDuckBot can be verified; new `KILN_CRAWLER_RANGES`, `KILN_CRAWLER_RANGES_CRON` and `ranges_fetch` metric.**
+  ([long form](docs/changelog/unreleased.md#crawler-ip-ranges))
 
 - **Groundwork for requiring two-step sign-in by role, not yet enforced (no page; part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))

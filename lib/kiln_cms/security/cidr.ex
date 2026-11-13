@@ -347,6 +347,67 @@ defmodule KilnCMS.Security.Cidr do
 
   def public_unicast?(_), do: false
 
+  # Special-purpose space no host on the public internet is numbered from
+  # (IANA's IPv4 and IPv6 special-purpose registries), beyond what
+  # `public_unicast?/1` already refuses: the documentation ranges, benchmarking,
+  # the IETF protocol-assignment blocks (which hold Teredo, `2001::/32`), the
+  # deprecated 6to4 relay anycast, 6to4 itself (`2002::/16`) and the new IPv6
+  # documentation block. NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), IPv4-mapped
+  # and IPv4-compatible space need no row: they sit outside `2000::/3`, which
+  # `global_unicast_range?/1` requires of every IPv6 range.
+  @special_purpose_ranges [
+    {:inet, 192 <<< 24, 24},
+    {:inet, 192 <<< 24 ||| 2 <<< 8, 24},
+    {:inet, 192 <<< 24 ||| 88 <<< 16 ||| 99 <<< 8, 24},
+    {:inet, 198 <<< 24 ||| 18 <<< 16, 15},
+    {:inet, 198 <<< 24 ||| 51 <<< 16 ||| 100 <<< 8, 24},
+    {:inet, 203 <<< 24 ||| 113 <<< 8, 24},
+    {:inet6, 0x2001 <<< 112, 23},
+    {:inet6, 0x2001 <<< 112 ||| 0x0DB8 <<< 96, 32},
+    {:inet6, 0x2002 <<< 112, 16},
+    {:inet6, 0x3FFF <<< 112, 20}
+  ]
+
+  # 2000::/3, the IPv6 global unicast block.
+  @global_unicast_v6 {:inet6, 0x2000 <<< 112, 3}
+
+  @doc """
+  Is every address in the parsed range `cidr` a global unicast address that a
+  public host could be numbered from? Stricter than `public_unicast?/1`, and
+  about a whole range rather than one address: a range that so much as
+  overlaps loopback, `shared_space?/1` space, non-unicast space or the
+  special-purpose blocks (documentation, benchmarking, `2001::/23`, which
+  holds Teredo, 6to4 `2002::/16` and its relay anycast `192.88.99.0/24`) is
+  `false`, and an IPv6 range must lie inside `2000::/3`, which leaves out
+  NAT64 (`64:ff9b::/96`), IPv4-mapped and IPv4-compatible space too.
+
+  For lists of other parties' addresses that must name real hosts, such as a
+  search engine's published crawler ranges
+  (`KilnCMS.CrawlerVerification.Ranges.Parser`). Unlike `public_unicast?/1` it
+  refuses the documentation ranges.
+
+      iex> KilnCMS.Security.Cidr.global_unicast_range?({:inet, 0x42F94000, 27})
+      true
+
+      iex> {:ok, teredo} = KilnCMS.Security.Cidr.parse("2001:0:4136:e378::/64")
+      iex> KilnCMS.Security.Cidr.global_unicast_range?(teredo)
+      false
+  """
+  @spec global_unicast_range?(t()) :: boolean()
+  def global_unicast_range?({:inet, _net, _prefix} = cidr) do
+    not Enum.any?(
+      [{:inet, 127 <<< 24, 8} | @shared_ranges ++ @non_unicast_ranges ++ @special_purpose_ranges],
+      &overlaps?(cidr, &1)
+    )
+  end
+
+  def global_unicast_range?({:inet6, _net, prefix} = cidr) do
+    prefix >= 3 and overlaps?(cidr, @global_unicast_v6) and
+      not Enum.any?(@special_purpose_ranges, &overlaps?(cidr, &1))
+  end
+
+  def global_unicast_range?(_), do: false
+
   defp check_floor(family, prefix) do
     if prefix < @min_prefix[family], do: {:error, :too_broad}, else: :ok
   end

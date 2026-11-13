@@ -157,4 +157,17 @@ if config_env() != :test do
   with {:ok, enabled?} <- Env.fetch("KILN_CRAWLER_VERIFICATION") do
     config :kiln_cms, KilnCMS.CrawlerVerification, enabled: enabled?
   end
+
+  # ## Published crawler IP ranges (#2586, KilnCMS.CrawlerVerification.Ranges)
+  #
+  # Google's, Bing's, Apple's and DuckDuckGo's own lists of their crawlers'
+  # addresses, fetched every 6 hours by one node: an address inside a fresh
+  # list is verified with no DNS lookup, and a DuckDuckBot claim from outside
+  # DuckDuckGo's is proven false. On by default; this is an outbound HTTPS
+  # request to each vendor, and `false` turns it off (no request is made and
+  # claims fall back to DNS). Off by implication when
+  # KILN_CRAWLER_VERIFICATION is false.
+  with {:ok, enabled?} <- Env.fetch("KILN_CRAWLER_RANGES") do
+    config :kiln_cms, KilnCMS.CrawlerVerification.Ranges, enabled: enabled?
+  end
 end
