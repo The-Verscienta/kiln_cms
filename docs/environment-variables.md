@@ -833,13 +833,15 @@ without the comparison. To keep the check but skip kilncms.dev, set
 `KILN_UPDATE_FEED_URL=false` (GitHub only).
 
 **This and the [plugin health check](#plugin-health-check-2244) are the
-outbound integrations that are on by default.** Unlike Meilisearch, S3,
-Unsplash and mail, they need no credential to work, so there is no
-unset-secret that implicitly disables them. Set `KILN_UPDATE_CHECK=false` if
+outbound integrations about Kiln itself that are on by default.** Unlike
+Meilisearch, S3, Unsplash and mail, they need no credential to work, so there
+is no unset-secret that implicitly disables them. Set `KILN_UPDATE_CHECK=false` if
 your deployment must make no third-party requests at all: it turns off both,
 unless `KILN_PLUGIN_HEALTH_CHECK` is set. It does not stop the other calls a
 default install makes, among them the search engines' published crawler IP
-lists, fetched on a schedule (`KILN_CRAWLER_RANGES=false`); see
+lists, fetched on a schedule (`KILN_CRAWLER_RANGES=false`), and the
+[breached-password check](#breached-password-check-2240)
+(`BREACHED_PASSWORD_CHECK=false`); see
 [Outbound calls made by default](system-requirements.md#outbound-calls-made-by-default)
 for the full list and each switch.
 
@@ -880,6 +882,9 @@ Security posture say whether each plugin built into this release still
 checks out: its package against hex.pm, security notices that cover the
 installed version, retired or long-unreleased packages, and its
 `kiln_plugin` requirement ([how to read it](security-posture.md#check-your-installed-plugins)).
+It is on by default although it tells hex.pm which plugins this server runs;
+[ADR 0032](decisions/0032-a-default-on-check-that-tells-a-third-party-about-the-installation-follows-the-update-check-switch.md)
+records the terms that allow it.
 
 **When it asks.** Only when a platform admin opens System, or Security
 posture with nothing cached, or selects **Check plugins now** (at most one
@@ -947,7 +952,11 @@ When someone sets a password (register, change, reset, first-run setup) it is
 looked up against the [Have I Been Pwned](https://haveibeenpwned.com/API/v3#PwnedPasswords)
 range API by k-anonymity: only the first five characters of its SHA-1 leave the
 server. See [account-administration.md](account-administration.md#breached-passwords)
-for what each policy does and [threat-model.md](threat-model.md) for the limits.
+for what each policy does, [threat-model.md](threat-model.md) for the limits and
+[ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
+for why it is on by default and fails open. `KILN_UPDATE_CHECK=false` does not
+turn it off; only `BREACHED_PASSWORD_CHECK=false` stops the outbound call for the
+whole deployment.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|

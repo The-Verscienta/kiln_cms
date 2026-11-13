@@ -148,7 +148,9 @@ is set. To keep the Hex comparison but not ask kilncms.dev for notices, set
 `KILN_SECURITY_NOTICES_URL=false`. A fork or mirror (`KILN_UPDATE_REPO`,
 `KILN_UPDATE_RELEASES_URL`, or `KILN_UPDATE_FEED_URL=false`) doesn't ask
 kilncms.dev unless `KILN_SECURITY_NOTICES_URL` names it. See
-[the variables](environment-variables.md#plugin-health-check-2244).
+[the variables](environment-variables.md#plugin-health-check-2244). Why the
+check is on by default, and on what terms, is in
+[ADR 0032](decisions/0032-a-default-on-check-that-tells-a-third-party-about-the-installation-follows-the-update-check-switch.md).
 
 `KILN_PLUGIN_HEALTH_CHECK=false` stops the hex.pm requests, but not the
 notices feed: [Security notices for Kiln](#security-notices-for-kiln) reads
