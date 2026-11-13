@@ -48,7 +48,7 @@ defmodule KilnCMSWeb.Surface do
 
   # Exact patterns and prefixes shared by both hosts. Patterns are the router's
   # own (`/preview/:token`), compared literally against `route_info/4`'s `:route`.
-  @shared_exact ~w(/account /locale/:locale /up /ready /gql /manifest.webmanifest /offline.html
+  @shared_exact ~w(/account /account/two-factor /locale/:locale /up /ready /gql /manifest.webmanifest /offline.html
                    /media/:id/download /media/:id/stream)
   @shared_prefixes ~w(/api /mcp /preview /auth /sign-in /sign-out /reset /register
                       /password-reset /confirm_new_user /magic_link)

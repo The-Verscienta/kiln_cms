@@ -53,7 +53,7 @@ the router so preflights are answered before route matching).
 | Public HTML delivery | `/`, `/:slug`, `/:type/:slug`, `/blog`, `/blog/:slug`, `/search`, `/*path` | none | `:delivery` |
 | Probes & SEO | `/up`, `/ready`, `/sitemap.xml`, `/news-sitemap.xml`, `/robots.txt`, `/.well-known/security.txt` (+ `/security.txt` redirect), `/llms.txt`, `/manifest.webmanifest`, `/offline.html` | none | `:probe` |
 | First-run bootstrap | `/setup` | none — the `:bootstrap_admin` policy (`Checks.NoAdminExists`) + advisory lock in `KilnCMS.Accounts.Bootstrap` are the gate | none |
-| GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
+| GraphQL | `/gql` (GET + POST), `/ws/gql` | optional JWT / API key on `/gql`; optional JWT only on `/ws/gql`, where a bearer that does not verify (an API key included) is refused at connect (#2634) | `:gql` (per operation, on both transports), `:gql_join` (socket connects) |
 | JSON:API | `/api/json/**` (GET/POST/PATCH/DELETE) | optional JWT / API key | `:api` |
 | API landing | `GET /api` (302 to `/developers`) | none | none (`:browser` pipeline) |
 | Headless REST | `/api/content/**`, `/api/resolve`, `/api/locales`, `/api/search`, `/api/ask`, `/api/provenance/**`, `/api/visual-editing/:type/:slug`, `/api/sync`, `/api/schema`, `/api/menus/**`, `/api/content/:type/:id/revisions/**` | optional JWT / API key | `:api` |
@@ -1196,6 +1196,8 @@ password leaves the server.
   corpus.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
+- **Why on by default, and why fail open.**
+  [ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md).
 
 ### Human verification (#2249)
 
@@ -1504,6 +1506,106 @@ Configured at `/editor/sessions`.
   tenth of the timeout (30 seconds to 5 minutes), so a session can end after
   as little as 90% of the timeout since its real last use. (6) Fail-open,
   above.
+
+### Two-step sign-in requirement (#2247)
+
+`KilnCMS.Accounts.TwoFactorRequirement`, `KilnCMSWeb.SecondFactorGate`,
+`KilnCMSWeb.Plugs.SecondFactorGate`, `KilnCMSWeb.Plugs.SecondFactorBearer`,
+`KilnCMSWeb.Plugs.PasskeyStepUp`, `KilnCMS.Accounts.EnrolmentProof`. A site
+admin can require a second factor of a role, after a grace period
+(`/editor/two-factor`); guide:
+[Requiring two-step sign-in on a site](two-factor-auth.md#requiring-two-step-sign-in-on-a-site);
+decision: [ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and-only-a-freshly-verified-admin-changes-it.md).
+
+- **What it stops.** A stolen password of a covered account with no second
+  factor used, after the deadline, for anything but setting one up: every
+  door asks the site the request resolved to. The browser sign-in
+  (`AuthController.success/4`, every strategy) lands a held account on
+  the setup page, recording `second_factor_required` once; `:browser` redirects every later
+  request there (`302`, `private, no-store`, no session or cookie written, so
+  #699 holds); every signed-in LiveView halts on the disconnected and the live
+  mount and follows the policy and the deadline while open; the headless
+  sign-in answers `403` and revokes the minted token; a JWT is refused on
+  every `/api`, `/gql` and `/api/feed` request, at the `/ws/gql` connect and on
+  each document, and at the `/ws/collab` connect and its 30-second re-check.
+  A save that holds people at once evicts their sockets
+  (`KilnCMS.Accounts.SecondFactorEviction`).
+- **The setup page is kept off site hosts.** `/account/two-factor` is served
+  only on the main host (`PHX_HOST`) and console hosts
+  (`SecondFactorGate.setup_host?/1`). On a tenant site host the
+  `live_session`'s first hook after the site is resolved
+  (`:second_factor_setup_host`) redirects it to the main host's page before
+  sign-in is checked, and every door that holds an account there (sign-in,
+  `:browser`, the LiveView gate) sends it to that URL, with no `return_to`.
+  Two reasons: a site host is the origin a site administrator's code
+  injection runs on ([residual risk 16](#residual-risks)), so a page that adds
+  and replaces a member's factors must not share it; and a passkey cannot be
+  registered there (`WebAuthn.ceremony_host?/1`). Cookies are host-only, so
+  the account signs in again on the main host. An account in its grace
+  period that signs in on a site host is not sent away; the grace banner and
+  `/account`'s **Two-step sign-in** card link to the main host's page. On the
+  main host the page judges the default site's requirement, so a reader held
+  by another site does not see that site's billing and export controls
+  there.
+- **A passkey-only account's password.** Past the deadline a passkey-only
+  account's first factor stops at the passkey step-up on a host where WebAuthn
+  runs and is refused (token revoked, `second_factor_required` recorded with
+  `passkey_host`) on a site's own host. A session that signed in with the
+  password before the deadline, or that a remember-me cookie restores, is
+  turned back into a pending passkey step-up on `:browser_auth`
+  (`Plugs.PasskeyStepUp`); a JWT or a collab token minted from such a session
+  is refused. `ThrottleSignIn` does not forgive the sign-in budget for a
+  password that stops at the step-up.
+- **Enrollment by whoever holds only the password.** The setup page is what a
+  held account can reach, so a password thief reaches it too. A session that
+  signed in with only a password (or a remember-me cookie, or an unknown
+  method) at or after the earliest deadline of any site holding the account
+  must confirm a six-digit code mailed to the account's address before
+  `:confirm_totp` or `Passkey :register` succeeds. The check is in the actions
+  (`Changes.RequireEnrolmentProof`), which re-decide from the session and fail
+  closed without one; the code is an HMAC in the LiveView's memory, bound to
+  the account and the session token, budgeted 3 mails an hour per address and
+  charged to the shared five-per-15-minutes second-factor budget before the
+  constant-time compare. Every factor added still mails the owner.
+- **The policy cannot be weakened by a password.** Every save needs the saver's
+  own second factor, verified within 15 minutes or by a code, and the policy
+  page is behind the gate it configures.
+- **API keys are exempt** by design: they carry no second factor and are not
+  held anywhere. A held person's keys keep working.
+- **Residual risks.**
+  1. **The operator's way in turns the requirement off.**
+     `KilnCMS.Release.second_factor_requirement_off/1` runs as the `:operator`
+     actor from a shell on the release, sets the requirement to off and
+     nothing else, and is recorded with `via: "console"` and no person.
+     Whoever has a shell on the release can use it; that access already
+     outranks every in-app control.
+  2. **Rolling back past the enforcement drops it silently.** An older
+     release ignores the policy table: nobody is held and held JWTs work
+     again, with no warning. The changelog's upgrade note says so.
+  3. **No working mail relay skips the email step.** A deployment with no
+     outgoing mail server (and a site with no relay of its own, or one whose
+     password cannot be decrypted) records `proof: "email_skipped_no_relay"`
+     and lets a password session add a factor; the owner's "factor added"
+     email needs a relay too. A relay that fails transiently never skips.
+  4. **Two removals racing for the last two factors.** The last-factor check
+     (`Validations.KeepsRequiredSecondFactor`) counts factors when the
+     changeset is built, so two concurrent removals of an account's last two
+     passkeys can both pass. The account then has none, and the gate holds it
+     until it sets one up again.
+  5. **Fails open.** An unreadable policy is read as off, logged and not
+     cached (ADR 0030): while the read fails, nobody is held.
+  6. **The emailed code proves the mailbox, not the person.** An attacker who
+     holds both the password and the mailbox enrolls their own factor; the
+     owner's notice goes to the same mailbox.
+  7. **A held account can still reach** billing, the export of its own data,
+     sign-out, the setup page and pages that read nothing of the account
+     ([What a held account can still reach](two-factor-auth.md#what-a-held-account-can-still-reach)).
+  8. **`/editor/settings` still manages factors on site hosts.** It adds and
+     removes an authenticator app and passkeys for editors and admins, and
+     with no `KILN_CONSOLE_HOST` the console, `/editor/settings` included, is
+     served on every site host, the injection origin of residual risk 16.
+     Keeping `/account/two-factor` off site hosts does not close that; a
+     console host does.
 
 ### Site invitations (`/auth/invite/:invite_token`, #2135)
 

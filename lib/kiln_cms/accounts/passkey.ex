@@ -60,6 +60,10 @@ defmodule KilnCMS.Accounts.Passkey do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
+      # The owner can't remove their last second factor while a site requires
+      # one (#2247). A platform admin removing it for them is unaffected.
+      validate KilnCMS.Accounts.Validations.KeepsRequiredSecondFactor
+
       # Audit log (#2241), in the transaction. Whoever removes it is the actor
       # (the owner, or a platform admin); the owner is the target.
       change {KilnCMS.Security.Changes.Record,
@@ -96,6 +100,10 @@ defmodule KilnCMS.Accounts.Passkey do
       accept [:user_id, :name, :credential_id, :public_key, :sign_count]
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
+      # Past the site's deadline, a password-only session proves the account's
+      # email first (#2247, decision 1b). Decided here, not only on the page.
+      change KilnCMS.Accounts.Changes.RequireEnrolmentProof
+
       # Every passkey added mails the owner (below), so the total and the rate
       # are both bounded (#2247): a stolen session must not be able to turn
       # "an email for every factor added" into a flood.
@@ -112,7 +120,11 @@ defmodule KilnCMS.Accounts.Passkey do
       change {KilnCMS.Security.Changes.Record,
               type: :passkey_added,
               target: fn record, _changeset -> {"user", record.user_id} end,
-              metadata: fn record, _changeset -> %{"name" => record.name} end}
+              metadata: fn record, changeset ->
+                KilnCMS.Accounts.Changes.RequireEnrolmentProof.metadata(changeset, %{
+                  "name" => record.name
+                })
+              end}
 
       # Tell the owner (#2247, decision 1a), after the commit.
       change {KilnCMS.Accounts.Changes.NotifyFactorAdded, kind: :passkey}

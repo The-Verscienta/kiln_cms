@@ -500,7 +500,7 @@ tenant-less, gated on the global role. A platform admin asks for a backup
 flight; the row itself is written only by the pipeline. The reasoning is in
 [ADR 0038](decisions/0038-a-backup-asked-for-while-one-runs-queues-and-only-like-folds-into-like.md) (one lock that
 queues), [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md) (the
-heartbeats) and [ADR 0046](decisions/0046-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md)
+heartbeats) and [ADR 0045](decisions/0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md)
 (why History writes stay out of the lock's transaction).
 
 ## Backup schedules — `Backups.Schedule`
@@ -520,7 +520,7 @@ fields, `baseline_at` or the keep fields. The window writes are the
 scheduler's (`Backups.system/0`), so no person can mark a window claimed,
 refused or waiting. Not exposed through GraphQL, JSON:API or MCP. Why a
 claimed window is never asked for again is argued in
-[ADR 0045](decisions/0045-a-claimed-schedule-window-is-never-retried-within-that-window.md).
+[ADR 0044](decisions/0044-a-schedule-sets-the-alarm-threshold-only-while-it-can-run-and-a-claimed-window-is-never-retried.md).
 
 ## Bounce suppression — `Mail.SuppressedRecipient`
 

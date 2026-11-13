@@ -98,6 +98,11 @@ msgstr ""
 msgid "is invalid"
 msgstr ""
 
+#: lib/kiln_cms/backups/schedule/validations/known_zone.ex
+#, elixir-autogen, elixir-format
+msgid "is not a known time zone"
+msgstr ""
+
 ## From Ecto.Changeset.validate_exclusion/3
 msgid "is reserved"
 msgstr ""
@@ -109,6 +114,11 @@ msgstr ""
 #: lib/kiln_cms/cms/validations/bot_budget_ceiling.ex
 #, elixir-autogen, elixir-format
 msgid "may not be more than %{ceiling}%: this server's operator caps it there. Ask them to raise it, or choose a lower value."
+msgstr ""
+
+#: lib/kiln_cms/backups/schedule/validations/media_available.ex
+#, elixir-autogen, elixir-format
+msgid "media isn't archived on this deployment"
 msgstr ""
 
 ## From KilnCMS.Accounts.OrgSlug.message/1 (#1710)
@@ -180,3 +190,8 @@ msgid "should have at most %{count} item(s)"
 msgid_plural "should have at most %{count} item(s)"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/kiln_cms/backups/schedule/validations/interval_available.ex
+#, elixir-autogen, elixir-format
+msgid "sub-daily schedules arrive with keep-N retention; choose daily or longer"
+msgstr ""

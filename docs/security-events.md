@@ -181,10 +181,10 @@ a type may carry only the keys below; anything else is dropped.
 | `sign_in` | Sign-in | A sign-in completed, every factor passed | `method` |
 | `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code or a passkey refused at the code prompt, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below | `method`, `reason` |
 | `sign_in_locked` | Sign-in locked out | A throttle refused an attempt. First refusal per subject and scope each 15 minutes | `method`, `scope` |
-| `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind`, `proof` (reserved, see below) |
+| `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind`, `proof` (see below) |
 | `second_factor_removed` | Second factor removed | Two-factor sign-in was turned off, or removed when an invitation, a password reset or a magic link took over an unconfirmed account (see below) | `kind`, `via` |
 | `recovery_code_used` | Recovery code used | A recovery code was spent at the code prompt | `remaining` |
-| `passkey_added` | Passkey added | A passkey was registered | `name`, `proof` (reserved, see below) |
+| `passkey_added` | Passkey added | A passkey was registered | `name`, `proof` (see below) |
 | `passkey_removed` | Passkey removed | A passkey was deleted, by its owner or an admin, or when an invitation, a password reset or a magic link took over an unconfirmed account | `name`, `via` |
 | `role_granted` | Role granted | A membership was created, or a role was raised | `role`, `previous_role`, `level`, `via` |
 | `role_revoked` | Role revoked | A role was lowered, a membership removed, a temporary elevation ended early, or a live temporary admin grant replaced by a lower one | `role`, `level`, `change` |
@@ -215,8 +215,8 @@ a type may carry only the keys below; anything else is dropped.
 | `ip_block_refused` | Blocked address refused | A request or socket connect from an address on the site's [block list](ip-blocking.md) was refused. **No IP address and no user agent**, and no person: nothing records a blocked address. Sampled: see below. Raises the site's `blocked_ip` [alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window), and is written even when the site turned that alert off | `rule`, `surface` |
 | `api_key_rate_limited` | API key hit a rate limit | An API key this server verified in the last 5 minutes went over a rate limit an API key can reach. No person (whoever presented it is not known to be the owner); the target is the key (target type `api_key`), the IP the request's. Sampled: see below. Raises the platform's `api_key_rate_limited` [alert](security-alerts.md#api-keys-over-a-rate-limit) | `name`, `bucket` |
 | `platform_alerts_changed` | Platform security alerts changed | A platform admin saved the platform's [security alert settings](security-alerts.md#turn-off-rate-limit-alerts-for-api-keys). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the settings row (target type `platform_security_alerts`) | `disabled_kinds` |
-| `second_factor_policy_changed` | Two-step sign-in requirement changed | A site's two-step sign-in requirement (who must hold a second factor, and the grace period) was saved, including turned off, or was turned off from the server with `KilnCMS.Release.second_factor_requirement_off/1` ([Turn the requirement off from the server](two-factor-auth.md#turn-the-requirement-off-from-the-server)). An admin's save names the admin; the server's names no person and has no IP address. The target is the setting (target type `site_second_factor_policy`). No console page writes the requirement yet (#2247) | `required_for`, `grace_days`, `previous_required_for`, `change`, `via` |
-| `second_factor_required` | Held for two-step sign-in setup | Reserved for the enforcement of the requirement (#2247): an account held until it sets up the second factor its site requires, recorded at the sign-in doors once per sign-in. Nothing records it in this release | `tier`, `surface`, `reason` |
+| `second_factor_policy_changed` | Two-step sign-in requirement changed | A site's two-step sign-in requirement (who must hold a second factor, and the grace period) was saved, including turned off, or was turned off from the server with `KilnCMS.Release.second_factor_requirement_off/1` ([Turn the requirement off from the server](two-factor-auth.md#turn-the-requirement-off-from-the-server)). An admin's save names the admin; the server's names no person and has no IP address. The target is the setting (target type `site_second_factor_policy`). Saved at `/editor/two-factor` (#2247) | `required_for`, `grace_days`, `previous_required_for`, `change`, `via` |
+| `second_factor_required` | Held for two-step sign-in setup | A sign-in was held, or refused, because the site requires a second factor of the account (#2247): sent to set one up, or a passkey-only account's password refused where its passkey cannot be used. Recorded once per sign-in, at the sign-in doors only, never for each request a held session or token makes afterwards. The person is the account | `tier`, `surface`, `reason` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials`,
@@ -305,15 +305,24 @@ save and `console` for `KilnCMS.Release.second_factor_requirement_off/1`. This
 event replaces `org_setting_changed` for this setting, so a write is still
 exactly one event.
 
-`second_factor_required`, and the `proof` key on `second_factor_enrolled` and
-`passkey_added`, are defined ahead of the enforcement that records them
-(#2247), so the log and its allowlist are in place before anything writes
-them. For `second_factor_required`, `tier` is the role the requirement held
-the account for, `surface` where it was held (`browser`, `api`, `live` or
-`socket`), and `reason` is `not_enrolled`, `passkey_host` or
-`headless_passkey`. `proof` will say how an enrollment the site required was
-vouched for: `email`, `email_skipped_no_relay`, `not_required` or
-`magic_link_session`.
+For `second_factor_required` (#2247), `tier` is the account's role on the
+site, `surface` the sign-in door (`browser` or `api`), and `reason` is
+`not_enrolled` (no second factor: sent to set one up, or at
+`POST /api/auth/sign_in` refused with a `403`), `passkey_host` (a passkey-only
+account's password refused on a site's own host, where its passkey cannot be
+used) or `headless_passkey` (the same account at `POST /api/auth/sign_in`).
+A refused API request with a held account's token records no event; it emits
+telemetry instead ([Observability](observability.md#refused-api-credentials)).
+
+`proof` says how an enrollment was vouched for
+([When the emailed code is asked for](two-factor-auth.md#when-the-emailed-code-is-asked-for)):
+`email` (the session confirmed a code mailed to the account),
+`email_skipped_no_relay` (the code was owed but the site has no working mail
+relay), `magic_link_session` (the session signed in by magic link, password
+reset or account confirmation, which proved the mailbox) or `not_required`
+(no site holds the account, or the session signed in with single sign-on or a
+passkey, or with a password before the deadline). It is absent on an
+enrollment made without a web session's context.
 
 For `sign_in_unlock_requested`, `surface` is always `browser`: the link can
 only be asked for on `/sign-in/unlock`. For `sign_in_unlocked`, `was_locked`
@@ -474,10 +483,10 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in_locked` (account, address) | `audit_sign_in.ex`, via `AuthEvents.password_locked/3`, when `ThrottleSignIn` refuses | after commit; `method: "password"`, `scope: "account"` or `"address"` |
 | `sign_in_locked` (second factor at sign-in) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` or `check_passkey/3` on a denied budget | after commit; `scope: "second_factor"` |
 | `sign_in_locked` (second factor in settings) | `lib/kiln_cms/accounts/changes/throttle_second_factor.ex`: on a denied budget (turning 2FA off, regenerating recovery codes); and `lib/kiln_cms/cms/changes/saver_verified_second_factor.ex`, when a code given to save the two-step sign-in requirement meets a denied budget (#2247) | after commit; `scope: "settings"` |
-| `second_factor_enrolled` | `User` `:confirm_totp` (`lib/kiln_cms/accounts/user.ex`) | in txn; `kind: "totp"` |
+| `second_factor_enrolled` | `User` `:confirm_totp` (`lib/kiln_cms/accounts/user.ex`) | in txn; `kind: "totp"`; `proof` from `Changes.RequireEnrolmentProof`, which refuses the action first when the email proof is owed |
 | `second_factor_removed` | `User` `:disable_totp`, and `lib/kiln_cms/accounts/changes/forget_prior_credentials.ex` on `User` `:accept_invitation_with_password` (#2453), `:reset_password_with_token` on an unconfirmed account and `:take_over_by_magic_link` (#2594) when the row it re-reads under lock had a confirmed factor | in txn; `kind: "totp"`; from a takeover, also `via` (`"invitation"`, `"password_reset"` or `"magic_link"`) and no person |
 | `recovery_code_used` | `User` `:consume_totp_recovery_code` | in txn; `remaining` is the count left |
-| `passkey_added` | `Accounts.Passkey` `:register` (`lib/kiln_cms/accounts/passkey.ex`) | in txn; `name` |
+| `passkey_added` | `Accounts.Passkey` `:register` (`lib/kiln_cms/accounts/passkey.ex`) | in txn; `name`; `proof` as for `second_factor_enrolled` |
 | `passkey_removed` | `Accounts.Passkey` `:destroy`, and `:forget_on_takeover` (#2453, #2594, from `Changes.ForgetPriorCredentials`, as `SystemActor.new(:account_takeover)`) | in txn; `name`; target is the owner; from a takeover, also `via` (`"invitation"`, `"password_reset"` or `"magic_link"`) and no person |
 | `role_granted` / `role_revoked` | `lib/kiln_cms/security/changes/record_role_change.ex`, on `User` `:manage_access` and `OrgMembership` `:create`, `:update`, `:destroy`, `:raise_role_by_invitation` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; an edit that leaves the role alone (audiences, type scopes) writes nothing |
 | `member_invited` | `Accounts.Invitation` `:invite` and `:resend` (`lib/kiln_cms/accounts/invitation.ex`), also reached through `:add_or_invite` | in txn; `role`, `resent`; tenant is the invitation's site |
@@ -504,7 +513,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `api_key_rate_limited` | `lib/kiln_cms/security/api_key_trip.ex`: `note/2`, called from the refusal branch of `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the `api`, `gql`, `media_upload`, `media_transform` and `plugin_endpoint` buckets | sampled, after commit, off the request path; only for a key in the node's verified-key cache (filled by `KilnCMSWeb.Plugs.ApiKeyAuth` and `KilnCMSWeb.Plugs.RememberApiKey`), reloaded and still valid; tenant from `ApiKeyTrip.owner_org_id/1`; `user: nil` |
 | `platform_alerts_changed` | `KilnCMS.Security.Changes.Record` on `Security.PlatformAlertSettings` `:save` (`lib/kiln_cms/security/platform_alert_settings.ex`), called from the Security alerts page | in txn, with the save: if the event cannot be written the setting does not change; `scope: :instance` |
 | `second_factor_policy_changed` | `lib/kiln_cms/cms/changes/record_second_factor_policy_change.ex`, on `CMS.SiteSecondFactorPolicy` `:save` and `:update` (the `audit: {:change, ...}` option of `use KilnCMS.CMS.OrgSettings`) and on `:operator_override`, run by `KilnCMS.Release.second_factor_requirement_off/1` | in txn: if the event cannot be written the setting does not change. Only for a user actor (`via: "admin"`) or the override (`via: "console"`, no person); the row as it stood is read in the same transaction (`Changes.StampSecondFactorRequirement`), and if it cannot be read the write fails |
-| `second_factor_required` | Nothing yet: the type and its keys exist for the enforcement of #2247 | — |
+| `second_factor_required` | `lib/kiln_cms/security/auth_events.ex`: `second_factor_required/4`, called by `KilnCMSWeb.SecondFactorGate.sign_in_destination/3` (every completed browser sign-in, `browser`, `not_enrolled`), `KilnCMSWeb.AuthController` (`passkey_host`) and `KilnCMSWeb.ApiAuthController.sign_in/2` (`api`) | after commit, once per sign-in; only when the request resolved a site |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:

@@ -931,7 +931,7 @@ defmodule KilnCMSWeb.ConsoleNav do
             icon: "hero-archive-box",
             description:
               gettext("The database and uploaded media, and when they were last saved."),
-            keywords: ["restore", "snapshot", "dump", "disaster recovery"]
+            keywords: ["restore", "snapshot", "dump", "disaster recovery", "schedule", "cron"]
           },
           %{
             platform: true,

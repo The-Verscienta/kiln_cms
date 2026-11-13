@@ -183,7 +183,14 @@ defmodule KilnCMSWeb.OpenApi do
               "answers **200** with `two_factor_required` and a short-lived " <>
               "`pending_token` instead of **201** with a JWT — redeem it at " <>
               "`POST /api/auth/sign_in/verify`. Branch on the status code, not " <>
-              "on the presence of `token`.",
+              "on the presence of `token`.\n\n" <>
+              "Where the site requires two-step sign-in of the account: during " <>
+              "its grace period the **201** carries `second_factor`; past the " <>
+              "deadline with no second factor set up (or with only a passkey, " <>
+              "which cannot be used headlessly) this answers **403** " <>
+              "`second_factor_required` and issues no token. A token issued " <>
+              "during the grace period is refused with the same 403 on every " <>
+              "request from the deadline. API keys are not affected.",
           # No bearer requirement — this is how you *get* the bearer token.
           security: [],
           requestBody: %OpenApiSpex.RequestBody{
@@ -234,6 +241,14 @@ defmodule KilnCMSWeb.OpenApi do
                   "`onload_param`, `render_options`, `action` and `action_option`, " <>
                   "`interactive` and `api` to draw the widget with; retry with " <>
                   "`challenge_token`."
+            },
+            403 => %OpenApiSpex.Response{
+              description:
+                "`second_factor_required` — the site requires two-step sign-in " <>
+                  "of this account and its grace period is over. `meta.setup_url` " <>
+                  "is the browser page to set it up, `meta.deadline` when the grace " <>
+                  "period ended, and `meta.reason` is `passkey_only` when the " <>
+                  "account's only second factor is a passkey. No token is issued."
             },
             422 => %OpenApiSpex.Response{description: "Missing email or password"},
             429 => %OpenApiSpex.Response{
@@ -381,6 +396,17 @@ defmodule KilnCMSWeb.OpenApi do
             id: %OpenApiSpex.Schema{type: :string, format: :uuid},
             email: %OpenApiSpex.Schema{type: :string},
             role: %OpenApiSpex.Schema{type: :string, enum: ["admin", "editor", "viewer"]}
+          }
+        },
+        second_factor: %OpenApiSpex.Schema{
+          type: :object,
+          description:
+            "Present only when the site requires two-step sign-in of this account " <>
+              "and it has not set it up yet: from `deadline` on, the token stops " <>
+              "working and signing in is refused until it does.",
+          properties: %{
+            required: %OpenApiSpex.Schema{type: :boolean, enum: [true]},
+            deadline: %OpenApiSpex.Schema{type: :string, format: :"date-time"}
           }
         }
       }

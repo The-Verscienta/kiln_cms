@@ -7,7 +7,7 @@
   [#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) (the
   owner's decisions of 2026-11-10 for scheduled and manual requests),
   [#2424](https://github.com/The-Verscienta/kiln_cms/issues/2424);
-  [ADR 0046](0046-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md)
+  [ADR 0045](0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md)
   for what the lock transaction may write,
   [ADR 0039](0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md)
   for how a stopped holder lets the queue move.

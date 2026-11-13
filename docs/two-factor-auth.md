@@ -11,9 +11,12 @@ To see who on a site has no authenticator app yet, a site admin opens
 lines fail for any administrator without one and warn for editors, and a
 platform admin also sees the platform administrators
 ([Security posture](security-posture.md#two-step-sign-in)). A passkey is not
-counted there. It is another way to sign in, and it does not protect the
-account's password sign-in: someone who has the password signs in with the
-password and, without TOTP, needs nothing else.
+counted there. It is another way to sign in, and on its own it does not
+protect the account's password sign-in: someone who has the password signs in
+with the password and, without TOTP, needs nothing else. The exception is a
+site that [requires two-step sign-in](#requiring-two-step-sign-in-on-a-site):
+past the deadline, a passkey-only account's password stops at the passkey
+prompt there.
 
 Turning a second factor on or off is recorded in the site's
 [security log](security-events.md) (`second_factor_enrolled`,
@@ -24,7 +27,10 @@ because an invitee took the account over is logged but raises no alert.
 
 ## How it works
 
-- **Self-service enrolment** at `/editor/settings` → "Two-factor authentication":
+- **Self-service enrolment** at `/editor/settings` → "Two-factor authentication"
+  (editors and admins), or at `/account/two-factor` (any signed-in account,
+  readers included, on the main or console host only; see
+  [Set up two-step sign-in when your site asks](#set-up-two-step-sign-in-when-your-site-asks)):
   1. *Enable* generates a fresh secret (`setup_totp`) into a **pending** slot
      (`totp_pending_secret`) and shows a setup key + an `otpauth://`
      provisioning URI. The live secret and enforcement state are untouched by
@@ -124,10 +130,12 @@ because an invitee took the account over is logged but raises no alert.
 ## Using a passkey at the code prompt
 
 An account that has both an authenticator app and a passkey can finish the
-second step with the passkey instead of typing a code (#2247). Who is asked
-for a second factor has not changed: only an account with an authenticator
-app is sent to the prompt, and a passkey sign-in from the sign-in page is
-still a complete sign-in on its own (see [Passkeys](passkeys.md)).
+second step with the passkey instead of typing a code (#2247). An account
+with an authenticator app is always sent to the prompt; a passkey-only
+account is sent there only on a site that
+[requires two-step sign-in](#passkey-only-accounts) of it, past its deadline,
+and is then offered the passkey alone. A passkey sign-in from the sign-in page
+is still a complete sign-in on its own (see [Passkeys](passkeys.md)).
 
 You need an account with an authenticator app and at least one passkey, both
 added at `/editor/settings`, and a browser that supports passkeys. Then:
@@ -214,21 +222,29 @@ releases the first-factor token held since the first step) and answers
 above. The two passkey ceremonies keep separate session keys and challenge
 entries, so a nonce from `/auth/passkey/*` is never accepted here, nor the
 reverse. Who is sent to the prompt at all is
-`KilnCMSWeb.SecondFactorStepUp.decide/2`, shared by the browser and headless
-doors; today it answers `:prompt` exactly when the authenticator app is on.
+`KilnCMSWeb.SecondFactorStepUp.decide/3`, shared by the browser and headless
+doors (the sign-in budget follows the same
+`KilnCMS.Accounts.TwoFactorRequirement.step_up/3`): `:prompt` when the
+authenticator app is on, or for a passkey-only account past a site's deadline
+on a host where the passkey can run;
+`{:refuse, :passkey_host}` for that account on a site's own host, and
+`{:refuse, :headless_passkey}` at the headless door.
 
 Every completed browser sign-in now also records, in the session, how it
 signed in and whether a second factor was verified (`KilnCMSWeb.SignInMarker`,
 session key `"sign_in"`). It is keyed to the session token, so a marker from
-an earlier token reads as nothing. Nothing reads it yet.
+an earlier token reads as nothing. The policy page reads it to decide whether
+a save needs a code, the email step reads how the session signed in, and the
+gates read it to tell a passkey-only account's password session from one that
+passed the passkey.
 
 ## We email you when a second factor is added
 
 Whenever a second factor is added to an account, its owner gets an email
 (#2247):
 
-- an authenticator app is set up on `/editor/settings` (the first one, or a
-  new one that replaces the old);
+- an authenticator app is set up on `/editor/settings` or
+  `/account/two-factor` (the first one, or a new one that replaces the old);
 - a passkey is added.
 
 One email per factor, every time. Regenerating recovery codes adds no factor
@@ -391,38 +407,360 @@ What an operator should know when a user reports it:
 
 ## Requiring two-step sign-in on a site
 
-A site will be able to require a second factor (an authenticator app or a
-passkey) of its administrators, of its editors and administrators, or of
-everyone, with a grace period of 0 to 90 days (14 by default) for each account
-to set one up (#2247). **This release lays the groundwork and enforces
-nothing:** there is no console page for the setting yet, no one is asked to
-set up a second factor, and no one is held. A site that never saved the
-setting, which is every site today, requires nothing. The page, the reminders
-and the enforcement come in a later release, along with this guide's
-walk-through.
+A site administrator can require a second factor (an authenticator app or a
+passkey) of the site's administrators, of its editors and administrators, or
+of everyone, with a grace period of 0 to 90 days for each account to set one
+up (#2247). During the grace period people are reminded; after it, an account
+with no second factor is **held**: every page of the site sends it to set one
+up first, and its headless tokens stop working. A site that never saved the
+setting requires nothing, and nobody is held.
 
-What is already in place, for operators:
+Who counts is decided by each person's role on the site the request is for.
+"Administrators" covers the admin role; "Editors and administrators" covers
+editors and admins; "Everyone" covers every signed-in account, readers
+included. An account that belongs to two sites is held only on the one that
+requires a factor of it, but the factor it adds counts on both.
 
-- **One additive migration.** It adds the `site_second_factor_policy` table
-  and a `users.inserted_at` column. Existing accounts get the time the
-  migration ran, and an account's grace period never starts before its
-  `inserted_at`, so when a site later turns the requirement on, no account
-  that existed before this upgrade starts out overdue. Rolling the release back
-  is safe: an older release ignores the table and the column.
-- **A way to turn the requirement off from the server**, below. It is here
-  before the requirement can be turned on, so the way back in exists first.
-- **Two security log types**, "Two-step sign-in requirement changed" and
-  "Held for two-step sign-in setup" (see
-  [What is recorded](security-events.md#what-is-recorded)). Only the first
-  can be recorded in this release.
+The grace period is counted per account, from the latest of: when the account
+was created, when it joined the site, and when its role became covered by the
+setting. A promotion does not restart it, so a reader of long standing
+promoted to admin on a site that requires admins is held at once. Lengthening
+the grace moves every deadline later; shortening it, or setting it to none,
+can hold people the moment you save.
 
-When the setting is saved, the person saving it must hold a second factor
-and prove it at that moment: a sign-in that verified one in the last 15
-minutes, or a current code from their authenticator app. That holds for every
-save, turning it off included, so a session left open, or a password alone,
-cannot switch the requirement off. If the setting cannot be read (a database
-error), the site is treated as requiring nothing until it can be, rather than
-holding every account; see
+### Require two-step sign-in on your site
+
+You need to be an administrator of the site, and to hold a second factor
+yourself (an authenticator app or a passkey). If you don't, set one up first
+at `/account/two-factor` on the main host (`PHX_HOST`) or the console host.
+
+1. Open `/editor/two-factor` on the site's console. (The page has no entry in
+   the console menu yet; go to it by its address.) You see **Two-step sign-in**
+   with three parts: **Who it covers now**, **Requirement** and **If nobody can
+   get in**. If you hold no second factor, a notice at the top says "Set up
+   two-step sign-in on your own account first." with a **Set up two-step
+   sign-in** button.
+2. Under **Require two-step sign-in for**, choose **Administrators**,
+   **Editors and administrators** or **Everyone**. (**Off** turns the
+   requirement off.)
+3. Choose a **Grace period**: **None: right away**, **7 days**, **14 days**,
+   **30 days** or **90 days**. As soon as you change either field, a line
+   under the form says how many people would be asked to set it up, and how
+   many of them right away: for example "4 people will be asked to set it up;
+   1 of them right away." Nothing is saved yet.
+4. If the page shows **Code from your authenticator app**, type a current code
+   from your app. It is shown when your sign-in did not verify a second factor
+   in the last 15 minutes. If your only factor is a passkey, sign out and sign
+   in again with it instead, then come back within 15 minutes.
+5. Click **Save**. The page says "Two-step sign-in settings saved.", and the
+   **Who it covers now** table shows, for each covered role, how many
+   **People** it has, how many have **Set up** a factor, how many are **Still
+   in grace** (with the first deadline) and how many are **Held until set
+   up**. Below the table, "Last changed (date) by (you)." The table shows
+   counts only, never names.
+
+The change reaches every open page of the site at once: anyone it holds is
+sent to the setup page, and their open GraphQL and collaboration connections
+are dropped. It is recorded in the site's security log as "Two-step sign-in
+requirement changed".
+
+Every save needs that fresh second factor, turning the requirement off
+included, so a session left open or a stolen password cannot switch it off.
+The policy page itself is not exempt from the requirement: an administrator
+the site holds sets up their own factor before they can reach it. Why:
+[ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and-only-a-freshly-verified-admin-changes-it.md).
+
+What can go wrong when saving:
+
+- **"Set up two-step sign-in on your own account first."** You hold no second
+  factor. Click **Set up two-step sign-in**, add one, then save again.
+- **"Confirm with a code from your authenticator app, or sign in again with
+  your passkey."** Your sign-in did not verify a second factor in the last 15
+  minutes and no code was given. Type a code, or sign in again with your
+  passkey. A page left open for more than 15 minutes after signing in asks for
+  a code too.
+- **"That code isn't valid. Check your authenticator app."** The code was
+  wrong or too old. It used one of your account's five attempts per 15
+  minutes, shared with the sign-in code prompt.
+- **"Too many attempts — try again in N seconds."** Those five attempts are
+  spent, here, at the sign-in prompt or on `/editor/settings`. Wait the
+  seconds it names.
+- **"You don't have permission to change this site's two-step sign-in."** You
+  are not an administrator of this site.
+
+### What people see during the grace period
+
+- **A banner** at the top of every console page and of `/account`: "This site
+  requires two-step sign-in. N days left to set it up." with a **Set it up
+  now** link to the setup page. On `/account` the link names the main host's
+  page outright when you are on a site's own address; on a console page it is
+  `/account/two-factor`, which a site's own address redirects to the main
+  host's. The count is whole days rounded up, so the last day reads "1 day
+  left".
+- **A reminder after signing in,** on the main or console host. Instead of
+  landing where they were going, they land on the setup page, which says
+  "(site) requires two-step sign-in for your role from (date)." and offers
+  **Not now**, which continues to where they were going. A sign-in on a
+  site's own address goes where it was going, with no reminder: the setup
+  page is not served there, and the main host would ask them to sign in
+  again just to be reminded.
+- **Headless sign-ins** get a `second_factor` field in the token response
+  (see [Headless clients, tokens and API keys](#headless-clients-tokens-and-api-keys)).
+
+People who already hold a factor, and roles the setting does not cover, see
+none of this.
+
+### Set up two-step sign-in when your site asks
+
+Anyone signed in can do this, readers included. You start on `/account/two-factor`:
+the site sends you there when it holds you, the banner and the post-sign-in
+reminder link to it, and on `/account` the **Two-step sign-in** card has a
+**Set up two-step sign-in** button.
+
+The page is served only on the main host (`PHX_HOST`) and on console hosts,
+never on a site's own address. On a site's own address, every link to it and
+every redirect that holds you goes to the main host's page instead, and
+`/account/two-factor` typed there redirects to it too. Your sign-in on the
+site does not carry over to the main host, so you **sign in once more there**.
+The `/account` card says so: "This opens on (main host), where you sign in
+again." Why: a passkey cannot be registered on a site's own address, and that
+address is where code a site administrator added to the site runs, which must
+not reach your second factors.
+
+1. Read the line under **Set up two-step sign-in**. Past your deadline it says
+   "This site requires two-step sign-in for your role. Set it up to continue."
+2. If the page shows **First, confirm it's you**, click **Email me a code**.
+   The page says "We sent a code to (your address)." Type the code from the
+   email under **Code from the email** and click **Confirm**. The page says
+   "Thanks — your email address is confirmed." (When this step is asked for,
+   and when it is not, is below.)
+3. Under **Authenticator app**, click **Set up an authenticator app**. Scan
+   the QR code with your app (or type the **Setup key**), type the current
+   **6-digit code** and click **Confirm**. The page says "Two-factor
+   authentication is now on." and shows ten recovery codes once: save them,
+   then click **I've saved them**.
+
+   Or add a passkey under **Passkey** (on the main host, and on a console
+   host when passkeys work there): name it
+   if you like, click **Add a passkey** and confirm on your device. The page
+   says "Passkey added — you can sign in with it now." A passkey has no
+   recovery codes, so the page suggests adding an authenticator app as well.
+4. Click **Continue**. You go on to where you were going (only a path on the
+   same site is followed), or to the console overview for an editor or admin
+   and `/account` for a reader. Sent here from a site's own address, you have
+   no "where you were going": **Continue** stays on the main host. Open the
+   site's address again yourself; the factor you added counts there.
+
+The owner of the account is emailed for every factor added, as always
+([We email you when a second factor is added](#we-email-you-when-a-second-factor-is-added)).
+The page also has **Sign out**. A reader held on a site that requires
+everyone also sees **Your membership and data**, with **Manage billing** (when
+they have a paid membership to manage) and **Export my data**.
+
+The page judges the site it is opened for. On the main host that is the
+default site: the line under **Set up two-step sign-in**, **Not now**, and
+**Your membership and data** follow the default site's requirement, not the
+one of the site that sent you. A reader held by another site therefore sees
+that site's **Manage billing** and **Export my data** only where the page is
+opened for that site (its console host, when one is configured). The emailed
+code below is asked for whichever site holds you.
+
+### When the emailed code is asked for
+
+Once a site holds an account, the setup page is the one page it can reach, and
+someone who has only the password reaches it too. Without a further check
+they could add their own authenticator app and take the account. So a session
+that signed in with **only a password** proves it can read the account's
+email before it adds a factor.
+
+The code is asked for when all of these are true:
+
+- a site the account belongs to holds it now (past its deadline, no factor).
+  Any of its sites counts, not only the one the page is on, because the
+  factor added counts on all of them;
+- the session signed in with a password, or was restored by a "Remember me"
+  cookie, or it is not known how it signed in;
+- it signed in at or after the earliest of those deadlines.
+
+It is **not** asked for when:
+
+- the session signed in with a magic link, a password reset or by confirming
+  a new account (each already proved the mailbox), with single sign-on (the
+  site's own or the operator's OIDC), or with a passkey;
+- no site holds the account (it is in its grace period everywhere, or not
+  covered);
+- the session signed in with a password before the deadline: the grace
+  period let it add a factor then, and it still may;
+- the site the page is opened for (on the main host, the default site) has
+  **no working mail relay**: no outgoing mail server is
+  configured for the deployment and the site has none of its own, or the
+  site's relay password can no longer be decrypted. The step is skipped and
+  the enrollment is recorded with `proof: "email_skipped_no_relay"`.
+
+A relay that fails this time (a refused connection, a site relay whose
+settings could not be read just now) does **not** skip the step: the page says
+"We couldn't send the code. Try again." Otherwise anyone who could cause a
+passing failure would get past it.
+
+The code is six digits, goes through the site's relay, works for 10 minutes,
+and works only in the browser session that asked for it. At most three are
+sent to an address an hour. Each attempt to confirm one uses one of the
+account's five second-factor attempts per 15 minutes, the same budget as the
+sign-in code prompt, before the code is compared. The code is never stored
+(the page keeps only a keyed hash), logged or shown. Its email says what to do
+if you did not ask for it: reset your password, which signs out every session.
+
+The check is made again by the enrollment itself (`User` `:confirm_totp`,
+`Passkey` `:register`), not only by the page, so a page that skipped the step
+cannot add a factor. `/editor/settings` has no email step: an account that
+owes one is refused there with "Confirm your email address before adding a
+second factor." and sets up on `/account/two-factor` instead.
+
+What can go wrong on the setup page:
+
+- **"Confirm your email address before adding a second factor."** The email
+  step is still owed. Do step 2 first.
+- **"That code isn't valid — try again."** Wrong code, or a code sent to
+  another browser. It used one attempt.
+- **"That code has expired. Send a new one."** More than 10 minutes passed.
+  Click **Send a new code**.
+- **"We've sent several codes already. Wait a while, then try again."** Three
+  codes went to the address in the last hour.
+- **"We couldn't send the code. Try again."** The mail relay failed this time.
+- **"Too many attempts — try again in N seconds."** The account's five
+  second-factor attempts are spent, here or at the sign-in prompt.
+
+### What a held account can still reach
+
+A held account is sent to the setup page before anything else, by every
+door: the sign-in itself, every page of the site (public pages included), the
+console's LiveViews (also a page left open when the deadline passes or the
+policy changes), `/membership` and plugin pages. The redirect is a `302`
+marked `private, no-store` that writes no session and no cookie, so a shared
+cache can never store it for other visitors. On the main or console host it
+goes to `/account/two-factor` there, carrying the page it asked for as
+`return_to`. On a site's own address it goes to the main host's
+`/account/two-factor`, with no `return_to` (a path on the site means nothing
+on the main host), and the account signs in again there.
+
+It can still reach:
+
+- the setup page (on the main or console host), and **Sign out**;
+- the sign-in pages, `/sign-in/verify`, `/auth/*`, invitations and unlock
+  links;
+- `POST /billing/portal` and `GET /editor/account/export.json` (managing a paid
+  membership, and the export of the account's own data);
+- `/locale/:locale`, `/access-denied`, `/developers` and `/api`;
+- `/preview/...` and `/newsletter/...` links, which their own tokens authorize,
+  and `/setup`;
+- images (`/media/:id/t/...`), which are served as to a visitor who is not
+  signed in, because an image cannot follow a redirect;
+- anything an API key reaches.
+
+To read the public site while held, sign out. The demo mode's shared account
+is never held.
+
+### Passkey-only accounts
+
+An account whose only factor is a passkey satisfies the requirement, but its
+password alone must not sign it in once the deadline has passed:
+
+- **On the main or console host**, a password (or a magic link, or single
+  sign-on) stops at `/sign-in/verify`, which says "Confirm it's you with your
+  passkey." and offers **Use a passkey**.
+- **On a site's own host**, where a passkey cannot run, the password is
+  refused: the sign-in page says "Your account's second factor is a passkey,
+  which works at (main host). Sign in there, or add an authenticator app."
+- **A session that signed in with the password before the deadline**, or that
+  a "Remember me" cookie restores, is sent through the same passkey prompt
+  (or signed out, on a site's own host). A session that signed in with the
+  passkey, or passed it at the prompt, carries on.
+- **Headless:** a passkey cannot be used outside a browser, so the account's
+  tokens and its headless sign-in are refused (below).
+
+Before the deadline, and on a site that requires nothing, its password signs
+it in as before.
+
+### Headless clients, tokens and API keys
+
+**API keys are not affected.** They carry no second factor by design and are
+never held, on any surface (JSON:API, GraphQL, MCP, `/ws/bridge`, key
+rotation).
+
+A user's JWT is checked **on every request**, so a token issued during the
+grace period stops working at the deadline:
+
+- `POST /api/auth/sign_in` answers a held account `403`
+  `second_factor_required` and issues no token (the one the password minted is
+  revoked). `meta.setup_url` is the setup page, `meta.deadline` when the grace
+  ended, and `meta.reason` is `"passkey_only"` for a passkey-only account.
+  During the grace period the `201` carries
+  `"second_factor": {"required": true, "deadline": "…"}`. An account with an
+  authenticator app still gets the `200 two_factor_required` step.
+- `/api/*` (JSON:API, media, the content and posture routes), `/gql` and
+  `/api/feed` answer a held account's JWT `403` `second_factor_required`, on
+  public reads too: the token is no longer good, and the answer says so
+  rather than serving the request as anonymous. Drop the header to read
+  public content.
+- `/ws/gql` refuses the connect (the handshake answers `403`), closes a
+  socket opened during the grace period at the deadline, and refuses every
+  document sent on an open socket afterwards with `extensions.code`
+  `"second_factor_required"`.
+- `/ws/collab` refuses the connect and closes an open room within 30 seconds
+  of the deadline.
+
+Request and response shapes: [API § Accounts a site requires two-step sign-in of](api.md#accounts-a-site-requires-two-step-sign-in-of).
+Each refused request emits `[:kiln_cms, :api, :second_factor_required]`
+([Observability](observability.md#refused-api-credentials)); it writes no
+security event.
+
+### Your last second factor stays while a site requires one
+
+While any site an account belongs to requires a second factor (in the grace
+period too), the owner cannot remove the account's last one. On
+`/editor/settings`, the authenticator app's **Disable** form, or the last
+passkey's remove (trash) button, is replaced by "A site you use requires
+two-step sign-in, so you can't remove your last second factor. Add another one
+first." The same refusal comes from
+the action itself, before any code is checked, so it costs no attempt.
+
+Replacing the authenticator app still works (also after signing in with a
+recovery code), and so does removing the app while a passkey remains, or a
+passkey while another factor remains. A platform admin removing someone's
+passkey, and an invitation taking over an unconfirmed account, are not
+affected: those are how a lost or stolen factor is cleared.
+
+### For operators
+
+- **Upgrading changes nothing by itself.** No site requires anything until an
+  administrator saves the setting. The migration (`site_second_factor_policy`,
+  `users.inserted_at`) is expand-only; existing accounts get the time it ran
+  as their creation time, so none starts out overdue.
+- **Every member must be able to reach the main host.** The setup page is
+  served only on the main host (the endpoint URL built from `PHX_HOST`) and
+  on console hosts. A person held on a site's own address is redirected to
+  that URL's `/account/two-factor` and signs in again there, so the main host
+  has to answer the public, readers of a site that requires everyone included.
+  The headless `meta.setup_url` is the same URL.
+- **Headless clients of a held account get `403`.** A script or app that signs
+  in as a person on a site that holds that person stops working at the
+  deadline. Give it an API key instead.
+- **Mail.** The email step goes through the site's relay. A deployment with no
+  outgoing mail server skips it, which leaves the enrollment protected only by
+  the "a second factor was added" email to the owner (which also needs a
+  relay). The three-codes-an-hour cap per address is code config:
+  `config :kiln_cms, KilnCMS.Accounts.AccountThrottle, enrolment_proof_mail_budget: 3`.
+- **Rolling back** to a release before this one drops the enforcement without
+  a warning: the table stays and an older release ignores it. Nobody is held,
+  and headless tokens work again.
+- **The way back in** when no administrator can pass the requirement is the
+  server command below.
+- **Recorded:** "Held for two-step sign-in setup" (`second_factor_required`)
+  once per sign-in that a requirement held or refused, and `proof` on every
+  enrollment ([What is recorded](security-events.md#what-is-recorded)).
+
+If the setting cannot be read (a database error), the site is treated as
+requiring nothing until it can be, rather than holding every account; see
 [ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and-only-a-freshly-verified-admin-changes-it.md).
 
 ### Turn the requirement off from the server
@@ -465,7 +803,7 @@ The command sets the requirement to off and nothing else: the grace period is
 kept, and nobody's second factor is touched. It runs as the server's own
 `:operator` actor; an administrator cannot run the same action from the
 console. Once an administrator has set up a second factor, they can turn the
-requirement back on, from the console page that comes with the enforcement.
+requirement back on at `/editor/two-factor`.
 
 `rpc` exits 0 whatever the command returns, which is `{:ok, :off}` or
 `{:error, message}`. A script that must fail on an error matches the result:

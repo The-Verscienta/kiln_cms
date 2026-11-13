@@ -20,8 +20,11 @@ draft-only by design.
 ## Authentication: write-scoped API keys
 
 `/mcp` accepts **API keys only** (`Authorization: Bearer kiln_…`) — no JWT or
-anonymous access; anything else is a `401`. Mint keys at `/editor/api-keys`
-(admin-only). A key acts as its owning user, bounded by its `access` scope:
+anonymous access; anything else, a valid, expired or garbled JWT included, is a
+`401`. Mint keys at `/editor/api-keys` (admin-only). A key acts as its owning
+user, bounded by its `access` scope. A site's
+[two-step sign-in requirement](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)
+never applies to a key: it keeps working for an owner the site holds.
 
 | Key `access`  | Owner role | What the LLM can do over `/mcp`                          |
 | ------------- | ---------- | -------------------------------------------------------- |

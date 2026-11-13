@@ -1,4 +1,4 @@
-# 0046. A backup Run write never shares the lock transaction, except Cancel's
+# 0045. A backup Run write never shares the lock transaction, except Cancel's
 
 - **Status** — accepted (2026-11-13). Records the choice that shipped with the
   backup step chain (#2537) in 1.9.0.

@@ -558,6 +558,17 @@ stale token read public content and took it for success; treat this `401` as
 "re-authenticate", not as "forbidden". A request with no `Authorization` header
 is still anonymous, and a bad `kiln_` key was always a `401`.
 
+The GraphQL WebSocket `/ws/gql` follows the same rule at connect (#2634): a
+`token` connection param that does not verify is refused, and the handshake
+answers `403`, where it used to connect as anonymous. That includes a `kiln_`
+API key, which that socket never accepted: use `POST /gql` with a key. Connect
+with no `token` to read as the public.
+
+A `403` with `code` (or `extensions.code`) `second_factor_required` is a
+different answer: the token is valid, but the site now requires its account to
+set up two-step sign-in. See
+[Accounts a site requires two-step sign-in of](api.md#accounts-a-site-requires-two-step-sign-in-of).
+
 An operator who needs time to fix a client can set
 `KILN_API_REJECT_INVALID_BEARER=false` to restore the anonymous fallback. That
 escape hatch lasts one release and is then removed

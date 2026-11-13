@@ -178,7 +178,7 @@ request carrying a credential is `private, no-store` (see
 | `KILN_CDN_PURGE_URL` | unset | When set, every `<type>.published`/`.unpublished`/`.updated` (and `release.published`) `POST`s the site's surrogate key here: body `{"tags": ["kiln-org-<id>"]}` (Cloudflare purge-by-tag) and header `Surrogate-Key: kiln-org-<id>` (Fastly purge-by-key). Coalesced per site, retried with backoff, sent through `KilnCMS.SafeFetch` — so in production it must be an `https://` URL that resolves to a public address. Unset, cached responses age out on `KILN_API_CACHE_MAX_AGE`. See [`KilnCMS.CDN`](../lib/kiln_cms/cdn.ex). | [`config/runtime/delivery.exs:73`](../config/runtime/delivery.exs#L73) |
 | `KILN_CDN_PURGE_TOKEN` | unset | Credential for the purge request. Resolved at call time through the `KilnCMS.Keys` env provider; never logged. | [`config/runtime/delivery.exs:79`](../config/runtime/delivery.exs#L79) |
 | `KILN_CDN_PURGE_TOKEN_HEADER` | `authorization` | Header the token goes in. `authorization` sends `Bearer <token>` (Cloudflare API tokens); any other name sends the bare token in that header, e.g. `fastly-key` for Fastly. | [`config/runtime/delivery.exs:82`](../config/runtime/delivery.exs#L82) |
-| `KILN_API_REJECT_INVALID_BEARER` | `true` | When on (the default), an `Authorization: Bearer …` header whose token does not verify (a garbled, expired or foreign JWT) is answered `401` in the standard error envelope (`invalid_token`, with `WWW-Authenticate: Bearer error="invalid_token"`) on `/api/json`, `/gql` and the other `/api` routes. Off, the request is quietly served as anonymous, so a client with a broken credential reads public content and takes it for success (#2161); that was the default for the one release that introduced the flag. The scheme is matched case-insensitively and a bare `Bearer` counts as invalid; the `401` is `private, no-store` with `Vary: Authorization`, and on `/gql` its body is `{"errors":[{"message":…,"extensions":{"code":"unauthenticated"}}]}`. A request with **no** `Authorization` header, or another scheme, stays anonymous either way; a bad `Bearer kiln_…` API key is always `401`. **On by default since the release after it shipped; `false` is an escape hatch kept for one more release, then removed, if the stale-token count is zero** (see [ADR 0017](decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md) and [ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)), so use it only while you fix the client sending the stale token. Parsed by the shared [on/off rules](#boolean-variables). See [`KilnCMSWeb.Plugs.ApiKeyAuth`](../lib/kiln_cms_web/plugs/api_key_auth.ex). | [`config/runtime/delivery.exs:91`](../config/runtime/delivery.exs#L91) |
+| `KILN_API_REJECT_INVALID_BEARER` | `true` | When on (the default), an `Authorization: Bearer …` header whose token does not verify (a garbled, expired or foreign JWT) is answered `401` in the standard error envelope (`invalid_token`, with `WWW-Authenticate: Bearer error="invalid_token"`) on `/api/json`, `/gql` and the other `/api` routes, and refuses the connect (a `403` handshake) on the GraphQL WebSocket `/ws/gql`, where a `kiln_` API key counts as such a token, since that socket accepts only JWTs (#2634). Off, the request or connect is quietly served as anonymous, so a client with a broken credential reads public content and takes it for success (#2161); that was the default for the one release that introduced the flag. The scheme is matched case-insensitively and a bare `Bearer` counts as invalid; the `401` is `private, no-store` with `Vary: Authorization`, and on `/gql` its body is `{"errors":[{"message":…,"extensions":{"code":"unauthenticated"}}]}`. A request with **no** `Authorization` header, or another scheme, stays anonymous either way; a bad `Bearer kiln_…` API key is always `401`. **On by default since the release after it shipped; `false` is an escape hatch kept for one more release, then removed, if the stale-token count is zero** (see [ADR 0017](decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md) and [ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)), so use it only while you fix the client sending the stale token. Parsed by the shared [on/off rules](#boolean-variables). See [`KilnCMSWeb.Plugs.ApiKeyAuth`](../lib/kiln_cms_web/plugs/api_key_auth.ex). | [`config/runtime/delivery.exs:91`](../config/runtime/delivery.exs#L91) |
 
 ### smart 404 blocking (#2253)
 
@@ -833,13 +833,15 @@ without the comparison. To keep the check but skip kilncms.dev, set
 `KILN_UPDATE_FEED_URL=false` (GitHub only).
 
 **This and the [plugin health check](#plugin-health-check-2244) are the
-outbound integrations that are on by default.** Unlike Meilisearch, S3,
-Unsplash and mail, they need no credential to work, so there is no
-unset-secret that implicitly disables them. Set `KILN_UPDATE_CHECK=false` if
+outbound integrations about Kiln itself that are on by default.** Unlike
+Meilisearch, S3, Unsplash and mail, they need no credential to work, so there
+is no unset-secret that implicitly disables them. Set `KILN_UPDATE_CHECK=false` if
 your deployment must make no third-party requests at all: it turns off both,
 unless `KILN_PLUGIN_HEALTH_CHECK` is set. It does not stop the other calls a
 default install makes, among them the search engines' published crawler IP
-lists, fetched on a schedule (`KILN_CRAWLER_RANGES=false`); see
+lists, fetched on a schedule (`KILN_CRAWLER_RANGES=false`), and the
+[breached-password check](#breached-password-check-2240)
+(`BREACHED_PASSWORD_CHECK=false`); see
 [Outbound calls made by default](system-requirements.md#outbound-calls-made-by-default)
 for the full list and each switch.
 
@@ -880,6 +882,9 @@ Security posture say whether each plugin built into this release still
 checks out: its package against hex.pm, security notices that cover the
 installed version, retired or long-unreleased packages, and its
 `kiln_plugin` requirement ([how to read it](security-posture.md#check-your-installed-plugins)).
+It is on by default although it tells hex.pm which plugins this server runs;
+[ADR 0032](decisions/0032-a-default-on-check-that-tells-a-third-party-about-the-installation-follows-the-update-check-switch.md)
+records the terms that allow it.
 
 **When it asks.** Only when a platform admin opens System, or Security
 posture with nothing cached, or selects **Check plugins now** (at most one
@@ -947,7 +952,11 @@ When someone sets a password (register, change, reset, first-run setup) it is
 looked up against the [Have I Been Pwned](https://haveibeenpwned.com/API/v3#PwnedPasswords)
 range API by k-anonymity: only the first five characters of its SHA-1 leave the
 server. See [account-administration.md](account-administration.md#breached-passwords)
-for what each policy does and [threat-model.md](threat-model.md) for the limits.
+for what each policy does, [threat-model.md](threat-model.md) for the limits and
+[ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
+for why it is on by default and fails open. `KILN_UPDATE_CHECK=false` does not
+turn it off; only `BREACHED_PASSWORD_CHECK=false` stops the outbound call for the
+whole deployment.
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|

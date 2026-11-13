@@ -24,6 +24,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor /editor/account/export.json /editor/accounts /editor/accounts/:id
     /editor/admin-allowlist /editor/analytics /editor/analytics/export.csv
     /editor/analytics/export.json /editor/api-keys /editor/automation /editor/backups
+    /editor/backups/schedules
     /editor/billing /editor/bot-budgets /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/configure /editor/content/:type/:id /editor/content/:type/new
     /editor/content/export.csv /editor/content/export.json
@@ -44,11 +45,11 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor/site-storage /editor/system /editor/system/image-backend /editor/tasks
     /editor/taxonomy /editor/team
     /editor/translations
-    /editor/translations/export.xlf /editor/trash /editor/types /editor/webhooks /media
+    /editor/translations/export.xlf /editor/trash /editor/two-factor /editor/types /editor/webhooks /media
   )
 
   @shared ~w(
-    /account /api /api/ask /api/auth/sign_in /api/auth/sign_in/verify /api/content/:type
+    /account /account/two-factor /api /api/ask /api/auth/sign_in /api/auth/sign_in/verify /api/content/:type
     /api/content/:type/:id/preview-token /api/content/:type/:id/revisions
     /api/content/:type/:id/revisions/:version_id
     /api/content/:type/:id/revisions/:version_id/restore /api/content/:type/:slug

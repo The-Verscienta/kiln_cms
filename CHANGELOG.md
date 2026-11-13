@@ -86,13 +86,19 @@ Every summary line below that was shortened links to its own entry there.
 - **New scheduled egress: one node fetches Google's, Bing's, Apple's and DuckDuckGo's crawler IP lists over HTTPS every 6 h; allow the four hosts or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot outside its list is now charged as no user agent and counted by the 404 guard. No migration; rollback safe.**
   ([long form](docs/changelog/unreleased.md#crawler-ip-ranges-upgrade))
 
-- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced, and rolling back is safe. Part of #2247.**
+- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced until a site requires it (next entry). Part of #2247.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
+
+- **Two-step sign-in can now be required per site: nothing changes until an admin saves it at `/editor/two-factor`. Then a held person's JWTs get `403 second_factor_required` (API keys are exempt), and held people set up on the main host (`PHX_HOST`), which they must reach; rolling back drops it silently.**
+  ([long form](docs/changelog/unreleased.md#second-factor-enforcement-upgrade))
 
 - **Yearly rules with BYMONTH, BYMONTHDAY or BYDAY, monthly BYDAY with BYMONTHDAY, BYMONTH on daily and weekly rules, and a repeated weekly BYDAY now expand per RFC 5545, as subscribed calendars showed them (`FREQ=YEARLY;BYDAY=2TU` is January's). Next dates are recomputed ~10 min after boot on the new `occurrence_backfill` queue; a hand-built Oban `queues:` must add `occurrence_backfill: 1`. Rollback safe.**
   ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#event-recurrence-rfc-upgrade))
 
 ### Breaking
+
+- **`/ws/gql` refuses a connect whose token does not verify (expired, revoked, garbled JWT, or a `kiln_` API key), with a `403` handshake, where it connected as anonymous; `KILN_API_REJECT_INVALID_BEARER=false` restores that.**
+  ([long form](docs/changelog/unreleased.md#ws-gql-refuses-unverified-bearer))
 
 - **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
   ([#2836](https://github.com/The-Verscienta/kiln_cms/pull/2836) · [long form](docs/changelog/unreleased.md#media-purge-quarantined))
@@ -102,7 +108,7 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
-- **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
+- **In-app backup schedules (part of #2219): daily, weekly, every 2 weeks or monthly at a local time, managed by platform admins on the new Schedule tab of Backups (or from a release console). Sub-daily intervals wait for keep-N retention.**
   ([long form](docs/changelog/unreleased.md#backup-schedules))
 
 - **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
@@ -129,7 +135,10 @@ Every summary line below that was shortened links to its own entry there.
 - **Search-engine claims are checked against Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists before DNS, so DuckDuckBot can be verified; new `KILN_CRAWLER_RANGES`, `KILN_CRAWLER_RANGES_CRON` and `ranges_fetch` metric.**
   ([long form](docs/changelog/unreleased.md#crawler-ip-ranges))
 
-- **Groundwork for requiring two-step sign-in by role, not yet enforced (no page; part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
+- **A site admin can require two-step sign-in of admins, editors or everyone at `/editor/two-factor`, with a grace period; held accounts set up at `/account/two-factor` on the main or console host, password sessions confirming an emailed code. Closes the #2247 series.**
+  ([long form](docs/changelog/unreleased.md#second-factor-requirement))
+
+- **The setting and logic behind requiring two-step sign-in (part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
 
 ### Changed
@@ -237,6 +246,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Calendar clients no longer drop or add the last occurrence of a timed repeating event with an end date: the `.ics` `UNTIL` is now the end of that day in the event's time zone.**
   ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#ics-until-end-of-local-day))
+
+- **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
+  ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
 
 ### Security
 

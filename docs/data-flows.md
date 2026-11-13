@@ -24,10 +24,13 @@ your deployment.
 - Data only leaves the system through integrations you explicitly enable
   (webhooks, optional Meilisearch/S3), through transactional email, or through
   the few checks that are on by default (see
-  [Optional subprocessors](#optional-subprocessors)). One of those sends visitor
-  data: crawler verification asks the node's DNS resolver about the address of
-  a client claiming to be a search engine (`KILN_CRAWLER_VERIFICATION=false`
-  turns it off). One runs on a schedule: crawler verification fetches Google's,
+  [Optional subprocessors](#optional-subprocessors)). Two of those send
+  something derived from people: crawler verification asks the node's DNS
+  resolver about the address of a client claiming to be a search engine
+  (`KILN_CRAWLER_VERIFICATION=false` turns it off), and the breached-password
+  check sends Have I Been Pwned five characters of the hash of a password
+  being set, never the password (`BREACHED_PASSWORD_CHECK=false` turns it
+  off). One runs on a schedule: crawler verification fetches Google's,
   Bing's, Apple's and DuckDuckGo's published crawler IP lists every 6 hours,
   sending nothing about the instance or its visitors
   (`KILN_CRAWLER_RANGES=false` turns it off).
@@ -50,7 +53,7 @@ your deployment.
 | Security alert queue | `security_alert_dispatches` | Pseudonymous (transient) | One row per security alert window or silencing notice (#2245): the site, the alert kind, the window, the id of the security event that raised it, delivery stamps, and for a notice what changed, the kinds, the webhook endpoint's id and the acting user's id. Never an address, email, URL or token. Deleted by an hourly prune a day after its window ends, and by the staging scrub. Not touched by erasure: it holds ids only and is gone within a day. See [Security alerts](security-alerts.md). |
 | Security alert settings | `site_security_alerts` | No | Per site (#2245): the alert kinds turned off, whether admins get the bell and email, whether alerts show full IP addresses. |
 | Platform security alert settings | `platform_security_alerts` | No | One row for the installation (#2245): the platform alert kinds a platform admin turned off (today only `api_key_rate_limited` can be). No person, address or key. Each save is recorded in the instance security log (`platform_alerts_changed`). |
-| Two-step sign-in requirement | `site_second_factor_policy` | No | Per site (#2247): who must hold a second factor (`required_for`: off, administrators, editors and administrators, or everyone), the grace period in days, when each role became covered and when the row last changed. No person, address or factor. Each save is recorded in the site's security log (`second_factor_policy_changed`). Not yet enforced: no console page writes it in this release. |
+| Two-step sign-in requirement | `site_second_factor_policy` | No | Per site (#2247): who must hold a second factor (`required_for`: off, administrators, editors and administrators, or everyone), the grace period in days, when each role became covered and when the row last changed. No person, address or factor. Each save is recorded in the site's security log (`second_factor_policy_changed`). Written from `/editor/two-factor`. |
 | Account creation time | `users.inserted_at` | Pseudonymous | When the account was created (#2247), the earliest a required second factor's grace period can start. Accounts that existed before the column was added carry the time of that migration. Not shown anywhere and not exposed by any API. |
 | Verified API keys | **memory only**, on each node | Pseudonymous (transient) | The SHA-256 of each API key that authenticated on the node in the last 5 minutes, with the key's id and when (#2245, `KilnCMS.Security.ApiKeyTrip`), so a rate-limit refusal can tell a real key from a forged one without a database read. Never the key itself, a user or an address. At most 10,000 entries; swept every minute, gone on restart, never shared between nodes or written to disk. |
 | Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
@@ -144,6 +147,14 @@ These kinds of email leave the system via the configured Swoosh adapter:
   credential id. It goes through the instance relay (`KilnCMS.Mailer`), never
   a site's own, cannot be muted, and is not sent to an erased account
   ([We email you when a second factor is added](two-factor-auth.md#we-email-you-when-a-second-factor-is-added)).
+- **Two-step sign-in setup code** (#2247), to the account's own address, when
+  a session that signed in with only a password sets up a second factor its
+  site requires, past the deadline. It holds a six-digit code (valid 10
+  minutes), the site's name and a link to reset the password. It goes through
+  the site's own relay when it has one, in English, at most three an hour per
+  address. The code is never stored: the setup page keeps only a keyed hash in
+  memory for the length of the visit
+  ([When the emailed code is asked for](two-factor-auth.md#when-the-emailed-code-is-asked-for)).
 - **Workflow email** — review-requested / published / changes-requested
   notifications to the relevant admins or author.
 - **Registration email** (#2251), about a site's registration approval queue:
@@ -193,22 +204,34 @@ Configure the sender and adapter in `config/runtime.exs`
 | **kilncms.dev security notices feed** (plugin health check and core security notices) | **Nothing about this instance.** An unauthenticated GET of the published `security_notice` entries (up to five pages, same origin only), with a bare `KilnCMS` user-agent and a fixed query. One fetch, cached 24 h per node (15 min after a failure), serves two readers. The plugin health check asks it at the same moments as the hex.pm row, when some plugin comes from Hex, git or a path. The core's notices check (#2522) asks it, with no plugin installed too, when a platform admin opens `/editor/system` or opens `/editor/security-posture` or calls `GET /api/security/posture` (one background request) with nothing cached, or selects **Check now** on System (at most one forced request a minute). Not asked by a fork or mirror, or with `KILN_UPDATE_FEED_URL=false`, unless `KILN_SECURITY_NOTICES_URL` names a feed. | **On by default** | `KILN_SECURITY_NOTICES_URL=false` (both readers). Otherwise each reader has its own switch: `KILN_UPDATE_CHECK=false` stops the core's reader, and the hex.pm row's switches stop the plugin reader. `KILN_PLUGIN_HEALTH_CHECK=false` alone does not stop this request. |
 | **The node's DNS resolver** (crawler verification) | **A visitor's IP address**, as a reverse (PTR) query for its `in-addr.arpa` / `ip6.arpa` name, then a forward (A or AAAA) query for up to two of the names it returns that fall under a search engine's domain. Sent only for a public delivery request (a page, `/search`, a media download or stream) whose `User-Agent` names Googlebot, Google-InspectionTool, bingbot, Applebot, YandexBot or Baiduspider, from a public address that is not a trusted proxy, is not in the claimed engine's fresh published IP list (next row), and was not checked recently: at most three queries per address, then cached on that node for 6 h (verified), 1 h (proven false) or 5 min (no answer) (#2254). The queries go to the nameservers in the node's `/etc/resolv.conf` (your host's, your cloud's, or a public resolver you chose), which resolve them through the internet, so the operator of the address's reverse zone (usually its ISP or hosting provider) can also see the query. No user agent, path or other request data is sent. With the smart 404 guard on (`KILN_SCANNER_BLOCKING`), a node whose lookups have had no answer for a minute also sends at most one PTR query a minute for a fixed address, `8.8.8.8` by default, to check that its resolver works; it carries no visitor data (#2588). A DuckDuckBot claim is never sent to DNS: it is checked against DuckDuckGo's published list only (#2586). | **On by default** | `KILN_CRAWLER_VERIFICATION=false` |
 | **Google, Microsoft (Bing), Apple and DuckDuckGo** (published crawler IP lists, crawler verification) | **Nothing about this instance or its visitors.** Unauthenticated HTTPS GETs of four fixed URLs (`developers.google.com/static/crawling/ipranges/common-crawlers.json`, `www.bing.com/toolbox/bingbot.json`, `search.developer.apple.com/applebot.json`, `duckduckgo.com/duckduckbot.json`) with a bare `KilnCMS` user-agent and no query, cookie, version or identifier, so each vendor sees only the fetching node's IP address. Sent by one node every 6 hours (`KILN_CRAWLER_RANGES_CRON`), plus a fetch of a missing or stale list that a node queues about 20 seconds after it starts and at its 10-minute checks, at most one job per 10 minutes across the cluster (#2586). The lists are kept in memory only and passed to the other nodes over the cluster's own connection. Visitors' addresses are compared against the lists locally and never sent. | **On by default** (scheduled, unlike the rows above) | `KILN_CRAWLER_RANGES=false`, or `KILN_CRAWLER_VERIFICATION=false`. `KILN_CRAWLER_RANGES_CRON=false` stops the automatic fetches only |
+| **Have I Been Pwned (api.pwnedpasswords.com)** (breached-password check) | **The first five hex characters of the SHA-1 of a new password**, as the path of `GET /range/<prefix>` (the k-anonymity range API), with `Add-Padding: true` and a bare `KilnCMS` user-agent, and nothing else: no account, address, site or full hash. The provider sees that prefix together with the server's IP. Sent each time someone sets a password (registration, change, reset by token, first-run setup, accepting an invitation with a password) on a site whose policy is not **Off**; never at sign-in. Nothing is cached; a failure accepts the password (#2240, [ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)). | **On by default** (policy **Warn**) | `BREACHED_PASSWORD_CHECK=false` (the whole deployment). A site admin's policy **Off** stops it for that site while the policy can be read (if it can't, the site is treated as **Warn**, so only the variable is a guarantee). `BREACHED_PASSWORD_POLICY=off` alone does not: a site's saved choice wins over it. `KILN_UPDATE_CHECK=false` does not stop it. |
 
 If you enable any of these, add it to your DPA's subprocessor list. Note the
 update check (kilncms.dev release feed and GitHub), the security notices
-feed, the plugin health check (hex.pm) and crawler verification (the DNS
-resolver and the four vendors' published lists) are
+feed, the plugin health check (hex.pm), crawler verification (the DNS
+resolver and the four vendors' published lists) and the breached-password
+check (Have I Been Pwned) are
 the entries that are **on by default**, and the published lists are the one
 fetched on a schedule rather than in answer to something a person did. hex.pm learns something about the
-installation (which plugins it runs), and crawler verification is the one that
+installation (which plugins it runs; [ADR 0032](decisions/0032-a-default-on-check-that-tells-a-third-party-about-the-installation-follows-the-update-check-switch.md)
+records when that is allowed by default), crawler verification is the one that
 sends a visitor's IP address out: if your resolver is a third party's (a
-public resolver, or your cloud's), list it. If your deployment must make no
-third-party requests at all, set `KILN_UPDATE_CHECK=false` explicitly rather
-than relying on leaving something unset; it turns off the update check, the
-core's security notices check and the plugin health check (unless
-`KILN_PLUGIN_HEALTH_CHECK` is set). Set `KILN_CRAWLER_VERIFICATION=false` too
-(it stops the DNS lookups and the published-list fetches), or
-`KILN_CRAWLER_RANGES=false` to stop only the fetches.
+public resolver, or your cloud's), list it. The breached-password check sends
+a five-character fragment of a new password's hash, never the password
+([ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)).
+If your deployment must make no
+third-party requests at all, set these explicitly rather
+than relying on leaving something unset:
+
+- `KILN_UPDATE_CHECK=false` turns off the update check, the
+  core's security notices check and the plugin health check (unless
+  `KILN_PLUGIN_HEALTH_CHECK` is set).
+- `KILN_CRAWLER_VERIFICATION=false`
+  stops the DNS lookups and the published-list fetches
+  (`KILN_CRAWLER_RANGES=false` stops only the fetches).
+- `BREACHED_PASSWORD_CHECK=false` stops the breached-password check. No other
+  variable does: `KILN_UPDATE_CHECK` does not cover it, and a site's own
+  policy overrides `BREACHED_PASSWORD_POLICY`.
 
 ## Retention & automated purge
 

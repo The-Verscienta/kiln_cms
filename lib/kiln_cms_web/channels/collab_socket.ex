@@ -42,23 +42,67 @@ defmodule KilnCMSWeb.CollabSocket do
     # still has to count.
     with :ok <- KilnCMSWeb.IpBlock.check_connect(:collab, connect_info),
          :ok <- KilnCMSWeb.SocketJoinBudget.charge(:collab_join, connect_info),
-         {:ok, user_id} <-
+         {:ok, claims} <-
            Phoenix.Token.verify(KilnCMSWeb.Endpoint, "collab", token, max_age: @max_age),
+         {user_id, verified?} = claims(claims),
          # The struct match matters: a `not_found_error?: false` interface would
          # return `{:ok, nil}`, and an anonymous actor reads published content.
          {:ok, %{} = actor} <- fetch_actor(user_id),
          {:ok, org} <- fetch_org(connect_info),
+         # The token is minted for a day, possibly during the grace period of
+         # a site that requires a second factor: an account the site now
+         # holds for one it has not set up is refused (#2247), and so is a
+         # passkey-only account past its deadline whose token came from a
+         # session that never passed the passkey. The channel's periodic
+         # re-check closes a socket that crosses the deadline.
+         false <- refused?(actor, org.id, verified?),
          # The admin allowlist (#2248): the console's own socket. After the
          # site is resolved, so an unserved host is refused (and alerted) there
          # first; the address is kept for the channel's periodic re-check.
          {:ok, client_ip} <- KilnCMSWeb.AdminAllowlist.check_connect(:collab, connect_info) do
-      {:ok, socket |> assign(:actor, actor) |> assign(:org, org) |> assign(:client_ip, client_ip)}
+      {:ok,
+       socket
+       |> assign(:actor, actor)
+       |> assign(:org, org)
+       |> assign(:client_ip, client_ip)
+       |> assign(:second_factor_verified?, verified?)}
     else
       _refused -> :error
     end
   end
 
   def connect(_params, _socket, _connect_info), do: :error
+
+  @doc """
+  The token for `user`'s collab socket. `second_factor_verified?` is whether
+  the session it is minted for passed a second factor at sign-in
+  (`KilnCMSWeb.SecondFactorGate.session_verified?/1`), which a passkey-only
+  account past its deadline needs (#2247).
+  """
+  @spec token(KilnCMS.Accounts.User.t(), boolean()) :: String.t()
+  def token(user, second_factor_verified?) do
+    Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", %{
+      "u" => user.id,
+      "sf" => second_factor_verified? == true
+    })
+  end
+
+  # A token from before #2247 carried the id alone: no second factor shown.
+  defp claims(%{"u" => user_id, "sf" => verified?}), do: {user_id, verified? == true}
+  defp claims(user_id), do: {user_id, false}
+
+  @doc """
+  Whether a collab connection of `actor` is refused on `org_id`: the site
+  holds the account, or it is a passkey-only account past its deadline and
+  the token's session never passed a second factor. Shared with
+  `KilnCMSWeb.CollabChannel`'s periodic re-check.
+  """
+  @spec refused?(KilnCMS.Accounts.User.t(), Ash.UUID.t(), boolean()) :: boolean()
+  def refused?(actor, org_id, second_factor_verified?) do
+    if second_factor_verified?,
+      do: KilnCMSWeb.SecondFactorGate.held?(actor, org_id, fresh?: true),
+      else: KilnCMSWeb.SecondFactorGate.bearer_refused?(actor, org_id)
+  end
 
   @impl true
   # Phoenix drops every socket whose `id/1` matches a `"disconnect"` broadcast,

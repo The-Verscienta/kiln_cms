@@ -99,6 +99,26 @@ defmodule KilnCMSWeb.SignInMarker do
 
   def read(_session), do: nil
 
+  @doc """
+  The session a LiveView was mounted from, as
+  `KilnCMS.Accounts.EnrolmentProof` reads it (#2247): the jti of its token, and
+  how and when it signed in. `method` and `signed_in_at` are `nil` when the
+  marker is stale or absent, which the proof reads as the weakest case.
+  """
+  @spec enrolment_session(map()) :: KilnCMS.Accounts.EnrolmentProof.session()
+  def enrolment_session(%{} = session) do
+    jti =
+      case claims(Map.get(session, "user_token")) do
+        %{"jti" => jti} when is_binary(jti) -> jti
+        _no_token -> nil
+      end
+
+    case read(session) do
+      %{method: method, signed_in_at: at} -> %{jti: jti, method: method, signed_in_at: at}
+      nil -> %{jti: jti, method: nil, signed_in_at: nil}
+    end
+  end
+
   # The session's own token, so peeking it is safe: the session cookie is
   # signed and the token was put there by the server. `Jwt.peek/1` raises on a
   # malformed token rather than answering, and a session that cannot be read
