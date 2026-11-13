@@ -90,7 +90,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
 
 - **Yearly rules with BYMONTH, BYMONTHDAY or BYDAY, monthly BYDAY with BYMONTHDAY, BYMONTH on daily and weekly rules, and a repeated weekly BYDAY now expand per RFC 5545, as subscribed calendars showed them (`FREQ=YEARLY;BYDAY=2TU` is January's). Next dates are recomputed ~10 min after boot on the new `occurrence_backfill` queue; a hand-built Oban `queues:` must add `occurrence_backfill: 1`. Rollback safe.**
-  ([long form](docs/changelog/unreleased.md#event-recurrence-rfc-upgrade))
+  ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#event-recurrence-rfc-upgrade))
 
 ### Breaking
 
@@ -233,10 +233,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-filter-operands-tidied))
 
 - **Restoring an event from the trash recomputes its next occurrence, fixing the 1.9.0 known issue #2621.**
-  ([long form](docs/changelog/unreleased.md#restored-event-next-occurrence))
+  ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#restored-event-next-occurrence))
 
 - **Calendar clients no longer drop or add the last occurrence of a timed repeating event with an end date: the `.ics` `UNTIL` is now the end of that day in the event's time zone.**
-  ([long form](docs/changelog/unreleased.md#ics-until-end-of-local-day))
+  ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#ics-until-end-of-local-day))
 
 ### Security
 
