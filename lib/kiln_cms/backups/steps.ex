@@ -92,6 +92,7 @@ defmodule KilnCMS.Backups.Steps do
     Lock,
     Manifest,
     MediaArchive,
+    PgUrl,
     RcloneRemote,
     Recorder,
     Redact,
@@ -1875,27 +1876,15 @@ defmodule KilnCMS.Backups.Steps do
   runs for minutes, so `postgres://user:secret@host/db` would sit there in
   plain sight for the duration, inside the long-lived application container.
 
+  The URL comes back normalized for libpq (`ecto://` becomes `postgres://`),
+  and a query `password=` is moved as well; see `KilnCMS.Backups.PgUrl.split/1`
+  for the exact rules.
+
   Returns the URL unchanged with an empty env when there is no password to
   move — `pg_dump` then falls back to `PGPASSFILE`/peer auth as it always did.
   """
   @spec split_credentials(String.t() | nil) :: {String.t() | nil, [{String.t(), String.t()}]}
-  def split_credentials(nil), do: {nil, []}
-
-  def split_credentials(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{userinfo: userinfo} = uri when is_binary(userinfo) ->
-        case String.split(userinfo, ":", parts: 2) do
-          [user, password] when password != "" ->
-            {URI.to_string(%{uri | userinfo: user}), [{"PGPASSWORD", URI.decode(password)}]}
-
-          _ ->
-            {url, []}
-        end
-
-      _ ->
-        {url, []}
-    end
-  end
+  defdelegate split_credentials(url), to: PgUrl, as: :split
 
   # This string reaches the manifest, which the console renders.
   #
