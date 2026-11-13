@@ -16894,7 +16894,7 @@
       "post": {
         "callbacks": {},
         "deprecated": false,
-        "description": "Sign in with an editor/admin email + password and receive an AshAuthentication JWT for `Authorization: Bearer <token>`. Public; no authentication required.\n\nIf the account has two-factor authentication enabled this answers **200** with `two_factor_required` and a short-lived `pending_token` instead of **201** with a JWT — redeem it at `POST /api/auth/sign_in/verify`. Branch on the status code, not on the presence of `token`.",
+        "description": "Sign in with an editor/admin email + password and receive an AshAuthentication JWT for `Authorization: Bearer <token>`. Public; no authentication required.\n\nIf the account has two-factor authentication enabled this answers **200** with `two_factor_required` and a short-lived `pending_token` instead of **201** with a JWT — redeem it at `POST /api/auth/sign_in/verify`. Branch on the status code, not on the presence of `token`.\n\nWhere the site requires two-step sign-in of the account: during its grace period the **201** carries `second_factor`; past the deadline with no second factor set up (or with only a passkey, which cannot be used headlessly) this answers **403** `second_factor_required` and issues no token. A token issued during the grace period is refused with the same 403 on every request from the deadline. API keys are not affected.",
         "operationId": "signIn",
         "parameters": [],
         "requestBody": {
@@ -16957,6 +16957,22 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "second_factor": {
+                      "description": "Present only when the site requires two-step sign-in of this account and it has not set it up yet: from `deadline` on, the token stops working and signing in is refused until it does.",
+                      "properties": {
+                        "deadline": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "required": {
+                          "enum": [
+                            true
+                          ],
+                          "type": "boolean"
+                        }
+                      },
+                      "type": "object"
+                    },
                     "token": {
                       "description": "JWT bearer token",
                       "type": "string"
@@ -16990,6 +17006,9 @@
           },
           "401": {
             "description": "Invalid email or password (`invalid_credentials`). Where the operator has turned on human verification for this endpoint, also `challenge_required` or `challenge_failed`, whose `meta` names the provider, `site_key`, `script_url`, `global`, `onload_param`, `render_options`, `action` and `action_option`, `interactive` and `api` to draw the widget with; retry with `challenge_token`."
+          },
+          "403": {
+            "description": "`second_factor_required` — the site requires two-step sign-in of this account and its grace period is over. `meta.setup_url` is the browser page to set it up, `meta.deadline` when the grace period ended, and `meta.reason` is `passkey_only` when the account's only second factor is a passkey. No token is issued."
           },
           "422": {
             "description": "Missing email or password"
@@ -17045,6 +17064,22 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "second_factor": {
+                      "description": "Present only when the site requires two-step sign-in of this account and it has not set it up yet: from `deadline` on, the token stops working and signing in is refused until it does.",
+                      "properties": {
+                        "deadline": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "required": {
+                          "enum": [
+                            true
+                          ],
+                          "type": "boolean"
+                        }
+                      },
+                      "type": "object"
+                    },
                     "token": {
                       "description": "JWT bearer token",
                       "type": "string"
