@@ -289,6 +289,23 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
     end
   end
 
+  @doc """
+  Whether some site holds `user` now (`{:enforced, _}` from `status/3`), over
+  the same sites `required_somewhere?/1` reads. For an enrolment that arrives
+  without the site it was made on (`KilnCMS.Accounts.Changes.RequireEnrolmentProof`),
+  which must assume the strictest of them.
+  """
+  @spec enforced_somewhere?(Accounts.User.t()) :: boolean()
+  def enforced_somewhere?(user) do
+    if exempt?(user) do
+      false
+    else
+      user
+      |> candidate_orgs()
+      |> Enum.any?(&match?({:enforced, _deadline}, status(user, &1)))
+    end
+  end
+
   defp candidate_orgs(user) do
     if RoleGrant.effective_role(user) == :admin do
       Accounts.list_org_ids()

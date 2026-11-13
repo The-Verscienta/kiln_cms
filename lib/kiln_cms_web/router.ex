@@ -812,6 +812,9 @@ defmodule KilnCMSWeb.Router do
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       live "/account", AccountLive, :show
+      # Setting up a second factor (#2247): where a site that requires one
+      # sends an account that has none, so open to every signed-in tier.
+      live "/account/two-factor", TwoFactorSetupLive, :show
     end
 
     # Member payment handoffs. Plain CSRF-protected posts rather than LiveView

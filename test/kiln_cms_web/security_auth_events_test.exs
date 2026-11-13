@@ -638,7 +638,9 @@ defmodule KilnCMSWeb.SecurityAuthEventsTest do
       assert [enrolled] = events(:second_factor_enrolled, ip)
       assert enrolled.actor_id == user.id
       assert enrolled.org_id == org_id()
-      assert enrolled.metadata == %{"kind" => "totp"}
+      # The site requires nothing, so the enrolment needed no email proof
+      # (#2247): the settings page says so in the context it passes.
+      assert enrolled.metadata == %{"kind" => "totp", "proof" => "not_required"}
 
       current = Ash.get!(User, user.id, authorize?: false)
 

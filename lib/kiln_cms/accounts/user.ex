@@ -1215,6 +1215,10 @@ defmodule KilnCMS.Accounts.User do
 
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
+      # Past the site's deadline, a password-only session proves the account's
+      # email first (#2247, decision 1b). Decided here, not only on the page.
+      change KilnCMS.Accounts.Changes.RequireEnrolmentProof
+
       # Budgeted like the other two (#727). Not because a stolen-session
       # attacker can grind this into a bypass — they would have to have called
       # `:setup_totp` themselves first, in which case they already know the
@@ -1253,7 +1257,11 @@ defmodule KilnCMS.Accounts.User do
       change {KilnCMS.Security.Changes.Record,
               type: :second_factor_enrolled,
               target: fn record, _changeset -> {"user", record.id} end,
-              metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
+              metadata: fn _record, changeset ->
+                KilnCMS.Accounts.Changes.RequireEnrolmentProof.metadata(changeset, %{
+                  "kind" => "totp"
+                })
+              end}
 
       # Tell the owner (#2247, decision 1a), after the commit: a first
       # enrollment and a replacement alike.

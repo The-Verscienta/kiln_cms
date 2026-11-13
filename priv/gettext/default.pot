@@ -1212,6 +1212,11 @@ msgstr ""
 msgid "%{site} Editor"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{site} requires two-step sign-in for your role from %{date}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{size} B"
@@ -1543,7 +1548,7 @@ msgstr ""
 msgid "404s (%{count})"
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "6-digit code"
 msgstr ""
@@ -2015,6 +2020,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A search box that finds the record by its title."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A second factor keeps your account safe even if someone learns your password."
 msgstr ""
 
 #: lib/kiln_cms/security/posture/checks/core_security_notices.ex
@@ -2638,6 +2648,7 @@ msgid "Add a manual redirect"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a passkey"
 msgstr ""
@@ -4119,6 +4130,11 @@ msgstr ""
 msgid "Authentication code"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Authenticator app"
+msgstr ""
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4744,7 +4760,9 @@ msgstr ""
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/trash_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -5457,6 +5475,11 @@ msgstr ""
 msgid "Clusters form from published, indexed documents."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Code from the email"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
@@ -5689,7 +5712,8 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/confirm_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirm"
 msgstr ""
@@ -5717,6 +5741,12 @@ msgstr ""
 #: lib/kiln_cms_web/live/confirm_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirm your email address"
+msgstr ""
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your email address before adding a second factor."
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
@@ -6011,6 +6041,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #: lib/kiln_cms_web/live/setup_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Continue"
 msgstr ""
@@ -6591,7 +6622,7 @@ msgstr ""
 msgid "Couldn't sign out of your other sessions. Try again."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't start two-factor setup."
 msgstr ""
@@ -6654,6 +6685,7 @@ msgid "Couldn't upload %{name}: %{reason}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't verify that passkey — try again."
 msgstr ""
@@ -8091,7 +8123,7 @@ msgstr ""
 msgid "Each block's text fields, addressed by the block's stable id — a patch survives reordering."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Each code signs you in once if you lose your authenticator."
 msgstr ""
@@ -8406,6 +8438,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Email domains"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Email me a code"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
@@ -9223,6 +9260,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Export my data"
 msgstr ""
@@ -9641,6 +9679,11 @@ msgstr ""
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "First value that isn't empty"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "First, confirm it's you"
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_posture_live.ex
@@ -10753,7 +10796,7 @@ msgstr ""
 msgid "I have a team — review before publishing"
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "I've saved them"
 msgstr ""
@@ -12211,6 +12254,7 @@ msgid "Manage account %{email}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/account_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Manage billing"
 msgstr ""
@@ -12876,6 +12920,7 @@ msgid "Name on the other side"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Name this passkey (optional)"
 msgstr ""
@@ -14109,6 +14154,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not installed"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not now"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -15363,12 +15413,18 @@ msgstr ""
 msgid "Passed the human-verification check."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Passkey"
+msgstr ""
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey added"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey added — you can sign in with it now."
 msgstr ""
@@ -15384,6 +15440,7 @@ msgid "Passkey removed."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey setup was cancelled or isn't supported by this browser."
 msgstr ""
@@ -16165,7 +16222,7 @@ msgstr ""
 msgid "Provider price ID"
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Provisioning URI"
 msgstr ""
@@ -18370,7 +18427,7 @@ msgstr ""
 msgid "Saving…"
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."
 msgstr ""
@@ -18962,6 +19019,11 @@ msgstr ""
 msgid "Send"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Send a new code"
+msgstr ""
+
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
 msgid "Send a newsletter"
@@ -19162,18 +19224,30 @@ msgid "Set one up in Fields"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up a new authenticator"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up a new authenticator app so you can keep signing in without using another recovery code."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up an authenticator app"
 msgstr ""
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up my account"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Set up two-step sign-in"
 msgstr ""
 
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -19210,7 +19284,7 @@ msgstr ""
 msgid "Settings that apply to every form on this site. A form's own Embed tab can still override the embed default for that form alone."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Setup key"
 msgstr ""
@@ -19516,10 +19590,16 @@ msgstr ""
 msgid "Sign in with your device's fingerprint, face, or PIN instead of a password. A passkey verifies you on the device, so it counts as two factors on its own."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in with your device's fingerprint, face, or PIN. A passkey counts as two factors on its own."
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/page_html/access_denied.html.heex
 #: lib/kiln_cms_web/live/auth_page_title.ex
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign out"
 msgstr ""
@@ -20961,6 +21041,11 @@ msgstr ""
 msgid "Thanks — we got your message."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Thanks — your email address is confirmed."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
 msgid "Thanks — your subscription to %{email} is confirmed."
@@ -21049,12 +21134,19 @@ msgstr ""
 msgid "That category doesn't exist, so nothing was searched."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That code has expired. Send a new one."
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid — 2FA is still on."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid — try again."
 msgstr ""
@@ -22450,6 +22542,11 @@ msgstr ""
 msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "These stay open while you set up two-step sign-in."
+msgstr ""
+
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
 msgid "These stored names match no content type here, so they allow nothing. A custom type's own name never matches on this list — use Custom content types (all of them). Untick a name to remove it."
@@ -22809,7 +22906,7 @@ msgstr ""
 msgid "This invitation is no longer valid"
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "This is a shared demo account, so its password and sign-in methods can't be changed."
 msgstr ""
@@ -23114,6 +23211,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "This site publishes its content over two headless API surfaces — GraphQL and JSON:API — plus a rendered-artifact endpoint for full page bodies. Anonymous requests read published content; a bearer token unlocks drafts."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This site requires two-step sign-in for your role. Set it up to continue."
 msgstr ""
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
@@ -23483,7 +23585,8 @@ msgstr ""
 msgid "Too many attempts from this address — try again shortly."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Too many attempts — try again in %{seconds} seconds."
 msgstr ""
@@ -23725,12 +23828,13 @@ msgstr ""
 msgid "Two-factor authentication is now off."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication is now on."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication is on."
 msgstr ""
@@ -23738,6 +23842,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Two-factor authentication turned off"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in"
 msgstr ""
 
 #: lib/kiln_cms/security/posture/checks/second_factor.ex
@@ -23748,6 +23857,11 @@ msgstr ""
 #: lib/kiln_cms/security/posture/checks/operator_second_factor.ex
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in for platform administrators"
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in is on for your account."
 msgstr ""
 
 #: lib/kiln_cms_web/security_log.ex
@@ -24281,6 +24395,11 @@ msgstr ""
 msgid "Use all of mine"
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Use an app such as Google Authenticator or 1Password to make a new code every 30 seconds. It comes with recovery codes in case you lose it."
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Use dark theme"
@@ -24654,6 +24773,7 @@ msgid "Waiting for review: one %{kind}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting for your device… Follow your browser's prompt to finish."
 msgstr ""
@@ -24703,9 +24823,24 @@ msgstr ""
 msgid "We couldn't find the page you were looking for — it may have been moved or deleted."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "We couldn't send the code. Try again."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/newsletter_controller.ex
 #, elixir-autogen, elixir-format
 msgid "We couldn't sign you up just now. Please try again shortly."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "We sent a code to %{email}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "We've sent several codes already. Wait a while, then try again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -25608,6 +25743,7 @@ msgid "You don't have permission to view this page."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "You have %{count} passkey set up."
 msgid_plural "You have %{count} passkeys set up."
@@ -25653,8 +25789,14 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "You signed in with a recovery code."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "You signed in with your password. Before you add a second factor, enter the code we email to %{email}."
 msgstr ""
 
 #: lib/kiln_cms_web/notification_text.ex
@@ -25885,6 +26027,11 @@ msgstr ""
 msgid "Your library grouped by what it is about, not only by how it was filed — and where the vocabulary has not caught up."
 msgstr ""
 
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your membership and data"
+msgstr ""
+
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your name"
@@ -25898,6 +26045,11 @@ msgstr ""
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Your own identity provider on this site's sign-in page."
+msgstr ""
+
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your passkey counts, but it has no recovery codes. Add an authenticator app too, so losing the device doesn't lock you out."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/auth_controller.ex
@@ -25920,7 +26072,7 @@ msgstr ""
 msgid "Your provider may only sign in addresses in these domains, once each is verified. Publish the TXT record shown, then press Verify. Keep the record in place: it is checked again at every sign-in. Each domain is exact — example.com does not cover mail.example.com."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Your recovery codes — save them now, they won't be shown again."
 msgstr ""
@@ -26545,6 +26697,7 @@ msgid "e.g. Identity, Safety"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "e.g. MacBook Touch ID"
 msgstr ""
