@@ -52,10 +52,12 @@ defmodule KilnCMS.Firing.Engine do
   # it (`migrate_if_stale/4`) and it converges without a backfill.
   # v4 added `social` to `:json` (#2258): the document's link-preview title,
   # description and absolute image. Unlike `robots` (#2256),
-  # `custom_fields_portable` (#2103) or `inherited_fields` (#1327), which were
-  # added without a bump because they only matter on documents edited after the
-  # deploy, `social` belongs on every existing document — and only a bump makes
-  # those converge, through `migrate_if_stale/4`.
+  # `custom_fields_plain`, `custom_fields_portable` (#2103) or `inherited_fields`
+  # (#1327), which were added without a bump because no artifact fired before
+  # their release could have needed them and whatever turns them on re-fires the
+  # documents it affects, `social` belongs on every existing document — and only
+  # a bump makes those converge, through `migrate_if_stale/4`. When the next artifact change
+  # bumps this, what a bump costs, and the checklist: `docs/decisions/0060-*`.
   @format_version 4
 
   @enqueue_log_key {__MODULE__, :last_refire_enqueue_failure_ms}
@@ -286,7 +288,8 @@ defmodule KilnCMS.Firing.Engine do
   should pick up. v2 added `custom_fields` to `:json` and `contentLocation` to
   `:json_ld` (#428/#429); v3 the media shape on `:json`; v4 the `social` object
   on `:json` (#2258). A stored artifact older than this is re-fired when read
-  (`migrate_if_stale/4`).
+  (`migrate_if_stale/4`). Which changes bump it, and which don't, is
+  `docs/decisions/0060-*`.
   """
   @spec format_version() :: pos_integer()
   def format_version, do: @format_version
@@ -563,7 +566,8 @@ defmodule KilnCMS.Firing.Engine do
   # The document's robots flags (#2256), so a consumer rendering its own pages
   # can emit the directive. Additive and absent unless a flag is set — an
   # artifact of an ordinary document is byte-identical to what it was, which is
-  # why `@format_version` does not move. Absent means both false.
+  # why `@format_version` does not move (`docs/decisions/0060-*`). Absent means
+  # both false.
   defp put_robots(body, document) do
     noindex = Map.get(document, :noindex) == true
     nofollow = Map.get(document, :nofollow) == true
@@ -582,7 +586,7 @@ defmodule KilnCMS.Firing.Engine do
   #
   # Document-level only. The card type, `twitter:site` and the brand's fallback
   # image are SITE-level values (branding), so they stay out of a per-document
-  # artifact; a consumer supplies its own.
+  # artifact; a consumer supplies its own (`docs/decisions/0061-*`).
   defp put_social(body, document) do
     social =
       %{

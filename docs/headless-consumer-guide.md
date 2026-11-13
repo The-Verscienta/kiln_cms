@@ -150,7 +150,9 @@ the type to a compiled one when you need them.
 > Treat the transition as eventual, not next-request: **read
 > `format_version` if you need to know which shape you have** rather than
 > assuming the keys are present. An operator can migrate a whole corpus up front
-> with `mix kiln.refire_all` instead of waiting for reads to drive it.
+> with `mix kiln.refire_all` instead of waiting for reads to drive it. Which
+> changes move `format_version`, and which arrive without it, is
+> [ADR 0060](decisions/0060-an-artifact-change-bumps-format-version-only-when-every-existing-document-needs-it.md).
 
 ## Word count and reading time
 
@@ -467,6 +469,9 @@ three values that belong to the site rather than the document:
   image; the artifact does not, so `image` is absent on a document without one.
   Use your own default.
 
+Why these stay out of the artifact:
+[ADR 0061](decisions/0061-site-level-values-stay-out-of-per-document-artifacts.md).
+
 Not provided: `twitter:creator` and image alt text (`og:image:alt`).
 
 **`image` is fixed when the document is fired.** It names the host the site
@@ -495,7 +500,9 @@ consumer can still keep the old body:
   can keep the old body until it expires. Kiln itself answers `304` only on
   `If-None-Match`.
 
-Read `social` as optional and fall back to `title` when it is missing.
+Read `social` as optional and fall back to `title` when it is missing. Why
+`social` moved `format_version` when other new keys didn't:
+[ADR 0060](decisions/0060-an-artifact-change-bumps-format-version-only-when-every-existing-document-needs-it.md).
 
 ## Author / PII
 
