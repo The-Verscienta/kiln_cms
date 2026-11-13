@@ -259,7 +259,54 @@ defmodule KilnCMS.Backups.LockPoliciesTest do
 
         assert {:error, %Ash.Error.Forbidden{}} =
                  Backups.list_node_beats(actor: actor, authorize_with: :error)
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.list_live_node_beats(600, actor: actor, authorize_with: :error)
       end
+    end
+
+    test "another subsystem's system actor can't read the live beats" do
+      beat!("n-#{System.unique_integer([:positive])}")
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Backups.list_live_node_beats(600,
+                 actor: SystemActor.new(:billing),
+                 authorize_with: :error
+               )
+    end
+
+    # #2789: the window is measured from the database's now(), the clock the
+    # beat itself is stamped with, not this node's.
+    test "the live beats are those of the last `within_s` seconds on the database's clock" do
+      backdated = fn seconds ->
+        node = "live-#{seconds}-#{System.unique_integer([:positive])}"
+        beat!(node)
+
+        %{num_rows: 1} =
+          KilnCMS.Repo.query!(
+            "UPDATE backup_node_beats SET beat_at = now() - make_interval(secs => $2) " <>
+              "WHERE node = $1",
+            [node, seconds]
+          )
+
+        node
+      end
+
+      fresh = beat!("live-0-#{System.unique_integer([:positive])}").node
+      nine = backdated.(9 * 60)
+      eleven = backdated.(11 * 60)
+
+      live =
+        600
+        |> Backups.list_live_node_beats!(actor: Backups.system())
+        |> MapSet.new(& &1.node)
+
+      assert fresh in live
+      assert nine in live
+      refute eleven in live
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Backups.list_live_node_beats(0, actor: Backups.system())
     end
   end
 end

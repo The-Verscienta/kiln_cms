@@ -141,6 +141,7 @@ defmodule KilnCMS.Backups do
       # The heartbeat's, as `system/0`.
       define :beat_node, action: :beat
       define :list_node_beats, action: :read
+      define :list_live_node_beats, action: :live, args: [:within_s]
       define :get_node_beat, action: :read, get_by: [:node], not_found_error?: false
       define :prune_node_beats, action: :prune, require_reference?: false
     end

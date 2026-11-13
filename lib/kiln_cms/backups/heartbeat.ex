@@ -7,7 +7,12 @@ defmodule KilnCMS.Backups.Heartbeat do
 
     1. **Beat**: upsert this node's `KilnCMS.Backups.NodeBeat` (its Oban node
        name, this boot's `KilnCMS.Backups.boot_id/0`, its backup-dir id), with
-       the database's `now()`, never this node's clock.
+       the database's `now()`, never this node's clock. When the last-good
+       marker sync is on (`KilnCMS.Backups.MarkerSyncWorker.enabled?/0`), the
+       beat first gives a backup directory that already holds backups its id
+       (`KilnCMS.Backups.DirId.ensure_existing/1`), so the sync can reach a
+       directory only `scripts/backup.sh` writes to (#2789). An id it can't
+       create is reported as none, with one warning per reason per boot.
     2. **Stop canceled steps**, after a successful beat only (below).
     3. **Sweep**: `KilnCMS.Backups.Chain.reclaim_stale/0` (a holder whose node
        has not beaten for 180 s, or
@@ -63,7 +68,7 @@ defmodule KilnCMS.Backups.Heartbeat do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.DirId
+  alias KilnCMS.Backups.{DirId, MarkerSyncWorker}
 
   require Logger
 
@@ -78,7 +83,8 @@ defmodule KilnCMS.Backups.Heartbeat do
           last_beat: integer() | nil,
           beat_ok?: boolean(),
           started: integer(),
-          last_prune: integer() | nil
+          last_prune: integer() | nil,
+          dir_id_warned: MapSet.t()
         }
 
   @doc false
@@ -131,7 +137,8 @@ defmodule KilnCMS.Backups.Heartbeat do
       last_beat: nil,
       beat_ok?: false,
       started: now_ms(),
-      last_prune: nil
+      last_prune: nil,
+      dir_id_warned: MapSet.new()
     }
   end
 
@@ -177,12 +184,7 @@ defmodule KilnCMS.Backups.Heartbeat do
   end
 
   defp beat(state) do
-    dir_id =
-      case DirId.current() do
-        {:ok, id} -> id
-        _ -> nil
-      end
-
+    {dir_id, state} = dir_id(state)
     attrs = %{node: state.node, boot_id: state.boot_id, dir_id: dir_id}
 
     case Backups.beat_node(attrs, actor: Backups.system()) do
@@ -197,6 +199,37 @@ defmodule KilnCMS.Backups.Heartbeat do
     error ->
       Logger.warning("Backup heartbeat failed: #{Exception.message(error)}")
       Map.put(state, :beat_ok?, false)
+  end
+
+  # The id to report, and the state with any warning noted. With the marker
+  # sync off nothing routes by a cron-only directory's id, so none is created.
+  defp dir_id(state) do
+    if MarkerSyncWorker.enabled?() do
+      case DirId.ensure_existing() do
+        {:ok, id} -> {id, state}
+        {:error, :enoent} -> {nil, state}
+        {:error, reason} -> {nil, warn_dir_id(state, reason)}
+      end
+    else
+      case DirId.current() do
+        {:ok, id} -> {id, state}
+        _ -> {nil, state}
+      end
+    end
+  end
+
+  defp warn_dir_id(state, reason) do
+    if MapSet.member?(state.dir_id_warned, reason) do
+      state
+    else
+      Logger.warning(
+        "Backup heartbeat: no id for the backup directory #{Backups.dir()} " <>
+          "(#{inspect(reason)}). The last-good marker sync can't route to it, so it is " <>
+          "synced only in the slots this node runs the sync job."
+      )
+
+      %{state | dir_id_warned: MapSet.put(state.dir_id_warned, reason)}
+    end
   end
 
   # Only after a successful beat: the job states it reads are then the
