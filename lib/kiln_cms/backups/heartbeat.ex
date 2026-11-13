@@ -69,6 +69,14 @@ defmodule KilnCMS.Backups.Heartbeat do
   @spec fence_after_ms() :: pos_integer()
   def fence_after_ms, do: @fence_after_ms
 
+  @doc """
+  Milliseconds by when a node cut off from the database has stopped its steps,
+  or, if it reconnected, been told to: the fence threshold, plus one beat
+  interval for the tick that notices it, plus 30 s of slack.
+  """
+  @spec settled_after_ms() :: pos_integer()
+  def settled_after_ms, do: @fence_after_ms + @interval_ms + 30_000
+
   @impl GenServer
   def init(opts) do
     {:ok, new_state(opts), {:continue, :tick}}

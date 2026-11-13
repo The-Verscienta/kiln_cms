@@ -147,10 +147,12 @@ defmodule KilnCMS.Backups.Run do
       change Normalize
     end
 
-    # A failed (or interrupted) in-app run picks up where it stopped (#2218):
-    # back to `running`, with the old outcome cleared. The guard is the
-    # `Resume` change, which refuses anything but a failed run or a stale
-    # `running` one; the stamp and `started_at` stay the original attempt's.
+    # A failed, canceled or interrupted in-app run picks up where it stopped
+    # (#2218): back to `running`, with the old outcome cleared. The guard is
+    # the `Resume` change: it refuses anything but a failed or canceled run or
+    # a stale `running` one, and re-checks the same in the UPDATE's WHERE, so
+    # two callers holding one stale struct can't both flip it (#2421). The
+    # stamp and `started_at` stay the original attempt's.
     update :resume do
       accept [:chain_id]
       require_atomic? false

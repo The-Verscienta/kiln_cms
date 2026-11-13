@@ -62,7 +62,7 @@ defmodule KilnCMS.Backups do
 
   use Ash.Domain
 
-  alias KilnCMS.Backups.{Chain, Lock, Manifest, Refused, Run, StepWorker, WorkState}
+  alias KilnCMS.Backups.{Chain, Heartbeat, Lock, Manifest, Refused, Run, StepWorker, WorkState}
 
   require Ash.Query
   require Logger
@@ -230,7 +230,7 @@ defmodule KilnCMS.Backups do
   """
   @spec run_stale?(Run.t(), DateTime.t()) :: boolean()
   def run_stale?(%Run{} = run, now \\ DateTime.utc_now()) do
-    cutoff = DateTime.add(now, -stale_after_ms(), :millisecond)
+    %{stale: cutoff} = resume_cutoffs(now)
 
     # No timestamp at all (a bare struct) is not evidence of anything: not stale.
     case Enum.filter([run.started_at, run.updated_at], &match?(%DateTime{}, &1)) do
@@ -239,8 +239,25 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  defp stale_after_ms do
+  # How long a `running` run may go without a write before it counts as
+  # stale: the worker's timeout plus grace.
+  @doc false
+  @spec stale_after_ms() :: pos_integer()
+  def stale_after_ms do
     StepWorker.timeout(nil) + :timer.minutes(@stale_grace_minutes)
+  end
+
+  # The instants a resume is judged against, one definition for the early
+  # check (`run_resumable?/2`) and the `:resume` action's UPDATE filter:
+  # `stale`, before which a `running` run's last write makes it stale, and
+  # `canceled`, before which a Cancel has settled (`Heartbeat.settled_after_ms/0`).
+  @doc false
+  @spec resume_cutoffs(DateTime.t()) :: %{stale: DateTime.t(), canceled: DateTime.t()}
+  def resume_cutoffs(%DateTime{} = now) do
+    %{
+      stale: DateTime.add(now, -stale_after_ms(), :millisecond),
+      canceled: DateTime.add(now, -Heartbeat.settled_after_ms(), :millisecond)
+    }
   end
 
   @doc """

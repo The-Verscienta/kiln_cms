@@ -172,6 +172,42 @@ defmodule KilnCMS.Backups.RunTest do
                Backups.resume_run(live, %{}, actor: Backups.system())
     end
 
+    # #2421: the guard is re-checked in the UPDATE's WHERE. Both calls pass the
+    # early check (the struct still says `failed`); only the filter can refuse
+    # the second, so this fails if the filter is dropped.
+    test "a second resume from the same stale struct is refused; the first chain keeps the row" do
+      failed = failed!()
+      chain_a = Ash.UUID.generate()
+      chain_b = Ash.UUID.generate()
+
+      assert {:ok, %{status: :running, chain_id: ^chain_a}} =
+               Backups.resume_run(failed, %{chain_id: chain_a}, actor: Backups.system())
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.resume_run(failed, %{chain_id: chain_b}, actor: Backups.system())
+
+      assert %{status: :running, chain_id: ^chain_a} =
+               Backups.get_run!(failed.id, actor: Backups.system())
+    end
+
+    test "a stale struct of a run that went quiet is refused once another caller re-opened it" do
+      quiet_at = DateTime.add(DateTime.utc_now(), -3 * 3600, :second)
+      quiet = %{started_at: quiet_at} |> start!() |> backdate!(quiet_at)
+      quiet = Backups.get_run!(quiet.id, actor: Backups.system())
+      chain_a = Ash.UUID.generate()
+
+      assert {:ok, _} =
+               Backups.resume_run(quiet, %{chain_id: chain_a}, actor: Backups.system())
+
+      # The resume bumped `updated_at`, so the row is no longer stale.
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.resume_run(quiet, %{chain_id: Ash.UUID.generate()},
+                 actor: Backups.system()
+               )
+
+      assert %{chain_id: ^chain_a} = Backups.get_run!(quiet.id, actor: Backups.system())
+    end
+
     test "refuses a succeeded, skipped or imported run" do
       done = Backups.finish_run!(start!(), %{}, actor: Backups.system())
 
