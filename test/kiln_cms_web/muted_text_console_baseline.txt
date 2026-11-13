@@ -59,7 +59,7 @@ lib/kiln_cms_web/live/safety_fields_live.ex 4
 lib/kiln_cms_web/live/search_palette_live.ex 7
 lib/kiln_cms_web/live/search_synonym_live.ex 7
 lib/kiln_cms_web/live/security_txt_live.ex 4
-lib/kiln_cms_web/live/settings_live.ex 23
+lib/kiln_cms_web/live/settings_live.ex 21
 lib/kiln_cms_web/live/site_mail_live.ex 6
 lib/kiln_cms_web/live/slug_regen_live.ex 3
 lib/kiln_cms_web/live/social_live.ex 4
@@ -67,7 +67,7 @@ lib/kiln_cms_web/live/structure_live.ex 4
 lib/kiln_cms_web/live/system_live.ex 17
 lib/kiln_cms_web/live/task_live.ex 7
 lib/kiln_cms_web/live/taxonomy_live.ex 6
-lib/kiln_cms_web/live/team_live.ex 10
+lib/kiln_cms_web/live/team_live.ex 9
 lib/kiln_cms_web/live/translations_live.ex 8
 lib/kiln_cms_web/live/trash_live.ex 1
 lib/kiln_cms_web/live/type_definition_live.ex 10

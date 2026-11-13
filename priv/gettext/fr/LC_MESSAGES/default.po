@@ -1409,6 +1409,7 @@ msgstr "(sans lien)"
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "(opens in a new tab)"
 msgstr "(s'ouvre dans un nouvel onglet)"
@@ -12044,6 +12045,7 @@ msgstr "Disposition"
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Learn more"
 msgstr "En savoir plus"
@@ -12272,6 +12274,11 @@ msgstr "Les liens ayant répondu par un mur anti-robots, un paywall ou une limit
 #, elixir-autogen, elixir-format
 msgid "Links to"
 msgstr "Pointe vers"
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "Links work for %{days} days. Resending mails a new link and restarts the clock; the old link stops working. Expired invitations stay listed for %{keep} days, and inviting the address again resends it."
+msgstr "Les liens restent valables %{days} jours. Un renvoi envoie un nouveau lien et relance le délai ; l’ancien lien cesse de fonctionner. Les invitations expirées restent dans la liste pendant %{keep} jours, et inviter de nouveau l’adresse la renvoie."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -15787,8 +15794,8 @@ msgstr "Politique de mots de passe enregistrée."
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
-msgid "Passwords are not looked up at all."
-msgstr "Les mots de passe ne sont pas vérifiés du tout."
+msgid "Passwords set on this site are not checked, and nothing about them is sent to Have I Been Pwned. If this setting can't be read, Warn applies instead; only the server's operator can stop the check for every site (BREACHED_PASSWORD_CHECK=false)."
+msgstr "Les mots de passe définis sur ce site ne sont pas vérifiés, et rien les concernant n’est envoyé à Have I Been Pwned. Si ce réglage ne peut pas être lu, Avertir s’applique à la place ; seul l’exploitant du serveur peut arrêter la vérification pour tous les sites (BREACHED_PASSWORD_CHECK=false)."
 
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
@@ -25302,6 +25309,16 @@ msgstr "Nous n'avons pas pu vous inscrire pour le moment. Veuillez réessayer da
 msgid "We sent a code to %{email}."
 msgstr "Nous avons envoyé un code à %{email}."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "We'll email you each time a passkey is added to your account."
+msgstr "Nous vous enverrons un e-mail chaque fois qu'une clé d'accès est ajoutée à votre compte."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "We'll email you when an authenticator app is added or replaced."
+msgstr "Nous vous enverrons un e-mail lorsqu'une application d'authentification est ajoutée ou remplacée."
+
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "We've sent several codes already. Wait a while, then try again."
@@ -25947,6 +25964,11 @@ msgstr "Vous êtes connecté en tant que %{role} sur %{site}."
 #, elixir-autogen, elixir-format
 msgid "You are signed in, but your account has no role on %{site}."
 msgstr "Vous êtes connecté, mais votre compte n’a aucun rôle sur %{site}."
+
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "You can also use a passkey."
+msgstr "Vous pouvez aussi utiliser une clé d'accès."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format

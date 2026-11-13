@@ -820,11 +820,22 @@ defmodule KilnCMSWeb.TeamLive do
                 options={custom_role_options(@roles)}
               />
             </div>
-            <p class="text-xs text-base-content/60">
+            <p class="text-xs text-base-content/70">
               {gettext(
                 "No account yet, or not confirmed? They'll get an email invitation. A confirmed account is added straight away."
               )}
               {tier_hint()}
+              <a
+                id="add-member-docs"
+                href={docs_url("account-administration.md#invite-someone-to-a-site")}
+                target="_blank"
+                rel="noopener"
+                class="link inline-flex items-center gap-1 font-medium text-primary-ink"
+              >
+                {gettext("Learn more")}
+                <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
+                <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+              </a>
             </p>
             <.button type="submit" variant="primary">{gettext("Add or invite")}</.button>
           </form>
@@ -838,6 +849,16 @@ defmodule KilnCMSWeb.TeamLive do
             <h3 id="team-invitations-heading" class="text-sm font-medium">
               {gettext("Pending invitations")} ({length(@invitations)})
             </h3>
+            <%!-- The numbers are `Invitations.ttl_days/0` and
+                  `prune_after_days/0`. Inviting an address whose invitation
+                  expired resends it (`AddOrInvite`, `:reinvited`). --%>
+            <p id="team-invitations-help" class="text-xs text-base-content/70">
+              {gettext(
+                "Links work for %{days} days. Resending mails a new link and restarts the clock; the old link stops working. Expired invitations stay listed for %{keep} days, and inviting the address again resends it.",
+                days: Invitations.ttl_days(),
+                keep: Invitations.prune_after_days()
+              )}
+            </p>
             <ul class="card divide-y divide-base-content/10 overflow-hidden">
               <li
                 :for={invitation <- @invitations}

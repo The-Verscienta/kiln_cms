@@ -331,6 +331,8 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
 
       assert has_element?(view, "#passkeys-at-limit", "the most an account can hold")
       refute has_element?(view, "#add-passkey-form")
+      # Nothing more can be added here, so no line about mail for adding one.
+      refute has_element?(view, "#passkey-added-mail")
 
       # The handler re-checks: a crafted event gets no challenge.
       render_hook(view, "passkey_begin", %{"name" => ""})
@@ -346,6 +348,14 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
 
       assert has_element?(view, "#add-passkey-form")
       refute has_element?(view, "#passkeys-at-limit")
+
+      # Beside the screen-lock line: `Passkey.:register` mails the owner every
+      # time (#2828).
+      assert has_element?(
+               view,
+               "#passkey-added-mail",
+               "We'll email you each time a passkey is added to your account."
+             )
     end
 
     test "a registration the cap refuses says so", %{conn: conn, user: user} do

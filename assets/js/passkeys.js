@@ -178,15 +178,26 @@ const stepUpWithPasskey = async (statusEl) => {
 export const initPasskeyStepUp = (root = document) => {
   if (!supported()) return
 
+  let revealed = false
+
   root.querySelectorAll("[data-passkey-step-up]").forEach((block) => {
     const button = block.querySelector("[data-role=passkey-step-up]")
     const status = block.querySelector("[data-role=passkey-status]")
     if (!button) return
 
     block.hidden = false
+    revealed = true
     button.addEventListener("click", () => {
       if (status) status.textContent = ""
       stepUpWithPasskey(status)
     })
   })
+
+  // The "or use a passkey" line beside the code prompt: shown only with a
+  // button it can point at.
+  if (revealed) {
+    root.querySelectorAll("[data-passkey-step-up-hint]").forEach((hint) => {
+      hint.hidden = false
+    })
+  }
 }

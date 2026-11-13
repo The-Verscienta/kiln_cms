@@ -1085,6 +1085,39 @@ carries the reasoning.
   and [ADR 0047](../decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md).
   No behavior changes. (#2674, #2656)
 
+<a id="account-screens-help-text"></a>
+
+- **Team, Settings and the second-step sign-in page now say what happens next: how long an invitation link lasts, that adding a second factor emails you, and that a passkey can answer the code prompt.**
+  Each of these was in the guides but not on the screen (#2454, #2828):
+  - **Team** (`/editor/team`): under **Pending invitations**, "Links work
+    for 7 days. Resending mails a new link and restarts the clock; the old
+    link stops working. Expired invitations stay listed for 30 days, and
+    inviting the address again resends it." The numbers come from
+    `KilnCMS.Accounts.Invitations.ttl_days/0` and `prune_after_days/0`. The
+    note under the **Add or invite** form ends in a **Learn more** link to
+    [Invite someone to a site](../account-administration.md#invite-someone-to-a-site).
+  - **Settings** (`/editor/settings`): the **Passkeys** section adds "We'll
+    email you each time a passkey is added to your account." beside the
+    screen-lock line, and **Two-factor authentication** adds "We'll email you
+    when an authenticator app is added or replaced." Both mails have been
+    sent since the second-factor notice shipped
+    ([We email you when a second factor is added](../two-factor-auth.md#we-email-you-when-a-second-factor-is-added));
+    an owner who knows to expect them is likelier to notice one they did not
+    cause.
+  - **`/sign-in/verify`**: for an account with an authenticator app and a
+    passkey, on a host where the passkey can run, the prompt now reads
+    "Enter the 6-digit code from your authenticator app. You can also use a
+    passkey." The second sentence is sent hidden and shown by the same script
+    that shows **Use a passkey** (`initPasskeyStepUp` in
+    `assets/js/passkeys.js`), so a browser without passkey support never sees
+    it. The code field's `aria-describedby` still points at the one
+    `#two-factor-help` paragraph, so a screen reader hears the hint too once
+    it is shown.
+
+  Why an invitation is a row of its own and not an account created up front
+  is now [ADR 0050](../decisions/0050-a-site-invitation-is-its-own-row-not-an-account-written-up-front.md),
+  linked from the invitation guide. No migration or config change.
+
 ## Fixed
 
 <a id="backup-resume-safety"></a>
@@ -1886,6 +1919,29 @@ carries the reasoning.
   (the terms on which the plugin health check tells hex.pm which plugins a
   server runs, #2568). Documentation only: no code, migration or config
   change.
+
+<a id="password-policy-off-description"></a>
+
+- **Password policy: the description of Off no longer says passwords are "not looked up at all".**
+  It said so while the server-wide check was still on, and that was only
+  ever true of one site, and only while its saved policy can be read (an
+  unreadable one is treated as **Warn** and the lookup is made). The page now
+  reads: "Passwords set on this site are not checked, and nothing about them
+  is sent to Have I Been Pwned. If this setting can't be read, Warn applies
+  instead; only the server's operator can stop the check for every site
+  (BREACHED_PASSWORD_CHECK=false)." This matches
+  [Breached passwords](../account-administration.md#when-the-check-does-nothing)
+  and [ADR 0031](../decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md);
+  a deployment that must make no request to Have I Been Pwned needs
+  `BREACHED_PASSWORD_CHECK=false` (#2868).
+
+  Also corrected in the docs: the table of what the staging scrub removes
+  ([staging-environments.md](../staging-environments.md)) now lists every
+  purge `KilnCMS.Staging.Scrub` makes, adding recorded 404 paths, backup
+  history, the security log, the instance security log and pending security
+  alert dispatches, and names each row's key in the scrub's summary. A test
+  now fails when the scrub reports a key the table does not name, or the
+  table names a key the scrub no longer reports (#2454).
 
 ## Security
 

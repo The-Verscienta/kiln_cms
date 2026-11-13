@@ -295,16 +295,23 @@ resend, because an accepted invitation would outlast the grant.
 Invitations work on an invite-only site (`:registration_enabled` false) too:
 that is what they are for there.
 
+Why an invitation is not an account until it is accepted: [ADR 0050](decisions/0050-a-site-invitation-is-its-own-row-not-an-account-written-up-front.md).
+
 1. Open the console on the host of the site you are inviting them to, then
    **Team** under **Operations** in the sidebar (`/editor/team`). Team acts on
    the site the console is showing.
 2. Under **Members**, enter the address in **Email**. Pick a **Site tier**
    (*Viewer* is the default) and, if the site has custom roles, a **Custom
-   role**.
+   role**. The note under the fields ends in **Learn more**, which opens this
+   section in a new tab.
 3. Click **Add or invite**. You see one of these results:
    - "Invitation sent to (address)." The address now appears under **Pending
      invitations (n)** with its tier, its custom role, "Invited by (you)." and
-     "Expires (date and time, UTC)".
+     "Expires (date and time, UTC)". The line under that heading sums up the
+     rules in [Resend or revoke an invitation](#resend-or-revoke-an-invitation):
+     "Links work for 7 days. Resending mails a new link and restarts the
+     clock; the old link stops working. Expired invitations stay listed for
+     30 days, and inviting the address again resends it."
    - "Member added to this site." The address already had a confirmed account,
      so it is in the member list now. Its owner is mailed "You were added to
      (site)" with a sign-in link. There is nothing more to do.
@@ -1305,8 +1312,12 @@ Requires the admin role.
 1. Open **Password policy** under **Sign-in & access** in the console sidebar (or go to
    `/editor/password-policy`).
 2. In **When a new password is in a known breach**, pick one of the three options:
-   - **Off - don't warn.** Passwords are not checked, and no request is
-     made to Have I Been Pwned for this site.
+   - **Off - don't warn.** Passwords set on this site are not checked, and
+     nothing about them is sent to Have I Been Pwned. The description under
+     the menu adds the two limits: if the saved policy can't be read, Warn
+     applies instead, and only the operator's `BREACHED_PASSWORD_CHECK=false`
+     stops the check for every site
+     ([When the check does nothing](#when-the-check-does-nothing)).
    - **Warn - allow it, with a warning.** The default. The password is
      accepted; the person sees a notice asking them to consider another.
    - **Block - refuse it for administrators.** An administrator's new password
