@@ -828,7 +828,8 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   unanswered too. Otherwise the silence is the address's own reverse zone,
   which its owner chooses, and its misses count. The guard goes by the last
   canary's answer and assumes the resolver works until one has found
-  otherwise. A claim whose PTR names a host under
+  otherwise ([ADR 0054](decisions/0054-in-crawler-verification-a-silence-the-claimant-controls-counts-against-it-and-one-the-vendor-controls-does-not.md) argues whose silence counts, and why a fixed
+  canary decides). A claim whose PTR names a host under
   the engine's domain, and whose forward query for that host got no answer
   with its full one-second budget, keeps the exemption: that silence is in
   the engine's zone, not the address owner's. A DuckDuckBot claim has no DNS
@@ -967,7 +968,8 @@ see [bot-budgets.md](bot-budgets.md).
   charged as no user agent and, with the 404 guard on, can be blocked, until
   the next fetch (normally within 6 hours; at most 24, after which the list is
   stale and claims are unproven again). For Google, Bing and Apple an address
-  outside the list falls back to DNS, so lag costs nothing there.
+  outside the list falls back to DNS, so lag costs nothing there. The rule is
+  [ADR 0055](decisions/0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md); whether the 404 guard should exempt such a claim is #2852.
 - **Outbound HTTPS to four vendors (#2586).** One node per cluster fetches
   `developers.google.com`, `www.bing.com`, `search.developer.apple.com` and
   `duckduckgo.com` every 6 hours, and a node with no fresh list queues a fetch
@@ -978,7 +980,9 @@ see [bot-budgets.md](bot-budgets.md).
   the vendor learns only that the fetching node's IP address runs this
   software. `KILN_CRAWLER_RANGES=false` (or `KILN_CRAWLER_VERIFICATION=false`)
   stops every request; `KILN_CRAWLER_RANGES_CRON=false` stops the automatic
-  ones. See [data-flows.md](data-flows.md#optional-subprocessors).
+  ones. See [data-flows.md](data-flows.md#optional-subprocessors), and
+  [ADR 0056](decisions/0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing-about-the-installation.md) for why it is on a schedule by default and
+  [ADR 0057](decisions/0057-one-node-fetches-the-crawler-ip-lists-and-the-others-re-check-what-it-sends.md) for why one node fetches.
 - **Outbound DNS to the system resolver.** Each node sends PTR, A and AAAA
   queries for visitors' addresses (never for one inside the claimed engine's
   fresh published list, nor for DuckDuckBot) to the nameservers in its `/etc/resolv.conf`
@@ -989,7 +993,8 @@ see [bot-budgets.md](bot-budgets.md).
   address; see [data-flows.md](data-flows.md#optional-subprocessors). With
   the 404 guard on, the canary adds at most one PTR query a minute for
   `8.8.8.8`, which names no visitor.
-  `KILN_CRAWLER_VERIFICATION=false` turns all of it off.
+  `KILN_CRAWLER_VERIFICATION=false` turns all of it off. Why it is on by
+  default: [ADR 0058](decisions/0058-crawler-verification-sends-a-visitors-address-to-the-dns-resolver-by-default.md).
 - **Switching user agents gains nothing.** Every class charges the one
   per-address counter, so an address never gets past the highest single class
   ceiling. The cost of sharing is that a browser-heavy shared address (an office
