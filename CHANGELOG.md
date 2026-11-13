@@ -84,6 +84,9 @@ Every summary line below that was shortened links to its own entry there.
 - **No form field of any type can be named `website` (the spam trap's input) on add, rename or type change; a field that already is keeps working and is flagged "Reserved name" in the builder until renamed.**
   ([long form](docs/changelog/unreleased.md#form-field-name-website-reserved))
 
+- **Contributors: the required `Compile, lint, scan & test` check also waits on docs, strict-tenancy, overlay drift, both clients and the ML job; every required job has a time limit.**
+  ([#2801](https://github.com/The-Verscienta/kiln_cms/pull/2801) · [long form](docs/changelog/unreleased.md#ci-required-check-covers-more-jobs))
+
 ### Fixed
 
 - **Security alerts: the inbox says each alert in the reader's language, a delivery that exhausts its attempts emits `alert_failed`, other sites' consoles show "N unread platform alerts", and the full-IP help text covers IPv6.**
@@ -128,6 +131,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The content editor's Featured image field shows an image older than the org's 500 most recent uploads, with its Remove link, instead of "None selected".**
   ([long form](docs/changelog/unreleased.md#featured-image-older-than-picker-window))
+
+- **The image build retries a failed GitHub release-asset download for about 4 minutes before failing, so a short CDN outage no longer fails `docker build`.**
+  ([#2801](https://github.com/The-Verscienta/kiln_cms/pull/2801) · [long form](docs/changelog/unreleased.md#image-build-retries-downloads))
 
 - **The Backups page shows recovery-point and last-good badges on History rows and a last-good summary, explains the backup queue under Back up now, and hides Cancel on a finishing row.**
   ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
