@@ -139,6 +139,31 @@ carries the reasoning.
   group's own **Select all** still ticks them all. On a Slack-format form,
   which offers only security events, Select all ticks them all. (#2642)
 
+<a id="ci-required-check-covers-more-jobs"></a>
+
+- **For contributors: the required `Compile, lint, scan & test` check now also waits on the docs, strict-tenancy, overlay drift, client, JS client and ML jobs, and a hung CI job fails within its own time limit.**
+  The "Require CI on main" ruleset names that one check, and it only
+  aggregates the jobs in `ci.needs`. Those were the build, the test shards,
+  coverage, Dialyzer and the plugin SDK, so a PR could merge with a red
+  `mix docs`, a pending `mix ash.codegen` (checked only by the
+  strict-tenancy job), broken client libraries or a broken `KILN_ML=1`
+  build. `ci.needs` now adds `docs`, `strict_tenancy`, `overlay_drift`,
+  `client`, `client-js` and `ml`, all reliably green on `main`. Still visible but not required, with the reason
+  written above the `ci` job: `e2e` (it failed in about 6 of the last 100
+  runs), `deps_audit` (the advisory database changes on its own schedule),
+  `image` (it downloads release assets from GitHub; see the image-build entry under Fixed) and the qpdf and ImageMagick script jobs.
+  To make a job required, add it to `ci.needs`; the ruleset does not change
+  ([Required checks](https://github.com/The-Verscienta/kiln_cms/blob/main/CONTRIBUTING.md#required-checks)).
+  Every required job now has a job-level `timeout-minutes` (20 to 90),
+  three or more times its longest recent run, instead of GitHub's six-hour
+  default. That default is what let one hang hold the docs job for 68
+  minutes: the docs publisher dry-run waited on a Mix build lock held inside
+  its own VM. The three publisher dry-runs now run with
+  `MIX_OS_CONCURRENCY_LOCK=0` (each is one `elixir` process, and they run one
+  after another, so the cross-process lock protects nothing there) and a
+  5-minute step timeout. The real publish workflows are unchanged.
+  (#2729, #2572)
+
 ## Fixed
 
 <a id="security-alert-gaps-2642"></a>
@@ -364,3 +389,33 @@ carries the reasoning.
   without first choosing another. The field now resolves the image the way
   the editor's preview already did: the window first, then the database.
   Saving never lost the image; only the display was wrong.
+
+<a id="image-build-retries-downloads"></a>
+
+- **The image build retries a failed release-asset download with backoff, so a few minutes of 504s from GitHub's release CDN no longer fail it.**
+  Building the Dockerfile downloads the precompiled NIFs of y_ex, lazy_html
+  and vix (and tokenizers in a `KILN_ML=1` build), vix's libvips tarball and
+  the tailwind binary from GitHub releases, and the esbuild binary from npm.
+  The builder can't build any of them from source, and each tool retries
+  for only a few seconds, so a short 504 window failed the build, in CI's
+  image jobs, in the release workflow and on an operator's own `docker
+  build`. Both `mix deps.compile` steps and the tailwind and esbuild installs
+  now run under `rel/docker/retry_download.sh`, which runs the step again
+  after 15, 30, 60 and 120 seconds when its output ends in a download error.
+  A compile error or any other failure still fails at once.
+  - **If you build the image yourself:** nothing to change. An outage longer
+    than about 4 minutes still fails the build, and it now takes that long
+    to do so, for each wrapped step. A download that can never succeed (a 403,
+    a rate limit, a 404 after a dependency bump) also fails about 4 minutes
+    later than before, because the fetchers' messages name the URL, not the
+    status. To shorten or lengthen the wait, set `KILN_FETCH_ATTEMPTS`
+    (attempts in all, default 5) or `KILN_FETCH_BACKOFF` (first wait in
+    seconds, doubling, default 15) in the `RUN` step's environment; there is
+    no build arg for them.
+  - The tailwind and esbuild binaries are now fetched in their own layer
+    right after the deps, with `--if-missing`, instead of inside
+    `mix assets.deploy`. That layer is cached with the deps, so a build that
+    changed only application code no longer downloads them.
+  - The script is removed from the builder before `mix release`, and never
+    reaches the runtime image. See
+    [Building the image](../deploy.md#building-the-image). (#2462)
