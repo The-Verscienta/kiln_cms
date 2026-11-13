@@ -294,10 +294,35 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
                ~s(<img src="https://raw.githubusercontent.com/The-Verscienta/kiln_cms/main/docs/images/editorial-workflow/)
     end
 
-    test "every other guide is one rich_text block, as it was", %{catalogue: catalogue} do
-      for doc <- PublishDocs.render_all(catalogue), doc.path != @guide do
-        assert [{:html, _}] = doc.blocks, "#{doc.path} grew a block"
+    # #2460: any guide may have screenshots, so which guides are split is read
+    # off the Markdown, not a list of guides.
+    test "a guide is split into blocks exactly when it has a screenshot", %{catalogue: catalogue} do
+      {with_images, without} =
+        catalogue
+        |> PublishDocs.render_all()
+        |> Enum.split_with(&(&1.path |> File.read!() |> standalone_local_image?()))
+
+      assert @guide in Enum.map(with_images, & &1.path)
+      # A broken scan would otherwise put every guide on one side.
+      assert length(without) > 50
+
+      for doc <- without do
+        assert [{:html, _}] = doc.blocks, "#{doc.path} has no screenshot but grew a block"
       end
+
+      for doc <- with_images do
+        assert Enum.any?(doc.blocks, &match?({:image, _}, &1)),
+               "#{doc.path} has a screenshot but published no image block"
+      end
+    end
+
+    test "the screenshot scan sees a paragraph that is one local image, and nothing else" do
+      assert standalone_local_image?("Intro.\n\n![A shot.](images/x/1.webp)\n\nMore.")
+      assert standalone_local_image?("![Titled.](images/x/1.webp \"Caption\")\n")
+      refute standalone_local_image?("Text ![inline](images/x/1.webp) here.")
+      refute standalone_local_image?("![Badge](https://example.com/badge.svg)")
+      refute standalone_local_image?("Lead-in line\n![A shot.](images/x/1.webp)")
+      refute standalone_local_image?("```\n![In a fence.](images/x/1.webp)\n```")
     end
 
     test "a changed screenshot selects the guides that show it, and a dry run sends nothing" do
@@ -441,6 +466,31 @@ defmodule KilnCMS.Scripts.PublishDocsTest do
       refute_received {:request, _, "/api/json/pages", _}
       refute_received {:request, "POST", "/api/media", _}
     end
+  end
+
+  # Whether some paragraph of the Markdown, outside fenced code, is nothing but
+  # an image whose source is a repo file: what the publisher turns into an image
+  # block. Read off the text rather than the publisher's parse, so the test does
+  # not grade the publisher against itself.
+  defp standalone_local_image?(markdown) do
+    markdown
+    |> String.split("\n")
+    |> Enum.map_reduce(false, fn line, in_fence? ->
+      cond do
+        Regex.match?(~r/^\s*(```|~~~)/, line) -> {"", not in_fence?}
+        in_fence? -> {"", true}
+        true -> {line, false}
+      end
+    end)
+    |> elem(0)
+    |> Enum.join("\n")
+    |> String.split(~r/\n\s*\n/)
+    |> Enum.any?(fn paragraph ->
+      case Regex.run(~r/\A\s*!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*\z/, paragraph) do
+        [_, src] -> URI.parse(src).scheme == nil
+        nil -> false
+      end
+    end)
   end
 
   defp fixture_doc(dir, blocks) do

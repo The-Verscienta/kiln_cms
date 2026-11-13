@@ -5,7 +5,8 @@
 #   ./scripts/optimize_home_images.sh            # screenshots + default logo
 #   ./scripts/optimize_home_images.sh home       # screenshots only
 #   ./scripts/optimize_home_images.sh logo       # default logo variants only
-#   ./scripts/optimize_home_images.sh docs       # guide screenshots only (#2158)
+#   ./scripts/optimize_home_images.sh docs       # every guide's screenshots (#2158, #2460)
+#   ./scripts/optimize_home_images.sh docs editorial-workflow   # one guide's
 #
 # This is the ONLY path to the files under priv/static/images/home/ and the
 # logo-mark-sm.* variants; never copy a raw capture into priv/static.
@@ -19,12 +20,13 @@
 #   priv/static/images/logo-mark.png (278x379, left untouched)
 #     -> priv/static/images/logo-mark-sm.png, logo-mark-sm.webp (88x120)
 #
-#   e2e/screenshots/raw/workflow-<n>-<name>.jpg   (from
-#       e2e/screenshots/editorial-workflow.spec.js; gitignored)
-#     -> docs/images/editorial-workflow/<n>-<name>.webp (at most 1440 wide),
-#        for docs/editorial-workflow.md. Not part of `all`: the guides' images
-#        are not the site's, and nothing under priv/static comes from them.
-#        test/kiln_cms/docs/editorial_workflow_test.exs holds the budgets.
+#   e2e/screenshots/raw/<guide>/<n>-<name>.jpg   (from the guide's capture
+#       spec, e2e/screenshots/<guide>.spec.js; gitignored)
+#     -> docs/images/<guide>/<n>-<name>.webp (at most 1440 wide), for
+#        docs/<guide>.md. With no guide named, every folder under raw/ is
+#        derived. Not part of `all`: the guides' images are not the site's, and
+#        nothing under priv/static comes from them.
+#        test/kiln_cms/docs/guide_images_test.exs holds the budgets.
 #
 # Tools:
 #   cwebp    WebP encoder — `brew install webp` / `apt install webp`
@@ -130,22 +132,47 @@ image_width() {
   echo "$w"
 }
 
+# docs [<guide>...] — derive the named guides' screenshots, or every guide's
+# under raw/ when none is named.
 docs() {
-  local out="$ROOT/docs/images/editorial-workflow"
-  local found=0
-  mkdir -p "$out"
-  for src in "$RAW"/workflow-*.jpg; do
+  local guides=() dir
+  if [ "$#" -gt 0 ]; then
+    guides=("$@")
+  else
+    for dir in "$RAW"/*/; do
+      if [ -d "$dir" ]; then guides+=("$(basename "$dir")"); fi
+    done
+  fi
+  # `${guides[@]}` of an empty array is an unbound variable to bash 3.2's `set -u`.
+  [ "${#guides[@]}" -gt 0 ] || die "no $RAW/<guide>/ folder — run a guide's capture spec under e2e/screenshots/ first"
+
+  local guide
+  for guide in "${guides[@]}"; do
+    docs_guide "$guide"
+  done
+  for guide in "${guides[@]}"; do
+    ( cd "$ROOT" && find "docs/images/$guide" -type f -name '*.webp' -exec ls -l {} + | awk '{print $5, $9}' )
+  done
+}
+
+# docs_guide <guide> — raw/<guide>/*.jpg -> docs/images/<guide>/*.webp
+docs_guide() {
+  local guide="$1"
+  # The name becomes a path under docs/images/, as the guide's basename does.
+  [[ "$guide" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "a guide is named like its docs/<guide>.md basename (lowercase, digits, hyphens), not '$guide'"
+  local in="$RAW/$guide" out="$ROOT/docs/images/$guide"
+  local found=0 src name w
+  for src in "$in"/*.jpg; do
     [ -f "$src" ] || continue
+    # Only once there is something to write, so a wrong name leaves no folder.
+    [ "$found" = 1 ] || mkdir -p "$out"
     found=1
-    local name w
     name="$(basename "$src" .jpg)"
-    name="${name#workflow-}"
     w="$(image_width "$src")"
     [ "$w" -gt 1440 ] && w=1440
     cwebp -quiet -q "$WEBP_Q" -m 6 -resize "$w" 0 "$src" -o "$out/$name.webp"
   done
-  [ "$found" = 1 ] || die "no $RAW/workflow-*.jpg — run e2e/screenshots/editorial-workflow.spec.js first"
-  ( cd "$ROOT" && find docs/images/editorial-workflow -type f -name '*.webp' -exec ls -l {} + | awk '{print $5, $9}' )
+  [ "$found" = 1 ] || die "no $in/*.jpg — run e2e/screenshots/$guide.spec.js first"
 }
 
 logo() {
@@ -159,8 +186,8 @@ case "${1:-all}" in
   home) home ;;
   logo) logo ;;
   all) home; logo ;;
-  docs) docs; exit 0 ;;
-  *) die "usage: $0 [home|logo|docs|all]" ;;
+  docs) shift; docs "$@"; exit 0 ;;
+  *) die "usage: $0 [home|logo|all] | $0 docs [<guide>...]" ;;
 esac
 
 ( cd "$ROOT" && find priv/static/images -maxdepth 2 \( -name 'logo-mark-sm.*' -o -path '*/home/*' \) -type f -exec ls -l {} + | awk '{print $5, $9}' )

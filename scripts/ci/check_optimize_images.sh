@@ -25,6 +25,9 @@
 #   - a second `logo` run writes a byte-identical logo-mark-sm.png
 #   - docs: a 2000-wide capture becomes a 1440-wide WebP, a 1200-wide one
 #     stays 1200 (the width comes from the script's image_width)
+#   - docs: bare `docs` derives every raw/<guide>/ folder into
+#     docs/images/<guide>/, `docs <guide>` only that one, and a guide with no
+#     captures fails and leaves no folder behind (#2460)
 # The WebP widths come from cwebp, whichever resizer runs, so they are only
 # smoke-checked. PNG and WebP sizes are read from the PNG header (WebPs via
 # dwebp), so no assertion depends on the tool under test measuring itself.
@@ -114,8 +117,11 @@ done
 for name in editor content calendar media; do
   to_jpg "$WORK/src/$name.png" "$RAW/$name.jpg" 2880
 done
-to_jpg "$WORK/src/editor.png" "$RAW/workflow-1-wide.jpg" 2000
-to_jpg "$WORK/src/content.png" "$RAW/workflow-2-narrow.jpg" 1200
+# Two guides' captures, each in a folder named after its guide.
+mkdir -p "$RAW/editorial-workflow" "$RAW/second-guide"
+to_jpg "$WORK/src/editor.png" "$RAW/editorial-workflow/1-wide.jpg" 2000
+to_jpg "$WORK/src/content.png" "$RAW/editorial-workflow/2-narrow.jpg" 1200
+to_jpg "$WORK/src/media.png" "$RAW/second-guide/1-shot.jpg" 1200
 
 # --- run ------------------------------------------------------------------
 bash "$REPO/scripts/optimize_home_images.sh" home >/dev/null
@@ -163,9 +169,28 @@ else
 fi
 
 # --- docs -----------------------------------------------------------------
-docs="$OPTIMIZE_IMAGES_ROOT/docs/images/editorial-workflow"
-expect "docs 1-wide.webp width (capped)" 1440 "$(webp_dims "$docs/1-wide.webp" | awk '{print $1}')"
-expect "docs 2-narrow.webp width (kept)" 1200 "$(webp_dims "$docs/2-narrow.webp" | awk '{print $1}')"
+docs="$OPTIMIZE_IMAGES_ROOT/docs/images"
+expect "docs editorial-workflow/1-wide.webp width (capped)" 1440 "$(webp_dims "$docs/editorial-workflow/1-wide.webp" | awk '{print $1}')"
+expect "docs editorial-workflow/2-narrow.webp width (kept)" 1200 "$(webp_dims "$docs/editorial-workflow/2-narrow.webp" | awk '{print $1}')"
+expect "docs second-guide/1-shot.webp width (kept)" 1200 "$(webp_dims "$docs/second-guide/1-shot.webp" | awk '{print $1}')"
+
+# A named guide is derived alone.
+rm -rf "$docs"
+bash "$REPO/scripts/optimize_home_images.sh" docs second-guide >/dev/null
+if [ -f "$docs/second-guide/1-shot.webp" ] && [ ! -e "$docs/editorial-workflow" ]; then
+  ok "docs second-guide derives that guide only"
+else
+  bad "docs second-guide did not derive exactly docs/images/second-guide/"
+fi
+
+# A guide with no captures is an error, not an empty folder.
+if bash "$REPO/scripts/optimize_home_images.sh" docs no-such-guide >/dev/null 2>&1; then
+  bad "docs no-such-guide succeeded"
+elif [ -e "$docs/no-such-guide" ]; then
+  bad "docs no-such-guide failed but left docs/images/no-such-guide/"
+else
+  ok "docs no-such-guide fails and leaves no folder"
+fi
 
 if [ "$fail" = 0 ]; then
   echo "check_optimize_images: all checks passed with $OPTIMIZE_RESIZER"
