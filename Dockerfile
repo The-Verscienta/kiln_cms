@@ -145,14 +145,17 @@ RUN set -eu; \
   mkdir -p /opt/httpc-stock && cp "$beam" /opt/httpc-stock/httpc.beam; \
   escript /opt/httpc_header_limit.escript
 
-# Retry a release-asset download that GitHub's CDN failed (#2462). The same
-# downloads as above: tailwind's and esbuild's binaries, and the precompiled
-# NIFs of y_ex, lazy_html, vix and tokenizers. Each tool retries about three
-# times within seconds, which a 504 window outlasts, and the image build then
-# fails on an outage rather than on the change. The wrapper re-runs the step
-# after 15, 30, 60 and 120 s, but only when the end of its output carries a
-# download error, so a real compile error still fails at once. A retry only
-# redoes what failed: `mix deps.compile` and the installers are incremental.
+# Retry a release-asset download that failed (#2462). The same downloads as
+# above, from GitHub's release CDN: tailwind's binary, and the precompiled
+# NIFs of y_ex, lazy_html, vix and tokenizers (plus esbuild's binary, from the
+# npm registry). Each tool retries about three times within seconds, which a
+# 504 window outlasts, and the image build then fails on an outage rather than
+# on the change. The wrapper re-runs the step after 15, 30, 60 and 120 s, but
+# only when its output carries a download error, so a compile error still
+# fails at once. A download that can never succeed (a 403, or a 404 after a
+# lock bump) is retried too, so it fails about 4 minutes later than before. A
+# retry only redoes what failed: `mix deps.compile` and the installers are
+# incremental.
 # Tune it with KILN_FETCH_ATTEMPTS (default 5) and KILN_FETCH_BACKOFF (first
 # wait in seconds, default 15). Removed with the httpc patch below.
 COPY rel/docker/retry_download.sh /opt/retry_download.sh

@@ -83,6 +83,7 @@ jobs:
   build:
     name: Compile, lint & scan
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     services:
       postgres:
@@ -286,6 +287,7 @@ jobs:
   test:
     name: Test (shard ${{ matrix.partition }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -464,6 +466,7 @@ jobs:
   coverage:
     name: Coverage (full suite)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     # The union of the shards is the full suite; this job runs no test. It
     # waits for every shard and runs even when one is red — a failing test
     # still executed, and a report on a red suite is what the old single job
@@ -527,6 +530,7 @@ jobs:
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     # No database: dialyzer reads beam files. `mix dialyzer` compiles the
     # project first (plainly — `build` is the warnings-as-errors leg) and then
@@ -568,7 +572,9 @@ jobs:
   # Required (#2729 added the second line): every job that guards correctness
   # and is reliably green on main.
   #   - build, test, coverage, dialyzer, plugin_sdk
-  #   - docs (`mix docs`, the committed API specs, the publishers),
+  #   - docs (`mix docs`, the committed API specs, the publishers; the
+  #     security-page publisher reads GitHub's REST API, so an API outage can
+  #     turn it red, the one network dependency accepted here),
   #     strict_tenancy (the only `mix ash.codegen --check` drift gate, plus the
   #     strict suite), overlay_drift, client, client-js, and ml (the only job
   #     that compiles the KILN_ML shape; on a mix.lock bump it re-downloads
@@ -583,6 +589,13 @@ jobs:
   #   - deps_audit: the advisory database moves on its own schedule (#51), so
   #     it can go red on a PR that changed nothing about dependencies.
   #   - image, qpdf_metadata_stripping, optimize_images_script: see each job.
+  #
+  # Every required job has a job-level `timeout-minutes`, so a hang fails it
+  # in minutes rather than holding this check for GitHub's 6-hour default
+  # (#2572 was such a hang). Each limit is three or more times the job's
+  # longest successful run in 2026-11 (dialyzer 18 min, build 14, test shards
+  # 12, docs 7, strict_tenancy 5, ml 4), with room for a cold cache after a
+  # mix.lock bump; ml gets the most, since a cold run rebuilds the EXLA NIF.
   #
   # No job this one needs is conditional on the event (coverage's only `if:`
   # is `!cancelled()`), so none is skipped on a PR, a push or a merge_group
@@ -729,6 +742,7 @@ jobs:
   docs:
     name: Documentation (mix docs)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     env:
       MIX_ENV: dev
@@ -826,7 +840,8 @@ jobs:
       # the holder was doing is unknown (two inet_gethost children were still
       # alive when the runner cleaned up). The lock guards against concurrent
       # compiles of one project from several OS processes, and each of these
-      # steps is a single `elixir` process with its own Mix.install cache, so
+      # steps is a single `elixir` process, and they run one after another
+      # (they share one Mix.install directory: the same three packages), so
       # `MIX_OS_CONCURRENCY_LOCK=0` costs nothing. The timeout is the backstop:
       # a normal run takes 3–15 s, about a minute with a cold Mix.install, so
       # a hang now fails in minutes and can be re-run, instead of holding the
@@ -864,6 +879,7 @@ jobs:
   client:
     name: Elixir client (kiln_client)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     defaults:
       run:
@@ -926,6 +942,7 @@ jobs:
   plugin_sdk:
     name: Plugin SDK (kiln_plugin)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     defaults:
       run:
@@ -1012,6 +1029,7 @@ jobs:
   client-js:
     name: JS client (@kiln-cms/client)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     defaults:
       run:
@@ -1215,6 +1233,7 @@ jobs:
   strict_tenancy:
     name: Strict-tenancy smoke
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -1324,6 +1343,7 @@ jobs:
   ml:
     name: Optional ML stack (semantic search)
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
 
     services:
       postgres:
@@ -1476,6 +1496,7 @@ jobs:
   overlay_drift:
     name: Overlay drift (example)
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -1623,8 +1644,11 @@ jobs:
     # window on GitHub's CDN used to fail the job (#2462). The Dockerfile now
     # runs those steps under `rel/docker/retry_download.sh`, which re-runs a
     # step that failed on a download after 15, 30, 60 and 120 s. An outage
-    # longer than about 4 minutes still fails the job, as does a 403 or
-    # rate-limit that the wrapper's signature does not name.
+    # longer than about 4 minutes still fails the job. A 403, a rate limit or
+    # a 404 is retried as well (the fetchers' messages name the URL, not the
+    # cause), so it fails about 4 minutes late. Each of the four wrapped
+    # commands can wait that long, so a long outage spends up to about 15 of
+    # the 60 minutes below before the job reports it.
     timeout-minutes: 60
 
     env:

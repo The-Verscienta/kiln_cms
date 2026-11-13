@@ -6,7 +6,7 @@ defmodule KilnCMS.Scripts.RetryDownloadTest do
 
   The wrapped command is a stub that prints a scripted output per attempt and
   exits with a scripted status, counting its runs in a file. The positive
-  cases print the messages the real fetchers print (elixir_make's "couldn't
+  cases print the messages the real fetchers print (rustler_precompiled's "couldn't
   fetch NIF from", tailwind's "Couldn't fetch https://", vix's MatchError on an
   httpc 504 tuple); the negative ones are compile failures whose output holds
   a 504-looking number, a `:closed`, or a real 504 far above the last 40 lines.
@@ -109,6 +109,31 @@ defmodule KilnCMS.Scripts.RetryDownloadTest do
 
     test "is recognized in vix's MatchError on the libvips tarball", ctx do
       script!(ctx, 1, @vix_504, 1)
+      script!(ctx, :default, "", 0)
+
+      assert {_out, 0} = run(ctx)
+      assert attempts(ctx) == 2
+    end
+
+    test "is recognized in elixir_make's fallback notice, however long the source build's failure",
+         ctx do
+      fallback = """
+      ==> lazy_html
+
+      12:01:44.903 [warning] Error happened while installing lazy_html from precompiled binary: "couldn't fetch NIF from https://github.com/dashbitco/lazy_html/releases/download/v0.1.13/lazy_html-nif-2.17-x86_64-linux-gnu-0.1.13.tar.gz: {:ok, {{~c\\"HTTP/1.1\\", 504, ~c\\"Gateway Time-out\\"}, [], []}}".
+
+      Attempting to compile lazy_html from source...
+      """
+
+      source_failure =
+        filler(60) <>
+          """
+          make: cmake: No such file or directory
+          make: *** [Makefile:72: lexbor] Error 127
+          ** (Mix) Could not compile with "make" (exit status: 2).
+          """
+
+      script!(ctx, 1, fallback <> source_failure, 1)
       script!(ctx, :default, "", 0)
 
       assert {_out, 0} = run(ctx)

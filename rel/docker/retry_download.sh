@@ -16,6 +16,19 @@
 # stopped it, so a 504 a dep logged early and recovered from does not make a
 # later compile error look like an outage. Any other failure exits at once.
 #
+# One exception is matched anywhere in the output: elixir_make (vix,
+# lazy_html) does not stop on a failed NIF download. It prints "Error happened
+# while installing <app> from precompiled binary" and falls back to a source
+# build, which this builder cannot finish (no cmake, a lexbor git clone, a
+# screenful of gcc errors), so the error that ends the step is the fallback's
+# and the download line has scrolled out of the last 40. On the retry the NIF
+# downloads, or the same fallback fails the same way; once the dep compiled,
+# the line is gone, so an unrelated later error costs at most one retry.
+#
+# The fetchers' messages name the URL, not the cause, so a 403, a rate limit
+# or a permanent 404 (a lock bump to a release with no NIF for this target)
+# is retried too, and fails after the full backoff rather than at once.
+#
 #   KILN_FETCH_ATTEMPTS  attempts in all (default 5)
 #   KILN_FETCH_BACKOFF   first wait in seconds, doubling each time (default 15)
 #
@@ -50,6 +63,8 @@ trap 'rm -rf "$work"' EXIT
 # no retry clears), tailwind and esbuild print "Couldn't fetch https://...", and vix's libvips
 # download dies on a MatchError carrying httpc's `{~c"HTTP/1.1", 504, ...}`.
 download_failure() {
+  grep -Eq "Error happened while installing [A-Za-z0-9_]+ from precompiled binary" "$work/log" \
+    && return 0
   tail -n 40 "$work/log" | grep -Eiq \
     -e "couldn't fetch NIF from" \
     -e "couldn't fetch https?://" \
