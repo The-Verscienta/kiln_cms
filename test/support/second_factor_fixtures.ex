@@ -106,6 +106,34 @@ defmodule KilnCMS.SecondFactorFixtures do
   end
 
   @doc """
+  Turns the console host (`KilnCMSWeb.Plugs.ConsoleHost`) on for the calling
+  test, under the base host as passkeys need, and restores it on exit. The
+  setup page is served on console hosts and the main host only, and
+  `<slug>.<console host>` is the one of those that resolves to a site of the
+  test's own. For an `async: false` module only: the setting is VM-global.
+  """
+  def with_console_host do
+    previous = Application.get_env(:kiln_cms, :console_host)
+    console = "sfconsole#{System.unique_integer([:positive])}.#{KilnCMSWeb.Tenant.base_host()}"
+    Application.put_env(:kiln_cms, :console_host, console)
+    KilnCMS.Cache.Hosts.clear()
+
+    ExUnit.Callbacks.on_exit(fn ->
+      if previous,
+        do: Application.put_env(:kiln_cms, :console_host, previous),
+        else: Application.delete_env(:kiln_cms, :console_host)
+
+      KilnCMS.Cache.Hosts.clear()
+    end)
+
+    :ok
+  end
+
+  @doc "`conn` on `site`'s console host (`with_console_host/0`)."
+  def console_conn(conn, site),
+    do: %{conn | host: "#{site.slug}.#{KilnCMSWeb.Plugs.ConsoleHost.console_host()}"}
+
+  @doc """
   `conn` signed in as `user` on `site`'s host, the session marked as a
   password sign-in (`KilnCMSWeb.SignInMarker`).
   """

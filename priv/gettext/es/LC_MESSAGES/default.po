@@ -2722,6 +2722,11 @@ msgstr "Añadir un webhook"
 msgid "Add after existing blocks"
 msgstr "Añadir después de los bloques existentes"
 
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add an authenticator app or a passkey, so your password alone can't open your account."
+msgstr "Añade una aplicación de autenticación o una clave de acceso, para que tu contraseña sola no pueda abrir tu cuenta."
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add an endpoint above to push content events to another system."
@@ -19408,6 +19413,7 @@ msgstr "Configurar una aplicación de autenticación"
 msgid "Set up my account"
 msgstr "Configurar mi cuenta"
 
+#: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
@@ -23181,6 +23187,11 @@ msgstr "No se pudo generar la vista previa. La regla no se ve afectada."
 msgid "This one's for members"
 msgstr "Este texto es solo para miembros"
 
+#: lib/kiln_cms_web/live/account_live.ex
+#, elixir-autogen, elixir-format
+msgid "This opens on %{host}, where you sign in again."
+msgstr "Se abre en %{host}, donde vuelves a iniciar sesión."
+
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "This page has no blocks yet. Add one below."
@@ -24033,6 +24044,7 @@ msgstr "La autenticación de doble factor está activada."
 msgid "Two-factor authentication turned off"
 msgstr "Autenticación en dos pasos desactivada"
 
+#: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format

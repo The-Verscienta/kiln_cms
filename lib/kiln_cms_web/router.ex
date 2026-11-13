@@ -833,12 +833,17 @@ defmodule KilnCMSWeb.Router do
       on_mount: [
         {KilnCMSWeb.LiveUserAuth, :current_user},
         {KilnCMSWeb.LiveUserAuth, :assign_current_org},
+        # The setup page is not served on a tenant site host (#2247): it goes
+        # to the main host's before sign-in is asked. After the site is known,
+        # whose hook vouches the socket's host.
+        {KilnCMSWeb.LiveUserAuth, :second_factor_setup_host},
         {KilnCMSWeb.LiveUserAuth, :live_user_required},
         {KilnCMSWeb.LiveUserAuth, :restore_locale}
       ] do
       live "/account", AccountLive, :show
       # Setting up a second factor (#2247): where a site that requires one
-      # sends an account that has none, so open to every signed-in tier.
+      # sends an account that has none, so open to every signed-in tier. On
+      # the main host and console hosts only.
       live "/account/two-factor", TwoFactorSetupLive, :show
     end
 

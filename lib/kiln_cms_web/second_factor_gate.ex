@@ -29,12 +29,28 @@ defmodule KilnCMSWeb.SecondFactorGate do
 
   `/account/two-factor` (`KilnCMSWeb.TwoFactorSetupLive`) is never held: it is
   where a held account goes.
+
+  ## Only on the main host and console hosts
+
+  The setup page is served on the main host (`PHX_HOST`, the passkeys' RP ID)
+  and on console hosts, never on a tenant site host (owner decision on #2247,
+  2026-11-13): a passkey cannot be registered there
+  (`KilnCMS.Accounts.WebAuthn.ceremony_host?/1`, decision record 0011), and a
+  site host is the origin a site administrator's injected code runs on
+  (`docs/threat-model.md`, item 16), which must not reach a visiting member's
+  factors. `setup_host?/1` is that rule. On a site host every door sends a held
+  account to the main host's page instead (`setup_location/3`), with no
+  `return_to`: a path on this site means nothing there. The page itself
+  refuses to render on a site host (`setup_host/1`, the first hook after the
+  site is known). An account in its grace period on a site host is not sent
+  away at sign-in; the grace banner links to the main host's page.
   """
   use KilnCMSWeb, :verified_routes
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMS.Security.AuthEvents
+  alias KilnCMSWeb.Plugs.ConsoleHost
   alias Phoenix.LiveView
 
   @key :kiln_second_factor
@@ -60,6 +76,77 @@ defmodule KilnCMSWeb.SecondFactorGate do
       query -> ~p"/account/two-factor" <> "?" <> URI.encode_query(query)
     end
   end
+
+  @doc """
+  Whether the setup page is served on `host`: the main host (the endpoint's
+  `PHX_HOST`) or a console host (`KilnCMSWeb.Plugs.ConsoleHost`). A tenant
+  site host, and a request with no host, is not.
+  """
+  @spec setup_host?(String.t() | nil) :: boolean()
+  def setup_host?(host) when is_binary(host) do
+    normalize(host) == main_host() or ConsoleHost.console_host_name?(host)
+  end
+
+  def setup_host?(_host), do: false
+
+  @doc "The setup page on the main host, as an absolute URL."
+  @spec main_setup_url() :: String.t()
+  def main_setup_url do
+    KilnCMSWeb.Endpoint.struct_url()
+    |> Map.put(:path, ~p"/account/two-factor")
+    |> URI.to_string()
+  end
+
+  @doc """
+  Where an account on `host` sets up a second factor: `setup_path/2` on a
+  setup host (`setup_host?/1`), the main host's page (`main_setup_url/0`)
+  anywhere else, without `return_to` or the reminder.
+  """
+  @spec setup_location(String.t() | nil, String.t() | nil, keyword()) :: String.t()
+  def setup_location(host, return_to, opts \\ []) do
+    if setup_host?(host), do: setup_path(return_to, opts), else: main_setup_url()
+  end
+
+  @doc """
+  `Phoenix.Controller.redirect/2` and `Phoenix.LiveView.redirect/2` options
+  for a `setup_location/3`: a local path as `:to`, the main host's URL as
+  `:external`.
+  """
+  @spec redirect_opts(String.t()) :: keyword()
+  def redirect_opts("/" <> _ = path), do: [to: path]
+  def redirect_opts(url) when is_binary(url), do: [external: url]
+
+  @doc """
+  The first hook after the site is known on the setup page's `live_session`
+  (`KilnCMSWeb.LiveUserAuth`, `:second_factor_setup_host`): the setup page
+  mounted on a host that is not a setup host is redirected to the main host's
+  page before anything else runs, signed in or not, on the disconnected
+  render (a `302`) and a live mount alike. Every other page passes.
+  """
+  @spec setup_host(LiveView.Socket.t()) :: {:cont | :halt, LiveView.Socket.t()}
+  def setup_host(socket) do
+    if exempt_view?(socket) and not setup_host?(socket_host(socket)),
+      do: {:halt, LiveView.redirect(socket, external: main_setup_url())},
+      else: {:cont, socket}
+  end
+
+  @doc """
+  The setup page's address for a link drawn on `host`: the local path on a
+  setup host, the main host's URL anywhere else.
+  """
+  @spec setup_href(String.t() | nil) :: String.t()
+  def setup_href(host), do: setup_location(host, nil)
+
+  @doc "The host a mounted LiveView answers for (vouched by `LiveUserAuth`), or `nil`."
+  @spec socket_host(LiveView.Socket.t()) :: String.t() | nil
+  def socket_host(%{host_uri: %URI{host: host}}) when is_binary(host), do: host
+  def socket_host(_socket), do: nil
+
+  defp main_host, do: normalize(KilnCMSWeb.Endpoint.struct_url().host || "")
+
+  # Hostnames are case-insensitive and a rooted FQDN's trailing dot names the
+  # same host, as `KilnCMSWeb.Tenant` normalizes them.
+  defp normalize(host), do: host |> String.trim_trailing(".") |> String.downcase()
 
   @doc """
   Whether `user` is held on `org_id`: their site requires a second factor of
@@ -166,7 +253,9 @@ defmodule KilnCMSWeb.SecondFactorGate do
   Where a browser sign-in of `user` on `conn` goes instead of `destination`:
   the setup page when the site holds them (recording `second_factor_required`
   once, here), the setup page with "Not now" during their grace period, and
-  `destination` otherwise.
+  `destination` otherwise. On a site host the held account goes to the main
+  host's page (`setup_location/3`), and one in its grace period goes on to
+  `destination`: the main host would ask it to sign in again for a reminder.
   """
   @spec sign_in_destination(Plug.Conn.t(), Accounts.User.t(), String.t()) :: String.t()
   def sign_in_destination(%Plug.Conn{} = conn, %Accounts.User{} = user, destination) do
@@ -179,10 +268,12 @@ defmodule KilnCMSWeb.SecondFactorGate do
           "not_enrolled"
         )
 
-        setup_path(destination)
+        setup_location(conn.host, destination)
 
       {:grace, _deadline} ->
-        setup_path(destination, reminder?: true)
+        if setup_host?(conn.host),
+          do: setup_path(destination, reminder?: true),
+          else: destination
 
       _not_held ->
         destination
@@ -249,7 +340,8 @@ defmodule KilnCMSWeb.SecondFactorGate do
 
   defp exempt_view?(socket), do: socket.view == KilnCMSWeb.TwoFactorSetupLive
 
-  defp hold(socket), do: LiveView.redirect(socket, to: setup_path(nil))
+  defp hold(socket),
+    do: LiveView.redirect(socket, redirect_opts(setup_location(socket_host(socket), nil)))
 
   defp follow(socket, org_id, status) do
     Phoenix.PubSub.subscribe(KilnCMS.PubSub, TwoFactorRequirement.topic(org_id))

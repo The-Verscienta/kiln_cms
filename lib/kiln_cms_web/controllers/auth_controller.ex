@@ -210,7 +210,9 @@ defmodule KilnCMSWeb.AuthController do
   """
   def complete_sign_in(conn, user, message, method, opts \\ []) do
     {conn, return_to} = establish_session(conn, user, message, method, opts)
-    redirect(conn, to: return_to)
+    # A local path, or the main host's setup page for an account a site host
+    # holds (`KilnCMSWeb.SecondFactorGate.setup_location/3`).
+    redirect(conn, KilnCMSWeb.SecondFactorGate.redirect_opts(return_to))
   end
 
   @doc """

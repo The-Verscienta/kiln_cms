@@ -5,16 +5,23 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
   decision 1b), the grace-period "Not now", the reader's billing and export
   (decision 4), the recovery-code replacement, and `return_to`.
 
-  Each test signs a viewer in on its own site's host, with the session's
-  sign-in marker (`KilnCMSWeb.SignInMarker`) saying how. The site requires
-  everyone with no grace, from long before the account was made, unless the
-  test says otherwise. Demo mode, which needs `Application.put_env`, is
-  `TwoFactorSetupLiveDemoTest` below.
+  Each test signs a viewer in on its own site's console host
+  (`<slug>.<console host>`), with the session's sign-in marker
+  (`KilnCMSWeb.SignInMarker`) saying how: the page is served only on the main
+  host and console hosts, and a console host is the one that resolves to a
+  site of the test's own (the main host is the default org's, whose policy
+  would reach every other test). The site requires everyone with no grace,
+  from long before the account was made, unless the test says otherwise.
+  Demo mode is `TwoFactorSetupLiveDemoTest` below; the site host's redirect
+  is `KilnCMSWeb.SecondFactorSetupHostTest`.
+
+  `async: false`: the console host is `Application.put_env`, VM-global.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  use KilnCMSWeb.ConnCase, async: false
 
   import Ecto.Query, only: [from: 2]
   import KilnCMS.OrgFixtures, only: [org: 1]
+  import KilnCMS.SecondFactorFixtures, only: [with_console_host: 0, console_conn: 2]
   import Phoenix.LiveViewTest
   import Swoosh.TestAssertions
 
@@ -26,6 +33,10 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
 
   @password "password123456"
   @long_ago ~U[2026-01-01 00:00:00.000000Z]
+
+  setup do
+    with_console_host()
+  end
 
   def policy!(site, required_for, opts \\ []) do
     since = Keyword.get(opts, :since, @long_ago)
@@ -71,7 +82,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
     )
   end
 
-  # Signed in as `user` on `site`'s host. `method` is what the session's
+  # Signed in as `user` on `site`'s console host. `method` is what the session's
   # marker says it signed in with; `nil` leaves no marker (a remember-me or
   # pre-upgrade session).
   def signed_in(conn, user, site, method, extra_session \\ %{}) do
@@ -90,7 +101,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
       if method, do: %{"sign_in" => %{"jti" => jti, "method" => method}}, else: %{}
 
     conn
-    |> org_conn(site)
+    |> console_conn(site)
     |> Phoenix.ConnTest.init_test_session(Map.merge(marker, extra_session))
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
@@ -458,7 +469,10 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
   end
 
   test "signed out, the page sends you to sign in", %{conn: conn} do
-    assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/account/two-factor")
+    site = org("tfs-signed-out")
+
+    assert {:error, {:redirect, %{to: "/sign-in"}}} =
+             conn |> console_conn(site) |> live(~p"/account/two-factor")
   end
 end
 
@@ -482,7 +496,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveDemoTest do
     previous = Application.get_env(:kiln_cms, KilnCMS.Demo, [])
     Application.put_env(:kiln_cms, KilnCMS.Demo, Keyword.put(previous, :enabled, true))
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Demo, previous) end)
-    :ok
+    KilnCMS.SecondFactorFixtures.with_console_host()
   end
 
   test "the shared demo account sees why, and nothing to change", %{conn: conn} do

@@ -9,7 +9,11 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
   (`KilnCMSWeb.Plugs.SecondFactorBearer`), with API keys exempt.
 
   Every test runs on a site of its own (the policy cache is node-wide, so the
-  default org is never given a policy), and signs in on that site's host.
+  default org is never given a policy), and signs in on that site's host. The
+  setup page is not served on a site host, so a held account here is sent to
+  the main host's (`SecondFactorGate.main_setup_url/0`); where the page is
+  served (the main host, a console host), with `return_to` and the reminder,
+  is `KilnCMSWeb.SecondFactorSetupHostTest`.
   The sockets, demo mode and the escape hatch need process-wide state and are
   in `KilnCMSWeb.SecondFactorSocketsTest`.
   """
@@ -77,6 +81,10 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
 
   defp canonical_host, do: URI.parse(KilnCMSWeb.Endpoint.url()).host
 
+  # Where a site host sends a held account: the main host's setup page, with
+  # no `return_to`.
+  defp main_setup, do: SecondFactorGate.main_setup_url()
+
   defp held_events(user) do
     Repo.all(
       from(e in "security_events",
@@ -125,7 +133,7 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
   # --- the browser gate --------------------------------------------------------
 
   describe "the browser gate" do
-    test "a held editor's every page goes to setup first, with where it was going",
+    test "a held editor's every page goes to the main host's setup page first",
          %{conn: conn} do
       site = held_site("sfe-pages")
       conn = signed_in(conn, editor(site), site)
@@ -143,8 +151,7 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
           ] do
         held = get(conn, path)
 
-        assert redirected_to(held) == @setup <> "?" <> URI.encode_query(%{"return_to" => path}),
-               "#{path} was not held"
+        assert redirected_to(held) == main_setup(), "#{path} was not held"
       end
     end
 
@@ -154,20 +161,21 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
       # A session from a real sign-in, carried by its cookie as a browser
       # would: a test session would be written on every response.
       # Read once first, so the sign-in's flash is already spent: taking it
-      # writes the session, and that is not the gate's write.
+      # writes the session, and that is not the gate's write. A page that
+      # answers 200: a redirect keeps the flash.
       session =
         conn
         |> password_sign_in(editor(site), site)
         |> recycle()
         |> org_conn(site)
-        |> get(~p"/account/two-factor")
+        |> get(~p"/developers")
         |> recycle()
         |> org_conn(site)
 
       for path <- [~p"/", "/some-page", ~p"/editor/overview"] do
         held = get(session, path)
 
-        assert redirected_to(held) =~ @setup
+        assert redirected_to(held) == main_setup()
         assert get_resp_header(held, "cache-control") == ["private, no-store"]
         assert get_resp_header(held, "set-cookie") == [], "#{path} wrote a cookie"
       end
@@ -182,14 +190,15 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
         |> Plug.Conn.put_private(:plug_skip_csrf_protection, true)
         |> post(~p"/billing/checkout", %{})
 
-      assert redirected_to(held) == @setup
+      assert redirected_to(held) == main_setup()
     end
 
     test "the exempt routes still answer", %{conn: conn} do
       site = "sfe-exempt" |> org() |> tap(&policy_row!(&1, :everyone))
       conn = signed_in(conn, viewer(site), site)
 
-      assert html_response(get(conn, ~p"/account/two-factor"), 200)
+      # Not held, but not served on a site host either: the main host's.
+      assert redirected_to(get(conn, ~p"/account/two-factor")) == main_setup()
       assert response(get(conn, ~p"/editor/account/export.json"), 200)
       assert html_response(get(conn, ~p"/access-denied"), 403)
       assert html_response(get(conn, ~p"/developers"), 200)
@@ -308,7 +317,21 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
         assigns: %{__changed__: %{}, current_user: user, current_org: site}
       }
 
+      # No host is not a setup host: the main host's page.
       assert {:halt, halted} = SecondFactorGate.attach(socket, %{})
+      assert {:redirect, %{external: external}} = halted.redirected
+      assert external == main_setup()
+
+      on_site = %{
+        socket
+        | host_uri: URI.parse("http://#{site.slug}.#{KilnCMSWeb.Tenant.base_host()}")
+      }
+
+      assert {:halt, halted} = SecondFactorGate.attach(on_site, %{})
+      assert {:redirect, %{external: ^external}} = halted.redirected
+
+      on_main = %{socket | host_uri: URI.parse(KilnCMSWeb.Endpoint.url())}
+      assert {:halt, halted} = SecondFactorGate.attach(on_main, %{})
       assert {:redirect, %{to: @setup}} = halted.redirected
 
       assert {:cont, setup} =
@@ -325,7 +348,8 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
       # Turned on without telling the page: the next mount still finds it.
       policy_row!(site, :editors)
 
-      assert {:error, {:redirect, %{to: @setup}}} = live_redirect(view, to: ~p"/editor/settings")
+      assert {:error, {:redirect, %{to: to}}} = live_redirect(view, to: ~p"/editor/settings")
+      assert to == main_setup()
     end
 
     test "an open page goes to setup when the policy starts holding it", %{conn: conn} do
@@ -341,7 +365,7 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
         {:second_factor_policy_changed, TwoFactorRequirement.from_row(row)}
       )
 
-      assert_redirect(view, @setup, 2_000)
+      assert_redirect(view, main_setup(), 2_000)
     end
 
     test "an open page goes to setup at the deadline", %{conn: conn} do
@@ -352,7 +376,7 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
       user = editor(site)
 
       {:ok, view, _html} = conn |> signed_in(user, site) |> live(~p"/editor/overview")
-      assert_redirect(view, @setup, 3_000)
+      assert_redirect(view, main_setup(), 3_000)
     end
 
     test "a page whose account enrolled meanwhile is not bounced", %{conn: conn} do
@@ -376,34 +400,31 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
   # --- the sign-in doors -------------------------------------------------------
 
   describe "the browser sign-in doors" do
-    test "a held password sign-in lands on setup, recorded once", %{conn: conn} do
+    test "a held password sign-in lands on the main host's setup, recorded once", %{conn: conn} do
       site = held_site("sfe-door-pw")
       user = editor(site)
       signed_in = password_sign_in(conn, user, site)
 
-      assert redirected_to(signed_in) ==
-               @setup <> "?" <> URI.encode_query(%{"return_to" => "/account"})
+      assert redirected_to(signed_in) == main_setup()
 
       assert is_binary(get_session(signed_in, :user_token))
 
       # Held on every page after it, and recorded only once.
       followed = signed_in |> recycle() |> org_conn(site)
-      assert redirected_to(get(followed, ~p"/editor/overview")) =~ @setup
-      assert redirected_to(get(followed, ~p"/account")) =~ @setup
+      assert redirected_to(get(followed, ~p"/editor/overview")) == main_setup()
+      assert redirected_to(get(followed, ~p"/account")) == main_setup()
 
       assert [%{"surface" => "browser", "reason" => "not_enrolled", "tier" => "editor"}] =
                held_events(user)
     end
 
-    test "in the grace period it lands on the reminder", %{conn: conn} do
+    test "in the grace period on a site host it goes on; the banner reminds", %{conn: conn} do
       site =
         "sfe-door-grace"
         |> org()
         |> tap(&policy_row!(&1, :editors, grace_days: 30, since: DateTime.utc_now()))
 
-      assert redirected_to(password_sign_in(conn, editor(site), site)) ==
-               @setup <>
-                 "?" <> URI.encode_query(%{"reminder" => "1", "return_to" => "/account"})
+      assert redirected_to(password_sign_in(conn, editor(site), site)) == ~p"/account"
     end
 
     for {name, activity} <- [
@@ -415,7 +436,13 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
       test "#{name}: held lands on setup, grace on the reminder, an app at the prompt" do
         site = held_site("sfe-door-#{unquote(name)}")
         {held, _token} = succeed(unquote(Macro.escape(activity)), editor(site), site)
-        assert redirected_to(held) =~ @setup
+        assert redirected_to(held) == main_setup()
+
+        # Where the page is served, it is the page itself, going on after.
+        {held, _token} =
+          succeed(unquote(Macro.escape(activity)), editor(site), site, canonical_host())
+
+        assert redirected_to(held) =~ @setup <> "?return_to="
         refute redirected_to(held) =~ "reminder"
 
         # A just-provisioned account on a site with a grace period: the reminder.
@@ -434,8 +461,15 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
             user
           end)
 
-        {reminded, _token} = succeed(unquote(Macro.escape(activity)), fresh, grace)
-        assert redirected_to(reminded) =~ "reminder=1"
+        # On the site host it goes on (the banner reminds); where the page is
+        # served, the reminder.
+        {went_on, _token} = succeed(unquote(Macro.escape(activity)), fresh, grace)
+        refute redirected_to(went_on) =~ @setup
+
+        {reminded, _token} =
+          succeed(unquote(Macro.escape(activity)), fresh, grace, canonical_host())
+
+        assert redirected_to(reminded) =~ @setup <> "?reminder=1"
 
         {prompted, _token} =
           succeed(unquote(Macro.escape(activity)), site |> editor() |> with_app(), site)

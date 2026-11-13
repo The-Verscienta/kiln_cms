@@ -8,7 +8,9 @@ defmodule KilnCMSWeb.Plugs.SecondFactorGate do
     * `:redirect` — on `:browser`, after `IdleTimeout, :session` (a session
       that is no longer good is already signed out, and goes to sign-in
       instead). A held account's request is answered `302` to the setup page,
-      with the path it asked for as `return_to` on a `GET`. It **writes no
+      with the path it asked for as `return_to` on a `GET` — or, on a tenant
+      site host, to the main host's setup page, which is not served on a site
+      host (`SecondFactorGate.setup_host?/1`). It **writes no
       session, no flash and no cookie**, and the redirect is `private,
       no-store`: `:browser` serves the public site, whose pages are
       `cache-control: public` (#699), and neither a `Set-Cookie` nor a
@@ -87,7 +89,9 @@ defmodule KilnCMSWeb.Plugs.SecondFactorGate do
   defp act(conn, :redirect) do
     conn
     |> put_resp_header("cache-control", "private, no-store")
-    |> Phoenix.Controller.redirect(to: SecondFactorGate.setup_path(return_to(conn)))
+    |> Phoenix.Controller.redirect(
+      SecondFactorGate.redirect_opts(SecondFactorGate.setup_location(conn.host, return_to(conn)))
+    )
     |> halt()
   end
 

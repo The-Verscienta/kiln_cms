@@ -5,8 +5,14 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
 
   Open to every signed-in account, viewers included (`:authenticated_routes`):
   a site can require a second factor of everyone, and `/editor/settings`, the
-  other place that offers one, is editors only. Served on both hosts, like
-  `/account`.
+  other place that offers one, is editors only.
+
+  Served only on the main host and console hosts
+  (`KilnCMSWeb.SecondFactorGate.setup_host?/1`): on a tenant site host it
+  redirects to the main host's page before it mounts
+  (`KilnCMSWeb.SecondFactorGate.setup_host/1`), where the account signs in
+  again. A site host cannot register a passkey, and is the origin a site's
+  injected code runs on, which must not reach a member's factors.
 
   ## What it shows
 

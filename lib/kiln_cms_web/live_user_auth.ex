@@ -114,6 +114,11 @@ defmodule KilnCMSWeb.LiveUserAuth do
   def on_mount(:second_factor, _params, session, socket),
     do: KilnCMSWeb.SecondFactorGate.screen(socket, session)
 
+  # After `:assign_current_org`, whose vouched host it reads: the two-step
+  # setup page on a tenant site host goes to the main host's (#2247).
+  def on_mount(:second_factor_setup_host, _params, _session, socket),
+    do: KilnCMSWeb.SecondFactorGate.setup_host(socket)
+
   def on_mount(:live_user_optional, _params, _session, socket) do
     socket =
       if socket.assigns[:current_user] do

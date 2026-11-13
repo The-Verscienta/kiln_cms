@@ -906,8 +906,20 @@ defmodule KilnCMSWeb.Layouts do
 
   `role="status"` because it is a reminder with a date, not standing chrome:
   a screen reader hears it once per page.
+
+  The setup page is not served on a tenant site host (#2247), so a page that
+  knows its host passes `setup_url` (`KilnCMSWeb.SecondFactorGate.setup_href/1`)
+  and the link names the main host's page outright. The console layout does
+  not know its host and links the local path, which a site host redirects.
   """
   attr :status, :any, default: nil, doc: "the gate's `:second_factor_status`, if known"
+
+  attr :setup_url, :string,
+    default: nil,
+    doc:
+      "where the link goes: `KilnCMSWeb.SecondFactorGate.setup_href/1` for this host; " <>
+        "the local path when absent, which a site host redirects to the main host's"
+
   attr :current_user, :map, default: nil
   attr :current_org, :any, default: nil
   attr :now, :any, default: nil, doc: "the clock, for tests"
@@ -944,7 +956,7 @@ defmodule KilnCMSWeb.Layouts do
         </time>
       </span>
       <.link
-        navigate={~p"/account/two-factor"}
+        href={@setup_url || ~p"/account/two-factor"}
         id="second-factor-banner-link"
         class="font-semibold underline underline-offset-2"
       >

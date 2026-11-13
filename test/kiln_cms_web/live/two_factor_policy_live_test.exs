@@ -96,8 +96,9 @@ defmodule KilnCMSWeb.TwoFactorPolicyLiveTest do
       policy_row!(site, :admins)
       admin = seed_user() |> member!(site, :admin)
 
-      assert {:error, {:redirect, %{to: "/account/two-factor" <> _}}} =
-               conn |> session(admin, site, nil) |> live(@path)
+      # On the site's host: the main host's setup page.
+      assert {:error, {:redirect, %{to: to}}} = conn |> session(admin, site, nil) |> live(@path)
+      assert to == KilnCMSWeb.SecondFactorGate.main_setup_url()
     end
   end
 
