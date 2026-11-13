@@ -133,7 +133,7 @@ alert. Later events of the same kind in the same window raise nothing more on
 their own; about a minute after the window closes, a **summary** says how many
 there were ("A new administrator: 4 in this alert window"). The summary is sent
 only when there was more than the alert already said: more than one event,
-or for failed sign-ins more than the 10 that crossed the threshold.
+or for failed sign-ins more than the count the alert carried (see below).
 
 Windows are per site for site alerts, and one for the whole installation for
 platform alerts. Silencing notices are never grouped: each one is sent.
@@ -146,17 +146,29 @@ a wrong password, a wrong second-factor code, a sign-in refused by
 address or account, which an attacker chooses: 40 attempts from 40 addresses
 count the same as 40 from one.
 
-The 10th failed sign-in in a window raises the alert, which names that
-attempt's address. The window's total arrives in the summary. Because the
-windows are fixed, 10 failures that straddle a quarter hour can stay under
-the threshold in both windows.
+The failed sign-in that takes the window's count to 10 raises the alert,
+which names that attempt's address. The window's total arrives in the
+summary. Because the windows are fixed, 10 failures that straddle a quarter
+hour can stay under the threshold in both windows.
+
+The alert's count can be more than 10. The site's count is kept in several
+rows, so that a burst of failed sign-ins does not queue on one database row,
+and attempts that arrive together each add to their own row before any of
+them reads the total. The first of them to see 10 or more raises the alert,
+and the count it saw (11, say) is the one the alert carries. A summary
+follows only when the window's total ends above that count. Still only one
+alert is sent per window, however many servers see the threshold crossed.
+
+If the database cannot be reached, each server counts failed sign-ins on
+its own until it can, and raises the alert when its own count reaches 10.
 
 A site with the kind off counts nothing. Turning it on takes effect at once on
 every node.
 
 The [security log samples failed sign-ins](security-events.md#failed-sign-ins-allowlist-and-unlock-refusals-are-sampled-lockouts-are-not)
-(5 per address per 15 minutes). The attempt that crosses the threshold is
-written to the log even past that cap, so the alert always has its event.
+(5 per address per 15 minutes). The attempt that crosses the threshold (on
+each server, the first one there to see it) is written to the log even past
+that cap, so the alert always has its event.
 
 ## Choose which alerts your site sends
 
@@ -301,7 +313,8 @@ Every phase carries:
 | `console_url` | The site's **Security log** (alert, summary) or **Security alerts** page (notice) on its console host |
 
 An **alert** adds `window` (`started_at`, `ends_at`), `count` (`1`, or for
-`failed_sign_ins` the count that crossed the threshold, `10`) and `event`,
+`failed_sign_ins` the count that crossed the threshold: `10` or more, see
+[Failed sign-ins](#failed-sign-ins-are-counted-per-site)) and `event`,
 the security log event that raised it:
 
 ```jsonc
@@ -471,6 +484,18 @@ What can go wrong:
   envelope, Slack refuses it, and after 10 exhausted deliveries the endpoint
   is auto-disabled with a silencing notice to the site's admins. The new
   columns can stay; 1.9 ignores them.
+- **Rolling deploys and the failed-sign-in count.** From this release a
+  site's failed sign-ins are counted over eight rows instead of one (#2639);
+  no migration. A node on the new release adds the old single row into its
+  total, so failed sign-ins counted by a node still on 1.9 are not lost.
+  The other way does not hold: a 1.9 node reads only the single row. For
+  the 15-minute window the deploy (or a rollback) falls in, a 1.9 node can
+  therefore raise the failed-sign-in alert late, and when it is the node
+  that sends the window's summary it reads too low a count: the summary
+  shows fewer failed sign-ins than there were, or is skipped (with "the
+  failed sign-in tally for its window is gone; no summary sent." in the log
+  when the single row has none). Later windows are unaffected once every
+  node runs the same release. Nothing needs doing.
 - **Mail goes through the instance relay** (the `KilnCMS.Mailer`
   configuration), never a site's own SMTP relay: a site admin can change that
   relay, and an alert about the site must not depend on it. Alert mail is
@@ -506,7 +531,14 @@ What can go wrong:
 
 - `KilnCMS.Security.Alerts`: the kinds, `classify/2` (an event to the alerts
   it raises; pure), the recipients, the IP display rule and the failed sign-in
-  tally.
+  tally. The tally is spread over `failed_sign_in_shards/0` rows by
+  `KilnCMS.Accounts.ThrottleStore.count_sharded/5`, and read back with
+  `failed_sign_in_total/2`. `KilnCMS.Security.AlertTrips` lets one crossing
+  per node and window try to claim the alert; `KilnCMS.Security.AlertGate`
+  keeps it to one across nodes.
+- Whether a site's alerts reach anyone is a line on the
+  [security posture](security-posture.md#security-alerts) page
+  (`core.security_alerts_reach_someone`).
 - `KilnCMS.Security.Changes.RaiseAlert`: the last change on
   `KilnCMS.Security.Event`'s `:record`; claims windows through
   `KilnCMS.Security.AlertGate` and writes derived notices.
@@ -547,7 +579,8 @@ What can go wrong:
 
 | You see | Meaning |
 |---|---|
-| No alerts at all on a site | **Notify this site's admins by bell and email** is off, or the kind is off. (A site with no member admins sends its alerts to the platform admins.) |
+| No alerts at all on a site | **Notify this site's admins by bell and email** is off, or the kind is off. (A site with no member admins sends its alerts to the platform admins.) The **Security alerts reach someone** line on [Security posture](security-posture.md#security-alerts) says which. |
+| A failed-sign-in alert says 11 or 12, not 10 | Several failed sign-ins arrived together and the first to see the threshold crossed saw more than 10. One alert is still sent. |
 | An alert email is missing, the bell row is there | You muted the email in **Your settings**. Platform alerts and notices ignore the mute. |
 | A platform alert is not in the bell | Platform alerts are listed in the default site's bell and inbox. In another site's console the bell shows only "N unread platform alerts": select it to open the default site's inbox. Alerts raised before this release are not counted there. |
 | "Couldn't reveal that URL." on Webhooks | The endpoint was deleted after the page loaded, or you are no longer an admin of the site. Reload. |

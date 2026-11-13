@@ -8938,6 +8938,11 @@ msgstr "Chaque slug analysé correspond déjà à sa dérivation."
 msgid "Every screen stays in search (⌘K) either way; this only decides what the sidebar lists."
 msgstr "Dans les deux cas, chaque écran reste accessible par la recherche (⌘K) ; ce choix ne décide que de ce que liste la barre latérale."
 
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Every security alert is turned off on this site."
+msgstr "Toutes les alertes de sécurité sont désactivées sur ce site."
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -18613,6 +18618,46 @@ msgstr "Réglages des alertes de sécurité enregistrés. Chaque administrateur 
 msgid "Security alerts"
 msgstr "Alertes de sécurité"
 
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts are turned off for this whole deployment."
+msgstr "Les alertes de sécurité sont désactivées pour toute l'installation."
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site go out only by webhook."
+msgstr "Les alertes de sécurité de ce site ne partent que par webhook."
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site go to the platform admins: this site has no admins of its own."
+msgstr "Les alertes de sécurité de ce site vont aux administrateurs de la plateforme : ce site n'a pas d'administrateurs à lui."
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site reach its administrators by bell only: each of them muted the email."
+msgstr "Les alertes de sécurité de ce site n'atteignent ses administrateurs que par la cloche : chacun a coupé l'e-mail."
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site reach its administrators."
+msgstr "Les alertes de sécurité de ce site atteignent ses administrateurs."
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts on this site reach nobody."
+msgstr "Les alertes de sécurité de ce site n'atteignent personne."
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts reach someone"
+msgstr "Les alertes de sécurité atteignent quelqu'un"
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts tell someone about lockouts, new administrators, removed second factors and sign-in changes. An alert that reaches nobody tells nobody."
+msgstr "Les alertes de sécurité signalent les verrouillages, les nouveaux administrateurs, les seconds facteurs retirés et les changements de connexion. Une alerte qui n'atteint personne ne prévient personne."
+
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "Security alerts were made quieter"
@@ -19828,6 +19873,11 @@ msgstr "Certaines clés ont plus de 180 jours (leur âge tient lieu de dernière
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
 msgstr "Certaines notifications n'ont pas pu être marquées comme lues."
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Some security alerts on this site reach nobody: no webhook carries them, and no administrator gets them."
+msgstr "Certaines alertes de sécurité de ce site n'atteignent personne : aucun webhook ne les transmet et aucun administrateur ne les reçoit."
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
@@ -22019,10 +22069,20 @@ msgstr "Le relais de messagerie du site a été modifié"
 msgid "The site's password policy could not be read."
 msgstr "La politique de mots de passe du site n'a pas pu être lue."
 
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "The site's security alert settings could not be read."
+msgstr "Les réglages des alertes de sécurité du site n'ont pas pu être lus."
+
 #: lib/kiln_cms/security/posture/checks/idle_timeout.ex
 #, elixir-autogen, elixir-format
 msgid "The site's session settings could not be read."
 msgstr "Les réglages de session du site n'ont pas pu être lus."
+
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "The site's webhook endpoints could not be read."
+msgstr "Les endpoints de webhook du site n'ont pas pu être lus."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format

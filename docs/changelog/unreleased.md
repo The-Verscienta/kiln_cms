@@ -160,6 +160,30 @@ carries the reasoning.
   edit the document see the upload area. The Branding page's image drawer is
   unchanged. (#2791)
 
+<a id="posture-security-alerts-reach-someone"></a>
+
+- **Security posture has a new site line, "Security alerts reach someone" (`core.security_alerts_reach_someone`).**
+  A site could have security alerts that went nowhere: every kind unticked,
+  admin notifications off with no webhook, or webhooks covering only some
+  kinds, and nothing said so. The line reads what delivery reads (the site's
+  alert settings, its recipients, who muted the email, and the active
+  endpoints subscribed to an alert kind it has on) and is **Review** when
+  alerts are off for the deployment (`config :kiln_cms,
+  KilnCMS.Security.Alerts, enabled: false`), when every kind is off, when no
+  bell, email or webhook would carry an alert, or when no admin gets them
+  and some kind on has no endpoint. It is **OK**, saying how, for
+  webhook-only delivery that covers every kind, for a site with no admins
+  of its own (alerts go to the platform admins), and for admins who all
+  muted the email (the bell still rings); **Unknown** when the settings or
+  endpoints can't be read. Its `facts` in `/api/security/posture` are counts
+  and flags only (`deployment_enabled`, `enabled_kinds`, `notify_admins`,
+  `member_admins`, `fallback`, `bell_recipients`, `email_recipients`,
+  `subscribed_endpoints`, `uncovered_kinds`), never who the recipients are.
+  New `KilnCMS.Security.Alerts.read_settings/1` returns `:error` instead of
+  the fallback settings when the row can't be read. See
+  [Security alerts](../security-posture.md#security-alerts) in the posture
+  guide. (#2640)
+
 ## Changed
 
 <a id="form-field-name-website-reserved"></a>
@@ -219,6 +243,31 @@ carries the reasoning.
   group's own **Select all** still ticks them all. On a Slack-format form,
   which offers only security events, Select all ticks them all. (#2642)
 
+<a id="ci-required-check-covers-more-jobs"></a>
+
+- **For contributors: the required `Compile, lint, scan & test` check now also waits on the docs, strict-tenancy, overlay drift, client, JS client and ML jobs, and a hung CI job fails within its own time limit.**
+  The "Require CI on main" ruleset names that one check, and it only
+  aggregates the jobs in `ci.needs`. Those were the build, the test shards,
+  coverage, Dialyzer and the plugin SDK, so a PR could merge with a red
+  `mix docs`, a pending `mix ash.codegen` (checked only by the
+  strict-tenancy job), broken client libraries or a broken `KILN_ML=1`
+  build. `ci.needs` now adds `docs`, `strict_tenancy`, `overlay_drift`,
+  `client`, `client-js` and `ml`, all reliably green on `main`. Still visible but not required, with the reason
+  written above the `ci` job: `e2e` (it failed in about 6 of the last 100
+  runs), `deps_audit` (the advisory database changes on its own schedule),
+  `image` (it downloads release assets from GitHub; see the image-build entry under Fixed) and the qpdf and ImageMagick script jobs.
+  To make a job required, add it to `ci.needs`; the ruleset does not change
+  ([Required checks](https://github.com/The-Verscienta/kiln_cms/blob/main/CONTRIBUTING.md#required-checks)).
+  Every required job now has a job-level `timeout-minutes` (20 to 90),
+  three or more times its longest recent run, instead of GitHub's six-hour
+  default. That default is what let one hang hold the docs job for 68
+  minutes: the docs publisher dry-run waited on a Mix build lock held inside
+  its own VM. The three publisher dry-runs now run with
+  `MIX_OS_CONCURRENCY_LOCK=0` (each is one `elixir` process, and they run one
+  after another, so the cross-process lock protects nothing there) and a
+  5-minute step timeout. The real publish workflows are unchanged.
+  (#2729, #2572)
+
 ## Fixed
 
 <a id="security-alert-gaps-2642"></a>
@@ -244,6 +293,37 @@ carries the reasoning.
     alert shows only the address's network: its /24 for IPv4, its /48 for
     IPv6. The security log keeps the full address either way." (#2642)
 
+
+<a id="failed-sign-in-tally-sharded"></a>
+
+- **A burst of failed sign-ins on one site no longer queues on one database row, and the failed-sign-in alert can carry a count above 10.**
+  Every failed sign-in on a site with the `failed_sign_ins` alert on added
+  one to a single `throttle_counters` row, so concurrent attempts waited on
+  its row lock. The count is now spread over 8 rows per site, picked at
+  random (an attacker can't steer it), and summed by a second statement
+  after the increment commits (`ThrottleStore.count_sharded/5`,
+  `window_sum/3`). The alert fires when the total is at least 10 rather than
+  exactly 10, because attempts that arrive together can each read a total
+  past it; its `count` (`threshold_count`) is the total the first of them
+  saw, so it can be 11 or more. A node-local memo
+  (`KilnCMS.Security.AlertTrips`) lets only the first crossing per site and
+  window on each node be recorded unsampled and try to claim the alert, and
+  `AlertGate` still keeps it to one alert across nodes. If the sum can't be
+  read, the shard's own count is used, which undercounts, so the alert can
+  come late during that fault. A crossing counted on a node's local fallback
+  (database down) does not use up the window's shared crossing. The
+  window's summary reads the sum too (`Alerts.failed_sign_in_total/2`).
+  No migration. **Rolling deploy:** the sum includes the old single-row
+  key, so counts from a 1.9 node are kept; a 1.9 node reads only that key,
+  so in the window of the deploy or a rollback it can raise the alert late
+  and, if it sends the summary, show too low a count or skip it ("the
+  failed sign-in tally for its window is gone").
+  Measured with the new `:benchmark` test (excluded by default; `mix test
+  --only benchmark test/kiln_cms/accounts/throttle_store_sharded_benchmark_test.exs`)
+  on a loaded development host: with 16 concurrent writers on one site,
+  p50/p99 per charge went from about 0.97/5.95 ms (one row) to 0.76/2.69 ms
+  (8 shards); with 32 writers p50 improved and p99 was too noisy to call.
+  (#2639)
 
 <a id="form-duplicate-autoresponder"></a>
 
@@ -444,6 +524,36 @@ carries the reasoning.
   without first choosing another. The field now resolves the image the way
   the editor's preview already did: the window first, then the database.
   Saving never lost the image; only the display was wrong.
+
+<a id="image-build-retries-downloads"></a>
+
+- **The image build retries a failed release-asset download with backoff, so a few minutes of 504s from GitHub's release CDN no longer fail it.**
+  Building the Dockerfile downloads the precompiled NIFs of y_ex, lazy_html
+  and vix (and tokenizers in a `KILN_ML=1` build), vix's libvips tarball and
+  the tailwind binary from GitHub releases, and the esbuild binary from npm.
+  The builder can't build any of them from source, and each tool retries
+  for only a few seconds, so a short 504 window failed the build, in CI's
+  image jobs, in the release workflow and on an operator's own `docker
+  build`. Both `mix deps.compile` steps and the tailwind and esbuild installs
+  now run under `rel/docker/retry_download.sh`, which runs the step again
+  after 15, 30, 60 and 120 seconds when its output ends in a download error.
+  A compile error or any other failure still fails at once.
+  - **If you build the image yourself:** nothing to change. An outage longer
+    than about 4 minutes still fails the build, and it now takes that long
+    to do so, for each wrapped step. A download that can never succeed (a 403,
+    a rate limit, a 404 after a dependency bump) also fails about 4 minutes
+    later than before, because the fetchers' messages name the URL, not the
+    status. To shorten or lengthen the wait, set `KILN_FETCH_ATTEMPTS`
+    (attempts in all, default 5) or `KILN_FETCH_BACKOFF` (first wait in
+    seconds, doubling, default 15) in the `RUN` step's environment; there is
+    no build arg for them.
+  - The tailwind and esbuild binaries are now fetched in their own layer
+    right after the deps, with `--if-missing`, instead of inside
+    `mix assets.deploy`. That layer is cached with the deps, so a build that
+    changed only application code no longer downloads them.
+  - The script is removed from the builder before `mix release`, and never
+    reaches the runtime image. See
+    [Building the image](../deploy.md#building-the-image). (#2462)
 
 <a id="backups-page-markers-and-queue-help"></a>
 

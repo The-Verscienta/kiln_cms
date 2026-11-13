@@ -98,6 +98,7 @@ defmodule KilnCMS.Security.Posture.RegistryTest do
 
     assert Enum.take(Enum.map(checks, & &1.id), length(core_ids)) == core_ids
     assert Enum.all?(Enum.take(checks, length(core_ids)), &(&1.source == :core))
+    assert "core.security_alerts_reach_someone" in core_ids
   end
 
   test "a plugin compiled as a dependency contributes its check" do
