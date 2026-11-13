@@ -174,7 +174,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2893](https://github.com/The-Verscienta/kiln_cms/pull/2893) · [long form](docs/changelog/unreleased.md#take-content-down-guide))
 
 - **Second-factor help matches the address: `/editor/two-factor` links to the main host's setup page from a site's own address and tells a passkey-only admin what works there, Settings says up front when the email code is owed, and "we'll email you" sits beside each add control on both setup pages.**
-  ([long form](docs/changelog/unreleased.md#second-factor-help-follows-the-host))
+  ([#2899](https://github.com/The-Verscienta/kiln_cms/pull/2899) · [long form](docs/changelog/unreleased.md#second-factor-help-follows-the-host))
 
 ### Fixed
 
