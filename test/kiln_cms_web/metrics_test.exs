@@ -103,10 +103,10 @@ defmodule KilnCMSWeb.MetricsTest do
       body = scrape()
 
       assert body =~
-               ~s|kiln_cms_api_invalid_bearer_count{enforced="true",read="true",reason="malformed",surface="json_api"} 1|
+               ~r/^kiln_cms_api_invalid_bearer_count\{enforced="true",read="true",reason="malformed",surface="json_api"\} 1$/m
 
       assert body =~
-               ~s|kiln_cms_api_invalid_bearer_count{enforced="true",read="true",reason="malformed",surface="graphql"} 1|
+               ~r/^kiln_cms_api_invalid_bearer_count\{enforced="true",read="true",reason="malformed",surface="graphql"\} 1$/m
 
       refute body =~ "garbage"
       refute body =~ "read?"
@@ -140,7 +140,9 @@ defmodule KilnCMSWeb.MetricsTest do
       offenders =
         for metric <- KilnCMSWeb.Telemetry.metrics(),
             tag <- metric.tags,
-            not Regex.match?(~r/^[a-zA-Z_][a-zA-Z0-9_]*$/, Atom.to_string(tag)),
+            name = Atom.to_string(tag),
+            not Regex.match?(~r/^[a-zA-Z_][a-zA-Z0-9_]*$/, name) or
+              String.starts_with?(name, "__"),
             do: {metric.name, tag}
 
       assert offenders == []

@@ -597,13 +597,18 @@ scrape as is, and one invalid name makes Prometheus reject the whole scrape.
   `POOL_SIZE` is too small (see "Oban queues & pool sizing" in [`performance.md`](performance.md)).
 - **Oban failures:** `sum by (queue, worker) (rate(oban_job_exception_count[5m]))`.
 - **Stale bearer tokens, the `KILN_API_REJECT_INVALID_BEARER` removal gate:**
-  `sum by (enforced, read, reason, surface) (increase(kiln_cms_api_invalid_bearer_count[<release window>]))`.
+  `max_over_time(kiln_cms_api_invalid_bearer_count{enforced="false",read="true"}[<release window>]) > 0`
+  (any result means stale tokens still reached public reads; no result means none
+  did), with
+  `sum by (enforced, read, reason, surface) (max_over_time(kiln_cms_api_invalid_bearer_count[<release window>]))`
+  for sizing. Gate on whether a series exists, not on `increase()`: a series is
+  created by its first event and the first scrape already reads `1`, so
+  `increase()` misses the first event of every label set after each restart.
   `enforced="true"` counts the `401`s (and `/ws/gql` refusals) actually served.
   `enforced="false"` comes only from an instance that set the variable to
   `false`, so it is zero by construction everywhere else. The counter lives in
   the node's memory and starts again from zero on every deploy or restart.
-  `increase()` allows for that reset, but whatever was counted after the last
-  scrape before a restart is lost, and nothing is counted at all unless
+  Whatever was counted after the last scrape before a restart is lost, and nothing is counted at all unless
   `KILN_METRICS_ENABLED` is on.
 
 The same definitions feed LiveDashboard in development, so adding a metric needs

@@ -1002,6 +1002,50 @@ carries the reasoning.
   [ADR 0030](../decisions/0030-the-second-factor-requirement-fails-open-and-only-a-freshly-verified-admin-changes-it.md).
   (Part of #2247.)
 
+<a id="invalid-bearer-metric"></a>
+
+- **Stale bearer tokens on the API are now a Prometheus counter, `kiln_cms_api_invalid_bearer_count`, so the count that gates removing `KILN_API_REJECT_INVALID_BEARER` can be read from a scrape.**
+  [ADR 0017](../decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md)
+  removes the `KILN_API_REJECT_INVALID_BEARER=false` escape hatch only when
+  stale tokens have stopped arriving. That count came from the
+  `[:kiln_cms, :api, :invalid_bearer]` event, which core emitted but did not
+  count, so each site had to attach its own `:telemetry` handler to read it.
+  `KilnCMSWeb.Telemetry.metrics/0` now counts the event, and the Prometheus
+  exporter serves it with no handler of your own.
+  **The metric.** One series per combination of four labels:
+  - `enforced`: `"true"` when the request got a `401` (or the `/ws/gql`
+    connect got a `403`), `"false"` when it was served as anonymous because
+    the instance set `KILN_API_REJECT_INVALID_BEARER=false`.
+  - `surface`: `json_api`, `graphql`, `media` or `other`.
+  - `read`: the event's `read?`, renamed because a `?` is not valid in a
+    Prometheus label name (one invalid label name makes Prometheus reject the
+    whole scrape). `"true"` for a `GET` or `HEAD`, and for anything on GraphQL.
+    The event's own metadata still says `read?`, so a handler you attached
+    keeps working.
+  - `reason`: `expired`, `malformed` or `invalid` (revoked, deleted-user and
+    bad-signature tokens are all `invalid`).
+
+  No token, user or address is a label.
+  **The gate query.** Over the release window, whether any series exists:
+  `max_over_time(kiln_cms_api_invalid_bearer_count{enforced="false",read="true"}[<release window>]) > 0`
+  (not `increase()`, which misses the first event of each label set after a
+  restart). The removal signal is `enforced="false", read="true"`: stale tokens still
+  reaching public reads through the hatch. It is nonzero only on an instance
+  that set the variable to `false`, so read `enforced="true"` beside it: those
+  are the refusals actually served, and they say whether removal would hurt
+  anyone.
+  **For operators.** The counter exists only with the exporter on
+  (`KILN_METRICS_ENABLED`, off by default; scraped from `GET /metrics` on
+  `KILN_METRICS_PORT`, default `9568`). A site expected to report the count
+  before the removal release must turn the exporter on and scrape it for the
+  whole window. The counter lives in the node's memory and starts again from
+  zero on every restart or deploy: `increase()` allows for the reset, but
+  whatever was counted after the last scrape before a restart is lost. No
+  migration; rolling back only removes the series.
+  See [Refused API credentials](../observability.md#refused-api-credentials)
+  and the [ADR 0017 amendment of 2026-11-13](../decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md#amendment-2026-11-13-the-count-is-exported-2635).
+  Closes #2635.
+
 ## Changed
 
 <a id="form-field-name-website-reserved"></a>

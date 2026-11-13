@@ -170,10 +170,12 @@ sites need no handler of their own.
   labeled `enforced`, `surface`, `read` and `reason`. `read` is the event's
   `read?`, renamed because a `?` is not valid in a Prometheus label name; the
   event itself is unchanged. No token, user or address is a label.
-- **Query.** The signal the removal is gated on:
-  `sum by (enforced, read, reason, surface) (increase(kiln_cms_api_invalid_bearer_count[<release window>]))`,
-  reading `enforced="false", read="true"` with `enforced="true"` beside it, as
-  above.
+- **Query.** The signal the removal is gated on is whether any
+  `enforced="false", read="true"` series exists in the release window:
+  `max_over_time(kiln_cms_api_invalid_bearer_count{enforced="false",read="true"}[<release window>]) > 0`,
+  with `enforced="true"` beside it, as above. Not `increase()`: a series is
+  created by its first event and first scraped at `1`, so `increase()` misses
+  the first event of every label set after a restart.
 - **Limits.** The count exists only where the exporter is on
   (`KILN_METRICS_ENABLED`), which is off by default, so each reporting site
   turns it on and scrapes it. The counter is in memory and starts again from
