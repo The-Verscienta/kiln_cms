@@ -501,8 +501,8 @@ defmodule KilnCMSWeb.ApiAuthControllerTest do
       pending = begin_two_factor(conn, user)
       code = current_code(secret)
 
-      assert {:ok, _first} = PendingSignIn.resolve(:encrypted, Endpoint, pending)
-      assert {:ok, second} = PendingSignIn.resolve(:encrypted, Endpoint, pending)
+      assert {:ok, _first} = PendingSignIn.resolve(:encrypted, Endpoint, pending, :totp)
+      assert {:ok, second} = PendingSignIn.resolve(:encrypted, Endpoint, pending, :totp)
 
       # The first request completes and claims the blob.
       assert %{"token" => _} =

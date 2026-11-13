@@ -18,7 +18,10 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
 
   import Phoenix.LiveViewTest
 
+  alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.Passkey
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Accounts.WebAuthn
   alias KilnCMS.Push
   alias KilnCMS.Push.Vapid
 
@@ -292,6 +295,85 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
       # The challenge is per-attempt, and the account it enrols for is this one.
       assert is_binary(challenge)
       assert name == to_string(ctx.user.email)
+    end
+  end
+
+  # #2247: every passkey added mails the owner, so an account holds at most
+  # `Passkey.max_per_account/0` and adds a few an hour. The page says so before
+  # the browser prompt, and turns the registration's refusals into sentences.
+  describe "passkey limits" do
+    defp seed_passkeys(user, count) do
+      for n <- 1..count//1 do
+        Ash.Seed.seed!(Passkey, %{
+          user_id: user.id,
+          name: "Device #{n}",
+          credential_id: "limit-#{System.unique_integer([:positive])}",
+          public_key: :erlang.term_to_binary(%{stub: :cose_key}),
+          sign_count: 0
+        })
+      end
+    end
+
+    defp attestation(bytes) do
+      %{
+        "attestation_object" => Base.url_encode64(bytes, padding: false),
+        "client_data_json" => Base.url_encode64(~s({"type":"webauthn.create"}), padding: false),
+        "name" => ""
+      }
+    end
+
+    test "at the cap the add form gives way to a note, and a forced begin is refused", %{
+      conn: conn,
+      user: user
+    } do
+      seed_passkeys(user, Passkey.max_per_account())
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+
+      assert has_element?(view, "#passkeys-at-limit", "the most an account can hold")
+      refute has_element?(view, "#add-passkey-form")
+
+      # The handler re-checks: a crafted event gets no challenge.
+      render_hook(view, "passkey_begin", %{"name" => ""})
+
+      assert has_element?(view, "#passkey-status.text-error", "Remove one to add another")
+      refute has_element?(view, "#passkey-waiting")
+      refute_push_event(view, "passkey-register", %{})
+    end
+
+    test "below the cap the form is offered", %{conn: conn, user: user} do
+      seed_passkeys(user, Passkey.max_per_account() - 1)
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+
+      assert has_element?(view, "#add-passkey-form")
+      refute has_element?(view, "#passkeys-at-limit")
+    end
+
+    test "a registration the cap refuses says so", %{conn: conn, user: user} do
+      seed_passkeys(user, Passkey.max_per_account() - 1)
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+      view |> form("#add-passkey-form", %{"name" => ""}) |> render_submit()
+
+      # Another tab fills the last place while this prompt is open.
+      seed_passkeys(user, 1)
+      render_hook(view, "passkey_attestation", attestation("limit-race"))
+
+      assert has_element?(view, "#passkey-status.text-error", "Remove one to add another")
+      assert has_element?(view, "#passkeys-at-limit")
+      assert length(WebAuthn.list(user)) == Passkey.max_per_account()
+    end
+
+    test "a registration over the hourly budget says to wait", %{conn: conn, user: user} do
+      on_exit(fn -> AccountThrottle.forget_passkey_registrations(user.id) end)
+
+      for _ <- 1..AccountThrottle.defaults()[:passkey_registration_budget],
+          do: AccountThrottle.consume_passkey_registration(user.id)
+
+      {:ok, view, _html} = live(conn, ~p"/editor/settings")
+      view |> form("#add-passkey-form", %{"name" => ""}) |> render_submit()
+      render_hook(view, "passkey_attestation", attestation("over-budget"))
+
+      assert has_element?(view, "#passkey-status.text-error", "several passkeys in a short time")
+      assert WebAuthn.list(user) == []
     end
   end
 

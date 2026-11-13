@@ -63,7 +63,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /confirm_new_user/:token /gql /locale/:locale /magic_link/:token /manifest.webmanifest /mcp
     /media/:id/download /media/:id/stream /offline.html /password-reset/:token /preview/:token
     /preview/:token/live /preview/release/:token /ready /register /reset /sign-in /sign-in/unlock
-    /sign-in/verify /sign-out /up
+    /sign-in/verify /sign-in/verify/passkey /sign-in/verify/passkey/options /sign-out /up
   )
 
   test "the console list is exactly these routes, plus every plugin panel" do

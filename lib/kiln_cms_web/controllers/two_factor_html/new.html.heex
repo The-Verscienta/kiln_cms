@@ -3,8 +3,14 @@
     <%!-- An h2: `Layouts.auth/1` draws the page's one (sr-only) h1 from this
           same title (#2162). --%>
     <h2 class="auth-title mb-2">{gettext("Two-factor authentication")}</h2>
-    <p id="two-factor-help" class="auth-muted mb-6">
+    <p :if={@code?} id="two-factor-help" class="auth-muted mb-6">
       {gettext("Enter the 6-digit code from your authenticator app.")}
+    </p>
+    <p :if={!@code? && @passkey?} id="two-factor-help" class="auth-muted mb-6">
+      {gettext("Confirm it's you with your passkey.")}
+    </p>
+    <p :if={!@code? && !@passkey?} id="two-factor-help" class="auth-muted mb-6">
+      {gettext("This sign-in can't be finished here. Start again.")}
     </p>
 
     <%!-- `role="alert"` so a refused code is announced the moment the page
@@ -14,7 +20,7 @@
       {@error}
     </p>
 
-    <.form for={%{}} id="two-factor-form" action={~p"/sign-in/verify"} method="post">
+    <.form :if={@code?} for={%{}} id="two-factor-form" action={~p"/sign-in/verify"} method="post">
       <label for="two-factor-code" class="field-label">
         {gettext("Authentication code")}
       </label>
@@ -40,7 +46,7 @@
 
     <%!-- No script: a native disclosure, opened on the way back from a refused
           recovery code so the user lands where they were typing. --%>
-    <details id="two-factor-recovery" class="mt-6" open={@recovery?}>
+    <details :if={@code?} id="two-factor-recovery" class="mt-6" open={@recovery?}>
       <summary class="link text-sm font-medium text-base-content">
         {gettext("Use a recovery code instead")}
       </summary>
@@ -80,6 +86,28 @@
         </button>
       </.form>
     </details>
+
+    <%!-- The passkey option (#2247): rendered only for an account that has
+          one, on a host where the ceremony can run, and shipped `hidden` —
+          `initPasskeyStepUp` (assets/js/passkeys.js) reveals it where WebAuthn
+          exists, so a browser without it never sees a button that cannot
+          work. Wired from app.js on load; no script here, so this page's CSP
+          is unchanged. --%>
+    <div :if={@passkey?} id="two-factor-passkey" class="mt-6" data-passkey-step-up hidden>
+      <button type="button" class="btn btn-default btn-block" data-role="passkey-step-up">
+        <.icon name="hero-key" class="size-4" />
+        {gettext("Use a passkey")}
+      </button>
+      <p
+        class="auth-muted mt-2 text-center text-xs"
+        role="status"
+        data-role="passkey-status"
+        data-error-text={
+          gettext("That passkey couldn't be verified. Try again or use another method.")
+        }
+      >
+      </p>
+    </div>
 
     <p class="mt-6 text-center">
       <a href={~p"/sign-in"} class="link auth-muted">{gettext("Back to sign in")}</a>

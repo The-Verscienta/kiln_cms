@@ -171,9 +171,17 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   @second_factor_budget 5
   @second_factor_window :timer.minutes(15)
 
+  # Passkey registrations per account (#2247). Every one mails the owner
+  # (`KilnCMS.Accounts.SecondFactorNotice`), so this is that mail's flood
+  # bound: a stolen session can add at most this many an hour, and
+  # `KilnCMS.Accounts.Passkey.max_per_account/0` caps the total. Generous for
+  # someone enrolling a laptop, a phone and two security keys in one sitting.
+  @passkey_registration_budget 5
+  @passkey_registration_window :timer.hours(1)
+
   # Every bucket this module charges, for `forget_all/0`.
   @buckets ~w(signin challenge:free_signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice
-               mail:invitation mail:membership_notice mail:sign_in_unlock)
+               mail:invitation mail:membership_notice mail:sign_in_unlock passkey:register)
 
   @mail_budget 5
   @mail_window :timer.hours(1)
@@ -313,6 +321,29 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   """
   @spec forgive_second_factor(String.t()) :: :ok
   def forgive_second_factor(user_id), do: drop("2fa", user_id)
+
+  @doc """
+  Charges one passkey registration against this account (#2247).
+
+  Keyed on the user id: the account is known (the ceremony runs for a signed-in
+  user), so there is nothing to enumerate. Charged by
+  `KilnCMS.Accounts.Changes.ThrottlePasskeyRegistration` before the
+  registration's transaction, once per verified attestation that reaches the
+  action, whether or not the row is then written.
+  """
+  @spec consume_passkey_registration(String.t()) :: :allow | {:deny, non_neg_integer()}
+  def consume_passkey_registration(user_id),
+    do:
+      charge(
+        "passkey:register",
+        user_id,
+        passkey_registration_window(),
+        passkey_registration_budget()
+      )
+
+  @doc "Clears this account's passkey-registration budget (a test seam)."
+  @spec forget_passkey_registrations(String.t()) :: :ok
+  def forget_passkey_registrations(user_id), do: drop("passkey:register", user_id)
 
   @doc """
   Whether the owner of this identifier should be told their account is being
@@ -460,7 +491,9 @@ defmodule KilnCMS.Accounts.AccountThrottle do
       second_factor_window: @second_factor_window,
       mail_budget: @mail_budget,
       mail_window: @mail_window,
-      unlock_mail_budget: @unlock_mail_budget
+      unlock_mail_budget: @unlock_mail_budget,
+      passkey_registration_budget: @passkey_registration_budget,
+      passkey_registration_window: @passkey_registration_window
     ]
   end
 
@@ -514,6 +547,12 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   defp mail_window, do: config(:mail_window, @mail_window)
   defp second_factor_budget, do: config(:second_factor_budget, @second_factor_budget)
   defp second_factor_window, do: config(:second_factor_window, @second_factor_window)
+
+  defp passkey_registration_budget,
+    do: config(:passkey_registration_budget, @passkey_registration_budget)
+
+  defp passkey_registration_window,
+    do: config(:passkey_registration_window, @passkey_registration_window)
 
   defp config(key, default) do
     :kiln_cms

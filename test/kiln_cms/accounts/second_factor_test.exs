@@ -152,4 +152,65 @@ defmodule KilnCMS.Accounts.SecondFactorTest do
       assert {:ok, _verified} = SecondFactor.check(user, hd(codes))
     end
   end
+
+  describe "a passkey at the prompt (#2247)" do
+    import KilnCMS.PasskeyFixtures, only: [enroll: 2, assertion: 1, assertion: 2]
+
+    alias KilnCMS.Accounts.WebAuthn
+
+    defp passkey_account do
+      {user, secret} = enabled_user()
+      {:ok, _} = enroll(user, "sf-#{user.id}")
+      {user, secret, "sf-#{user.id}"}
+    end
+
+    defp step_up(user, payload),
+      do: SecondFactor.check_passkey(user, {WebAuthn.step_up_challenge(user), payload})
+
+    test "a verified passkey clears the counter, so repeated step-ups never lock out" do
+      # One more than the budget: a passkey that charged and did not forgive
+      # would lock its owner out of their own sign-ins.
+      {user, _secret, cred} = passkey_account()
+
+      for _ <- 1..(@budget + 1) do
+        assert {:ok, verified} = step_up(user, assertion(cred))
+        assert verified.id == user.id
+        assert Ash.Resource.get_metadata(verified, :second_factor_method) == :passkey
+      end
+    end
+
+    test "and clears the sign-in counter the password step charged" do
+      {user, _secret, cred} = passkey_account()
+      email = to_string(user.email)
+      on_exit(fn -> AccountThrottle.forgive(email) end)
+
+      AccountThrottle.consume(email)
+      assert AccountThrottle.sign_in_attempts(email) > 0
+
+      assert {:ok, _} = step_up(user, assertion(cred))
+      assert AccountThrottle.sign_in_attempts(email) == 0
+    end
+
+    test "a refused assertion spends the code's budget, so a spent one refuses a good passkey" do
+      {user, secret, cred} = passkey_account()
+
+      assert :invalid = step_up(user, assertion(cred, signature: "bad"))
+      assert :invalid = step_up(user, assertion(cred, signature: "bad"))
+
+      assert {:deny, denied, ms} = step_up(user, assertion(cred))
+      assert denied.id == user.id
+      assert is_integer(ms) and ms > 0
+
+      # One budget for both factors: the code is refused as well.
+      assert {:deny, _user, _ms} = SecondFactor.check(user, current_code(secret))
+    end
+
+    test "codes and passkeys draw on the same budget" do
+      {user, _secret, cred} = passkey_account()
+
+      assert :invalid = SecondFactor.check(user, "000000")
+      assert :invalid = step_up(user, assertion(cred, signature: "bad"))
+      assert {:deny, _user, _ms} = step_up(user, assertion(cred))
+    end
+  end
 end

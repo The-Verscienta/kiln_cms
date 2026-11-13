@@ -10,6 +10,8 @@ defmodule KilnCMSWeb.AuthController do
   alias KilnCMS.Security.AuthEvents
   alias KilnCMSWeb.ChallengeComponents
   alias KilnCMSWeb.SafeRedirect
+  alias KilnCMSWeb.SecondFactorStepUp
+  alias KilnCMSWeb.SignInMarker
 
   # Same flag the session cookie rides, for the same reason: `__Host-` is only
   # honoured alongside `Secure`, and dev/test/e2e serve over plain HTTP.
@@ -24,11 +26,12 @@ defmodule KilnCMSWeb.AuthController do
   def success(conn, activity, user, token) do
     conn = carry_password_notice(conn, activity, user)
 
-    # If the account has two-factor enabled, the first factor alone must not grant
+    # If the account owes a second factor, the first factor alone must not grant
     # a session: stash a signed, expiring pending token (carrying the first-factor
-    # auth token, already minted + stored) and divert to the code prompt.
+    # auth token, already minted + stored) and divert to the prompt. Who owes
+    # one is `SecondFactorStepUp`'s decision, shared with the headless door.
     # Everything else completes the sign-in immediately.
-    if Accounts.totp_enabled?(user) do
+    if SecondFactorStepUp.decide(conn, user) == :prompt do
       # Read before withholding: deleting a cookie *adds* a `resp_cookies` entry,
       # so the check has to happen first.
       remember_me? = remember_me_pending?(conn)
@@ -143,25 +146,47 @@ defmodule KilnCMSWeb.AuthController do
   `complete_sign_in/3` for a caller that knows how the sign-in was made. Records
   the `:sign_in` security event (#2241) with `method`: this is where every
   password, magic-link, SSO and post-second-factor sign-in completes.
+
+  Marks the session with how it signed in (`KilnCMSWeb.SignInMarker`, #2247).
+  Options:
+
+    * `:second_factor?` — a second factor was verified for this sign-in (the
+      code prompt or the passkey step-up).
   """
-  def complete_sign_in(conn, user, message, method) do
+  def complete_sign_in(conn, user, message, method, opts \\ []) do
+    {conn, return_to} = establish_session(conn, user, message, method, opts)
+    redirect(conn, to: return_to)
+  end
+
+  @doc """
+  Everything `complete_sign_in/5` does but the redirect: returns the conn with
+  the session established and where to send the user. For a door that answers
+  JSON and lets its script follow (the passkey step-up, #2247).
+  """
+  @spec establish_session(Plug.Conn.t(), Accounts.User.t(), String.t(), String.t(), keyword()) ::
+          {Plug.Conn.t(), String.t()}
+  def establish_session(conn, user, message, method, opts \\ []) do
     return_to = sign_in_destination(conn, user)
     notice? = get_session(conn, :password_breach_notice) == true
 
     AuthEvents.signed_in(conn, user, method)
 
-    conn
-    |> delete_session(:sign_in_method)
-    |> delete_session(:return_to)
-    |> delete_session(:password_breach_notice)
-    |> delete_session(:pending_2fa)
-    |> store_in_session(user)
-    |> put_live_socket_id(user)
-    # If your resource has a different name, update the assign name here (i.e :current_admin)
-    |> assign(:current_user, user)
-    |> put_flash(:info, message)
-    |> flash_password_notice(notice?)
-    |> redirect(to: return_to)
+    conn =
+      conn
+      |> delete_session(:sign_in_method)
+      |> delete_session(:return_to)
+      |> delete_session(:password_breach_notice)
+      |> delete_session(:pending_2fa)
+      |> store_in_session(user)
+      # After the store: the marker is keyed to the token just stored.
+      |> SignInMarker.put(method, second_factor?: Keyword.get(opts, :second_factor?, false))
+      |> put_live_socket_id(user)
+      # If your resource has a different name, update the assign name here (i.e :current_admin)
+      |> assign(:current_user, user)
+      |> put_flash(:info, message)
+      |> flash_password_notice(notice?)
+
+    {conn, return_to}
   end
 
   # `:error`, not `:info`: the info flash dismisses itself, and this is a

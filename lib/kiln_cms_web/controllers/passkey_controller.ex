@@ -19,6 +19,11 @@ defmodule KilnCMSWeb.PasskeyController do
   Kiln passkey is registered *and* asserted with user verification required,
   so the ceremony already proves possession + PIN/biometric (the same
   two-factor bar the TOTP flow enforces).
+
+  This is the *anonymous* ceremony. A passkey used as the second factor after
+  a password (#2247) is a different one, at `/sign-in/verify/passkey` in
+  `KilnCMSWeb.TwoFactorController`, with its own session key and its own
+  challenges: a nonce parked here is never accepted there, nor the reverse.
   """
   use KilnCMSWeb, :controller
 
@@ -49,6 +54,10 @@ defmodule KilnCMSWeb.PasskeyController do
       conn
       |> delete_session(:return_to)
       |> AshAuthentication.Plug.Helpers.store_in_session(user)
+      # A user-verified passkey is both factors at once, so the session is
+      # marked as having passed the second (#2247). After the store: the marker
+      # is keyed to the token just stored.
+      |> KilnCMSWeb.SignInMarker.put("passkey", second_factor?: true)
       # This ceremony establishes its session without going through
       # `complete_sign_in/3`, so it has to key the socket itself (#675).
       |> KilnCMSWeb.AuthController.put_live_socket_id(user)
