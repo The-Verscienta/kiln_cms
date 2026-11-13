@@ -26281,6 +26281,21 @@ msgstr ""
 msgid "can't depend on the field itself"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't filter %{type} by %{field}, a private field"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't filter %{type} by %{field}: a %{kind} field has no plain value to match"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't let editors create records yet: that is coming in a later release"
+msgstr ""
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "category"
@@ -26710,6 +26725,11 @@ msgstr ""
 msgid "hard bounce"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "has a value for %{field} that it does not accept: it %{reason}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "has expired"
@@ -26847,9 +26867,19 @@ msgstr ""
 msgid "is not empty"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "is not valid: it %{reason}"
+msgstr ""
+
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "is one of"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "is only for a reference field"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
@@ -26895,6 +26925,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "is updated"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "is used by the selection of %{fields}; remove it from there first"
 msgstr ""
 
 #: lib/kiln_cms/cms/validations/field_condition.ex
@@ -27078,6 +27113,26 @@ msgstr ""
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
 msgid "names %{field}, which is not a field beside this one"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "names %{field}, which is not a field of %{type}"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "names %{type}, which is not one of this field's target types"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "names a category for %{type} that does not exist on this site"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "names a tag for %{type} that does not exist on this site"
 msgstr ""
 
 #: lib/kiln_cms/cms/validations/default_source.ex

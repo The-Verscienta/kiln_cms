@@ -33,6 +33,13 @@ defmodule KilnCMS.CMS.FieldSync do
   every environment. Role and membership field *grants* are not field
   attributes — they live on roles and are not part of this document.
 
+  A reference field's `selection` (which records it may add, #2285) is **not**
+  part of the document either: it names tag and category ids, which are per
+  site, and fields of its target types that this import may not have created
+  yet. An import neither writes it, changes it nor clears it, so what an
+  environment configured survives; a file that carries a `"selection"` key is
+  refused like any unknown key.
+
   An owner's `"sections"` lists how its sections are laid out in the editor
   (`KilnCMS.CMS.FieldSection`, #2280): `name`, `display` and `initially`, one
   entry per stored layout of a section some field of the owner carries. A
@@ -79,6 +86,10 @@ defmodule KilnCMS.CMS.FieldSync do
   @version 1
 
   @owner_keys ~w(content_type type_definition_id link_of_id group_of_id)a
+  # Attributes of a field that belong to one site and are not synced (#2285):
+  # `selection` names tag and category ids, which differ per site, and fields
+  # of its targets that this import may not have created yet.
+  @site_keys ~w(selection)a
   @rules ~w(visible_when required_when)
   @child_lists [{"link_fields", :reference}, {"group_fields", :group}]
   @section_owner_keys ~w(content_type type_definition_id)a
@@ -102,7 +113,7 @@ defmodule KilnCMS.CMS.FieldSync do
     FieldDefinition
     |> Ash.Resource.Info.action(:create)
     |> Map.fetch!(:accept)
-    |> Enum.reject(&(&1 in @owner_keys))
+    |> Enum.reject(&(&1 in @owner_keys or &1 in @site_keys))
     |> Enum.map(&Atom.to_string/1)
     |> Enum.sort()
   end

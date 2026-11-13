@@ -687,6 +687,14 @@ record, the field's own validation (`min_items` / `max_items`, the allowed
 target types, link fields) and the reconciled edges. A refused write returns
 `result: null` and the reasons in `errors`, exactly as `updatePost` does.
 
+That includes a field's `selection` (which records it may add,
+[extending-content.md](extending-content.md#limit-what-can-be-picked)): adding
+a record the field does not accept returns `result: null` and an error whose
+`message` reads `“Title” isn't one of the records this field accepts.` A
+record the field already holds is not re-judged, and `remove…References` and
+`move…Reference` are never refused for it. `GET /api/schema` reports the
+live selection as `x-kiln-selection` on the field.
+
 `targets` are `{ id, type, link }`. `type` (`page`, `post`, a dynamic type's
 name) is needed only when the field links to more than one type. `link` sets
 the connection's link fields (R3) as a JSON-encoded object, like

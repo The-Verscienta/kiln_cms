@@ -169,6 +169,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldValue
   alias KilnCMS.CMS.PrivateFields
+  alias KilnCMS.CMS.ReferenceSelection
   alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.CMS.UniqueValues
   alias KilnCMS.CMS.WorkingCopy
@@ -834,6 +835,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
           {mode, grandfather(check?, Map.get(existing, def.name))}
         )
         |> constrain(def, Map.get(existing, def.name), check?)
+        |> select(def, Map.get(existing, def.name), ctx)
         |> with_links(def, Map.get(supplied, def.name), Map.get(existing, def.name), ctx)
         |> fold(def, cleaned, errors)
 
@@ -848,6 +850,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         def
         |> resolve_field(nil, read_opts, {mode, grandfather(check?, nil)})
         |> constrain(def, nil, check?)
+        |> select(def, nil, ctx)
         |> with_links(def, def.default, nil, ctx)
         |> fold(def, cleaned, errors)
     end
@@ -902,6 +905,84 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       FieldConstraints.check(def, item, "#{def.name}[#{index}]")
     end)
   end
+
+  # A reference field's `selection` (#2285): every target the write ADDS must
+  # be one the field accepts. "Added" is by id against the stored value, never
+  # by comparing snapshots (a retitled target or a link map differs while the
+  # connection is the same), so a connection already held is never re-judged
+  # and removing or reordering is never refused. One read per target type, as
+  # the writer, restricted to the added ids plus the selection's own filter —
+  # the same evaluator and read action the picker uses, so the two agree. A
+  # system actor and `authorize?: false` skip the filter (the evaluator says
+  # so) but the target was already resolved above. References cannot be group
+  # sub-fields or link fields (`Validations.GroupField`, `LinkField`), so the
+  # top-level pass is the only one.
+  defp select({:ok, value} = ok, %{field_type: :reference} = def, stored, {read_opts, _, true}) do
+    selection = ReferenceSelection.normalize(Map.get(def, :selection))
+    stored_ids = snapshot_ids(stored)
+    added = for %{"id" => id} = item <- List.wrap(value), id not in stored_ids, do: item
+
+    if is_nil(selection) or added == [] do
+      ok
+    else
+      with :ok <- unaccepted(added, selection, read_opts), do: ok
+    end
+  end
+
+  defp select(result, _def, _stored, _ctx), do: result
+
+  defp unaccepted(added, selection, read_opts) do
+    added
+    |> Enum.group_by(&Map.get(&1, "type"))
+    |> Enum.reduce_while(:ok, fn {type, items}, :ok ->
+      case missing_from_selection(type, items, selection, read_opts) do
+        [] -> {:cont, :ok}
+        missing -> {:halt, {:error, not_accepted(missing)}}
+      end
+    end)
+  rescue
+    # A real boundary, narrowed to Ash errors: a selection that went stale
+    # (a value its field can no longer cast) makes the read fail, and the
+    # writer needs a message, not a 500. A database error is not caught here:
+    # it would leave the transaction aborted.
+    _error in Ash.Error.Invalid ->
+      {:error,
+       "could not be checked against which records it accepts — an admin should review " <>
+         "the field's selection"}
+  end
+
+  defp missing_from_selection(type, items, selection, read_opts) do
+    tenant = Keyword.get(read_opts, :tenant)
+
+    case ReferenceSelection.query_for(selection, type, Keyword.get(read_opts, :actor), tenant,
+           read_opts: read_opts
+         ) do
+      {:ok, :unfiltered} ->
+        []
+
+      {:ok, plan} ->
+        ids = Enum.map(items, & &1["id"])
+
+        found =
+          type
+          |> KilnCMS.CMS.ContentTypes.list!(
+            read_opts
+            |> ReferenceSelection.read_opts(plan)
+            |> Keyword.update!(:query, &(&1 ++ [filter: [id: [in: ids]], select: [:id]]))
+          )
+          |> MapSet.new(& &1.id)
+
+        Enum.reject(items, &MapSet.member?(found, &1["id"]))
+    end
+  end
+
+  defp not_accepted([only]),
+    do: "#{item_label(only, snapshot_title(only))} isn't one of the records this field accepts."
+
+  defp not_accepted(items),
+    do:
+      Enum.map_join(items, ", ", &item_label(&1, snapshot_title(&1))) <>
+        " aren't among the records this field accepts."
 
   # --- link fields (R3) ----------------------------------------------------------
 

@@ -26,6 +26,12 @@ defmodule KilnCMS.CMS.FieldSyncTest do
   defp field!(admin, attrs),
     do: CMS.create_field_definition!(Map.put_new(attrs, :content_type, :post), actor: admin)
 
+  defp put_in_field(doc, name, key, value) do
+    update_in(doc, ["owners", Access.all(), "fields", Access.filter(&(&1["name"] == name))], fn
+      field -> Map.put(field, key, value)
+    end)
+  end
+
   # A model touching every kind of owner and every rule attribute.
   defp model!(admin) do
     field!(admin, %{
@@ -216,7 +222,7 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       # action's accept list. One that is not accepted would be silently left
       # out of every sync, so it must be named here as a decision.
       not_synced =
-        ~w(id org_id inserted_at updated_at content_type type_definition_id link_of_id group_of_id)a
+        ~w(id org_id inserted_at updated_at content_type type_definition_id link_of_id group_of_id selection)a
 
       stored =
         KilnCMS.CMS.FieldDefinition
@@ -226,6 +232,44 @@ defmodule KilnCMS.CMS.FieldSyncTest do
         |> Enum.sort()
 
       assert stored == FieldSync.field_keys()
+    end
+
+    test "a reference's selection is per site: not exported, never touched by an import",
+         %{admin: admin} do
+      field =
+        field!(admin, %{
+          name: "pick",
+          label: "Pick",
+          field_type: :reference,
+          target_type: "page",
+          selection: %{"states" => ["published"]}
+        })
+
+      assert {:ok, doc} = FieldSync.export(actor: admin)
+      doc = FieldSync.jsonify(doc)
+
+      exported =
+        for owner <- doc["owners"], f <- owner["fields"], f["name"] == "pick", do: f
+
+      assert [pick] = exported
+      refute Map.has_key?(pick, "selection")
+
+      # Importing over it neither clears nor changes the site's selection,
+      # even when the file changes the field.
+      changed = put_in_field(doc, "pick", "label", "Pick one")
+      assert {:ok, _report} = FieldSync.import_doc(changed, actor: admin, apply?: true)
+
+      reloaded = CMS.get_field_definition!(field.id, actor: admin)
+      assert reloaded.label == "Pick one"
+      assert reloaded.selection == %{"states" => ["published"]}
+
+      # A file that tries to carry one is refused like any unknown key.
+      with_selection = put_in_field(doc, "pick", "selection", %{"owner" => "self"})
+
+      assert {:error, %{errors: [%{messages: [m]}]}} =
+               FieldSync.import_doc(with_selection, actor: admin)
+
+      assert m =~ "unknown key(s) selection"
     end
 
     test "the export is admin only", %{admin: _admin} do

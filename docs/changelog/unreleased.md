@@ -325,6 +325,32 @@ carries the reasoning.
 
 ## Added
 
+<a id="reference-selection-foundation"></a>
+
+- **A reference field can limit which records may be added to it ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285), first of four changes).**
+  `FieldDefinition.selection` is a nullable map (one additive column, nothing
+  in 1.9 reads it): `states`, `owner: "self"`, `sort`, and per target type
+  `tags_any`, `category` and `fields` (custom-field equality, `in`, `not_eq`).
+  Conditions AND together and only narrow what the writer can already read; an
+  admin is bound too. It is checked in the write that adds a target, for every
+  path (editor, reverse connect, JSON:API, GraphQL, MCP, import): a target
+  already connected is never re-judged, removing and reordering are never
+  refused, and copies, translations, restores and *Publish changes* skip it.
+  A system actor or `authorize?: false` write skips the filter but still
+  resolves the target. A refused target reads “Title” isn't one of the records
+  this field accepts.
+
+  Conditions on something that no longer exists (a deleted tag, category or
+  field, a type that left the registry) are dropped, not turned into "match
+  nothing". Making a field a selection names private, or retyping it to a type
+  without equality, is refused. `create` (create-on-type) is refused until a
+  later change. `GET /api/schema` reports the live selection as
+  `x-kiln-selection` (tag and category as ids); field-definition sync
+  (`FieldSync`) leaves it out because those ids are per site; `mix
+  kiln.gen.join` does not carry it. There is no picker or admin UI for it yet:
+  configure it only together with the filtered picker, because until then the
+  picker offers targets a save refuses.
+
 <a id="backup-schedules"></a>
 
 - **In-app backup schedules: a platform admin can schedule database and media backups daily, weekly, fortnightly or monthly at a local time in a time zone, from a release console; the Backups page lists them.**

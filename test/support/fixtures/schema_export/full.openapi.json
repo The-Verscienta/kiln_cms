@@ -1451,6 +1451,13 @@
                   "object",
                   "null"
                 ],
+                "x-kiln-selection": {
+                  "owner": "self",
+                  "sort": "title",
+                  "states": [
+                    "published"
+                  ]
+                },
                 "x-kiln-target-types": [
                   "post"
                 ]

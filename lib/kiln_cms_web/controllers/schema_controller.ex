@@ -54,6 +54,14 @@ defmodule KilnCMSWeb.SchemaController do
   difference that gated it there absent here: this describes the **read**
   surface only, so it is not a map of the mutation API.
 
+  A reference field's `selection` (#2285) is published as `x-kiln-selection`
+  by the same rule: only its live conditions, and never one that names a
+  private field (so none a #2281 read grant could hide, which are private
+  fields). What remains is states, owner, sort, tag and category ids and the
+  equality values on non-private fields: configuration of which records a
+  field accepts, not content, and the tags and categories are world-readable.
+  The endpoint is anonymous, so this is what an anonymous caller learns.
+
   It deliberately withholds the parts of the field registry that are editorial
   rather than structural, because those are *not* inferable from published
   output and `KilnCMS.CMS.FieldDefinition`'s own read policy is editor-gated:

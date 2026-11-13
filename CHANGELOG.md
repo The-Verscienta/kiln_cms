@@ -99,6 +99,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A reference field can limit which records may be added to it (`selection` on its definition: states, "only mine", and per target type tags, category and custom-field values), enforced on every write path and reported by `GET /api/schema`; groundwork for the filtered picker, no editor yet ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)). Run `mix ash.migrate`.**
+  ([long form](docs/changelog/unreleased.md#reference-selection-foundation))
+
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
   ([long form](docs/changelog/unreleased.md#backup-schedules))
 

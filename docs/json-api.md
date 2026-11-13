@@ -889,6 +889,15 @@ depends on how many types the field allows (`target_type` or
 `slug` and `title` on input are ignored; the stored snapshot is always
 re-read from the target.
 
+A reference field can also limit which records may be **added** to it
+(`selection`, [extending-content.md](extending-content.md#limit-what-can-be-picked)).
+A write that adds a record the field does not accept is refused with a
+validation error on the field, in the same shape as an unresolvable target:
+`“Only a draft” isn't one of the records this field accepts.` (several refused
+records read `… aren't among the records this field accepts.`). A record the
+field already holds is never re-judged, and removing or reordering is never
+refused. The schema export reports the live selection as `x-kiln-selection`.
+
 An edge is returned only when the reader may read **both** of its ends: an
 anonymous reader of a published page never sees the edge from a draft that
 links to it, nor an edge to a target that has been unpublished. Editors and
