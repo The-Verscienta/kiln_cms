@@ -47,6 +47,7 @@ defmodule KilnCMS.CrawlerVerification.RangesWorker do
 
   @type result ::
           :ok
+          | :disabled
           | :http_error
           | :transport_error
           | :too_large
@@ -89,19 +90,28 @@ defmodule KilnCMS.CrawlerVerification.RangesWorker do
   @doc """
   Fetches, checks and installs `engine`'s list, and sends it to the other
   nodes. Answers the result telemetry reports.
+
+  With ranges off (`KILN_CRAWLER_RANGES=false`, or verification off) it
+  answers `:disabled` and does nothing else: no request, no telemetry, no
+  list installed or sent (#2853). The switch is read from the application
+  environment, never from `config`, so no caller can pass its way past it.
   """
   @spec refresh(atom(), keyword()) :: result()
   def refresh(engine, config \\ Ranges.config()) do
-    result =
-      with {:ok, body} <- fetch(Engines.range_source(engine), config),
-           {:ok, cidrs} <- parse(body, config) do
-        Ranges.put(engine, cidrs)
-        Ranges.broadcast(engine)
-        :ok
-      end
+    if Ranges.enabled?() do
+      result =
+        with {:ok, body} <- fetch(Engines.range_source(engine), config),
+             {:ok, cidrs} <- parse(body, config) do
+          Ranges.put(engine, cidrs)
+          Ranges.broadcast(engine)
+          :ok
+        end
 
-    report(engine, result)
-    result
+      report(engine, result)
+      result
+    else
+      :disabled
+    end
   end
 
   defp fetch(nil, _config), do: :other

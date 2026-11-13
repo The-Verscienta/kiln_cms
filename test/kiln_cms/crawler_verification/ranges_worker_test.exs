@@ -193,6 +193,40 @@ defmodule KilnCMS.CrawlerVerification.RangesWorkerTest do
       refute_received :requested
       refute_received {:fetch, _, _}
     end
+
+    # `refresh/2` checks the switch itself, not only through `perform/1`, and
+    # reads it from the application environment, so a `config` saying
+    # `enabled: true` cannot get past it (#2853).
+    test "with #{name} off, refresh/2 answers :disabled and makes no request" do
+      test = self()
+
+      Req.Test.stub(@stub, fn conn ->
+        send(test, :requested)
+        Req.Test.json(conn, %{"prefixes" => [%{"ipv4Prefix" => @v4}]})
+      end)
+
+      Application.put_env(
+        :kiln_cms,
+        unquote(key),
+        Keyword.put(env(unquote(key)), :enabled, false)
+      )
+
+      assert RangesWorker.refresh(:google) == :disabled
+      assert RangesWorker.refresh(:google, Ranges.config(enabled: true)) == :disabled
+      refute_received :requested
+      refute_received {:fetch, _, _}
+      refute_received {:crawler_ranges, _, _, _, _}
+      assert Ranges.status().google.count == 0
+    end
+  end
+
+  test "with ranges on, refresh/2 fetches, installs and sends the list" do
+    stub_all(fn _engine -> {200, list([@v4])} end)
+
+    assert RangesWorker.refresh(:google) == :ok
+    assert_received {:fetch, %{count: 1}, %{engine: :google, result: :ok}}
+    assert_received {:crawler_ranges, 1, :google, [@v4], _age}
+    assert Ranges.status().google.count == 1
   end
 
   test "a job naming engines fetches only those, and ignores names it does not know" do
