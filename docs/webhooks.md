@@ -186,7 +186,10 @@ The same masked form names an endpoint everywhere else it appears: the
 **Recent deliveries** table, the labels of the signing-secret buttons read by
 screen readers, a document's governance trail and its JSON and CSV exports,
 the "Retraction not delivered" notice, and the application log. The database
-and the delivery ledger keep the real URL, and a redelivery is sent to it.
+and the delivery ledger keep the real URL. Every delivery, a redelivery
+included, is posted to the endpoint's current URL. Why every URL is treated
+as a credential, whatever the format, is argued in
+[ADR 0028](decisions/0028-webhook-urls-are-credentials-masked-wherever-they-are-shown-exported-or-logged.md).
 
 What can go wrong:
 
@@ -227,7 +230,8 @@ setup is in [Send alerts to Slack](security-alerts.md#send-alerts-to-slack).
   the signature covers the body actually sent, so a relay in front of the
   channel can verify it. Slack itself checks no signature: **the URL is the
   credential**. That is why the row shows no signing secret and no **Rotate
-  secret** button, and why the URL is masked. If the URL leaks, regenerate it
+  secret** button, and why the URL is masked
+  ([ADR 0028](decisions/0028-webhook-urls-are-credentials-masked-wherever-they-are-shown-exported-or-logged.md)). If the URL leaks, regenerate it
   in Slack, then delete the endpoint and add the new URL.
 - **Failures are ordinary.** Slack answers `400 invalid_payload`, `403`,
   `404 channel_not_found` or `410 channel_is_archived` when it can't post;
@@ -525,7 +529,8 @@ site's mail relay changed).
 - **Platform alerts** (new platform admins, platform role changes, new API
   keys, a stolen API key used again, an API key over a rate limit) are not
   webhook events in this release;
-  they go to the platform admins by bell and email only.
+  they go to the platform admins by bell and email only
+  ([ADR 0027](decisions/0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md)).
 - **Sent only to the endpoint.** A security event is not a content change:
   it does not run [automation](automation.md) rules, federate, purge the CDN
   or appear in the change feed. It is otherwise an ordinary delivery: on the
