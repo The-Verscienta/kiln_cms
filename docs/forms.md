@@ -445,7 +445,7 @@ The page is not a route of its own. It is the last thing Kiln tries for a
 address wins: a content type of your own whose path segment is `forms` keeps
 its entries, and a path alias, a redirect, a locked page or a members-only
 teaser at the address is served instead of the form. The form shows only
-when none of those answer.
+when none of those answer. Why it is not a route: [ADR 0059](decisions/0059-a-generated-page-is-served-only-as-the-last-fallback-of-the-404-funnel-not-as-a-route-or-a-reserved-segment.md).
 
 What can go wrong:
 
