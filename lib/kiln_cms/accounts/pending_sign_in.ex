@@ -36,7 +36,7 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   caller reading a stale blob. What it sets is the *default* for a reader that
   passes none: `Plug.Crypto` embeds `Keyword.get(opts, :max_age, 86400)` into
   the term, so without it the blob's own lifetime would be a day. The five
-  minutes is enforced by `resolve/3`; the mint-time value is what a reader that
+  minutes is enforced by `resolve/4`; the mint-time value is what a reader that
   forgets falls back to.
 
   ## Single use
@@ -163,11 +163,12 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   """
   @type t :: %__MODULE__{
           user: Accounts.User.t(),
+          factors: Accounts.second_factors(),
           jti: String.t() | nil,
           remember_me?: boolean()
         }
 
-  defstruct [:user, :jti, remember_me?: false]
+  defstruct [:user, :jti, factors: %{totp?: false, passkeys: 0}, remember_me?: false]
 
   @doc "How long a minted blob stays redeemable, in seconds. Both gates."
   @spec max_age() :: pos_integer()
@@ -230,15 +231,26 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   Resolve a minted blob to the account awaiting its code.
 
   `{:ok, %PendingSignIn{}}`, with the first-factor token reattached to the
-  user's `__metadata__` so a completed sign-in has something to return — or
-  `:error` when the blob is missing, malformed, expired, already spent, or
-  names an account that no longer has a second factor.
+  user's `__metadata__` so a completed sign-in has something to return, and
+  `factors` saying which second factors the account holds now — or `:error`
+  when the blob is missing, malformed, expired, already spent, or names an
+  account that no longer holds the factor `factor` asks for.
+
+  `factor` is the factor the caller is about to check (#2247):
+
+    * `:totp` — the code prompts. The authenticator app must be enrolled, so a
+      passkey-only account cannot spend the shared second-factor budget on a
+      form that has nothing to check its code against.
+    * `:passkey` — the passkey step-up. At least one passkey must be registered.
+    * `:any` — the prompt page, which offers whichever factors the account
+      holds. Either one will do.
 
   Every one of those is `:error` rather than a reason, because they mean the
   same thing to a caller: this exchange is over, start again.
   """
-  @spec resolve(mode(), context(), term()) :: {:ok, t()} | :error
-  def resolve(mode, context, blob) when is_map_key(@modes, mode) and is_binary(blob) do
+  @spec resolve(mode(), context(), term(), :any | :totp | :passkey) :: {:ok, t()} | :error
+  def resolve(mode, context, blob, factor)
+      when is_map_key(@modes, mode) and is_binary(blob) and factor in [:any, :totp, :passkey] do
     %{jti?: jti?, remember_me?: carries_remember_me?} = Map.fetch!(@modes, mode)
 
     with {:ok, %{"user_id" => user_id, "token" => token} = payload} <-
@@ -249,13 +261,15 @@ defmodule KilnCMS.Accounts.PendingSignIn do
          user when not is_nil(user) <-
            Accounts.get_user!(user_id, authorize?: false, not_found_error?: false),
          # Re-checked rather than trusted from the first step: an account that
-         # turned two-factor off in between has no code to verify, and honouring
-         # the blob anyway would complete a sign-in on a factor that no longer
-         # exists.
-         true <- Accounts.totp_enabled?(user) do
+         # removed its second factor in between has nothing to verify, and
+         # honouring the blob anyway would complete a sign-in on a factor that
+         # no longer exists.
+         factors = Accounts.second_factors(user),
+         true <- holds?(factors, factor) do
       {:ok,
        %__MODULE__{
          user: %{user | __metadata__: Map.put(user.__metadata__, :token, token)},
+         factors: factors,
          jti: jti,
          remember_me?: carries_remember_me? and payload["remember_me"] == true
        }}
@@ -269,7 +283,13 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   # `:error` from a typo would resolve forever, and both gates render that as a
   # redirect back to `/sign-in` — an unbreakable loop with no exception, no log
   # line, and nothing in the suite to catch it.
-  def resolve(mode, _context, _blob) when is_map_key(@modes, mode), do: :error
+  def resolve(mode, _context, _blob, factor)
+      when is_map_key(@modes, mode) and factor in [:any, :totp, :passkey],
+      do: :error
+
+  defp holds?(factors, :any), do: Accounts.has_second_factor?(factors)
+  defp holds?(%{totp?: totp?}, :totp), do: totp?
+  defp holds?(%{passkeys: passkeys}, :passkey), do: passkeys > 0
 
   @doc """
   Complete this attempt: release the first-factor token `mint_and_hold/4` held, and claim

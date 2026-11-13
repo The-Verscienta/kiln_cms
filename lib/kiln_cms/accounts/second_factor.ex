@@ -23,7 +23,8 @@ defmodule KilnCMS.Accounts.SecondFactor do
   pivot to the recovery codes, and two budgets would simply be one budget twice
   as large.
 
-  `check/2` is the whole public surface, and it owns charge → verify → forgive
+  `check/3` and its passkey twin `check_passkey/3` (#2247) are the whole
+  public surface, and they own charge → verify → forgive
   so that ordering is a property of this module rather than of two call sites —
   see `KilnCMS.Accounts.AccountThrottle`'s moduledoc on why the gate must be
   the counter rather than a check followed by a later increment. The code check
@@ -46,6 +47,7 @@ defmodule KilnCMS.Accounts.SecondFactor do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.SignInAlert
   alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Accounts.WebAuthn
   alias KilnCMS.Security.AuthEvents
 
   @doc """
@@ -80,9 +82,41 @@ defmodule KilnCMS.Accounts.SecondFactor do
     # what a recovery code's use is attributed to. Without it nothing is.
     context = Keyword.get(opts, :context, %{})
 
+    charged(user, context, fn -> verify(user, code, context) end)
+  end
+
+  @doc """
+  `check/3` for a passkey at the second-factor prompt (#2247): `assertion` is
+  `{challenge, payload}` — the step-up challenge this pending sign-in parked
+  and the browser's assertion over it.
+
+  The same three answers, and the same order, for the same reason: the passkey
+  is the other way to pass this step, so it shares the code's budget, its
+  owner alert and its failure event, and a verified one clears the sign-in
+  counter exactly as a verified code does. A door that verified passkeys
+  outside this would be a second, unbudgeted second factor.
+
+  The assertion itself is `KilnCMS.Accounts.WebAuthn.verify_step_up/3`'s.
+  """
+  @spec check_passkey(Accounts.User.t(), {Wax.Challenge.t(), map()}, keyword()) ::
+          {:ok, Accounts.User.t()} | :invalid | {:deny, Accounts.User.t(), non_neg_integer()}
+  def check_passkey(user, {%Wax.Challenge{} = challenge, payload}, opts \\ []) do
+    context = Keyword.get(opts, :context, %{})
+
+    charged(user, context, fn ->
+      case WebAuthn.verify_step_up(challenge, payload, user) do
+        {:ok, verified} -> {:ok, mark(verified, :passkey)}
+        {:error, _reason} -> :invalid
+      end
+    end)
+  end
+
+  # Charge, then run `verify`, then audit and forgive — or refuse with the
+  # owner alerted. The one place either factor's order is written.
+  defp charged(user, context, verify) do
     case AccountThrottle.consume_second_factor(user.id) do
       :allow ->
-        user |> verify(code, context) |> audit_failure(user, context) |> forgive_on_success()
+        verify.() |> audit_failure(user, context) |> forgive_on_success()
 
       {:deny, retry_after_ms} ->
         SignInAlert.second_factor_locked(user)

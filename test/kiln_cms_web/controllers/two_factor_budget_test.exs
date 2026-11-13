@@ -252,4 +252,55 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
 
     assert redirected_to(verify(user, spaced)) == ~p"/editor/overview"
   end
+
+  describe "the passkey step-up (#2247)" do
+    import KilnCMS.PasskeyFixtures, only: [enroll: 2, assertion: 1, assertion: 2]
+
+    defp passkey_pending(user) do
+      build_conn()
+      |> unique_ip()
+      |> Map.put(:host, "localhost")
+      |> with_pending(user)
+    end
+
+    defp step_up(user, payload) do
+      optioned = user |> passkey_pending() |> post(~p"/sign-in/verify/passkey/options")
+
+      optioned
+      |> recycle()
+      |> Map.put(:host, "localhost")
+      |> Map.put(:remote_ip, optioned.remote_ip)
+      |> put_private(:plug_skip_csrf_protection, true)
+      |> post(~p"/sign-in/verify/passkey", payload)
+    end
+
+    test "refused passkeys spend the code's budget; a spent one is a 429 with retry-after" do
+      user = enabled_user()
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
+      {:ok, _} = enroll(user, "budget-#{user.id}")
+
+      for _ <- 1..@budget do
+        assert step_up(user, assertion("budget-#{user.id}", signature: "bad")).status == 401
+      end
+
+      denied = step_up(user, assertion("budget-#{user.id}"))
+
+      assert json_response(denied, 429)["error"]
+      assert [_seconds] = get_resp_header(denied, "retry-after")
+      assert get_session(denied, "user_token") == nil
+
+      # One budget: the code prompt is refused too.
+      assert verify(user, valid_code()).status == 429
+    end
+
+    test "a verified passkey clears the counter, so more step-ups than the budget all pass" do
+      user = enabled_user()
+      on_exit(fn -> AccountThrottle.forgive_second_factor(user.id) end)
+      {:ok, _} = enroll(user, "clear-#{user.id}")
+
+      for _ <- 1..(@budget + 1) do
+        assert json_response(step_up(user, assertion("clear-#{user.id}")), 200)["redirect_to"]
+      end
+    end
+  end
 end

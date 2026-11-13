@@ -79,7 +79,6 @@ defmodule KilnCMSWeb.ApiAuthController do
   """
   use KilnCMSWeb, :controller
 
-  alias KilnCMS.Accounts
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.Errors.ChallengeRequired
   alias KilnCMS.Accounts.PendingSignIn
@@ -123,7 +122,11 @@ defmodule KilnCMSWeb.ApiAuthController do
              # (#2241); human verification reads the door (#2249).
              context: Map.merge(AuthEvents.context(conn), Challenge.context(:api))
            ) do
-      if Accounts.totp_enabled?(user) do
+      # The same decision the browser door takes (#2247). Only the
+      # authenticator app diverts here: a passkey cannot be asserted
+      # headlessly, and nothing requires a second factor of a passkey-only
+      # account yet.
+      if KilnCMSWeb.SecondFactorStepUp.decide(conn, user) == :prompt do
         two_factor_required(conn, user)
       else
         issue_token(conn, user)
@@ -196,7 +199,7 @@ defmodule KilnCMSWeb.ApiAuthController do
     code = params["code"]
 
     with :ok <- require_params([{"pending_token", pending}, {"code", code}]),
-         {:ok, resolved} <- PendingSignIn.resolve(:encrypted, conn, pending),
+         {:ok, resolved} <- PendingSignIn.resolve(:encrypted, conn, pending, :totp),
          {:ok, user} <- SecondFactor.check(resolved.user, code, context: AuthEvents.context(conn)),
          # Only now, and only on success: a wrong code or a spent budget leaves
          # the blob alive, because neither is a failed authentication and

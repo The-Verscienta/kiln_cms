@@ -116,6 +116,8 @@ defmodule KilnCMSWeb.AdminAllowlistTest do
     {:get, "/magic_link/some-token"},
     {:get, "/sign-in/verify"},
     {:post, "/sign-in/verify"},
+    {:post, "/sign-in/verify/passkey/options"},
+    {:post, "/sign-in/verify/passkey"},
     {:get, "/sign-in/unlock"},
     {:post, "/auth/passkey/options"},
     {:post, "/auth/passkey/verify"},
