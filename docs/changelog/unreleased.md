@@ -214,6 +214,37 @@ carries the reasoning.
   rolling back is safe (nothing is stored differently). Guide:
   [Trash and restore](../trash.md#for-developers).
 
+<a id="custom-field-api-stricter-shapes"></a>
+
+- **Custom-field API: a few requests that used to succeed by accident are now a `400`, and `not_eq` on a tidied field can exclude more records (#2739, #2743, #2677).**
+  The fixes below ([value shapes](#custom-field-value-shapes),
+  [operand shapes](#custom-filter-operand-shapes),
+  [tidied operands](#custom-filter-operands-tidied)) mostly turn a 500 into
+  a 400, but these requests answered `200` before and are refused now. Each
+  one was read in a way the client is unlikely to have meant:
+
+  | Request | Before | Now |
+  |---|---|---|
+  | `[]` sent for a single (not `multiple`) `string`, `url`, `select`, `integer`, `float`, `date` or `datetime` field | the field was cleared (or took its default) | `400` `invalid_attribute`: `<Label> (<name>) must be a single value, not an object or a list`. Send `null` or `""` to clear |
+  | `[]` sent for a single `text` field | `""` was stored | the same `400` |
+  | a non-empty list on a single `text` field | its items joined into one string | the same `400` |
+  | a list operand beside `ilike` (`custom_filter[x][ilike][]=a%`) | joined into one pattern | `400` `invalid_argument`: `ilike on custom field "x" takes one value, not a list` |
+  | a list operand beside `eq` / `not_eq` on a media or reference field (`custom_filter[cover][eq][]=<id>`) | joined into one id | the same `400`; use `[in][]=<id>` |
+  | a `null` `ilike` operand (JSON, from GraphQL `customFilter` or MCP) | read as an empty pattern | `400`: `invalid value for custom field "x"` |
+  | an Ecto-style date object (`custom_filter[dates][eq][year]=2026&…[month]=3&…[day]=1`) on a date or date-time list, as an item of `in` on a date or date-time field, or as the operand of a date or date-time link field | read as that date | `400`: `eq on custom field "dates" takes a value, not a nested filter`. Send `2026-03-01` |
+
+  `not_eq` on a single string, URL, select, email, color, telephone, time or
+  slug field (or a string, URL or select link field) now leaves out the
+  operand's stored spelling as well as the spelling sent, so
+  `custom_filter[accent][not_eq]=#FFF` drops a record holding `#ffffff`,
+  which it used to return. `eq` and `in` only find more.
+
+  What to do: send one value where a field takes one, `null` or `""` to
+  clear, an ISO-8601 string for a date, and `in` for a list. No migration,
+  no config; rolling back restores the old readings. Docs:
+  [json-api.md](../json-api.md) → "Custom fields" and "A single custom field
+  takes one value".
+
 ## Added
 
 <a id="backup-schedules"></a>
@@ -1094,6 +1125,111 @@ carries the reasoning.
   `KilnCMS.Backups.Manifest` also reads a `keep_days` of 0 or below as
   absent. If you set either `0` or a value with a unit, read the
   [upgrade note](#backup-keep-days-upgrade) first. (#2727)
+
+<a id="custom-field-value-shapes"></a>
+
+- **An object, or a list where one value goes, sent for a single custom field is a field error naming the field, not a 500 (#2743).**
+  A write coerced a single `text`, `string`, `url`, `select`, `integer`,
+  `float`, `date` or `datetime` field's value with `to_string/1`, so an
+  object (`"custom_fields": {"subtitle": {"en": "x"}}`, a map of locales
+  sent to a field, which is one value per locale record) raised and the
+  JSON:API `PATCH`, the GraphQL mutation and the MCP `update_*` tool all
+  answered 500. A list on a single `text` field was joined into one string
+  (`["a", "b"]` became `"ab"`). Now an object, an empty list, and any list on
+  a single `text` or `boolean` field fail the field with
+  `<Label> (<name>) must be a single value, not an object or a list`, the
+  message a group's sub-field already gave:
+
+  - **JSON:API**: `400` `invalid_attribute`, `source.pointer`
+    `/data/attributes/custom_fields`.
+  - **GraphQL**: `result: null` and the message in `errors`.
+  - **MCP**: a tool result with `isError: true` (HTTP 200).
+
+  Nothing is written. `null` and `""` still clear a field, and a number or a
+  boolean sent to a text-like field is still stored as its text (`42` as
+  `"42"`). A non-empty list on a single `string`, `url`, `select`, number or
+  date field still keeps its first item (1.9.0's
+  [#2497](https://github.com/The-Verscienta/kiln_cms/issues/2497)). A
+  reference's link values follow the same rule, and the error names the
+  item: `item 1 “Flour”: Role must be a single value, not an object or a
+  list`. A copy or a version restore holding such a value is refused with
+  the same message instead of crashing. A `float` field now parses text
+  with `Kiln.FieldType.parse_float/1`, as filter operands already did, so
+  `"1e400"` is `must be a number`. The built-in format types and plugin field types decide in their
+  own `cast/2`, as before. Which of these requests used to succeed is under
+  [Breaking](#custom-field-api-stricter-shapes).
+
+  Developers: the type-only coercion moved out of
+  `KilnCMS.CMS.Changes.ApplyCustomFields` into the new
+  `KilnCMS.CMS.FieldValue` (`coerce/2`, `text/1`, `canonical/2`,
+  `not_single/0`), which writes and filter operands now share.
+  `ApplyCustomFields.coerce_item/2` keeps its signature. `FieldValue` is core
+  internals, not part of the overlay contract. Guide:
+  [json-api.md](../json-api.md) → "A single custom field takes one value".
+
+<a id="custom-filter-operand-shapes"></a>
+
+- **A custom-field filter operand of the wrong shape is a `400 invalid_argument` naming the operator and the field, not a 500 (#2739).**
+  The [crash fixes](#sweep-crash-fixes) earlier in this release made an
+  object operand on a single field's comparison a `400`. The other paths still called
+  `to_string/1` on what the client sent: `ilike` on a link field
+  (`custom_filter[cta.link.label][ilike][x]=1`), a list of objects beside
+  `ilike` from GraphQL `customFilter` or an MCP read tool, and a media or
+  reference id. Lists of values took a date object through an Ecto cast and
+  answered `200`. Now every path checks the shape first, on JSON:API
+  `custom_filter`, GraphQL `customFilter` / `customWhere` and the MCP
+  `read_pages`, `read_posts` and `read_entries` tools (`custom_filter` and
+  `custom_where`):
+
+  - an object operand: `<op> on custom field "x" takes a value, not a nested filter`;
+  - a list beside any operator other than `in` (on a list of values, also
+    `has`, `has_all` and `has_none`): `<op> on custom field "x" takes one
+    value, not a list`;
+  - an object or a list as one item of `in`: the same two messages, with `in`;
+  - on a link field the subject reads `link field "cta.link.label"`.
+
+  A `null` operand for `ilike`, or for a media or reference `eq` / `not_eq`,
+  is `invalid value for custom field "x"`. A number or a boolean is still
+  read as its text by `ilike` and `eq`. The requests that answered `200`
+  before and are refused now are listed under
+  [Breaking](#custom-field-api-stricter-shapes). Guide:
+  [json-api.md](../json-api.md) → "Custom fields", "One value per operator".
+
+<a id="custom-filter-operands-tidied"></a>
+
+- **`eq`, `not_eq` and `in` on a field whose save tidies the value also match the operand as the save would store it, which resolves the 1.9.0 known issue "A custom filter on an email, color, telephone or time field misses values written another way" (#2677).**
+  A save stores some values tidied: a string or URL trimmed, a select's
+  label as its option's value, and the canonical spelling of an email
+  (domain lowercased), color (`#ffffff`), telephone (`+442079460958`), time
+  (`09:30`) or slug (`hello-world`). A typed list of values already tidied
+  its filter operands (#2289); a single field compared them as sent, so
+  `custom_filter[accent]=#FFF` missed a stored `#ffffff`. Now, on a single
+  string, URL, select, email, color, telephone, time or slug field, and on a
+  string, URL or select link field, `eq` (or a bare value), `not_eq` and
+  each item of `in` match the operand **both** as sent and as a save would
+  store it. On GraphQL that is `customWhere`'s `string: {eq, notEq, in}` and
+  `customFilter`. So `#FFF` finds `#ffffff`, `a@Example.com` finds
+  `a@example.com`, `+44 20 7946 0958` finds `+442079460958`, `9:30` finds
+  `09:30`, and a select option's label (any letter case) finds the option:
+  select filters now match by label as well as by value.
+
+  Matching the spelling sent as well keeps every match that worked before:
+  a value stored before its field's type changed (a string field holding
+  `#FFF`, since made a color field) is still found by `#FFF`. The cost is
+  on `not_eq`, which leaves out both spellings and so can exclude records it
+  used to return ([Breaking](#custom-field-api-stricter-shapes)).
+
+  Unchanged: range operators (`gt`, `gte`, `lt`, `lte`) and `ilike`,
+  `contains` and `starts_with` take the operand as sent (a time's tidy drops
+  its seconds, which would move a range bound), `text` fields and plugin
+  field types compare the operand as the text sent (the `Kiln.FieldType`
+  contract does not promise a deterministic `cast/2`), and an operand the
+  field could never hold (`foo` on an email field) matches nothing rather
+  than answering `400`. Date-times are not tidied here: the 1.9.0 known
+  issue about fractional seconds
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678)) is still
+  open. No migration and no config. Guide: [json-api.md](../json-api.md) → "Custom fields",
+  "Equality operands also match the value as a save stores it".
 
 ## Security
 

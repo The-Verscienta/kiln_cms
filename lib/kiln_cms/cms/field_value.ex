@@ -8,6 +8,10 @@ defmodule KilnCMS.CMS.FieldValue do
 
   Pure: no database, no tenant. The record-resolving types (`:media`,
   `:reference`, `:user`) and the list shapes stay `ApplyCustomFields`' own.
+
+  Core internals, not part of the overlay contract: an overlay or plugin
+  writes custom fields through the content actions, and a plugin field type
+  coerces in its own `c:Kiln.FieldType.cast/2`.
   """
 
   alias KilnCMS.CMS.FieldDefinition
