@@ -314,4 +314,74 @@ defmodule KilnCMS.Accounts.RequireEnrolmentProofTest do
       assert refused?(register_passkey(held_viewer(site), %{}))
     end
   end
+
+  describe "from another site's host" do
+    # A factor counts on every site. A password session on a site that does
+    # not cover the account must not add one that then satisfies the site that
+    # holds it: the proof follows the strictest site, not the page's.
+    setup %{site: site} do
+      free = org("rep-free")
+      user = held_viewer(site)
+
+      Ash.Seed.seed!(Accounts.OrgMembership, %{
+        organization_id: free.id,
+        user_id: user.id,
+        role: :viewer,
+        inserted_at: @long_ago
+      })
+
+      %{free: free, user: user}
+    end
+
+    test "the page's site holds nothing, yet the proof is required", %{free: free, user: user} do
+      assert EnrolmentProof.decide(user, free.id, session("password")) == :required
+
+      assert EnrolmentProof.decide(user, free.id, session("magic_link")) ==
+               {:not_needed, "magic_link_session"}
+    end
+
+    test "an authenticator app without the proof is refused", %{free: free, user: user} do
+      assert refused?(confirm(user, EnrolmentProof.context(free, session("password"), nil)))
+      refute reload(user).totp_confirmed_at
+    end
+
+    test "a passkey without the proof is refused", %{free: free, user: user} do
+      assert refused?(
+               register_passkey(user, EnrolmentProof.context(free, session("password"), nil))
+             )
+
+      assert WebAuthn.list(user) == []
+    end
+
+    test "with the proof, both enroll", %{free: free, user: user} do
+      session = session("password")
+      proof = prove(user, free, session)
+      assert {:ok, _user} = confirm(user, EnrolmentProof.context(free, session, proof))
+    end
+
+    test "a session from before the earliest deadline needs none", %{free: free, user: user} do
+      before = %{session("password") | signed_in_at: ~U[2025-06-01 00:00:00Z]}
+      assert EnrolmentProof.decide(user, free.id, before) == {:not_needed, "not_required"}
+    end
+
+    test "an account no site holds needs none", %{free: free} do
+      user =
+        Ash.Seed.seed!(Accounts.User, %{
+          email: "rep-free-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :viewer,
+          inserted_at: @long_ago
+        })
+
+      Ash.Seed.seed!(Accounts.OrgMembership, %{
+        organization_id: free.id,
+        user_id: user.id,
+        role: :viewer
+      })
+
+      assert EnrolmentProof.decide(user, free.id, session("password")) ==
+               {:not_needed, "not_required"}
+    end
+  end
 end

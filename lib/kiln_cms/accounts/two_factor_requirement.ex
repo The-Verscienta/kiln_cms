@@ -306,6 +306,26 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
     end
   end
 
+  @doc """
+  The deadlines of every site that holds `user` now (`{:enforced, deadline}`
+  from `status/3`), over the same sites `required_somewhere?/1` reads, so a
+  caller can apply the strictest of them: a factor is account-wide, and the
+  site a page happens to be served from is not the only one it counts on.
+  `[]` when no site holds the account. Option: `:now`.
+  """
+  @spec enforced_deadlines(Accounts.User.t(), keyword()) :: [DateTime.t()]
+  def enforced_deadlines(user, opts \\ []) do
+    if exempt?(user) do
+      []
+    else
+      opts = Keyword.take(opts, [:now])
+
+      for org_id <- candidate_orgs(user),
+          {:enforced, deadline} <- [status(user, org_id, opts)],
+          do: deadline
+    end
+  end
+
   defp candidate_orgs(user) do
     if RoleGrant.effective_role(user) == :admin do
       Accounts.list_org_ids()

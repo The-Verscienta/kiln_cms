@@ -14,7 +14,9 @@ defmodule KilnCMSWeb.GraphqlLimits.SocketSecondFactor do
 
   The refusal is a GraphQL error with `extensions.code`
   `"second_factor_required"`, the code `/gql` answers with, and runs no other
-  phase. An anonymous socket passes untouched.
+  phase. A passkey-only account past its deadline is refused too: the socket
+  was opened with a JWT, which never passed the passkey. An anonymous socket
+  passes untouched.
   """
 
   use Absinthe.Phase
@@ -36,7 +38,7 @@ defmodule KilnCMSWeb.GraphqlLimits.SocketSecondFactor do
   defp held?(%{actor: %KilnCMS.Accounts.User{__metadata__: %{using_api_key?: true}}}), do: false
 
   defp held?(%{actor: %KilnCMS.Accounts.User{} = user, tenant: org_id}),
-    do: SecondFactorGate.held?(user, org_id)
+    do: SecondFactorGate.bearer_refused?(user, org_id, [])
 
   defp held?(_anonymous), do: false
 

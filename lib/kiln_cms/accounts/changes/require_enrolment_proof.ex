@@ -49,8 +49,11 @@ defmodule KilnCMS.Accounts.Changes.RequireEnrolmentProof do
 
       enrolment ->
         case enrolling_user(changeset, context) do
-          nil -> changeset
-          user -> judge(changeset, user, enrolment)
+          # No stored account (a changeset built over a bare struct, as an
+          # authorization check does): nothing to judge, and the action
+          # cannot run against it anyway.
+          %Accounts.User{id: id} = user when is_binary(id) -> judge(changeset, user, enrolment)
+          _none -> changeset
         end
     end
   end

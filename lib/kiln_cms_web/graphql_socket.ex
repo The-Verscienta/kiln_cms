@@ -122,8 +122,8 @@ defmodule KilnCMSWeb.GraphqlSocket do
   end
 
   defp signed_in_context(user, org_id) do
-    case TwoFactorRequirement.status(user, org_id) do
-      {:enforced, _deadline} ->
+    case bearer_status(user, org_id) do
+      :refused ->
         :error
 
       {:grace, deadline} ->
@@ -133,6 +133,14 @@ defmodule KilnCMSWeb.GraphqlSocket do
       _not_held ->
         {:ok, BearerAuth.graphql_context(user)}
     end
+  end
+
+  # Held, or a passkey-only account past its deadline, whose JWT never passed
+  # the passkey (`KilnCMSWeb.SecondFactorGate.bearer_refused?/3`).
+  defp bearer_status(user, org_id) do
+    if KilnCMSWeb.SecondFactorGate.bearer_refused?(user, org_id),
+      do: :refused,
+      else: TwoFactorRequirement.status(user, org_id)
   end
 
   # `connect/3` runs in the transport's own process, which becomes the

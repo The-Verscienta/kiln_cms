@@ -129,6 +129,11 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
     end
   end
 
+  # A payload with no code (a forged or truncated event): the same answer as
+  # a wrong one, and nothing is charged.
+  def handle_event("verify_proof_code", _params, socket),
+    do: {:noreply, put_flash(socket, :error, proof_error(:invalid))}
+
   # --- the authenticator app ---------------------------------------------------
 
   def handle_event("start_totp", _params, socket) do
@@ -146,6 +151,9 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
     {_result, socket} = TotpEnrolment.confirm(socket, params, enrolment_context(socket))
     {:noreply, assign_status(socket)}
   end
+
+  # No code to check: nothing to confirm.
+  def handle_event("confirm_totp", _params, socket), do: {:noreply, socket}
 
   def handle_event("dismiss_recovery_codes", _params, socket),
     do: {:noreply, assign(socket, :recovery_codes, nil)}

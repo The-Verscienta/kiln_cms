@@ -236,6 +236,41 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
                "That code isn&#39;t valid"
     end
 
+    test "events missing their code change nothing and crash nothing", %{conn: conn} do
+      site = held_site()
+      user = seed_user() |> member!(site)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      view |> element("#send-proof-code") |> render_click()
+      render_async(view, 2_000)
+      _code = emailed_code()
+
+      assert render_hook(view, "verify_proof_code", %{}) =~ "That code isn&#39;t valid"
+
+      assert render_hook(view, "verify_proof_code", %{"code" => 123_456}) =~
+               "That code isn&#39;t valid"
+
+      assert render_hook(view, "confirm_totp", %{})
+      assert render_hook(view, "confirm_totp", %{"code" => nil})
+      assert has_element?(view, "#two-factor-proof")
+      refute reload(user).totp_confirmed_at
+    end
+
+    test "a site that holds nothing still asks, when another site holds the account", %{
+      conn: conn
+    } do
+      held = held_site()
+      free = org("tfs-free-host")
+      user = seed_user() |> member!(held) |> member!(free)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, free, "password") |> live(~p"/account/two-factor")
+
+      assert has_element?(view, "#two-factor-proof")
+    end
+
     test "a confirm without the proof is refused by the action, page bypassed", %{conn: conn} do
       site = held_site()
       user = seed_user() |> member!(site)

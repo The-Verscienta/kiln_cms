@@ -9,8 +9,11 @@ defmodule KilnCMSWeb.Plugs.SecondFactorBearer do
   it judges whichever actor those left: a user loaded from a JWT. **API keys
   are exempt** (the issue, and decision 3): an actor carrying
   `using_api_key?` metadata passes untouched, and so does an anonymous
-  request. The decision is `KilnCMSWeb.SecondFactorGate.held?/3` on the site
-  the request resolved to.
+  request. The decision is `KilnCMSWeb.SecondFactorGate.bearer_refused?/3` on
+  the site the request resolved to: the account is held, or it is a
+  passkey-only account past its deadline. A JWT never passed a passkey (the
+  headless sign-in cannot take one), so for that account it is the password
+  alone, whichever site's host minted it.
 
   The refusal is `403 second_factor_required`, `private, no-store` and
   `vary: authorization`: the `KilnCMSWeb.ApiError` envelope with
@@ -47,7 +50,7 @@ defmodule KilnCMSWeb.Plugs.SecondFactorBearer do
   defp held?(%KilnCMS.Accounts.User{__metadata__: %{using_api_key?: true}}, _conn), do: false
 
   defp held?(%KilnCMS.Accounts.User{} = user, conn),
-    do: SecondFactorGate.held?(user, org_id(conn), fresh?: true)
+    do: SecondFactorGate.bearer_refused?(user, org_id(conn))
 
   defp held?(_anonymous, _conn), do: false
 

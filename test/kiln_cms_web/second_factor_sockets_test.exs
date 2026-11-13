@@ -137,6 +137,29 @@ defmodule KilnCMSWeb.SecondFactorSocketsTest do
       assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}, 2_000
     end
 
+    test "a passkey-only account's JWT is refused past the deadline" do
+      site = org("sfs-gql-pko")
+      user = Fixtures.editor(site)
+      {:ok, _} = KilnCMS.PasskeyFixtures.enroll(user, "sfs-gql-pko-#{user.id}")
+      row = grace_policy!(site)
+      token = Fixtures.jwt(user)
+
+      {:ok, socket} = gql_connect(site, %{"token" => token})
+      {:ok, socket} = join_absinthe(socket)
+
+      Fixtures.end_grace!(row)
+      assert :error = gql_connect(site, %{"token" => token})
+
+      ref = push_doc(socket, "{ __typename }")
+
+      assert_reply(
+        ref,
+        :error,
+        %{errors: [%{extensions: %{code: "second_factor_required"}}]},
+        1_000
+      )
+    end
+
     test "an enrolled account and an unrequired site are untouched" do
       site = "sfs-gql-free" |> org()
       Fixtures.policy_row!(site, :editors)
@@ -174,6 +197,23 @@ defmodule KilnCMSWeb.SecondFactorSocketsTest do
     # A platform administrator: an administrator on every site, so the page
     # needs no membership to be edited.
     defp admin, do: Fixtures.seed_user(%{role: :admin})
+
+    test "a passkey-only account past the deadline needs a token from a verified session" do
+      site = org("sfs-collab-pko")
+      user = Fixtures.seed_user(%{role: :admin})
+      {:ok, _} = KilnCMS.PasskeyFixtures.enroll(user, "sfs-pko-#{user.id}")
+      Fixtures.policy_row!(site, :admins)
+
+      connect = fn token ->
+        Phoenix.ChannelTest.connect(CollabSocket, %{"token" => token},
+          connect_info: uri(site, "/ws/collab")
+        )
+      end
+
+      assert :error = connect.(collab_token(user))
+      assert :error = connect.(CollabSocket.token(user, false))
+      assert {:ok, _socket} = connect.(CollabSocket.token(user, true))
+    end
 
     test "a held account is refused at connect" do
       site = org("sfs-collab-held")

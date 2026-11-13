@@ -122,7 +122,10 @@ defmodule KilnCMS.Accounts.EnrolmentProofTest do
       assert EnrolmentProof.decide(user, site.id, session("sso")) == {:not_needed, "not_required"}
     end
 
-    test "nobody is asked in the grace period, or on a site that holds nobody", %{user: user} do
+    test "nobody is asked in the grace period, or on a site that holds nobody" do
+      # An account no site holds: one held anywhere is asked everywhere
+      # (a factor counts on every site), which the cross-site test covers.
+      user = held_viewer(org("ep-alone"))
       grace_site = org("ep-grace")
 
       Ash.Seed.seed!(KilnCMS.CMS.SiteSecondFactorPolicy, %{

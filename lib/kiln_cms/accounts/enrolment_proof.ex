@@ -122,10 +122,24 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
   """
   @spec decide(KilnCMS.Accounts.User.t(), Ash.UUID.t() | nil, session() | nil, keyword()) ::
           :required | {:not_needed, label()}
+  #
+  # A factor counts on every site, so the page's site is not the only one that
+  # decides: a password-only session on a host whose site does not cover the
+  # account would otherwise add a factor that then satisfies a site that does
+  # hold it, with no proof. The proof is asked when the page's site holds the
+  # account OR any site does (`TwoFactorRequirement.enforced_deadlines/2`, the
+  # strictest-site rule the action applies without a page), and "signed in
+  # before the deadline" is judged against the earliest of those deadlines.
   def decide(user, org_id, session, opts \\ []) do
-    case TwoFactorRequirement.status(user, org_id, opts) do
-      {:enforced, deadline} -> by_session(session || %{}, deadline)
-      _not_held -> {:not_needed, "not_required"}
+    page =
+      case TwoFactorRequirement.status(user, org_id, opts) do
+        {:enforced, deadline} -> [deadline]
+        _not_held -> []
+      end
+
+    case page ++ TwoFactorRequirement.enforced_deadlines(user, opts) do
+      [] -> {:not_needed, "not_required"}
+      deadlines -> by_session(session || %{}, Enum.min(deadlines, DateTime))
     end
   end
 

@@ -722,4 +722,177 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
       end
     end
   end
+
+  # --- a passkey-only account's password-only access ---------------------------
+
+  describe "a passkey-only account's password-only access past the deadline" do
+    defp grace_row(site),
+      do: policy_row!(site, :editors, grace_days: 30, since: DateTime.utc_now())
+
+    defp marked(conn, user, site, marker) do
+      token = jwt(user)
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+
+      conn
+      |> org_conn(site)
+      |> Phoenix.ConnTest.init_test_session(%{
+        "user_token" => token,
+        "sign_in" => Map.put(marker, "jti", jti)
+      })
+    end
+
+    test "a JWT minted in grace stops at the deadline", %{conn: conn} do
+      site = org("sfe-pko-jwt")
+      user = passkey_editor(site)
+      row = grace_row(site)
+      conn = bearer(conn, site, jwt(user))
+
+      assert json_response(get(conn, ~p"/api/locales"), 200)
+
+      end_grace!(row)
+
+      assert %{"errors" => [%{"code" => "second_factor_required"}]} =
+               conn |> get(~p"/api/locales") |> json_response(403)
+
+      assert conn |> gql("{ __typename }") |> json_response(403)
+    end
+
+    test "a JWT minted on a site that does not cover it is refused where one does",
+         %{conn: conn} do
+      held = org("sfe-pko-cross")
+      user = passkey_editor(held)
+      policy_row!(held, :editors)
+      free = org("sfe-pko-cross-free")
+      member!(user, free, :editor)
+
+      assert %{"token" => token} =
+               conn |> api_sign_in(user, free) |> json_response(201)
+
+      assert json_response(build_conn() |> bearer(free, token) |> get(~p"/api/locales"), 200)
+
+      assert build_conn() |> bearer(held, token) |> get(~p"/api/locales") |> Map.get(:status) ==
+               403
+    end
+
+    test "a password session from before the deadline goes to the passkey prompt",
+         %{conn: conn} do
+      site = org("sfe-pko-session")
+      user = passkey_editor(site)
+      policy_row!(site, :editors)
+
+      session = marked(conn, user, site, %{"method" => "password"})
+
+      for path <- [~p"/account", ~p"/account/two-factor", ~p"/editor/account/export.json"] do
+        held = get(session, path)
+        assert redirected_to(held) == ~p"/sign-in/verify", path
+        assert get_resp_header(held, "cache-control") == ["private, no-store"]
+      end
+
+      # A tenant host cannot run the passkey: the session is signed out there.
+      token = get_session(session, "user_token")
+      refused = get(session, ~p"/sign-in/verify")
+      assert redirected_to(refused) == ~p"/sign-in"
+      assert get_session(refused, "user_token") == nil
+      assert Phoenix.Flash.get(refused.assigns.flash, :error) =~ canonical_host()
+      assert live_token_rows(token) == []
+    end
+
+    test "on the console host it is turned into a pending passkey step-up" do
+      site = org("sfe-pko-console-session")
+      user = passkey_editor(site)
+      policy_row!(site, :editors)
+      token = jwt(user)
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+
+      conn =
+        build_conn()
+        |> unique_ip()
+        |> Map.put(:host, canonical_host())
+        |> Map.put(:path_info, ["account"])
+        |> assign(:current_org, site)
+        |> assign(:current_user, user)
+        |> Plug.Conn.put_private(:phoenix_endpoint, KilnCMSWeb.Endpoint)
+        |> Plug.Test.init_test_session(%{
+          "user_token" => token,
+          "sign_in" => %{"jti" => jti, "method" => "remember_me"}
+        })
+        |> Phoenix.Controller.fetch_flash([])
+        |> KilnCMSWeb.Plugs.PasskeyStepUp.call([])
+
+      assert conn.halted
+      assert redirected_to(conn) == ~p"/sign-in/verify"
+      assert get_session(conn, "user_token") == nil
+      assert is_binary(get_session(conn, :pending_2fa))
+      assert get_session(conn, :sign_in_method) == "remember_me"
+      assert conn.assigns.current_user == nil
+      assert live_token_rows(token) == []
+    end
+
+    test "a remember-me cookie does not restore it", %{conn: conn} do
+      site = org("sfe-pko-remember")
+      user = passkey_editor(site)
+      row = grace_row(site)
+
+      # Ticked during the grace period, when the password alone still signed in.
+      cookie =
+        password_sign_in(conn, user, site, %{"remember_me" => "true"}).resp_cookies[@cookie]
+
+      assert cookie.value
+      end_grace!(row)
+
+      remembered =
+        build_conn()
+        |> unique_ip()
+        |> org_conn(site)
+        |> Plug.Test.put_req_cookie(@cookie, cookie.value)
+        |> get(~p"/sign-in")
+
+      assert remembered.assigns.current_user == nil
+      assert get_session(remembered, "user_token") == nil
+      assert %{max_age: 0} = remembered.resp_cookies[@cookie]
+    end
+
+    test "a session that passed the passkey still works", %{conn: conn} do
+      site = org("sfe-pko-verified")
+      user = passkey_editor(site)
+      policy_row!(site, :editors)
+
+      for marker <- [
+            %{"method" => "passkey"},
+            %{"method" => "password", "second_factor_at" => System.system_time(:second)}
+          ] do
+        assert html_response(conn |> marked(user, site, marker) |> get(~p"/account"), 200)
+      end
+    end
+
+    test "the LiveView gate sends it to the prompt too, setup page included" do
+      site = org("sfe-pko-lv")
+      user = passkey_editor(site)
+      policy_row!(site, :editors)
+      token = jwt(user)
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
+      session = %{"user_token" => token, "sign_in" => %{"jti" => jti, "method" => "password"}}
+
+      for view <- [KilnCMSWeb.OverviewLive, KilnCMSWeb.TwoFactorSetupLive] do
+        socket = %Phoenix.LiveView.Socket{
+          view: view,
+          assigns: %{__changed__: %{}, current_user: user, current_org: site}
+        }
+
+        assert {:halt, halted} = SecondFactorGate.attach(socket, session)
+        assert {:redirect, %{to: "/sign-in/verify"}} = halted.redirected
+      end
+
+      verified = put_in(session, ["sign_in", "method"], "passkey")
+
+      assert {:cont, _socket} =
+               SecondFactorGate.attach(
+                 %Phoenix.LiveView.Socket{
+                   view: KilnCMSWeb.OverviewLive,
+                   assigns: %{__changed__: %{}, current_user: user, current_org: site}
+                 },
+                 verified
+               )
+    end
+  end
 end

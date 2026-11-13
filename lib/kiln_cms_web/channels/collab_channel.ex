@@ -464,7 +464,12 @@ defmodule KilnCMSWeb.CollabChannel do
          # A site that requires a second factor, past the deadline of an
          # account that has not set one up (#2247). The actor was just
          # reloaded, so an enrolment since the connect counts.
-         false <- KilnCMSWeb.SecondFactorGate.held?(actor, org.id, fresh?: true) do
+         false <-
+           KilnCMSWeb.CollabSocket.refused?(
+             actor,
+             org.id,
+             socket.assigns[:second_factor_verified?] == true
+           ) do
       {:ok, assign(socket, :actor, actor)}
     else
       _refused ->

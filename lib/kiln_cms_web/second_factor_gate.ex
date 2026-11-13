@@ -82,6 +82,61 @@ defmodule KilnCMSWeb.SecondFactorGate do
 
   def held?(_user, _org_id, _opts), do: false
 
+  @doc """
+  Whether a **bearer** credential of `user` (a JWT, the collab socket's
+  token) is refused on `org_id`: the account is held, or it is a passkey-only
+  account past its deadline (`TwoFactorRequirement.step_up/3` answers
+  `:passkey_only`). A bearer never passed a passkey — the headless sign-in
+  cannot take one — so for such an account it is the password alone, which
+  the site no longer accepts (owner decisions 2 and 3). Bearers are not bound
+  to the site that issued them, so this is asked of every site they reach.
+  An account with the authenticator app, or none required, passes.
+  """
+  #
+  # `opts` go to `held?/3`: a caller holding an actor loaded long ago (a
+  # socket) passes `[]` so a hold is confirmed against the account as it is.
+  @spec bearer_refused?(Accounts.User.t() | nil, Ash.UUID.t() | nil, keyword()) :: boolean()
+  def bearer_refused?(user, org_id, opts \\ [fresh?: true])
+
+  def bearer_refused?(%Accounts.User{} = user, org_id, opts) when is_binary(org_id) do
+    held?(user, org_id, opts) or
+      TwoFactorRequirement.step_up(user, org_id) == :passkey_only
+  end
+
+  def bearer_refused?(_user, _org_id, _opts), do: false
+
+  @doc """
+  Whether the browser session `session` (a conn's, or the map a LiveView
+  mounts with) of `user` owes the passkey step-up on `org_id`: a passkey-only
+  account past its deadline whose current session token
+  (`KilnCMSWeb.SignInMarker`) never passed a second factor. A session that
+  signed in before the deadline with its password, or that a remember-me
+  cookie restored, is password-only access; it goes through the passkey
+  prompt (`KilnCMSWeb.Plugs.PasskeyStepUp`) before anything else.
+  """
+  @spec passkey_step_up_owed?(Accounts.User.t() | nil, Ash.UUID.t() | nil, Plug.Conn.t() | map()) ::
+          boolean()
+  def passkey_step_up_owed?(%Accounts.User{} = user, org_id, session) when is_binary(org_id) do
+    TwoFactorRequirement.step_up(user, org_id) == :passkey_only and
+      not session_verified?(session)
+  end
+
+  def passkey_step_up_owed?(_user, _org_id, _session), do: false
+
+  @doc """
+  Whether the session's current token passed a second factor at sign-in (a
+  code, a passkey step-up, or a passkey sign-in). A stale or absent marker
+  is not.
+  """
+  @spec session_verified?(Plug.Conn.t() | map()) :: boolean()
+  def session_verified?(session) do
+    case KilnCMSWeb.SignInMarker.read(session) do
+      %{second_factor_at: %DateTime{}} -> true
+      %{method: "passkey"} -> true
+      _password_only -> false
+    end
+  end
+
   defp confirmed_held?(user, org_id, opts) do
     if Keyword.get(opts, :fresh?, false) do
       true
@@ -141,24 +196,33 @@ defmodule KilnCMSWeb.SecondFactorGate do
   (`KilnCMSWeb.IdleSession`). Assigns `:second_factor_status` and halts with
   a redirect to the setup page when the account is held, on the disconnected
   render and the live mount alike. On a live mount it also follows the site's
-  policy and, in grace, the deadline.
+  policy and, in grace, the deadline. A passkey-only account's password-only
+  session (`passkey_step_up_owed?/3`) goes to the passkey prompt instead,
+  from every page, the setup page included.
   """
   @spec attach(LiveView.Socket.t(), map()) :: {:cont | :halt, LiveView.Socket.t()}
-  def attach(socket, _session) do
+  def attach(socket, session) do
     user = socket.assigns[:current_user]
     org_id = org_id(socket)
 
-    if exempt_view?(socket) or not is_binary(org_id) or is_nil(user) do
-      {:cont, Phoenix.Component.assign(socket, :second_factor_status, :not_required)}
-    else
-      status = TwoFactorRequirement.status(user, org_id)
-      socket = Phoenix.Component.assign(socket, :second_factor_status, status)
+    cond do
+      passkey_step_up_owed?(user, org_id, session) -> {:halt, step_up(socket)}
+      exempt_view?(socket) or not is_binary(org_id) or is_nil(user) -> attach_exempt(socket)
+      true -> attach_judged(socket, user, org_id)
+    end
+  end
 
-      cond do
-        match?({:enforced, _}, status) -> {:halt, hold(socket)}
-        LiveView.connected?(socket) -> {:cont, follow(socket, org_id, status)}
-        true -> {:cont, socket}
-      end
+  defp attach_exempt(socket),
+    do: {:cont, Phoenix.Component.assign(socket, :second_factor_status, :not_required)}
+
+  defp attach_judged(socket, user, org_id) do
+    status = TwoFactorRequirement.status(user, org_id)
+    socket = Phoenix.Component.assign(socket, :second_factor_status, status)
+
+    cond do
+      match?({:enforced, _}, status) -> {:halt, hold(socket)}
+      LiveView.connected?(socket) -> {:cont, follow(socket, org_id, status)}
+      true -> {:cont, socket}
     end
   end
 
@@ -167,12 +231,21 @@ defmodule KilnCMSWeb.SecondFactorGate do
   signed-in account is sent to the setup page; an anonymous visitor, or one
   not held, is left alone.
   """
-  @spec screen(LiveView.Socket.t()) :: {:cont | :halt, LiveView.Socket.t()}
-  def screen(socket) do
-    if held?(socket.assigns[:current_user], org_id(socket), fresh?: true),
-      do: {:halt, hold(socket)},
-      else: {:cont, socket}
+  @spec screen(LiveView.Socket.t(), map()) :: {:cont | :halt, LiveView.Socket.t()}
+  def screen(socket, session) do
+    user = socket.assigns[:current_user]
+    org_id = org_id(socket)
+
+    cond do
+      passkey_step_up_owed?(user, org_id, session) -> {:halt, step_up(socket)}
+      held?(user, org_id, fresh?: true) -> {:halt, hold(socket)}
+      true -> {:cont, socket}
+    end
   end
+
+  # The passkey prompt, through `:browser_auth`, which turns the session into
+  # a pending sign-in (`KilnCMSWeb.Plugs.PasskeyStepUp`).
+  defp step_up(socket), do: LiveView.redirect(socket, to: ~p"/sign-in/verify")
 
   defp exempt_view?(socket), do: socket.view == KilnCMSWeb.TwoFactorSetupLive
 

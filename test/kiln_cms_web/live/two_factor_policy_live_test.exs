@@ -229,6 +229,31 @@ defmodule KilnCMSWeb.TwoFactorPolicyLiveTest do
       assert html =~ "0 of them right away."
     end
 
+    test "typing the code previews nothing: no roster read per keystroke", %{conn: conn} do
+      site = org("tfpl-code-keys")
+      {admin, _secret} = app_admin(site)
+      _editor = editor(site)
+
+      {:ok, view, html} = conn |> session(admin, site, 3_600) |> live(@path)
+      assert html =~ ~s(id="two-factor-policy-code")
+
+      html =
+        render_change(view, "preview", %{
+          "_target" => ["policy", "code"],
+          "policy" => %{"required_for" => "editors", "grace_days" => "0", "code" => "12"}
+        })
+
+      refute html =~ "will be asked to set it up"
+
+      html =
+        render_change(view, "preview", %{
+          "_target" => ["policy", "required_for"],
+          "policy" => %{"required_for" => "editors", "grace_days" => "0", "code" => "12"}
+        })
+
+      assert html =~ "1 person will be asked to set it up;"
+    end
+
     test "a page left open after a demotion previews nothing", %{conn: conn} do
       site = org("tfpl-demoted")
       {admin, _secret} = app_admin(site)

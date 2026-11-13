@@ -310,6 +310,11 @@ defmodule KilnCMSWeb.Router do
     # As on `:browser`, and this pipeline may write: the token leaves the
     # session and the remember-me cookie is deleted (#2246).
     plug KilnCMSWeb.Plugs.IdleTimeout, {:session, writes_session?: true}
+    # A passkey-only account past its site's deadline whose session never
+    # passed the passkey (a password session from before the deadline, or one
+    # the remember-me cookie restored above) goes through the passkey step-up
+    # rather than keeping password-only access (#2247).
+    plug KilnCMSWeb.Plugs.PasskeyStepUp
     # After the two above, because it needs whichever of them resolved the user
     # — and it covers the remember-me path, which never reaches
     # `AuthController.complete_sign_in/3` (#675).

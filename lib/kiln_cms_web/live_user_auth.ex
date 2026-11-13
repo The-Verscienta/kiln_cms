@@ -111,8 +111,8 @@ defmodule KilnCMSWeb.LiveUserAuth do
   # pages), after `:assign_current_org`: a signed-in account its site holds for
   # a second factor it has not set up goes to set one up (#2247), as on every
   # signed-in page. Anonymous visitors are left alone.
-  def on_mount(:second_factor, _params, _session, socket),
-    do: KilnCMSWeb.SecondFactorGate.screen(socket)
+  def on_mount(:second_factor, _params, session, socket),
+    do: KilnCMSWeb.SecondFactorGate.screen(socket, session)
 
   def on_mount(:live_user_optional, _params, _session, socket) do
     socket =

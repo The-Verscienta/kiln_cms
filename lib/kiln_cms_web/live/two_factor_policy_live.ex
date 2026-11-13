@@ -69,6 +69,11 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
   end
 
   @impl true
+  # Typing the confirmation code changes nothing the preview shows, and each
+  # preview reads the whole roster: a keystroke there is not a preview.
+  def handle_event("preview", %{"_target" => ["policy", "code"]}, socket),
+    do: {:noreply, socket}
+
   def handle_event("preview", %{"policy" => params}, socket) when is_map(params) do
     # The roster is read without authorization, so the caller is re-checked
     # against the row's own read policy (admins of this site) on every event:
@@ -491,6 +496,7 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
                   name={@form[:required_for].name}
                   value={choice}
                   checked={@selected == Atom.to_string(choice)}
+                  phx-debounce="300"
                   class="mt-1"
                 />
                 <span>
@@ -506,6 +512,7 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
             type="select"
             label={gettext("Grace period")}
             options={@grace_options}
+            phx-debounce="300"
           />
           <p class="-mt-4 text-xs text-base-content/70">
             {gettext(
@@ -539,6 +546,7 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
               type="text"
               inputmode="numeric"
               autocomplete="one-time-code"
+              phx-debounce="blur"
               label={gettext("Code from your authenticator app")}
             />
             <p :if={@code_error} id="two-factor-policy-code-error" class="text-sm text-error">

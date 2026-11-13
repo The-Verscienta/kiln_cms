@@ -20,7 +20,11 @@ defmodule KilnCMSWeb.Plugs.SecondFactorGate do
 
   ## What a held account can still reach
 
-  The exempt list below, by method and path. Everything outside `:browser`
+  The exempt list below, by method and path. A passkey-only account's
+  password-only session (`SecondFactorGate.passkey_step_up_owed?/3`) is sent
+  to the passkey prompt at `/sign-in/verify` instead, and keeps only the
+  pages that read nothing of the account: not the setup page, billing or the
+  export. Everything outside `:browser`
   is untouched by construction: the sign-in, sign-out, second-factor prompt,
   `/auth/*`, invitation and unlock routes (`:browser_auth`), static files,
   health checks, webhooks, federation and every API-key surface.
@@ -47,7 +51,31 @@ defmodule KilnCMSWeb.Plugs.SecondFactorGate do
 
   @impl true
   def call(conn, mode) do
-    if exempt?(conn) or not held?(conn), do: conn, else: act(conn, mode)
+    cond do
+      account_free?(conn) -> conn
+      step_up_owed?(conn) -> step_up(conn, mode)
+      exempt?(conn) or not held?(conn) -> conn
+      true -> act(conn, mode)
+    end
+  end
+
+  # A passkey-only account past its deadline whose session never passed the
+  # passkey (signed in with the password before the deadline, or restored by
+  # a remember-me cookie): password-only access the site no longer accepts.
+  # It goes to the passkey prompt, and the setup page, billing and the export
+  # are not exempt from that: the account does hold a factor, and this
+  # session has not shown it.
+  defp step_up_owed?(conn) do
+    SecondFactorGate.passkey_step_up_owed?(conn.assigns[:current_user], org_id(conn), conn)
+  end
+
+  defp step_up(conn, :read_only), do: assign(conn, :current_user, nil)
+
+  defp step_up(conn, :redirect) do
+    conn
+    |> put_resp_header("cache-control", "private, no-store")
+    |> Phoenix.Controller.redirect(to: "/sign-in/verify")
+    |> halt()
   end
 
   defp held?(conn) do
@@ -84,14 +112,21 @@ defmodule KilnCMSWeb.Plugs.SecondFactorGate do
   defp exempt?(_method, ["account", "two-factor"]), do: true
   defp exempt?("POST", ["billing", "portal"]), do: true
   defp exempt?("GET", ["editor", "account", "export.json"]), do: true
-  defp exempt?(_method, ["locale", _locale]), do: true
-  defp exempt?("GET", ["access-denied"]), do: true
-  defp exempt?("GET", ["developers"]), do: true
-  defp exempt?("GET", ["api"]), do: true
-  defp exempt?(_method, ["setup"]), do: true
-  defp exempt?(_method, ["preview" | _rest]), do: true
-  defp exempt?(_method, ["newsletter" | _rest]), do: true
-  defp exempt?(_method, _path_info), do: false
+  defp exempt?(method, path_info), do: account_free?(method, path_info)
+
+  # Pages that read nothing of the account, or are authorized by their own
+  # tokens: exempt from both holds.
+  defp account_free?(%Plug.Conn{method: method, path_info: path_info}),
+    do: account_free?(method, path_info)
+
+  defp account_free?(_method, ["locale", _locale]), do: true
+  defp account_free?("GET", ["access-denied"]), do: true
+  defp account_free?("GET", ["developers"]), do: true
+  defp account_free?("GET", ["api"]), do: true
+  defp account_free?(_method, ["setup"]), do: true
+  defp account_free?(_method, ["preview" | _rest]), do: true
+  defp account_free?(_method, ["newsletter" | _rest]), do: true
+  defp account_free?(_method, _path_info), do: false
 
   defp org_id(conn) do
     case conn.assigns[:current_org] do
