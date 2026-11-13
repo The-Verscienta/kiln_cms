@@ -100,10 +100,16 @@ defmodule KilnCMS.Webhooks.SlackFormat do
     %{text: escape(line), unfurl_links: false, unfurl_media: false}
   end
 
-  # The address goes into the headline as a code span (the critic's rule from
-  # 2026-11-08: names and addresses in code spans).
-  defp code_ip(%{"ip" => ip} = details) when is_binary(ip), do: %{details | "ip" => code(ip)}
-  defp code_ip(details), do: details
+  # The address and a block rule go into the headline as code spans (the
+  # critic's rule from 2026-11-08: names and addresses in code spans).
+  defp code_ip(details) do
+    Enum.reduce(["ip", "rule"], details, fn key, acc ->
+      case acc do
+        %{^key => value} when is_binary(value) -> %{acc | key => code(value)}
+        _other -> acc
+      end
+    end)
+  end
 
   defp detail("alert", data), do: escape(at(get(data, "occurred_at")))
 

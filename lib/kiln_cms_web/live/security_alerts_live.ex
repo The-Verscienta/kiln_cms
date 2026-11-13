@@ -167,6 +167,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
   defp kind_label(:lockout), do: gettext("Account locked out")
   defp kind_label(:two_factor_disabled), do: gettext("Two-factor authentication turned off")
   defp kind_label(:sso_config_changed), do: gettext("Single sign-on changed")
+  defp kind_label(:blocked_ip), do: gettext("Blocked addresses")
 
   defp kind_description(:new_admin),
     do:
@@ -192,6 +193,13 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
 
   defp kind_description(:sso_config_changed),
     do: gettext("This site's single sign-on provider is changed.")
+
+  defp kind_description(:blocked_ip) do
+    gettext(
+      "A request from an address on this site's block list is refused. One alert every %{minutes} minutes, then a summary.",
+      minutes: div(Alerts.window_ms(), :timer.minutes(1))
+    )
+  end
 
   @impl true
   def render(assigns) do
@@ -311,7 +319,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
         <h2 class="text-sm font-semibold">{gettext("Not set here")}</h2>
         <p id="security-alerts-platform-note" class="text-base-content/70">
           {gettext(
-            "Platform alerts (new platform admins, platform role changes, new API keys and reuse of a stolen API key) go to the platform's admins and can't be turned off here."
+            "Platform alerts (new platform admins, platform role changes, new API keys, reuse of a stolen API key and API keys over a rate limit) go to the platform's admins and can't be turned off here."
           )}
         </p>
         <p class="text-base-content/70">

@@ -211,6 +211,10 @@ defmodule KilnCMSWeb.Router do
     plug AshAuthentication.Strategy.ApiKey.Plug,
       resource: KilnCMS.Accounts.User,
       required?: true
+
+    # The key that plug verified, remembered on this node so a later `:api`
+    # refusal of it can alert (`KilnCMS.Security.ApiKeyTrip`).
+    plug KilnCMSWeb.Plugs.RememberApiKey
   end
 
   # Swagger UI explorer — serves the published OpenAPI spec interactively in all

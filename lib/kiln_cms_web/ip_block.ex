@@ -22,7 +22,8 @@ defmodule KilnCMSWeb.IpBlock do
 
   Everything fails open: a host that names no organization, a connect with no
   address, an unreadable rule list. Those are refused (or not) by the code that
-  already owns them. Nothing here logs an address.
+  already owns them. Nothing here logs an address. A refusal is noted for the
+  site's `blocked_ip` alert with its surface (`KilnCMS.Security.BlockedIpAlert`).
   """
 
   import Phoenix.LiveView, only: [connected?: 1, get_connect_info: 2]
@@ -47,15 +48,22 @@ defmodule KilnCMSWeb.IpBlock do
   """
   @spec check_connect(atom(), map()) :: :ok | :error
   def check_connect(surface, connect_info) when is_map(connect_info) do
-    if blocked_connect?(connect_info) do
-      count_refusal(surface)
-      :error
-    else
-      :ok
+    case blocked_connect(connect_info) do
+      {:blocked, org_id, ip, rule} ->
+        count_refusal(surface)
+
+        KilnCMS.Security.BlockedIpAlert.note(org_id, ip, rule, surface, fn ->
+          KilnCMS.Security.Recorder.request_context(connect_info)
+        end)
+
+        :error
+
+      :ok ->
+        :ok
     end
   end
 
-  defp blocked_connect?(connect_info) do
+  defp blocked_connect(connect_info) do
     peer =
       case Map.get(connect_info, :peer_data) do
         %{address: address} -> address
@@ -65,10 +73,11 @@ defmodule KilnCMSWeb.IpBlock do
     ip = ClientIp.resolve(Map.get(connect_info, :x_headers) || [], peer)
 
     with false <- is_nil(ip),
-         {:ok, org} <- KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info) do
-      KilnCMS.Security.IpBlocklist.blocked?(org, ip)
+         {:ok, org} <- KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info),
+         {:blocked, rule} <- KilnCMS.Security.IpBlocklist.match(org, ip) do
+      {:blocked, org.id, ip, rule}
     else
-      _no_address_or_org -> false
+      _no_address_org_or_rule -> :ok
     end
   end
 
@@ -78,7 +87,8 @@ defmodule KilnCMSWeb.IpBlock do
       connect_info = %{
         uri: get_connect_info(socket, :uri),
         x_headers: get_connect_info(socket, :x_headers),
-        peer_data: get_connect_info(socket, :peer_data)
+        peer_data: get_connect_info(socket, :peer_data),
+        user_agent: get_connect_info(socket, :user_agent)
       }
 
       if check_connect(:live, connect_info) == :error, do: raise(BlockedError)

@@ -85,6 +85,17 @@ defmodule KilnCMS.Security.DeliverAlertTest do
     event
   end
 
+  defp refused(org_id, ip \\ @ip, rule \\ "203.0.113.77/32") do
+    {:ok, event} =
+      Recorder.record(:ip_block_refused,
+        tenant: org_id,
+        request: %{ip: ip, user_agent: "Secret-Agent/1.0"},
+        metadata: %{"rule" => rule, "surface" => "http"}
+      )
+
+    event
+  end
+
   defp endpoint!(org_id, events, admin) do
     CMS.create_webhook_endpoint!(
       %{url: "https://hooks.example.com/#{uniq()}", events: events},
@@ -356,6 +367,63 @@ defmodule KilnCMS.Security.DeliverAlertTest do
       assert job.args["delivery_id"] == delivery.id
     end
 
+    test "a blocked_ip alert masks the address and the rule by default (#2245)", ctx do
+      endpoint!(ctx.org.id, ["security.blocked_ip"], ctx.admin)
+      event = refused(ctx.org.id)
+      SecurityAlerts.deliver()
+
+      assert [delivery] = deliveries()
+      assert delivery.event == "security.blocked_ip"
+      payload = delivery.payload
+      assert payload["kind"] == "blocked_ip"
+      assert payload["event"]["id"] == event.id
+      assert payload["event"]["type"] == "ip_block_refused"
+      assert payload["event"]["ip"] == "203.0.113.0/24"
+      assert payload["event"]["metadata"] == %{"rule" => "203.0.113.0/24", "surface" => "http"}
+      refute Jason.encode!(payload) =~ "203.0.113.77"
+
+      assert [bell | _] = Enum.filter(bells(), &(&1.event == :security_alert))
+
+      assert bell.excerpt ==
+               "A blocked address was refused (rule 203.0.113.0/24, from 203.0.113.0/24)"
+
+      assert bell.details["rule"] == "203.0.113.0/24"
+    end
+
+    test "a blocked_ip alert carries the full address and rule when the site opted in", ctx do
+      CMS.save_site_security_alerts!(%{include_full_ip: true},
+        actor: ctx.admin,
+        tenant: ctx.org.id
+      )
+
+      endpoint!(ctx.org.id, ["security.blocked_ip"], ctx.admin)
+      refused(ctx.org.id)
+      SecurityAlerts.deliver()
+
+      assert [delivery] = deliveries()
+      assert delivery.payload["event"]["ip"] == @ip
+      assert delivery.payload["event"]["metadata"]["rule"] == "203.0.113.77/32"
+    end
+
+    test "a blocked_ip alert masks an IPv6 address and rule to the /48", ctx do
+      endpoint!(ctx.org.id, ["security.blocked_ip"], ctx.admin)
+      refused(ctx.org.id, "2001:db8:1:2::9", "2001:db8:1:2::/64")
+      SecurityAlerts.deliver()
+
+      assert [delivery] = deliveries()
+      assert delivery.payload["event"]["ip"] == "2001:db8:1::/48"
+      assert delivery.payload["event"]["metadata"]["rule"] == "2001:db8:1::/48"
+    end
+
+    test "an endpoint not subscribed to security.blocked_ip receives nothing", ctx do
+      endpoint!(ctx.org.id, ["security.lockout"], ctx.admin)
+      refused(ctx.org.id)
+      SecurityAlerts.deliver()
+
+      assert deliveries() == []
+      assert ctx.admin.id in bell_users(:security_alert)
+    end
+
     test "a platform alert sends no webhook", ctx do
       endpoint!(Accounts.default_org_id(), ["security.new_admin"], ctx.platform)
 
@@ -392,6 +460,33 @@ defmodule KilnCMS.Security.DeliverAlertTest do
       sent = recipients(mails())
       assert to_string(muted_platform.email) in sent
       refute to_string(ctx.admin.email) in sent
+    end
+  end
+
+  describe "a key over a rate limit (#2245)" do
+    test "goes to the platform admins only, masked, with no webhook", ctx do
+      endpoint!(Accounts.default_org_id(), ["security.lockout"], ctx.platform)
+
+      {:ok, _} =
+        Recorder.record(:api_key_rate_limited,
+          tenant: ctx.org.id,
+          target_type: "api_key",
+          target_id: Ecto.UUID.generate(),
+          request: %{ip: @ip},
+          metadata: %{"name" => "ci", "bucket" => "api"}
+        )
+
+      SecurityAlerts.deliver()
+
+      users = bell_users(:security_alert)
+      assert ctx.platform.id in users
+      refute ctx.admin.id in users
+      assert deliveries() == []
+
+      for bell <- Enum.filter(bells(), &(&1.event == :security_alert)) do
+        assert bell.excerpt == "An API key hit a rate limit (from 203.0.113.0/24)"
+        refute bell.excerpt =~ @ip
+      end
     end
   end
 

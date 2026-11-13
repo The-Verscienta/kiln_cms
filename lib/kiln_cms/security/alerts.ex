@@ -28,6 +28,12 @@ defmodule KilnCMS.Security.Alerts do
   | `sso_config_changed` | site | the site's identity provider changed |
   | `new_api_key` | platform | an API key minted (not rotated) |
   | `api_key_abuse` | platform | a rotated API key presented again |
+  | `api_key_rate_limited` | platform | a verified API key over a rate limit |
+  | `blocked_ip` | site | a request from an address on the site's block list refused |
+
+  `api_key_rate_limited` is its own kind, not part of `api_key_abuse`: an
+  alert window is claimed per kind, so a key over a rate limit must not use up
+  the window a stolen key's reuse alerts in.
 
   Not alerts: a legacy account's tier carried onto its first membership
   (`via: "legacy_carry"`, it holds nothing new), a key rotation
@@ -59,10 +65,17 @@ defmodule KilnCMS.Security.Alerts do
     :failed_sign_ins,
     :lockout,
     :two_factor_disabled,
-    :sso_config_changed
+    :sso_config_changed,
+    :blocked_ip
   ]
 
-  @platform_kinds [:new_admin, :platform_role_changed, :new_api_key, :api_key_abuse]
+  @platform_kinds [
+    :new_admin,
+    :platform_role_changed,
+    :new_api_key,
+    :api_key_abuse,
+    :api_key_rate_limited
+  ]
 
   @notice_changes ~w(kind_disabled admin_notifications_off webhook_changed webhook_removed
                      webhook_secret_rotated webhook_auto_disabled admin_removed admin_demoted
@@ -86,9 +99,11 @@ defmodule KilnCMS.Security.Alerts do
           | :lockout
           | :two_factor_disabled
           | :sso_config_changed
+          | :blocked_ip
           | :platform_role_changed
           | :new_api_key
           | :api_key_abuse
+          | :api_key_rate_limited
 
   @typedoc """
   One thing an event raises: an alert of `kind` on a channel, or an
@@ -149,7 +164,9 @@ defmodule KilnCMS.Security.Alerts do
     sso_config_changed: [:sso_config_changed],
     platform_role_changed: [:role_revoked],
     new_api_key: [:api_key_created],
-    api_key_abuse: [:api_key_reuse_detected]
+    api_key_abuse: [:api_key_reuse_detected],
+    api_key_rate_limited: [:api_key_rate_limited],
+    blocked_ip: [:ip_block_refused]
   }
 
   @doc """
@@ -284,6 +301,12 @@ defmodule KilnCMS.Security.Alerts do
   defp do_classify(:api_key_reuse_detected, _metadata, _event, _context),
     do: [{:api_key_abuse, :platform}]
 
+  defp do_classify(:api_key_rate_limited, _metadata, _event, _context),
+    do: [{:api_key_rate_limited, :platform}]
+
+  defp do_classify(:ip_block_refused, _metadata, _event, _context),
+    do: [{:blocked_ip, :site}]
+
   defp do_classify(:org_setting_changed, metadata, _event, _context) do
     if meta(metadata, "setting") == "site_mail_relay",
       do: [{:alerts_silenced, :notice, "mail_relay_changed"}],
@@ -404,6 +427,39 @@ defmodule KilnCMS.Security.Alerts do
   def display_ip(nil, _settings), do: nil
   def display_ip(ip, %{include_full_ip: true}), do: ip
   def display_ip(ip, _settings), do: Cidr.truncate(ip)
+
+  @doc """
+  A block rule as an alert shows it, by the same rule as `display_ip/2`: in
+  full only when the site opted in (`include_full_ip`), otherwise a rule
+  narrower than a `/24` or `/48` is widened to it
+  (`KilnCMS.Security.Cidr.truncate_range/1`), so a host rule does not name
+  the host. `nil` settings always mask.
+  """
+  @spec display_rule(String.t() | nil, settings() | nil) :: String.t() | nil
+  def display_rule(nil, _settings), do: nil
+  def display_rule(rule, %{include_full_ip: true}), do: rule
+  def display_rule(rule, _settings), do: Cidr.truncate_range(rule)
+
+  @doc """
+  An event's metadata as an alert carries it (webhooks, bell, mail): every
+  value that names an address is masked by `display_rule/2`, the rest is
+  carried as recorded. Today that is the `rule` of `:ip_block_refused`.
+  """
+  @spec display_metadata(atom() | String.t() | nil, map() | nil, settings() | nil) :: map()
+  def display_metadata(_type, nil, _settings), do: %{}
+
+  def display_metadata(_type, metadata, settings) when is_map(metadata) do
+    case Map.fetch(metadata, "rule") do
+      {:ok, rule} when is_binary(rule) ->
+        Map.put(metadata, "rule", display_rule(rule, settings))
+
+      {:ok, _not_text} ->
+        Map.delete(metadata, "rule")
+
+      :error ->
+        metadata
+    end
+  end
 
   @doc """
   Count one failed sign-in on `org_id`'s tally (#2245), keyed on the site

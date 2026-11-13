@@ -240,16 +240,19 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   defp iso(nil), do: nil
   defp iso(%DateTime{} = at), do: DateTime.to_iso8601(at)
 
-  # A platform alert always masks: no site chose to show the address.
+  # A platform alert always masks: no site chose to show the address. The
+  # metadata is masked the same way (a block rule names an address).
   defp event_data(event, channel, settings) do
+    settings = if channel == :site, do: settings
+
     %{
       id: event.id,
       type: to_string(event.type),
       actor_id: event.actor_id,
       target_type: event.target_type,
       target_id: event.target_id,
-      ip: Alerts.display_ip(event.ip, if(channel == :site, do: settings)),
-      metadata: event.metadata || %{}
+      ip: Alerts.display_ip(event.ip, settings),
+      metadata: Alerts.display_metadata(event.type, event.metadata, settings)
     }
   end
 

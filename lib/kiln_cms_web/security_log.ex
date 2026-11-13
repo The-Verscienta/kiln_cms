@@ -195,6 +195,8 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:registration_rejected), do: gettext("Registration rejected")
   def type_label(:backup_canceled), do: gettext("Backup canceled")
   def type_label(:api_key_reuse_detected), do: gettext("Rotated API key used again")
+  def type_label(:ip_block_refused), do: gettext("Blocked address refused")
+  def type_label(:api_key_rate_limited), do: gettext("API key hit a rate limit")
 
   def type_label(%UnknownAtom{value: value}),
     do: gettext("Unrecognized event (%{type})", type: value)

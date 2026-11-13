@@ -285,7 +285,9 @@ defmodule KilnCMSWeb.SecurityLogLive do
                        :sign_in_failed,
                        :sign_in_locked,
                        :sign_in_unlock_refused,
-                       :api_key_reuse_detected
+                       :api_key_reuse_detected,
+                       :ip_block_refused,
+                       :api_key_rate_limited
                      ],
                      do: "warning",
                      else: "neutral"

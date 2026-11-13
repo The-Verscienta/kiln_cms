@@ -137,6 +137,27 @@ defmodule KilnCMS.Webhooks.SlackFormatTest do
       refute body.text =~ "<!here>"
     end
 
+    test "a block rule is a code span, escaped, like the address" do
+      body =
+        SlackFormat.render(
+          "security.blocked_ip",
+          alert(%{
+            "kind" => "blocked_ip",
+            "event" => %{
+              "ip" => "203.0.113.0/24",
+              "type" => "ip_block_refused",
+              "metadata" => %{"rule" => "203.0.113.0/24 <!here>", "surface" => "http"}
+            }
+          })
+        )
+
+      assert section(body) =~
+               "*A blocked address was refused (rule `203.0.113.0/24 &lt;!here&gt;`, " <>
+                 "from `203.0.113.0/24`)* on `Example`"
+
+      refute body.text =~ "<!here>"
+    end
+
     test "the console URL is escaped for the link syntax" do
       body =
         SlackFormat.render(

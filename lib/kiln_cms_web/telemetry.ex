@@ -249,6 +249,14 @@ defmodule KilnCMSWeb.Telemetry do
             "(#2242), tagged http / live / gql / collab / bridge. The address is " <>
             "deliberately not a tag or a log field."
       ),
+      counter("kiln_cms.security.api_key_trip.count",
+        tags: [:result, :bucket],
+        description:
+          "Rate-limit refusals of a request that presented a credential (#2245), by " <>
+            "result (unverified: not a key this node verified, so nothing is recorded; " <>
+            "debounced: already noted this window; noted: recorded for the platform " <>
+            "alert) and bucket. No key, user or address is a tag."
+      ),
       counter("kiln_cms.admin_allowlist.refused.count",
         tags: [:surface, :reason],
         description:
