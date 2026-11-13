@@ -156,6 +156,16 @@ defmodule KilnCMS.Security.AdminAllowlist do
     policy = from_row(row)
     version = version(row)
 
+    # Inside a transaction the row may be uncommitted and roll back
+    # (`KilnCMS.Cache` reads on the caller's connection there, #2823):
+    # never pin it as the last-known list, whose newer-version guard would
+    # then decline the real, older one for a day.
+    unless KilnCMS.Repo.in_transaction?(), do: remember(org_id, version, policy)
+
+    policy
+  end
+
+  defp remember(org_id, version, policy) do
     KilnCMS.Cache.put_unless_kept(
       KilnCMS.Cache.admin_allowlist_last_known_key(org_id),
       @last_known_ttl,

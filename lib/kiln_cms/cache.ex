@@ -26,6 +26,37 @@ defmodule KilnCMS.Cache do
   would get a stale 304 (#2502). That instance has no size cap and nothing
   clears it.
 
+  ## A fetch from a process that holds a database connection
+
+  A miss normally runs its fallback on a Cachex courier process, which
+  deduplicates concurrent misses on one key. That process has no connection of
+  its own, so a fallback that reads the database checks out a *second* pool
+  connection while the caller still holds its first. When the caller holds one
+  (inside a transaction, such as an action's `after_action` hook, or inside
+  `Repo.checkout/1`) that is a deadlock waiting for a busy pool: transactions waiting on connections
+  that only finishing transactions give back (#2823). Under the SQL sandbox it
+  is a certain one: the courier is routed to the caller's single connection,
+  which the caller holds while it waits, so the sandbox drops the courier's
+  checkout after about a second and the caller's own fallback is served.
+
+  So `fetch/3` and the published-content fetches check `KilnCMS.Repo.checked_out?/0`
+  first (a registry ETS lookup and a process-dictionary lookup). When the caller
+  holds a connection, a cached value is still served, but a miss runs the
+  fallback **in the caller**, on the connection it already holds, and the cache
+  entry is **not stored**: the value may come from an uncommitted transaction
+  that is still to roll back. (`KilnCMS.Security.AdminAllowlist`'s fallback,
+  which also records a last-known list, skips that write inside a
+  transaction for the same reason.) The trade-offs: concurrent misses inside
+  transactions are not deduplicated, which is write traffic only; and a
+  fallback query that fails at the SQL level aborts the caller's transaction,
+  where on the courier it only failed the fallback. A fallback that rescues
+  the error and degrades (`KilnCMS.OrgSettings` logs "lookup failed, serving
+  the fallback") still leaves the transaction aborted, so its next statement
+  or the commit fails with `25P02`: read that log line next to the write's
+  error as its cause. `KilnCMS.CMS.Severity` and
+  `KilnCMS.Compliance.Settings.for_org_uncached/1` made the same choice for
+  their own reads.
+
   Set `config :kiln_cms, KilnCMS.Cache, enabled: false` to bypass the cache
   (every read hits the source) without removing the supervised process.
   """
@@ -184,12 +215,20 @@ defmodule KilnCMS.Cache do
   # `Cachex.Actions.Fetch` takes the same read before dispatching to the
   # Courier, so a hit still costs one ETS lookup and only the miss path pays a
   # second one.
+  #
+  # A miss from a caller that holds a database connection is computed here and
+  # not stored, as in `fetch/3` (moduledoc); it is still a `:miss`.
   defp fetch_published_cached(shape, org_id, type, slug, locale, fun) do
     key = key(shape, org_id, type, slug, locale)
 
     case Cachex.get(@cache, key) do
-      {:ok, value} when not is_nil(value) -> emit(:hit, value)
-      _ -> fetch_published_uncached(key, fun)
+      {:ok, value} when not is_nil(value) ->
+        emit(:hit, value)
+
+      _miss ->
+        if holding_connection?(),
+          do: emit(:miss, fun.()),
+          else: fetch_published_uncached(key, fun)
     end
   end
 
@@ -278,10 +317,31 @@ defmodule KilnCMS.Cache do
   with `fun` and cache it for `ttl` milliseconds (a non-`nil` result; a `nil` is
   recomputed each call, as in `fetch_published/4`). Cleared by `bust_published/0`
   along with everything else, so it stays fresh on writes.
+
+  Called while the caller holds a database connection (inside a transaction or
+  a `Repo.checkout/1`), a miss is computed in the caller and not stored; see
+  the moduledoc.
   """
   @spec fetch(term(), pos_integer(), (-> any())) :: any()
   def fetch(key, ttl, fun) when is_function(fun, 0) do
-    if enabled?(), do: fetch_cached(key, ttl, fun), else: fun.()
+    if enabled?(), do: fetch_enabled(key, ttl, fun), else: fun.()
+  end
+
+  # A hit is served from the store before anything asks the Repo, so a hit
+  # never depends on the Repo being started (a hit during a Repo restart, or
+  # early in boot, is served as it was). Only a miss checks whether the caller
+  # holds a database connection (see "A fetch from a process that holds a
+  # database connection" in the moduledoc): if it does, the miss is computed
+  # here on that connection and stored nothing; a raise propagates as it is, as
+  # the courier path re-raises it. Otherwise the courier computes and stores it.
+  defp fetch_enabled(key, ttl, fun) do
+    case Cachex.get(@cache, key) do
+      {:ok, value} when not is_nil(value) ->
+        value
+
+      _miss ->
+        if holding_connection?(), do: fun.(), else: fetch_cached(key, ttl, fun)
+    end
   end
 
   # Stampede-safe like `fetch_published/4` — one concurrent rebuild per key
@@ -1284,6 +1344,10 @@ defmodule KilnCMS.Cache do
 
   defp key(shape, org_id, type, slug, locale) when shape in @shapes,
     do: "published:#{shape}:#{org_id}:#{type}:#{locale}:#{slug}"
+
+  # True inside `Repo.transaction/2` and `Repo.checkout/2`, where a fallback on
+  # the courier would need a second connection (moduledoc).
+  defp holding_connection?, do: KilnCMS.Repo.checked_out?()
 
   defp enabled? do
     :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:enabled, true)

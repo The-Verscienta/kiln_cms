@@ -1427,6 +1427,67 @@ carries the reasoning.
   absent. If you set either `0` or a value with a unit, read the
   [upgrade note](#backup-keep-days-upgrade) first. (#2727)
 
+<a id="cache-fetch-in-transaction"></a>
+
+- **A cached read made while the caller holds a database connection no longer needs a second one.**
+  On a cache miss, `KilnCMS.Cache.fetch/3` and the published-content fetches
+  (`fetch_published/5`, `fetch_published_payload/5`) ran the fallback on a
+  Cachex courier process, which deduplicates concurrent misses on one key.
+  The courier has no connection of its own, so a fallback that reads the
+  database checked out a second pool connection while the caller still held
+  its first. Many write paths do exactly that: an action's `after_action`
+  hook, inside the write transaction, reads a cached setting. Examples are the
+  site branding in a newsletter confirmation mail or an invitation mail, and
+  the content-type registry. Under load, transactions waiting on connections
+  that only finishing transactions give back can exhaust the pool or deadlock.
+
+  Now, when the caller holds a connection (inside `Repo.transaction/2` or
+  `Repo.checkout/2`, checked with `KilnCMS.Repo.checked_out?/0`):
+
+  - **A cache hit is served as before**, read from the store before anything
+    asks the Repo.
+  - **A miss runs the fallback in the caller**, on the connection it already
+    holds, and the result is **not stored**: it may come from an uncommitted
+    transaction that is about to roll back. The next read outside a
+    transaction fills the cache.
+
+  Outside a transaction nothing changed: the courier computes the miss and
+  stores it. There is no setting; the rule is the same one
+  `KilnCMS.CMS.Severity` and
+  `KilnCMS.Compliance.Settings.for_org_uncached/1` already followed for their
+  own reads.
+
+  The trade-offs:
+
+  - Concurrent misses inside transactions are no longer deduplicated, and a
+    write path re-reads the source on each miss until a read outside a
+    transaction fills the cache. Only write traffic pays this.
+  - **A fallback query that fails at the SQL level now aborts the caller's
+    transaction**, where on the courier it failed only the fallback. A
+    fallback that rescues the error and degrades still leaves the transaction
+    aborted, so the write fails at its next statement or at commit with
+    Postgres error `25P02` (`in_failed_sql_transaction`). If you see a log
+    line such as `branding lookup failed, serving the fallback for this
+    request: …` just before a write's `25P02`, it is the cause.
+  - `KilnCMS.Security.AdminAllowlist` no longer records its last-known
+    allowlist from a read made inside a transaction, since a rolled-back row
+    would otherwise be kept as the newest list and the real one declined.
+
+  No migration and no configuration; rolling back is safe.
+
+  Developers: a fallback passed to `KilnCMS.Cache.fetch/3` may now run in
+  the calling process, so it must not depend on running elsewhere. In
+  particular, take the actor before `KilnCMS.OrgSettings.resolve/2`, as its
+  moduledoc already says: a resolver that read a process-local actor inside
+  its fallback would pass inside a transaction and fail everywhere else. In
+  tests, the SQL sandbox used to drop the courier's checkout after about a
+  second and serve the fallback, so a mail rendered inside a transaction
+  carried the fallback site name. That stall is gone (in a full suite run,
+  83 "lookup failed, serving the fallback" lines became 0, and the suite
+  runs about 74 s faster), and a test that reads a cached setting inside a
+  transaction no longer needs the shared sandbox or `async: false` for it.
+  `InvitationMailTest` is async now. (#2823)
+
 <a id="custom-field-value-shapes"></a>
 
 - **An object, or a list where one value goes, sent for a single custom field is a field error naming the field, not a 500 (#2743).**

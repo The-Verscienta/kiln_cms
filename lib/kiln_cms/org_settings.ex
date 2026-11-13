@@ -60,8 +60,11 @@ defmodule KilnCMS.OrgSettings do
   `system_actions:` option).
 
   Take the actor in the caller, before `resolve/2`, and close over it in
-  `read`: a cache miss runs `read` on a Cachex courier process, where the
-  `with_actor/2` test seam (process-local) does not reach.
+  `read`: a cache miss usually runs `read` on a Cachex courier process, where
+  the `with_actor/2` test seam (process-local) does not reach. Only a miss from
+  a caller that holds a database connection (inside a transaction) runs `read`
+  in the caller, uncached (`KilnCMS.Cache.fetch/3`), so a resolver that takes
+  the actor inside `read` would pass there and fail everywhere else.
 
   **With `authorize_with: :error`, always.** A refused read filters to "no
   row", and "no row" is `build.(nil)`, the operator config, which is *cached*
