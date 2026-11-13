@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.Notifications
   alias KilnCMS.Notifications.Link
   alias KilnCMS.Test.SecurityAlerts
   alias KilnCMSWeb.NotificationText
@@ -87,6 +88,8 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
       assert has_element?(lv, "#alerts_notify_admins[checked]")
       refute has_element?(lv, "#alerts_include_full_ip[checked]")
       refute has_element?(lv, "#security-alerts-full-ip-warning")
+      # The masking covers both families (#2642).
+      assert html =~ "its /24 for IPv4, its /48 for IPv6"
     end
 
     test "warns when the site has no member admins", %{conn: conn} do
@@ -276,6 +279,199 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
              "#security-log-events span.bg-warning\\/20",
              "Rotated API key used again"
            )
+  end
+
+  describe "a security row in the inbox, in the reader's language (#2642)" do
+    defp security_row(user, org, attrs \\ %{}) do
+      Notifications.record_notification!(
+        Map.merge(
+          %{
+            user_id: user.id,
+            event: :security_alert,
+            content_type: "security_alert_dispatch",
+            content_id: Ecto.UUID.generate(),
+            title: "Alerts Site",
+            excerpt: "An account was locked out (from 203.0.113.0/24)",
+            details: %{
+              "phase" => "alert",
+              "kind" => "lockout",
+              "channel" => "site",
+              "count" => 1,
+              "ip" => "203.0.113.0/24",
+              "event_type" => "sign_in_locked"
+            }
+          },
+          attrs
+        ),
+        tenant: org.id
+      )
+    end
+
+    defp inbox_in(ctx, locale) do
+      {:ok, _lv, html} =
+        admin_conn(ctx) |> Plug.Conn.put_session("locale", locale) |> live(~p"/editor/inbox")
+
+      html
+    end
+
+    test "Spanish and French readers get the excerpt in their language", ctx do
+      security_row(ctx.admin, ctx.org)
+
+      es = inbox_in(ctx, "es")
+      assert es =~ "Se bloqueó una cuenta (desde 203.0.113.0/24)"
+      refute es =~ "An account was locked out"
+
+      fr = inbox_in(ctx, "fr")
+      assert fr =~ "Un compte a été verrouillé (depuis 203.0.113.0/24)"
+      refute fr =~ "An account was locked out"
+    end
+
+    test "a summary and a notice are said from their details too", ctx do
+      security_row(ctx.admin, ctx.org, %{
+        excerpt: "An account was locked out: 3 in this alert window",
+        details: %{"phase" => "summary", "kind" => "lockout", "count" => 3}
+      })
+
+      security_row(ctx.admin, ctx.org, %{
+        event: :security_notice,
+        excerpt: "Some security alerts were turned off",
+        details: %{"phase" => "notice", "change" => "kind_disabled", "kinds" => ["lockout"]}
+      })
+
+      es = inbox_in(ctx, "es")
+      assert es =~ "Se bloqueó una cuenta: 3 en este intervalo de alertas"
+      assert es =~ "Se desactivaron algunas alertas de seguridad"
+    end
+
+    test "a row written before details existed shows its stored excerpt", ctx do
+      security_row(ctx.admin, ctx.org, %{details: nil})
+
+      assert inbox_in(ctx, "es") =~ "An account was locked out (from 203.0.113.0/24)"
+    end
+  end
+
+  describe "platform alerts outside the default console (#2642)" do
+    defp platform_row(user, attrs \\ %{}) do
+      Notifications.record_notification!(
+        Map.merge(
+          %{
+            user_id: user.id,
+            event: :security_alert,
+            content_type: Notifications.platform_alert_content_type(),
+            content_id: Ecto.UUID.generate(),
+            title: "Platform Row Title",
+            excerpt: "A platform administrator lost the role (from 198.51.100.0/24)",
+            details: %{"phase" => "alert", "kind" => "platform_role_changed"}
+          },
+          attrs
+        ),
+        tenant: Accounts.default_org_id()
+      )
+    end
+
+    defp in_site(conn, org, user, path) do
+      {:ok, lv, html} = conn |> org_conn(org) |> log_in(user) |> live(path)
+      {lv, html}
+    end
+
+    defp platform_entry(html) do
+      html
+      |> Floki.parse_document!()
+      |> Floki.find("#inbox-platform-alerts, #notification-bell-platform-alerts")
+    end
+
+    test "a platform admin sees the count and a link to the default console", %{
+      conn: conn,
+      org: org
+    } do
+      platform = authed_user(:admin)
+      platform_row(platform)
+      platform_row(platform)
+
+      {lv, html} = in_site(conn, org, platform, ~p"/editor/inbox")
+
+      assert has_element?(lv, "#inbox-platform-alerts", "2 unread platform alerts")
+      assert has_element?(lv, "#notification-bell-platform-alerts", "2 unread platform alerts")
+
+      assert [href] =
+               html
+               |> Floki.parse_document!()
+               |> Floki.attribute("#inbox-platform-alerts", "href")
+
+      assert href == Link.platform_alerts_url()
+      assert href =~ ~r{/editor/inbox\?filter=unread$}
+
+      # Content-free: no title, no excerpt, no site.
+      refute html =~ "Platform Row Title"
+      refute html =~ "198.51.100.0/24"
+      refute html =~ "lost the role"
+    end
+
+    test "read rows are not counted", %{conn: conn, org: org} do
+      platform = authed_user(:admin)
+      platform_row(platform)
+      read = platform_row(platform)
+
+      Notifications.mark_notification_read!(read,
+        actor: platform,
+        tenant: Accounts.default_org_id()
+      )
+
+      {lv, _html} = in_site(conn, org, platform, ~p"/editor/inbox")
+
+      assert has_element?(lv, "#inbox-platform-alerts", "1 unread platform alert")
+
+      Notifications.mark_all_read(platform, Accounts.default_org_id())
+      {lv, html} = in_site(conn, org, platform, ~p"/editor/inbox")
+      refute has_element?(lv, "#inbox-platform-alerts")
+      assert platform_entry(html) == []
+    end
+
+    test "a site's own admin, not a platform admin, sees nothing", %{conn: conn, org: org} do
+      member_admin = authed_user(:viewer)
+      grant_tier(member_admin, org, :admin)
+      # Even a row anchored as a platform alert is not counted for them.
+      platform_row(member_admin)
+
+      {_lv, html} = in_site(conn, org, member_admin, ~p"/editor/inbox")
+
+      assert platform_entry(html) == []
+      assert Notifications.unread_platform_alert_count(member_admin, org) == 0
+    end
+
+    test "a platform admin demoted mid-session stops seeing it", %{conn: conn, org: org} do
+      platform = authed_user(:admin)
+      grant_tier(platform, org, :editor)
+      platform_row(platform)
+
+      {lv, _html} = in_site(conn, org, platform, ~p"/editor/inbox")
+      assert has_element?(lv, "#inbox-platform-alerts")
+
+      Ash.Seed.update!(platform, %{role: :editor})
+
+      Phoenix.PubSub.broadcast(
+        KilnCMS.PubSub,
+        Notifications.topic(platform.id),
+        :notifications_changed
+      )
+
+      _drained = render(lv)
+      html = render(lv)
+
+      refute has_element?(lv, "#inbox-platform-alerts")
+      assert platform_entry(html) == []
+    end
+
+    test "the default console lists the rows themselves and shows no entry", %{conn: conn} do
+      platform = authed_user(:admin)
+      platform_row(platform)
+
+      {:ok, lv, html} = conn |> log_in(platform) |> live(~p"/editor/inbox")
+
+      assert html =~ "Platform Row Title"
+      refute has_element?(lv, "#inbox-platform-alerts")
+      refute has_element?(lv, "#notification-bell-platform-alerts")
+    end
   end
 
   defp admin_conn(%{conn: conn, org: org} = ctx) do

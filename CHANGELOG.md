@@ -60,17 +60,34 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Run `mix ash.migrate` (new `webhook_endpoints.format`, default `kiln`, and nullable `notifications.details`). Before rolling back to 1.9, deactivate every Slack-format endpoint: 1.9 sends it the Kiln envelope, which Slack refuses, until it auto-disables.**
+  ([long form](docs/changelog/unreleased.md#slack-webhooks-upgrade))
+
 ### Added
+
+- **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
+  ([long form](docs/changelog/unreleased.md#slack-webhook-format))
 
 - **The editor's image picker (featured image, social image, image and gallery blocks, media fields) has its own Upload button and drop zone; the uploaded image is used right away.**
   ([long form](docs/changelog/unreleased.md#image-picker-upload))
 
 ### Changed
 
+- **Webhook URLs are masked (`https://host/…/last4`) on the Webhooks page, in the governance trail and its JSON/CSV exports (now also with `endpoint_id`), and in notices and logs. Reveal URL shows one; the edit form starts blank, and blank keeps the URL.**
+  ([long form](docs/changelog/unreleased.md#webhook-url-masking))
+
+- **Select all in a webhook's event list no longer ticks the `security.*` events; the `security` group's own Select all still does.**
+  ([long form](docs/changelog/unreleased.md#webhook-select-all-skips-security))
+
 - **No form field of any type can be named `website` (the spam trap's input) on add, rename or type change; a field that already is keeps working and is flagged "Reserved name" in the builder until renamed.**
   ([long form](docs/changelog/unreleased.md#form-field-name-website-reserved))
 
 ### Fixed
+
+- **Security alerts: the inbox says each alert in the reader's language, a delivery that exhausts its attempts emits `alert_failed`, other sites' consoles show "N unread platform alerts", and the full-IP help text covers IPv6.**
+  ([long form](docs/changelog/unreleased.md#security-alert-gaps-2642))
 
 - **Duplicating a form whose autoresponder is on and uses `[field:…]` tokens works again; a `website` field is copied as `website_2`, and a field that can't be copied is named.**
   ([long form](docs/changelog/unreleased.md#form-duplicate-autoresponder))

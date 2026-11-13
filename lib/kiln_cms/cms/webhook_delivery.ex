@@ -271,8 +271,11 @@ defmodule KilnCMS.CMS.WebhookDelivery do
 
     # The endpoint's URL when the delivery was made: what the governance trail
     # names after the endpoint itself has been deleted.
+    # `sensitive?` like `WebhookEndpoint.url` (#2245): the snapshot is the
+    # same URL, credential and all.
     attribute :endpoint_url, :string,
       public?: true,
+      sensitive?: true,
       constraints: [max_length: KilnCMS.Limits.url()]
 
     # When a later retraction of the same document got through to the same

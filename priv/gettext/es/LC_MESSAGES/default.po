@@ -655,6 +655,13 @@ msgid_plural "%{count} unknown"
 msgstr[0] "%{count} desconocida"
 msgstr[1] "%{count} desconocidas"
 
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} unread platform alert"
+msgid_plural "%{count} unread platform alerts"
+msgstr[0] "%{count} alerta de la plataforma sin leer"
+msgstr[1] "%{count} alertas de la plataforma sin leer"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} unresolved comment"
@@ -895,6 +902,16 @@ msgstr "%{id} nombra varios paquetes; no se puede saber si afecta a Kiln."
 #, elixir-autogen, elixir-format
 msgid "%{id}: its affected versions can't be read."
 msgstr "%{id}: no se pueden leer sus versiones afectadas."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{label} (from %{ip})"
+msgstr "%{label} (desde %{ip})"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{label}: %{count} in this alert window"
+msgstr "%{label}: %{count} en este intervalo de alertas"
 
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
@@ -1818,6 +1835,11 @@ msgstr "Una biblioteca de medios"
 msgid "A menu that opens on click — compact for any number of options."
 msgstr "Un menú que se abre al hacer clic: compacto para cualquier número de opciones."
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A new administrator"
+msgstr "Un nuevo administrador"
+
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "A note in your inbox each time content goes live."
@@ -1877,6 +1899,11 @@ msgstr "Un cuadro simple, guardado tal cual — para una nota o un código."
 #, elixir-autogen, elixir-format
 msgid "A platform administrator can change every site on this installation, and its users, keys and backups."
 msgstr "Un administrador de la plataforma puede cambiar todos los sitios de esta instalación, y sus usuarios, claves y copias de seguridad."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A platform administrator lost the role"
+msgstr "Un administrador de la plataforma perdió el rol"
 
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
@@ -1942,6 +1969,16 @@ msgstr "Un restablecimiento también confirma la dirección y elimina todo lo qu
 #, elixir-autogen, elixir-format
 msgid "A restore puts the document back without a propagation record"
 msgstr "Una restauración vuelve a publicar el documento sin registro de propagación"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A role was raised"
+msgstr "Se elevó un rol"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A rotated API key was used again"
+msgstr "Se volvió a usar una clave de API rotada"
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -2060,6 +2097,11 @@ msgstr "Una tarea puede anclarse a un bloque de un documento, como un párrafo o
 msgid "A task for %{person}, due %{date}"
 msgstr "Una tarea para %{person}, con vencimiento el %{date}"
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A temporary administrator role was ended early"
+msgstr "Se terminó antes de tiempo un rol temporal de administrador"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A third of a row"
@@ -2124,6 +2166,26 @@ msgstr "Una dirección web con una etiqueta opcional y si se abre en una pestañ
 #, elixir-autogen, elixir-format
 msgid "A web address. For a link to an external site, a source or a download."
 msgstr "Una dirección web. Para un enlace a un sitio externo, una fuente o una descarga."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A webhook that receives security alerts got a new signing secret"
+msgstr "Un webhook que recibe alertas de seguridad recibió un nuevo secreto de firma"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A webhook that receives security alerts was changed"
+msgstr "Se cambió un webhook que recibe alertas de seguridad"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A webhook that receives security alerts was deleted"
+msgstr "Se eliminó un webhook que recibe alertas de seguridad"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A webhook that receives security alerts was switched off after failed deliveries"
+msgstr "Se desactivó un webhook que recibe alertas de seguridad tras entregas fallidas"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -3237,6 +3299,11 @@ msgstr "Texto alternativo — déjalo en blanco solo si la imagen es decorativa"
 msgid "Always encrypted, and the server's certificate is always checked."
 msgstr "Siempre cifrado, y el certificado del servidor siempre se comprueba."
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "An API key was created"
+msgstr "Se creó una clave de API"
+
 #: lib/kiln_cms/security/posture/checks/api_keys.ex
 #, elixir-autogen, elixir-format
 msgid "An API key works without a password or a second factor, for as long as it is valid. Keep keys narrow and short-lived."
@@ -3256,6 +3323,11 @@ msgstr "Un acordeón es un encabezado que los editores abren y cierran; un grupo
 #, elixir-autogen, elixir-format
 msgid "An account is locked out of signing in after too many failed attempts."
 msgstr "Una cuenta queda bloqueada para iniciar sesión tras demasiados intentos fallidos."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "An account was locked out"
+msgstr "Se bloqueó una cuenta"
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
@@ -3291,6 +3363,16 @@ msgstr "Un administrador puede activarlo."
 #, elixir-autogen, elixir-format
 msgid "An administrator signed everyone out of this site. Sign in again to continue."
 msgstr "Un administrador ha cerrado la sesión de todos en este sitio. Inicia sesión de nuevo para continuar."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "An administrator was demoted"
+msgstr "Se rebajó el rol de un administrador"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "An administrator was removed"
+msgstr "Se quitó a un administrador"
 
 #: lib/kiln_cms/branding/app_icon.ex
 #, elixir-autogen, elixir-format
@@ -6319,6 +6401,11 @@ msgstr "No se pudo restaurar esa versión."
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't reveal that URL."
+msgstr "No se pudo mostrar esa URL."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't reveal that signing secret."
 msgstr "No se pudo mostrar ese secreto de firma."
 
@@ -6741,6 +6828,11 @@ msgstr "Ctrl+Z"
 #, elixir-autogen, elixir-format
 msgid "Current"
 msgstr "Actual"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Current URL:"
+msgstr "URL actual:"
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
@@ -9058,6 +9150,11 @@ msgstr "Inicio de sesión fallido"
 msgid "Failed sign-ins"
 msgstr "Inicios de sesión fallidos"
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Failed sign-ins reached the alert threshold"
+msgstr "Los inicios de sesión fallidos alcanzaron el umbral de alerta"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Failures"
@@ -9598,6 +9695,11 @@ msgstr "Configuración de formularios"
 #, elixir-autogen, elixir-format
 msgid "Form submission"
 msgstr "Envío de formulario"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Format"
+msgstr "Formato"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -10264,6 +10366,11 @@ msgstr "Campo oculto — %{label}"
 #, elixir-autogen, elixir-format
 msgid "Hide"
 msgstr "Ocultar"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hide URL"
+msgstr "Ocultar URL"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -11294,6 +11401,11 @@ msgstr "Palabras clave aplicadas. El slug no se ha modificado porque este conten
 msgid "Kiln %{version} is available; this is %{current}."
 msgstr "Kiln %{version} está disponible; esta es la %{current}."
 
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kiln (signed JSON)"
+msgstr "Kiln (JSON firmado)"
+
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
 msgid "Kiln can't see your real address."
@@ -11536,6 +11648,11 @@ msgstr "Déjalo vacío para usar el valor predeterminado"
 #, elixir-autogen, elixir-format
 msgid "Leave blank for the default message"
 msgstr "Déjalo vacío para usar el mensaje predeterminado"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to keep the current URL."
+msgstr "Déjalo en blanco para mantener la URL actual."
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -14210,8 +14327,8 @@ msgstr "Si está desactivado, las alertas siguen llegando a los webhooks suscrit
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Off, an alert shows only the address's network (the first three parts of an IPv4 address). The security log keeps the full address either way."
-msgstr "Si está desactivado, una alerta muestra solo la red de la dirección (las tres primeras partes de una dirección IPv4). El registro de seguridad guarda la dirección completa en cualquier caso."
+msgid "Off, an alert shows only the address's network: its /24 for IPv4, its /48 for IPv6. The security log keeps the full address either way."
+msgstr "Si está desactivado, una alerta muestra solo la red de la dirección: su /24 para IPv4, su /48 para IPv6. El registro de seguridad guarda la dirección completa en cualquier caso."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -14725,6 +14842,12 @@ msgstr "Abrir el panel de Cumplimiento del editor"
 #, elixir-autogen, elixir-format
 msgid "Open the full editor"
 msgstr "Abrir el editor completo"
+
+#: lib/kiln_cms_web/live/inbox_live.ex
+#: lib/kiln_cms_web/live/notification_bell.ex
+#, elixir-autogen, elixir-format
+msgid "Open them in the default site's console"
+msgstr "Ábrelas en la consola del sitio predeterminado"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -17306,6 +17429,11 @@ msgstr "Mostrar"
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
+msgid "Reveal URL"
+msgstr "Mostrar URL"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
 msgid "Reveal signing secret for %{url}"
 msgstr "Mostrar el secreto de firma de %{url}"
 
@@ -18309,10 +18437,16 @@ msgstr "Título de sección"
 msgid "Sections of %{type}"
 msgstr "Secciones de %{type}"
 
+#: lib/kiln_cms/security/alert_text.ex
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
 msgid "Security alert"
 msgstr "Alerta de seguridad"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Security alert notifications and emails were turned off"
+msgstr "Se desactivaron las notificaciones y los correos de alertas de seguridad"
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
@@ -18329,6 +18463,11 @@ msgstr "Configuración de alertas de seguridad guardada. Se ha enviado un aviso 
 #, elixir-autogen, elixir-format
 msgid "Security alerts"
 msgstr "Alertas de seguridad"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Security alerts were made quieter"
+msgstr "Se redujeron las alertas de seguridad"
 
 #: lib/kiln_cms_web/notification_text.ex
 #, elixir-autogen, elixir-format
@@ -18469,6 +18608,11 @@ msgstr "Seleccionar todo"
 #, elixir-autogen, elixir-format
 msgid "Select all %{group} events"
 msgstr "Seleccionar todos los eventos de %{group}"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Select all events except security alerts"
+msgstr "Seleccionar todos los eventos excepto las alertas de seguridad"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -19336,6 +19480,11 @@ msgstr "El inicio de sesión único no está disponible ahora en este sitio. Ent
 msgid "Single sign-on saved."
 msgstr "Inicio de sesión único guardado."
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Single sign-on settings changed"
+msgstr "Cambió la configuración del inicio de sesión único"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -19419,6 +19568,31 @@ msgstr "Saltar al contenido principal"
 #, elixir-autogen, elixir-format
 msgid "Skipped"
 msgstr "Omitido"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack"
+msgstr "Slack"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack (incoming webhook)"
+msgstr "Slack (webhook entrante)"
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack doesn't check signatures: the URL is the credential. After saving, Kiln shows only its host."
+msgstr "Slack no comprueba firmas: la URL es la credencial. Después de guardar, Kiln solo muestra su host."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack endpoints receive security alerts only."
+msgstr "Los endpoints de Slack solo reciben alertas de seguridad."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slack webhook added."
+msgstr "Webhook de Slack añadido."
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
@@ -19505,6 +19679,11 @@ msgstr "Algunas claves tienen más de 180 días (su antigüedad sustituye al úl
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
 msgstr "No se pudieron marcar como leídas algunas notificaciones."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Some security alerts were turned off"
+msgstr "Se desactivaron algunas alertas de seguridad"
 
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
@@ -21676,6 +21855,11 @@ msgstr "La asignación de embeddings en segundo plano del sitio está agotada po
 msgid "The site's default language"
 msgstr "El idioma predeterminado del sitio"
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "The site's mail relay was changed"
+msgstr "Se cambió el relé de correo del sitio"
+
 #: lib/kiln_cms/security/posture/checks/breached_passwords.ex
 #, elixir-autogen, elixir-format
 msgid "The site's password policy could not be read."
@@ -23232,6 +23416,11 @@ msgstr "Inicio de sesión en dos pasos para administradores y editores"
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in for platform administrators"
 msgstr "Inicio de sesión en dos pasos para administradores de la plataforma"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step verification was turned off"
+msgstr "Se desactivó la verificación en dos pasos"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/calendar_live.ex

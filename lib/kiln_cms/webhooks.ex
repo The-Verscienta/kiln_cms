@@ -160,6 +160,61 @@ defmodule KilnCMS.Webhooks do
   defp hmac_hex(secret, data),
     do: :hmac |> :crypto.mac(:sha256, secret, data) |> Base.encode16(case: :lower)
 
+  # What `display_url/1` shows for a URL it cannot name a host for.
+  @masked_url "••••"
+  # The elision `display_url/1` writes, and recognizes on a second pass.
+  @elided_path "/…/"
+
+  @doc """
+  A webhook URL as Kiln shows it anywhere a person or another system reads it
+  (#2245): `scheme://host[:port]`, then `/…/` and the last four characters of
+  the path and query when those are at least 16 characters long. Shorter, the
+  host alone. The userinfo is always dropped, and so is a port that is the
+  scheme's default. Anything without a scheme and a host shows as `"••••"`.
+
+      display_url("https://hooks.slack.com/services/T0/B0/9xQzAbCd9xQz")
+      #=> "https://hooks.slack.com/…/9xQz"
+
+  An incoming-webhook URL (Slack, Teams, Discord, Zapier, and many custom
+  receivers) carries its own token, and Slack checks no signature, so for
+  those receivers the URL is the credential. The same rule applies to every
+  endpoint, whatever its format, so no surface has to remember which.
+
+  The delivery ledger keeps the real URL (`WebhookDelivery.endpoint_url`):
+  this is applied where it is shown, exported or logged. It is idempotent,
+  so a value that has already been through it comes back unchanged.
+  """
+  @spec display_url(String.t() | nil) :: String.t()
+  def display_url(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} = uri
+      when is_binary(scheme) and scheme != "" and is_binary(host) and host != "" ->
+        origin(uri) <> elided_tail(uri)
+
+      _unparseable ->
+        @masked_url
+    end
+  end
+
+  def display_url(_url), do: @masked_url
+
+  defp origin(%URI{scheme: scheme, host: host, port: port}) do
+    host = if String.contains?(host, ":"), do: "[#{host}]", else: host
+    port = if port && port != URI.default_port(scheme), do: ":#{port}", else: ""
+    "#{scheme}://#{host}#{port}"
+  end
+
+  defp elided_tail(%URI{path: path, query: query}) do
+    tail = (path || "") <> if(query, do: "?" <> query, else: "")
+
+    cond do
+      # Already masked: `/…/` and four characters.
+      String.starts_with?(tail, @elided_path) and String.length(tail) == 7 -> tail
+      String.length(tail) >= 16 -> @elided_path <> String.slice(tail, -4, 4)
+      true -> ""
+    end
+  end
+
   @doc "Exhausted deliveries in a row before an endpoint is auto-disabled."
   @spec auto_disable_after() :: pos_integer()
   def auto_disable_after,
@@ -343,20 +398,32 @@ defmodule KilnCMS.Webhooks do
   @doc """
   Send a test `"ping"` event to one endpoint (delivers even when inactive, so
   a receiver can be verified before enabling). Admin-triggered.
+
+  A Kiln-format endpoint's ping carries `endpoint_url`, the full URL, as it
+  always has (webhook payloads are additive-only under 1.x). A Slack-format
+  one's carries the site's name instead and no URL (#2245): the message is
+  posted into a channel, and for an incoming webhook the URL is the
+  credential (`KilnCMS.Webhooks.SlackFormat`).
   """
   @spec ping(struct()) :: struct()
   def ping(endpoint) do
-    enqueue(
-      endpoint,
-      "ping",
-      %{
-        message: "KilnCMS webhook test",
-        endpoint_url: endpoint.url,
-        sent_at: DateTime.to_iso8601(DateTime.utc_now())
-      },
-      endpoint.org_id,
-      true
-    )
+    enqueue(endpoint, "ping", ping_payload(endpoint), endpoint.org_id, true)
+  end
+
+  defp ping_payload(%{format: :slack} = endpoint) do
+    %{
+      message: "KilnCMS webhook test",
+      site_name: KilnCMS.Branding.for_org(endpoint.org_id).site_name,
+      sent_at: DateTime.to_iso8601(DateTime.utc_now())
+    }
+  end
+
+  defp ping_payload(endpoint) do
+    %{
+      message: "KilnCMS webhook test",
+      endpoint_url: endpoint.url,
+      sent_at: DateTime.to_iso8601(DateTime.utc_now())
+    }
   end
 
   # The endpoint scan runs as `system/0` (#1659) with `authorize_with: :error`.
@@ -371,7 +438,11 @@ defmodule KilnCMS.Webhooks do
     retraction? = withdraws? and retraction?(event)
 
     # The query narrows to the candidates; `receives?/3` decides, the same
-    # rule the worker applies when the job runs.
+    # rule the worker applies when the job runs. Kiln-format endpoints only:
+    # a Slack endpoint takes security alerts alone, which never come through
+    # here (`enqueue_security!/4`), and has no rendering for a document or a
+    # retraction (#2245). `KilnCMS.CMS.Validations.WebhookFormatEvents` keeps
+    # content events off one; this keeps a row that predates it off too.
     CMS.list_webhook_endpoints!(
       actor: system(),
       authorize_with: :error,
@@ -379,7 +450,8 @@ defmodule KilnCMS.Webhooks do
       query:
         Ash.Query.filter(
           CMS.WebhookEndpoint,
-          ^event in events and (active == true or not is_nil(auto_disabled_at))
+          ^event in events and format == :kiln and
+            (active == true or not is_nil(auto_disabled_at))
         )
     )
     |> Enum.filter(&CMS.WebhookEndpoint.receives?(&1, event, retraction?))
@@ -447,8 +519,8 @@ defmodule KilnCMS.Webhooks do
 
   `type` is the event namespace (`"page"`, or a dynamic type's name), `id` the
   document's id. Each entry is the failed delivery with the endpoint it was
-  for (named from the row's snapshot, so a deleted endpoint is still named)
-  and, once a later retraction of the same document reached the same endpoint
+  for (named from the row's snapshot, so a deleted endpoint is still named,
+  and masked by `display_url/1`) and, once a later retraction of the same document reached the same endpoint
   (a replay, or a later verb), when:
 
       %{id, event, endpoint_id, endpoint_url, attempts, last_error, failed_at, recovered_at}
@@ -477,7 +549,9 @@ defmodule KilnCMS.Webhooks do
         id: row.id,
         event: row.event,
         endpoint_id: row.endpoint_id,
-        endpoint_url: row.endpoint_url,
+        # Masked (#2245): the trail is shown, exported as JSON and CSV, and
+        # read by every admin of the site. The ledger keeps the real URL.
+        endpoint_url: row.endpoint_url && display_url(row.endpoint_url),
         attempts: row.attempts,
         last_error: row.last_error,
         failed_at: CMS.WebhookDelivery.given_up_at(row),

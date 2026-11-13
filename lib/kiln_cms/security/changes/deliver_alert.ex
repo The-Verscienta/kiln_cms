@@ -62,6 +62,7 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   alias KilnCMS.Security
   alias KilnCMS.Security.AlertMail
   alias KilnCMS.Security.Alerts
+  alias KilnCMS.Security.AlertText
   alias KilnCMS.Webhooks
   alias KilnCMSWeb.Plugs.ConsoleHost
 
@@ -341,17 +342,22 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
 
   defp send!(plan, dispatch) do
     notification = if dispatch.channel == :notice, do: :security_notice, else: :security_alert
+    # The English line stays in `excerpt`, which is all a release before
+    # `details` reads (a rollback shows it as before); `details` lets the
+    # inbox say it in the reader's language (#2642).
     headline = AlertMail.headline(plan.data)
+    details = AlertText.details(plan.data)
 
     Enum.each(plan.bell, fn user ->
       Notifications.record_notification!(
         %{
           user_id: user.id,
           event: notification,
-          content_type: "security_alert_dispatch",
+          content_type: content_type(dispatch),
           content_id: dispatch.id,
           title: plan.data.site_name,
-          excerpt: headline
+          excerpt: headline,
+          details: details
         },
         tenant: dispatch.org_id
       )
@@ -364,6 +370,14 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
       &Webhooks.enqueue_security!(&1, plan.event_name, plan.data, dispatch.org_id)
     )
   end
+
+  # A platform alert's rows are told apart by their anchor, so the count of
+  # unread platform alerts shown outside the default console
+  # (`KilnCMS.Notifications.unread_platform_alert_count/1`) is one exact
+  # filter. Rows written before this (`"security_alert_dispatch"`) stay where
+  # they are, in the default console's bell.
+  defp content_type(%{channel: :platform}), do: Notifications.platform_alert_content_type()
+  defp content_type(_dispatch), do: "security_alert_dispatch"
 
   # -- 3. After the commit --------------------------------------------------
 

@@ -109,6 +109,7 @@ defmodule KilnCMSWeb.GovernanceController do
         Enum.map(trail.lost_retractions, fn lost ->
           Map.take(lost, [
             :event,
+            :endpoint_id,
             :endpoint_url,
             :attempts,
             :last_error,

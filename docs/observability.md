@@ -376,7 +376,7 @@ lines.
 |-------|--------------|--------------|----------|
 | `[:kiln_cms, :security, :event_failed]` | A security event could not be written. Also logged at `error`: `security event <type> not recorded: ...` | `count` (always `1`) | `type` |
 | `[:kiln_cms, :security, :event_sampled_out]` | An event was dropped on purpose: a failed sign-in, an admin allowlist refusal or a refused unlock link over its per-address cap, or a repeat lockout in the same window | `count` (always `1`) | `type` |
-| `[:kiln_cms, :security, :alert_failed]` | An alert could not be claimed and will not be sent. Also logged at `error`: `Security alert <kind> for <scope> could not be claimed and will not be sent: ...` | `count` (always `1`) | `scope`, `kind`, `reason` |
+| `[:kiln_cms, :security, :alert_failed]` | An alert could not be claimed and will not be sent, or a claimed alert used its 10 delivery attempts and was stamped failed (`reason: :delivery_exhausted`, once per alert). Also logged at `error`: `Security alert <kind> for <scope> could not be claimed and will not be sent: ...`, or `Security alert <id> (<kind>, <phase>) was not delivered after its last attempt; ...` | `count` (always `1`) | `scope`, `kind`, `reason`; `phase` (`:alert` or `:summary`) when `reason` is `:delivery_exhausted` |
 | `[:kiln_cms, :api_key, :reuse_detected]` | A rotated-away API key was presented again and its lineage revoked (#2245). Also logged at `warning` | `count` (always `1`) | `key_id`, `lineage_id`, `user_id`, `revoked_ids` |
 
 Wire an alert to `event_failed` and `alert_failed`: either means something

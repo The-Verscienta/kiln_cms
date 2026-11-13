@@ -146,9 +146,13 @@ defmodule KilnCMSWeb.NotificationBell do
     user = socket.assigns.current_user
     org = socket.assigns[:current_org]
 
+    platform_alerts = Notifications.unread_platform_alert_count(user, org)
+
     socket
     |> assign(:unread_count, Notifications.unread_count(user, org))
     |> assign(:notifications, Notifications.recent(user, org, @recent))
+    |> assign(:platform_alert_count, platform_alerts)
+    |> assign(:platform_alerts_url, platform_alerts > 0 && Link.platform_alerts_url())
   end
 
   @impl true
@@ -165,13 +169,20 @@ defmodule KilnCMSWeb.NotificationBell do
         data-autoclose
         phx-mounted={JS.ignore_attributes(["open"])}
       >
-        <summary class="bell-trigger" aria-label={bell_label(@unread_count)}>
+        <summary
+          class="bell-trigger"
+          aria-label={bell_label(@unread_count + @platform_alert_count)}
+        >
           <.icon name="hero-bell" class="size-5" />
           <%!-- The badge is decoration — capped, and hidden from assistive
                 technology, because the summary's own label above carries the
                 real, uncapped number. A count nobody can hear is not a count. --%>
-          <span :if={@unread_count > 0} class="bell-badge" aria-hidden="true">
-            {unread_badge(@unread_count)}
+          <span
+            :if={@unread_count + @platform_alert_count > 0}
+            class="bell-badge"
+            aria-hidden="true"
+          >
+            {unread_badge(@unread_count + @platform_alert_count)}
           </span>
         </summary>
 
@@ -189,7 +200,25 @@ defmodule KilnCMSWeb.NotificationBell do
             </button>
           </div>
 
-          <p :if={@notifications == []} class="bell-empty">
+          <%!-- Platform alerts, outside the default console: a count and a
+                link there, never a row (#2642; see
+                `Notifications.unread_platform_alert_count/2`). A plain
+                `href`: it is another console's host. --%>
+          <a
+            :if={@platform_alert_count > 0}
+            id={"#{@id}-platform-alerts"}
+            href={@platform_alerts_url}
+            class="bell-item bell-item-unread block"
+          >
+            <span class="bell-item-head">
+              <span class="truncate font-medium">
+                {platform_alerts_label(@platform_alert_count)}
+              </span>
+            </span>
+            <span class="bell-item-sub">{gettext("Open them in the default site's console")}</span>
+          </a>
+
+          <p :if={@notifications == [] and @platform_alert_count == 0} class="bell-empty">
             {gettext("Nothing yet.")}
           </p>
 
@@ -250,6 +279,18 @@ defmodule KilnCMSWeb.NotificationBell do
   @spec unread_badge(non_neg_integer()) :: String.t()
   def unread_badge(count) when count >= @badge_max, do: "#{@badge_max - 1}+"
   def unread_badge(count), do: Integer.to_string(count)
+
+  @doc false
+  # Shared with the inbox, which shows the same entry.
+  @spec platform_alerts_label(pos_integer()) :: String.t()
+  def platform_alerts_label(count),
+    do:
+      ngettext(
+        "%{count} unread platform alert",
+        "%{count} unread platform alerts",
+        count,
+        count: count
+      )
 
   # The accessible name carries the real number, uncapped: "8+" is a
   # space-saving glyph for the eye, not an answer for a screen reader.

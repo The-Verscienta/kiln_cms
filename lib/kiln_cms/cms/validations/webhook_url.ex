@@ -14,12 +14,9 @@ defmodule KilnCMS.CMS.Validations.WebhookUrl do
             :ok
 
           {:error, message} ->
-            {:error,
-             InvalidAttribute.exception(
-               field: :url,
-               message: message,
-               value: url
-             )}
+            # No `value:` (#2245): the error is logged and reported, and the
+            # URL may be the credential.
+            {:error, InvalidAttribute.exception(field: :url, message: message)}
         end
 
       _ ->

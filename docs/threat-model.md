@@ -958,6 +958,15 @@ see [bot-budgets.md](bot-budgets.md).
   last four characters, and the plaintext reaches the browser only when an
   admin clicks **Reveal** or has just added the endpoint (#2140), so a screen
   share or a saved page of the list doesn't carry it.
+- **URL disclosure** — an incoming-webhook URL (Slack, Teams, Discord) is
+  itself the credential, and Slack checks no signature. The console shows
+  every endpoint URL masked to its host and last four characters, the edit
+  form is never pre-filled with it, and **Reveal URL** re-reads the endpoint
+  as the admin before sending the full URL (#2245). The governance trail and
+  its exports, the "Retraction not delivered" notice and log line, and
+  validation errors carry no full URL either. The URL is still stored in the
+  clear, in the endpoint and in each delivery row, so a database dump or
+  backup holds it.
 
 ### oEmbed resolution (`OEMBED_ENABLED`, #489)
 - **Content choosing the destination** — prevented by design. Kiln does **not**

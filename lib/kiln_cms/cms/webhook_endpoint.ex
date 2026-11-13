@@ -259,10 +259,12 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
   end
 
   # AshAdmin: keep system config out of the content groups (issue #25). The
-  # encrypted secret is sensitive? and stays redacted by default.
+  # encrypted secret is sensitive? and stays redacted by default. The URL is
+  # not a column either (#2245): a Slack-style incoming webhook URL is itself
+  # the credential, and a table lists every endpoint's at once.
   admin do
     resource_group :system
-    table_columns [:url, :active, :inserted_at]
+    table_columns [:format, :active, :inserted_at]
   end
 
   postgres do
@@ -284,30 +286,44 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
 
     create :create do
       primary? true
+      # `format` is set here and nowhere else (#2245): turning a receiver that
+      # verifies Kiln's signed JSON into one that gets Slack text would break
+      # it, so a different format is a new endpoint. `:update` keeps
+      # `default_accept`, which leaves `format` out.
+      accept [:url, :events, :active, :format]
+
       # No `events` given: subscribe to the defaults for THIS tenant's types.
       # The attribute default can only see the default org's (see
-      # `default_events/1`).
+      # `default_events/1`). A Slack endpoint's default is every security
+      # event (#2245): it may take nothing else.
       change fn changeset, _context ->
-        if Ash.Changeset.changing_attribute?(changeset, :events) do
-          changeset
-        else
-          Ash.Changeset.force_change_attribute(
-            changeset,
-            :events,
-            default_events(changeset.tenant)
-          )
+        cond do
+          Ash.Changeset.changing_attribute?(changeset, :events) ->
+            changeset
+
+          Ash.Changeset.get_attribute(changeset, :format) == :slack ->
+            Ash.Changeset.force_change_attribute(changeset, :events, security_events())
+
+          true ->
+            Ash.Changeset.force_change_attribute(
+              changeset,
+              :events,
+              default_events(changeset.tenant)
+            )
         end
       end
 
       # A receiver-shared signing secret, generated once and stored encrypted.
       change set_attribute(:secret_encrypted, &__MODULE__.generate_encrypted_secret/0)
       validate KilnCMS.CMS.Validations.WebhookUrl
+      validate KilnCMS.CMS.Validations.WebhookFormatEvents
     end
 
     update :update do
       primary? true
       require_atomic? false
       validate KilnCMS.CMS.Validations.WebhookUrl
+      validate KilnCMS.CMS.Validations.WebhookFormatEvents
       # Any edit gives the endpoint a clean failure count. The auto-disable
       # stamp is only cleared when the endpoint ends up active: an admin fixing
       # the URL of an auto-disabled endpoint and leaving it off to ping first
@@ -440,10 +456,27 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
       public? false
     end
 
+    # `sensitive?` (#2245): kept out of `inspect`, changeset logs and error
+    # reports. An incoming-webhook URL (Slack, Teams, Discord) carries its own
+    # token, so for those receivers the URL is the credential.
     attribute :url, :string,
       allow_nil?: false,
       public?: true,
+      sensitive?: true,
       constraints: [max_length: KilnCMS.Limits.url()]
+
+    # The body a delivery is rendered as (#2245): `:kiln`, the signed JSON
+    # envelope, or `:slack`, an incoming-webhook message. Set at create only.
+    # `KnownAtom`, not `:atom` (docs/releasing.md, "New values in an atom
+    # column"): a format a later release adds loads here as an `UnknownAtom`
+    # after a rollback instead of failing every read of the table. Delivery
+    # treats one as nothing it can render.
+    attribute :format, KilnCMS.Types.KnownAtom do
+      allow_nil? false
+      default :kiln
+      public? true
+      constraints one_of: [:kiln, :slack]
+    end
 
     # Subscribed event names; defaults to the published-content lifecycle only
     # (`default_events/1`) — draft-carrying review events are explicit opt-in.

@@ -38,9 +38,15 @@ defmodule KilnCMS.WebhookRetractionTest do
     })
   end
 
+  # Long enough to be masked to its last four (#2245): the notice, the log
+  # and the trail name the endpoint without its secret segment.
+  @hook_url "https://example.test/hook/T0SECRET-token-Zq9x"
+  @masked_url "https://example.test/…/Zq9x"
+  @secret_segment "T0SECRET-token"
+
   defp endpoint!(attrs \\ %{}) do
     CMS.create_webhook_endpoint!(
-      Map.merge(%{url: "https://example.test/hook"}, attrs),
+      Map.merge(%{url: @hook_url}, attrs),
       actor: admin()
     )
   end
@@ -212,7 +218,10 @@ defmodule KilnCMS.WebhookRetractionTest do
       stub_status(500)
 
       CMS.unpublish_page!(page, %{}, actor: admin)
-      drain_with_retries()
+
+      log = ExUnit.CaptureLog.capture_log(fn -> drain_with_retries() end)
+      assert log =~ "#{@masked_url} exhausted its retries"
+      refute log =~ @secret_segment
 
       org = KilnCMS.Accounts.default_org_id()
 
@@ -224,7 +233,8 @@ defmodule KilnCMS.WebhookRetractionTest do
       assert notice.content_type == "page"
       assert notice.content_id == page.id
       assert notice.title == "Dosage guidance"
-      assert notice.excerpt =~ "https://example.test/hook"
+      assert notice.excerpt =~ @masked_url
+      refute notice.excerpt =~ @secret_segment
       assert notice.excerpt =~ "HTTP 500"
       assert KilnCMSWeb.NotificationText.headline(notice) == "Retraction not delivered"
 
@@ -244,7 +254,7 @@ defmodule KilnCMS.WebhookRetractionTest do
       org = KilnCMS.Accounts.default_org_id()
       assert [lost] = Governance.trail("page", page.id, org).lost_retractions
       assert lost.event == "page.unpublished"
-      assert lost.endpoint_url == endpoint.url
+      assert lost.endpoint_url == @masked_url
       assert lost.attempts == Webhooks.retraction_max_attempts()
       assert lost.last_error =~ "HTTP 500"
       assert lost.recovered_at == nil
@@ -498,10 +508,12 @@ defmodule KilnCMS.WebhookRetractionTest do
     assert [lost] =
              Governance.trail("page", page.id, KilnCMS.Accounts.default_org_id()).lost_retractions
 
-    assert lost.endpoint_url == endpoint.url
+    assert lost.endpoint_url == @masked_url
     assert is_nil(lost.endpoint_id)
 
     failed = CMS.get_webhook_delivery!(lost.id, authorize?: false)
+    # The ledger keeps the real URL (#2245): masking is for display.
+    assert failed.endpoint_url == endpoint.url
     assert Webhooks.redeliver(failed) == {:error, :endpoint_deleted}
   end
 

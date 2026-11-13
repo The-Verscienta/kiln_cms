@@ -134,7 +134,8 @@ defmodule KilnCMS.Notifications.Notification do
         :title,
         :excerpt,
         :actor_id,
-        :actor_name
+        :actor_name,
+        :details
       ]
     end
 
@@ -306,7 +307,8 @@ defmodule KilnCMS.Notifications.Notification do
                     # (`KilnCMS.Notifications.Registrations`).
                     :registration_pending,
                     # A security alert (#2245), to a site's member admins or the
-                    # platform admins: `content_type` "security_alert_dispatch",
+                    # platform admins: `content_type` "security_alert_dispatch"
+                    # ("platform_security_alert" for a platform alert, #2642),
                     # `content_id` the `KilnCMS.Security.AlertDispatch` row.
                     :security_alert,
                     # An `alerts_silenced` notice (#2245): someone made the site's
@@ -350,6 +352,17 @@ defmodule KilnCMS.Notifications.Notification do
       allow_nil? true
       public? true
       constraints max_length: Limits.paragraph()
+    end
+
+    # What a security row's excerpt is made of (#2642): the alert's phase,
+    # kind, change, count, display address and so on, so the bell and inbox
+    # can say it in the reader's language (`KilnCMSWeb.NotificationText`).
+    # `excerpt` keeps the English line, which is what a release without this
+    # column shows. Nothing here the excerpt did not already say. Nil for
+    # every other event.
+    attribute :details, :map do
+      allow_nil? true
+      public? true
     end
 
     # Who did it, by their chosen display name. Nil for actor-less events
