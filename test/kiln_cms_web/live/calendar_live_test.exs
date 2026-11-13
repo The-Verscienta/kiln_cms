@@ -1166,6 +1166,130 @@ defmodule KilnCMSWeb.CalendarLiveTest do
     end
   end
 
+  # The drag handle is offered only to someone who may move that date (#2894,
+  # #2474 item 1): a content chip to an admin or an editor who may publish and
+  # edit the type, a release go-live to an admin. The drop is still refused by
+  # policy ("reschedule" above); this is what the chip offers in the first place.
+  describe "who is offered the drag handle" do
+    defp chip(id, kind), do: ~s{li[data-event-id="#{id}"][data-event-kind="#{kind}"]}
+
+    defp set_editors_can_publish!(value) do
+      {:ok, _} =
+        KilnCMS.CMS.EditorialSettings.save(%{editors_can_publish: value},
+          actor: authed_admin(),
+          tenant: KilnCMS.Accounts.default_org_id()
+        )
+    end
+
+    # A scheduled draft (publish chip) and a live page with an unpublish date
+    # (unpublish chip), both on `day`.
+    defp publish_and_unpublish_chips(day) do
+      admin = authed_admin()
+
+      scheduled =
+        CMS.create_page!(
+          %{
+            title: "Handle publish #{System.unique_integer([:positive])}",
+            slug: slug(),
+            scheduled_at: DateTime.new!(day, ~T[09:00:00])
+          },
+          actor: admin
+        )
+
+      live =
+        %{title: "Handle unpublish #{System.unique_integer([:positive])}", slug: slug()}
+        |> CMS.create_page!(actor: admin)
+        |> CMS.publish_page!(%{}, actor: admin)
+        |> CMS.update_page!(%{unpublish_at: DateTime.new!(day, ~T[17:00:00])}, actor: admin)
+
+      {scheduled, live}
+    end
+
+    defp assert_offered(lv, selector) do
+      assert has_element?(lv, selector <> "[data-reschedulable]")
+      link = lv |> element(selector <> " a") |> render()
+      assert link =~ "cursor-grab"
+      assert link =~ "arrow keys move it"
+    end
+
+    defp refute_offered(lv, selector) do
+      assert has_element?(lv, selector)
+      refute has_element?(lv, selector <> "[data-reschedulable]")
+      link = lv |> element(selector <> " a") |> render()
+      refute link =~ "cursor-grab"
+      refute link =~ "arrow keys move it"
+    end
+
+    test "an editor who may not publish gets no handle on publish or unpublish chips",
+         %{conn: conn} do
+      set_editors_can_publish!(false)
+      day = soon()
+      {scheduled, live} = publish_and_unpublish_chips(day)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(calendar_at(day))
+
+      refute_offered(lv, chip(scheduled.id, "publish"))
+      refute_offered(lv, chip(live.id, "unpublish"))
+    end
+
+    test "an editor who may publish gets the handle on both", %{conn: conn} do
+      set_editors_can_publish!(true)
+      day = soon()
+      {scheduled, live} = publish_and_unpublish_chips(day)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:editor)) |> live(calendar_at(day))
+
+      assert_offered(lv, chip(scheduled.id, "publish"))
+      assert_offered(lv, chip(live.id, "unpublish"))
+    end
+
+    test "an editor who may publish gets no handle on a type outside their editable types",
+         %{conn: conn} do
+      set_editors_can_publish!(true)
+      day = soon()
+      {scheduled, live} = publish_and_unpublish_chips(day)
+
+      editor = authed_user(:editor, %{editable_types: ["post"]})
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(calendar_at(day))
+
+      refute_offered(lv, chip(scheduled.id, "publish"))
+      refute_offered(lv, chip(live.id, "unpublish"))
+    end
+
+    test "an admin gets the handle whatever the switch says", %{conn: conn} do
+      set_editors_can_publish!(false)
+      day = soon()
+      {scheduled, live} = publish_and_unpublish_chips(day)
+
+      {:ok, lv, _html} = conn |> log_in(authed_admin()) |> live(calendar_at(day))
+
+      assert_offered(lv, chip(scheduled.id, "publish"))
+      assert_offered(lv, chip(live.id, "unpublish"))
+    end
+
+    test "a release go-live is draggable for an admin only", %{conn: conn} do
+      set_editors_can_publish!(true)
+      admin = authed_admin()
+      day = soon()
+
+      release =
+        CMS.create_release!(%{name: "Handle release #{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+        |> CMS.schedule_release!(%{scheduled_at: DateTime.new!(day, ~T[09:00:00])},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(calendar_at(day))
+      assert_offered(lv, chip(release.id, "release_scheduled"))
+
+      {:ok, lv, _html} =
+        build_conn() |> log_in(authed_user(:editor)) |> live(calendar_at(day))
+
+      refute_offered(lv, chip(release.id, "release_scheduled"))
+    end
+  end
+
   describe "mark reviewed from the calendar" do
     test "an overdue chip attests, and the chip stops asking", %{conn: conn} do
       admin = authed_admin()

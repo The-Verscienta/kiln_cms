@@ -261,6 +261,47 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert CMS.get_post!(post.id, authorize?: false).state == :published
     end
 
+    # A skipped row says why, once, whatever the cause (#2894): here the draft
+    # can't be unpublished because it isn't live.
+    test "a bulk run that skips a row says why rows are skipped", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      live =
+        %{title: "BulkLive", slug: "ed-#{System.unique_integer([:positive])}"}
+        |> CMS.create_page!(actor: admin)
+        |> CMS.publish_page!(%{}, actor: admin)
+
+      draft = draft_page(%{title: "BulkDraft"})
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor")
+
+      lv |> element(~s(input[phx-value-key="page:#{live.id}"])) |> render_click()
+      lv |> element(~s(input[phx-value-key="page:#{draft.id}"])) |> render_click()
+      lv |> element("button[phx-value-action='unpublish']") |> render_click()
+      html = lv |> element("button[phx-click='confirm_bulk']") |> render_click()
+
+      assert html =~ "Unpublish: 1 updated, 1 skipped"
+
+      assert html =~
+               "A row is skipped when it can&#39;t take this step: it isn&#39;t in a state that allows it, or you may not change it on this site."
+
+      assert CMS.get_page!(live.id, authorize?: false).state == :draft
+    end
+
+    test "a bulk run with nothing skipped gives no reason line", %{conn: conn} do
+      page = draft_page(%{title: "BulkAllFine"})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor")
+
+      lv |> element(~s(input[phx-value-key="page:#{page.id}"])) |> render_click()
+      lv |> element("button[phx-value-action='archive']") |> render_click()
+      html = lv |> element("button[phx-click='confirm_bulk']") |> render_click()
+
+      assert html =~ "Archive: 1 updated"
+      refute html =~ "skipped"
+      refute html =~ "A row is skipped when"
+    end
+
     test "the bulk Publish button is admin-only", %{conn: conn} do
       draft_page()
 

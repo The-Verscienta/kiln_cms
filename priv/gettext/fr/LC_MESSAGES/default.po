@@ -2032,6 +2032,11 @@ msgstr "Un rôle a été élevé"
 msgid "A rotated API key was used again"
 msgstr "Une clé d'API remplacée a été réutilisée"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "A row is skipped when it can't take this step: it isn't in a state that allows it, or you may not change it on this site."
+msgstr "Une ligne est ignorée quand elle ne peut pas franchir cette étape : elle n'est pas dans un état qui le permet, ou vous ne pouvez pas la modifier sur ce site."
+
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "A running experiment's variants are locked: changing a split or a patch mid-run would invalidate every result gathered so far. Conclude it first."

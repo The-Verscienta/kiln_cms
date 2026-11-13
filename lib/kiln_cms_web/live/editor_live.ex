@@ -992,6 +992,20 @@ defmodule KilnCMSWeb.EditorLive do
             ),
         else: flash
 
+    # Why a row was skipped, said once and true of every cause the tally lumps
+    # together: wrong state for this step, or a write the policy refuses (#2894).
+    # Keyed on the non-severity count, so a run skipped only for a safety field
+    # gets the one sentence above, not two. Delete is admin-only and leaves it off.
+    flash =
+      if skipped > 0 and verb != "delete",
+        do:
+          flash <>
+            " " <>
+            gettext(
+              "A row is skipped when it can't take this step: it isn't in a state that allows it, or you may not change it on this site."
+            ),
+        else: flash
+
     {:noreply,
      socket
      |> refresh()
