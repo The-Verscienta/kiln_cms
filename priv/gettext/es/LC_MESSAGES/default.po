@@ -1401,6 +1401,7 @@ msgstr "(sin enlace)"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -2382,6 +2383,11 @@ msgstr "Las API añaden el formato como datos estructurados en custom_fields_por
 #, elixir-autogen, elixir-format
 msgid "About %{percentage}% of sentences look passive (guideline: %{max}%). This is an estimate — passive voice is often the right choice."
 msgstr "Alrededor del %{percentage}% de las frases parecen pasivas (recomendación: %{max}%). Es una estimación: la voz pasiva suele ser la opción correcta."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "About Resume"
+msgstr "Acerca de Reanudar"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -6159,6 +6165,11 @@ msgstr "Continúa esta copia de seguridad fallida a partir de los archivos que y
 #, elixir-autogen, elixir-format
 msgid "Continue this interrupted backup from the files it already wrote."
 msgstr "Continúa esta copia de seguridad interrumpida a partir de los archivos que ya escribió."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Continues from the files already written; each is reused only if its checksum still matches. It backs up the files listed when the backup first started, so its files can be from different times."
+msgstr "Continúa a partir de los archivos ya escritos; cada uno se reutiliza solo si su suma de comprobación sigue coincidiendo. Guarda los archivos que se listaron cuando empezó la copia de seguridad, así que sus archivos pueden ser de momentos distintos."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -10955,6 +10966,11 @@ msgstr "Cómo envía correo esta instancia, y sus registros DNS."
 #, elixir-autogen, elixir-format
 msgid "How to build the formula"
 msgstr "Cómo crear la fórmula"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "How to restore a media backup written in several parts"
+msgstr "Cómo restaurar una copia de seguridad de medios escrita en varias partes"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format

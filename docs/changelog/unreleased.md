@@ -477,7 +477,8 @@ carries the reasoning.
   form never undoes a pause. A schedule the form can't offer (a value from a
   newer release, a sub-daily interval, media with no media directory) can
   only be paused, resumed or deleted. There is no keep setting per schedule
-  yet: retention stays `BACKUP_KEEP_DAYS`.
+  yet: scheduled backups are pruned by the same retention rules as every
+  other backup.
 
   The **Backups** tab says "Next scheduled backup: in …" (linking to the
   tab) and shows each component's alarm threshold and where it came from.
@@ -517,14 +518,16 @@ carries the reasoning.
     database and media schedule ticked on a node with no media directory backs
     up the database only, with a warning; a media-only one is refused.
   - **Sub-daily intervals are refused** until keep-N retention ships (a later
-    part of #2219). Retention is unchanged and age-only, and every run is a
-    full set, so the sets on disk per component are about runs per day ×
+    part of #2219). Retention caps backups by age, not by count (beyond the
+    recovery points and newest backups it keeps), and every run is a full
+    set, so the sets on disk per component are about runs per day ×
     `BACKUP_KEEP_DAYS`: a two-hourly schedule would keep 168 with the default
     14 days.
   - A schedule sets the alarm threshold of the components it covers
     (interval plus half, at least 6 h: daily 36 h, weekly 252 h) only while it
-    can actually run here and has fired at least once since its baseline;
-    otherwise `BACKUP_STALE_AFTER_HOURS` applies. If host cron also backed the
+    can actually run here and one of its windows has come since its baseline
+    (creation, last timing edit or resume) and its start date; otherwise
+    `BACKUP_STALE_AFTER_HOURS` applies. If host cron also backed the
     component up in the last eight days, the lower of the two wins.
   - Restoring a database dump brings back the schedules as they were,
     deleted ones included, and each enabled one fires its latest window

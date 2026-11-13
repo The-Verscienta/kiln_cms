@@ -1502,10 +1502,14 @@ defmodule KilnCMSWeb.BackupLiveTest do
     # An in-app run in `status` whose state file is kept, so it is resumable.
     defp resumable_run!(dir, stamp, status) do
       run = Ash.Seed.seed!(KilnCMS.Backups.Run, %{stamp: stamp, status: status})
+      put_state!(dir, stamp)
+      run
+    end
+
+    defp put_state!(dir, stamp) do
       work = WorkState.path(dir, stamp)
       File.mkdir_p!(work)
       :ok = WorkState.write(work, WorkState.new(stamp))
-      run
     end
 
     test "Back up now explains queuing, in the words of the refusal", %{conn: conn} do
@@ -1535,6 +1539,124 @@ defmodule KilnCMSWeb.BackupLiveTest do
                lv,
                ~s|#backup-run-#{failed.id} button[data-role="resume"][title="Continue this failed backup from the files it already wrote."]|
              )
+    end
+
+    test "a resumable row explains Resume in a ? tip; other rows have none (#2425)", %{
+      conn: conn,
+      dir: dir
+    } do
+      failed = resumable_run!(dir, "20261107-101010", :failed)
+      canceled = resumable_run!(dir, "20261106-101010", :canceled)
+
+      # Quiet for a day: the stale `running` run the page reads as Interrupted.
+      day_ago = DateTime.add(DateTime.utc_now(), -1, :day)
+
+      interrupted =
+        Ash.Seed.seed!(KilnCMS.Backups.Run, %{
+          stamp: "20261105-101010",
+          status: :running,
+          started_at: day_ago,
+          updated_at: day_ago
+        })
+
+      put_state!(dir, interrupted.stamp)
+
+      # Kept state files, so only the status keeps these from being resumable.
+      succeeded = resumable_run!(dir, "20261104-101010", :succeeded)
+      imported = seed_run!(dir, 3)
+      put_state!(dir, imported.stamp)
+
+      lv = mount_admin(conn)
+
+      for run <- [failed, canceled, interrupted] do
+        assert has_element?(lv, ~s|#backup-run-#{run.id} button[data-role="resume"]|)
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-run-#{run.id} #resume-help-#{run.id}|,
+                 "each is reused only if its checksum still matches"
+               )
+
+        assert has_element?(
+                 lv,
+                 ~s|#resume-help-#{run.id}|,
+                 "so its files can be from different times"
+               )
+
+        assert has_element?(
+                 lv,
+                 ~s|#resume-help-#{run.id} a[href$="/docs/backups.md#media-backups-in-parts-2218"]|
+               )
+      end
+
+      for run <- [succeeded, imported] do
+        assert has_element?(lv, "#backup-run-#{run.id}")
+        refute has_element?(lv, "#resume-help-#{run.id}")
+      end
+    end
+
+    test "a media set in parts links to the multi-part restore; a single archive does not (#2425)",
+         %{conn: conn} do
+      media = fn stamp, parts ->
+        Backups.import_run!(
+          %{
+            stamp: stamp,
+            trigger: "cron",
+            status: :succeeded,
+            components: [:media],
+            started_at: ~U[2026-01-05 03:00:00.000000Z],
+            finished_at: ~U[2026-01-05 03:05:00.000000Z],
+            artifacts: [
+              %{
+                kind: :media,
+                name: "kiln-media-#{stamp}",
+                bytes: 1024 * max(length(parts), 1),
+                verified: true,
+                parts: parts,
+                destinations: %{"local" => %{"status" => "ok"}}
+              }
+            ]
+          },
+          actor: Backups.system()
+        )
+      end
+
+      part = &%{"name" => "kiln-media-20260105-030000.part0#{&1}.tar.gz", "bytes" => 1024}
+      split = media.("20260105-030000", Enum.map(1..2, part))
+      single = media.("20260106-030000", [])
+
+      lv = mount_admin(conn)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{split.id} a[data-role="parts"][target="_blank"][href$="/docs/backups.md#restore-a-media-set-that-has-several-parts"]|,
+               "2 parts"
+             )
+
+      assert has_element?(lv, "#backup-run-#{single.id}")
+      refute has_element?(lv, ~s|#backup-run-#{single.id} [data-role="parts"]|)
+    end
+
+    test "the docs anchors the page links to are headings of docs/backups.md (#2425)" do
+      doc = File.read!(Path.expand("../../../docs/backups.md", __DIR__))
+
+      # GitHub's heading slug: lowercased, punctuation other than `-` dropped,
+      # spaces to `-`.
+      slugs =
+        for [heading] <- Regex.scan(~r/^\#{1,6} +(.+?) *$/m, doc, capture: :all_but_first),
+            into: MapSet.new() do
+          heading
+          |> String.downcase()
+          |> String.replace(~r/[^\p{L}\p{N}\s_-]/u, "")
+          |> String.replace(" ", "-")
+        end
+
+      for fragment <- [
+            "restore-a-media-set-that-has-several-parts",
+            "media-backups-in-parts-2218"
+          ] do
+        assert fragment in slugs, "docs/backups.md has no heading whose anchor is ##{fragment}"
+      end
     end
 
     test "manual, cron, console and schedule read as labels; anything else as recorded", %{
