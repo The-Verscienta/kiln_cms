@@ -171,7 +171,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-history-resume-tip-parts-link))
 
 - **New guide "Take content down": unpublishing and archiving from the editor, the content list, a date, the calendar or a release, who may use each, and what each refusal message means.**
-  ([long form](docs/changelog/unreleased.md#take-content-down-guide))
+  ([#2893](https://github.com/The-Verscienta/kiln_cms/pull/2893) · [long form](docs/changelog/unreleased.md#take-content-down-guide))
 
 ### Fixed
 
