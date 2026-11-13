@@ -25,6 +25,12 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
   charges the second-factor budget every time a changeset is built with one,
   so the preview never builds a changeset.
 
+  The help under the code field says what else works for this admin on this
+  host: signing in again with a passkey only where the passkey ceremony runs
+  (`KilnCMS.Accounts.WebAuthn.ceremony_host?/1`). Where it does not (a tenant
+  site host, or a console host outside `PHX_HOST`), an admin whose only factor
+  is a passkey is pointed at the setup page to add an authenticator app.
+
   ## What it shows
 
     * the people the current policy covers, per tier: how many, how many hold
@@ -43,9 +49,11 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMS.Accounts.TwoFactorRequirement.Policy
+  alias KilnCMS.Accounts.WebAuthn
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Changes.SaverVerifiedSecondFactor
   alias KilnCMS.CMS.SiteSecondFactorPolicy
+  alias KilnCMSWeb.SecondFactorGate
   alias KilnCMSWeb.TotpEnrolment
 
   @grace_presets [0, 7, 14, 30, 90]
@@ -59,14 +67,41 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
         _none -> nil
       end
 
+    factors = Accounts.second_factors(socket.assigns.current_user)
+
     {:ok,
      socket
      |> assign(:page_title, gettext("Two-step sign-in"))
      |> assign(:verified_at, verified_at)
-     |> assign(:enrolled?, Accounts.has_second_factor?(socket.assigns.current_user))
+     |> assign(:enrolled?, Accounts.has_second_factor?(factors))
      |> assign(:code_error, nil)
+     |> assign_ways_forward(factors)
      |> load()}
   end
+
+  # Where this admin sets up a factor, and how they can confirm one here.
+  # The setup page is not served on a tenant site host, so a link drawn there
+  # goes to the main host's and says so (as `/account` does). A passkey can
+  # only confirm a save where its ceremony runs: anywhere else, an admin
+  # whose only factor is a passkey needs an authenticator app's code.
+  defp assign_ways_forward(socket, factors) do
+    host = SecondFactorGate.socket_host(socket)
+    url = SecondFactorGate.setup_href(host)
+
+    socket
+    |> assign(:setup_url, url)
+    |> assign(
+      :setup_host,
+      if(SecondFactorGate.setup_host?(host), do: nil, else: URI.parse(url).host)
+    )
+    |> assign(:code_help, code_help(factors, WebAuthn.ceremony_host?(host)))
+  end
+
+  defp code_help(%{totp?: true}, true = _ceremony_host?), do: :code_or_passkey
+  defp code_help(%{totp?: true}, false), do: :code
+  defp code_help(%{passkeys: n}, true) when n > 0, do: :passkey_sign_in
+  defp code_help(%{passkeys: n}, false) when n > 0, do: :add_app
+  defp code_help(_none, _ceremony_host?), do: :code_or_passkey
 
   @impl true
   # Typing the confirmation code changes nothing the preview shows, and each
@@ -319,6 +354,30 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
 
   # --- rendering ---------------------------------------------------------------
 
+  defp code_help_text(:code_or_passkey),
+    do:
+      gettext(
+        "Changing this setting needs a second factor from the last 15 minutes. Use a code, or sign in again with your passkey."
+      )
+
+  defp code_help_text(:code),
+    do:
+      gettext(
+        "Changing this setting needs a second factor from the last 15 minutes. Enter a current code from your authenticator app."
+      )
+
+  defp code_help_text(:passkey_sign_in),
+    do:
+      gettext(
+        "Changing this setting needs a second factor from the last 15 minutes. No authenticator app? Sign out and sign in again with your passkey, then save within 15 minutes."
+      )
+
+  defp code_help_text(:add_app),
+    do:
+      gettext(
+        "Changing this setting needs a second factor from the last 15 minutes. A passkey can't confirm it at this address: add an authenticator app, then enter its code here."
+      )
+
   defp choice_label(:off), do: gettext("Off")
   defp choice_label(:admins), do: gettext("Administrators")
   defp choice_label(:editors), do: gettext("Editors and administrators")
@@ -400,7 +459,14 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
             "Changing this setting needs your own second factor, so that a stolen password alone can't turn it off."
           )}
         </p>
-        <.link navigate={~p"/account/two-factor"} class="btn btn-sm btn-primary mt-3">
+        <p :if={@setup_host} class="mt-1 text-base-content/70">
+          {gettext("This opens on %{host}, where you sign in again.", host: @setup_host)}
+        </p>
+        <.link
+          id="two-factor-policy-setup-link"
+          href={@setup_url}
+          class="btn btn-sm btn-primary mt-3"
+        >
           {gettext("Set up two-step sign-in")}
         </.link>
       </div>
@@ -552,11 +618,18 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
             <p :if={@code_error} id="two-factor-policy-code-error" class="text-sm text-error">
               {@code_error}
             </p>
-            <p class="text-xs text-base-content/70">
-              {gettext(
-                "Changing this setting needs a second factor from the last 15 minutes. Use a code, or sign in again with your passkey."
-              )}
-            </p>
+            <%!-- 15 minutes: `SaverVerifiedSecondFactor.fresh_seconds/0`. --%>
+            <div id="two-factor-policy-code-help" class="text-xs text-base-content/70">
+              <p>{code_help_text(@code_help)}</p>
+              <p :if={@code_help == :add_app} class="mt-1">
+                <.link id="two-factor-policy-add-app" href={@setup_url} class="link">
+                  {gettext("Set up an authenticator app")}
+                </.link>
+                <span :if={@setup_host}>
+                  {gettext("This opens on %{host}, where you sign in again.", host: @setup_host)}
+                </span>
+              </p>
+            </div>
           </div>
 
           <.button phx-disable-with={gettext("Saving…")}>{gettext("Save")}</.button>

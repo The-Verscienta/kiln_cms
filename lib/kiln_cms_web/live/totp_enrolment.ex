@@ -211,6 +211,20 @@ defmodule KilnCMSWeb.TotpEnrolment do
     """
   end
 
+  @doc """
+  That adding or replacing the app sends the owner a mail (#2828, #2886):
+  `User.:confirm_totp` mails on a first setup and a replacement alike
+  (`NotifyFactorAdded`). Drawn beside a control that starts or confirms one,
+  never where none is shown.
+  """
+  def added_mail_note(assigns) do
+    ~H"""
+    <p id="totp-added-mail" class="mt-3 text-xs text-base-content/70">
+      {gettext("We'll email you when an authenticator app is added or replaced.")}
+    </p>
+    """
+  end
+
   attr :codes, :list, required: true
 
   @doc "The recovery codes a confirmation just minted, shown once."
