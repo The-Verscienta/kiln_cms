@@ -1657,6 +1657,8 @@ What to know before relying on it:
 | `this field has no choice of editor input` | The field takes no widget at all (rich text, a list of references, a link field or group sub-field, most types). Send `nil`. |
 | `checkboxes can't take terms of their own: use tags, or turn off new terms` | `checkboxes` on a select with `allow_custom: true`. |
 
+Why the input is an editor-only setting apart from **Editing**, and why a named input is refused rather than reset: [ADR 0049](decisions/0049-a-fields-editor-input-is-an-editor-only-string-separate-from-its-text-format.md) and [ADR 0050](decisions/0050-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md).
+
 ### Delete a field of an unknown type
 
 A field can name a field type this version of Kiln doesn't know. That

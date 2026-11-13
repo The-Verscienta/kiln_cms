@@ -2381,6 +2381,56 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       end
     end
 
+    # #2674: a line under the legend says the choice is editor-only.
+    test "the cards are described as changing only how editors fill the field in", %{
+      conn: conn
+    } do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "select")
+
+      assert has_element?(lv, "fieldset#new-field-widget[aria-describedby=new-field-widget-help]")
+
+      assert lv |> element("#new-field-widget > p#new-field-widget-help") |> render() =~
+               "How editors fill this in. What they enter is stored and delivered the same way."
+    end
+
+    # The page drops a widget its posted settings don't offer, so a refused
+    # one with no cards left is rendered from a form validated directly.
+    test "a refused input with no cards left shows the error without the help line" do
+      form =
+        FieldDefinition
+        |> AshPhoenix.Form.for_create(:create,
+          actor: authed_user(:admin),
+          tenant: KilnCMS.Accounts.default_org_id(),
+          as: "field_definition"
+        )
+        |> AshPhoenix.Form.validate(
+          %{
+            "content_type" => "page",
+            "name" => "body_note",
+            "label" => "Body note",
+            "field_type" => "text",
+            "format" => "rich",
+            "widget" => "radios"
+          },
+          errors: true
+        )
+        |> Phoenix.Component.to_form()
+
+      html =
+        render_component(&KilnCMSWeb.FieldDefinitionLive.widget_field/1,
+          form: form,
+          id: "w"
+        )
+
+      fieldset = html |> LazyHTML.from_fragment() |> LazyHTML.query("fieldset#w")
+      assert LazyHTML.text(fieldset) =~ "this field has no choice of editor input"
+      refute html =~ "aria-describedby"
+      refute html =~ "w-help"
+      refute html =~ "stored and delivered"
+    end
+
     test "a plugin type offers its own inputs, by its own labels", %{conn: conn} do
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
 
