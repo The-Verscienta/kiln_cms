@@ -1558,6 +1558,11 @@ msgstr "Un objeto o lista JSON, de hasta 64 KB. Para datos estructurados de otro
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "A backup asked for while another runs waits for it; only one waits. A request of a different kind, or a resume of a different backup, is refused until the queue clears."
+msgstr "Una copia de seguridad pedida mientras otra está en curso espera a que termine; solo una espera. Una petición de otro tipo, o la reanudación de otra copia de seguridad, se rechaza hasta que la cola se vacíe."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "A backup can't run on this deployment."
 msgstr "No se puede crear una copia de seguridad en esta instalación."
 
@@ -1929,6 +1934,11 @@ msgstr "Un calendario de publicación"
 #, elixir-autogen, elixir-format
 msgid "A range must not include loopback (127.0.0.0/8 or ::1)."
 msgstr "Un rango no debe incluir el bucle local (127.0.0.0/8 o ::1)."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A recovery point (kiln-<stamp>.keep) keeps every file of that backup from retention. Cron keeps the backup marked last good (kiln-<stamp>.good) in each folder; the app moves the marker after every successful backup and, by default, every 15 minutes. Both are read from this server's backup directory."
+msgstr "Un punto de recuperación (kiln-<stamp>.keep) protege de la retención todos los archivos de esa copia de seguridad. Cron conserva en cada carpeta la copia marcada como la última buena (kiln-<stamp>.good); la aplicación mueve la marca tras cada copia correcta y, de forma predeterminada, cada 15 minutos. Ambas se leen del directorio de copias de seguridad de este servidor."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -5736,6 +5746,11 @@ msgstr "Consentimiento registrado."
 msgid "Consent records"
 msgstr "Registros de consentimiento"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Console"
+msgstr "Consola"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Console pages"
@@ -5925,8 +5940,18 @@ msgstr "Continuar editando"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Continue this backup from the files it already wrote"
-msgstr "Continuar esta copia desde los archivos que ya escribió"
+msgid "Continue this canceled backup from the files it already wrote."
+msgstr "Continúa esta copia de seguridad cancelada a partir de los archivos que ya escribió."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Continue this failed backup from the files it already wrote."
+msgstr "Continúa esta copia de seguridad fallida a partir de los archivos que ya escribió."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Continue this interrupted backup from the files it already wrote."
+msgstr "Continúa esta copia de seguridad interrumpida a partir de los archivos que ya escribió."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -6768,6 +6793,11 @@ msgstr "Credenciales borradas. Ya no se ofrece ninguna superficie de pago."
 #, elixir-autogen, elixir-format
 msgid "Critical"
 msgstr "Crítico"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cron"
+msgstr "Cron"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -11295,6 +11325,16 @@ msgstr "Conservar la versión publicada"
 msgid "Keep the site fresh"
 msgstr "Mantener el sitio al día"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kept by backup.sh prune: the last-good marker names this backup"
+msgstr "backup.sh prune la conserva: la marca de última copia buena apunta a esta copia de seguridad"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kept from retention by a kiln-<stamp>.keep marker"
+msgstr "Protegida de la retención por una marca kiln-<stamp>.keep"
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Key"
@@ -11482,6 +11522,11 @@ msgstr "Última entrega"
 msgid "Last error"
 msgstr "Último error"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last good: %{component}"
+msgstr "Última buena: %{component}"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Last posted %{when}"
@@ -11531,6 +11576,11 @@ msgstr "Última actualización"
 #, elixir-autogen, elixir-format
 msgid "Last viewed"
 msgstr "Última visualización"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last-good marker (kept by backup.sh prune)"
+msgstr "Marca de última copia buena (conservada por backup.sh prune)"
 
 #: lib/kiln_cms_web/controllers/content_html/event_index.html.heex
 #, elixir-autogen, elixir-format
@@ -12034,6 +12084,11 @@ msgstr "Gestione las categorías y etiquetas con las que se puede organizar el c
 #, elixir-autogen, elixir-format
 msgid "Manage your profile, password, and notification preferences."
 msgstr "Gestione su perfil, contraseña y preferencias de notificación."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manual"
+msgstr "Manual"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -16356,6 +16411,11 @@ msgstr "Código de recuperación"
 #, elixir-autogen, elixir-format
 msgid "Recovery code used"
 msgstr "Código de recuperación usado"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Recovery point"
+msgstr "Punto de recuperación"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -26706,6 +26766,11 @@ msgstr "sin ganadora: solo detener"
 #, elixir-autogen, elixir-format
 msgid "none"
 msgstr "ninguno"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "none yet"
+msgstr "ninguna todavía"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format

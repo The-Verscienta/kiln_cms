@@ -79,7 +79,7 @@ defmodule KilnCMSWeb.BackupLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Importer, Manifest, Presence}
+  alias KilnCMS.Backups.{Importer, Manifest, Markers, Presence}
   alias KilnCMSWeb.Params
 
   # The page polls while the backup lock is held (`Backups.in_flight/0`). A
@@ -100,6 +100,7 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:page, 1)
        |> assign(:runs, [])
        |> assign(:run_count, 0)
+       |> assign(:markers, Markers.empty())
        |> load_status()
        |> load_in_flight()
        |> poll()
@@ -396,6 +397,9 @@ defmodule KilnCMSWeb.BackupLive do
 
   defp read_history(socket) do
     %{page: page, current_user: user} = socket.assigns
+    # The `.keep` / `.good` markers (#2542): two directory listings, never an
+    # error. Read with the history so a poll that settles a run moves both.
+    socket = assign(socket, :markers, Markers.read(backup_dir()))
 
     case Backups.run_history(
            actor: user,
@@ -503,18 +507,28 @@ defmodule KilnCMSWeb.BackupLive do
             </p>
           </div>
 
-          <%!-- Enabled while a backup runs: a request then queues behind it.
-                `phx-disable-with` stops a double click asking twice. --%>
-          <button
-            type="button"
-            phx-click="backup_now"
-            phx-disable-with={gettext("Requesting…")}
-            disabled={not @status.available?}
-            title={not @status.available? && unavailable_message(@status.reason)}
-            class="btn btn-primary"
-          >
-            {gettext("Back up now")}
-          </button>
+          <div class="flex max-w-xs flex-col items-start gap-2 sm:items-end">
+            <%!-- Enabled while a backup runs: a request then queues behind it.
+                  `phx-disable-with` stops a double click asking twice. --%>
+            <button
+              type="button"
+              phx-click="backup_now"
+              phx-disable-with={gettext("Requesting…")}
+              disabled={not @status.available?}
+              title={not @status.available? && unavailable_message(@status.reason)}
+              aria-describedby="backup-now-help"
+              class="btn btn-primary"
+            >
+              {gettext("Back up now")}
+            </button>
+            <%!-- The queue rule (#2540), in the words of the flash a refused
+                  request gets, so the two never disagree. --%>
+            <p id="backup-now-help" class="text-xs text-base-content/70 sm:text-right">
+              {gettext(
+                "A backup asked for while another runs waits for it; only one waits. A request of a different kind, or a resume of a different backup, is refused until the queue clears."
+              )}
+            </p>
+          </div>
         </div>
 
         <.in_flight :if={@in_flight} in_flight={@in_flight} run_id={@in_flight_run_id} />
@@ -651,7 +665,14 @@ defmodule KilnCMSWeb.BackupLive do
           </p>
         </section>
 
-        <.history runs={@runs} page={@page} run_count={@run_count} in_flight={@in_flight} />
+        <.history
+          runs={@runs}
+          page={@page}
+          run_count={@run_count}
+          in_flight={@in_flight}
+          markers={@markers}
+          expected={@status.expected}
+        />
       </div>
     </Layouts.console>
     """
@@ -755,6 +776,8 @@ defmodule KilnCMSWeb.BackupLive do
   attr :page, :integer, required: true
   attr :run_count, :integer, required: true
   attr :in_flight, :map, default: nil
+  attr :markers, :map, required: true
+  attr :expected, :list, required: true
 
   defp history(assigns) do
     assigns = assign(assigns, :last_page, last_page(assigns.run_count))
@@ -764,6 +787,26 @@ defmodule KilnCMSWeb.BackupLive do
       <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
         {gettext("History")}
       </h2>
+
+      <%!-- The last-good stamps even when the marked run is off this page of
+            the history (#2542). Read from this node's directory, which may be
+            one per host (#2218). --%>
+      <div id="backup-last-good" class="mt-3 space-y-1 text-sm">
+        <p class="font-medium">{gettext("Last-good marker (kept by backup.sh prune)")}</p>
+        <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+          <%= for component <- @expected do %>
+            <dt class="text-base-content/70">{component_label(component)}</dt>
+            <dd data-role="last-good" data-component={component} class="font-mono text-xs">
+              {Markers.last_good(@markers, component) || gettext("none yet")}
+            </dd>
+          <% end %>
+        </dl>
+        <p id="backup-markers-help" class="text-xs text-base-content/70">
+          {gettext(
+            "A recovery point (kiln-<stamp>.keep) keeps every file of that backup from retention. Cron keeps the backup marked last good (kiln-<stamp>.good) in each folder; the app moves the marker after every successful backup and, by default, every 15 minutes. Both are read from this server's backup directory."
+          )}
+        </p>
+      </div>
 
       <p :if={@runs == []} id="backup-history-empty" class="mt-3 text-sm text-base-content/70">
         {gettext("No backups have been recorded yet.")}
@@ -779,7 +822,9 @@ defmodule KilnCMSWeb.BackupLive do
             <span class="font-medium tabular-nums">
               {Calendar.strftime(run.started_at, "%Y-%m-%d %H:%M UTC")}
             </span>
-            <span class="text-xs text-base-content/70">{run.trigger}</span>
+            <span data-role="trigger" class="text-xs text-base-content/70">
+              {trigger_label(run.trigger)}
+            </span>
             <span
               data-role="status"
               class={[
@@ -795,6 +840,23 @@ defmodule KilnCMSWeb.BackupLive do
               class="rounded bg-base-content/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-base-content/70"
             >
               {component_label(component)}
+            </span>
+            <span
+              :if={Markers.recovery_point?(@markers, run.stamp)}
+              data-role="recovery-point"
+              title={gettext("Kept from retention by a kiln-<stamp>.keep marker")}
+              class="rounded bg-info/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-info-ink"
+            >
+              {gettext("Recovery point")}
+            </span>
+            <span
+              :for={component <- Markers.last_good_components(@markers, run.stamp)}
+              data-role="last-good"
+              data-component={component}
+              title={gettext("Kept by backup.sh prune: the last-good marker names this backup")}
+              class="rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-success-ink"
+            >
+              {gettext("Last good: %{component}", component: component_label(component))}
             </span>
             <span class="ml-auto tabular-nums text-base-content/70">
               {humanize_bytes(total_bytes(run))}
@@ -816,8 +878,11 @@ defmodule KilnCMSWeb.BackupLive do
             <span :if={presence != :none} data-role="presence" data-presence={presence}>
               {presence_label(presence)}
             </span>
+            <%!-- Hidden once the backup is finishing, as on the strip: Cancel is
+                  refused from there (#2542). `@in_flight` is read here, not
+                  when the row was built, so it doesn't matter which loaded first. --%>
             <button
-              :if={cancelable?}
+              :if={cancelable? and not finishing?(@in_flight, run)}
               type="button"
               phx-click="cancel_run"
               phx-value-id={run.id}
@@ -836,7 +901,7 @@ defmodule KilnCMSWeb.BackupLive do
               phx-value-id={run.id}
               phx-disable-with={gettext("Requesting…")}
               data-role="resume"
-              title={gettext("Continue this backup from the files it already wrote")}
+              title={resume_title(run)}
               class="btn btn-sm btn-default ml-auto"
             >
               <.icon name="hero-arrow-path" class="mr-1 size-4" />
@@ -877,6 +942,27 @@ defmodule KilnCMSWeb.BackupLive do
     </section>
     """
   end
+
+  defp finishing?(%{stamp: stamp, phase: :finishing}, %{stamp: stamp}), do: true
+  defp finishing?(_in_flight, _run), do: false
+
+  # Resumable statuses (`Backups.run_resumable?/2`): a stale `running` run is
+  # one whose chain was interrupted.
+  defp resume_title(%{status: :canceled}),
+    do: gettext("Continue this canceled backup from the files it already wrote.")
+
+  defp resume_title(%{status: :failed}),
+    do: gettext("Continue this failed backup from the files it already wrote.")
+
+  defp resume_title(_interrupted),
+    do: gettext("Continue this interrupted backup from the files it already wrote.")
+
+  # Who asked. `schedule` waits for in-app schedules (#2219); anything else
+  # (an older or hand-set `BACKUP_TRIGGER`) shows as recorded.
+  defp trigger_label("manual"), do: gettext("Manual")
+  defp trigger_label("cron"), do: gettext("Cron")
+  defp trigger_label("console"), do: gettext("Console")
+  defp trigger_label(other), do: other
 
   # The artifact's bytes are already the sum of its parts (#2218).
   defp total_bytes(run), do: Enum.reduce(run.artifacts, 0, &(&1.bytes + &2))

@@ -129,6 +129,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The content editor's Featured image field shows an image older than the org's 500 most recent uploads, with its Remove link, instead of "None selected".**
   ([long form](docs/changelog/unreleased.md#featured-image-older-than-picker-window))
 
+- **The Backups page shows recovery-point and last-good badges on History rows and a last-good summary, explains the backup queue under Back up now, and hides Cancel on a finishing row.**
+  ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
+
 ## [1.9.2] - 2026-11-12
 
 Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —
