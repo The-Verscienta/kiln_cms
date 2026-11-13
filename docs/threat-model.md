@@ -444,6 +444,17 @@ build if a resource is ever registered without that authorizer.
   than how many rows one document returns. Each document on `/ws/gql` is
   charged to `:gql` like a `/gql` request (residual item 11). Introspection is
   off in production.
+- **A key used beyond its normal rate** — a verified API key over a rate limit
+  on `:api`, `:gql`, `:media_upload`, `:media_transform` or `:plugin_endpoint`
+  raises the platform's `api_key_rate_limited` alert (#2245). The limit runs
+  before the key is checked, so "verified" means a key that authenticated on
+  the same node within 5 minutes, held in memory as a SHA-256 of the key
+  (`KilnCMS.Security.ApiKeyTrip`); nothing on the refusal path reads the
+  database or keys on the presented string, so a client sending a fresh forged
+  key each time costs nothing and cannot use up the real key's alert. It is a
+  signal, not a control: a key spread across nodes or used only on surfaces that
+  never check a key may not alert, and a legitimate key behind a NAT that
+  someone else floods can.
 - **Error verbosity** — keep `:logger` at `:info` in prod (already set).
 
 ### MCP (`/mcp`)
@@ -656,7 +667,15 @@ An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks
 - **Who can edit.** Organization admins only, every action including the read; no
   API surface exposes it, so a leaked API key cannot lock a site out.
 - **No address in logs.** The refusal counter `kiln_cms.ip_block.refused.count`
-  carries the surface only.
+  carries the surface only. The sampled `ip_block_refused` security event and the
+  site's `blocked_ip` alert (#2245) carry the matched rule and the surface, with
+  no IP address or user agent. The client network is used only as a sampling
+  key, held in memory for one window and hashed in the throttle table.
+- **An alert, without a flood.** A refusal reaches the database only after
+  in-memory gates (one per client network per site per 15-minute window, at most
+  20 networks per site per window, on each node), so a blocked flood costs no
+  write per request. The cost is a bounded stream of admin alerts: one alert and
+  at most one summary per site per window, which an admin can turn off.
 - **Limits.** Matching is per source address: it does not stop a distributed
   source, and a visitor can change address. Expired rules are not swept.
 

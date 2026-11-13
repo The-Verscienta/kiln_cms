@@ -229,6 +229,20 @@ defmodule KilnCMS.Security.RecorderTest do
       assert length(stored()) == 2
     end
 
+    test "a blocked address and a key over a limit are sampled once per key per window" do
+      for type <- [:ip_block_refused, :api_key_rate_limited] do
+        window = KilnCMS.Test.BudgetWindow.fresh_window_ms()
+        key = "#{type}-#{uniq()}"
+        opts = [tenant: org_id(), sample_key: key, limit: 1, scale: window]
+        other = Keyword.put(opts, :sample_key, "#{key}-other")
+
+        for _ <- 1..3, do: assert(:ok = Recorder.record_sampled(type, opts))
+        assert :ok = Recorder.record_sampled(type, other)
+
+        assert Enum.count(stored(), &(&1.type == type)) == 2, inspect(type)
+      end
+    end
+
     test "lockouts are never sampled away" do
       opts = [tenant: org_id(), request: %{ip: "203.0.113.77"}, limit: 1]
       for _ <- 1..3, do: Recorder.record_sampled(:sign_in_locked, opts)

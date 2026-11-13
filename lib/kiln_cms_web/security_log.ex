@@ -197,7 +197,10 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:backup_schedule_created), do: gettext("Backup schedule created")
   def type_label(:backup_schedule_changed), do: gettext("Backup schedule changed")
   def type_label(:backup_schedule_deleted), do: gettext("Backup schedule deleted")
+  def type_label(:platform_alerts_changed), do: gettext("Platform security alerts changed")
   def type_label(:api_key_reuse_detected), do: gettext("Rotated API key used again")
+  def type_label(:ip_block_refused), do: gettext("Blocked address refused")
+  def type_label(:api_key_rate_limited), do: gettext("API key hit a rate limit")
 
   def type_label(%UnknownAtom{value: value}),
     do: gettext("Unrecognized event (%{type})", type: value)

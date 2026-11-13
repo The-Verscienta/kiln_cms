@@ -68,6 +68,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `backup_schedules`, part of #2219). Nothing is scheduled until a platform admin creates one; rolling back is safe (an older release ignores the table, and no schedule fires).**
   ([long form](docs/changelog/unreleased.md#backup-schedules-upgrade))
 
+- **Run `mix ash.migrate` (new table `platform_security_alerts`). Blocked-address alerts are on for every site (up to one alert and one summary per 15 minutes; off under Security alerts → Blocked addresses). Existing webhook endpoints, Slack too, need `security.blocked_ip` ticked; until then a webhook-only site's "Security alerts reach someone" line reads Review.**
+  ([long form](docs/changelog/unreleased.md#blocked-ip-alerts-upgrade))
+
 ### Added
 
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
@@ -81,6 +84,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Security posture has a new site line, "Security alerts reach someone": Review when the site's alerts are turned off, or some or all of them would reach no admin and no webhook.**
   ([long form](docs/changelog/unreleased.md#posture-security-alerts-reach-someone))
+
+- **Security alerts: a request refused by the site's block list raises a `blocked_ip` alert (and webhook `security.blocked_ip`) naming the matched rule, never the address.**
+  ([long form](docs/changelog/unreleased.md#blocked-ip-alerts))
+
+- **Platform admins are alerted when a verified API key goes over a rate limit (`api_key_rate_limited`), and can turn that alert off under Security alerts → Platform alerts.**
+  ([long form](docs/changelog/unreleased.md#api-key-rate-limited-alerts))
 
 ### Changed
 

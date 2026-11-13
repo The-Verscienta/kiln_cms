@@ -63,7 +63,13 @@ defmodule KilnCMS.Security.Event do
     # (`KilnCMS.Security.InstanceEvent`), and the migration moved its rows.
     # A drafts-only API key presented again after it was rotated (#2245):
     # two parties held one secret, and the whole lineage was revoked.
-    :api_key_reuse_detected
+    :api_key_reuse_detected,
+    # A request from an address on the site's block list refused (#2245).
+    # Sampled: one per client network per alert window.
+    :ip_block_refused,
+    # A verified API key over a rate limit (#2245). Sampled: one per key and
+    # bucket per alert window.
+    :api_key_rate_limited
   ]
 
   # The only metadata keys each type may carry. None names a person: who is in
@@ -105,7 +111,13 @@ defmodule KilnCMS.Security.Event do
     registration_approved: ~w(role via),
     registration_rejected: ~w(outcome),
     # `revoked`: how many keys of the lineage the detection revoked.
-    api_key_reuse_detected: ~w(name revoked)
+    api_key_reuse_detected: ~w(name revoked),
+    # `rule`: the block rule that matched, as stored (full; an alert masks it,
+    # `KilnCMS.Security.Alerts.display_metadata/3`). `surface`: "http",
+    # "live", "gql", "collab" or "bridge".
+    ip_block_refused: ~w(rule surface),
+    # `name`: the key's name. `bucket`: the rate limit it went over.
+    api_key_rate_limited: ~w(name bucket)
   }
 
   @max_metadata_keys 8

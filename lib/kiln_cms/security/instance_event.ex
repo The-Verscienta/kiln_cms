@@ -49,7 +49,10 @@ defmodule KilnCMS.Security.InstanceEvent do
     # recorded before part 3 makes them editable, so the keys stay put.
     :backup_schedule_created,
     :backup_schedule_changed,
-    :backup_schedule_deleted
+    :backup_schedule_deleted,
+    # A platform admin saved the platform's security alert settings (#2245):
+    # which platform alert kinds are off (`KilnCMS.Security.PlatformAlertSettings`).
+    :platform_alerts_changed
   ]
 
   @metadata_keys %{
@@ -58,7 +61,10 @@ defmodule KilnCMS.Security.InstanceEvent do
       ~w(components interval time_of_day time_zone starts_on enabled keep_count keep_days),
     backup_schedule_changed:
       ~w(changed components interval enabled keep_count_before keep_count_after keep_days_before keep_days_after),
-    backup_schedule_deleted: ~w(components interval enabled keep_count keep_days)
+    backup_schedule_deleted: ~w(components interval enabled keep_count keep_days),
+    # `disabled_kinds`: the platform kinds off after the save, comma-joined,
+    # or "none".
+    platform_alerts_changed: ~w(disabled_kinds)
   }
 
   # Alerts: none of these types raises one today. Instance events could carry

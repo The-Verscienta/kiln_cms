@@ -141,6 +141,49 @@ defmodule KilnCMSWeb.NotificationTextTest do
       end)
     end
 
+    test "a blocked address names the rule, never an address; a key over a limit its kind" do
+      blocked = %{
+        event: :security_alert,
+        excerpt: "stored",
+        details: %{
+          "phase" => "alert",
+          "kind" => "blocked_ip",
+          "rule" => "203.0.113.0/24",
+          "event_type" => "ip_block_refused"
+        }
+      }
+
+      assert NotificationText.excerpt(blocked) ==
+               "A blocked address was refused (rule 203.0.113.0/24)"
+
+      # Without a rule (no event left to name it) it is the bare label.
+      assert NotificationText.excerpt(%{
+               blocked
+               | details: Map.delete(blocked.details, "rule")
+             }) == "A blocked address was refused"
+
+      assert NotificationText.excerpt(%{
+               event: :security_alert,
+               excerpt: "stored",
+               details: %{
+                 "phase" => "alert",
+                 "kind" => "api_key_rate_limited",
+                 "ip" => "203.0.113.0/24"
+               }
+             }) == "An API key hit a rate limit (from 203.0.113.0/24)"
+
+      # A reuse row stored before the rate-limit kind existed reads as it did.
+      assert NotificationText.excerpt(%{
+               event: :security_alert,
+               excerpt: "stored",
+               details: %{
+                 "phase" => "alert",
+                 "kind" => "api_key_abuse",
+                 "event_type" => "api_key_reuse_detected"
+               }
+             }) == "A rotated API key was used again"
+    end
+
     test "a kind or change from a newer release reads neutrally" do
       assert NotificationText.excerpt(%{
                event: :security_alert,

@@ -194,6 +194,22 @@ defmodule KilnCMS.Security.AlertsTest do
                [{:api_key_abuse, :platform}]
     end
 
+    test "a verified key over a rate limit is its own platform kind, not api_key_abuse" do
+      assert Alerts.classify(event(:api_key_rate_limited, %{"name" => "ci", "bucket" => "api"})) ==
+               [{:api_key_rate_limited, :platform}]
+
+      assert Alerts.event_types(:api_key_abuse) == [:api_key_reuse_detected]
+      assert Alerts.event_types(:api_key_rate_limited) == [:api_key_rate_limited]
+    end
+
+    test "a refused blocked address is a site blocked_ip" do
+      assert Alerts.classify(
+               event(:ip_block_refused, %{"rule" => "203.0.113.7/32", "surface" => "http"})
+             ) == [{:blocked_ip, :site}]
+
+      assert Alerts.event_types(:blocked_ip) == [:ip_block_refused]
+    end
+
     test "unmapped types raise nothing" do
       for type <- [
             :sign_in,
@@ -344,7 +360,19 @@ defmodule KilnCMS.Security.AlertsTest do
       refute "security.new_api_key" in events
       refute "security.api_key_abuse" in events
       refute "security.platform_role_changed" in events
+      refute "security.api_key_rate_limited" in events
       assert length(events) == length(Alerts.site_kinds()) + 1
+    end
+
+    test "blocked_ip is a site kind, on by default, and a webhook event" do
+      assert :blocked_ip in Alerts.site_kinds()
+      refute :blocked_ip in Alerts.platform_kinds()
+      assert :api_key_rate_limited in Alerts.platform_kinds()
+      refute :api_key_rate_limited in Alerts.site_kinds()
+      refute "blocked_ip" in Alerts.default_disabled_kinds()
+      assert "security.blocked_ip" in Alerts.webhook_events()
+      assert Alerts.kind("blocked_ip") == :blocked_ip
+      assert Alerts.kind("api_key_rate_limited") == :api_key_rate_limited
     end
   end
 
@@ -462,6 +490,52 @@ defmodule KilnCMS.Security.AlertsTest do
       assert settings == %{disabled_kinds: [], notify_admins: true, include_full_ip: false}
       assert settings == Alerts.unreadable_settings()
       assert Alerts.enabled?(settings, :failed_sign_ins)
+    end
+
+    test "blocked_ip is on for a site with no row, and for a row stored before it existed" do
+      org = org("alerts-blocked-ip")
+      admin = user(:viewer)
+      member!(admin, org.id, :admin)
+
+      assert Alerts.enabled?(Alerts.settings_for(org.id), :blocked_ip)
+
+      # A row saved by a release that did not know the kind stores only the
+      # opt-outs it knew.
+      {:ok, _} =
+        CMS.save_site_security_alerts(%{disabled_kinds: ["lockout"]},
+          actor: admin,
+          tenant: org.id
+        )
+
+      settings = Alerts.settings_for(org.id)
+      refute Alerts.enabled?(settings, :lockout)
+      assert Alerts.enabled?(settings, :blocked_ip)
+    end
+
+    test "a block rule is masked like an address" do
+      assert Alerts.display_rule("203.0.113.7/32", Alerts.defaults()) == "203.0.113.0/24"
+      assert Alerts.display_rule("10.0.0.0/16", Alerts.defaults()) == "10.0.0.0/16"
+      assert Alerts.display_rule("2001:db8:1:2::/64", nil) == "2001:db8:1::/48"
+      assert Alerts.display_rule("203.0.113.7/32", %{include_full_ip: true}) == "203.0.113.7/32"
+      assert Alerts.display_rule(nil, %{include_full_ip: true}) == nil
+    end
+
+    test "an event's metadata is carried with its rule masked" do
+      metadata = %{"rule" => "203.0.113.7/32", "surface" => "http"}
+
+      assert Alerts.display_metadata(:ip_block_refused, metadata, Alerts.defaults()) ==
+               %{"rule" => "203.0.113.0/24", "surface" => "http"}
+
+      assert Alerts.display_metadata(:ip_block_refused, metadata, nil) ==
+               %{"rule" => "203.0.113.0/24", "surface" => "http"}
+
+      assert Alerts.display_metadata(:ip_block_refused, metadata, %{include_full_ip: true}) ==
+               metadata
+
+      assert Alerts.display_metadata(:sign_in_locked, %{"scope" => "account"}, nil) ==
+               %{"scope" => "account"}
+
+      assert Alerts.display_metadata(:ip_block_refused, nil, nil) == %{}
     end
 
     test "an address is masked unless the site opted in, and always on the platform" do

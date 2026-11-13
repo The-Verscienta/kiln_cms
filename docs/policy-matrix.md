@@ -249,6 +249,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `History.DocumentEvent` | `for_document`, `by_actor`, `append`, `anonymize_actor` **only** | `append`, `for_document`, `by_actor`, `anonymize_actor`: `:history` | The block-level event log (#1659). The History API appends an event with the next per-document sequence number, folds one document's events for time-travel, and GDPR erasure redacts one user's events (a bulk update authorizes its query as a read, hence `by_actor`). The plain `read` is not admitted: nothing lists the whole log. No person, admin included, may append or rewrite an event. Every read fails closed (`authorize_with: :error`, `authorize_query_with: :error` on the erasure): a refused sequence read would hand out a number already taken, a refused fold would render an empty document, and a refused erasure would erase nothing and report success. |
 | `Security.Event` | `record`, `by_actor`, `older_than`, `sign_in_from_ip`, `for_alert`, `alert_window`, `anonymize_actor`, `prune` **only** | `record`, `by_actor`, `older_than`, `anonymize_actor`, `prune`: `:security` · `sign_in_from_ip`: `:scanner_guard` · `for_alert`, `alert_window`: `:security_alerts` | The security audit log (#2241). The recorder appends an event as `Security.system/0`; GDPR erasure (`Security.anonymize_actor/1`) scrubs the events a user acted in or is the target of (a bulk update authorizes its query as a read, hence `by_actor`); retention (`Security.prune/1`) deletes events past their window in keyset chunks (hence `older_than`). `sign_in_from_ip` is the scanner guard's one read (#2253): it will not auto-block an address a person signed in from recently. `for_alert` and `alert_window` are the security alerts' (#2245, `Security.alerts_system/0`): the one event an alert names, and a closed window's events, re-classified to count its summary; the alert path can read the log but not write it. The plain `read` and `list` are not admitted: nothing system-side lists the log. No person, admin included, may record, rewrite or delete an event. Erasure and prune fail closed (`authorize_query_with: :error`, `authorize_with: :error`): a refused bulk query would match nothing and report success. |
 | `Security.InstanceEvent` | `record`, `by_actor`, `older_than`, `anonymize_actor`, `prune` **only** | `record`, `by_actor`, `older_than`, `anonymize_actor`, `prune`: `:security` | The instance security log (#2541): events about the installation rather than a site (a canceled backup). Same grants as `Security.Event` for the recorder, erasure and retention (`Security.prune_instance/1`), with no tenant. The plain `read` and `list` are a platform admin's only (`PlatformAdmin`, the effective role, so a temporary platform grant reads the whole log until it expires); a site admin, the default site's included, is refused. No person, platform admin included, may record, rewrite or delete an event. Erasure and prune fail closed as on `Security.Event`. |
+| `Security.PlatformAlertSettings` | `read` **only** | `read`: `:security_alerts` | Which platform alert kinds a platform admin turned off (#2245; today only `api_key_rate_limited` can be). The alert delivery (`Changes.DeliverAlert`, as `Security.alerts_system/0`) reads the one tenant-less row with `authorize_with: :error`; a refused or failed read is logged and treated as every kind on, the direction that still alerts. Narrowed inside the read policy with `forbid_unless action(:read)`. `save` stays a platform admin's (`PlatformAdmin`); a site admin, the default site's included, can neither read nor write it. |
 | `Security.AlertDispatch` | `prune` **only** | `prune`: `:operator` | One security alert to deliver (#2245). `Security.AlertGate` claims a row in raw SQL inside the audit event's transaction, and the resource's AshOban triggers deliver it (`deliver_alert`, `deliver_summary`, `mark_failed` on exhausted attempts) under the AshOban interaction bypass. The scheduled prune deletes rows a day past their window; the actor is admitted so an operator or a test can run it by hand. No create action exists, and `read` and the delivery actions are forbidden to everyone, admin included. |
 | `CMS.FeedSettings` | `read` **only** | `read`: `:feeds` | `KilnCMS.Feeds` resolves a site's syndication policy for anonymous feed readers (#1659). A refused read would be "no row", the operator config, cached for the TTL, which can turn full content on for a site that switched it off, so the read fails closed to `Feeds.unavailable/0`, uncached. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
 | `CMS.SiteCompliance` | `read` **only** | `read`: `:compliance` | `Compliance.Settings` resolves a site's claim-checking rules and publish gate for the editor panel and the publish path (#1659). Fails closed to `Settings.unavailable/0`, uncached, for the same reason as `FeedSettings`. Saving the row stays an admin act. Granted through `OrgSettings`' `system_actions:`. |
@@ -1222,6 +1223,13 @@ themselves. Not exposed over JSON:API, GraphQL or MCP.
 | `read` | ✅ | ❌ | ❌ | ❌ | `:security_alerts` |
 | `save`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ |
 
+`Security.PlatformAlertSettings`:
+
+| Action | platform admin | site admin (any site, default included) | editor | viewer | anonymous | System actor |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `read` | ✅ | ❌ | ❌ | ❌ | ❌ | `:security_alerts` |
+| `save` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
 `Security.AlertDispatch`:
 
 | Action | admin | editor | viewer | anonymous | System actor |
@@ -1234,6 +1242,10 @@ read and write, another site's admin sees nothing. A dispatch row is nobody's:
 it has no create action (`Security.AlertGate` inserts in raw SQL), and every
 action is refused to every person, admin included; only the AshOban triggers
 and the scheduled prune reach it.
+
+The platform's alert settings are one tenant-less row, gated on the effective
+platform role (`Accounts.Checks.PlatformAdmin`, never `OrgAdmin`). Every save
+is recorded in the instance security log (`platform_alerts_changed`).
 
 `User.notify_on_security_alert` (the mute of a site alert's email) is in
 `User`'s self-or-admin field policy, and written through

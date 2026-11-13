@@ -216,7 +216,7 @@ defmodule KilnCMS.CMS.WebhookEndpointTest do
     test "platform kinds are not webhook events, and none is subscribed by default" do
       events = WebhookEndpoint.events()
 
-      for kind <- [:platform_role_changed, :new_api_key, :api_key_abuse],
+      for kind <- [:platform_role_changed, :new_api_key, :api_key_abuse, :api_key_rate_limited],
           do: refute("security.#{kind}" in events)
 
       refute Enum.any?(WebhookEndpoint.default_events(), &String.starts_with?(&1, "security."))

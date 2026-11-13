@@ -30,6 +30,11 @@ defmodule KilnCMSWeb.GraphqlLimits.SocketDocumentBudget do
   was, has no actor to key on. An actor key alongside the address would bound
   one token used from many addresses, which `/gql` does not bound either.
 
+  A refusal here is never noted as an API key over a rate limit
+  (`KilnCMS.Security.ApiKeyTrip`): the socket accepts only a JWT
+  (`KilnCMSWeb.BearerAuth`), and a `kiln_` token connects as anonymous, so no
+  verified key is ever behind a document.
+
   ## Only what the client sends is charged
 
   A subscription's push re-runs its document every time a subscribed record

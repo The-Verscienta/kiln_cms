@@ -39,6 +39,7 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
     "lockout" => "true",
     "two_factor_disabled" => "true",
     "sso_config_changed" => "true",
+    "blocked_ip" => "true",
     "notify_admins" => "true",
     "include_full_ip" => "false"
   }
@@ -76,7 +77,8 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
       assert has_element?(lv, "#security-alerts-platform-note", "new API keys")
       assert has_element?(lv, ~s(#security-alerts-webhooks-link[href="/editor/webhooks"]))
 
-      for kind <- ~w(new_admin role_elevation lockout two_factor_disabled sso_config_changed) do
+      for kind <-
+            ~w(new_admin role_elevation lockout two_factor_disabled sso_config_changed blocked_ip) do
         assert has_element?(lv, ~s(#security-alert-kind-#{kind} input[type=checkbox][checked]))
       end
 
@@ -143,6 +145,25 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
       assert notice["kinds"] == ["lockout"]
 
       refute has_element?(lv, "#security-alert-kind-lockout input[type=checkbox][checked]")
+    end
+
+    test "turning blocked addresses off saves it and sends the admins a notice", ctx do
+      {:ok, lv, html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+      assert html =~ "Blocked addresses"
+      assert html =~ "on this site&#39;s block list is refused. One alert every 15 minutes"
+
+      lv
+      |> form("#security-alerts-form", alerts: %{@all_on | "blocked_ip" => "false"})
+      |> render_submit()
+
+      assert {:ok, [row]} = CMS.list_site_security_alerts(actor: ctx.admin, tenant: ctx.org)
+      assert Enum.sort(row.disabled_kinds) == ["blocked_ip", "failed_sign_ins"]
+
+      assert [%{"channel" => "notice", "notice" => notice}] = SecurityAlerts.dispatches()
+      assert notice["change"] == "kind_disabled"
+      assert notice["kinds"] == ["blocked_ip"]
+
+      refute has_element?(lv, "#security-alert-kind-blocked_ip input[type=checkbox][checked]")
     end
 
     test "switching admin notifications off sends a notice", ctx do
@@ -214,6 +235,64 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
     end
   end
 
+  describe "the platform's alerts (#2245, D-A)" do
+    test "a site admin sees the note, not the form, and cannot save it", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      assert has_element?(
+               lv,
+               "#security-alerts-platform-note",
+               "Only a platform admin can turn one off, and only API keys over a rate limit."
+             )
+
+      refute has_element?(lv, "#security-alerts-platform")
+      refute has_element?(lv, "#platform-alerts-form")
+
+      # The event a crafted client could still send is refused.
+      html =
+        render_hook(lv, "save_platform", %{
+          "platform_alerts" => %{"api_key_rate_limited" => "false"}
+        })
+
+      assert html =~ "Only platform administrators can change the platform&#39;s security alerts."
+
+      assert {:ok, []} =
+               KilnCMS.Security.list_platform_alert_settings(
+                 actor: KilnCMS.Security.alerts_system()
+               )
+    end
+
+    test "a platform admin turns rate-limit alerts off, and the page says it is logged",
+         %{conn: conn, org: org} do
+      platform = authed_user(:admin)
+
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(platform) |> live(~p"/editor/security-alerts")
+
+      assert has_element?(
+               lv,
+               "#platform-alert-kind-api_key_rate_limited input[type=checkbox][checked]"
+             )
+
+      html =
+        lv
+        |> form("#platform-alerts-form", platform_alerts: %{"api_key_rate_limited" => "false"})
+        |> render_submit()
+
+      assert html =~ "recorded in the instance security log"
+
+      refute has_element?(
+               lv,
+               "#platform-alert-kind-api_key_rate_limited input[type=checkbox][checked]"
+             )
+
+      assert {:ok, [row]} = KilnCMS.Security.list_platform_alert_settings(actor: platform)
+      assert row.disabled_kinds == ["api_key_rate_limited"]
+      # No site notice: the platform setting is not a site's.
+      assert SecurityAlerts.dispatches() == []
+    end
+  end
+
   describe "the mute switch in your settings" do
     test "a member admin sees it and can turn the email off", %{conn: conn, org: org} do
       admin = authed_user(:viewer)
@@ -259,6 +338,25 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
       assert Link.editor_url(alert) == KilnCMSWeb.Endpoint.url() <> "/editor/security-log"
       assert Link.editor_path(notice) == "/editor/security-alerts"
       assert Link.editor_url(notice) == KilnCMSWeb.Endpoint.url() <> "/editor/security-alerts"
+    end
+  end
+
+  test "the security log names a refused blocked address and a key over a limit, as warnings",
+       ctx do
+    assert KilnCMSWeb.SecurityLog.type_label(:ip_block_refused) == "Blocked address refused"
+    assert KilnCMSWeb.SecurityLog.type_label(:api_key_rate_limited) == "API key hit a rate limit"
+
+    for type <- [:ip_block_refused, :api_key_rate_limited] do
+      KilnCMS.Security.record!(%{type: type},
+        actor: KilnCMS.Security.system(),
+        tenant: ctx.org.id
+      )
+    end
+
+    {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-log")
+
+    for label <- ["Blocked address refused", "API key hit a rate limit"] do
+      assert has_element?(lv, "#security-log-events span.bg-warning\\/20", label)
     end
   end
 

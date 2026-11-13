@@ -17,7 +17,9 @@ defmodule KilnCMSWeb.Plugs.GraphqlBatchLimit do
     * A batch within the limit is charged once per operation. The rate-limit plug
       has already charged the first, so this charges the rest. A client that
       batches pays the same as one that sends each operation separately. Over
-      budget, it gets the rate-limit plug's 429.
+      budget, it gets the rate-limit plug's 429, and a verified API key's
+      refusal is noted like the rate-limit plug's
+      (`KilnCMS.Security.ApiKeyTrip`).
 
   To count operations it reads the request the way Absinthe.Plug.Request
   does. That includes a multipart `operations` field and a `_json` that arrives
@@ -46,8 +48,12 @@ defmodule KilnCMSWeb.Plugs.GraphqlBatchLimit do
 
   defp charge(conn, bucket, extra) do
     case RateLimit.check(bucket, RateLimit.client_key(conn.remote_ip), extra) do
-      :allow -> conn
-      {:deny, retry_after_ms} -> KilnCMSWeb.Plugs.RateLimit.deny(conn, retry_after_ms)
+      :allow ->
+        conn
+
+      {:deny, retry_after_ms} ->
+        KilnCMS.Security.ApiKeyTrip.note(conn, bucket)
+        KilnCMSWeb.Plugs.RateLimit.deny(conn, retry_after_ms)
     end
   end
 

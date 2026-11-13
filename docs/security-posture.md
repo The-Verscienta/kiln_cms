@@ -301,7 +301,11 @@ It is **Review** when:
   kind the site has on;
 - no admin gets alerts, and some kind the site has on has no webhook
   endpoint subscribed to it. An endpoint subscribed to `security.lockout`
-  does not carry `security.new_admin`.
+  does not carry `security.new_admin`, and an endpoint made before a kind
+  existed does not carry that kind until it is ticked: after upgrading to
+  the release that added `security.blocked_ip`, a webhook-only site reads
+  **Review** until its endpoint ticks it or **Blocked addresses** is turned
+  off.
 
 It is **OK**, and says how alerts arrive, when:
 

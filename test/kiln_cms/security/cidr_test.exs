@@ -327,4 +327,34 @@ defmodule KilnCMS.Security.CidrTest do
       assert Cidr.truncate(42) == nil
     end
   end
+
+  describe "truncate_range/1 (#2245)" do
+    test "a host or narrow IPv4 rule widens to its /24" do
+      assert Cidr.truncate_range("203.0.113.7") == "203.0.113.0/24"
+      assert Cidr.truncate_range("203.0.113.7/32") == "203.0.113.0/24"
+      assert Cidr.truncate_range("203.0.113.0/26") == "203.0.113.0/24"
+      assert Cidr.truncate_range("203.0.113.0/24") == "203.0.113.0/24"
+    end
+
+    test "a rule at or broader than the display network is shown as it is" do
+      assert Cidr.truncate_range("10.0.0.0/16") == "10.0.0.0/16"
+      assert Cidr.truncate_range("2001:db8::/32") == "2001:db8::/32"
+    end
+
+    test "a narrow IPv6 rule widens to its /48" do
+      assert Cidr.truncate_range("2001:db8:1:2::/64") == "2001:db8:1::/48"
+      assert Cidr.truncate_range("2001:db8:1:2::9/128") == "2001:db8:1::/48"
+    end
+
+    test "an IPv4-mapped rule is shown as the IPv4 range it means" do
+      assert Cidr.truncate_range("::ffff:203.0.113.7/128") == "203.0.113.0/24"
+      assert Cidr.truncate_range("::ffff:10.0.0.0/112") == "10.0.0.0/16"
+    end
+
+    test "anything that is not an address or range is nil" do
+      for junk <- [nil, "", "not a range", "203.0.113.0/33", "010.0.0.1/32", 42] do
+        assert Cidr.truncate_range(junk) == nil, inspect(junk)
+      end
+    end
+  end
 end

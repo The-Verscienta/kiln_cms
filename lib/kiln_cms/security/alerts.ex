@@ -13,8 +13,10 @@ defmodule KilnCMS.Security.Alerts do
   A **site** alert is about one site and goes to that site's member admins
   (`site_recipients/1`); the site's `KilnCMS.CMS.SiteSecurityAlerts` row can
   turn each kind off and mute the bell and email. A **platform** alert is about
-  the deployment and goes to every platform admin; it cannot be turned off or
-  muted.
+  the deployment and goes to every platform admin; it cannot be muted, and
+  only `api_key_rate_limited` can be turned off, by a platform admin
+  (`platform_optional_kinds/0`, stored in
+  `KilnCMS.Security.PlatformAlertSettings`, on by default).
 
   | kind | channel | raised by |
   |------|---------|-----------|
@@ -28,6 +30,12 @@ defmodule KilnCMS.Security.Alerts do
   | `sso_config_changed` | site | the site's identity provider changed |
   | `new_api_key` | platform | an API key minted (not rotated) |
   | `api_key_abuse` | platform | a rotated API key presented again |
+  | `api_key_rate_limited` | platform | a verified API key over a rate limit |
+  | `blocked_ip` | site | a request from an address on the site's block list refused |
+
+  `api_key_rate_limited` is its own kind, not part of `api_key_abuse`: an
+  alert window is claimed per kind, so a key over a rate limit must not use up
+  the window a stolen key's reuse alerts in.
 
   Not alerts: a legacy account's tier carried onto its first membership
   (`via: "legacy_carry"`, it holds nothing new), a key rotation
@@ -45,6 +53,7 @@ defmodule KilnCMS.Security.Alerts do
   """
 
   require Ash.Query
+  require Logger
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.RoleGrant
@@ -59,10 +68,22 @@ defmodule KilnCMS.Security.Alerts do
     :failed_sign_ins,
     :lockout,
     :two_factor_disabled,
-    :sso_config_changed
+    :sso_config_changed,
+    :blocked_ip
   ]
 
-  @platform_kinds [:new_admin, :platform_role_changed, :new_api_key, :api_key_abuse]
+  @platform_kinds [
+    :new_admin,
+    :platform_role_changed,
+    :new_api_key,
+    :api_key_abuse,
+    :api_key_rate_limited
+  ]
+
+  # The platform kinds a platform admin can turn off (owner decision D-A on
+  # #2245): a key over a rate limit can be routine for an installation whose
+  # clients batch. Every other platform kind is always on.
+  @platform_optional_kinds [:api_key_rate_limited]
 
   @notice_changes ~w(kind_disabled admin_notifications_off webhook_changed webhook_removed
                      webhook_secret_rotated webhook_auto_disabled admin_removed admin_demoted
@@ -86,9 +107,11 @@ defmodule KilnCMS.Security.Alerts do
           | :lockout
           | :two_factor_disabled
           | :sso_config_changed
+          | :blocked_ip
           | :platform_role_changed
           | :new_api_key
           | :api_key_abuse
+          | :api_key_rate_limited
 
   @typedoc """
   One thing an event raises: an alert of `kind` on a channel, or an
@@ -122,9 +145,19 @@ defmodule KilnCMS.Security.Alerts do
   @spec site_kinds() :: [kind()]
   def site_kinds, do: @site_kinds
 
-  @doc "The kinds the platform raises, to every platform admin. Never turned off."
+  @doc """
+  The kinds the platform raises, to every platform admin. Only
+  `platform_optional_kinds/0` can be turned off.
+  """
   @spec platform_kinds() :: [kind()]
   def platform_kinds, do: @platform_kinds
+
+  @doc """
+  The platform kinds a platform admin can turn off
+  (`KilnCMS.Security.PlatformAlertSettings`), in display order.
+  """
+  @spec platform_optional_kinds() :: [kind()]
+  def platform_optional_kinds, do: @platform_optional_kinds
 
   @doc "The changes an `alerts_silenced` notice can name."
   @spec notice_changes() :: [String.t()]
@@ -149,7 +182,9 @@ defmodule KilnCMS.Security.Alerts do
     sso_config_changed: [:sso_config_changed],
     platform_role_changed: [:role_revoked],
     new_api_key: [:api_key_created],
-    api_key_abuse: [:api_key_reuse_detected]
+    api_key_abuse: [:api_key_reuse_detected],
+    api_key_rate_limited: [:api_key_rate_limited],
+    blocked_ip: [:ip_block_refused]
   }
 
   @doc """
@@ -284,6 +319,12 @@ defmodule KilnCMS.Security.Alerts do
   defp do_classify(:api_key_reuse_detected, _metadata, _event, _context),
     do: [{:api_key_abuse, :platform}]
 
+  defp do_classify(:api_key_rate_limited, _metadata, _event, _context),
+    do: [{:api_key_rate_limited, :platform}]
+
+  defp do_classify(:ip_block_refused, _metadata, _event, _context),
+    do: [{:blocked_ip, :site}]
+
   defp do_classify(:org_setting_changed, metadata, _event, _context) do
     if meta(metadata, "setting") == "site_mail_relay",
       do: [{:alerts_silenced, :notice, "mail_relay_changed"}],
@@ -395,6 +436,64 @@ defmodule KilnCMS.Security.Alerts do
   end
 
   @doc """
+  The platform kinds turned off, as strings: the
+  `KilnCMS.Security.PlatformAlertSettings` row's `disabled_kinds`, or `[]`
+  when there is no row.
+
+  Read uncached as `KilnCMS.Security.alerts_system/0` with
+  `authorize_with: :error`, so a lost grant is an error rather than "no row".
+  `{:error, error}` when it cannot be read; `platform_disabled_kinds/0` is
+  the caller that falls back.
+  """
+  @spec fetch_platform_disabled_kinds() :: {:ok, [String.t()]} | {:error, term()}
+  def fetch_platform_disabled_kinds do
+    case KilnCMS.Security.list_platform_alert_settings(
+           actor: KilnCMS.Security.alerts_system(),
+           authorize_with: :error
+         ) do
+      {:ok, [row | _]} -> {:ok, row.disabled_kinds || []}
+      {:ok, []} -> {:ok, []}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  @doc """
+  `fetch_platform_disabled_kinds/0`, with a row that cannot be read logged and
+  answered `[]`: every platform kind on, the direction that still alerts.
+  """
+  @spec platform_disabled_kinds() :: [String.t()]
+  def platform_disabled_kinds do
+    case fetch_platform_disabled_kinds() do
+      {:ok, kinds} ->
+        kinds
+
+      {:error, error} ->
+        Logger.warning(
+          "Security alerts: the platform alert settings could not be read " <>
+            "(#{error_kind(error)}); every platform kind is treated as on."
+        )
+
+        []
+    end
+  end
+
+  defp error_kind(%{__struct__: struct}), do: inspect(struct)
+
+  @doc """
+  Whether the platform kind `kind` is on: always for a kind not in
+  `platform_optional_kinds/0`, without a read; otherwise unless the platform's
+  settings turned it off (`platform_disabled_kinds/0`).
+  """
+  @spec platform_enabled?(kind() | String.t()) :: boolean()
+  def platform_enabled?(kind) do
+    name = to_string(kind)
+
+    if Enum.any?(@platform_optional_kinds, &(Atom.to_string(&1) == name)),
+      do: name not in platform_disabled_kinds(),
+      else: true
+  end
+
+  @doc """
   An address as an alert shows it: in full only when the site opted in
   (`include_full_ip`), its network otherwise (`KilnCMS.Security.Cidr.truncate/1`,
   a `/24` or `/48`). `nil` settings — a platform alert — always masks. The
@@ -404,6 +503,39 @@ defmodule KilnCMS.Security.Alerts do
   def display_ip(nil, _settings), do: nil
   def display_ip(ip, %{include_full_ip: true}), do: ip
   def display_ip(ip, _settings), do: Cidr.truncate(ip)
+
+  @doc """
+  A block rule as an alert shows it, by the same rule as `display_ip/2`: in
+  full only when the site opted in (`include_full_ip`), otherwise a rule
+  narrower than a `/24` or `/48` is widened to it
+  (`KilnCMS.Security.Cidr.truncate_range/1`), so a host rule does not name
+  the host. `nil` settings always mask.
+  """
+  @spec display_rule(String.t() | nil, settings() | nil) :: String.t() | nil
+  def display_rule(nil, _settings), do: nil
+  def display_rule(rule, %{include_full_ip: true}), do: rule
+  def display_rule(rule, _settings), do: Cidr.truncate_range(rule)
+
+  @doc """
+  An event's metadata as an alert carries it (webhooks, bell, mail): every
+  value that names an address is masked by `display_rule/2`, the rest is
+  carried as recorded. Today that is the `rule` of `:ip_block_refused`.
+  """
+  @spec display_metadata(atom() | String.t() | nil, map() | nil, settings() | nil) :: map()
+  def display_metadata(_type, nil, _settings), do: %{}
+
+  def display_metadata(_type, metadata, settings) when is_map(metadata) do
+    case Map.fetch(metadata, "rule") do
+      {:ok, rule} when is_binary(rule) ->
+        Map.put(metadata, "rule", display_rule(rule, settings))
+
+      {:ok, _not_text} ->
+        Map.delete(metadata, "rule")
+
+      :error ->
+        metadata
+    end
+  end
 
   @doc """
   Count one failed sign-in on `org_id`'s tally (#2245), keyed on the site

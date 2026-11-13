@@ -66,29 +66,40 @@ defmodule KilnCMS.Security.IpBlocklist do
   Is `ip` (an address tuple) blocked for `org` (an organization or its id)?
 
   `false` for anything that is not an address, for loopback, and whenever the
-  rules cannot be read.
+  rules cannot be read. A plain question with no side effect: the scanner
+  guard asks it too, and its asking is not a refused request. The request
+  edges use `match/2`.
   """
   @spec blocked?(struct() | Ash.UUID.t() | nil, term()) :: boolean()
-  def blocked?(%{id: org_id}, ip), do: blocked?(org_id, ip)
-  def blocked?(nil, _ip), do: false
+  def blocked?(org, ip), do: match(org, ip) != false
 
-  def blocked?(org_id, ip) when is_binary(org_id) and is_tuple(ip) do
+  @doc """
+  The rule that blocks `ip` for `org`: `{:blocked, rule}` with the first
+  matching rule's canonical text (`KilnCMS.Security.Cidr.format/1`), or
+  `false` on the same terms as `blocked?/2`.
+  """
+  @spec match(struct() | Ash.UUID.t() | nil, term()) :: {:blocked, String.t()} | false
+  def match(%{id: org_id}, ip), do: match(org_id, ip)
+  def match(nil, _ip), do: false
+
+  def match(org_id, ip) when is_binary(org_id) and is_tuple(ip) do
     if Cidr.loopback?(ip) do
       false
     else
       case rules(org_id) do
         [] -> false
-        rules -> any_match?(rules, ip, DateTime.utc_now())
+        rules -> first_match(rules, ip, DateTime.utc_now())
       end
     end
   end
 
-  def blocked?(_org, _ip), do: false
+  def match(_org, _ip), do: false
 
-  defp any_match?(rules, ip, now) do
-    Enum.any?(rules, fn {cidr, expires_at} ->
-      (is_nil(expires_at) or DateTime.compare(expires_at, now) == :gt) and
-        Cidr.contains?(cidr, ip)
+  defp first_match(rules, ip, now) do
+    Enum.find_value(rules, false, fn {cidr, expires_at} ->
+      if (is_nil(expires_at) or DateTime.compare(expires_at, now) == :gt) and
+           Cidr.contains?(cidr, ip),
+         do: {:blocked, Cidr.format(cidr)}
     end)
   end
 

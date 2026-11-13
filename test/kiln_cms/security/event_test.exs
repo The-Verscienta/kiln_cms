@@ -109,7 +109,7 @@ defmodule KilnCMS.Security.EventTest do
 
     test "every type has an allowlist entry" do
       for type <- Event.types(), do: assert(is_list(Event.metadata_keys(type)))
-      assert length(Event.types()) == 30
+      assert length(Event.types()) == 32
     end
   end
 
@@ -515,6 +515,24 @@ defmodule KilnCMS.Security.EventTest do
         record!(%{type: :api_key_reuse_detected, metadata: %{"name" => "ci", "revoked" => 2}})
 
       assert reuse.metadata == %{"name" => "ci", "revoked" => 2}
+    end
+
+    test "a refused blocked address and a key over a rate limit keep their own keys only" do
+      refused =
+        record!(%{
+          type: :ip_block_refused,
+          metadata: %{"rule" => "203.0.113.7/32", "surface" => "http", "path" => "/x"}
+        })
+
+      assert refused.metadata == %{"rule" => "203.0.113.7/32", "surface" => "http"}
+
+      tripped =
+        record!(%{
+          type: :api_key_rate_limited,
+          metadata: %{"name" => "ci", "bucket" => "api", "token" => "kiln_secret"}
+        })
+
+      assert tripped.metadata == %{"name" => "ci", "bucket" => "api"}
     end
   end
 end
