@@ -37,7 +37,11 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
 
       stub!(bin, tool, """
       #!/bin/sh
-      { printf '%s|%s' "#{tool}" "${PGPASSWORD--}"; printf '|%s' "$@"; echo; } >> "#{log}"
+      # One write per line: `pg_dump | psql` runs both stubs at once, and
+      # separate printfs to the shared log interleave. A single append of a
+      # short line is atomic.
+      line="$(printf '%s|%s' "#{tool}" "${PGPASSWORD--}"; printf '|%s' "$@")"
+      printf '%s\n' "$line" >> "#{log}"
       #{extra}
       """)
     end
