@@ -61,7 +61,9 @@ export on each run, not a stored artifact.
 They stay because each is a per-document value that happens to read the site:
 a title made from a pattern is that document's title, and a link preview needs
 an absolute image URL. The alternative, resolving them on every read, gives up
-what firing is for: the body served is the body compiled and signed.
+what firing is for: delivery would read Branding on every request instead of
+serving a body compiled once, and the default response would no longer be the
+body that was signed.
 
 ## Rejected
 
@@ -70,9 +72,10 @@ what firing is for: the body served is the body compiled and signed.
   whose artifacts were fired before and after the save would serve both.
   Making the save re-fire instead turns a settings edit into a sweep of every
   document on the site.
-- **Fill site values in at read time.** The served body would no longer be the
-  fired body, so its provenance manifest would not match it, and the delivery
-  path would read Branding on every request.
+- **Fill site values in at read time.** The delivery path would read Branding
+  on every request, for every document. And the default response (no
+  `?expand=`, `?fields=` or variant, which already reshape the body) would no
+  longer be the fired body its provenance manifest signs.
 
 ## Consequences
 

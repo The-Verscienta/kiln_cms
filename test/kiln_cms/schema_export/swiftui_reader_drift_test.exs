@@ -40,8 +40,19 @@ defmodule KilnCMS.SchemaExport.SwiftUIReaderDriftTest do
 
     assert swift =~ "Artifact format version: #{KilnCMS.Firing.Engine.format_version()}"
 
+    # Inside `RecipeDocument.CustomFields`, not anywhere in the file: a block
+    # struct with a property of the same name would otherwise satisfy it.
+    [_, recipe] = String.split(swift, "public struct RecipeDocument: ", parts: 2)
+    [recipe | _] = String.split(recipe, "\n}\n", parts: 2)
+    [_, custom_fields] = String.split(recipe, "    public struct CustomFields: ", parts: 2)
+    [custom_fields | _] = String.split(custom_fields, "\n    }\n", parts: 2)
+
     for name <- ~w(serves minutes hero method ingredients),
-        do: assert(swift =~ "public let #{name}: ", "no `#{name}` in the recipe's custom fields")
+        do:
+          assert(
+            custom_fields =~ "public let #{name}: ",
+            "no `#{name}` in RecipeDocument.CustomFields"
+          )
 
     # Core blocks only: the test env's fixture plugins must not leak into the example.
     refute swift =~ "dep_badge"

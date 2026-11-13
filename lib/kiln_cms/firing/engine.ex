@@ -55,9 +55,11 @@ defmodule KilnCMS.Firing.Engine do
   # `custom_fields_plain`, `custom_fields_portable` (#2103) or `inherited_fields`
   # (#1327), which were added without a bump because no artifact fired before
   # their release could have needed them and whatever turns them on re-fires the
-  # documents it affects, `social` belongs on every existing document — and only
-  # a bump makes those converge, through `migrate_if_stale/4`. When the next artifact change
-  # bumps this, what a bump costs, and the checklist: `docs/decisions/0060-*`.
+  # documents it affects (except a field switched to `:fallback`, which re-fires
+  # nothing; see `docs/decisions/0060-*`), `social` belongs on every existing
+  # document — and only a bump makes those converge, through
+  # `migrate_if_stale/4`. When the next artifact change bumps this, what a bump
+  # costs, and the checklist: `docs/decisions/0060-*`.
   @format_version 4
 
   @enqueue_log_key {__MODULE__, :last_refire_enqueue_failure_ms}

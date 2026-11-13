@@ -495,10 +495,12 @@ consumer can still keep the old body:
   editorially, and a re-fire is not an edit. To refresh a mirror, wait until
   the operator's `mix kiln.refire_all` has finished, then run a fresh
   `?initial=true` sync.
-- **A cache that revalidates with `If-Modified-Since` alone.** `Last-Modified`
-  is the document's last edit, which a re-fire does not move, so such a cache
-  can keep the old body until it expires. Kiln itself answers `304` only on
-  `If-None-Match`.
+- **A cache that answers `If-Modified-Since` itself.** Kiln ignores
+  `If-Modified-Since` and answers `304` only on `If-None-Match`. A cache
+  between Kiln and your client that answers `If-Modified-Since` from the
+  stored `Last-Modified` compares against the document's last edit, which a
+  re-fire does not move. Its `304` renews the entry, so it keeps the old body
+  until the document is next edited.
 
 Read `social` as optional and fall back to `title` when it is missing. Why
 `social` moved `format_version` when other new keys didn't:

@@ -35,9 +35,10 @@
 
 Every fired artifact is stamped with `KilnCMS.Firing.Engine.format_version/0`
 (`@format_version`, now 4). Since #615 the stamp is read:
-`Engine.migrate_if_stale/4` runs on each artifact read that misses the firing
-cache (`Firing.Delivery`, `Firing.Sync`, the provenance controller and the
-engine's own read), and enqueues a `FireWorker` job for a row older than the
+`Engine.migrate_if_stale/4` runs whenever an artifact row is read: on a
+firing-cache miss in `Firing.Delivery`, the engine's own read and
+`Firing.Sync`, and on every request to the provenance controller, which reads
+the row directly. It enqueues a `FireWorker` job for a row older than the
 build. Bumping the number therefore re-fires, lazily, every published document
 that anyone reads.
 
@@ -106,10 +107,12 @@ Each of these is real, and each is a reason not to bump for a key that rule
   announces nothing: no webhook, no change-feed entry, no `KilnCMS.Cache` bust,
   no CDN purge.
 - **Only `If-None-Match` revalidators converge.** The artifact `ETag` is a
-  digest of the body served (#2463, #2583), so it moves when the body does. A
-  cache that revalidates with `If-Modified-Since` alone keeps the old body
-  until it expires, because `Last-Modified` is the last edit, which a re-fire
-  does not move.
+  digest of the body served (#2463, #2583), so it moves when the body does.
+  Kiln checks only `If-None-Match` (the `fresh?` check in
+  `KilnCMSWeb.Plugs.PublicCache`) and ignores `If-Modified-Since`. A cache between Kiln and the client that
+  answers `If-Modified-Since` itself compares against `Last-Modified`, the
+  document's last edit, which a re-fire does not move. Its `304` renews the
+  entry, so it keeps the old body until the document is next edited.
 - **An `/api/sync` mirror never hears of it.** A re-fire is not an edit, so the
   delta feed does not send the document again. The mirror needs a fresh
   `?initial=true` sync after the corpus has been re-fired.
