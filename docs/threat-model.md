@@ -1028,7 +1028,9 @@ see [bot-budgets.md](bot-budgets.md).
   loads the record with `authorize?: false`, so token possession is full read
   access to that record in whatever state it is in. Tokens are the sharing
   mechanism for unpublished work; treat a leaked preview URL as a content leak.
-  See residual risk 6.
+  The request log line shows the token as `[FILTERED]`
+  (`GET /preview/[FILTERED]`), and the missed-path list never records a path
+  that carries it (#2449). See residual risk 6.
 - **Headless draft mode (#1887)** — the same token on `/api/json` and the
   fired-artifact read. It does *not* bypass authorization there:
   `KilnCMSWeb.Plugs.PreviewGrant` verifies it, pins it to the serving site and
@@ -1637,10 +1639,10 @@ creates an account and grants a site tier.
 - **Invite-only sites.** Accepting deliberately skips the `:registration_enabled`
   check: on an invite-only site this is how accounts arrive. The admin's
   choice to invite is the control.
-- **Residuals.** (1) *The token is in the request path*, and Phoenix logs the
-  path: `invite_token` is in `:filter_parameters`, which filters the logged
-  params map only. The same holds for `/magic_link/…` and `/password-reset/…`.
-  Whoever can read request logs within the 7 days can accept the invitation.
+- **Residuals.** (1) *The token is in the request path.* The request log line
+  shows it as `[FILTERED]` (`GET /auth/invite/[FILTERED]`), and the missed-path
+  list never records a path that carries it (#2449), as for `/magic_link/…` and
+  `/password-reset/…`. `invite_token` is also in `:filter_parameters`.
   (2) *The plaintext link sits in the mail job's args* in `oban_jobs`, and so
   in any backup taken meanwhile, until Oban's Pruner deletes the finished job 7
   days later, as for reset and magic-link mail. (3) *Whoever holds the mail
@@ -1737,8 +1739,9 @@ The how-to is
   unreachable keeps those counts through an unlock made elsewhere, until its
   window rolls. That is `ThrottleStore`'s documented bound, not a new one.
   (4) *The token is in the request path*, as for invitations, reset and
-  magic links: `unlock_token` is in `:filter_parameters`, which filters the
-  logged params map only. (5) *The plaintext link sits in the mail job's
+  magic links. The request log line shows it as `[FILTERED]`, and the
+  missed-path list never records a path that carries it (#2449);
+  `unlock_token` is also in `:filter_parameters`. (5) *The plaintext link sits in the mail job's
   args* in `oban_jobs` until Oban's Pruner deletes the finished job 7 days
   later; it has expired long before. (6) *A newer link does not revoke an
   older one*; each is short-lived and single use, and the mail budget bounds

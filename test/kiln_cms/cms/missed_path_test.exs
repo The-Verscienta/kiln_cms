@@ -166,6 +166,23 @@ defmodule KilnCMS.CMS.MissedPathTest do
 
       assert rows() == []
     end
+
+    # #2449. A mangled sign-in link routes to the catch-all, and the list is
+    # editor-visible: a stored token would be a working one.
+    test "drops a path that carries a credential, and still records the miss beside it",
+         %{conn: conn} do
+      token = "T#{System.unique_integer([:positive])}secret"
+
+      visit(conn, "/magic_link/#{token}/x")
+      visit(build_conn(), "/fr/password-reset/#{token}/x")
+      visit(build_conn(), "/legacy-page")
+      # A token route one segment in is an ordinary miss here: the locale is
+      # already gone, so only a match at the start of the path is a credential.
+      visit(build_conn(), "/products/magic_link/old-page")
+
+      assert ["/legacy-page", "/products/magic_link/old-page"] =
+               rows() |> Enum.map(& &1.path) |> Enum.sort()
+    end
   end
 
   # An anonymous writer can ask for a million distinct paths; the cap is what

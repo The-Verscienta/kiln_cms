@@ -921,8 +921,9 @@ config :phoenix, :json_library, Jason
 # (`?preview_token=`, #1887) and a passphrase grant (`?unlock=`, #496).
 # `invite_token` (#2135): the site-invitation link's path parameter, which
 # accepts the invitation for whoever holds it. This filters the logged params
-# map only; Phoenix.Logger still logs the request path, token included, as it
-# does for `/magic_link` and `/password-reset` tokens.
+# map only; a token in the request path is redacted from the request line by
+# `KilnCMSWeb.RequestRedaction` (#2449), as for `/magic_link` and
+# `/password-reset` tokens.
 # Human verification (#2249). Off until the operator names a provider and its
 # keys (config/runtime/console.exs); the secret defaults to CHALLENGE_SECRET_KEY.
 config :kiln_cms, KilnCMS.Challenge, secret_key: {:env, %{"var" => "CHALLENGE_SECRET_KEY"}}

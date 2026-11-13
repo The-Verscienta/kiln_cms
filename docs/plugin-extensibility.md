@@ -218,6 +218,17 @@ What the core does with it:
   then read with Plug's default 8 MB on a route nobody has authenticated yet,
   and signature verification would depend on the sender's content type.
 
+- **Credentials in the path.** If a path parameter carries a secret (a
+  one-time link, an unsubscribe token), put `token` or `secret` in its name:
+  `{:get, "/ratings/confirm/:token", …}` or `:vote_secret`. The core reads the
+  router for such names, writes the request log line with that segment as
+  `[FILTERED]`, and never records the path in the 404 list
+  ([Request log lines for token links](observability.md#request-log-lines-for-token-links),
+  #2449). Any other name (`:code`, `:key`, `:sig`) is logged as written. The
+  same holds for a `public_routes/0` path. A `:forward` is opaque here: the
+  router lists only its mount point, so the sub-router's own paths are never
+  matched, and a forwarded plug must keep credentials out of its paths (use a
+  header or the request body).
 - **Compile time.** A malformed entry stops the build with an error naming the
   plugin. `mix kiln.plugins.doctor` reports all of them at once, plus a path a
   core route owns, and any overlap, on whole path segments, with another
