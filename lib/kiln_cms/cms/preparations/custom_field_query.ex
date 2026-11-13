@@ -626,16 +626,22 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   end
 
   defp link_condition(%{name: name} = link, "in", raw, label) do
-    cast_list(raw, ash_type(link), label, fn
-      [] ->
-        expr(false)
+    cast_list(
+      raw,
+      ash_type(link),
+      label,
+      fn
+        [] ->
+          expr(false)
 
-      values ->
-        values
-        |> equal_values(raw, link)
-        |> Enum.map(&jsonb_condition(:metadata, "eq", name, &1))
-        |> Enum.reduce(&expr(^&2 or ^&1))
-    end)
+        values ->
+          values
+          |> equal_values(raw, link)
+          |> Enum.map(&jsonb_condition(:metadata, "eq", name, &1))
+          |> Enum.reduce(&expr(^&2 or ^&1))
+      end,
+      "link field #{inspect(label)}"
+    )
   end
 
   defp link_condition(%{name: name} = link, "ilike", raw, label) do
@@ -1345,12 +1351,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   # `in`'s items are each one value: an object or a list among them is refused
   # before the cast (an Ecto date cast takes a `%{"year" => …}` map).
-  defp cast_list(raw, type, name, build) do
+  # `subject` names the field in a shape error: "custom field …" by default, a
+  # link's caller passes "link field …" so its errors read like the link's
+  # other operators.
+  defp cast_list(raw, type, name, build, subject \\ nil) do
     raw = List.wrap(raw)
+    subject = subject || "custom field #{inspect(name)}"
 
     raw
     |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
-      with :ok <- operand_shape(item, "in", "custom field #{inspect(name)}"),
+      with :ok <- operand_shape(item, "in", subject),
            {:ok, value} <- cast_value(item, type, name) do
         {:cont, {:ok, [value | acc]}}
       else

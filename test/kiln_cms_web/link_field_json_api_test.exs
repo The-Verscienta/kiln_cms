@@ -137,5 +137,16 @@ defmodule KilnCMSWeb.LinkFieldJsonApiTest do
       assert {200, _body} = get_pages("custom_filter[#{cta}.link.label][in][]=a", key)
       assert {200, _body} = get_pages("custom_filter[#{cta}.link.label][ilike]=a%25", key)
     end
+
+    test "an object item inside in names the link field, like its other operators", %{
+      cta: cta,
+      key: key
+    } do
+      assert {400, body} = get_pages("custom_filter[#{cta}.link.label][in][0][x]=1", key)
+      assert [%{"code" => "invalid_argument", "detail" => detail}] = body["errors"]
+
+      assert detail =~
+               ~s(in on link field "#{cta}.link.label" takes a value, not a nested filter)
+    end
   end
 end
