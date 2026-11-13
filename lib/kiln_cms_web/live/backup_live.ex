@@ -651,9 +651,25 @@ defmodule KilnCMSWeb.BackupLive do
         </section>
 
         <section class="rounded-lg border border-base-content/10 p-4 text-sm">
-          <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-            {gettext("Where backups go")}
-          </h2>
+          <%!-- Shown whatever the off-site row says: the built-in copy already
+                ships the .sha256 files, so the hint is for operators who copy
+                backups off the host themselves (#2890). The "?" sits beside the
+                heading, not inside it, so it doesn't join the heading's name. --%>
+          <div class="flex items-center gap-1">
+            <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+              {gettext("Where backups go")}
+            </h2>
+            <.help_tip
+              id="offsite-sidecars-help"
+              label={gettext("About copying backups")}
+              title={gettext("Copying backups elsewhere")}
+              learn_more={docs_url("backups.md#the-app-path-and-the-shell-path-share-one-format")}
+            >
+              {gettext(
+                "If you copy backups off this host yourself, copy each backup's .sha256 files with it: without them a media backup in parts won't restore, and nothing can check the others. The built-in off-site copy already includes them."
+              )}
+            </.help_tip>
+          </div>
           <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
             <dt class="text-base-content/60">{gettext("Directory")}</dt>
             <dd class="font-mono text-xs">{backup_dir()}</dd>
