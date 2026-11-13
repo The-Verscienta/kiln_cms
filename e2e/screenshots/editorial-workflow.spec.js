@@ -5,10 +5,11 @@
 //
 //     cd e2e && npm ci
 //     npx playwright test -c screenshots.config.js editorial-workflow
-//     scripts/optimize_home_images.sh docs   # derive docs/images/editorial-workflow/
+//     scripts/optimize_home_images.sh docs editorial-workflow   # repo root
 //
-// Raw captures go to e2e/screenshots/raw/workflow-*.jpg (gitignored). Only the
-// WebP files the script derives are committed.
+// Raw captures go to e2e/screenshots/raw/editorial-workflow/<n>-<name>.jpg
+// (gitignored): a folder named after the guide, which the script derives into
+// docs/images/editorial-workflow/ (#2460). Only those WebP files are committed.
 //
 // It runs against the e2e seeds as they are: the seeded editor may not publish
 // (Team → Publishing is off), which is the workflow the guide walks through.
@@ -31,7 +32,7 @@ const {
 } = require("../tests/fixtures");
 const { annotate } = require("./annotate");
 
-const OUT = path.resolve(__dirname, "raw");
+const OUT = path.resolve(__dirname, "raw", "editorial-workflow");
 const TITLE = "Spring firing schedule";
 const SLUG = "spring-firing-schedule";
 const BODY =
@@ -58,7 +59,7 @@ async function settled(page) {
 async function shoot(page, name, markers, clip = undefined) {
   fs.mkdirSync(OUT, { recursive: true });
   await settled(page);
-  await annotate(page, markers, { path: path.join(OUT, `workflow-${name}.jpg`), clip });
+  await annotate(page, markers, { path: path.join(OUT, `${name}.jpg`), clip });
 }
 
 // Deleting moves a page to the trash, where it still holds its slug; the next
