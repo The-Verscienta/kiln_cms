@@ -33,6 +33,24 @@ carries the reasoning.
   `platform_security_alert`; 1.9 shows them in the default site's bell as
   before. (Part of #2245.)
 
+<a id="backup-run-dir-id-upgrade"></a>
+
+- **Run `mix ash.migrate` (new nullable `backup_runs.dir_id`); a backup resumed during a rolling deploy may run unpinned.**
+  One additive migration: `backup_runs.dir_id` (`uuid`, nullable, no index),
+  the id of the backup directory a run's files are in, which decides where a
+  resume runs (next entries). The release's boot migration applies it as
+  usual. What a mixed or rolled-back cluster does:
+  - **During a rolling deploy**, an older node can still pick up a resume's
+    start step. It runs it wherever it lands and records no `dir_id`, and
+    on a cluster with a `BACKUP_DIR` per host it can fail there as it did
+    in 1.9 (click **Resume** again once every node is upgraded).
+  - **Runs from before the upgrade** have no `dir_id`, so their first resume
+    runs on whichever node has their files or picks them up, and records the
+    id then.
+  - **Rolling back** is safe: older releases don't read the column, and it
+    can stay. Their resumes are unpinned again.
+  (Part of #2539.)
+
 ## Added
 
 <a id="slack-webhook-format"></a>
@@ -140,6 +158,77 @@ carries the reasoning.
   which offers only security events, Select all ticks them all. (#2642)
 
 ## Fixed
+
+<a id="backup-resume-safety"></a>
+
+- **Resuming a backup is safe against a double re-open, a step that outlived its Cancel, and a node without the files; a resume that can't run now says why on its History row.**
+  Three gaps, all on the path from **Resume** (or `Backups.request(resume:)`)
+  to a run that is `Running` again. See
+  [Several nodes and the backup lock](../backups.md#several-nodes-and-the-backup-lock)
+  and [Cancel a running backup](../backups.md#cancel-a-running-backup).
+  - **The re-open is atomic (#2421).** #2537 already stopped two requests
+    from resuming the same run through the lock; the Run's own `:resume`
+    guard still checked only the struct it had loaded. It is now repeated in
+    the UPDATE's WHERE (an in-app run that is `failed`, `canceled`, or
+    `running` and stale), so of two callers holding the same stale run one
+    re-opens it and the other gets `Ash.Error.Changes.StaleRecord`.
+  - **A step that outlives its Cancel is fenced (#2538).** Cancel reaches a
+    step's node through the database, so a node that has lost it keeps the
+    step running until its heartbeat's 90-second self-fence, and one that
+    reconnects sooner never fenced at all. Now:
+    - **Resume waits after a Cancel.** For 150 seconds after a run is
+      canceled, **Resume** on it is refused with "That backup was canceled
+      moments ago. Resume it again in N seconds: a step on a server that
+      lost contact with the database may still be stopping." The button
+      stays, and the `Canceled` row's tooltip says to wait about two and a
+      half minutes. `Backups.request/2` returns
+      `{:error, {:canceled_recently, seconds}}`. A resume that starts inside
+      the window without a click (queued earlier, or a retried start step)
+      waits in its step instead, up to 180 seconds, and logs "Waited N s
+      after the Cancel before resuming"; a legacy `Backups.Worker` resume
+      job snoozes for the time left.
+    - **`state.json` is written under the backup lock**, and only while the
+      step's job still holds it, so a canceled step can't overwrite what a
+      resume of the same stamp has written.
+    - **The step's History writes are filtered by its chain.** `record_progress`,
+      `finish` and `fail` land only on a `running` run whose `chain_id` is
+      still the writer's (`Run.Changes.OwnChain`).
+    - **The heartbeat stops a step whose job was canceled**, after its next
+      successful beat: a step whose Oban job is `cancelled`, `completed` or
+      `discarded`. A missing job row stops nothing (a failover to a lagging
+      standby can lose a live step's row).
+    The 150-second window is typically enough, not a guarantee: a heartbeat
+    hung on a half-open database connection waits out its query timeouts
+    before it stops the step. What the window alone protects is the step's
+    own `.partial` files, which are not fenced. The fenced `state.json` write
+    holds the cluster-wide advisory lock, so on a backup directory that
+    stalls (a hung NFS mount) Cancel, new requests and the heartbeat's sweep
+    wait behind it until their query timeout.
+  - **A resume runs where its files are (#2539).** On a cluster with a
+    `BACKUP_DIR` per host, a resume's start ran on whichever node picked it
+    up; elsewhere than the host with the files it was refused, the row kept
+    `Running` for over two hours, and the page had said "Backup resumed".
+    Each run now records its directory's `.kiln-dir-id` (`Run.dir_id`, set at
+    start and rebound on each resume), and a resume's start runs only on a
+    node that has `.work/<stamp>/state.json` locally or reads that id. Local
+    files win, so a copied directory, or one given a new id, still resumes. On
+    any other node the start waits 30 s and is put back, 20 times per attempt
+    across the job's four attempts and their 1/5/15-minute backoff (about an
+    hour, holding the lock, when no live node has the files), then is given
+    up: the lock is released (a queued request starts) and the row reads
+    "Resume refused: no server with its backup directory (id …) picked it up;
+    every attempt waited about 10 minutes for one". Nothing on the page can
+    cancel a resume during that wait or the wait after a Cancel: **Cancel**
+    is offered only for a `Running` row.
+  - **A refused resume is visible.** The start step now reads `state.json`
+    before it re-opens the run, and any refusal after the click (files not
+    on that server, no media directory for a media-only run, the wait after
+    a Cancel ran out, the start crashed or was interrupted before the
+    re-open) writes "Resume refused: `<reason>`" above the run's original
+    error, through the new system-only `Run` action `:note_resume_refused`
+    (code interface `Backups.note_run_resume_refused`). Refusals don't
+    stack. A `failed` or `canceled` run keeps its status and its **Resume**
+    button; a stale `running` one is marked `failed`.
 
 <a id="security-alert-gaps-2642"></a>
 
