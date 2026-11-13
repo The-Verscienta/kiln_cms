@@ -230,7 +230,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-filter-operands-tidied))
 
 - **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
-  ([long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
+  ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
 
 ### Security
 
