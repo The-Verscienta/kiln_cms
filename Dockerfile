@@ -145,6 +145,18 @@ RUN set -eu; \
   mkdir -p /opt/httpc-stock && cp "$beam" /opt/httpc-stock/httpc.beam; \
   escript /opt/httpc_header_limit.escript
 
+# Retry a release-asset download that GitHub's CDN failed (#2462). The same
+# downloads as above: tailwind's and esbuild's binaries, and the precompiled
+# NIFs of y_ex, lazy_html, vix and tokenizers. Each tool retries about three
+# times within seconds, which a 504 window outlasts, and the image build then
+# fails on an outage rather than on the change. The wrapper re-runs the step
+# after 15, 30, 60 and 120 s, but only when the end of its output carries a
+# download error, so a real compile error still fails at once. A retry only
+# redoes what failed: `mix deps.compile` and the installers are incremental.
+# Tune it with KILN_FETCH_ATTEMPTS (default 5) and KILN_FETCH_BACKOFF (first
+# wait in seconds, default 15). Removed with the httpc patch below.
+COPY rel/docker/retry_download.sh /opt/retry_download.sh
+
 RUN mix local.hex --force && mix local.rebar --force
 
 ENV MIX_ENV="prod"
@@ -210,7 +222,7 @@ COPY config/config.exs config/${MIX_ENV}.exs config/
 # Only when the stack is in the tree: without KILN_ML, mix.exs leaves these deps
 # out and `mix deps.compile <name>` on an absent dep is an error.
 RUN if [ -d deps/bumblebee ]; then \
-  ERL_FLAGS="+S 2:2" mix deps.compile \
+  ERL_FLAGS="+S 2:2" sh /opt/retry_download.sh mix deps.compile \
   complex nx nx_image nx_signal polaris axon safetensors unpickler \
   rustler_precompiled unzip tokenizers bumblebee; \
   fi
@@ -223,7 +235,15 @@ RUN if [ -d deps/bumblebee ]; then \
 # in a later RUN without it, so they still warn.
 RUN ERL_FLAGS="+S 2:2" \
   ERL_COMPILER_OPTIONS='[nowarn_deprecated_catch,nowarn_export_var_subexpr,{nowarn_deprecated_function,[{lists,zf,2}]}]' \
-  mix deps.compile
+  sh /opt/retry_download.sh mix deps.compile
+
+# Fetch the tailwind and esbuild binaries here, in their own retried step,
+# rather than inside `mix assets.deploy` below. This layer caches with the deps
+# above, so the download happens again only when mix.lock or the config changes,
+# and a 504 on it is retried (#2462). `--if-missing` skips a binary already at
+# the configured version; `mix assets.deploy` then finds both in `_build`.
+RUN sh /opt/retry_download.sh mix tailwind.install --if-missing \
+  && sh /opt/retry_download.sh mix esbuild.install --if-missing
 
 COPY priv priv
 COPY lib lib
@@ -275,11 +295,12 @@ COPY rel rel
 RUN mix sentry.package_source_code
 
 # Put back the stock `httpc` patched in above: nothing downloads from here
-# on, and the release copies OTP's apps into the image.
+# on, and the release copies OTP's apps into the image. The download retry
+# wrapper goes with it, for the same reason.
 RUN set -eu; \
   beam="$(erl -noshell -eval 'io:format("~s", [code:which(httpc)]), halt().')"; \
   cp /opt/httpc-stock/httpc.beam "$beam"; \
-  rm -rf /opt/httpc-stock /opt/httpc_header_limit.escript
+  rm -rf /opt/httpc-stock /opt/httpc_header_limit.escript /opt/retry_download.sh
 
 RUN mix release
 

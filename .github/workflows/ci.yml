@@ -1551,10 +1551,15 @@ jobs:
     # (often) invalidates the whole dep layer.
     #
     # Known flake vector, worth naming before this is ever made a required
-    # check: `tokenizers` pulls a precompiled NIF from GitHub at compile time
-    # via `rustler_precompiled`, and the builder has no Rust toolchain to fall
-    # back on — so a transient 403 or rate-limit fails the job for reasons that
-    # have nothing to do with the change under test.
+    # check: the build downloads release assets from GitHub — the precompiled
+    # NIFs of y_ex, lazy_html and vix (and tokenizers in an ML build), vix's
+    # libvips tarball, and tailwind's binary — and has no toolchain to build
+    # them from source. Each tool retries for only a few seconds, so a 504
+    # window on GitHub's CDN used to fail the job (#2462). The Dockerfile now
+    # runs those steps under `rel/docker/retry_download.sh`, which re-runs a
+    # step that failed on a download after 15, 30, 60 and 120 s. An outage
+    # longer than about 4 minutes still fails the job, as does a 403 or
+    # rate-limit that the wrapper's signature does not name.
     timeout-minutes: 60
 
     env:
