@@ -196,6 +196,145 @@ defmodule KilnCMS.CMS.CustomFieldsTest do
     end
   end
 
+  # #2743: an object or a list where a field holds one value used to reach
+  # `to_string/1` — a raise, so a 500 on the public API — or, for a list on a
+  # `:text` field, was joined into one string.
+  describe "a value that is not one value" do
+    @single_types [:text, :string, :url, :select, :integer, :float, :boolean, :date, :datetime]
+
+    defp single!(type, admin, attrs \\ %{}) do
+      options = if type == :select, do: %{options: ~w(a b)}, else: %{}
+      define!(Map.merge(%{label: "Single", field_type: type}, Map.merge(options, attrs)), admin)
+    end
+
+    defp field_error(fields, admin) do
+      assert {:error, %Ash.Error.Invalid{errors: errors}} =
+               CMS.create_page(%{title: "H", slug: slug(), custom_fields: fields}, actor: admin)
+
+      assert [%Ash.Error.Changes.InvalidAttribute{field: :custom_fields} = error] = errors
+      {error.message, error.value}
+    end
+
+    test "an object is a field error naming the field, for every core scalar type" do
+      admin = admin()
+
+      for type <- @single_types, value <- [%{"en" => "x"}, %{}] do
+        field = single!(type, admin)
+
+        assert {type, field_error(%{field.name => value}, admin)} ==
+                 {type,
+                  {"Single (#{field.name}) must be a single value, not an object or a list",
+                   field.name}}
+      end
+    end
+
+    test "an empty list is refused on a single field, as a group sub-field refuses it" do
+      admin = admin()
+
+      for type <- @single_types do
+        field = single!(type, admin)
+
+        assert {type, field_error(%{field.name => []}, admin)} ==
+                 {type,
+                  {"Single (#{field.name}) must be a single value, not an object or a list",
+                   field.name}}
+      end
+    end
+
+    test "a list on a text field is refused, not joined into one string" do
+      admin = admin()
+
+      for format <- [:rich, :plain] do
+        field = single!(:text, admin, %{format: format})
+
+        assert {message, _name} = field_error(%{field.name => ["a", "b"]}, admin)
+        assert message =~ "must be a single value, not an object or a list"
+      end
+    end
+
+    test "a struct with no text form is refused rather than raising" do
+      admin = admin()
+      field = single!(:string, admin)
+
+      assert {message, _name} = field_error(%{field.name => MapSet.new(["a"])}, admin)
+      assert message =~ "must be a single value, not an object or a list"
+    end
+
+    test "nil still clears the field or falls to its default" do
+      admin = admin()
+      plain = single!(:string, admin)
+      defaulted = single!(:string, admin, %{default: "fallback"})
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "H",
+            slug: slug(),
+            custom_fields: %{plain.name => nil, defaulted.name => nil}
+          },
+          actor: admin
+        )
+
+      assert page.custom_fields == %{defaulted.name => "fallback"}
+    end
+
+    test "a number, a boolean, an atom, a Decimal or a date-time is still stored as its text" do
+      admin = admin()
+      field = single!(:string, admin)
+
+      for {given, stored} <- [
+            {42, "42"},
+            {true, "true"},
+            {:atom, "atom"},
+            {Decimal.new("1.50"), "1.50"},
+            {~N[2026-03-01 10:00:00], "2026-03-01 10:00:00"},
+            {~D[2026-03-01], "2026-03-01"}
+          ] do
+        page =
+          CMS.create_page!(
+            %{title: "H", slug: slug(), custom_fields: %{field.name => given}},
+            actor: admin
+          )
+
+        assert {given, page.custom_fields[field.name]} == {given, stored}
+      end
+    end
+
+    test "a float literal that overflows is a field error, a long integer a number" do
+      admin = admin()
+      float = single!(:float, admin)
+      integer = single!(:integer, admin)
+      digits = String.duplicate("9", 1000)
+
+      assert {"Single (#{float.name}) must be a number", float.name} ==
+               field_error(%{float.name => "1e400"}, admin)
+
+      page =
+        CMS.create_page!(
+          %{title: "H", slug: slug(), custom_fields: %{integer.name => digits}},
+          actor: admin
+        )
+
+      assert page.custom_fields[integer.name] == String.to_integer(digits)
+    end
+
+    test "a copy or restore (:drop mode) refuses an object rather than raising" do
+      admin = admin()
+      field = single!(:string, admin)
+
+      for value <- [%{"en" => "x"}, [%{"b" => 1}], []] do
+        assert {:error, error} =
+                 CMS.create_page(
+                   %{title: "H", slug: slug(), custom_fields: %{field.name => value}},
+                   actor: admin,
+                   context: %{custom_fields: :drop}
+                 )
+
+        assert Exception.message(error) =~ "Single (#{field.name}) must be a single value"
+      end
+    end
+  end
+
   describe "custom_fields partial updates merge over the stored map" do
     setup do
       admin = admin()
