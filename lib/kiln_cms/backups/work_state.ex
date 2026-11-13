@@ -11,8 +11,9 @@ defmodule KilnCMS.Backups.WorkState do
 
   The file records which steps have completed and, for the database dump and for
   each finished media part, its `{name, bytes, sha256}`. **A recorded hash is the
-  only licence to reuse a file**: the worker reuses a dump or part only when this
-  file recorded its digest *and* `Checksum.verify/2` matches the bytes on disk.
+  only license to reuse a file**: `KilnCMS.Backups.Steps` reuses a dump or part
+  only when this file recorded its digest *and* `Checksum.recheck/3` finds a
+  regular file of the recorded size with that digest on disk.
   A final-named file with no entry (or a different digest) is rebuilt, never
   trusted because it happens to exist.
 

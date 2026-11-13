@@ -95,6 +95,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Yearly rules with BYMONTH, BYMONTHDAY or BYDAY, monthly BYDAY with BYMONTHDAY, BYMONTH on daily and weekly rules, and a repeated weekly BYDAY now expand per RFC 5545, as subscribed calendars showed them (`FREQ=YEARLY;BYDAY=2TU` is January's). Next dates are recomputed ~10 min after boot on the new `occurrence_backfill` queue; a hand-built Oban `queues:` must add `occurrence_backfill: 1`. Rollback safe.**
   ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#event-recurrence-rfc-upgrade))
 
+- **Check your own rclone, monitoring or retention filters over backups: `kiln-media-*.tar.gz` already matched media parts (1.9.0's note was wrong), but it and `kiln-db-*.dump` drop the `.sha256` sidecars, and a part set without one won't restore by default. Add `--include "kiln-media-*.sha256"` and `"kiln-db-*.sha256"`; don't widen to `kiln-media-*`.**
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-offsite-filter-sidecar-upgrade))
+
 ### Breaking
 
 - **`/ws/gql` refuses a connect whose token does not verify (expired, revoked, garbled JWT, or a `kiln_` API key), with a `403` handshake, where it connected as anonymous; `KILN_API_REJECT_INVALID_BEARER=false` restores that.**
@@ -163,6 +166,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Team says how long an invitation link lasts and links its guide, Settings says adding a passkey or authenticator app emails you, and `/sign-in/verify` says a passkey works too when one can.**
   ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#account-screens-help-text))
+
+- **Backups → History: a resumable run has a `?` tip beside Resume explaining what a resume reuses, and a media backup's "N parts" label links to how to restore a part set.**
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-history-resume-tip-parts-link))
 
 - **New guide "Take content down": unpublishing and archiving from the editor, the content list, a date, the calendar or a release, who may use each, and what each refusal message means.**
   ([long form](docs/changelog/unreleased.md#take-content-down-guide))
@@ -261,6 +267,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Password policy no longer describes Off as "not looked up at all": it covers this site only, and only `BREACHED_PASSWORD_CHECK=false` stops the check server-wide. Docs: the staging scrub table lists all its purges.**
   ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#password-policy-off-description))
+
+- **Backup docs: the History import command for cron's backups now works (`bin/kiln_cms rpc`, not `bin/kiln eval`), and the manual multi-part media restore extracts only after a `--strict` checksum check passes.**
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-docs-import-and-manual-restore))
 
 ### Security
 

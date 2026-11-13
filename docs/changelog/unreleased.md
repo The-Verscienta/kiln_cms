@@ -368,6 +368,50 @@ carries the reasoning.
   recomputes an event's date the old way whenever it next saves or sweeps
   it.
 
+<a id="backup-offsite-filter-sidecar-upgrade"></a>
+
+- **Check any filter of yours that copies or watches backups: it must take the `.sha256` sidecars. 1.9.0's notes were wrong that `kiln-media-*.tar.gz` had to be widened for the parts.**
+  For anyone with their own rclone filter, monitoring script or retention
+  job over `$BACKUP_DIR`. No migration and no setting; rolling the pin back
+  changes nothing here, because this corrects advice, not code. (#2425)
+
+  1.9.0's upgrade notes for media parts, both
+  [for the app](v1.9.0.md#backup-media-parts-upgrade) and
+  [for `backup.sh`](v1.9.0.md#backup-sh-media-parts-upgrade), said that
+  anything which globs `kiln-media-*.tar.gz` must accept the
+  `kiln-media-<stamp>.partNN.tar.gz` names. A glob already does: the `*`
+  covers `<stamp>.part01`. (A pattern that spells the stamp out, such as a
+  regex ending in `-[0-9]{6}\.tar\.gz`, still needs the `.partNN`.) What
+  such a filter loses is the checksum sidecar next to each set:
+  - **Media.** `kiln-media-*.tar.gz` leaves out `kiln-media-<stamp>.sha256`.
+    Since 1.9, `restore.sh media` refuses a part set without its sidecar
+    unless you set `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1`, so an off-site
+    copy made through that filter does not restore by default once the
+    library is bigger than one part (`BACKUP_MEDIA_PART_MB`, default 400).
+  - **Database.** `kiln-db-*.dump` leaves out `kiln-db-<stamp>.sha256`, so
+    a copied dump can't be checked against the digest written with it.
+
+  Add the sidecars to each filter:
+
+  ```bash
+  rclone copy /var/backups/kiln/media r2:kiln-backups/media \
+    --include "kiln-media-*.tar.gz" --include "kiln-media-*.sha256"
+  rclone copy /var/backups/kiln/db r2:kiln-backups/db \
+    --include "kiln-db-*.dump" --include "kiln-db-*.sha256"
+  ```
+
+  Don't widen the media filter to `kiln-media-*`. That also copies a running
+  backup's `.partial` files, and a killed run's, and `rclone copy` keeps them
+  off-site after the local ones are gone; `restore.sh` refuses a set with a
+  `kiln-media-<stamp>.*.partial` beside it. Copies already made without the
+  sidecars can be completed by running the corrected filter again while the
+  local sets still exist.
+  [Media backups in parts](../backups.md#media-backups-in-parts-2218) now
+  says this; why media is split into independent archives at all is in
+  [ADR 0034](../decisions/0034-media-backups-are-split-by-file-set-into-independent-archives-not-by-bytes.md),
+  and why the sidecar is the only checksum a restore trusts is in
+  [ADR 0035](../decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
+
 ## Breaking
 
 <a id="ws-gql-refuses-unverified-bearer"></a>
@@ -477,7 +521,8 @@ carries the reasoning.
   form never undoes a pause. A schedule the form can't offer (a value from a
   newer release, a sub-daily interval, media with no media directory) can
   only be paused, resumed or deleted. There is no keep setting per schedule
-  yet: retention stays `BACKUP_KEEP_DAYS`.
+  yet: scheduled backups are pruned by the same retention rules as every
+  other backup.
 
   The **Backups** tab says "Next scheduled backup: in …" (linking to the
   tab) and shows each component's alarm threshold and where it came from.
@@ -517,14 +562,16 @@ carries the reasoning.
     database and media schedule ticked on a node with no media directory backs
     up the database only, with a warning; a media-only one is refused.
   - **Sub-daily intervals are refused** until keep-N retention ships (a later
-    part of #2219). Retention is unchanged and age-only, and every run is a
-    full set, so the sets on disk per component are about runs per day ×
+    part of #2219). Retention caps backups by age, not by count (beyond the
+    recovery points and newest backups it keeps), and every run is a full
+    set, so the sets on disk per component are about runs per day ×
     `BACKUP_KEEP_DAYS`: a two-hourly schedule would keep 168 with the default
     14 days.
   - A schedule sets the alarm threshold of the components it covers
     (interval plus half, at least 6 h: daily 36 h, weekly 252 h) only while it
-    can actually run here and has fired at least once since its baseline;
-    otherwise `BACKUP_STALE_AFTER_HOURS` applies. If host cron also backed the
+    can actually run here and one of its windows has come since its baseline
+    (creation, last timing edit or resume) and its start date; otherwise
+    `BACKUP_STALE_AFTER_HOURS` applies. If host cron also backed the
     component up in the last eight days, the lower of the two wins.
   - Restoring a database dump brings back the schedules as they were,
     deleted ones included, and each enabled one fires its latest window
@@ -1117,6 +1164,23 @@ carries the reasoning.
   Why an invitation is a row of its own and not an account created up front
   is now [ADR 0050](../decisions/0050-a-site-invitation-is-its-own-row-not-an-account-written-up-front.md),
   linked from the invitation guide. No migration or config change.
+
+<a id="backup-history-resume-tip-parts-link"></a>
+
+- **Backups → History: a resumable run has a `?` beside Resume saying what a resume does, and a media backup's "N parts" label links to how to restore one.**
+  For platform admins. Both are on the History rows of **Backups**.
+  - **About Resume.** On a row that can be resumed (a failed, canceled or
+    stale running in-app backup whose work files are still on disk), a
+    `?` next to **Resume** opens: "Continues from the files already written;
+    each is reused only if its checksum still matches. It backs up the files
+    listed when the backup first started, so its files can be from different
+    times." Its **Learn more** opens
+    [Media backups in parts](../backups.md#media-backups-in-parts-2218).
+    Succeeded and imported rows have no tip, as they have no Resume.
+  - **"N parts" is a link.** The label on a run whose media was written in
+    several parts now opens
+    [Restore a media set that has several parts](../backups.md#restore-a-media-set-that-has-several-parts)
+    in a new tab. A single-archive run shows no label, as before. (#2425)
 
 <a id="take-content-down-guide"></a>
 
@@ -1985,6 +2049,46 @@ carries the reasoning.
   alert dispatches, and names each row's key in the scrub's summary. A test
   now fails when the scrub reports a key the table does not name, or the
   table names a key the scrub no longer reports (#2454).
+
+<a id="backup-docs-import-and-manual-restore"></a>
+
+- **Backup docs: the command that imports cron's backups into History now imports them, and the manual restore of a media part set extracts nothing when its checksum check fails.**
+  Two commands in [Backups](../backups.md) did not do what they said.
+  - **Importing cron's backups (#2488).** The documented
+    `bin/kiln eval "KilnCMS.Backups.Importer.run()"` named a binary the
+    release doesn't have (it is `bin/kiln_cms`), and `eval` starts no Repo,
+    so the history read failed and nothing was imported. The command is now
+
+    ```bash
+    bin/kiln_cms rpc '{:ok, r} = KilnCMS.Backups.Importer.run(); IO.inspect(r)'
+    # %{failed: 0, imported: 2, pending: 0, skipped: 0}
+    ```
+
+    run against the serving node. When the backup directory can't be listed
+    or the history can't be read, the match fails and `rpc` exits non-zero.
+    A row that couldn't be written is only counted in `failed`, and the call
+    still returns `{:ok, _}`, so read `failed` too. The importer also runs
+    on its own with the last-good marker sync, so this only matters when you
+    want cron's backups in History now. A doc test runs the documented
+    expression.
+  - **Restoring a media part set by hand (#2425).** The example checked the
+    sidecar and then extracted on the next line whatever the check said. It
+    now chains `sha256sum --strict -c … && for p in …; do tar -xzf …; done`
+    (`shasum -a 256 --strict -c` on macOS), so a failed check extracts
+    nothing, and `--strict` fails on a sidecar line it can't parse instead
+    of skipping it. Unlike `restore.sh`, the check covers only the parts the
+    sidecar lists: a stray `.partNN` the sidecar doesn't name passes and the
+    glob extracts it, so make sure the directory holds only the listed
+    parts first. The order of the parts doesn't matter (each file is in
+    exactly one part, and folders aren't archived), past `part99` too; the
+    old text's "extract in numeric order" is gone. See
+    [Restore a media set that has several parts](../backups.md#restore-a-media-set-that-has-several-parts).
+
+  Also corrected in the same pass: who writes backup history (the
+  `:backups` system actor, and a platform admin's Cancel, which records the
+  admin's email in the run's log), and the retention wording in the backup
+  schedules entry under Added. Documentation and module docs only; no behavior
+  change.
 
 ## Security
 

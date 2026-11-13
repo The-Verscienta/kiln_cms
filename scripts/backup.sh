@@ -66,6 +66,9 @@
 # folders and folder modes are not kept. A file larger than the cap is a part
 # of its own. If any part fails, every file of the unfinished set is removed:
 # cron has no resume, and a partial set must not look like a backup.
+# A change to how MediaArchive walks, excludes, sizes, splits, archives or
+# names, or to the sidecar or the manifest's part keys, updates this script
+# and test/scripts/backup_script_test.exs in the same pull request (ADR 0042).
 # Needs GNU tar or bsdtar (`--null -T`); busybox tar is refused up front.
 # `verify` treats a stamp's files as one set; `prune` treats each component
 # of a stamp (db, media) as one unit.

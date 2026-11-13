@@ -112,9 +112,12 @@ defmodule KilnCMS.Backups.Checksum do
   verified (#2218): a regular file (not followed through a symlink) of
   `expected_bytes` (when given) whose SHA-256 is `expected` (hex, either case).
 
-  The worker calls this immediately before each off-site copy, with the digest
-  it recorded when the file was written, so a file changed on disk in between
-  is refused rather than uploaded.
+  `KilnCMS.Backups.Steps` calls this in two places: immediately before each
+  off-site copy of a dump or media part (a sidecar goes through
+  `check_sidecar/2` instead), with the digest it recorded when the file was written, so a
+  file changed on disk in between is refused rather than uploaded; and before a
+  resume or retry reuses a dump or media part, so only a file that still
+  matches its recorded digest is reused.
 
   Returns `:ok`, or `{:error, reason}`: `:no_digest` (nothing on record to
   compare with, so nothing can be vouched for), `:not_regular`,
