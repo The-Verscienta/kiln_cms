@@ -228,7 +228,8 @@ were never saved, so paste them in again after the restore.
   (`is_nil(archived_at)`), not on the struct the caller holds, so a struct
   loaded before the trash is refused too. A refused write raises
   `Ash.Error.Changes.StaleRecord`, and nothing after it runs: no artifacts
-  fired, no webhook, no job enqueued.
+  fired, no webhook, no job enqueued. Why a row filter, and how an action
+  earns an exemption: [ADR 0052](decisions/0052-a-trashed-content-row-refuses-every-update-by-default-through-a-row-filter.md).
 - Four update actions are exempt, listed by
   `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0`:
   - `:restore`, which instead requires the row to still be trashed (a second
