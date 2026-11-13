@@ -118,8 +118,38 @@ fixed everywhere, and can we show that?*
   polling budget.
 
 **What we will not claim**: co-editing as a headline (it stays a prototype
-until it earns a release), AI features as a differentiator, or feature parity
-with WordPress.
+until it earns a release), AI features as a differentiator, feature parity
+with WordPress, or that Kiln is a DXP.
+
+### Toward a DXP: composable, not owned
+
+*Added 2026-11-12.* Kiln is the content core a digital experience platform
+can be built on, not a DXP itself. The full stance, with what Kiln supplies
+and what it leaves to other tools, is
+[Kiln in a composable DXP](cms-comparison.md#kiln-in-a-composable-dxp).
+For this plan it means:
+
+- **Propagation and verification come first, and are not traded away.** The
+  3.0 and 4.0 milestones below (the `/ws/feed` channel, client subscribe
+  helpers, multi-node propagation, an answer to "has this change reached
+  every connected surface?", offline verification) are the base any
+  experience feature would stand on. A personalized variant that cannot be
+  withdrawn everywhere, provably, is a liability.
+- **Integrate with customer-data, messaging and analytics tools; don't build
+  them.** No customer profile service, identity resolution, journey
+  orchestration or marketing automation in Kiln. Documented connectors and
+  an easy integration surface come before any of that.
+- **Once the 2.0 gate passes, extend what already exists before adding
+  anything new.** Content experiments and referrer analytics ship today, off
+  by default. When their freeze lifts, a small audience or segment API with
+  content variants and a deterministic fallback is the next step, and it is
+  lower risk than a profile service. The segment is supplied by the caller,
+  so Kiln still tracks no visitors.
+- **The overlay model is deliberate.** Downstream projects layer onto a
+  stated [contract](overlay-contract.md) rather than forking. Integrations
+  ship the same way.
+- **An experience layer would be a separate product name**, with KilnCMS as
+  its content core.
 
 ### The demo that proves it
 
