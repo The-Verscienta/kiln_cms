@@ -7,7 +7,8 @@ defmodule KilnCMS.Test.BackupCluster do
   directory while a function runs, so a test that uses it must be
   `async: false`. `tick_as/2` runs that node's heartbeat tick, and
   `backdate_beat!/2` ages its beat on the database's clock. `cron_backup!/2`
-  leaves what `scripts/backup.sh` leaves.
+  leaves what `scripts/backup.sh` leaves, and `killed_run!/3` what it leaves
+  when it is killed outright.
   """
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Heartbeat, Manifest}
@@ -81,6 +82,29 @@ defmodule KilnCMS.Test.BackupCluster do
           ]
         )
       )
+  end
+
+  @doc """
+  What a `backup.sh all` killed outright mid-media leaves in `dir` (#2478): the
+  finished dump and its sidecar, part 1 of the media set, and the media
+  marker, every file `minutes` old.
+  """
+  @spec killed_run!(Path.t(), String.t(), non_neg_integer()) :: :ok
+  def killed_run!(dir, stamp, minutes) do
+    files = [
+      Path.join([dir, "db", "kiln-db-#{stamp}.dump"]),
+      Path.join([dir, "db", "kiln-db-#{stamp}.sha256"]),
+      Path.join([dir, "media", Artifact.part_name(stamp, 1)]),
+      Path.join([dir, "media", "kiln-media-#{stamp}.sha256.partial"])
+    ]
+
+    for path <- files do
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "left by a killed run")
+      File.touch!(path, System.os_time(:second) - minutes * 60)
+    end
+
+    :ok
   end
 
   @doc "The `.good` markers in `dir`, as `\"db/<name>\"`, sorted."

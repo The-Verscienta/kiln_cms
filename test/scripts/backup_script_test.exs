@@ -276,19 +276,19 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert Enum.all?(files, &File.exists?/1)
     end
 
-    test "leaves unrelated files and partials alone", ctx do
+    test "leaves unrelated files, and partials named like no backup, alone", ctx do
       other = Path.join(ctx.backups, "db/notes.txt")
       stray = Path.join(ctx.backups, "media/kiln-media-notes.txt")
-      partial = Path.join(ctx.backups, "media/kiln-media-20260101-000000.part01.tar.gz.partial")
-      File.write!(other, "keep")
-      File.write!(stray, "keep")
-      File.write!(partial, "in flight")
-      age!([other, stray, partial], 90)
+      notes = Path.join(ctx.backups, "media/kiln-media-notes.partial")
+      manifest = Path.join(ctx.backups, "manifest.json.partial")
+      for f <- [other, stray, notes, manifest], do: File.write!(f, "keep")
+      link = Path.join(ctx.backups, "db/kiln-db-20260101-000000.dump.partial")
+      File.ln_s!(other, link)
+      age!([other, stray, notes, manifest], 90)
 
       assert {_out, 0} = backup(ctx, "prune")
-      assert File.exists?(other)
-      assert File.exists?(stray)
-      assert File.exists?(partial)
+      assert Enum.all?([other, stray, notes, manifest], &File.exists?/1)
+      assert {:ok, %{type: :symlink}} = File.lstat(link)
     end
 
     test "the newest complete unit of each kind is kept however old", ctx do
@@ -402,7 +402,8 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert Enum.all?(writing_db, &(not File.exists?(&1)))
       assert Enum.all?(files[stale], &(not File.exists?(&1)))
       assert File.exists?(fresh)
-      assert File.exists?(old)
+      # Every file of its stamp is days old: a killed run's leftover (#2478).
+      refute File.exists?(old)
     end
 
     test "a run in flight never takes the newest-complete slot from the last finished one",
@@ -468,6 +469,96 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert Enum.all?(older_files, &File.exists?/1)
     end
 
+    test "if the search for recent files fails, an abandoned partial is kept (#2478)", ctx do
+      real_find = System.find_executable("find")
+
+      stub!(ctx.bin, "find", """
+      #!/bin/sh
+      for a in "$@"; do [ "$a" = "-mmin" ] && exit 1; done
+      exec #{real_find} "$@"
+      """)
+
+      partial = abandoned!(ctx, "db/kiln-db-20260101-000000.dump.partial", 2 * 24 * 60)
+
+      assert {out, 0} = backup(ctx, "prune")
+      assert out =~ "could not look for recent files of 20260101-000000; keeping its partials"
+      assert File.exists?(partial)
+    end
+
+    # The script's own cleanup can't run when a run is killed outright, and
+    # `restore.sh` refuses a set with a `.partial` beside it, so prune removes
+    # them once every file of the stamp is 12 hours old (#2478).
+    test "the partials of an abandoned run go; a fresh one, or one with a fresh sibling, stays",
+         ctx do
+      [abandoned, fresh, sibling, working, pinned] =
+        ~w(20260101-000000 20260201-000000 20260301-000000 20260401-000000 20260501-000000)
+
+      day = 24 * 60
+
+      gone = [
+        abandoned!(ctx, "media/kiln-media-#{abandoned}.sha256.partial", 2 * day),
+        abandoned!(ctx, "media/kiln-media-#{abandoned}.part02.tar.gz.partial", 2 * day),
+        abandoned!(ctx, "db/kiln-db-#{abandoned}.dump.partial", 13 * 60),
+        abandoned!(ctx, "db/kiln-db-#{abandoned}.sha256.partial", 2 * day),
+        # A recovery point doesn't keep them: it would pin an unrestorable set.
+        abandoned!(ctx, "media/kiln-media-#{pinned}.sha256.partial", 2 * day)
+      ]
+
+      finished = abandoned!(ctx, "media/kiln-media-#{abandoned}.part01.tar.gz", 2 * day)
+      abandoned!(ctx, "media/kiln-#{pinned}.keep", 2 * day)
+
+      kept = [
+        abandoned!(ctx, "media/kiln-media-#{fresh}.sha256.partial", 11 * 60),
+        abandoned!(ctx, "media/kiln-media-#{sibling}.sha256.partial", 2 * day),
+        abandoned!(ctx, "media/kiln-media-#{working}.sha256.partial", 2 * day)
+      ]
+
+      # Two hours old: past the app's grace, well inside the 12 hours.
+      abandoned!(ctx, "db/kiln-db-#{sibling}.dump", 120)
+      File.mkdir_p!(Path.join(ctx.backups, ".work/#{working}"))
+
+      assert {out, 0} = backup(ctx, "prune")
+
+      for f <- gone do
+        refute File.exists?(f)
+        assert out =~ f
+      end
+
+      assert Enum.all?(kept, &File.exists?/1)
+      # The finished part ages as an incomplete unit, under BACKUP_KEEP_DAYS.
+      assert File.exists?(finished)
+    end
+
+    test "a partial that can't be removed is warned about, and the rest go on", ctx do
+      stuck = abandoned!(ctx, "db/kiln-db-20260101-000000.dump.partial", 2 * 24 * 60)
+      other = abandoned!(ctx, "media/kiln-media-20260201-000000.sha256.partial", 2 * 24 * 60)
+      db = Path.join(ctx.backups, "db")
+      File.chmod!(db, 0o500)
+      on_exit(fn -> File.chmod(db, 0o700) end)
+
+      assert {out, 0} = backup(ctx, "prune")
+      File.chmod!(db, 0o700)
+
+      if File.exists?(stuck) do
+        assert out =~ "could not remove #{stuck}"
+      end
+
+      refute File.exists?(other)
+    end
+
+    # The two thresholds only work against the Importer's: prune must leave
+    # a killed run's evidence long enough for the Importer to read it, and the
+    # heartbeat must touch many times inside the Importer's window.
+    test "the heartbeat and the abandoned-partial age agree with the Importer's threshold" do
+      script = File.read!(@script)
+      [_, prune_min] = Regex.run(~r/^ABANDONED_PARTIAL_MIN=(\d+)$/m, script)
+      [_, heartbeat_s] = Regex.run(~r/^HEARTBEAT_S=(\d+)$/m, script)
+      interrupted = KilnCMS.Backups.Importer.interrupted_after_s()
+
+      assert String.to_integer(prune_min) * 60 >= 3 * interrupted
+      assert String.to_integer(heartbeat_s) * 10 <= interrupted
+    end
+
     # The app and the script must agree wherever the script can see what the
     # app's rules need: recovery points, work in flight, newest complete, age,
     # and newest verified, which the script sees through the `.good` markers
@@ -496,7 +587,13 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       app_survivors = MapSet.difference(listing(ctx), planned)
 
       assert {_out, 0} = backup(ctx, "prune")
-      assert listing(ctx) == app_survivors
+
+      # The one intended difference: cron removes an abandoned run's partials
+      # (#2478); the app's plan never deletes a `.partial` (its start step
+      # sweeps them, and only once the stamp has a run row).
+      cron_only = MapSet.new(["media/kiln-media-20250201-000000.part03.tar.gz.partial"])
+      assert MapSet.subset?(cron_only, app_survivors)
+      assert listing(ctx) == MapSet.difference(app_survivors, cron_only)
 
       for {file, should_survive?} <- expected do
         assert MapSet.member?(app_survivors, file) == should_survive?,
@@ -518,8 +615,8 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     put.("db/kiln-db-20250101-000000.sha256", 400, "s")
     put.("media/kiln-media-20250101-000000.tar.gz", 400, "m")
 
-    # S2: a complete part set with an OLD .partial beside it → the set goes, the
-    # partial stays.
+    # S2: a complete part set with an OLD .partial beside it → the set goes;
+    # the partial survives the app's plan, and cron removes it (see the test).
     for i <- 1..2, do: put.("media/kiln-media-20250201-000000.part0#{i}.tar.gz", 400, "p")
     put.("media/kiln-media-20250201-000000.sha256", 400, "s")
     put.("media/kiln-media-20250201-000000.part03.tar.gz.partial", 2, "p")
@@ -563,11 +660,14 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     put.("media/kiln-20250901-000000.keep", 400, "")
     put.("db/kiln-db-20250901-000000.dump", 400, "")
 
-    # S10: .work/<stamp> → kept. S11: a fresh sidecar .partial → kept.
+    # S10: .work/<stamp> → kept. S11: a fresh sidecar .partial → kept, and the
+    # partial itself survives both. S15: an abandoned .partial under
+    # .work/<stamp> → kept by both.
     File.mkdir_p!(Path.join(b, ".work/20251001-000000"))
     put.("db/kiln-db-20251001-000000.dump", 400, "")
     put.("db/kiln-db-20251101-000000.dump", 400, "")
     put.("db/kiln-db-20251101-000000.sha256.partial", 0, "")
+    put.("db/kiln-db-20251001-000000.dump.partial", 400, "")
 
     # S13: a future-dated complete dump and an impossible-stamp (month 13)
     # complete archive: neither may hold the newest slot, so S7 and S4 keep it
@@ -617,6 +717,8 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       {"db/kiln-db-20250901-000000.dump", true},
       {"db/kiln-db-20251001-000000.dump", true},
       {"db/kiln-db-20251101-000000.dump", true},
+      {"db/kiln-db-20251101-000000.sha256.partial", true},
+      {"db/kiln-db-20251001-000000.dump.partial", true},
       {"media/kiln-media-20251201-000000.part01.tar.gz", true},
       {"media/kiln-20240101-000000.keep", true},
       {"db/kiln-db-20250315-000000.dump", true},
@@ -1774,6 +1876,14 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       Path.join(ctx.backups, "db/kiln-db-#{stamp}.sha256"),
       Path.join(ctx.backups, "media/kiln-media-#{stamp}.sha256")
     ] ++ parts
+  end
+
+  # A file at `rel` under the backup directory, `minutes` old.
+  defp abandoned!(ctx, rel, minutes) do
+    path = Path.join(ctx.backups, rel)
+    File.write!(path, "left behind")
+    File.touch!(path, System.os_time(:second) - minutes * 60)
+    path
   end
 
   defp age!(files, days) do

@@ -469,6 +469,30 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       fetch_routed!(job, [a, b])
       assert goods(b) == synced("20260801-041700")
     end
+
+    # #2478 needs #2789: on a cron-only host the Importer reaches the host's
+    # directory only through its routed job, and must, before prune removes a
+    # killed run's marker.
+    test "a cron-only host's killed run is recorded as interrupted through its routed job" do
+      a = host!("a", "20260801-031700")
+      b = host!("b", "20260801-041700")
+      killed = "20260802-041700"
+      killed_run!(b, killed, 4 * 60)
+      tick_as(a, "a@host")
+      tick_as(b, "b@host")
+
+      assert :ok = as_node(a, fn -> perform_job(MarkerSyncWorker, %{}) end)
+      assert {:ok, nil} = Backups.get_run_by_stamp(killed, actor: Backups.system())
+
+      assert [job] = routed_jobs()
+      fetch_routed!(job, [a, b])
+
+      assert %{status: :failed, error: "Interrupted: " <> _, components: [:db, :media]} =
+               Backups.get_run_by_stamp!(killed, actor: Backups.system())
+
+      # The last good backup is still the finished one before it.
+      assert goods(b) == synced("20260801-041700")
+    end
   end
 
   # :ok once the id file holds an id, after reading it every few hundred

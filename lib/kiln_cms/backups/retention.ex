@@ -85,7 +85,10 @@ defmodule KilnCMS.Backups.Retention do
   backup even when a newer complete set from a failed run exists. That holds
   as long as the app keeps the marker in step; a host whose copy of
   `backup.sh` predates the marker ignores it. Cron never deletes strays or
-  markers.
+  markers. Unlike this module, it does delete `.partial` files: those of a run
+  killed outright, once every file of the stamp is 12 hours old (#2478). Here
+  a `.partial` is only ever a reason to keep; the start step's sweep removes
+  one, once its stamp has a run row.
   """
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Importer, Recorder, WorkState}
@@ -141,7 +144,8 @@ defmodule KilnCMS.Backups.Retention do
 
   @doc """
   How long a `.partial` counts as a live writer's work: younger, and its unit
-  is in flight; older, and the worker's partial sweep removes it.
+  is in flight; older, and the start step's partial sweep removes it once
+  every file of its stamp is older and the stamp has a run row (#2478).
   """
   @spec partial_grace_s() :: pos_integer()
   def partial_grace_s, do: @partial_grace_s

@@ -306,9 +306,22 @@ defmodule KilnCMS.Backups.ImporterTest do
   end
 
   describe "what is not an artifact" do
-    test "a .partial alone is ignored", %{dir: dir} do
+    test "a .partial alone is pending, not imported (#2478)", %{dir: dir} do
       put(dir, :db, "20260801-031700", suffix: ".partial")
-      assert {:ok, %{imported: 0, pending: 0}} = Importer.run()
+      assert {:ok, %{imported: 0, pending: 1}} = Importer.run()
+      assert all_runs() == []
+    end
+
+    test "a .partial alone with an impossible stamp is ignored, and not warned about",
+         %{dir: dir} do
+      put(dir, :db, "20261399-031700", suffix: ".partial", age: 600)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{imported: 0, pending: 0, skipped: 0}} = Importer.run()
+        end)
+
+      refute log =~ "20261399-031700"
       assert all_runs() == []
     end
 
@@ -717,6 +730,152 @@ defmodule KilnCMS.Backups.ImporterTest do
       assert %{trigger: "cron-nightly", artifacts: [media]} = run!(@set)
       assert [%{"sha256" => @hex_a}, %{"sha256" => @hex_b}] = media.parts
       assert media.bytes == 200
+    end
+  end
+
+  describe "interrupted (#2478)" do
+    @stamp "20260801-031700"
+    @interrupted "Interrupted: the backup stopped before it finished and left .partial files behind"
+
+    defp marker!(dir, stamp, age),
+      do: put_named(dir, "media", "kiln-media-#{stamp}.sha256.partial", age)
+
+    defp put_named(dir, sub, name, age) do
+      path = Path.join([dir, sub, name])
+      File.write!(path, "x")
+      File.touch!(path, System.os_time(:second) - age * 60)
+      path
+    end
+
+    test "quiet for 2 h 59 min is pending; for 3 h 01 min it is a failed run", %{dir: dir} do
+      put_named(dir, "media", Artifact.part_name(@stamp, 1), 179)
+      marker!(dir, @stamp, 179)
+
+      assert {:ok, %{imported: 0, pending: 1}} = Importer.run()
+      assert all_runs() == []
+
+      for f <- Path.wildcard(Path.join(dir, "media/kiln-media-#{@stamp}*")),
+          do: File.touch!(f, System.os_time(:second) - 181 * 60)
+
+      assert {:ok, %{imported: 1, pending: 0}} = Importer.run()
+
+      run = run!(@stamp)
+      assert run.origin == :imported
+      assert run.status == :failed
+      assert run.error == @interrupted
+      assert run.components == [:media]
+
+      assert [%{kind: :media, parts: [%{"name" => "kiln-media-#{@stamp}.part01.tar.gz"}]}] =
+               run.artifacts
+
+      assert DateTime.diff(DateTime.utc_now(), run.finished_at) in (181 * 60 - 5)..(181 * 60 + 5)
+
+      assert Enum.any?(
+               run.log,
+               &(&1.level == :error and
+                   &1.message =~ "kiln-media-#{@stamp}.sha256.partial (181 min old)")
+             )
+
+      assert Importer.interrupted_after_s() == 3 * 3600
+    end
+
+    test "judged on the newest of all its files: a part finished 10 minutes ago keeps it " <>
+           "pending however old the marker",
+         %{dir: dir} do
+      put(dir, :db, @stamp, age: 600)
+      marker!(dir, @stamp, 600)
+      put(dir, :media, @stamp, age: 10)
+
+      assert {:ok, %{imported: 0, pending: 1}} = Importer.run()
+    end
+
+    test "only partials: pending, then a failed run with no artifacts", %{dir: dir} do
+      put(dir, :db, @stamp, suffix: ".partial", age: 60)
+
+      assert {:ok, %{imported: 0, pending: 1}} = Importer.run()
+
+      put(dir, :db, @stamp, suffix: ".partial", age: 200)
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :failed, error: @interrupted, artifacts: [], components: [:db]} =
+               run!(@stamp)
+    end
+
+    test "a finished dump with the media marker beside it is both components", %{dir: dir} do
+      put(dir, :db, @stamp, age: 200)
+      marker!(dir, @stamp, 200)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+
+      assert %{status: :failed, error: @interrupted, components: [:db, :media]} =
+               run = run!(@stamp)
+
+      assert [%{kind: :db, name: "kiln-db-#{@stamp}.dump"}] = run.artifacts
+    end
+
+    test "a sidecar's partial counts like any other", %{dir: dir} do
+      put(dir, :db, @stamp, age: 200)
+      put_named(dir, "db", "kiln-db-#{@stamp}.sha256.partial", 200)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{status: :failed, error: @interrupted, components: [:db]} = run!(@stamp)
+    end
+
+    test "a manifest covering the stamp still wins", %{dir: dir} do
+      put(dir, :db, @stamp, age: 600)
+      marker!(dir, @stamp, 600)
+
+      manifest!(dir,
+        trigger: "cron",
+        ok: true,
+        started_at: ~U[2026-08-01 03:17:00Z],
+        finished_at: ~U[2026-08-01 03:18:42Z],
+        artifacts: [%{kind: "db", path: "db/kiln-db-#{@stamp}.dump", bytes: 100, verified: true}]
+      )
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{status: :succeeded, error: nil} = run!(@stamp)
+    end
+
+    test "a stamp the application owns is never looked at", %{dir: dir} do
+      Backups.start_run!(%{stamp: @stamp, trigger: "manual"}, actor: Backups.system())
+      put(dir, :db, @stamp, suffix: ".partial", age: 600)
+
+      assert {:ok, %{imported: 0, pending: 0}} = Importer.run()
+      assert %{status: :running, origin: :app, error: nil} = run!(@stamp)
+    end
+
+    test "a second run is a no-op", %{dir: dir} do
+      put(dir, :db, @stamp, age: 600)
+      marker!(dir, @stamp, 600)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      before = run!(@stamp)
+
+      assert {:ok, %{imported: 0, pending: 0}} = Importer.run()
+      assert run!(@stamp).updated_at == before.updated_at
+    end
+
+    test "a file dated in the future reads as fresh, with one warning per call", %{dir: dir} do
+      put(dir, :db, @stamp, age: 600)
+      marker!(dir, @stamp, -60)
+      put(dir, :db, "20260802-031700", suffix: ".partial", age: -60)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{imported: 0, pending: 2}} = Importer.run()
+        end)
+
+      assert [_one] = Regex.scan(~r/dated in the future/, log)
+      assert log =~ "#{@stamp}, 20260802-031700"
+      assert all_runs() == []
+    end
+
+    test "with the grant revoked nothing is written", %{dir: dir} do
+      put(dir, :db, @stamp, suffix: ".partial", age: 600)
+
+      assert {:error, _} = Backups.with_actor(nil, &Importer.run/0)
+      assert all_runs() == []
     end
   end
 

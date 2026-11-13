@@ -212,7 +212,9 @@ defmodule KilnCMS.Backups.ChainTest do
       partial = Path.join([dir, "db", "kiln-db-20200101-000000.dump.partial"])
       File.mkdir_p!(Path.dirname(partial))
       File.write!(partial, "abandoned")
-      File.touch!(partial, System.os_time(:second) - 7200)
+      # Old enough for the Importer to record the stamp as interrupted, which
+      # the sweep waits for (#2478).
+      File.touch!(partial, System.os_time(:second) - 4 * 3600)
 
       {:ok, %{status: :started}} = request()
       {:ok, %{status: :queued}} = request()

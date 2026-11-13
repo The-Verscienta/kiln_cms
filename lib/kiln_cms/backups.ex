@@ -810,7 +810,9 @@ defmodule KilnCMS.Backups do
 
   # A failed run that doesn't say what it covered counts against every
   # component, as a failed manifest does: an imported (cron) run lists only
-  # the kinds of the files it left, or none at all.
+  # the kinds of the files it left, or none at all. That holds for an
+  # "Interrupted" import too (#2478), whose components come from its partials
+  # as well: a cron `all` killed in its db phase would have done media next.
   defp newest_attempt(component) do
     name = Atom.to_string(component)
 
