@@ -61,7 +61,9 @@ defmodule KilnCMS.CMS.FieldSyncVersionTest do
     before updating the pinned list in #{Path.relative_to_cwd(__ENV__.file)}:
 
       * leave the attribute out of the document (KilnCMS.CMS.FieldSync drops
-        the keys in @owner_keys and @section_owner_keys the same way);
+        field keys through @owner_keys and section keys through
+        @section_owner_keys; a type definition key would need a list of
+        its own, since type_keys/0 has none);
       * keep version 1 and accept that older builds refuse new files by the
         unknown key, as docs/field-sync.md describes; or
       * bump the version, with a reader that still accepts every older one

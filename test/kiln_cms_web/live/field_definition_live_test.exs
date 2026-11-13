@@ -2392,7 +2392,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert has_element?(lv, "fieldset#new-field-widget[aria-describedby=new-field-widget-help]")
 
       assert lv |> element("#new-field-widget > p#new-field-widget-help") |> render() =~
-               "How editors fill this in. What they enter is stored and delivered the same way."
+               "How editors fill this in. The type and text format of the field stay as they are."
     end
 
     # The page drops a widget its posted settings don't offer, so a refused

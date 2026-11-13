@@ -42,8 +42,10 @@ about what version 1 means:
 
 - Field sync (#2437, merged 2026-11-08), `widget` (#2495, 2026-11-09) and
   `width` with `sections` (#2496, 2026-11-09) all merged after 1.8.0
-  (2026-11-03) and first shipped together in 1.9.0 (2026-11-11). 1.8.0 has no
-  `FieldSync` at all, and there was no 1.9.0 release candidate.
+  (2026-11-03) and first shipped together in 1.9.0 (2026-11-11). 1.9.0's image
+  was published but never announced, so 1.9.1 is the first announced 1.9;
+  either way, every 1.9 build carries all three. 1.8.0 has no `FieldSync` at
+  all, and there was no 1.9.0 release candidate.
 - `field_sync.ex`, `field_definition.ex`, `field_section.ex`,
   `type_definition.ex`, `field_widgets.ex`, `section_layouts.ex` and
   `promotion.ex` are unchanged from 1.9.0 to 1.9.2.

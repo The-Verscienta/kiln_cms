@@ -3201,8 +3201,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       aria-describedby={if length(@choices) > 1, do: "#{@id}-help"}
     >
       <legend class="mb-1 block text-sm font-medium">{gettext("Editor input")}</legend>
-      <p :if={length(@choices) > 1} id={"#{@id}-help"} class="mb-2 text-xs text-base-content/60">
-        {gettext("How editors fill this in. What they enter is stored and delivered the same way.")}
+      <p :if={length(@choices) > 1} id={"#{@id}-help"} class="mb-2 text-xs text-base-content/70">
+        {gettext("How editors fill this in. The type and text format of the field stay as they are.")}
       </p>
       <div :if={length(@choices) > 1} class="grid gap-2 sm:grid-cols-3">
         <label
@@ -3916,7 +3916,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 <legend class="mb-1 block text-sm font-medium">
                   {gettext("Content types")}
                 </legend>
-                <p class="mb-2 text-xs text-base-content/60">
+                <p class="mb-2 text-xs text-base-content/70">
                   {gettext(
                     "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
                   )}

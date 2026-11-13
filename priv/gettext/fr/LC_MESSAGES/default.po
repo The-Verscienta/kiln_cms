@@ -10748,8 +10748,8 @@ msgstr "Comment chaque élément de la liste des contenus indique s'il est publi
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
-msgid "How editors fill this in. What they enter is stored and delivered the same way."
-msgstr "La façon dont les éditeurs remplissent ce champ. Ce qu'ils saisissent est enregistré et fourni de la même manière."
+msgid "How editors fill this in. The type and text format of the field stay as they are."
+msgstr "La façon dont les éditeurs remplissent ce champ. Le type et le format de texte du champ ne changent pas."
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format

@@ -10748,7 +10748,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
-msgid "How editors fill this in. What they enter is stored and delivered the same way."
+msgid "How editors fill this in. The type and text format of the field stay as they are."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
