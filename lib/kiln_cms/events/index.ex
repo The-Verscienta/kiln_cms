@@ -37,6 +37,11 @@ defmodule KilnCMS.Events.Index do
   matter how long ago it was written, and the sweep only has to visit rows whose
   value has already gone by — a small, self-limiting set, not the archive.
 
+  That holds for **one engine version**. A release that changes what
+  `KilnCMS.Events.Recurrence` expands a rule to can make any stored value wrong,
+  future or `nil`, so it bumps `KilnCMS.Events.Recurrence.engine_version/0` and
+  `KilnCMS.Events.BackfillWorker` re-runs the full pass on its first boot.
+
   That argument holds only if `nil` means "never again" rather than "not soon",
   which is why the materialization horizon is a **decade** rather than the 400
   days `KilnCMS.Events.Occurrences.next/3` defaults to. A `nil` that meant
@@ -131,7 +136,9 @@ defmodule KilnCMS.Events.Index do
 
   The one write path, shared by `KilnCMS.Events.Sweep` (rows whose occurrence
   has gone by) and `KilnCMS.Events.Backfill` (every row, once). Returns
-  `:written`, `:unchanged`, or `{:error, reason}`.
+  `{:written, next}` with the value now stored (a `DateTime` or `nil`, so a
+  caller can tell a row that just left the listings), `:unchanged`, or
+  `{:error, reason}`.
 
   ## Why "unless it is already right" is not an optimization
 
@@ -151,7 +158,8 @@ defmodule KilnCMS.Events.Index do
   deliberately: a caller whose `select:` dropped it would otherwise compare
   against `%Ash.NotLoaded{}` and rewrite every row it touched.
   """
-  @spec refresh(struct(), Ash.UUID.t(), DateTime.t()) :: :written | :unchanged | {:error, term()}
+  @spec refresh(struct(), Ash.UUID.t(), DateTime.t()) ::
+          {:written, DateTime.t() | nil} | :unchanged | {:error, term()}
   def refresh(record, org_id, from) do
     next = next_occurrence_at(record, org_id, from)
 
@@ -182,7 +190,7 @@ defmodule KilnCMS.Events.Index do
     )
     |> Ash.update()
     |> case do
-      {:ok, _record} -> :written
+      {:ok, _record} -> {:written, next}
       {:error, reason} -> {:error, reason}
     end
   end

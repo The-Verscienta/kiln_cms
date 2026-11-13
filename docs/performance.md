@@ -92,7 +92,7 @@ the cron triggers (`config/config.exs`):
 ```elixir
 queues: [firing: 5, search: 5, mail: 3, newsletter: 3, billing: 3, media: 3, webhooks: 3,
          scheduling: 5, link_check: 3, federation: 3, push: 3, backups: 1, backup_steps: 1,
-         default: 10]
+         occurrence_backfill: 1, default: 10]
 ```
 
 | Queue        | Workers                                                |
@@ -109,6 +109,7 @@ queues: [firing: 5, search: 5, mail: 3, newsletter: 3, billing: 3, media: 3, web
 | `push`       | `Push.Worker` (Web Push)                               |
 | `backup_steps` | `Backups.StepWorker`: one step of an in-app backup, concurrency 1 per node ([backups.md](backups.md#how-an-in-app-backup-runs-2218)) |
 | `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; removed in the next minor |
+| `occurrence_backfill` | `Events.BackfillWorker`: the boot-time recompute of events' next dates, one job per recurrence engine version per day, ten minutes after boot ([events.md](events.md#recomputing-stored-dates-at-boot)) |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
 | `default`    | Daily AshOban triggers (trash purge, untitled sweep)   |
 
@@ -122,7 +123,12 @@ the other direction: a large newsletter blast must not starve transactional `mai
 inbound payment webhook must not queue behind one — a delayed entitlement event is a paying
 member locked out of what they just bought.
 
-**Pool sizing.** Total worker concurrency above is about 50, all sharing the Ecto pool with web
+The `backup_steps` and `occurrence_backfill` queues are isolated for the version they run
+under rather than for load: during a rolling deploy, a node of the previous release still
+polls `default`, and would run a newer release's job with the older code. A deployment that
+builds Oban's `queues:` list itself must carry both, or their jobs are queued and never run.
+
+**Pool sizing.** Total worker concurrency above is 52, all sharing the Ecto pool with web
 requests. Size `POOL_SIZE` (in `config/runtime.exs`) so jobs and web requests don't starve
 each other:
 

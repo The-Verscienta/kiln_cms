@@ -373,6 +373,29 @@ defmodule KilnCMS.EventsTest do
       assert ics |> String.split("BEGIN:VEVENT") |> length() == 2
     end
 
+    test "a yearly rule's RRULE is the stored rule, re-rendered unchanged (#2750)", ctx do
+      # The expansion fix moves Kiln's own surfaces to what subscribers already
+      # saw; the exported rule text must not move with it.
+      add_recurrence(ctx.td, ctx.admin)
+
+      for rrule <-
+            ~w(FREQ=YEARLY;BYMONTH=3,9 FREQ=YEARLY;BYMONTH=11;BYDAY=4TH FREQ=YEARLY;BYDAY=2TU) do
+        event =
+          event!(ctx, %{
+            "when" => %{"start" => "2026-03-10T19:00", "time_zone" => @london},
+            "repeats" => %{"rrule" => rrule}
+          })
+
+        stored = get_in(event.custom_fields, ["repeats", "rrule"])
+        {:ok, rule} = KilnCMS.Events.Recurrence.parse(stored)
+
+        ics = ICS.event(event, org_id: ctx.org)
+
+        assert ics =~ "\r\nRRULE:#{KilnCMS.Events.Recurrence.to_rrule(rule)}\r\n"
+        assert ics =~ "\r\nRRULE:#{rrule}\r\n"
+      end
+    end
+
     test "an all-day event uses VALUE=DATE with an exclusive end", ctx do
       event =
         event!(ctx, %{
@@ -500,7 +523,30 @@ defmodule KilnCMS.EventsTest do
       ics = ICS.event(event, org_id: ctx.org)
 
       assert ics =~ "DTSTART;TZID=Europe/London:"
-      assert ics =~ "UNTIL=20260405T235959Z"
+      # The end of 5 April in London, which is on BST by then: midnight of the
+      # 6th is 23:00 UTC on the 5th. The old `T235959Z` let a client add an
+      # hour of the 6th to the series (#2751).
+      assert ics =~ "UNTIL=20260405T225959Z"
+    end
+
+    test "an all-day rule's UNTIL stays a DATE, matching its DTSTART", ctx do
+      add_recurrence(ctx.td, ctx.admin)
+
+      event =
+        event!(ctx, %{
+          "when" => %{
+            "start" => "2026-03-15T00:00",
+            "end" => "2026-03-15T00:00",
+            "time_zone" => @london,
+            "all_day" => true
+          },
+          "repeats" => %{"rrule" => "FREQ=WEEKLY;BYDAY=SU;UNTIL=20260405"}
+        })
+
+      ics = ICS.event(event, org_id: ctx.org)
+
+      assert ics =~ "DTSTART;VALUE=DATE:20260315"
+      assert ics =~ ~r/RRULE:[^\r]*UNTIL=20260405(;|\r)/
     end
 
     test "a zone that bypassed the field-type cast cannot inject calendar lines", ctx do
