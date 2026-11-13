@@ -204,6 +204,22 @@ defmodule KilnCMS.Backups.Lock do
       run KilnCMS.Backups.Lock.Actions.Request
     end
 
+    # The scheduler's entry point (part of #2219): one backup for every due
+    # window of `schedule_ids`, the windows claimed in the lock transaction.
+    # The `:backups` system actor's alone, so no person can ask for a backup
+    # carrying `scheduled`/`schedule_ids`.
+    action :request_scheduled, :map do
+      argument :schedule_ids, {:array, :uuid} do
+        allow_nil? false
+        constraints min_length: 1
+      end
+
+      argument :at, :utc_datetime_usec, allow_nil?: false
+
+      transaction? false
+      run KilnCMS.Backups.Lock.Actions.RequestScheduled
+    end
+
     # The heartbeat's sweep: a holder whose node stopped beating loses the lock.
     action :reclaim_stale, :map do
       transaction? false
@@ -222,6 +238,12 @@ defmodule KilnCMS.Backups.Lock do
     # implementation writes the row as `Backups.system/0`, not as the caller.
     policy action(:request) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
+    end
+
+    # Scheduled backups (part of #2219): the scheduler's, never a person's,
+    # platform admin included.
+    policy action(:request_scheduled) do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
     end
 

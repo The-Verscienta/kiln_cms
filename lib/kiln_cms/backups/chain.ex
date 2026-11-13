@@ -19,6 +19,12 @@ defmodule KilnCMS.Backups.Chain do
   would abort the transaction that inserts the next step. Run writes happen
   before (a step's progress) or after the commit (bookkeeping here).
 
+  One other write does happen inside it: a scheduled request's window claims
+  (part of #2219; `request/1`'s `:claim`), so a window is claimed exactly when
+  the backup it asked for is started, queued or folded. A claim that matches
+  zero rows (the window taken by another node) is a returned error, not a
+  failed statement, and rolls the whole transaction back.
+
   Every Lock write passes `actor: Backups.system()` explicitly.
 
   ## Fencing
@@ -58,7 +64,19 @@ defmodule KilnCMS.Backups.Chain do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, DirId, Importer, Lock, Retention, Steps, StepWorker, WorkState}
+
+  alias KilnCMS.Backups.{
+    Artifact,
+    DirId,
+    Importer,
+    Lock,
+    Recorder,
+    Retention,
+    Steps,
+    StepWorker,
+    WorkState
+  }
+
   alias KilnCMS.Backups.Run.Changes.Normalize
   alias KilnCMS.Repo
 
@@ -137,9 +155,19 @@ defmodule KilnCMS.Backups.Chain do
   folding would drop it: a fresh backup folded into a queued resume never takes
   its own (the resume backs up the old stamp), and a resume folded into a
   queued fresh backup (or another stamp's resume) never resumes. The caller
-  asks again once the queue clears; a scheduler (#2219, not yet built) must
-  roll its window back and retry on a later tick, so a scheduled backup is
-  never folded into a Resume.
+  asks again once the queue clears; the scheduler's claim rolls back with the
+  refusal and it asks again on a later tick, so a scheduled backup is never
+  folded into a Resume.
+
+  ## Claiming a schedule's window (part of #2219)
+
+  `:claim` is a function of the outcome (`:started`, `:queued` or
+  `:folded`) returning `:ok` or `{:error, reason}`, run inside the lock
+  transaction only after the decision succeeded. An error rolls everything
+  back, the decision's Lock write and `Oban.insert/2` included, and is the
+  result. A refused decision (`{:queue_busy, _}`, #2540) never runs it, so
+  nothing is claimed. `:scheduled` and `:schedule_ids` say what the schedules
+  asked for (`KilnCMS.Backups.Lock.Actions.RequestScheduled`).
   """
   @spec request(map()) :: {:ok, map()} | {:error, term()}
   def request(attrs) do
@@ -152,7 +180,8 @@ defmodule KilnCMS.Backups.Chain do
       by: Map.get(attrs, :requested_by),
       components: Map.get(attrs, :components),
       scheduled: Map.get(attrs, :scheduled) || [],
-      schedule_ids: Map.get(attrs, :schedule_ids) || []
+      schedule_ids: Map.get(attrs, :schedule_ids) || [],
+      claim: Map.get(attrs, :claim)
     }
 
     with :ok <- Backups.availability(),
@@ -167,12 +196,24 @@ defmodule KilnCMS.Backups.Chain do
       _ = if heartbeat?(), do: reclaim_stale()
       _ = reap()
 
-      result = with_lock(fn row -> decide(row, req) end)
+      result = with_lock(&decide_and_claim(&1, req))
 
       with {:ok, %{status: :folded}} <- result, do: announce_fold(req)
       result
     end
   end
+
+  defp decide_and_claim(row, req) do
+    with {:ok, %{status: status} = decided} <- decide(row, req),
+         :ok <- run_claim(req.claim, status),
+         do: {:ok, decided}
+  end
+
+  # Inside the lock transaction. The claim stops at its first error and
+  # returns it; nothing here rescues and carries on, because a failed
+  # statement aborts the PostgreSQL transaction and every statement after it.
+  defp run_claim(nil, _status), do: :ok
+  defp run_claim(claim, status) when is_function(claim, 1), do: claim.(status)
 
   defp precheck_resume(nil), do: {:ok, nil}
 
@@ -448,6 +489,41 @@ defmodule KilnCMS.Backups.Chain do
     with_lock(fn row ->
       if holds?(row, lease), do: release_in_txn(row), else: {:error, :superseded}
     end)
+  end
+
+  @doc """
+  Give up a resume whose start `job` found no node with the run's files
+  (#2539; `StepWorker`): when `job` is still the lock's start job, free the
+  lock and promote the waiting request, then, after the commit, say on the
+  run why (`Steps.resume_refused/3`). Returns what the job returns:
+  `{:cancel, reason}`, or `{:cancel, :superseded}` when the lock has moved on.
+  """
+  @spec abandon_start(Oban.Job.t(), term()) :: {:cancel, term()} | {:error, term()}
+  def abandon_start(%Oban.Job{id: id, args: args}, reason) do
+    result =
+      with_lock(fn row ->
+        if current?(row, args, id), do: release_resume(row), else: {:error, :superseded}
+      end)
+
+    case result do
+      {:ok, stamp} when is_binary(stamp) ->
+        Steps.resume_refused(stamp, args["chain"], reason)
+        {:cancel, reason}
+
+      {:ok, nil} ->
+        {:cancel, reason}
+
+      {:error, :superseded} ->
+        {:cancel, :superseded}
+
+      {:error, error} ->
+        Logger.warning("Couldn't give up the backup resume: #{inspect(error, limit: 5)}")
+        {:error, error}
+    end
+  end
+
+  defp release_resume(row) do
+    with {:ok, _promoted} <- release_in_txn(row), do: {:ok, row.resume_stamp}
   end
 
   @doc """
@@ -747,7 +823,8 @@ defmodule KilnCMS.Backups.Chain do
       dir_id: row.dir_id,
       step: row.step,
       part: row.part,
-      node: node
+      node: node,
+      resume: row.resume_stamp
     }
   end
 
@@ -833,6 +910,21 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   # After the commit: the Run, and the failure manifest when the files are here.
+  #
+  # A resume chain (#2539) whose start never re-opened the run (discarded or
+  # killed before it claimed the lock, or before the re-open) has no run of its
+  # own to fail: the run still names the chain it last ran under. It gets the
+  # refusal note instead of nothing.
+  defp interrupt(%{resume: stamp} = info, message) when is_binary(stamp) do
+    if Recorder.from_run(stamp, info.chain).run,
+      do: Steps.interrupt(stamp, info.chain, info.dir_id, message),
+      else: Steps.resume_refused(stamp, info.chain, {:interrupted, message})
+  rescue
+    error ->
+      Logger.warning("Couldn't record the interrupted backup: #{Exception.message(error)}")
+      :ok
+  end
+
   defp interrupt(%{stamp: nil}, _message), do: :ok
 
   defp interrupt(info, message) do

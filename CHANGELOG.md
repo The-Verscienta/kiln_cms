@@ -65,10 +65,19 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new `webhook_endpoints.format`, default `kiln`, and nullable `notifications.details`). Before rolling back to 1.9, deactivate every Slack-format endpoint: 1.9 sends it the Kiln envelope, which Slack refuses, until it auto-disables.**
   ([long form](docs/changelog/unreleased.md#slack-webhooks-upgrade))
 
+- **Run `mix ash.migrate` (new table `backup_schedules`, part of #2219). Nothing is scheduled until a platform admin creates one; rolling back is safe (an older release ignores the table, and no schedule fires).**
+  ([long form](docs/changelog/unreleased.md#backup-schedules-upgrade))
+
+- **Run `mix ash.migrate` (new nullable `backup_runs.dir_id`). During a rolling deploy an older node may run a backup resume unpinned; runs from before the upgrade are pinned on their first resume. Rolling back is safe.**
+  ([#2815](https://github.com/The-Verscienta/kiln_cms/pull/2815) · [long form](docs/changelog/unreleased.md#backup-run-dir-id-upgrade))
+
 - **Run `mix ash.migrate` (new table `platform_security_alerts`). Blocked-address alerts are on for every site (up to one alert and one summary per 15 minutes; off under Security alerts → Blocked addresses). Existing webhook endpoints, Slack too, need `security.blocked_ip` ticked; until then a webhook-only site's "Security alerts reach someone" line reads Review.**
   ([long form](docs/changelog/unreleased.md#blocked-ip-alerts-upgrade))
 
 ### Added
+
+- **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
+  ([long form](docs/changelog/unreleased.md#backup-schedules))
 
 - **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
   ([long form](docs/changelog/unreleased.md#slack-webhook-format))
@@ -109,6 +118,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2801](https://github.com/The-Verscienta/kiln_cms/pull/2801) · [long form](docs/changelog/unreleased.md#ci-required-check-covers-more-jobs))
 
 ### Fixed
+
+- **Backup Resume is safe: the re-open is atomic, Resume waits ~2.5 min after a Cancel, a step that outlived its Cancel can't overwrite state or history, a resume runs on the node with its files, and a refused one says why on its row.**
+  ([#2815](https://github.com/The-Verscienta/kiln_cms/pull/2815) · [long form](docs/changelog/unreleased.md#backup-resume-safety))
 
 - **Security alerts: the inbox says each alert in the reader's language, a delivery that exhausts its attempts emits `alert_failed`, other sites' consoles show "N unread platform alerts", and the full-IP help text covers IPv6.**
   ([long form](docs/changelog/unreleased.md#security-alert-gaps-2642))

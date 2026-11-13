@@ -23,8 +23,9 @@ defmodule KilnCMS.Backups do
   Every entry point goes through `request/2` with an actor: the Backups page's
   "Back up now" and "Resume" buttons (as the platform admin), a legacy
   `KilnCMS.Backups.Worker` job and the console's `Worker.run/3` (as
-  `system/0`), and a future scheduler, which must call
-  `request(trigger: "schedule")` as `system/0`. A request while a backup runs
+  `system/0`). In-app schedules (part of #2219) go through
+  `request_scheduled/3` instead, as `system/0` (`KilnCMS.Backups.Scheduler`),
+  which claims each schedule's window with the request. A request while a backup runs
   queues behind it; at most one waits, and later requests of the same kind fold
   into that one (a different kind is refused: `KilnCMS.Backups.Chain.request/1`).
   `scripts/backup.sh` runs outside the application and does not take the lock.
@@ -62,7 +63,20 @@ defmodule KilnCMS.Backups do
 
   use Ash.Domain
 
-  alias KilnCMS.Backups.{Chain, Lock, Manifest, Refused, Run, StepWorker, WorkState}
+  alias KilnCMS.Backups.{
+    Chain,
+    Heartbeat,
+    Lock,
+    Manifest,
+    Refused,
+    Run,
+    Schedule,
+    Scheduler,
+    StepWorker,
+    WorkState
+  }
+
+  alias KilnCMS.Backups.Schedule.Window
 
   require Ash.Query
   require Logger
@@ -79,6 +93,7 @@ defmodule KilnCMS.Backups do
       define :finish_run, action: :finish
       define :fail_run, action: :fail
       define :resume_run, action: :resume
+      define :note_run_resume_refused, action: :note_resume_refused, args: [:reason]
       define :import_run, action: :import
       define :list_runs, action: :read
       define :run_history, action: :history
@@ -94,6 +109,7 @@ defmodule KilnCMS.Backups do
       # platform admin reads `backup_lock` for the in-flight strip. The rest
       # are the step chain's, as `system/0`, inside the lock transaction.
       define :request_backup, action: :request
+      define :request_scheduled_backup, action: :request_scheduled
       define :backup_lock, action: :read, get?: true, not_found_error?: false
       define :ensure_backup_lock, action: :ensure
       define :hold_backup_lock, action: :hold
@@ -104,6 +120,20 @@ defmodule KilnCMS.Backups do
       define :queue_backup_request, action: :queue_waiting
       define :fold_backup_request, action: :fold
       define :reclaim_stale_backups, action: :reclaim_stale
+    end
+
+    resource KilnCMS.Backups.Schedule do
+      # A platform admin lists and manages schedules (part of #2219); the
+      # window writes are the scheduler's, as `system/0`, inside the lock
+      # transaction (`request_scheduled/3`).
+      define :list_backup_schedules, action: :read
+      define :get_backup_schedule, action: :read, get_by: [:id], not_found_error?: false
+      define :create_backup_schedule, action: :create
+      define :update_backup_schedule, action: :update
+      define :destroy_backup_schedule, action: :destroy
+      define :claim_backup_schedule_window, action: :claim_window
+      define :refuse_backup_schedule_window, action: :refuse_window
+      define :note_backup_schedule_deferred, action: :note_deferred
     end
 
     resource KilnCMS.Backups.NodeBeat do
@@ -230,7 +260,7 @@ defmodule KilnCMS.Backups do
   """
   @spec run_stale?(Run.t(), DateTime.t()) :: boolean()
   def run_stale?(%Run{} = run, now \\ DateTime.utc_now()) do
-    cutoff = DateTime.add(now, -stale_after_ms(), :millisecond)
+    %{stale: cutoff} = resume_cutoffs(now)
 
     # No timestamp at all (a bare struct) is not evidence of anything: not stale.
     case Enum.filter([run.started_at, run.updated_at], &match?(%DateTime{}, &1)) do
@@ -239,8 +269,25 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  defp stale_after_ms do
+  # How long a `running` run may go without a write before it counts as
+  # stale: the worker's timeout plus grace.
+  @doc false
+  @spec stale_after_ms() :: pos_integer()
+  def stale_after_ms do
     StepWorker.timeout(nil) + :timer.minutes(@stale_grace_minutes)
+  end
+
+  # The instants a resume is judged against, one definition for the early
+  # check (`run_resumable?/2`) and the `:resume` action's UPDATE filter:
+  # `stale`, before which a `running` run's last write makes it stale, and
+  # `canceled`, before which a Cancel has settled (`Heartbeat.settled_after_ms/0`).
+  @doc false
+  @spec resume_cutoffs(DateTime.t()) :: %{stale: DateTime.t(), canceled: DateTime.t()}
+  def resume_cutoffs(%DateTime{} = now) do
+    %{
+      stale: DateTime.add(now, -stale_after_ms(), :millisecond),
+      canceled: DateTime.add(now, -Heartbeat.settled_after_ms(), :millisecond)
+    }
   end
 
   @doc """
@@ -268,6 +315,9 @@ defmodule KilnCMS.Backups do
   Reasons: `:invalid_stamp`, `:in_flight` (the running backup is that stamp's,
   or a resume of it is about to start), `:no_such_run`,
   `{:not_resumable, status}` (a succeeded run, or one still running),
+  `{:canceled_recently, seconds}` (#2538: canceled less than
+  `Heartbeat.settled_after_ms/0` ago, so a step on a node that lost the
+  database may still be stopping; `seconds` is how long is left, rounded up),
   `:no_state`.
 
   `lock: false` skips the `:in_flight` check: for the resume's own start step,
@@ -279,6 +329,7 @@ defmodule KilnCMS.Backups do
          :ok <- check_not_held(stamp, Keyword.get(opts, :lock, true)),
          {:ok, run} <- fetch_run(stamp),
          :ok <- check_resumable(run, now),
+         :ok <- check_settled(run, now),
          :ok <- check_state(stamp) do
       {:ok, run}
     end
@@ -303,6 +354,22 @@ defmodule KilnCMS.Backups do
   defp check_resumable(run, now),
     do: if(run_resumable?(run, now), do: :ok, else: {:error, {:not_resumable, run.status}})
 
+  # A Cancel reaches the step's node through Oban's notifier, which a node cut
+  # off from the database misses; that node stops the step itself, by its
+  # heartbeat, within `Heartbeat.settled_after_ms/0` (#2538). A resume before
+  # then could share the step's files with it. A nil `finished_at` (a row
+  # canceled before it was recorded) is not evidence of a recent Cancel.
+  defp check_settled(%Run{status: :canceled, finished_at: %DateTime{} = at}, now) do
+    %{canceled: cutoff} = resume_cutoffs(now)
+
+    case DateTime.diff(at, cutoff, :millisecond) do
+      left when left > 0 -> {:error, {:canceled_recently, ceil(left / 1000)}}
+      _settled -> :ok
+    end
+  end
+
+  defp check_settled(_run, _now), do: :ok
+
   defp check_state(stamp),
     do: if(work_state?(stamp), do: :ok, else: {:error, :no_state})
 
@@ -313,6 +380,20 @@ defmodule KilnCMS.Backups do
   @spec work_state?(term()) :: boolean()
   def work_state?(stamp) do
     WorkState.valid_stamp?(stamp) and stamp |> work_dir() |> WorkState.exists?()
+  end
+
+  @doc false
+  # The backup directory a resume of `stamp` must run in (#2539): the run's
+  # `dir_id`, nil when the run has none (imported, from before #2539) or
+  # doesn't exist. Fails closed on a refused read, so the caller can tell
+  # "unpinned" from "unknown".
+  @spec resume_dir_id(String.t()) :: {:ok, String.t() | nil} | {:error, term()}
+  def resume_dir_id(stamp) do
+    case get_run_by_stamp(stamp, actor: system(), authorize_with: :error) do
+      {:ok, %Run{dir_id: dir_id}} -> {:ok, dir_id}
+      {:ok, nil} -> {:ok, nil}
+      {:error, _} = error -> error
+    end
   end
 
   @doc "The work directory of a (valid) stamp. Raises for any other."
@@ -330,8 +411,11 @@ defmodule KilnCMS.Backups do
           stale?: boolean(),
           never?: boolean(),
           stale_after_hours: pos_integer(),
-          stale_source: {:env, String.t()}
+          stale_source: {:env, String.t()} | {:cron, String.t()} | {:schedule, String.t()},
+          next_at: DateTime.t() | nil
         }
+
+  @type schedule_entry :: %{schedule: Schedule.t(), next_at: DateTime.t() | nil}
 
   @type status :: %{
           configured?: boolean(),
@@ -343,7 +427,10 @@ defmodule KilnCMS.Backups do
           components: %{optional(component()) => component_status()},
           source: :runs | :manifest,
           reason: atom() | nil,
-          rclone_missing?: boolean()
+          rclone_missing?: boolean(),
+          scheduler_enabled?: boolean(),
+          schedules: :none | :unreadable | [schedule_entry()],
+          next_at: DateTime.t() | nil
         }
 
   @doc """
@@ -462,12 +549,34 @@ defmodule KilnCMS.Backups do
       the kinds of the files they left.
     * `failed?` (the last attempt failed), `stale?` (no last good, or older
       than `stale_after_hours`), `never?` (no attempt at all),
-      `stale_after_hours` and where that came from (`stale_source`).
+      `stale_after_hours` and where that came from (`stale_source`), and
+      `next_at`, when an in-app schedule backs it up next.
 
   `stale?` and `failed?` at the top are any component's. The runs are read as
   `system/0`, a few rows per component; when that read fails, the status comes
   from the manifest alone (`source: :manifest`) rather than raising or
   calling anything healthy.
+
+  ## In-app schedules (part of #2219)
+
+  `schedules` lists every schedule with `next_at`, its next window (a past
+  one when it is due and waiting), or nil when it can't fire here: it is
+  paused, `scheduler_enabled?` is false (`KILN_BACKUP_SCHEDULER_CRON`), backups
+  are unavailable, or it backs up only media and there is no media directory.
+  `:none` when there are none, `:unreadable` when they can't be read (then
+  every threshold is the environment's, and a warning is logged now and
+  then). `next_at` at the top is the soonest of any component's.
+
+  A component's staleness threshold follows a schedule only while that
+  schedule is known to run: backups are available, the scheduler is on, the
+  schedule is enabled, its last window was not refused, and at least one of
+  its windows has come since its baseline and start date. Then the threshold
+  is the shortest such schedule's interval plus half of it, at least six
+  hours (`Schedule.Window.stale_after_hours/1`; `stale_source:
+  {:schedule, id}`), or, when host cron backed the component up in the last
+  eight days as well, the lower of that and `BACKUP_STALE_AFTER_HOURS` (the
+  environment's winning is `{:cron, "BACKUP_STALE_AFTER_HOURS"}`).
+  Otherwise it is `BACKUP_STALE_AFTER_HOURS` (`{:env, ...}`).
   """
   @spec status() :: status()
   def status do
@@ -475,7 +584,16 @@ defmodule KilnCMS.Backups do
     manifest = Manifest.read(dir())
     expected = expected_components()
     {source, runs} = status_runs(expected)
-    components = Map.new(expected, &{&1, component_status(&1, Map.get(runs, &1), manifest)})
+    now = DateTime.utc_now()
+    scheduler? = Scheduler.enabled?()
+    schedules = status_schedules()
+    firing? = availability == :ok and scheduler?
+
+    components =
+      Map.new(expected, fn component ->
+        rule = schedule_rule(component, schedules, firing?, now)
+        {component, component_status(component, Map.get(runs, component), manifest, rule, now)}
+      end)
 
     %{
       configured?: not match?({:error, :disabled}, availability),
@@ -490,8 +608,153 @@ defmodule KilnCMS.Backups do
       source: source,
       stale?: Enum.any?(components, fn {_c, cs} -> cs.stale? end),
       failed?: Enum.any?(components, fn {_c, cs} -> cs.failed? end),
-      rclone_missing?: rclone_missing?()
+      rclone_missing?: rclone_missing?(),
+      scheduler_enabled?: scheduler?,
+      schedules: schedule_entries(schedules, firing?, now),
+      next_at: components |> Enum.map(fn {_c, cs} -> cs.next_at end) |> earliest()
     }
+  end
+
+  # Every schedule, read as `system/0`; `:unreadable` (logged now and then)
+  # when that fails, so the thresholds fall back to the environment's.
+  defp status_schedules do
+    query = Ash.Query.sort(Schedule, id: :asc)
+
+    case list_backup_schedules(query: query, actor: system(), authorize_with: :error) do
+      {:ok, schedules} ->
+        {:ok, schedules}
+
+      {:error, error} ->
+        schedules_unreadable(error)
+        :unreadable
+    end
+  end
+
+  defp schedule_entries(:unreadable, _firing?, _now), do: :unreadable
+  defp schedule_entries({:ok, []}, _firing?, _now), do: :none
+
+  defp schedule_entries({:ok, schedules}, firing?, now) do
+    expected = expected_components()
+
+    for s <- schedules do
+      can_fire? = firing? and s.enabled and Enum.any?(s.components, &(&1 in expected))
+      %{schedule: s, next_at: if(can_fire?, do: next_window(s, now))}
+    end
+  end
+
+  # How a component's staleness is judged, and when a schedule backs it up
+  # next: `%{hours, source, next_at}`.
+  defp schedule_rule(component, {:ok, schedules}, true = _firing?, now) do
+    covering = Enum.filter(schedules, &(&1.enabled and component in &1.components))
+    next_at = covering |> Enum.map(&next_window(&1, now)) |> earliest()
+
+    counting =
+      Enum.filter(covering, &(&1.last_outcome != :refused and window_passed?(&1, now)))
+
+    counting
+    |> Enum.map(&{Window.stale_after_hours(&1.interval), &1.id})
+    |> Enum.reject(&is_nil(elem(&1, 0)))
+    |> Enum.min_by(&elem(&1, 0), fn -> nil end)
+    |> threshold(component, next_at)
+  end
+
+  defp schedule_rule(_component, _schedules, _firing?, _now), do: env_rule(nil)
+
+  defp threshold(nil, _component, next_at), do: env_rule(next_at)
+
+  defp threshold({hours, id}, component, next_at) do
+    env = stale_after_hours()
+
+    if env < hours and cron_backs_up?(component),
+      do: %{hours: env, source: {:cron, "BACKUP_STALE_AFTER_HOURS"}, next_at: next_at},
+      else: %{hours: hours, source: {:schedule, id}, next_at: next_at}
+  end
+
+  defp env_rule(next_at),
+    do: %{
+      hours: stale_after_hours(),
+      source: {:env, "BACKUP_STALE_AFTER_HOURS"},
+      next_at: next_at
+    }
+
+  # The schedule's due window (waiting, so "now") or its next one.
+  defp next_window(s, now) do
+    case Window.due(s, now) do
+      {:ok, %DateTime{} = w} ->
+        w
+
+      {:ok, nil} ->
+        case Window.next(s, now) do
+          {:ok, next} -> next
+          {:error, :invalid} -> nil
+        end
+
+      {:error, :invalid} ->
+        nil
+    end
+  end
+
+  # At least one of the schedule's windows came since its baseline (and its
+  # start date): until then nothing says it runs.
+  defp window_passed?(s, now) do
+    case Window.latest(s, now) do
+      {:ok, %DateTime{} = w} -> DateTime.compare(w, s.baseline_at) != :lt
+      _none_or_invalid -> false
+    end
+  end
+
+  @cron_evidence_days 8
+
+  # Host cron backed `component` up recently as well (an imported run with
+  # the cron trigger). A read that fails counts as yes: the lower threshold
+  # alarms sooner, never later.
+  defp cron_backs_up?(component) do
+    name = Atom.to_string(component)
+    since = DateTime.add(DateTime.utc_now(), -@cron_evidence_days * 86_400, :second)
+
+    query =
+      Run
+      |> Ash.Query.filter(
+        origin == :imported and trigger == "cron" and started_at >= ^since and
+          fragment("? = ANY(?)", ^name, components)
+      )
+      |> Ash.Query.limit(1)
+      |> Ash.Query.select([:id])
+
+    case list_runs(query: query, actor: system(), authorize_with: :error) do
+      {:ok, runs} -> runs != []
+      {:error, _} -> true
+    end
+  end
+
+  defp earliest(times) do
+    case Enum.reject(times, &is_nil/1) do
+      [] -> nil
+      list -> Enum.min(list, DateTime)
+    end
+  end
+
+  @schedules_warned {__MODULE__, :schedules_warned_at}
+  @schedules_warn_every_ms :timer.minutes(15)
+
+  defp schedules_unreadable(error) do
+    :telemetry.execute([:kiln_cms, :backups, :status, :schedules_unreadable], %{count: 1}, %{
+      error: error.__struct__
+    })
+
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get(@schedules_warned, nil)
+
+    if is_nil(last) or now - last >= @schedules_warn_every_ms do
+      :persistent_term.put(@schedules_warned, now)
+
+      Logger.warning(
+        "Backup status ignores the in-app schedules: they could not be read " <>
+          "(#{inspect(error.__struct__)})"
+      )
+    end
+
+    :ok
   end
 
   # The run history's say on each component: `{:runs, %{c => %{good, attempt}}}`,
@@ -593,22 +856,23 @@ defmodule KilnCMS.Backups do
     end)
   end
 
-  defp component_status(component, runs, manifest) do
+  defp component_status(component, runs, manifest, rule, now) do
     name = Atom.to_string(component)
     runs = runs || %{good: nil, attempt: nil}
 
     last_good = newer(run_point(runs.good), manifest_good(manifest, name))
     last_attempt = newer(run_point(runs.attempt), manifest_attempt(manifest, name))
-    hours = stale_after_hours()
+    hours = rule.hours
 
     %{
       last_good: last_good && Map.delete(last_good, :ok?),
       last_attempt: last_attempt,
       failed?: last_attempt != nil and not last_attempt.ok?,
-      stale?: last_good == nil or DateTime.diff(DateTime.utc_now(), last_good.at, :hour) >= hours,
+      stale?: last_good == nil or DateTime.diff(now, last_good.at, :hour) >= hours,
       never?: last_good == nil and last_attempt == nil,
       stale_after_hours: hours,
-      stale_source: {:env, "BACKUP_STALE_AFTER_HOURS"}
+      stale_source: rule.source,
+      next_at: rule.next_at
     }
   end
 
@@ -721,7 +985,8 @@ defmodule KilnCMS.Backups do
       once the queue clears (#2540).
     * `{:error, reason}`: `availability/0`'s reason, a resume refusal
       (`resumable_run/2`: `:invalid_stamp`, `:in_flight`, `:no_such_run`,
-      `{:not_resumable, status}`, `:no_state`), a `:components` refusal, or
+      `{:not_resumable, status}`, `{:canceled_recently, seconds}`,
+      `:no_state`), a `:components` refusal, or
       `:forbidden` for an actor the policy refuses (only a platform admin and
       `system/0` may ask).
   """
@@ -735,6 +1000,50 @@ defmodule KilnCMS.Backups do
         {:ok, result} -> {:ok, result}
         {:error, error} -> {:error, refusal(error)}
       end
+    end
+  end
+
+  @doc """
+  Ask for the backups the schedules `schedule_ids` are due for at `at` (part
+  of #2219), claiming each due window in the transaction that starts, queues
+  or folds the backup. What `KilnCMS.Backups.Scheduler` calls every minute,
+  as `system/0`; only that actor may (a platform admin is refused:
+  `:forbidden`). From a release console:
+
+      KilnCMS.Backups.request_scheduled(ids, KilnCMS.Backups.system())
+
+  Every schedule due at once makes **one** backup covering all of them. See
+  `KilnCMS.Backups.Lock.Actions.RequestScheduled` for the steps.
+
+  `{:ok, result}`, where `result` has:
+
+    * `status`: `:started`, `:queued` or `:folded` (the backup asked for, as
+      in `request/2`), `:deferred` (refused for now, e.g. a Resume is
+      queued, #2540, or this node can't run backups: no `pg_dump`,
+      `pg_restore` or database URL; nothing claimed, asked again next tick),
+      `:refused` (`BACKUP_ENABLED=false`, or a media-only schedule on a node
+      with no media directory: the windows are claimed as refused) or
+      `:nothing_due`;
+    * `chain`: as in `request/2`, or nil;
+    * `claimed`: `[{schedule_id, window}]`;
+    * `refused` and `deferred`: `[{schedule_id, window, reason, first?}]`,
+      where `first?` says whether this call recorded it (a deferred window is
+      noted once per window);
+    * `narrowed`: ids backed up without their media (no media directory);
+    * `missed`: ids whose earlier windows were skipped (only the latest
+      fires);
+    * `invalid`: ids whose windows can't be computed (skipped).
+
+  `{:error, reason}`: `:future_at` (`at` more than a minute ahead),
+  `{:schedules, error}` (the schedules could not be read; nothing written),
+  or `:forbidden`.
+  """
+  @spec request_scheduled([String.t()], DateTime.t(), term()) ::
+          {:ok, map()} | {:error, term()}
+  def request_scheduled(schedule_ids, at \\ DateTime.utc_now(), actor) do
+    case request_scheduled_backup(%{schedule_ids: schedule_ids, at: at}, actor: actor) do
+      {:ok, result} -> {:ok, result}
+      {:error, error} -> {:error, refusal(error)}
     end
   end
 

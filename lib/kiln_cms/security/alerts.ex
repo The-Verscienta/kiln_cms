@@ -10,8 +10,8 @@ defmodule KilnCMS.Security.Alerts do
 
   ## Kinds and channels
 
-  A **site** alert is about one site and goes to that site's member admins
-  (`site_recipients/1`); the site's `KilnCMS.CMS.SiteSecurityAlerts` row can
+  A **site** alert is about one site and goes to that site's member admins,
+  or to the platform admins when it has none (`site_recipients/1`); the site's `KilnCMS.CMS.SiteSecurityAlerts` row can
   turn each kind off and mute the bell and email. A **platform** alert is about
   the deployment and goes to every platform admin; it cannot be muted, and
   only `api_key_rate_limited` can be turned off, by a platform admin
@@ -46,7 +46,8 @@ defmodule KilnCMS.Security.Alerts do
   ## Notices: silencing is never silent
 
   Some changes make the alerts quieter. Each raises an `alerts_silenced`
-  **notice** to the site's member admins that no setting turns off and no
+  **notice** to the site-alert recipients (`site_recipients/1`: its member
+  admins, else the platform admins) that no setting turns off and no
   mute silences: `classify/2` derives two of them from events (another person
   removing or demoting a site admin, and a change to the site's mail relay);
   settings and webhook changes raise their own. See `notice_changes/0`.

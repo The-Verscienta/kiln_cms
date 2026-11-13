@@ -29,18 +29,19 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
     * **site** alert — nothing at all when the site turned the kind off (the
       row is only stamped). Otherwise the site's webhooks subscribed to
       `security.<kind>`, and, unless the site turned `notify_admins` off, a
-      bell row for each of its member admins
-      (`KilnCMS.Security.Alerts.site_recipients/1`) and an email to those who
-      have not muted `notify_on_security_alert`.
+      bell row for each of its member admins, or for each platform admin when
+      it has none (`KilnCMS.Security.Alerts.site_recipients/1`), and an email
+      to those who have not muted `notify_on_security_alert`.
     * **platform** alert — a bell row (in the default org) and an email for
       every platform admin. No mute applies, and no webhook goes (platform
       kinds are not webhook events). The one setting is the platform's own:
       a kind a platform admin turned off (`api_key_rate_limited`,
       `KilnCMS.Security.PlatformAlertSettings`) sends nothing, and the row is
       only stamped. A platform setting that cannot be read is treated as on.
-    * **notice** — a bell row and an email for each of the site's member
-      admins, muted or not, and the site's webhooks subscribed to
-      `security.alerts_silenced`.
+    * **notice** — a bell row and an email for each of the site-alert
+      recipients (`KilnCMS.Security.Alerts.site_recipients/1`: its member
+      admins, else the platform admins), muted or not, and the site's webhooks
+      subscribed to `security.alerts_silenced`.
 
   ## Summaries
 

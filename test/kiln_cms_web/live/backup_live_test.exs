@@ -13,6 +13,8 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
   import Phoenix.LiveViewTest
 
+  require Ecto.Query
+
   alias KilnCMS.Accounts.User
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Manifest
@@ -734,6 +736,27 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert backup_jobs() == []
     end
 
+    test "a failed run whose resume was refused says so in its row and still offers Resume", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = app_run!(dir, 2, :failed)
+
+      Backups.note_run_resume_refused!(
+        run,
+        "its work files (.work/#{run.stamp}/state.json) are not on the server that picked it up",
+        actor: Backups.system()
+      )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      render_async(lv, 2_000)
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, row, "Resume refused: its work files")
+      assert has_element?(lv, row, "tar exited 2")
+      assert has_element?(lv, ~s|#{row} button[data-role="resume"]|, "Resume")
+    end
+
     test "a run refused off-site shows the refusal, Not verified, and Resume", %{
       conn: conn,
       dir: dir
@@ -868,7 +891,26 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
       assert has_element?(lv, ~s|#{row} button[data-role="resume"]|)
 
-      # Resume on the canceled row requests it again.
+      # Right after the Cancel, Resume says how long to wait (#2538)...
+      html = lv |> element(~s|#{row} button[data-role="resume"]|) |> render_click()
+      assert html =~ "canceled moments ago"
+      assert html =~ ~r/Resume it again in \d+ seconds?/
+      assert Backups.in_flight() == nil
+
+      # ...and once the Cancel has settled, it requests it again.
+      settled =
+        DateTime.add(
+          DateTime.utc_now(),
+          -(Backups.Heartbeat.settled_after_ms() + 1_000),
+          :millisecond
+        )
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          Ecto.Query.from(r in "backup_runs", where: r.stamp == ^stamp),
+          set: [finished_at: settled]
+        )
+
       html = lv |> element(~s|#{row} button[data-role="resume"]|) |> render_click()
       assert html =~ "Backup resumed"
       assert %{stamp: ^stamp} = Backups.in_flight()
@@ -1481,7 +1523,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       assert has_element?(
                lv,
-               ~s|#backup-run-#{canceled.id} button[data-role="resume"][title="Continue this canceled backup from the files it already wrote."]|
+               ~s|#backup-run-#{canceled.id} button[data-role="resume"][title="Continue this canceled backup from the files it already wrote. Right after a Cancel, wait about two and a half minutes."]|
              )
 
       assert has_element?(
@@ -1490,18 +1532,25 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
     end
 
-    test "manual, cron and console read as labels; anything else as recorded", %{
+    test "manual, cron, console and schedule read as labels; anything else as recorded", %{
       conn: conn,
       dir: dir
     } do
       runs =
-        for {trigger, n} <- Enum.with_index(["manual", "cron", "console", "schedule"], 1),
+        for {trigger, n} <-
+              Enum.with_index(["manual", "cron", "console", "schedule", "nightly-ops"], 1),
             do: {trigger, seed_run!(dir, n, trigger: trigger)}
 
       lv = mount_admin(conn)
 
       for {trigger, run} <- runs do
-        label = %{"manual" => "Manual", "cron" => "Cron", "console" => "Console"}[trigger]
+        label =
+          %{
+            "manual" => "Manual",
+            "cron" => "Cron",
+            "console" => "Console",
+            "schedule" => "Scheduled"
+          }[trigger]
 
         assert has_element?(
                  lv,
@@ -1619,11 +1668,11 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
     for {locale, help, canceled, failed, keep} <- [
           {"es", "solo una espera",
-           "Continúa esta copia de seguridad cancelada a partir de los archivos que ya escribió.",
+           "Continúa esta copia de seguridad cancelada a partir de los archivos que ya escribió. Justo después de cancelarla, espera unos dos minutos y medio.",
            "Continúa esta copia de seguridad fallida a partir de los archivos que ya escribió.",
            "Punto de recuperación"},
           {"fr", "une seule attend",
-           "Reprendre cette sauvegarde annulée à partir des fichiers déjà écrits.",
+           "Reprendre cette sauvegarde annulée à partir des fichiers déjà écrits. Juste après une annulation, attendez environ deux minutes et demie.",
            "Reprendre cette sauvegarde échouée à partir des fichiers déjà écrits.",
            "Point de restauration"}
         ] do
@@ -1665,6 +1714,206 @@ defmodule KilnCMSWeb.BackupLiveTest do
       conn = log_in(conn, authed_user(:editor))
 
       assert {:error, {:redirect, _}} = live(conn, ~p"/editor/backups")
+    end
+  end
+
+  # Part of #2219 (2a): the schedules are listed read-only, from
+  # `Backups.status/0`; they are managed from a release console for now.
+  describe "the Schedules list" do
+    import KilnCMS.Test.BackupSchedules, only: [schedule!: 2, force!: 2]
+
+    @baseline ~U[2026-01-01 00:00:00.000000Z]
+
+    defp mount_backups(conn, admin, locale \\ nil) do
+      conn = log_in(conn, admin)
+      conn = if locale, do: Plug.Conn.put_session(conn, "locale", locale), else: conn
+      {:ok, lv, _html} = live(conn, ~p"/editor/backups")
+      lv
+    end
+
+    defp put_cron(value) do
+      original = Application.fetch_env(:kiln_cms, :backup_scheduler_cron)
+      Application.put_env(:kiln_cms, :backup_scheduler_cron, value)
+
+      on_exit(fn ->
+        case original do
+          {:ok, old} -> Application.put_env(:kiln_cms, :backup_scheduler_cron, old)
+          :error -> Application.delete_env(:kiln_cms, :backup_scheduler_cron)
+        end
+      end)
+    end
+
+    test "no schedules: says how backups run instead", %{conn: conn} do
+      lv = mount_backups(conn, authed_user(:admin))
+
+      assert has_element?(lv, "#backup-schedules", "No schedules yet")
+      refute has_element?(lv, "#backup-schedules-off")
+
+      assert has_element?(
+               lv,
+               "#backup-threshold-db",
+               "Alarm after 36 hours without a good backup (BACKUP_STALE_AFTER_HOURS)"
+             )
+    end
+
+    @tag :pg_tools
+    test "each schedule shows its cadence, its next run, its last outcome, and the threshold it sets",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+
+      # 2026-01-01 is a Thursday.
+      weekly =
+        force!(schedule!(%{interval: :weekly, time_of_day: ~T[02:30:00]}, admin),
+          baseline_at: @baseline
+        )
+
+      paused = schedule!(%{enabled: false, time_of_day: ~T[05:00:00]}, admin)
+
+      refused =
+        force!(schedule!(%{time_of_day: ~T[06:00:00]}, admin),
+          last_outcome: "refused",
+          last_error: "disabled",
+          baseline_at: @baseline
+        )
+
+      lv = mount_backups(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{weekly.id} [data-role=cadence]",
+               "Every week on Thursday at 02:30 (Etc/UTC)"
+             )
+
+      assert has_element?(lv, "#backup-schedule-#{weekly.id} [data-role=components]", "Database")
+      assert has_element?(lv, "#backup-schedule-#{weekly.id} [data-role=next]", "Next run:")
+      assert has_element?(lv, "#backup-schedule-#{paused.id} [data-role=paused]", "Paused")
+      refute has_element?(lv, "#backup-schedule-#{paused.id} [data-role=next]")
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{refused.id} [data-role=last-outcome]",
+               "Last window refused: disabled"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-threshold-db",
+               "Alarm after 252 hours without a good backup (its schedule)"
+             )
+    end
+
+    test "a deferred window says why it waits", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      queued =
+        force!(schedule!(%{time_of_day: ~T[01:00:00]}, admin),
+          last_outcome: "deferred",
+          last_error: "queue_busy: a resume of 20260101-000000 is queued"
+        )
+
+      no_tools =
+        force!(schedule!(%{time_of_day: ~T[02:00:00]}, admin),
+          last_outcome: "deferred",
+          last_error: "no_pg_dump"
+        )
+
+      lv = mount_backups(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{queued.id} [data-role=last-outcome]",
+               "another kind of backup is queued"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{no_tools.id} [data-role=last-outcome]",
+               "the server that checked can't run backups (no_pg_dump)"
+             )
+
+      refute has_element?(
+               lv,
+               "#backup-schedule-#{no_tools.id} [data-role=last-outcome]",
+               "queue"
+             )
+    end
+
+    test "the weekday is translated", %{conn: conn} do
+      admin = authed_user(:admin)
+      weekly = schedule!(%{interval: :weekly}, admin)
+
+      lv = mount_backups(conn, admin, "fr")
+      assert has_element?(lv, "#backup-schedule-#{weekly.id} [data-role=cadence]", "jeudi")
+    end
+
+    test "with the scheduler off, the list says so and shows no next run", %{conn: conn} do
+      admin = authed_user(:admin)
+      s = force!(schedule!(%{}, admin), baseline_at: @baseline)
+      put_cron("false")
+
+      lv = mount_backups(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#backup-schedules-off",
+               "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
+             )
+
+      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=next]")
+    end
+
+    test "when backups can't run here, the list says why and shows no next run", %{conn: conn} do
+      admin = authed_user(:admin)
+      s = force!(schedule!(%{}, admin), baseline_at: @baseline)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :enabled, false)
+      )
+
+      lv = mount_backups(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#backup-schedules-unavailable",
+               "Scheduled backups can't run here:"
+             )
+
+      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=next]")
+    end
+
+    # D9: the home strip no longer says scheduled backups are only cron's
+    # once an enabled in-app schedule exists.
+    test "the overview set-up notice names the schedule once one is enabled", %{conn: conn} do
+      admin = authed_user(:admin)
+      schedule!(%{}, admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-setup",
+               "in-app schedules listed on the Backups page"
+             )
+
+      refute has_element?(lv, "#overview-backup-setup", "are a cron job set up by")
+    end
+
+    test "the overview alarm names the schedule once one is enabled", %{conn: conn, dir: dir} do
+      admin = authed_user(:admin)
+      schedule!(%{}, admin)
+      seed_manifest!(dir, ok: false)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning",
+               "in-app schedules listed on the Backups page"
+             )
+
+      refute has_element?(lv, "#overview-backup-warning", "ask whoever runs this server")
     end
   end
 end

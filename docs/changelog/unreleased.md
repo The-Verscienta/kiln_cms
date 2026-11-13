@@ -33,6 +33,45 @@ carries the reasoning.
   `platform_security_alert`; 1.9 shows them in the default site's bell as
   before. (Part of #2245.)
 
+<a id="backup-schedules-upgrade"></a>
+
+- **Run `mix ash.migrate` (new table `backup_schedules`). Nothing is scheduled until a platform admin creates a schedule; rolling the pin back is safe, and an older release ignores the table.**
+  The `add_backup_schedules` migration is expand-only: it creates one table
+  and touches nothing else. A new scheduler job (`KilnCMS.Backups.Scheduler`,
+  `KILN_BACKUP_SCHEDULER_CRON`, every minute by default on the `scheduling`
+  queue) starts with the release; with no schedules it reads an empty table
+  and does nothing. About 10 000 completed job rows a week, pruned after 7
+  days; `*/5 * * * *` is fine, and `false` turns every schedule off.
+  - **During a rolling deploy**, a node still on the previous release that
+    picks up a scheduler job discards it as an unknown worker. A window stays
+    due, so a newer node's next tick fires it.
+  - **After rolling back**, the older release has no scheduler: no schedule
+    fires, and backups come only from host cron and **Back up now**. The table
+    and its rows stay and fire again when you roll forward. Rolling the
+    migration itself back (`mix ecto.rollback`) drops the schedules.
+  - **Once you create a schedule**, the alarm threshold of each component it
+    covers follows the schedule (a weekly one raises it from 36 h to 252 h),
+    and host cron *and* a schedule on the same component take two backups
+    per window. See the Added entry below. (Part of #2219.)
+
+<a id="backup-run-dir-id-upgrade"></a>
+
+- **Run `mix ash.migrate` (new nullable `backup_runs.dir_id`); a backup resumed during a rolling deploy may run unpinned.**
+  One additive migration: `backup_runs.dir_id` (`uuid`, nullable, no index),
+  the id of the backup directory a run's files are in, which decides where a
+  resume runs (next entries). The release's boot migration applies it as
+  usual. What a mixed or rolled-back cluster does:
+  - **During a rolling deploy**, an older node can still pick up a resume's
+    start step. It runs it wherever it lands and records no `dir_id`, and
+    on a cluster with a `BACKUP_DIR` per host it can fail there as it did
+    in 1.9 (click **Resume** again once every node is upgraded).
+  - **Runs from before the upgrade** have no `dir_id`, so their first resume
+    runs on whichever node has their files or picks them up, and records the
+    id then.
+  - **Rolling back** is safe: older releases don't read the column, and it
+    can stay. Their resumes are unpinned again.
+  (Part of #2539.)
+
 <a id="blocked-ip-alerts-upgrade"></a>
 
 - **Run `mix ash.migrate` (new table `platform_security_alerts`). Sites with block rules now alert their admins when a blocked address is refused, on by default; existing webhook endpoints don't receive `security.blocked_ip` until it is ticked.**
@@ -72,6 +111,65 @@ carries the reasoning.
   notice. Tick it again after rolling forward. (Part of #2245.)
 
 ## Added
+
+<a id="backup-schedules"></a>
+
+- **In-app backup schedules: a platform admin can schedule database and media backups daily, weekly, fortnightly or monthly at a local time in a time zone, from a release console; the Backups page lists them.**
+  The alternative to the host's cron job (part of #2219). Created, changed
+  and deleted from a release console in this release, as a platform admin:
+
+  ```bash
+  bin/kiln_cms rpc '
+  admin = KilnCMS.Accounts.get_user_by_email!("you@example.com", authorize?: false)
+  {:ok, s} = KilnCMS.Backups.create_backup_schedule(%{components: [:db], interval: :daily,
+    time_of_day: ~T[03:00:00], starts_on: Date.utc_today(), time_zone: "Europe/Paris"}, actor: admin)
+  IO.inspect(s.id)'
+  ```
+
+  `update_backup_schedule/3` edits, pauses (`enabled: false`) and resumes
+  one, `destroy_backup_schedule/2` deletes it, and each is recorded in the
+  instance security log (`backup_schedule_created`, `_changed`, `_deleted`).
+  The **Backups** page gains a read-only **Schedules** section: each
+  schedule's cadence and components, "Paused", "Next run" (only when it can
+  fire here), the last window's outcome, and each component's alarm threshold
+  and where it came from, with a warning when `KILN_BACKUP_SCHEDULER_CRON` is
+  off or this node can't run backups. Scheduled runs read **Scheduled** in
+  History, and the Overview's backup strips mention the in-app schedules once
+  one is enabled.
+
+  How it behaves:
+  - A window fires once across every node: it is claimed in the transaction
+    that starts, queues or folds the backup. Schedules due together make one
+    backup. Only the latest window fires after downtime (missed ones are
+    logged), and a failed backup is not retried within its window.
+  - Editing a schedule's timing or components, or resuming it, rebaselines
+    it, so no window from before the edit fires. Pausing doesn't.
+  - A scheduled backup never folds into a queued Resume (#2540): the window
+    stays due and is retried every minute. A node with no `pg_dump`,
+    `pg_restore` or database URL defers the window the same way, so another
+    node can take it; each wait is logged once per window.
+    `BACKUP_ENABLED=false` refuses the window (claimed, not retried). A
+    database and media schedule ticked on a node with no media directory backs
+    up the database only, with a warning; a media-only one is refused.
+  - **Sub-daily intervals are refused** until keep-N retention ships (a later
+    part of #2219). Retention is unchanged and age-only, and every run is a
+    full set, so the sets on disk per component are about runs per day ×
+    `BACKUP_KEEP_DAYS`: a two-hourly schedule would keep 168 with the default
+    14 days.
+  - A schedule sets the alarm threshold of the components it covers
+    (interval plus half, at least 6 h: daily 36 h, weekly 252 h) only while it
+    can actually run here and has fired at least once since its baseline;
+    otherwise `BACKUP_STALE_AFTER_HOURS` applies. If host cron also backed the
+    component up in the last eight days, the lower of the two wins.
+  - Restoring a database dump brings back the schedules as they were,
+    deleted ones included, and each enabled one fires its latest window
+    within a minute. The staging scrub pauses every schedule
+    (`backup_schedules_disabled`).
+  - Telemetry: `[:kiln_cms, :backups, :schedule, :fired | :deferred |
+    :refused | :narrowed | :missed | :invalid | :unreadable]` and
+    `[:kiln_cms, :backups, :status, :schedules_unreadable]`.
+
+  See [Schedule backups in the app](../backups.md#schedule-backups-in-the-app).
 
 <a id="slack-webhook-format"></a>
 
@@ -390,6 +488,77 @@ carries the reasoning.
   `retry_after_seconds`). (Part of #2247.)
 
 ## Fixed
+
+<a id="backup-resume-safety"></a>
+
+- **Resuming a backup is safe against a double re-open, a step that outlived its Cancel, and a node without the files; a resume that can't run now says why on its History row.**
+  Three gaps, all on the path from **Resume** (or `Backups.request(resume:)`)
+  to a run that is `Running` again. See
+  [Several nodes and the backup lock](../backups.md#several-nodes-and-the-backup-lock)
+  and [Cancel a running backup](../backups.md#cancel-a-running-backup).
+  - **The re-open is atomic (#2421).** #2537 already stopped two requests
+    from resuming the same run through the lock; the Run's own `:resume`
+    guard still checked only the struct it had loaded. It is now repeated in
+    the UPDATE's WHERE (an in-app run that is `failed`, `canceled`, or
+    `running` and stale), so of two callers holding the same stale run one
+    re-opens it and the other gets `Ash.Error.Changes.StaleRecord`.
+  - **A step that outlives its Cancel is fenced (#2538).** Cancel reaches a
+    step's node through the database, so a node that has lost it keeps the
+    step running until its heartbeat's 90-second self-fence, and one that
+    reconnects sooner never fenced at all. Now:
+    - **Resume waits after a Cancel.** For 150 seconds after a run is
+      canceled, **Resume** on it is refused with "That backup was canceled
+      moments ago. Resume it again in N seconds: a step on a server that
+      lost contact with the database may still be stopping." The button
+      stays, and the `Canceled` row's tooltip says to wait about two and a
+      half minutes. `Backups.request/2` returns
+      `{:error, {:canceled_recently, seconds}}`. A resume that starts inside
+      the window without a click (queued earlier, or a retried start step)
+      waits in its step instead, up to 180 seconds, and logs "Waited N s
+      after the Cancel before resuming"; a legacy `Backups.Worker` resume
+      job snoozes for the time left.
+    - **`state.json` is written under the backup lock**, and only while the
+      step's job still holds it, so a canceled step can't overwrite what a
+      resume of the same stamp has written.
+    - **The step's History writes are filtered by its chain.** `record_progress`,
+      `finish` and `fail` land only on a `running` run whose `chain_id` is
+      still the writer's (`Run.Changes.OwnChain`).
+    - **The heartbeat stops a step whose job was canceled**, after its next
+      successful beat: a step whose Oban job is `cancelled`, `completed` or
+      `discarded`. A missing job row stops nothing (a failover to a lagging
+      standby can lose a live step's row).
+    The 150-second window is typically enough, not a guarantee: a heartbeat
+    hung on a half-open database connection waits out its query timeouts
+    before it stops the step. What the window alone protects is the step's
+    own `.partial` files, which are not fenced. The fenced `state.json` write
+    holds the cluster-wide advisory lock, so on a backup directory that
+    stalls (a hung NFS mount) Cancel, new requests and the heartbeat's sweep
+    wait behind it until their query timeout.
+  - **A resume runs where its files are (#2539).** On a cluster with a
+    `BACKUP_DIR` per host, a resume's start ran on whichever node picked it
+    up; elsewhere than the host with the files it was refused, the row kept
+    `Running` for over two hours, and the page had said "Backup resumed".
+    Each run now records its directory's `.kiln-dir-id` (`Run.dir_id`, set at
+    start and rebound on each resume), and a resume's start runs only on a
+    node that has `.work/<stamp>/state.json` locally or reads that id. Local
+    files win, so a copied directory, or one given a new id, still resumes. On
+    any other node the start waits 30 s and is put back, 20 times per attempt
+    across the job's four attempts and their 1/5/15-minute backoff (about an
+    hour, holding the lock, when no live node has the files), then is given
+    up: the lock is released (a queued request starts) and the row reads
+    "Resume refused: no server with its backup directory (id …) picked it up;
+    every attempt waited about 10 minutes for one". Nothing on the page can
+    cancel a resume during that wait or the wait after a Cancel: **Cancel**
+    is offered only for a `Running` row.
+  - **A refused resume is visible.** The start step now reads `state.json`
+    before it re-opens the run, and any refusal after the click (files not
+    on that server, no media directory for a media-only run, the wait after
+    a Cancel ran out, the start crashed or was interrupted before the
+    re-open) writes "Resume refused: `<reason>`" above the run's original
+    error, through the new system-only `Run` action `:note_resume_refused`
+    (code interface `Backups.note_run_resume_refused`). Refusals don't
+    stack. A `failed` or `canceled` run keeps its status and its **Resume**
+    button; a stale `running` one is marked `failed`.
 
 <a id="security-alert-gaps-2642"></a>
 

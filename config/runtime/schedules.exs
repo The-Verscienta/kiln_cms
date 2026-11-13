@@ -109,3 +109,12 @@ end
 if cron = System.get_env("KILN_BACKUP_MARKER_SYNC_CRON") do
   config :kiln_cms, :backup_marker_sync_cron, cron
 end
+
+# ## Backups: in-app schedules (part of #2219)
+#
+# When the app checks its backup schedules (`KilnCMS.Backups.Scheduler`).
+# Every minute by default; `false` turns them off, and then no schedule runs.
+# Read in every environment.
+if cron = System.get_env("KILN_BACKUP_SCHEDULER_CRON") do
+  config :kiln_cms, :backup_scheduler_cron, cron
+end

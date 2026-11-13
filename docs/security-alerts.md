@@ -10,7 +10,9 @@ send its alerts to a webhook.
 Alerts are built on the security log. Nothing records an alert on its own: an
 event is written to the log, and if it is one of the kinds below it raises an
 alert in the same database transaction. An event that rolls back raises
-nothing.
+nothing. Why alerts are built this way, who hears them and why turning them
+down always sends a notice are argued in
+[ADR 0027](decisions/0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md).
 
 ## What raises an alert
 
@@ -125,11 +127,14 @@ are not counted: they are only in the default site's bell.
   when (UTC), links to the security log on the site's own console host (a
   notice links to the Security alerts page), and says why you got it. Emails
   are in English, whatever language the console is in: an account stores no
-  preferred language, and one admin can hold sites in several. They go through the
+  preferred language, and one admin can hold sites in several
+  ([ADR 0029](decisions/0029-security-alert-email-stays-english-until-accounts-store-a-locale.md)). They go through the
   installation's own mail relay, never a site's (see
   [For operators](#for-operators)).
 - **Never a name or address of a person.** Neither the bell, the email nor the
-  webhook carries an email address, a user agent, a secret or a webhook URL.
+  webhook carries an email address, a user agent, a secret or a webhook URL
+  (a webhook URL is treated as a credential:
+  [ADR 0028](decisions/0028-webhook-urls-are-credentials-masked-wherever-they-are-shown-exported-or-logged.md)).
   The client's IP address is shown only as its network unless the site opted
   in (see [IP addresses in alerts](#ip-addresses-in-alerts)).
 
@@ -403,7 +408,10 @@ one back on raise nothing.
 
 A notice is written in the same transaction as the change. If the notice
 cannot be written, the change is refused and rolls back: alerts are never
-turned down without a word.
+turned down without a word. The platform's own switch for
+`api_key_rate_limited` is the one exception: it sends no notice and is
+recorded in the instance security log instead
+([ADR 0027](decisions/0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md)).
 
 ## IP addresses in alerts
 
