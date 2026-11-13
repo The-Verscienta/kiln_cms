@@ -846,9 +846,23 @@ defmodule KilnCMSWeb.BackupLive do
 
   defp outcome_label(%{last_outcome: :folded}), do: gettext("Last window: joined a queued backup")
 
-  defp outcome_label(%{last_outcome: :deferred}),
+  # A deferred window waits either behind a queued backup of another kind
+  # (#2540) or for a node that can run backups (the one that checked lacked
+  # pg_dump, pg_restore or a database URL).
+  defp outcome_label(%{last_outcome: :deferred, last_error: "queue_busy" <> _}),
     do:
       gettext("Waiting: another kind of backup is queued; this one starts once the queue clears.")
+
+  defp outcome_label(%{last_outcome: :deferred, last_error: error})
+       when error in ["no_pg_dump", "no_pg_restore", "no_database_url"],
+       do:
+         gettext(
+           "Waiting: the server that checked can't run backups (%{reason}); another server can take it.",
+           reason: error
+         )
+
+  defp outcome_label(%{last_outcome: :deferred}),
+    do: gettext("Waiting: this window is asked for again each minute.")
 
   defp outcome_label(%{last_outcome: :refused, last_error: error}),
     do: gettext("Last window refused: %{reason}", reason: error || "—")

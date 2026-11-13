@@ -1760,6 +1760,42 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
     end
 
+    test "a deferred window says why it waits", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      queued =
+        force!(schedule!(%{time_of_day: ~T[01:00:00]}, admin),
+          last_outcome: "deferred",
+          last_error: "queue_busy: a resume of 20260101-000000 is queued"
+        )
+
+      no_tools =
+        force!(schedule!(%{time_of_day: ~T[02:00:00]}, admin),
+          last_outcome: "deferred",
+          last_error: "no_pg_dump"
+        )
+
+      lv = mount_backups(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{queued.id} [data-role=last-outcome]",
+               "another kind of backup is queued"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{no_tools.id} [data-role=last-outcome]",
+               "the server that checked can't run backups (no_pg_dump)"
+             )
+
+      refute has_element?(
+               lv,
+               "#backup-schedule-#{no_tools.id} [data-role=last-outcome]",
+               "queue"
+             )
+    end
+
     test "the weekday is translated", %{conn: conn} do
       admin = authed_user(:admin)
       weekly = schedule!(%{interval: :weekly}, admin)

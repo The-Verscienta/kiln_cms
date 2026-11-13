@@ -24488,6 +24488,16 @@ msgstr "Esperando a su dispositivo… Siga las indicaciones del navegador para t
 msgid "Waiting: another kind of backup is queued; this one starts once the queue clears."
 msgstr "En espera: hay en cola una copia de otro tipo; esta empieza cuando la cola quede libre."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting: the server that checked can't run backups (%{reason}); another server can take it."
+msgstr "En espera: el servidor que lo comprobó no puede hacer copias de seguridad (%{reason}); otro servidor puede encargarse."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting: this window is asked for again each minute."
+msgstr "En espera: esta franja se vuelve a pedir cada minuto."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Walk through the workflow"
