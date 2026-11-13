@@ -260,6 +260,23 @@ defmodule KilnCMS.Security.AdminAllowlistTest do
 
       assert KilnCMS.OrgSettings.with_actor(nil, fn -> AdminAllowlist.policy(site.id) end) == :off
     end
+
+    # Inside a transaction `KilnCMS.Cache` reads on the caller's connection
+    # (#2823), so the row may be uncommitted and still roll back: it is never
+    # pinned as the last-known list.
+    test "a read inside a transaction is not remembered" do
+      site = org("aal-in-transaction")
+      key = KilnCMS.Cache.admin_allowlist_last_known_key(site.id)
+      assert KilnCMS.Cache.peek(key) == nil
+
+      assert {:ok, :off} =
+               KilnCMS.Repo.transaction(fn -> AdminAllowlist.remember_read(site.id, nil) end)
+
+      assert KilnCMS.Cache.peek(key) == nil
+
+      assert AdminAllowlist.remember_read(site.id, nil) == :off
+      assert {_version, :off} = KilnCMS.Cache.peek(key)
+    end
   end
 
   describe "the operator's switch" do
