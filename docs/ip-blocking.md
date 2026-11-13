@@ -31,7 +31,11 @@ summary of how many client networks were refused. Refusals are also written to
 the [security log](security-events.md) as `ip_block_refused`, sampled to one
 per client network per 15 minutes, with the rule and the surface and **without
 the address**. To stop the alerts, untick **Blocked addresses** on **Security
-alerts** (`/editor/security-alerts`); the log entries continue.
+alerts** (`/editor/security-alerts`); the log entries continue. Why the list
+fails open, covers dynamic routes only and logs no address is argued in
+[ADR 0026](decisions/0026-the-ip-block-list-fails-open-and-covers-dynamic-routes-only.md);
+how the alert is thinned out and who hears it, in
+[ADR 0027](decisions/0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md).
 
 ## Block an address or range
 
@@ -267,7 +271,7 @@ removing a rule in the console clears that cache on every node at once. An
 expiry takes effect at the second it passes, not at the next refresh. A rule
 changed directly in the database is seen when the minute is up.
 
-There is no environment variable for this: the behaviour is fixed. (Automatic
+There is no environment variable for this: the behavior is fixed. (Automatic
 blocking, above, has its own variables.)
 
 ## Recovering from a lock-out
@@ -324,9 +328,11 @@ never blocked.
   `kiln_cms.ip_block.refused.count` counter, tagged by surface (see
   [Observability](observability.md#blocked-addresses)), and a sample of them is
   written to the security log as `ip_block_refused` with the rule and surface
-  only. Neither carries the address, nor does the `blocked_ip` alert.
+  only. Neither carries the address, nor does the `blocked_ip` alert
+  ([ADR 0026](decisions/0026-the-ip-block-list-fails-open-and-covers-dynamic-routes-only.md),
+  amended for the security event).
 - **Automatic rules share the list.** They carry an expiry, so they follow the
-  "expired rules" behaviour above too, and the scanner guard may only add rules;
+  "expired rules" behavior above too, and the scanner guard may only add rules;
   an admin can still remove one at any time.
 - **Not in the API.** Block rules are not on JSON:API, GraphQL or MCP, so an API
   key can neither read nor edit them. Only an organization admin, in the console.
