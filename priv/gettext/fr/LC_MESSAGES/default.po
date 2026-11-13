@@ -25307,12 +25307,12 @@ msgstr "Nous avons envoyé un code à %{email}."
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "We'll email you each time a passkey is added to your account."
-msgstr "Nous vous enverrons un e-mail chaque fois qu’une clé d’accès est ajoutée à votre compte."
+msgstr "Nous vous enverrons un e-mail chaque fois qu'une clé d'accès est ajoutée à votre compte."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "We'll email you when an authenticator app is added or replaced."
-msgstr "Nous vous enverrons un e-mail lorsqu’une application d’authentification est ajoutée ou remplacée."
+msgstr "Nous vous enverrons un e-mail lorsqu'une application d'authentification est ajoutée ou remplacée."
 
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
@@ -25963,7 +25963,7 @@ msgstr "Vous êtes connecté, mais votre compte n’a aucun rôle sur %{site}."
 #: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #, elixir-autogen, elixir-format
 msgid "You can also use a passkey."
-msgstr "Vous pouvez aussi utiliser une clé d’accès."
+msgstr "Vous pouvez aussi utiliser une clé d'accès."
 
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format

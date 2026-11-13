@@ -227,7 +227,11 @@ defmodule KilnCMSWeb.TeamLiveTest do
 
       help = view |> element("#team-invitations-help") |> render()
 
-      # The numbers come from the code, not the string.
+      # The numbers come from the code, not the string: the msgid carries
+      # placeholders, and the page fills them from `Invitations`.
+      source = File.read!("lib/kiln_cms_web/live/team_live.ex")
+      assert source =~ "Links work for %{days} days."
+      assert source =~ "stay listed for %{keep} days"
       assert help =~ "Links work for #{Invitations.ttl_days()} days."
 
       assert help =~

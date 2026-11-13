@@ -226,6 +226,22 @@ defmodule KilnCMS.Staging.ScrubTest do
       """
     end
 
+    test "names no key the scrub no longer returns" do
+      keys = Scrub.run([]) |> Map.keys() |> Enum.map(&to_string/1)
+
+      named =
+        ~r/\(`([a-z_]+)`\)/
+        |> Regex.scan(scrub_table!(), capture: :all_but_first)
+        |> List.flatten()
+
+      stale = Enum.uniq(named) -- keys
+
+      assert stale == [], """
+      The scrub table in #{@guide} ("## The scrub") names keys Scrub.run/1 no
+      longer returns: #{inspect(stale)}. Remove or rename those rows.
+      """
+    end
+
     defp scrub_table! do
       [_, section] = @guide |> File.read!() |> String.split("\n## The scrub\n", parts: 2)
       [section | _] = String.split(section, "\n## ", parts: 2)

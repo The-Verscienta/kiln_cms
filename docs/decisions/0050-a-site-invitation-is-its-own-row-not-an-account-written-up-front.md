@@ -45,9 +45,11 @@ for the address until the invitee clicks the link and accepts:
   registrant's credentials (`KilnCMS.Accounts.Changes.ForgetPriorCredentials`);
 - a confirmed account accepts with one click.
 
-`KilnCMS.Accounts.Changes.AcceptInvitation` adds the membership
-(`KilnCMS.Accounts.Invitations.grant_membership/4`) and consumes the row in
-the same transaction as the account write. The rules are in the
+On the two password paths, `KilnCMS.Accounts.Changes.AcceptInvitation`
+adds the membership (`KilnCMS.Accounts.Invitations.grant_membership/4`) and
+consumes the row in the same transaction as the account write. The one-click
+path is `Invitation.:accept_existing` (`KilnCMS.Accounts.Invitations.AcceptExisting`),
+which writes no account and grants and consumes the same way. The rules are in the
 `KilnCMS.Accounts.Invitations` moduledoc.
 
 ## Why not an account up front
@@ -80,8 +82,8 @@ Each of these holds in today's code:
   at the chosen tier grants it at once. An invitation that is never accepted, sent to
   a mistyped address, or revoked would have been a live role on the site
   until someone removed it. As a row of its own, an invitation grants
-  nothing: `AcceptInvitation` writes the membership only once the token is
-  presented, and re-checks that an `:admin` invitation's sender is still a
+  nothing: `AcceptInvitation` and `AcceptExisting` write the membership only
+  once the token is presented, and each re-checks that an `:admin` invitation's sender is still a
   standing platform admin (`Invitations.inviter_still_admin?/1`).
 
 ## Rejected
@@ -103,12 +105,15 @@ Each of these holds in today's code:
 
 ## Consequences
 
-- An invitation is new personal data: an address held for at most the 7-day
-  life plus 30 days until the daily `:prune_expired` sweep. The staging scrub
+- An invitation is new personal data: an address held for 7 days from the
+  last send (each resend restarts them), plus about 30 days until the daily
+  `:prune_expired` sweep removes the expired row. The staging scrub
   deletes the table.
 - A pending invitation admits nobody through single sign-on, on the
-  operator's provider or a site's own: the invitee accepts with a password
-  first ([sso.md](../sso.md)). After that the account is confirmed, and SSO
+  operator's provider or a site's own. On an invite-only site the invitee
+  accepts with a password first ([sso.md](../sso.md)); on a site open to
+  registration, an invitee who signs in with the operator's SSO first gets a
+  confirmed account and then accepts with one click (`:accept_existing`). After that the account is confirmed, and SSO
   signs it in as an existing account.
 - Inviting an address that has an unconfirmed account invites it rather than
   adding it, and accepting takes that account over.
