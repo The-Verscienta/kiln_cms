@@ -1401,6 +1401,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -2382,6 +2383,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "About %{percentage}% of sentences look passive (guideline: %{max}%). This is an estimate — passive voice is often the right choice."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "About Resume"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
@@ -6159,6 +6165,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Continue this interrupted backup from the files it already wrote."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Continues from the files already written; each is reused only if its checksum still matches. It backs up the files listed when the backup first started, so its files can be from different times."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -10955,6 +10966,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "How to build the formula"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "How to restore a media backup written in several parts"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex

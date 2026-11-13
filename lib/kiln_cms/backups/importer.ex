@@ -18,8 +18,9 @@ defmodule KilnCMS.Backups.Importer do
   ## What an imported run is
 
   `origin: :imported`, trigger `"cron"` unless a manifest says otherwise,
-  `verified: false` (nothing is hashed or verified on import; a `sha256` is
-  recorded only when the manifest or the stamp's checksum sidecar supplies one),
+  `verified` as a covering manifest records it and `false` otherwise (nothing is
+  hashed or verified on import; a `sha256` is recorded only when the manifest
+  or the stamp's checksum sidecar supplies one),
   `succeeded` unless a file is zero bytes (`failed`, "empty artifact").
   `started_at` is the stamp read as UTC; `finished_at` is the newest file's
   mtime. Components are inferred from the files.

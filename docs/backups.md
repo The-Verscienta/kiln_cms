@@ -656,9 +656,24 @@ app write a set of independent `tar.gz` parts,
 the single `kiln-media-<stamp>.tar.gz` name. Given the same media directory and
 settings, both put the same files in the same parts under the same names. Every
 part is a complete archive, so `tar -tzf` works on each and `restore.sh media`
-accepts either shape. Anything of yours that globs `kiln-media-*.tar.gz` (a
-rclone filter, a monitoring script, a retention job) must accept the `.partNN`
-names too. The reasoning is in [ADR 0042](decisions/0042-backup-sh-re-implements-the-media-planner-in-bash-and-both-change-in-the-same-pull-request.md).
+accepts either shape. A glob such as `kiln-media-*.tar.gz` already matches the
+`.partNN.tar.gz` names. What it leaves out is the checksum sidecar,
+`kiln-media-<stamp>.sha256` (and `kiln-db-*.dump` leaves out
+`kiln-db-<stamp>.sha256`). Without its sidecar a part set does not restore by
+default ([below](#restore-a-media-set-that-has-several-parts)), and a dump
+cannot be checked. So an rclone filter, a monitoring script or a retention job
+of yours must take the sidecars too:
+
+```bash
+rclone copy /var/backups/kiln/media r2:kiln-backups/media \
+  --include "kiln-media-*.tar.gz" --include "kiln-media-*.sha256"
+rclone copy /var/backups/kiln/db r2:kiln-backups/db \
+  --include "kiln-db-*.dump" --include "kiln-db-*.sha256"
+```
+
+Don't widen it to `kiln-media-*`: that also copies a running backup's
+`.partial` files (and a killed one's), and `restore.sh` refuses a set with one
+beside it. Why the two writers split media the same way is in [ADR 0042](decisions/0042-backup-sh-re-implements-the-media-planner-in-bash-and-both-change-in-the-same-pull-request.md).
 
 The one difference is recovery. A failed in-app backup keeps its finished parts
 so it can be [resumed](#media-backups-in-parts-2218); a failed cron run removes
@@ -1526,8 +1541,9 @@ window fires once however many nodes tick.
 `:every_2h`, `:every_4h`, `:every_8h` and `:every_12h` exist in the schema but
 are refused when a schedule is created or its interval changed, until keep-N
 retention (a later part of #2219) can cap how many backups a schedule keeps.
-Retention today is by age alone, and every run is a full set, so the sets on
-disk for each component are about:
+Retention today caps backups by age, not by count (beyond the recovery points
+and newest backups it keeps), and every run is a full set, so the sets on disk
+for each component are about:
 
 > runs per day × `BACKUP_KEEP_DAYS`
 
@@ -2140,9 +2156,15 @@ run of the [last-good marker](#the-last-good-marker) sync (every 15 minutes by
 default), and on demand:
 
 ```bash
-bin/kiln eval "KilnCMS.Backups.Importer.run()"
-# {:ok, %{imported: 2, pending: 0, skipped: 0, failed: 0}}
+bin/kiln_cms rpc '{:ok, r} = KilnCMS.Backups.Importer.run(); IO.inspect(r)'
+# %{failed: 0, imported: 2, pending: 0, skipped: 0}
 ```
+
+It runs on the serving node, as the other commands on this page do; `eval`
+starts no Repo, so the read fails and nothing is imported. When the directory
+cannot be listed or the history cannot be read, the match fails and `rpc` exits
+non-zero. A row that could not be written does not: it is counted in `failed`
+and the call still returns `{:ok, _}`, so read `failed` as well.
 
 It scans `$BACKUP_DIR/db` and `$BACKUP_DIR/media` for `kiln-db-<stamp>` and
 `kiln-media-<stamp>` files and creates one row per stamp. The parts of one
@@ -2180,8 +2202,12 @@ Everything stored in a row (errors, log lines, off-site remote) is passed
 through `KilnCMS.Backups.Redact`: URL userinfo, `key=value` credentials and
 rclone connection-string remotes are replaced with `***`. The status panel's
 off-site remote and `manifest.json`'s `offsite` are redacted the same way. Read
-access is the platform admin only; the table is written only by the `:backups`
-system actor and is purged by the staging scrub (`backup_runs_purged`).
+access is the platform admin only. The table is written by the `:backups`
+system actor, and by one person's action: a platform admin's `:cancel` of a
+running backup, which sets its status, finish time and error ("Canceled by a
+platform admin") and appends a log line naming that admin by email. It is
+purged by
+the staging scrub (`backup_runs_purged`).
 
 ### It needs the client tools in the image
 
@@ -2352,18 +2378,27 @@ yourself, say), set `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` to restore it
 anyway. It never falls back to the hashes in `manifest.json`; the sidecar is the
 supported record. The reasoning is in [ADR 0035](decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
 
-**By hand** (no script): check the sidecar, then extract in numeric order.
+**By hand** (no script): check the sidecar, and extract only if it passed.
 
 ```bash
-cd /backups/media && sha256sum -c kiln-media-20260805-031700.sha256
-for p in kiln-media-20260805-031700.part*.tar.gz; do
-  tar -xzf "$p" -C /data/kiln/uploads
-done
+cd /backups/media &&
+  sha256sum --strict -c kiln-media-20260805-031700.sha256 &&
+  for p in kiln-media-20260805-031700.part*.tar.gz; do
+    tar -xzf "$p" -C /data/kiln/uploads
+  done
 ```
 
-Plain `tar -xzf` per part is the supported manual form (the shell glob sorts
-two-digit names correctly up to part99). `cat parts | tar -xzi` works only with
-GNU tar and is not supported.
+On macOS, use `shasum -a 256 --strict -c` in place of `sha256sum --strict -c`.
+The `&&` is the point: without it a failed check still extracts, and `--strict`
+fails on a sidecar line it cannot parse instead of skipping it. Unlike
+`restore.sh`, the check only covers the parts the sidecar lists: a stray
+`.partNN` file that it doesn't list passes the check and the glob extracts it
+anyway, so first make sure the directory holds only the parts the sidecar
+names (`restore.sh` refuses such a set). The order
+of the parts does not matter, past `part99` too: each file is in exactly one
+part, and directories are not archived, so no part overwrites another. Plain
+`tar -xzf` per part is the supported manual form. `cat parts | tar -xzi` works
+only with GNU tar and is not supported.
 
 What can go wrong:
 

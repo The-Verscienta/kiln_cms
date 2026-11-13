@@ -945,9 +945,22 @@ defmodule KilnCMSWeb.BackupLive do
 
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/70">
             <span data-role="verified">{verified_label(run)}</span>
-            <span :for={count <- part_counts(run)} data-role="parts">
+            <a
+              :for={count <- part_counts(run)}
+              data-role="parts"
+              href={docs_url("backups.md#restore-a-media-set-that-has-several-parts")}
+              target="_blank"
+              rel="noopener"
+              title={gettext("How to restore a media backup written in several parts")}
+              class="link inline-flex items-center gap-1 text-primary-ink"
+            >
               {ngettext("%{count} part", "%{count} parts", count)}
-            </span>
+              <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+              <span class="sr-only">
+                {gettext("How to restore a media backup written in several parts")}
+                {gettext("(opens in a new tab)")}
+              </span>
+            </a>
             <span
               :for={{label, status} <- destination_chips(run)}
               data-role="destination"
@@ -987,6 +1000,17 @@ defmodule KilnCMSWeb.BackupLive do
               <.icon name="hero-arrow-path" class="mr-1 size-4" />
               {gettext("Resume")}
             </button>
+            <.help_tip
+              :if={resumable?}
+              id={"resume-help-#{run.id}"}
+              label={gettext("About Resume")}
+              title={gettext("Resume")}
+              learn_more={docs_url("backups.md#media-backups-in-parts-2218")}
+            >
+              {gettext(
+                "Continues from the files already written; each is reused only if its checksum still matches. It backs up the files listed when the backup first started, so its files can be from different times."
+              )}
+            </.help_tip>
           </div>
 
           <pre
