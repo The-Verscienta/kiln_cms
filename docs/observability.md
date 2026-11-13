@@ -454,10 +454,20 @@ Useful Grafana panel: `sum(rate(kiln_cms_security_api_key_trip_count[5m])) by (r
 
 ### Refused API credentials
 
-Two events count user tokens the API refused. Neither is in
-`KilnCMSWeb.Telemetry.metrics/0` and neither writes a security event (a client
-retrying in a loop must not become a write per request): attach a `:telemetry`
-handler to count them. Neither carries a token, user or address.
+Two events count user tokens the API refused. Neither writes a security event
+(a client retrying in a loop must not become a write per request), and neither
+carries a token, user or address.
+
+- `[:kiln_cms, :api, :invalid_bearer]` is in `KilnCMSWeb.Telemetry.metrics/0`
+  (#2635). With the [Prometheus exporter](#prometheus-and-grafana) on, it is
+  `kiln_cms_api_invalid_bearer_count`, labeled `enforced`, `surface`, `read`
+  (the event's `read?`: a `?` is not valid in a Prometheus label name) and
+  `reason`. This is the count that gates removing
+  `KILN_API_REJECT_INVALID_BEARER`
+  ([ADR 0017](decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md));
+  the query is under [Useful panels](#useful-panels).
+- `[:kiln_cms, :api, :second_factor_required]` is not in the metrics list:
+  attach a `:telemetry` handler to count it.
 
 | Event | Emitted when | Measurements | Metadata |
 |-------|--------------|--------------|----------|
@@ -561,13 +571,16 @@ Every label is bounded:
 - **`route`** is the router pattern (`/api/content/:type/:slug`), never the
   request path.
 - **`queue` and `worker`** are Oban's.
-- **`result`, `status`, `surface`, `mode`, `action`, `event` and `class`** are small
-  enumerations.
+- **`result`, `status`, `surface`, `mode`, `action`, `event`, `class` and
+  `reason`** are small enumerations.
+- **`enforced` and `read`** are booleans, exported as `"true"` or `"false"`.
 - **The content-type label (`type`, `kind`)** keeps a compiled type's name but
   folds every admin-defined type into `dynamic`. Admin-defined types are
   per-org, so on a multi-tenant host they have no ceiling.
 
-`test/kiln_cms_web/metrics_test.exs` rejects an unbounded tag.
+`test/kiln_cms_web/metrics_test.exs` rejects an unbounded tag, and a tag that
+is not a valid Prometheus label name: the exporter writes a tag's name into the
+scrape as is, and one invalid name makes Prometheus reject the whole scrape.
 
 ### Useful panels
 
@@ -583,6 +596,15 @@ Every label is bounded:
 - **Pool pressure:** p95 of `kiln_cms_repo_query_queue_time`. When it rises,
   `POOL_SIZE` is too small (see "Oban queues & pool sizing" in [`performance.md`](performance.md)).
 - **Oban failures:** `sum by (queue, worker) (rate(oban_job_exception_count[5m]))`.
+- **Stale bearer tokens, the `KILN_API_REJECT_INVALID_BEARER` removal gate:**
+  `sum by (enforced, read, reason, surface) (increase(kiln_cms_api_invalid_bearer_count[<release window>]))`.
+  `enforced="true"` counts the `401`s (and `/ws/gql` refusals) actually served.
+  `enforced="false"` comes only from an instance that set the variable to
+  `false`, so it is zero by construction everywhere else. The counter lives in
+  the node's memory and starts again from zero on every deploy or restart.
+  `increase()` allows for that reset, but whatever was counted after the last
+  scrape before a restart is lost, and nothing is counted at all unless
+  `KILN_METRICS_ENABLED` is on.
 
 The same definitions feed LiveDashboard in development, so adding a metric needs
 no change to the exporter.
