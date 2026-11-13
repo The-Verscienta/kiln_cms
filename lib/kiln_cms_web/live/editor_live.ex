@@ -985,7 +985,7 @@ defmodule KilnCMSWeb.EditorLive do
       if needs_severity > 0,
         do:
           flash <>
-            " " <>
+            ". " <>
             gettext(
               "%{count} of them touch a safety field — open each in the editor to publish and say how much the change matters.",
               count: needs_severity
@@ -1001,7 +1001,7 @@ defmodule KilnCMSWeb.EditorLive do
       if skipped > 0 and verb != "delete",
         do:
           flash <>
-            " " <>
+            ". " <>
             gettext(
               "A row is skipped when it can't take this step: it isn't in a state that allows it, you may not change it on this site, or something on it needs fixing first (open it to see what)."
             ),

@@ -179,6 +179,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Second-factor help matches the address: `/editor/two-factor` links to the main host's setup page from a site's own address and tells a passkey-only admin what works there, Settings says up front when the email code is owed, and "we'll email you" sits beside each add control on both setup pages.**
   ([#2899](https://github.com/The-Verscienta/kiln_cms/pull/2899) · [long form](docs/changelog/unreleased.md#second-factor-help-follows-the-host))
 
+- **Calendar chips offer the drag and arrow keys only to someone who may move that date; the content list's bulk bar now says why it skipped rows.**
+  ([long form](docs/changelog/unreleased.md#calendar-drag-and-bulk-skip-reason))
+
 ### Fixed
 
 - **Backup Resume is safe: the re-open is atomic, Resume waits ~2.5 min after a Cancel, a step that outlived its Cancel can't overwrite state or history, a resume runs on the node with its files, and a refused one says why on its row.**

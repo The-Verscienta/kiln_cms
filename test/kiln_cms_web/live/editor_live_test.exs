@@ -280,7 +280,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       lv |> element("button[phx-value-action='unpublish']") |> render_click()
       html = lv |> element("button[phx-click='confirm_bulk']") |> render_click()
 
-      assert html =~ "Unpublish: 1 updated, 1 skipped"
+      assert html =~ "Unpublish: 1 updated, 1 skipped. A row is skipped when"
 
       assert html =~
                "A row is skipped when it can&#39;t take this step: it isn&#39;t in a state that allows it, you may not change it on this site, or something on it needs fixing first (open it to see what)."

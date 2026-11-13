@@ -2,7 +2,9 @@
 
 - **Status** — accepted (2026-11-13), recording the rule #2472 shipped
   (merged 2026-11-08). It is written after the fact, so it argues against the
-  code as it is now.
+  code as it is now. Amended 2026-11-13 by
+  [#2894](https://github.com/The-Verscienta/kiln_cms/issues/2894) (the
+  calendar no longer offers a drag it would refuse, see "Amendment").
 - **References** — [#2134](https://github.com/The-Verscienta/kiln_cms/issues/2134),
   the decision, and [#2472](https://github.com/The-Verscienta/kiln_cms/pull/2472),
   which built it; [#2475](https://github.com/The-Verscienta/kiln_cms/issues/2475),
@@ -110,7 +112,22 @@ mirrors.
 - **Releases and the calendar.** "Add to release" with an Unpublish action is
   still offered to editors who may not publish, which is safe because only an
   admin ships a release. The calendar still lets them drag a live page's
-  unpublish chip, and refuses the move when it is dropped.
+  unpublish chip, and refuses the move when it is dropped. Since #2894 it no
+  longer does; see "Amendment".
+
+## Amendment (2026-11-13, #2894): the calendar offers the drag only to who may make it
+
+The calendar now offers a chip's drag handle and arrow-key nudge only to
+someone whose move the policy would allow: content chips (publish,
+unpublish, archive, expired) to an admin, or to an editor on a site where
+**Let editors publish** is on and whose role may edit the chip's type;
+release go-live chips to an admin. This is
+[#2474](https://github.com/The-Verscienta/kiln_cms/issues/2474) item 1. The
+rule in this record is unchanged, and so is where it is enforced: the
+handle is worked out when the calendar loads its dates, so a page loaded
+before the switch or a role changed can still offer a drag, and the policy
+refuses it on drop as before. "Add to release" with an Unpublish action is
+still offered to every editor, for the reason given above.
 
 How to take content down, step by step, is in
 [Take content down](../take-content-down.md). The permissions are in the

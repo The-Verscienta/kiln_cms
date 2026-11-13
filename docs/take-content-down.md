@@ -11,11 +11,11 @@ page away, and it needs publish rights even on a draft. Any editor may
 **Unarchive**, which brings an archived page back as a draft. Why the rule
 covers dates and archive too is in [ADR 0051](decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md).
 
-The editor and the content list offer these controls only to someone who may
-use them, and the unpublish date is locked for anyone else. If you don't see
-**Unpublish**, ask an admin. The calendar is the exception: anyone may drag a
-chip there, and a move they may not make is refused when it is dropped. Deleting is different: it moves a page to the
-trash, and only an admin can do it ([Trash and restore](trash.md)).
+The editor, the content list and the calendar offer these controls only to
+someone who may use them, and the unpublish date is locked for anyone else.
+If you don't see **Unpublish**, or a calendar chip doesn't move, ask an admin.
+Deleting is different: it moves a page to the trash, and only an admin can do
+it ([Trash and restore](trash.md)).
 
 ## Unpublish a page from its editor
 
@@ -43,8 +43,12 @@ To take down several at once:
 3. Read the prompt, then choose **Unpublish** or **Archive** again to confirm,
    or **Cancel**.
 
-The message afterwards counts the rows updated and the rows skipped. A row
-that can't make the move, such as a draft ticked for Unpublish, is skipped.
+The message afterwards counts the rows updated and the rows skipped. When a
+row is skipped, it adds why:
+*A row is skipped when it can't take this step: it isn't in a state that allows it, you may not change it on this site, or something on it needs fixing first (open it to see what).*
+A draft ticked for Unpublish is skipped because it isn't live. A row you may
+not take down on this site is skipped too, and the message doesn't say which
+row it was: open a skipped row in the editor to see what stops it.
 
 If someone else moved one of the pages to the trash after the list loaded,
 the action currently fails without a message: the list reloads, and the
@@ -77,9 +81,18 @@ the page is published.
    keys. Each moves the page's unpublish date. The time of day stays the
    same.
 
-Editors who may not publish can still drag the chip. The move is refused when
-it is dropped, and the chip snaps back. The calendar's own messages are listed
-under [Rescheduling from the grid](content-lifecycles.md#rescheduling-from-the-grid).
+A chip you may move has a grab cursor, and its tooltip ends with
+"arrow keys move it". That is an admin, or an editor on a site where
+**Team → Publishing** lets editors publish, and only for content types their
+role may edit. For anyone else the chip is a plain link to the page: it
+doesn't drag, and the arrow keys don't move it.
+
+The calendar works this out when it loads its dates. If the switch or your
+role changes after that, a chip may still offer the drag until the calendar
+reloads, and the move is then refused when it is dropped. The refusal
+reloads the calendar's dates, so the chip stops offering the drag. The calendar's own
+messages are listed under
+[Rescheduling from the grid](content-lifecycles.md#rescheduling-from-the-grid).
 
 ## Take pages down with a release
 
@@ -111,8 +124,9 @@ on a row's **Unpublish**, the message says why:
 | *You don't have permission to do that.* | Any other refusal. |
 | *Someone else changed this item's status first — reload to see where it stands.* | Someone moved the page first. |
 
-The bar shows no such message. It keeps offering what it offered when the
-list loaded, and counts each refused row as skipped.
+The bar keeps offering what it offered when the list loaded. It counts each
+refused row as skipped and gives the general reason above, not one of these
+messages.
 
 ## Where next
 

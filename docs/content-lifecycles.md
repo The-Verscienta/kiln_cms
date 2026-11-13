@@ -177,6 +177,21 @@ something a screen reader can otherwise report.
 The day moves and the time of day does not: a 09:00 publish dragged to Thursday
 is a 09:00 Thursday publish.
 
+**The handle depends on who is looking.** A chip offers the drag and the
+arrow keys only to someone whose move would be allowed: it has a grab cursor,
+and its tooltip ends with "arrow keys move it". A publish date is a publish
+and an unpublish date is a takedown, so a content chip moves for an admin, and
+for an editor on a site where **Team → Publishing** lets editors publish when
+their role may edit the chip's content type (`editable_types`). A release
+go-live chip moves for an admin only. For anyone else the chip is a plain link
+to the record (#2894, #2474 item 1).
+
+The calendar works this out each time it loads its dates (opening it, moving
+the window, changing a filter, or a requery after someone's write). A page
+loaded before the switch was turned off, or before a role changed, can still
+offer a drag; the move is then refused as below, and the reload that follows
+the refusal takes the handle away.
+
 | Lane | Drag moves |
 |---|---|
 | Scheduled publish | `scheduled_at` |
@@ -196,7 +211,7 @@ deadline. Neither is what "give me another week" means. Those chips carry a
 appears only when the health is `:due`, `:overdue` or `:expired`, because a
 review falling due next month is not asking for anything.
 
-Two refusals, both returning an inline error and snapping the chip back:
+Two refusals, both returning an inline error and leaving the date as it was:
 
 * **Into the past.** Uniform across lanes: a backwards drag is nearly always a
   slip, and every lane's past date means something abrupt — a publish that
@@ -209,8 +224,13 @@ Two refusals, both returning an inline error and snapping the chip back:
 The write itself is then subject to the record's own policy, so an editor
 scoped by `editable_types` to other types cannot move what they cannot edit,
 and the calendar route is editor-gated, so a viewer never reaches it at all.
+The handle rule above only hides moves the policy would refuse; the policy is
+still what refuses them.
 
-What a refused move says (the chip snaps back each time):
+What a refused move says. The last three rows are what a stale page sees,
+since a chip whose move the policy refuses offers no drag on a fresh one. A
+refused mouse drag can currently leave the chip drawn on the day it was
+dropped on, though nothing moved; reload to see where it is (#2786).
 
 | Message | Meaning |
 |---|---|
