@@ -478,7 +478,6 @@ defmodule KilnCMS.Security.Alerts do
   end
 
   defp error_kind(%{__struct__: struct}), do: inspect(struct)
-  defp error_kind(_error), do: "unknown error"
 
   @doc """
   Whether the platform kind `kind` is on: always for a kind not in

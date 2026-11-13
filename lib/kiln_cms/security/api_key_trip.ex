@@ -170,7 +170,10 @@ defmodule KilnCMS.Security.ApiKeyTrip do
 
   @doc false
   # Test seam: forget every key.
-  def clear, do: :ets.delete_all_objects(@table) && :ok
+  def clear do
+    :ets.delete_all_objects(@table)
+    :ok
+  end
 
   defp verified_key(conn) do
     case Ash.PlugHelpers.get_actor(conn) do
