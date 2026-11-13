@@ -55,8 +55,25 @@ defmodule KilnCMS.Test.PgUrlCases do
        "postgres://u@h/db", nil},
       {"an `@` in the query is not userinfo", "postgres://u:p@h/db?application_name=a@b",
        "postgres://u@h/db?application_name=a@b", "p"},
-      {"an `@` in the password, unencoded", "postgres://u:p@ss@h/db", "postgres://u@h/db",
-       "p@ss"},
+      # The userinfo ends where libpq's URI parser (`conninfo_uri_parse_options`
+      # in fe-connect.c) ends it: at the FIRST `@` before the first `/`. So an
+      # unencoded `@` in a password splits it, and a `?` or `#` before the `@`
+      # belongs to the password.
+      {"an unencoded `@` in the password: the first `@` ends the userinfo",
+       "postgres://u:p@ss@h/db", "postgres://u@ss@h/db", "p"},
+      {"a `?` before the `@` is part of the password", "postgres://u:p?ss@h/db",
+       "postgres://u@h/db", "p?ss"},
+      {"a `#` before the `@` is part of the password", "postgres://u:p#ss@h/db",
+       "postgres://u@h/db", "p#ss"},
+      {"no path, an `@` in the query", "postgres://u:p@h?application_name=a@b",
+       "postgres://u@h?application_name=a@b", "p"},
+      {"a `/` before any `@` means no userinfo", "postgres://h/db?password=x@y&a=b@c",
+       "postgres://h/db?a=b@c", "x@y"},
+      {"a percent-encoded query key is decoded, as libpq does",
+       "postgres://kiln@db/kiln?pass%77ord=x&sslmode=require",
+       "postgres://kiln@db/kiln?sslmode=require", "x"},
+      {"a key that decodes to something else is kept", "postgres://u@h/db?pass%2577ord=x",
+       "postgres://u@h/db?pass%2577ord=x", nil},
       {"an IPv6 host", "ecto://u:pw@[::1]:5432/db", "postgres://u@[::1]:5432/db", "pw"},
       {"several hosts", "postgres://u:pw@h1:5432,h2:5433/db?target_session_attrs=read-write",
        "postgres://u@h1:5432,h2:5433/db?target_session_attrs=read-write", "pw"},

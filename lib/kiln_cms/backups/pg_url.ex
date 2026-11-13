@@ -16,9 +16,12 @@ defmodule KilnCMS.Backups.PgUrl do
   `KilnCMS.Backups.RcloneRemote` does for an rclone remote:
 
     * a userinfo password (`postgres://user:secret@host/db`) is removed from
-      the URL and percent-decoded. A valid `%HH` becomes its byte; an invalid
+      the URL and percent-decoded. The userinfo ends where libpq ends it: at
+      the first `@` before the first `/`, so `postgres://u:p?ss@h/db` has the
+      password `p?ss`. A valid `%HH` becomes its byte; an invalid
       escape and `%00` stay literal rather than raising;
-    * a query `password=` (libpq accepts one) is removed as well. When both
+    * a query `password=` (libpq accepts one, and decodes the key, so
+      `pass%77ord=` counts) is removed as well. When both
       are present the query value wins, as it does in libpq;
     * everything else (the user, hosts, IPv6 brackets, the path, the other
       query parameters and their order) is kept byte for byte. There is no
@@ -65,35 +68,26 @@ defmodule KilnCMS.Backups.PgUrl do
   defp parse(url) do
     case String.split(url, "://", parts: 2) do
       [scheme, rest] when scheme in ["postgres", "postgresql"] ->
-        # The authority runs to the first `/`, `?` or `#`; userinfo ends at the
-        # LAST `@` inside it, so an `@` in the query is never mistaken for one.
-        {authority, tail} = split_at(rest, ["/", "?", "#"])
-        {userinfo, host} = split_userinfo(authority)
-        {path, query} = split_query(tail)
-        {:ok, %{scheme: scheme, userinfo: userinfo, host: host, path: path, query: query}}
+        {userinfo, after_userinfo} = split_userinfo(rest)
+        {host_and_path, query} = split_query(after_userinfo)
+        {:ok, %{scheme: scheme, userinfo: userinfo, host: host_and_path, query: query}}
 
       _ ->
         :not_a_uri
     end
   end
 
-  defp split_at(string, separators) do
-    case :binary.match(string, separators) do
-      {pos, _} -> {binary_part(string, 0, pos), binary_part(string, pos, byte_size(string) - pos)}
-      :nomatch -> {string, ""}
-    end
-  end
+  # libpq's rule (`conninfo_uri_parse_options` in fe-connect.c): scan from
+  # after `//` to the first `@` or `/`. An `@` found first ends the userinfo,
+  # so a `?` or `#` before it is part of the password, and an `@` after the
+  # first `/` (in the path or query) never is.
+  defp split_userinfo(rest) do
+    case :binary.match(rest, ["@", "/"]) do
+      {pos, 1} when binary_part(rest, pos, 1) == "@" ->
+        {binary_part(rest, 0, pos), binary_part(rest, pos + 1, byte_size(rest) - pos - 1)}
 
-  defp split_userinfo(authority) do
-    case :binary.matches(authority, "@") do
-      [] ->
-        {nil, authority}
-
-      matches ->
-        {pos, 1} = List.last(matches)
-
-        {binary_part(authority, 0, pos),
-         binary_part(authority, pos + 1, byte_size(authority) - pos - 1)}
+      _ ->
+        {nil, rest}
     end
   end
 
@@ -115,7 +109,7 @@ defmodule KilnCMS.Backups.PgUrl do
 
       stripped =
         parts.scheme <>
-          "://" <> userinfo(user) <> parts.host <> parts.path <> query_string(query)
+          "://" <> userinfo(user) <> parts.host <> query_string(query)
 
       {stripped, password_env(decode(password))}
     end
@@ -130,22 +124,31 @@ defmodule KilnCMS.Backups.PgUrl do
     end
   end
 
-  # Every `password=` parameter, in order (libpq keeps the last), and the
-  # query without them. Untouched when there is none.
+  # Every `password` parameter, in order (libpq keeps the last), and the
+  # query without them. libpq percent-decodes keys too, so `pass%77ord=` is
+  # one. Untouched when there is none.
   defp take_query_passwords(nil), do: {nil, []}
 
   defp take_query_passwords(query) do
     {passwords, kept} =
       query
       |> String.split("&")
-      |> Enum.split_with(&String.starts_with?(&1, "password="))
+      |> Enum.split_with(&password_param?/1)
 
     case passwords do
       [] ->
         {query, []}
 
       _ ->
-        {Enum.join(kept, "&"), Enum.map(passwords, &String.replace_prefix(&1, "password=", ""))}
+        {Enum.join(kept, "&"),
+         Enum.map(passwords, &(&1 |> String.split("=", parts: 2) |> List.last()))}
+    end
+  end
+
+  defp password_param?(param) do
+    case String.split(param, "=", parts: 2) do
+      [key, _value] -> decode(key) == "password"
+      [_key] -> false
     end
   end
 

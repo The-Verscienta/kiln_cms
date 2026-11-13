@@ -1404,7 +1404,8 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
         "14",
         " 14",
         "14 ",
-        " 14",
+        # A no-break space, not a duplicate of " 14".
+        "\u00A014",
         "+14",
         "014",
         "1",

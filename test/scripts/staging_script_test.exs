@@ -71,6 +71,19 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
     end
   end
 
+  test "the closing hint prints the staging URL without its password", ctx do
+    assert {out, 0} =
+             up(ctx,
+               prod: "ecto://prod:prod-pw@prod-db/kiln_prod",
+               staging: "ecto://stage:stage%40pw@stage-db/kiln_staging?sslmode=require"
+             )
+
+    assert out =~ "DATABASE_URL=postgres://stage@stage-db/kiln_staging?sslmode=require"
+    refute out =~ "stage%40pw"
+    refute out =~ "stage@pw"
+    refute out =~ "prod-pw"
+  end
+
   test "a URL without a password leaves that side to the operator's own PGPASSWORD", ctx do
     assert {_out, 0} =
              up(ctx,

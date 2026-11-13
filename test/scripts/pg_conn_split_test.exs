@@ -1,6 +1,7 @@
 defmodule KilnCMS.Scripts.PgConnSplitTest do
   @moduledoc """
-  `pg_conn_split`, the shell copy of `KilnCMS.Backups.PgUrl.split/1` that
+  `pg_conn_split` (with its helper `pg_conn_decode`), the shell copy of
+  `KilnCMS.Backups.PgUrl.split/1` that
   `scripts/backup.sh`, `scripts/restore.sh` and `scripts/staging.sh` each
   carry (#2719, #2726).
 
@@ -24,11 +25,12 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
 
   unless System.find_executable("bash"), do: @moduletag(skip: "needs bash on PATH")
 
-  test "the three scripts carry the same pg_conn_split" do
+  test "the three scripts carry the same pg_conn_decode and pg_conn_split" do
     [first | rest] = Enum.map(@scripts, &function!/1)
 
     for {script, body} <- Enum.zip(tl(@scripts), rest) do
-      assert body == first, "#{Path.basename(script)}'s pg_conn_split differs from backup.sh's"
+      assert body == first,
+             "#{Path.basename(script)}'s pg_conn_decode/pg_conn_split differ from backup.sh's"
     end
   end
 
@@ -67,8 +69,13 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
     {url, if(has == "1", do: password)}
   end
 
+  # Both functions, since pg_conn_split calls pg_conn_decode.
   defp function!(script) do
-    [body] = Regex.run(~r/^pg_conn_split\(\) \{\n.*?^\}\n/ms, File.read!(script))
-    body
+    source = File.read!(script)
+
+    Enum.map_join(~w(pg_conn_decode pg_conn_split), fn name ->
+      [body] = Regex.run(~r/^#{name}\(\) \{\n.*?^\}\n/ms, source)
+      body
+    end)
   end
 end

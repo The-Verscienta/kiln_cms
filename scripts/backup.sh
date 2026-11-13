@@ -212,25 +212,60 @@ rclone_split_remote() {
 
 # Keep the database password out of pg_dump/pg_restore/psql's argv (#2726) and
 # give libpq a URI it reads as one (#2719), as KilnCMS.Backups.PgUrl.split/1
-# does for the app. Keep the copies in scripts/backup.sh, scripts/restore.sh and
-# scripts/staging.sh identical (a test compares them): each script must run
-# alone, so none of them sources a shared file.
+# does for the app. Keep the copies of pg_conn_decode and pg_conn_split in
+# scripts/backup.sh, scripts/restore.sh and scripts/staging.sh identical (a
+# test compares them): each script must run alone, so none of them sources a
+# shared file.
 #
+# $1 = percent-encoded text. Sets PG_CONN_DECODED: each valid `%HH` but `%00`
+# decoded, anything else, `+` included, as written.
+pg_conn_decode() {
+  local s="$1" out="" hh
+  # `printf -v … %b`, never `$(printf …)`: a substitution drops trailing
+  # newlines. Literal backslashes are doubled first so `%b` reads only the
+  # `\xHH` escapes made here (a bare `\c` would cut the text short).
+  s="${s//\\/\\\\}"
+  while :; do
+    case "$s" in
+      *%*) ;;
+      *) break ;;
+    esac
+    out+="${s%%\%*}"
+    s="${s#*\%}"
+    hh="${s:0:2}"
+    case "$hh" in
+      00) out+="%" ;;
+      [0123456789ABCDEFabcdef][0123456789ABCDEFabcdef])
+        out+="\\x${hh}"
+        s="${s:2}"
+        ;;
+      *) out+="%" ;;
+    esac
+  done
+  out+="$s"
+  # Not with an empty argument: bash 3.2 then assigns the output of the
+  # previous `printf -v` instead of "".
+  PG_CONN_DECODED=""
+  if [ -n "$out" ]; then printf -v PG_CONN_DECODED '%b' "$out"; fi
+}
+
 # $1 = a DATABASE_URL. Sets PG_CONN_URL (what goes in argv), PG_CONN_PASSWORD
 # and PG_CONN_HAS_PASSWORD (1 when PG_CONN_PASSWORD is to be exported as
 # PGPASSWORD, in a subshell around the one command that needs it):
 #   - `ecto://` (any case) becomes `postgres://`; nothing else is rewritten;
-#   - the userinfo password (up to the LAST `@` before the first `/`, `?` or
-#     `#`, from the first `:`) and every query `password=` are removed. The
-#     query one wins, as in libpq. Each valid `%HH` but `%00` is decoded;
-#     anything else, `+` included, stays as written;
+#   - the userinfo password and every query `password` parameter (the key is
+#     decoded first, as libpq does: `pass%77ord=` is one) are removed and
+#     decoded. The query one wins, as in libpq. The userinfo ends where libpq
+#     ends it (fe-connect.c): at the first `@` before the first `/`, so a `?`
+#     or `#` before that `@` is part of the password; the password runs from
+#     the first `:` in it;
 #   - with no non-empty password the URL is left as written, so an inherited
 #     PGPASSWORD or ~/.pgpass still applies.
 # A string that is not a postgres:// or postgresql:// URI (a `key=value`
 # conninfo) is left unchanged.
 pg_conn_split() {
-  local url="$1" rest authority tail userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
-  local path query="" has_query=0 q seg kept="" sep="" qpw="" has_qpw=0 out hh
+  local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
+  local query="" has_query=0 q seg kept="" sep="" qpw="" has_qpw=0
   PG_CONN_URL="$url"
   PG_CONN_PASSWORD=""
   PG_CONN_HAS_PASSWORD=0
@@ -245,30 +280,26 @@ pg_conn_split() {
   esac
 
   rest="${url#*://}"
-  authority="${rest%%[/?#]*}"
-  tail="${rest:${#authority}}"
-  host="$authority"
-  case "$authority" in
-    *@*)
-      has_userinfo=1
-      userinfo="${authority%@*}"
-      host="${authority##*@}"
-      user="$userinfo"
-      case "$userinfo" in
-        *:*)
-          user="${userinfo%%:*}"
-          pw="${userinfo#*:}"
-          has_pw=1
-          ;;
-      esac
-      ;;
-  esac
+  userinfo="${rest%%[@/]*}"
+  host="$rest"
+  if [ "${rest:${#userinfo}:1}" = "@" ]; then
+    has_userinfo=1
+    host="${rest:$((${#userinfo} + 1))}"
+    user="$userinfo"
+    case "$userinfo" in
+      *:*)
+        user="${userinfo%%:*}"
+        pw="${userinfo#*:}"
+        has_pw=1
+        ;;
+    esac
+  fi
 
-  path="$tail"
-  case "$tail" in
+  # From here `host` is the hosts and the path, up to the query.
+  case "$host" in
     *\?*)
-      path="${tail%%\?*}"
-      query="${tail#*\?}"
+      query="${host#*\?}"
+      host="${host%%\?*}"
       has_query=1
       ;;
   esac
@@ -276,16 +307,17 @@ pg_conn_split() {
     q="$query"
     while :; do
       seg="${q%%&*}"
+      PG_CONN_DECODED=""
       case "$seg" in
-        password=*)
-          qpw="${seg#password=}"
-          has_qpw=1
-          ;;
-        *)
-          kept="${kept}${sep}${seg}"
-          sep="&"
-          ;;
+        *=*) pg_conn_decode "${seg%%=*}" ;;
       esac
+      if [ "$PG_CONN_DECODED" = "password" ]; then
+        qpw="${seg#*=}"
+        has_qpw=1
+      else
+        kept="${kept}${sep}${seg}"
+        sep="&"
+      fi
       [ "$seg" = "$q" ] && break
       q="${q#*&}"
     done
@@ -299,33 +331,11 @@ pg_conn_split() {
 
   PG_CONN_URL="${url%%://*}://"
   [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${user}@"
-  PG_CONN_URL+="${host}${path}"
+  PG_CONN_URL+="${host}"
   [ -n "$query" ] && PG_CONN_URL+="?${query}"
 
-  # `printf -v … %b`, never `$(printf …)`: a substitution drops trailing
-  # newlines. Literal backslashes are doubled first so `%b` reads only the
-  # `\xHH` escapes made here (a bare `\c` would cut the password short).
-  pw="${pw//\\/\\\\}"
-  out=""
-  while :; do
-    case "$pw" in
-      *%*) ;;
-      *) break ;;
-    esac
-    out+="${pw%%\%*}"
-    pw="${pw#*\%}"
-    hh="${pw:0:2}"
-    case "$hh" in
-      00) out+="%" ;;
-      [0123456789ABCDEFabcdef][0123456789ABCDEFabcdef])
-        out+="\\x${hh}"
-        pw="${pw:2}"
-        ;;
-      *) out+="%" ;;
-    esac
-  done
-  out+="$pw"
-  printf -v PG_CONN_PASSWORD '%b' "$out"
+  pg_conn_decode "$pw"
+  PG_CONN_PASSWORD="$PG_CONN_DECODED"
   [ -n "$PG_CONN_PASSWORD" ] && PG_CONN_HAS_PASSWORD=1
   return 0
 }

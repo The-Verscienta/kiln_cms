@@ -66,8 +66,8 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
     assert "--dbname=postgres://kiln@db/kiln_drill?sslmode=require" in restore_args
     assert length(checks) == 5
 
-    for ["psql", password | args] <- checks do
-      assert password == "hunter2"
+    for check <- checks do
+      assert ["psql", "hunter2" | args] = check
       assert List.last(args) == "postgres://kiln@db/kiln_drill?sslmode=require"
     end
 
@@ -75,6 +75,12 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
       refute arg =~ "hunter2"
       refute arg =~ "p%40ss"
     end
+
+    # The closing hint shows the URL to scrub, without either password.
+    assert out =~ ~s(STAGING_DATABASE_URL="postgres://kiln@db/kiln_drill?sslmode=require")
+    refute out =~ "hunter2"
+    refute out =~ "p%40ss"
+    refute out =~ "p@ss"
   end
 
   test "without a password in the URL, the operator's own PGPASSWORD still applies", ctx do
