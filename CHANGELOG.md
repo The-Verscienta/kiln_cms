@@ -159,7 +159,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2801](https://github.com/The-Verscienta/kiln_cms/pull/2801) · [long form](docs/changelog/unreleased.md#ci-required-check-covers-more-jobs))
 
 - **The fields admin says under Editor input that the choice changes only how editors fill a field in; the field's type and text format stay as they are.**
-  ([long form](docs/changelog/unreleased.md#editor-input-help-line))
+  ([#2880](https://github.com/The-Verscienta/kiln_cms/pull/2880) · [long form](docs/changelog/unreleased.md#editor-input-help-line))
 
 ### Fixed
 
