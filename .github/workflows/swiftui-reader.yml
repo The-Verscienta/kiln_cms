@@ -2,24 +2,30 @@ name: SwiftUI reader
 
 # `swift test` for examples/swiftui-reader (the decoding, Portable Text,
 # media and sync tests), on its own so it runs only when what it checks can
-# have changed: the example itself, or the Swift emitter and walker its
-# checked-in models come from. An emitter change doesn't regenerate
-# Sources/KilnModels/Kiln.swift here (that needs a seeded database; run
-# `bin/regenerate` and commit the result), but this still proves the example
-# builds against the file it has. Run it by hand from the Actions tab
-# (workflow_dispatch) for anything the filter misses, such as an Xcode bump.
+# have changed: the example itself, or the export, Swift emitter and walker its
+# checked-in models come from. This job doesn't regenerate
+# Sources/KilnModels/Kiln.swift; the core suite's
+# test/kiln_cms/schema_export/swiftui_reader_drift_test.exs fails when the file
+# is stale (run `bin/regenerate` and commit the result). This proves the example
+# builds against the file it has. A change elsewhere that moves the export (a
+# core block, the firing engine's format version) fails that drift test, and
+# the regenerated file then lands under examples/ and triggers this job. Run it
+# by hand from the Actions tab (workflow_dispatch) for anything the filter
+# misses, such as an Xcode bump.
 on:
   push:
     branches: [main]
     # Keep the two lists the same.
     paths:
       - "examples/swiftui-reader/**"
+      - "lib/kiln_cms/schema_export.ex"
       - "lib/kiln_cms/schema_export/swift.ex"
       - "lib/kiln_cms/schema_export/walk.ex"
       - ".github/workflows/swiftui-reader.yml"
   pull_request:
     paths:
       - "examples/swiftui-reader/**"
+      - "lib/kiln_cms/schema_export.ex"
       - "lib/kiln_cms/schema_export/swift.ex"
       - "lib/kiln_cms/schema_export/walk.ex"
       - ".github/workflows/swiftui-reader.yml"
