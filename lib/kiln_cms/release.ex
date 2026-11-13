@@ -655,6 +655,84 @@ defmodule KilnCMS.Release do
   defp admin_allowlist_entries(nil), do: []
   defp admin_allowlist_entries(row), do: row.cidrs
 
+  @doc """
+  Turn off a site's two-step sign-in requirement (#2247) — the way back in
+  when no administrator of the site can pass it, such as a last administrator
+  whose only passkey is lost.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.second_factor_requirement_off()'
+      bin/kiln_cms rpc 'KilnCMS.Release.second_factor_requirement_off(org: "acme")'
+
+  `org: "<slug>"` acts on a site other than the default one. Prints what it
+  found or did and returns `{:ok, :off}` or `{:error, message}`.
+
+  It runs the resource's `operator_override` action as the `:operator` system
+  actor: it sets the requirement to off and nothing else, records "Two-step
+  sign-in requirement changed" (`via: console`) in the site's security log in
+  the same transaction, and the change reaches every node at once. An
+  administrator who has set up a second factor turns it back on from the
+  site's policy page (part 3 of #2247 adds that page).
+
+  Through `rpc`, not `eval`: the cluster-wide cache bust needs the running
+  application. `rpc` exits 0 whatever this
+  returns; a script that must fail on an error matches the result:
+
+      bin/kiln_cms rpc '{:ok, :off} = KilnCMS.Release.second_factor_requirement_off()'
+  """
+  @spec second_factor_requirement_off(keyword()) :: {:ok, :off} | {:error, String.t()}
+  def second_factor_requirement_off(opts \\ []),
+    do: run_second_factor_requirement_off(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_second_factor_requirement_off(opts, serving?) do
+    result =
+      with true <- serving? || {:error, @needs_running_node},
+           {:ok, org_id} <- KilnCMS.CMS.FieldConversion.org_id(opts[:org]),
+           {:ok, row} <- second_factor_policy_row(org_id) do
+        turn_second_factor_requirement_off(org_id, row)
+      end
+
+    with {:error, message} <- result, do: IO.puts(message)
+    result
+  end
+
+  defp second_factor_policy_row(org_id) do
+    case KilnCMS.CMS.list_site_second_factor_policy(
+           actor: KilnCMS.SystemActor.new(:operator),
+           tenant: org_id,
+           authorize_with: :error
+         ) do
+      {:ok, rows} ->
+        {:ok, List.first(rows)}
+
+      {:error, error} ->
+        {:error, "Could not read the two-step sign-in requirement: #{Exception.message(error)}"}
+    end
+  end
+
+  defp turn_second_factor_requirement_off(_org_id, row)
+       when is_nil(row) or row.required_for == :off do
+    IO.puts("This site does not require two-step sign-in; nothing to turn off.")
+    {:ok, :off}
+  end
+
+  defp turn_second_factor_requirement_off(org_id, row) do
+    case KilnCMS.CMS.override_site_second_factor_policy(row,
+           actor: KilnCMS.SystemActor.new(:operator),
+           tenant: org_id
+         ) do
+      {:ok, _row} ->
+        IO.puts("Turned off the two-step sign-in requirement (it was: #{row.required_for}).")
+        IO.puts("The change reaches every node now, and is in the site's security log.")
+        {:ok, :off}
+
+      {:error, error} ->
+        {:error,
+         "Could not turn off the two-step sign-in requirement: #{Exception.message(error)}"}
+    end
+  end
+
   # `serving?` is an argument only so the test can take the `eval` branch.
   @doc false
   def run_conversion(type, source, target, opts, serving?) do

@@ -165,6 +165,20 @@ carries the reasoning.
   old reading, but backups the new prune has already deleted are gone. The
   in-app backup already read the variable this way and is unchanged. (#2727)
 
+<a id="second-factor-policy-upgrade"></a>
+
+- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and a `users.inserted_at` column). Nothing is enforced; rolling back is safe.**
+  The `require_second_factor` migration is expand-only. It creates
+  `site_second_factor_policy`, one row per site that saves a two-step sign-in
+  requirement (none do yet: there is no page for it), and adds
+  `users.inserted_at` (`NOT NULL`, default `now()`), so every existing
+  account gets the time the migration ran. An account's grace period never
+  starts before its `inserted_at`, so when a site later turns the requirement
+  on, no account from before this upgrade starts out overdue. Run the release
+  migration as usual. **Rolling back is safe:** an older release ignores the
+  table and the column, and reads the two new security log types as
+  unrecognized events ("Unrecognized event (…)"). (Part of #2247.)
+
 ## Breaking
 
 <a id="media-purge-quarantined"></a>
@@ -465,6 +479,44 @@ carries the reasoning.
   `KilnCMS.Accounts.Changes.NotifyFactorAdded` on `User` `:confirm_totp`
   and `Passkey` `:register`. See
   [We email you when a second factor is added](../two-factor-auth.md#we-email-you-when-a-second-factor-is-added).
+  (Part of #2247.)
+
+<a id="second-factor-policy-groundwork"></a>
+
+- **Groundwork for requiring two-step sign-in by role, not yet enforced, and an operator command to turn a site's requirement off.**
+  A site will be able to require a second factor (an authenticator app or a
+  passkey) of its administrators, of its editors and administrators, or of
+  everyone, with a grace period of 0 to 90 days (default 14). This release
+  adds the setting and the logic that answers who it covers and by when, but
+  **no page, no reminder and no enforcement**: a site with no saved
+  setting, which is every site, requires nothing, and nobody is held.
+  For operators: `bin/kiln_cms rpc
+  'KilnCMS.Release.second_factor_requirement_off(org: "acme")'` turns a
+  site's requirement off (and nothing else) as the server's `:operator`
+  actor, for when no administrator can pass it, such as a last administrator
+  whose only passkey is lost. It prints what it found and returns
+  `{:ok, :off}` or `{:error, message}`; it needs `rpc`, not `eval`. The
+  change is recorded as "Two-step sign-in requirement changed" with no
+  person. See
+  [Turn the requirement off from the server](../two-factor-auth.md#turn-the-requirement-off-from-the-server).
+  Security log: new types `second_factor_policy_changed` (`required_for`,
+  `grace_days`, `previous_required_for`, `change`, `via`; it replaces
+  `org_setting_changed` for this setting) and `second_factor_required`
+  (`tier`, `surface`, `reason`), and a `proof` key on
+  `second_factor_enrolled` and `passkey_added`. Only the first is recorded
+  in this release. For developers: `KilnCMS.CMS.SiteSecondFactorPolicy`
+  (not on JSON:API, GraphQL or MCP) and
+  `KilnCMS.Accounts.TwoFactorRequirement`: `policy/1` (cached for a
+  minute; an unreadable row is logged and read as off, uncached),
+  `read_policy/1`, `status/3`, `step_up/3`, `required_somewhere?/1`,
+  `promotion_warning/4` and `roster/3`. Every save of the setting by a
+  person needs that person's second factor, proved within the last 15
+  minutes (`:second_factor_verified_at` in the changeset context) or by a
+  `code` argument checked against the account's shared second-factor
+  budget; pass `code` only on submit, since every build of the changeset
+  charges it. Why it fails open, why API keys are exempt and why every save
+  needs a fresh factor:
+  [ADR 0030](../decisions/0030-the-second-factor-requirement-fails-open-and-only-a-freshly-verified-admin-changes-it.md).
   (Part of #2247.)
 
 ## Changed
