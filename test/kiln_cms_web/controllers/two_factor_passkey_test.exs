@@ -29,6 +29,15 @@ defmodule KilnCMSWeb.TwoFactorPasskeyTest do
   # `www.example.com`, stands for any other — a tenant site host.
   @ceremony_host "localhost"
 
+  @generic_refusal %{
+    "error" => "That passkey couldn't be verified. Try again or use another method."
+  }
+
+  @start_over %{
+    "error" => "This sign-in can't be finished here. Start again.",
+    "redirect_to" => "/sign-in"
+  }
+
   @remember_me_cookie to_string(
                         KilnCMSWeb.SessionCookie.remember_me_key(
                           Application.compile_env(:kiln_cms, :secure_session_cookie, false)
@@ -260,7 +269,8 @@ defmodule KilnCMSWeb.TwoFactorPasskeyTest do
 
       refused = conn |> options() |> verify(assertion("tfp-other-#{other.id}"))
 
-      assert %{"error" => _} = json_response(refused, 401)
+      # The same answer as every other failed check: nothing says which.
+      assert json_response(refused, 401) == @generic_refusal
       assert get_session(refused, "user_token") == nil
       assert :error = BearerAuth.user_from_token(token)
       assert sign_in_events(user) == []
@@ -332,26 +342,57 @@ defmodule KilnCMSWeb.TwoFactorPasskeyTest do
       {user, _secret, cred} = both_factors()
       {conn, _token} = pending(conn, user)
 
-      assert json_response(verify(conn, assertion(cred)), 401)
+      assert json_response(verify(conn, assertion(cred)), 401) == @generic_refusal
     end
 
-    test "nothing pending: both steps refuse", %{conn: conn} do
+    test "nothing pending: both steps tell the script to start again at /sign-in", %{
+      conn: conn
+    } do
       conn =
         conn
         |> Map.put(:host, @ceremony_host)
         |> put_private(:plug_skip_csrf_protection, true)
         |> init_test_session(%{})
 
-      assert json_response(options(conn), 401)
-      assert json_response(post(conn, ~p"/sign-in/verify/passkey", assertion("x")), 401)
+      for refused <- [
+            options(conn),
+            post(conn, ~p"/sign-in/verify/passkey", assertion("x"))
+          ] do
+        assert json_response(refused, 401) == @start_over
+      end
     end
 
-    test "an app-only account gets no step-up challenge", %{conn: conn} do
+    # The five minutes `PendingSignIn.max_age/0` allows have run out between
+    # the page loading and the passkey being used.
+    test "an expired pending sign-in: both steps tell the script to start again", %{
+      conn: conn
+    } do
+      {user, _secret, cred} = both_factors()
+      {conn, _token} = pending(conn, user)
+
+      expired =
+        Phoenix.Token.sign(
+          KilnCMSWeb.Endpoint,
+          "two-factor pending",
+          %{"user_id" => user.id, "token" => "unused", "remember_me" => false},
+          signed_at: System.system_time(:second) - PendingSignIn.max_age() - 1
+        )
+
+      conn = put_session(conn, :pending_2fa, expired)
+
+      assert json_response(options(conn), 401) == @start_over
+      assert json_response(verify(conn, assertion(cred)), 401) == @start_over
+      assert sign_in_events(user) == []
+    end
+
+    # Its code still works, so the exchange is not over: the generic refusal,
+    # not a redirect that would throw the pending sign-in away.
+    test "an app-only account gets no step-up challenge and is not sent back", %{conn: conn} do
       {user, _secret} = TwoFactorFixtures.enabled_user(role: :editor)
       {conn, _token} = pending(conn, user)
 
       refused = options(conn)
-      assert json_response(refused, 401)
+      assert json_response(refused, 401) == @generic_refusal
       assert get_session(refused, :passkey_step_up_nonce) == nil
     end
 

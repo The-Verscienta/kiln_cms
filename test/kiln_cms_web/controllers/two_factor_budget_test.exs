@@ -285,7 +285,12 @@ defmodule KilnCMSWeb.TwoFactorBudgetTest do
 
       denied = step_up(user, assertion("budget-#{user.id}"))
 
-      assert json_response(denied, 429)["error"]
+      # The code form's text, which the script shows in place of its generic
+      # refusal; no `redirect_to`, because the pending sign-in is not over.
+      assert json_response(denied, 429) == %{
+               "error" => "Too many attempts. Wait a few minutes and try again."
+             }
+
       assert [_seconds] = get_resp_header(denied, "retry-after")
       assert get_session(denied, "user_token") == nil
 

@@ -104,6 +104,34 @@ defmodule KilnCMS.Accounts.SecondFactorNoticeTest do
       assert mail.html_body =~ "A new authenticator app replaced"
     end
 
+    # The settings page confirms on its `current_user` assign, which predates
+    # an enrollment another tab finished since: the wording comes from the
+    # row, not from that struct.
+    test "a confirmation on a struct loaded before another enrollment says it replaced one" do
+      stale = passkey_user()
+      enrolled_elsewhere = enroll_totp(stale)
+      assert [_first] = mails_to(stale)
+      assert is_nil(stale.totp_confirmed_at)
+
+      {:ok, staged} = Accounts.setup_totp(stale, %{}, actor: stale)
+      assert is_nil(staged.totp_confirmed_at)
+
+      {:ok, _} =
+        Accounts.confirm_totp(
+          staged,
+          %{
+            code: code(staged.totp_pending_secret),
+            current_code: code(enrolled_elsewhere.totp_secret)
+          },
+          actor: staged
+        )
+
+      mails = mails_to(stale)
+      assert length(mails) == 2
+      assert Enum.count(mails, &(&1.html_body =~ "A new authenticator app replaced")) == 1
+      assert Enum.count(mails, &(&1.html_body =~ "An authenticator app was set up")) == 1
+    end
+
     test "a wrong code mails nobody" do
       user = passkey_user()
       {:ok, staged} = Accounts.setup_totp(user, %{}, actor: user)
@@ -134,8 +162,10 @@ defmodule KilnCMS.Accounts.SecondFactorNoticeTest do
       :telemetry.attach(
         handler,
         [:oban, :engine, :insert_job, :start],
+        # The handler is VM-wide and this module is async: only this test's
+        # own inserts, which run in its process, count.
         fn _event, _measurements, _meta, _config ->
-          send(test, {:mail_queued, Repo.in_transaction?()})
+          if self() == test, do: send(test, {:mail_queued, Repo.in_transaction?()})
         end,
         nil
       )

@@ -82,7 +82,7 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   def new(conn, _params) do
     case pending(conn, :any) do
-      {:ok, _pending} -> render_form(conn, 200, nil)
+      {:ok, %{factors: factors}} -> render_form(conn, 200, nil, factors)
       :error -> redirect(conn, to: ~p"/sign-in")
     end
   end
@@ -177,12 +177,15 @@ defmodule KilnCMSWeb.TwoFactorController do
 
   @doc """
   Step one of the passkey step-up (#2247): a challenge for the pending
-  account's own passkeys, its nonce parked in the session. Refused alike when
-  nothing is pending, the account has no passkey, or this host cannot run the
-  ceremony.
+  account's own passkeys, its nonce parked in the session.
+
+  Nothing pending (the five minutes ran out, or there never was a sign-in)
+  answers `start_over/1`, as the code form sends the caller back to
+  `/sign-in`; a pending account without a passkey, or a host that cannot run
+  the ceremony, answers the generic refusal.
   """
   def passkey_options(conn, _params) do
-    with true <- WebAuthn.ceremony_host?(conn.host),
+    with {:host, true} <- {:host, WebAuthn.ceremony_host?(conn.host)},
          {:ok, %{user: user}} <- pending(conn, :passkey) do
       challenge = WebAuthn.step_up_challenge(user)
 
@@ -193,7 +196,8 @@ defmodule KilnCMSWeb.TwoFactorController do
       |> put_session(@step_up_key, WebAuthn.stash_step_up_challenge(challenge, user.id))
       |> json(%{publicKey: WebAuthn.step_up_options(challenge)})
     else
-      _refused -> passkey_refused(conn)
+      :error -> no_passkey_pending(conn)
+      {:host, false} -> passkey_refused(conn)
     end
   end
 
@@ -201,6 +205,16 @@ defmodule KilnCMSWeb.TwoFactorController do
   Step two of the passkey step-up (#2247): verify the assertion as this
   pending sign-in's second factor and complete it, answering JSON
   `{redirect_to}` for the script to follow.
+
+  The refusals are three, and the script acts on each:
+
+    * the pending sign-in is over (expired, never there, or already
+      redeemed) — `start_over/1`, the code form's redirect as JSON. A pending
+      account that merely has no passkey any more is not over: its code still
+      works, so it gets the generic refusal;
+    * the shared second-factor budget is spent — 429 with the code form's
+      "too many attempts" text and a `retry-after`;
+    * anything else — one generic 401 that does not say which check failed.
   """
   def passkey_verify(conn, params) do
     nonce = get_session(conn, @step_up_key)
@@ -232,6 +246,15 @@ defmodule KilnCMSWeb.TwoFactorController do
 
       json(conn, %{redirect_to: return_to})
     else
+      # Pending state missing or expired (`:error`, unless the account merely
+      # lost its passkey) or redeemed elsewhere (`:taken`): the code form's
+      # redirect to `/sign-in`, in a shape a script can follow.
+      :error ->
+        no_passkey_pending(conn)
+
+      :taken ->
+        start_over(conn)
+
       :unavailable ->
         conn
         |> put_status(503)
@@ -248,12 +271,36 @@ defmodule KilnCMSWeb.TwoFactorController do
         |> put_status(429)
         |> json(%{error: gettext("Too many attempts. Wait a few minutes and try again.")})
 
-      # Nothing pending, no passkey, no challenge for this account, a refused
-      # assertion, or `:taken`: one answer. A refused assertion was already
-      # recorded and charged by `SecondFactor.check_passkey/3`.
-      _refused ->
+      # No challenge for this account (`nil`) or a refused assertion
+      # (`:invalid`): one answer, so the caller cannot tell which. A refused
+      # assertion was already recorded and charged by
+      # `SecondFactor.check_passkey/3`.
+      refused when refused in [nil, :invalid] ->
         passkey_refused(conn)
     end
+  end
+
+  # `pending(conn, :passkey)` is `:error` both when nothing is pending and when
+  # the pending account has no passkey (any more). Only the first is over; the
+  # second still has its code, so it gets the generic refusal and stays put.
+  # The extra resolve is on this refusal path only.
+  defp no_passkey_pending(conn) do
+    case pending(conn, :any) do
+      {:ok, _pending} -> passkey_refused(conn)
+      :error -> start_over(conn)
+    end
+  end
+
+  # "This exchange is over, start again" for the passkey script: the
+  # redirect the code form answers with, as JSON the script follows, and the
+  # text the page shows when it has no factor left to offer.
+  defp start_over(conn) do
+    conn
+    |> put_status(401)
+    |> json(%{
+      error: gettext("This sign-in can't be finished here. Start again."),
+      redirect_to: ~p"/sign-in"
+    })
   end
 
   defp passkey_refused(conn) do
@@ -296,8 +343,11 @@ defmodule KilnCMSWeb.TwoFactorController do
   #
   # Which factors the page offers is the pending account's (#2247): the code
   # fields only with the authenticator app, the passkey only with a passkey and
-  # on a host where its ceremony can run. A blob that no longer resolves keeps
-  # the code form, which answers it by sending the caller back to `/sign-in`.
+  # on a host where its ceremony can run. `new/2` passes the factors it has
+  # just resolved; a refused code resolves them here, because a `with`'s
+  # `else` cannot see the clause bindings. A blob that no longer resolves
+  # keeps the code form, which answers it by sending the caller back to
+  # `/sign-in`.
   defp render_form(conn, status, error) do
     factors =
       case pending(conn, :any) do
@@ -305,6 +355,10 @@ defmodule KilnCMSWeb.TwoFactorController do
         :error -> %{totp?: true, passkeys: 0}
       end
 
+    render_form(conn, status, error, factors)
+  end
+
+  defp render_form(conn, status, error, factors) do
     conn
     |> put_status(status)
     |> put_layout(html: {KilnCMSWeb.Layouts, :auth})

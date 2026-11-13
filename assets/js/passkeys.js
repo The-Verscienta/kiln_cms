@@ -16,7 +16,8 @@
 //    (#2247), a dead page (`KilnCMSWeb.TwoFactorController`), so it is wired
 //    on load rather than by a hook: POST /sign-in/verify/passkey/options →
 //    get() limited to the account's own credentials → POST
-//    /sign-in/verify/passkey → follow the redirect.
+//    /sign-in/verify/passkey → follow the redirect. A refusal's JSON says
+//    whether to start over (`redirect_to`) or what to show (`error`).
 //
 // All binary fields cross the wire as unpadded base64url.
 
@@ -76,7 +77,13 @@ const post = async (path, body) => {
     headers: {"content-type": "application/json", "x-csrf-token": csrf},
     body: JSON.stringify(body || {}),
   })
-  if (!response.ok) throw new Error(`passkey request failed: ${response.status}`)
+  if (!response.ok) {
+    // The refusal's JSON body rides on the error, for a caller that acts on
+    // it (`stepUpWithPasskey`); a body that isn't JSON leaves it empty.
+    const error = new Error(`passkey request failed: ${response.status}`)
+    error.body = await response.json().catch(() => ({}))
+    throw error
+  }
   return response.json()
 }
 
@@ -148,8 +155,20 @@ const stepUpWithPasskey = async (statusEl) => {
     })
 
     window.location.assign(redirect_to)
-  } catch (_error) {
-    if (statusEl) statusEl.textContent = statusEl.dataset.errorText
+  } catch (error) {
+    const body = error?.body || {}
+
+    // The pending sign-in is over (expired or redeemed): start again where
+    // the server says, as the code form's redirect would.
+    if (typeof body.redirect_to === "string") {
+      window.location.assign(body.redirect_to)
+      return
+    }
+
+    // The server's text when it sent one (a spent budget, a retry), else the
+    // page's generic refusal: a cancelled ceremony or a network failure has
+    // no body.
+    if (statusEl) statusEl.textContent = body.error || statusEl.dataset.errorText
   }
 }
 
