@@ -1,7 +1,8 @@
 defmodule KilnCMS.Backups.Refused do
   @moduledoc """
   A backup request the pipeline refused (#2218), carrying the reason as a term:
-  `availability/0`'s reason, a resume refusal (`Backups.resumable_run/2`),
+  `availability/0`'s reason, a resume refusal (`Backups.resumable_run/2`,
+  including `{:canceled_recently, seconds}` right after a Cancel, #2538),
   `:in_flight` or `{:queue_busy, queued}`. `KilnCMS.Backups.request/2` unwraps it back to
   `{:error, reason}`.
   """

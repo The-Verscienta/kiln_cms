@@ -11,6 +11,8 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import Ecto.Query
+
   alias KilnCMS.Accounts.{OrgMembership, User}
   alias KilnCMS.Backups
   alias KilnCMS.SystemActor
@@ -69,6 +71,11 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
       resume: fn actor ->
         failed = Backups.fail_run!(run!(), %{error: "x"}, actor: Backups.system())
         Backups.resume_run(failed, %{}, actor: actor)
+      end,
+      # A fresh failed run per call, as `resume` (#2539).
+      note_resume_refused: fn actor ->
+        failed = Backups.fail_run!(run!(), %{error: "x"}, actor: Backups.system())
+        Backups.note_run_resume_refused(failed, "no files here", actor: actor)
       end,
       import: fn actor ->
         Backups.import_run(%{stamp: stamp(), trigger: "cron", status: :succeeded}, actor: actor)
@@ -172,6 +179,136 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
 
       assert Backups.get_run_by_stamp!(canceled.stamp, actor: Backups.system()).status ==
                :canceled
+    end
+
+    test "record_progress, finish and fail refuse a run another chain re-opened (#2538)" do
+      chain_a = Ash.UUID.generate()
+      chain_b = Ash.UUID.generate()
+      ours = run!(%{chain_id: chain_a})
+
+      failed = Backups.fail_run!(ours, %{error: "boom"}, actor: Backups.system())
+      Backups.resume_run!(failed, %{chain_id: chain_b}, actor: Backups.system())
+
+      # `ours` is what a step of chain a still holds: running, under a.
+      for call <- [
+            &Backups.record_run_progress(&1, %{}, actor: Backups.system()),
+            &Backups.finish_run(&1, %{}, actor: Backups.system()),
+            &Backups.fail_run(&1, %{error: "late"}, actor: Backups.system())
+          ] do
+        assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+                 call.(ours)
+      end
+
+      assert %{status: :running, chain_id: ^chain_b} =
+               Backups.get_run!(ours.id, actor: Backups.system())
+    end
+
+    test "a run with no chain is written through a struct with no chain, and only that" do
+      # A run from before #2218: the stale-run sweep fails it as it reads it.
+      legacy = run!()
+      assert legacy.chain_id == nil
+
+      assert {:ok, %{status: :failed} = failed} =
+               Backups.fail_run(legacy, %{error: "Interrupted"}, actor: Backups.system())
+
+      chain = Ash.UUID.generate()
+      Backups.resume_run!(failed, %{chain_id: chain}, actor: Backups.system())
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.fail_run(legacy, %{error: "late"}, actor: Backups.system())
+
+      assert %{status: :running, chain_id: ^chain} =
+               Backups.get_run!(legacy.id, actor: Backups.system())
+    end
+
+    test "note_resume_refused keeps a failed run failed, notes why, and doesn't stack (#2539)" do
+      failed = Backups.fail_run!(run!(), %{error: "boom"}, actor: Backups.system())
+
+      assert {:ok, noted} =
+               Backups.note_run_resume_refused(failed, "no files here", actor: Backups.system())
+
+      assert noted.status == :failed
+      assert noted.error == "Resume refused: no files here\nboom"
+      assert %{level: :error, step: "resume"} = List.last(noted.log)
+      assert Backups.run_resumable?(noted)
+
+      assert {:ok, again} =
+               Backups.note_run_resume_refused(noted, "still not", actor: Backups.system())
+
+      assert again.error == "Resume refused: still not\nboom"
+    end
+
+    test "note_resume_refused keeps a canceled run canceled (#2539)" do
+      canceled = Ash.Seed.seed!(KilnCMS.Backups.Run, %{stamp: stamp(), status: :canceled})
+
+      assert {:ok, %{status: :canceled, error: "Resume refused: gone"}} =
+               Backups.note_run_resume_refused(canceled, "gone", actor: Backups.system())
+    end
+
+    test "note_resume_refused fails a stale running run, keeping it resumable (#2539)" do
+      quiet = DateTime.add(DateTime.utc_now(), -5 * 3600, :second)
+      stale = run!(%{started_at: quiet})
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          from(r in "backup_runs", where: r.id == type(^stale.id, :binary_id)),
+          set: [updated_at: quiet]
+        )
+
+      stale = Backups.get_run!(stale.id, actor: Backups.system())
+
+      assert {:ok, noted} =
+               Backups.note_run_resume_refused(stale, "gone", actor: Backups.system())
+
+      assert noted.status == :failed
+      assert noted.finished_at
+
+      assert noted.error ==
+               "Resume refused: gone\nInterrupted: the job was killed or the node stopped"
+
+      assert Backups.run_resumable?(noted)
+    end
+
+    test "note_resume_refused never touches a live, imported or succeeded run (#2539)" do
+      live = run!()
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.note_run_resume_refused(live, "x", actor: Backups.system())
+
+      assert %{status: :running, error: nil} = Backups.get_run!(live.id, actor: Backups.system())
+
+      imported =
+        Ash.Seed.seed!(KilnCMS.Backups.Run, %{
+          stamp: stamp(),
+          status: :failed,
+          origin: :imported,
+          error: "cron"
+        })
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.note_run_resume_refused(imported, "x", actor: Backups.system())
+
+      assert %{status: :failed, error: "cron", log: []} =
+               Backups.get_run!(imported.id, actor: Backups.system())
+
+      done = Backups.finish_run!(run!(), %{}, actor: Backups.system())
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Backups.note_run_resume_refused(done, "x", actor: Backups.system())
+
+      assert %{status: :succeeded, error: nil} =
+               Backups.get_run!(done.id, actor: Backups.system())
+    end
+
+    test "note_resume_refused misses a run re-opened since it was read (#2539)" do
+      failed = Backups.fail_run!(run!(), %{error: "boom"}, actor: Backups.system())
+      Backups.resume_run!(failed, %{chain_id: Ash.UUID.generate()}, actor: Backups.system())
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.note_run_resume_refused(failed, "x", actor: Backups.system())
+
+      assert %{status: :running, error: nil} =
+               Backups.get_run!(failed.id, actor: Backups.system())
     end
 
     test "mark_pruned updates a finished run's artifacts" do

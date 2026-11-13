@@ -15,7 +15,7 @@ defmodule KilnCMS.Backups.ChainRaceTest do
 
   alias Ecto.Adapters.SQL.Sandbox
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.Chain
+  alias KilnCMS.Backups.{Chain, Recorder, Worker}
   alias KilnCMS.Repo
 
   @moduletag :pg_tools
@@ -99,6 +99,80 @@ defmodule KilnCMS.Backups.ChainRaceTest do
 
     assert [{:error, :superseded}, {:ok, %{chain: ^chain}}] =
              Enum.sort_by(results, &match?({:ok, _}, &1))
+  end
+
+  # A committed in-app run of `stamp` that failed, and (with `state?: true`)
+  # the `state.json` a resume builds on.
+  defp failed_run!(stamp, opts \\ []) do
+    run =
+      unboxed(fn ->
+        %{stamp: stamp, trigger: "test"}
+        |> Backups.start_run!(actor: Backups.system())
+        |> Backups.fail_run!(%{error: "boom"}, actor: Backups.system())
+      end)
+
+    if Keyword.get(opts, :state?, false) do
+      work = Backups.work_dir(stamp)
+      File.mkdir_p!(work)
+      File.write!(Path.join(work, "state.json"), "{}")
+    end
+
+    run
+  end
+
+  defp start_jobs do
+    unboxed(fn -> Repo.all(from(j in Oban.Job, where: j.queue == "backup_steps")) end)
+  end
+
+  describe "#2421: one resume per stamp" do
+    # The two UPDATEs serialize on the row lock, so before #2421 the second
+    # still landed (its WHERE named only the id) and both chains thought they
+    # held the run. Without the fix this passes whenever the second caller
+    # happens to read the row after the first commits, so it is not the
+    # proof: that is the stale-struct test in `run_test.exs`.
+    test "two concurrent re-opens of one failed run: exactly one wins" do
+      stamp = "20260803-101500"
+      failed_run!(stamp)
+      chain_a = Ash.UUID.generate()
+      chain_b = Ash.UUID.generate()
+
+      results =
+        race(fn -> Recorder.reopen(stamp, chain_a) end, fn -> Recorder.reopen(stamp, chain_b) end)
+
+      assert [{:error, :not_resumable}, {:ok, %Recorder{chain_id: winner}}] =
+               Enum.sort_by(results, &match?({:ok, _}, &1))
+
+      assert winner in [chain_a, chain_b]
+
+      assert %{status: :running, chain_id: ^winner} =
+               unboxed(fn -> Backups.get_run_by_stamp!(stamp, actor: Backups.system()) end)
+    end
+
+    test "two concurrent resume requests: one starts, the other is in flight" do
+      stamp = "20260803-101600"
+      failed_run!(stamp, state?: true)
+      request = fn -> Backups.request([trigger: "manual", resume: stamp], Backups.system()) end
+
+      assert [{:error, :in_flight}, {:ok, %{status: :started, chain: chain}}] =
+               request |> race(request) |> Enum.sort_by(&match?({:ok, _}, &1))
+
+      assert [%{args: %{"chain" => ^chain, "resume" => ^stamp}}] = start_jobs()
+    end
+
+    test "a console resume racing a resume request: one start job" do
+      stamp = "20260803-101700"
+      failed_run!(stamp, state?: true)
+
+      # `timeout: 0`: the console returns after one look instead of waiting
+      # for a chain no queue here runs.
+      console = fn -> Worker.run("console", nil, resume: stamp, timeout: 0) end
+      request = fn -> Backups.request([trigger: "manual", resume: stamp], Backups.system()) end
+
+      results = race(console, request)
+
+      assert Enum.count(results, &match?({:error, :in_flight}, &1)) == 1
+      assert [%{args: %{"resume" => ^stamp}}] = start_jobs()
+    end
   end
 
   # #2554: the marker sync takes the same advisory lock, so a request that
