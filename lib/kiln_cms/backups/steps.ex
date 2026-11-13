@@ -1641,11 +1641,16 @@ defmodule KilnCMS.Backups.Steps do
          # Identical flags to scripts/backup.sh: custom format so `pg_restore`
          # can go table-by-table, and no-owner/no-privileges so a restore
          # doesn't depend on the production role existing on the target.
+         # `--no-password`: with no password in the URL, PGPASSWORD or
+         # .pgpass, libpq would prompt, and with no terminal it reads the
+         # port's stdin, which never ends: the step hangs until its job
+         # timeout. Failing at once reports the real cause.
          {url, env} = split_credentials(Backups.database_url()),
          :ok <-
            cmd(
              "pg_dump",
              [
+               "--no-password",
                "--format=custom",
                "--no-owner",
                "--no-privileges",

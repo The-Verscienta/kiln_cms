@@ -76,8 +76,23 @@ defmodule KilnCMS.Backups.WorkerTest do
       original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
 
-      for url <- [ecto_url(password: true), ecto_url(password: false)] do
+      # Without a password in the URL, the password comes from the
+      # environment, the documented path (a server that trusts local
+      # connections needs none, one that doesn't, CI's, does).
+      original_pgpassword = System.get_env("PGPASSWORD")
+
+      on_exit(fn ->
+        if original_pgpassword,
+          do: System.put_env("PGPASSWORD", original_pgpassword),
+          else: System.delete_env("PGPASSWORD")
+      end)
+
+      for {url, pgpassword} <- [
+            {ecto_url(password: true), nil},
+            {ecto_url(password: false), KilnCMS.Repo.config()[:password]}
+          ] do
         Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(original, :database_url, url))
+        if pgpassword, do: System.put_env("PGPASSWORD", pgpassword)
 
         assert :ok = BackupChain.run()
 
