@@ -655,7 +655,7 @@ defmodule KilnCMSWeb.BackupLive do
                 ships the .sha256 files, so the hint is for operators who copy
                 backups off the host themselves (#2890). The "?" sits beside the
                 heading, not inside it, so it doesn't join the heading's name. --%>
-          <span class="flex items-center gap-1">
+          <div class="flex items-center gap-1">
             <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
               {gettext("Where backups go")}
             </h2>
@@ -669,7 +669,7 @@ defmodule KilnCMSWeb.BackupLive do
                 "If you copy backups off this host yourself, copy each backup's .sha256 files with it: without them a media backup in parts won't restore, and nothing can check the others. The built-in off-site copy already includes them."
               )}
             </.help_tip>
-          </span>
+          </div>
           <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
             <dt class="text-base-content/60">{gettext("Directory")}</dt>
             <dd class="font-mono text-xs">{backup_dir()}</dd>

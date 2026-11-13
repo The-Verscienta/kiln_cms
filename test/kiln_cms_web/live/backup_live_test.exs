@@ -1675,6 +1675,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       seed_manifest!(dir, offsite: "r2:kiln-backups")
       lv = mount_admin(conn)
+      assert render(lv) =~ "r2:kiln-backups"
       assert has_element?(lv, "#offsite-sidecars-help", "in parts won't restore")
     end
 
