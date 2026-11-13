@@ -80,7 +80,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Breaking
 
 - **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
-  ([long form](docs/changelog/unreleased.md#media-purge-quarantined))
+  ([#2836](https://github.com/The-Verscienta/kiln_cms/pull/2836) · [long form](docs/changelog/unreleased.md#media-purge-quarantined))
 
 ### Added
 
@@ -183,7 +183,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
 
 - **Media trash: Delete permanently no longer deletes a file someone restored (one trashed during upload processing included), and Restore or Delete on a stale row says whether it was restored or deleted.**
-  ([long form](docs/changelog/unreleased.md#media-trash-stale-actions))
+  ([#2836](https://github.com/The-Verscienta/kiln_cms/pull/2836) · [long form](docs/changelog/unreleased.md#media-trash-stale-actions))
 - **The in-app backup, the demo reset and `backup.sh`, `restore.sh` and `staging.sh` accept an `ecto://` database URL, the documented form, which every dump used to fail on.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#database-url-ecto-scheme))
 
