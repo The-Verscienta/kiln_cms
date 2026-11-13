@@ -55,11 +55,13 @@ jobs:
   #   coverage  merges that data, enforces the floor, writes the report —
   #             runs no tests and needs no database
   #   dialyzer  its own job, on the cached PLT
-  #   ci        `Compile, lint, scan & test` — waits on all of them
+  #   ci        `Compile, lint, scan & test` — waits on all of them, and on
+  #             the other jobs that guard correctness (see the `ci` job)
   #
   # `ci` carries the OLD job's name on purpose: the "Require CI on main"
   # ruleset names exactly that context, so the gate keeps working with no
   # change to repository settings, and it now fails if any of the others does.
+  # To make another job required, add it to `ci.needs`, not to the ruleset.
   #
   # Sharding a coverage run is wiring rather than code: excoveralls has no
   # partition mode, but it honours `mix test --export-coverage NAME` (writes
@@ -560,11 +562,48 @@ jobs:
   # The required check. Its name is the one the "Require CI on main" ruleset
   # lists, so splitting the job above into four changed nothing in repository
   # settings — and where the old job could only fail on its own steps, this
-  # one fails if ANY of the four does.
+  # one fails if ANY of the jobs it needs does. The ruleset lists this one
+  # context, so `needs` below IS the list of required jobs.
+  #
+  # Required (#2729 added the second line): every job that guards correctness
+  # and is reliably green on main.
+  #   - build, test, coverage, dialyzer, plugin_sdk
+  #   - docs (`mix docs`, the committed API specs, the publishers),
+  #     strict_tenancy (the only `mix ash.codegen --check` drift gate, plus the
+  #     strict suite), overlay_drift, client, client-js, and ml (the only job
+  #     that compiles the KILN_ML shape; on a mix.lock bump it re-downloads
+  #     the XLA archive from GitHub, the #2462 failure class, accepted because
+  #     nothing else catches a break in that shape).
+  #
+  # Visible on the PR but NOT required, each for a recorded reason:
+  #   - e2e: failed in about 6 of the last 100 ci.yml runs (2026-11, counting
+  #     attempts later re-run to green, and main itself on 11-11). As a
+  #     required check it would block every PR whenever it flakes or main is
+  #     red on it. Add it here once its failures are down to real regressions.
+  #   - deps_audit: the advisory database moves on its own schedule (#51), so
+  #     it can go red on a PR that changed nothing about dependencies.
+  #   - image, qpdf_metadata_stripping, optimize_images_script: see each job.
+  #
+  # No job this one needs is conditional on the event (coverage's only `if:`
+  # is `!cancelled()`), so none is skipped on a PR, a push or a merge_group
+  # run, and the `skipped` check below turns a future skip into a failure.
   ci:
     name: Compile, lint, scan & test
     runs-on: ubuntu-24.04
-    needs: [build, test, coverage, dialyzer, plugin_sdk]
+    needs:
+      [
+        build,
+        test,
+        coverage,
+        dialyzer,
+        plugin_sdk,
+        docs,
+        strict_tenancy,
+        overlay_drift,
+        client,
+        client-js,
+        ml
+      ]
     # `!cancelled()` is load-bearing. The default (`success()`) SKIPS this job
     # when a dependency failed, and a skipped required check is not a failed
     # one: the ruleset would sit waiting on a check that never reports, and
@@ -1557,14 +1596,14 @@ jobs:
     # failure mode that reaches a deploy. Publishing stays a deliberate act
     # outside CI (prod is a manual Coolify redeploy).
     #
-    # NOT a required check, deliberately. The "Require CI on main" ruleset lists
-    # only `Compile, lint, scan & test`, so a red build here is visible on the
-    # PR but does not block it. That is the right starting position: this job
+    # NOT a required check, deliberately: it is not in `ci.needs`, and the
+    # "Require CI on main" ruleset lists only `Compile, lint, scan & test`, so
+    # a red build here is visible on the PR but does not block it. That is the right starting position: this job
     # depends on a precompiled NIF downloaded from GitHub at build time (see the
     # flake note below), and a required check that can fail for reasons
     # unrelated to the change blocks every merge until it passes. Promote it by
-    # adding the context `Release image (build only)` to that ruleset once its
-    # real pass rate and runtime are known.
+    # adding `image` to `ci.needs` once its real pass rate and runtime are
+    # known (#2462 retries its downloads now).
     #
     # Generous timeout: a cold build compiles the whole dep set, and the
     # Dockerfile deliberately caps the BEAM to 2 schedulers through it to stay
@@ -1687,8 +1726,7 @@ jobs:
     # non-Ubuntu container, and a required check that can fail for reasons
     # unrelated to the change under test (a container/action incompatibility,
     # not a qpdf regression) blocks every merge until it's fixed. Promote it
-    # by adding the context `PDF metadata stripping (qpdf, Debian trixie)` to
-    # the "Require CI on main" ruleset once its real pass rate is known.
+    # by adding it to `ci.needs` once its real pass rate is known.
     steps:
       # `actions/checkout` needs `git`; qpdf is the thing under test.
       # `ca-certificates` so the later `mix deps.get`/GitHub NIF fetch (for
@@ -1759,8 +1797,8 @@ jobs:
   #
   # NOT a required check, same posture as `qpdf_metadata_stripping`: it
   # guards a developer script, not the app, and the trixie leg depends on what
-  # Debian's imagemagick package installs. Promote it by adding both contexts
-  # to the "Require CI on main" ruleset once its pass rate is known.
+  # Debian's imagemagick package installs. Promote it by adding it to `ci.needs` once
+  # its pass rate is known.
   optimize_images_script:
     name: Image script (ImageMagick ${{ matrix.im }}, ${{ matrix.os }})
     runs-on: ubuntu-24.04
