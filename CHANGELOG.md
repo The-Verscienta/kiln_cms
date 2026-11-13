@@ -96,7 +96,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#event-recurrence-rfc-upgrade))
 
 - **Check your own rclone, monitoring or retention filters over backups: `kiln-media-*.tar.gz` already matched media parts (1.9.0's note was wrong), but it and `kiln-db-*.dump` drop the `.sha256` sidecars, and a part set without one won't restore by default. Add `--include "kiln-media-*.sha256"` and `"kiln-db-*.sha256"`; don't widen to `kiln-media-*`.**
-  ([long form](docs/changelog/unreleased.md#backup-offsite-filter-sidecar-upgrade))
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-offsite-filter-sidecar-upgrade))
 
 ### Breaking
 
@@ -168,7 +168,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#account-screens-help-text))
 
 - **Backups → History: a resumable run has a `?` tip beside Resume explaining what a resume reuses, and a media backup's "N parts" label links to how to restore a part set.**
-  ([long form](docs/changelog/unreleased.md#backup-history-resume-tip-parts-link))
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-history-resume-tip-parts-link))
 
 ### Fixed
 
@@ -266,7 +266,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#password-policy-off-description))
 
 - **Backup docs: the History import command for cron's backups now works (`bin/kiln_cms rpc`, not `bin/kiln eval`), and the manual multi-part media restore extracts only after a `--strict` checksum check passes.**
-  ([long form](docs/changelog/unreleased.md#backup-docs-import-and-manual-restore))
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-docs-import-and-manual-restore))
 
 ### Security
 
