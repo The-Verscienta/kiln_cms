@@ -71,6 +71,9 @@ defmodule KilnCMS.Application do
       # never reads that option — setting it would be inert config that reads
       # like a floor.
       {KilnCMS.Accounts.ThrottleStore.Local, clean_period: :timer.minutes(5)},
+      # Which security-alert thresholds this node already saw crossed in the
+      # current window (#2639): one row per site that crossed one.
+      {KilnCMS.Security.AlertTrips, clean_period: :timer.minutes(5)},
       # Per-user and per-org spend ceilings for every optional LLM feature (SEO
       # drafting, block assist). Started unconditionally: the table is empty
       # until someone asks for a generation, and starting it lazily would mean

@@ -429,3 +429,28 @@ To add screenshots to another guide:
   [`KilnCMS_Project_Plan.md`](KilnCMS_Project_Plan.md)'s TODO checklist when you
   complete a planned item.
 - Open a PR against `main`; CI must be green before merge.
+
+### Required checks
+
+The "Require CI on main" ruleset names one status check, `Compile, lint,
+scan & test` (the `ci` job in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml)). That job runs nothing
+itself: it fails when any job in its `needs:` list failed, was cancelled or
+was skipped. So `ci.needs` is the list of required jobs:
+
+- `Compile, lint & scan`, every `Test (shard n)`, `Coverage (full suite)`,
+  `Dialyzer` and `Plugin SDK (kiln_plugin)`;
+- `Documentation (mix docs)`, `Strict-tenancy smoke`, `Overlay drift
+  (example)`, `Elixir client (kiln_client)`, `JS client (@kiln-cms/client)`
+  and `Optional ML stack (semantic search)`.
+
+The other jobs run on every PR and show their result, but a red one doesn't
+block the merge: `Browser E2E (Playwright)` (it still flakes now and then),
+`Dependency audit` (the advisory database changes on its own schedule, so it
+can go red on a PR that touched no dependency), `Release image (build only)`
+(it downloads release assets from GitHub), and the qpdf and ImageMagick script
+jobs. The comment above the `ci` job records each reason.
+
+To make a job required, add it to `ci.needs`, not to the ruleset. Give it a
+job-level `timeout-minutes` as well, as every required job has: without one, a
+hung step holds the required check for GitHub's six-hour default.

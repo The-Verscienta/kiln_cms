@@ -139,7 +139,7 @@ the Dockerfile uses it whenever `GIT_SHA` isn't set, so every Redeploy records
 its commit. The build date has no equivalent; leave it unset or set
 `BUILD_DATE` as a build variable yourself.
 
-Two things about the build worth knowing before you size a build host:
+Three things about the build worth knowing before you size a build host:
 
 - **Peak RAM is `mix deps.compile`**, not the app compile. The Ash ecosystem
   compiles in one BEAM, and the Dockerfile caps the build BEAM to two
@@ -151,6 +151,22 @@ Two things about the build worth knowing before you size a build host:
   bookworm) because bookworm's `qpdf` predates the options PDF stripping
   needs. Building on the older suite and running on the newer is the safe
   direction; don't "fix" the mismatch.
+- **The build downloads release assets, and waits out a short outage.** The
+  precompiled NIFs of y_ex, lazy_html and vix (and tokenizers in a `KILN_ML=1`
+  build), vix's libvips tarball and the tailwind binary come from GitHub's
+  release CDN, and the esbuild binary from the npm registry. The builder has
+  no toolchain to build them from source. The steps that fetch them (each
+  `mix deps.compile`, and the tailwind and esbuild installs) run under
+  `rel/docker/retry_download.sh`. When a step fails with a download error in
+  its output, the script runs it again after 15, 30, 60 and 120 seconds, five
+  attempts in all. Any other failure, such as a compile error, still fails at
+  once. So an outage of up to about 4 minutes no longer fails the build, but
+  each of those steps can wait that long before it reports a failure. A
+  download that can never succeed (a 403 or a 404) is retried as well, so it
+  also fails about 4 minutes in. The script reads `KILN_FETCH_ATTEMPTS`
+  (default 5) and `KILN_FETCH_BACKOFF` (first wait in seconds, default 15)
+  from the environment of the `RUN` step; the Dockerfile has no build arg for
+  them.
 
 The build is the same wherever it runs — a `docker build` on your laptop, a
 CI job, or a PaaS that builds from the Dockerfile (Coolify does exactly that

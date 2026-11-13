@@ -26,6 +26,7 @@ defmodule KilnCMS.Security.Posture.Registry do
   @core [
     Checks.SecondFactor,
     Checks.IdleTimeout,
+    Checks.SecurityAlerts,
     Checks.AdminAllowlist,
     Checks.BreachedPasswords,
     Checks.OperatorSecondFactor,

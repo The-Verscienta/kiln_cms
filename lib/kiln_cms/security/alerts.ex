@@ -50,6 +50,7 @@ defmodule KilnCMS.Security.Alerts do
   alias KilnCMS.Accounts.RoleGrant
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.ThrottleStore
+  alias KilnCMS.Security.AlertTrips
   alias KilnCMS.Security.Cidr
 
   @site_kinds [
@@ -72,6 +73,8 @@ defmodule KilnCMS.Security.Alerts do
   # The failed-sign-in tally: how many in one window raise the alert.
   @failed_sign_in_threshold 10
   @failed_sign_in_bucket "security_alert_failed_sign_in"
+  # How many rows one site's tally is spread over (#2639).
+  @failed_sign_in_shards 8
 
   @default_window_ms :timer.minutes(15)
 
@@ -178,6 +181,28 @@ defmodule KilnCMS.Security.Alerts do
   @doc "The `KilnCMS.Accounts.ThrottleStore` bucket the failed-sign-in tally counts in."
   @spec failed_sign_in_bucket() :: String.t()
   def failed_sign_in_bucket, do: @failed_sign_in_bucket
+
+  @doc """
+  How many rows a site's failed-sign-in tally is spread over (#2639). Its
+  keys are `KilnCMS.Accounts.ThrottleStore.sharded_keys(org_id, failed_sign_in_shards())`.
+  """
+  @spec failed_sign_in_shards() :: pos_integer()
+  def failed_sign_in_shards, do: @failed_sign_in_shards
+
+  @doc """
+  The total of `org_id`'s failed-sign-in tally in window `window_index`,
+  current or closed, over every shard and the unsharded key a node of the
+  previous release counts on. `nil` when there is none or it cannot be read:
+  never read that as zero.
+  """
+  @spec failed_sign_in_total(Ash.UUID.t(), integer()) :: non_neg_integer() | nil
+  def failed_sign_in_total(org_id, window_index) when is_binary(org_id),
+    do:
+      ThrottleStore.window_sum(
+        @failed_sign_in_bucket,
+        ThrottleStore.sharded_keys(org_id, @failed_sign_in_shards),
+        window_index
+      )
 
   @doc """
   The length of an alert window, in milliseconds: 15 minutes. One alert per
@@ -312,8 +337,24 @@ defmodule KilnCMS.Security.Alerts do
   """
   @spec settings_for(Ash.UUID.t() | struct() | nil) :: settings()
   def settings_for(org) do
-    KilnCMS.OrgSettings.resolve_uncached(Accounts.org_id(org), settings_opts()) ||
-      unreadable_settings()
+    case read_settings(org) do
+      {:ok, settings} -> settings
+      :error -> unreadable_settings()
+    end
+  end
+
+  @doc """
+  A site's alert settings as `settings_for/1` reads them, but able to say it
+  could not: `{:ok, settings}`, or `:error` when the row cannot be read
+  (logged). For a reader that must not mistake `unreadable_settings/0` for
+  the site's choice — the security posture report (#2640).
+  """
+  @spec read_settings(Ash.UUID.t() | struct() | nil) :: {:ok, settings()} | :error
+  def read_settings(org) do
+    case KilnCMS.OrgSettings.resolve_uncached(Accounts.org_id(org), settings_opts()) do
+      nil -> :error
+      settings -> {:ok, settings}
+    end
   end
 
   @doc "The settings a site without a row has."
@@ -368,16 +409,27 @@ defmodule KilnCMS.Security.Alerts do
   Count one failed sign-in on `org_id`'s tally (#2245), keyed on the site
   alone — never on the address or account tried, which an attacker chooses.
 
-    * `{:threshold, window_index, count}` — this attempt brought the window's
-      count to the threshold: record it as the alert's event.
-    * `:counted` — counted, below or past the threshold.
+    * `{:threshold, window_index, count}` — the window's count has reached the
+      threshold, and this is the first attempt on this node to see it: record
+      it as the alert's event. `count` is the total this attempt saw, which
+      can be past the threshold when attempts arrive together.
+    * `:counted` — counted, below the threshold or already past it.
     * `:off` — the site has `failed_sign_ins` turned off, so nothing is counted.
+
+  The tally is spread over `failed_sign_in_shards/0` rows
+  (`KilnCMS.Accounts.ThrottleStore.count_sharded/5`, #2639), so a burst of
+  failed sign-ins on one site does not queue on one row lock. Each attempt
+  reads the total after its own increment committed, so at least one attempt
+  sees `count >= threshold`; `KilnCMS.Security.AlertTrips` admits the first
+  such attempt per node and window (once for the shared tally and once for
+  this node's fallback, which a database outage counts on), and `KilnCMS.Security.AlertGate`'s claim
+  keeps the alert to one across nodes.
 
   Whether the kind is on comes from a cached read of the site's settings; one
   that cannot be read counts (the direction that can still alert). Outside any
-  transaction, as `KilnCMS.Accounts.ThrottleStore.count/3` requires.
+  transaction, as `KilnCMS.Accounts.ThrottleStore.count_sharded/5` requires.
 
-  Options: `:window_ms` (default `window_ms/0`).
+  Options: `:window_ms` (default `window_ms/0`), and `:shard` (tests).
   """
   @spec charge_failed_sign_in(Ash.UUID.t(), keyword()) ::
           {:threshold, integer(), pos_integer()} | :counted | :off
@@ -385,9 +437,26 @@ defmodule KilnCMS.Security.Alerts do
     if failed_sign_ins_enabled?(org_id) do
       window_ms = Keyword.get(opts, :window_ms, window_ms())
 
-      case ThrottleStore.count(@failed_sign_in_bucket, org_id, window_ms) do
-        {@failed_sign_in_threshold = count, window_index} -> {:threshold, window_index, count}
-        {_count, _window_index} -> :counted
+      {count, window_index, source} =
+        ThrottleStore.count_sharded(
+          @failed_sign_in_bucket,
+          org_id,
+          window_ms,
+          @failed_sign_in_shards,
+          Keyword.take(opts, [:shard])
+        )
+
+      # The source is in the trip: a crossing counted only on this node's
+      # fallback (the database down) must not use up the window's shared one,
+      # or the database's crossing after it recovers would never be claimed.
+      if count >= @failed_sign_in_threshold and
+           AlertTrips.first?(
+             {:failed_sign_ins, source, org_id, window_ms, window_index},
+             window_ms
+           ) do
+        {:threshold, window_index, count}
+      else
+        :counted
       end
     else
       :off
