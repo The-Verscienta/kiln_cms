@@ -52,6 +52,7 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
   alias KilnCMS.BotBudgets
   alias KilnCMS.BotClass
   alias KilnCMS.CrawlerVerification
+  alias KilnCMS.Security.ApiKeyTrip
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Plugs.ClientIp
   alias KilnCMSWeb.RateLimit
@@ -74,10 +75,17 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
     end
   end
 
+  # A refusal of a verified API key is noted for the platform's alert
+  # (`KilnCMS.Security.ApiKeyTrip`, which ignores the buckets it does not
+  # cover and costs no database read for a key it has not verified).
   def call(conn, bucket) do
     case RateLimit.check(bucket, remote_ip(conn)) do
-      :allow -> conn
-      {:deny, retry_after_ms} -> deny(conn, retry_after_ms)
+      :allow ->
+        conn
+
+      {:deny, retry_after_ms} ->
+        ApiKeyTrip.note(conn, bucket)
+        deny(conn, retry_after_ms)
     end
   end
 

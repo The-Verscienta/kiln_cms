@@ -18,6 +18,7 @@ defmodule KilnCMS.Security.ApiKeyAlertTest do
   alias KilnCMS.Repo
   alias KilnCMS.Security
   alias KilnCMS.Security.AuthEvents
+  alias KilnCMS.Security.Recorder
   alias KilnCMS.Test.SecurityAlerts
 
   @moduletag :capture_log
@@ -140,6 +141,54 @@ defmodule KilnCMS.Security.ApiKeyAlertTest do
     {_key, secret} = rotated(owner, Accounts.default_org_id())
     assert :reuse_detected = ApiKeyReuse.check(secret, ctx(Accounts.default_org_id()))
     assert [_event] = reuse_events(Accounts.default_org_id())
+  end
+
+  # B1 (#2245): a window is claimed per kind, so a key over a rate limit has a
+  # kind of its own. Were it `api_key_abuse`, its claim would take the window
+  # and a stolen key's reuse in that window would wait for the summary.
+  test "a key over a rate limit does not use up the reuse alert's window" do
+    platform = user(:admin)
+    org_id = Accounts.default_org_id()
+    key_id = Ecto.UUID.generate()
+
+    trip = fn ->
+      {:ok, _} =
+        Recorder.record(:api_key_rate_limited,
+          tenant: org_id,
+          target_type: "api_key",
+          target_id: key_id,
+          metadata: %{"name" => "svc", "bucket" => "api"}
+        )
+    end
+
+    trip.()
+    assert kinds() == [{"platform", "api_key_rate_limited"}]
+
+    {:ok, _} =
+      Recorder.record(:api_key_reuse_detected,
+        tenant: org_id,
+        target_type: "api_key",
+        target_id: key_id,
+        metadata: %{"name" => "svc", "revoked" => 2}
+      )
+
+    trip.()
+
+    assert Enum.sort(kinds()) == [
+             {"platform", "api_key_abuse"},
+             {"platform", "api_key_rate_limited"}
+           ]
+
+    SecurityAlerts.deliver()
+
+    excerpts =
+      Notification
+      |> Repo.all()
+      |> Enum.filter(&(&1.user_id == platform.id))
+      |> Enum.map(& &1.excerpt)
+      |> Enum.sort()
+
+    assert excerpts == ["A rotated API key was used again", "An API key hit a rate limit"]
   end
 
   test "an unknown, forged or junk key records nothing" do

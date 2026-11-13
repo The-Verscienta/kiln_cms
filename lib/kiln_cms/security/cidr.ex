@@ -45,6 +45,8 @@ defmodule KilnCMS.Security.Cidr do
 
   @min_prefix %{inet: 8, inet6: 16}
   @bits %{inet: 32, inet6: 128}
+  # The network an address or range is shown as (`truncate/1`, `truncate_range/1`).
+  @display_prefix %{inet: 24, inet6: 48}
 
   # ::ffff:0:0/96 as a network integer.
   @mapped_net 0xFFFF <<< 32
@@ -251,6 +253,38 @@ defmodule KilnCMS.Security.Cidr do
   end
 
   def truncate(_), do: nil
+
+  @doc """
+  A range as an alert shows it without naming one host (#2245): a rule
+  narrower than a `/24` (IPv4) or a `/48` (IPv6) is widened to that network,
+  as `truncate/1` widens an address; a broader rule is shown as it is. A bare
+  address is a host rule, and an IPv4-mapped rule is shown as the IPv4 range
+  it means. `nil` for anything that is not an address or range.
+
+      iex> KilnCMS.Security.Cidr.truncate_range("203.0.113.7/32")
+      "203.0.113.0/24"
+
+      iex> KilnCMS.Security.Cidr.truncate_range("10.0.0.0/16")
+      "10.0.0.0/16"
+
+      iex> KilnCMS.Security.Cidr.truncate_range("2001:db8:1:2::/64")
+      "2001:db8:1::/48"
+
+      iex> KilnCMS.Security.Cidr.truncate_range("not a range")
+      nil
+  """
+  @spec truncate_range(String.t() | nil) :: String.t() | nil
+  def truncate_range(range) when is_binary(range) do
+    case parse(range) do
+      {:ok, {family, net, prefix}} ->
+        format(mask({family, net, min(prefix, @display_prefix[family])}))
+
+      {:error, :invalid} ->
+        nil
+    end
+  end
+
+  def truncate_range(_), do: nil
 
   # Private, shared and link-local space: an address here is usually a proxy's
   # or a NAT's as seen from the app, not one person's.

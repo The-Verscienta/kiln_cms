@@ -910,6 +910,11 @@ msgstr ""
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
+msgid "%{label} (rule %{rule})"
+msgstr ""
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
 msgid "%{label}: %{count} in this alert window"
 msgstr ""
 
@@ -1611,6 +1616,11 @@ msgstr ""
 msgid "A block"
 msgstr ""
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A blocked address was refused"
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A box that grows with the text."
@@ -1955,6 +1965,11 @@ msgstr ""
 msgid "A release needs a name."
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "A request from an address on this site's block list is refused. One alert every %{minutes} minutes, then a summary."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
@@ -2147,6 +2162,11 @@ msgstr ""
 msgid "A value, or a backup value when it's empty."
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "A verified API key goes over a rate limit. One alert every %{minutes} minutes, then a summary, to every platform admin."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "A version you were comparing was superseded."
@@ -2266,6 +2286,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
+msgid "API key hit a rate limit"
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
 msgid "API key revoked"
 msgstr ""
 
@@ -2281,6 +2306,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "API keys over a rate limit"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -3301,6 +3331,11 @@ msgstr ""
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
+msgid "An API key hit a rate limit"
+msgstr ""
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
 msgid "An API key was created"
 msgstr ""
 
@@ -4306,8 +4341,14 @@ msgstr ""
 msgid "Blocked"
 msgstr ""
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked address refused"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/ip_block_live.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Blocked addresses"
 msgstr ""
@@ -14670,6 +14711,11 @@ msgstr ""
 msgid "Only one locale is configured — add locales to config :kiln_cms, :i18n."
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only platform administrators can change the platform's security alerts."
+msgstr ""
+
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only platform administrators can view the instance security log."
@@ -15571,12 +15617,32 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Platform alerts (new platform admins, platform role changes, new API keys and reuse of a stolen API key) go to the platform's admins and can't be turned off here."
+msgid "Platform alert settings saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform alert settings saved. Turning an alert off is recorded in the instance security log."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform alerts"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform alerts (new platform admins, platform role changes, new API keys, reuse of a stolen API key and API keys over a rate limit) go to the platform's admins and aren't site settings. Only a platform admin can turn one off, and only API keys over a rate limit."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Platform role"
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Platform security alerts changed"
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -17992,6 +18058,11 @@ msgstr ""
 msgid "Save key source"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save platform alerts"
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save preferences"
@@ -19234,6 +19305,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shown to editors. Leave empty for the standard message."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -21702,6 +21778,11 @@ msgstr ""
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "The payment provider, and the tiers readers can buy."
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "The platform alert settings could not be saved."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex

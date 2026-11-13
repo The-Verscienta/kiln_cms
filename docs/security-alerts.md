@@ -2,7 +2,8 @@
 
 The [security log](security-events.md) records what happened. Security alerts
 tell someone while it still matters: a new admin, a lockout, two-factor turned
-off, a changed single sign-on provider, a stolen API key used again (#2245).
+off, a changed single sign-on provider, a stolen API key used again, a blocked
+address knocking, an API key over a rate limit (#2245).
 Each alert arrives as a bell notification and an email, and a site can also
 send its alerts to a webhook.
 
@@ -15,8 +16,10 @@ nothing.
 
 There are two channels. A **site** alert is about one site and goes to that
 site's own admins, who can turn each kind off. A **platform** alert is about
-the whole installation and goes to every platform admin. Nobody can turn a
-platform alert off or mute it.
+the whole installation and goes to every platform admin. Nobody can mute a
+platform alert, and only one platform kind, `api_key_rate_limited`, can be
+turned off, by a platform admin
+([Turn off rate-limit alerts for API keys](#turn-off-rate-limit-alerts-for-api-keys)).
 
 Site alerts (each one can be turned off on the site's
 [Security alerts](#choose-which-alerts-your-site-sends) page):
@@ -29,15 +32,17 @@ Site alerts (each one can be turned off on the site's
 | `lockout` | Account locked out | A sign-in throttle locks an account or an address out: too many wrong passwords or second-factor codes | Yes |
 | `two_factor_disabled` | Two-factor authentication turned off | Someone removes the second factor from their account | Yes |
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a single sign-on domain is saved, verified or removed | Yes |
+| `blocked_ip` | Blocked addresses | A request or socket connect from an address on the site's [block list](ip-blocking.md) is refused (see [Blocked addresses](#blocked-addresses-raise-one-alert-per-window)) | Yes |
 
-Platform alerts (always on):
+Platform alerts:
 
-| Kind | Raised when |
-|---|---|
-| `new_admin` | An account's own role is set or raised to admin (a platform admin), standing or by a temporary grant |
-| `platform_role_changed` | A platform admin's admin role is taken away: lowered, or a temporary admin grant ended early or replaced by a lower one |
-| `new_api_key` | An API key is minted. Rotating a key into its successor is not an alert |
-| `api_key_abuse` | A rotated-away API key is presented to `POST /api/keys/rotate` again more than 120 seconds after its rotation: two parties held the key, and Kiln revoked the whole chain ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)) |
+| Kind | Raised when | Can be turned off |
+|---|---|---|
+| `new_admin` | An account's own role is set or raised to admin (a platform admin), standing or by a temporary grant | No |
+| `platform_role_changed` | A platform admin's admin role is taken away: lowered, or a temporary admin grant ended early or replaced by a lower one | No |
+| `new_api_key` | An API key is minted. Rotating a key into its successor is not an alert | No |
+| `api_key_abuse` | A rotated-away API key is presented to `POST /api/keys/rotate` again more than 120 seconds after its rotation: two parties held the key, and Kiln revoked the whole chain ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)) | No |
+| `api_key_rate_limited` | A verified API key goes over a rate limit (see [API keys over a rate limit](#api-keys-over-a-rate-limit)) | Yes, by a platform admin. On by default |
 
 ### What does not raise an alert
 
@@ -54,9 +59,12 @@ Platform alerts (always on):
   admin.
 - **Erasing a site admin.** Erasure writes no role event, so it raises
   nothing.
+- **An automatic address block being created.** The scanner guard adding a
+  temporary rule is recorded as `ip_auto_blocked` and raises nothing. The
+  requests that rule then refuses do raise `blocked_ip`, like any rule's.
 - **Every other security event**: sign-ins, invitations, passkeys, recovery
-  codes, API key revocations, the admin allowlist, other site settings,
-  automatic address blocks. They stay in the log.
+  codes, API key revocations, the admin allowlist, other site settings. They
+  stay in the log.
 
 ## Who hears about it
 
@@ -136,7 +144,9 @@ only when there was more than the alert already said: more than one event,
 or for failed sign-ins more than the count the alert carried (see below).
 
 Windows are per site for site alerts, and one for the whole installation for
-platform alerts. Silencing notices are never grouped: each one is sent.
+platform alerts. Each kind has its own window, so an API key going over a rate
+limit never uses up the window a stolen key's `api_key_abuse` alert is sent
+in. Silencing notices are never grouped: each one is sent.
 
 ### Failed sign-ins are counted per site
 
@@ -165,10 +175,104 @@ its own until it can, and raises the alert when its own count reaches 10.
 A site with the kind off counts nothing. Turning it on takes effect at once on
 every node.
 
-The [security log samples failed sign-ins](security-events.md#failed-sign-ins-allowlist-and-unlock-refusals-are-sampled-lockouts-are-not)
+The [security log samples failed sign-ins](security-events.md#failed-sign-ins-refusals-and-rate-limited-keys-are-sampled-lockouts-are-not)
 (5 per address per 15 minutes). The attempt that crosses the threshold (on
 each server, the first one there to see it) is written to the log even past
 that cap, so the alert always has its event.
+
+### Blocked addresses raise one alert per window
+
+When `blocked_ip` is on (the default), a request refused by the site's
+[block list](ip-blocking.md) raises an alert: an HTTP request (the empty
+`403`), a page's LiveView connection, or a connect to `/ws/gql`,
+`/ws/collab` or `/ws/bridge`. Rules the [scanner guard](ip-blocking.md#block-scanners-automatically)
+adds for a while are rules like any other, so the requests they refuse
+alert too.
+
+A blocked address is a flood by nature, so it is thinned out in memory
+before anything reaches the database:
+
+- Each server lets through the first refusal of each client network per
+  site per 15-minute window, and at most **20 networks per site per window**.
+  A client network is an IPv4 address, or an IPv6 address's `/64`.
+- What gets through is written to the security log as `ip_block_refused`,
+  once per site and network per window across all servers. The event names
+  the **rule that matched and the surface** (`http`, `live`, `gql`,
+  `collab`, `bridge`), and has **no IP address and no user agent**: nothing
+  records a blocked address.
+- The first event of the window raises the alert: "A blocked address was
+  refused (rule 203.0.113.0/24)". The rule is masked like an address (see
+  [IP addresses in alerts](#ip-addresses-in-alerts)).
+- The summary counts the client networks recorded in the window, at most 20
+  per server, not the requests refused. For the number of refusals, see the
+  `kiln_cms.ip_block.refused.count` counter
+  ([Observability](observability.md#blocked-addresses)).
+
+**How many to expect.** A blocked client that keeps trying raises one alert
+every 15 minutes, 96 a day for each admin, by bell and by email. When more
+than one network is refused in a window, a summary follows each alert, so the
+most a site sends is one alert and one summary per window, 192 a day. To
+stop them, untick **Blocked addresses** on the Security alerts page (the
+[steps](#choose-which-alerts-your-site-sends) below). The refusals are still
+written to the security log, sampled the same way, but no alert is sent.
+
+Don't confuse the alert setting with the **Blocked addresses** page under
+**Sign-in & access** (`/editor/ip-blocks`), where the rules themselves are.
+Removing a rule there stops the alerts it raises.
+
+### API keys over a rate limit
+
+`api_key_rate_limited` is a platform alert: every platform admin gets it by
+bell and email, with no mute, and no webhook carries it. It is raised when an
+API key that this server has verified goes over one of these rate limits:
+
+| Limit (`bucket`) | Covers |
+|---|---|
+| `api` | JSON:API and the REST routes under `/api`, the change feed (`/api/feed`), MCP (`/mcp`) and the ActivityPub inbox (`POST /actor/inbox`) |
+| `gql` | `/gql`, including a batch over its operation budget |
+| `media_upload` | Uploads and imports under `/api/media` |
+| `media_transform` | Image transforms, `/media/:id/t/...` |
+| `plugin_endpoint` | Plugin routes |
+
+No other limit raises it: sign-in, forms, page delivery and the rest are
+about addresses, not keys.
+
+**"Verified" means used successfully on this server in the last 5 minutes.**
+A rate limit refuses a request before the key in it is checked, and checking
+it there would cost a database read on every refused request. So each server
+remembers, in memory, the keys that authenticated on it in the last 5
+minutes, as a SHA-256 of the key and the key's id. A refused request whose
+key is not remembered (forged, unknown, revoked, expired, never used on this
+server, or a JWT from the headless sign-in rather than a key) is counted on the
+`kiln_cms.security.api_key_trip.count` counter and nothing else. That means:
+
+- On image transforms and plugin routes, which never check a key, a refusal
+  alerts only if the same key was used on an authenticated API on the same
+  server within 5 minutes. Behind a load balancer, the earlier use and the
+  refusal have to land on the same server.
+- `/ws/gql` cannot carry an API key (the socket accepts only a JWT), so a
+  refusal there never alerts.
+- A key revoked in those 5 minutes records nothing.
+
+**One per key and limit per window.** Each server notes a key once per limit
+per 15-minute window. The security log gets one `api_key_rate_limited` event
+per key and limit per window across servers, and the platform gets one
+alert, then a summary counting the key-and-limit pairs. The window is the
+kind's own, so it never delays a stolen-key `api_key_abuse` alert.
+
+**Where it is logged.** In the security log of the key owner's site when the
+owner has exactly one active membership, otherwise the default site's; the
+host the request named never decides. The event has no person (whoever
+presented the key is not known to be its owner); its target is the key, its
+`metadata` the key's `name` and the `bucket`, and its IP address the
+request's. The alert shows the address as its network only, like every
+platform alert: "An API key hit a rate limit (from 203.0.113.0/24)".
+
+**False positives.** The limits are per client address, not per key. A
+legitimate key behind a NAT or proxy that someone else is flooding is refused
+too, and alerts. If that is routine for your installation (clients that batch
+heavily, shared egress), a platform admin can
+[turn this alert off](#turn-off-rate-limit-alerts-for-api-keys).
 
 ## Choose which alerts your site sends
 
@@ -178,10 +282,14 @@ address.
 
 1. Open **Security alerts** under **Organization** in the console sidebar,
    or go to `/editor/security-alerts`. You see three parts: **Alerts**,
-   **Delivery** and **Not set here**.
+   **Delivery** and **Not set here**. A platform admin also sees **Platform
+   alerts** (see
+   [Turn off rate-limit alerts for API keys](#turn-off-rate-limit-alerts-for-api-keys)).
 2. Under **Alerts**, tick the kinds you want and untick the ones you don't.
    Each has a line saying what raises it. **Failed sign-ins** reads "10 failed
-   sign-ins in 15 minutes on this site. Off by default."
+   sign-ins in 15 minutes on this site. Off by default." **Blocked addresses**
+   reads "A request from an address on this site's block list is refused.
+   One alert every 15 minutes, then a summary."
 3. Under **Delivery**:
    - **Notify this site's admins by bell and email**: untick it and the site's
      admins get no bell row and no email for site alerts. Webhooks subscribed
@@ -199,12 +307,54 @@ The banner above the form says the same before you save: "Turning an alert off
 or switching off admin notifications sends every admin of this site a notice.
 That notice can't be turned off or muted."
 
-Platform alerts are not on this page. The **Not set here** section lists them
+Platform alerts are not site settings. The **Not set here** section lists them
 and links to **Webhooks**, where an endpoint can subscribe to the site's
 alerts (see [Send alerts to a webhook](#send-alerts-to-a-webhook)).
 
 Saving the page is itself recorded in the security log, as
 `org_setting_changed` with `setting` `site_security_alerts`.
+
+## Turn off rate-limit alerts for API keys
+
+`api_key_rate_limited` is the one platform alert that can be turned off. It
+starts on. Only a platform admin can change it, and the change applies to
+the whole installation, not one site.
+
+1. Open **Security alerts** (`/editor/security-alerts`) on any site. Below
+   the site's form you see **Platform alerts**, with the line "Shown to
+   platform admins only. These go to every platform admin, for the whole
+   installation. Turning one off is recorded in the instance security log."
+   Site admins who are not platform admins don't see this part.
+2. Untick **API keys over a rate limit**. The line under it reads "A verified
+   API key goes over a rate limit. One alert every 15 minutes, then a
+   summary, to every platform admin."
+3. Select **Save platform alerts**. You see "Platform alert settings saved.
+   Turning an alert off is recorded in the instance security log." (Saving
+   with nothing turned off says "Platform alert settings saved.")
+4. Open **Security log**, then **Instance log**. The save is there as
+   **Platform security alerts changed** (`platform_alerts_changed`), with
+   `disabled_kinds` `api_key_rate_limited`, or `none` after turning it back
+   on.
+
+From the next delivery on, nothing is sent for the kind. The
+`api_key_rate_limited` events are still written to the security log, and the
+alert's window is still claimed and stamped delivered; only the bell and
+email are skipped. Unlike a site setting, turning it off sends no
+[silencing notice](#silencing-notices): notices go to one site's admins, and
+this is the installation's. The instance log is the record.
+
+What can go wrong:
+
+- **"Only platform administrators can change the platform's security
+  alerts."** Your platform admin role was lowered, or a temporary platform
+  grant expired, while the page was open. Nothing changed.
+- **"The platform alert settings could not be saved."** The save failed, for
+  example because its instance log event could not be written (the two are
+  saved together). Nothing changed; try again and check the application log.
+- **The alerts keep coming after you turned the kind off.** The setting
+  could not be read when an alert was delivered; delivery then treats the
+  kind as on and logs "Security alerts: the platform alert settings could
+  not be read (…); every platform kind is treated as on."
 
 ## Mute the alert emails for yourself
 
@@ -267,6 +417,15 @@ The security log keeps every event's full address. An alert shows less:
 - **Platform alerts always show the network only.** No site chose to show
   the address.
 
+A `blocked_ip` alert carries no address at all: its event records none. It
+names the block rule that matched, masked by the same setting. By default a
+rule narrower than a `/24` (IPv4) or a `/48` (IPv6) is shown as that network,
+so a rule for one host does not name the host (`203.0.113.7/32` becomes
+`203.0.113.0/24`, `2001:db8:1:2::/64` becomes `2001:db8:1::/48`); a broader
+rule, such as `10.0.0.0/16`, is shown as it is. With **Show the full IP
+address in alerts** ticked, the rule is shown as stored. The security log
+keeps the rule in full.
+
 ## Send alerts to a webhook
 
 A webhook endpoint of the site can receive the site's alerts and its silencing
@@ -278,10 +437,11 @@ webhook in this release.
 3. In the event list, find the **`security`** group and tick the events you
    want: `security.new_admin`, `security.role_elevation`,
    `security.failed_sign_ins`, `security.lockout`,
-   `security.two_factor_disabled`, `security.sso_config_changed` and
-   `security.alerts_silenced`. **Select all** in the group ticks them all.
-   None of them is in the defaults, so an existing endpoint receives nothing
-   until you tick them. The **Select all** above the whole list leaves them
+   `security.two_factor_disabled`, `security.sso_config_changed`,
+   `security.blocked_ip` and `security.alerts_silenced`. **Select all** in
+   the group ticks them all. None of them is in the defaults, so an existing
+   endpoint receives nothing until you tick them, and an endpoint made before
+   `security.blocked_ip` existed does not receive it until you tick it. The **Select all** above the whole list leaves them
    out, so an endpoint never picks them up by accident.
 4. Save. The next alert of a ticked kind is delivered to the endpoint within
    about a minute, and is listed in its delivery history.
@@ -346,9 +506,25 @@ the security log event that raised it:
 ```
 
 `event.metadata` holds the event's allowlisted keys, the same as the security
-log's ([What is recorded](security-events.md#what-is-recorded)). `event` is
-absent when the event was already removed by the log's retention before the
-alert was delivered.
+log's ([What is recorded](security-events.md#what-is-recorded)), except that a
+block `rule` is masked like an address. `event` is absent when the event was
+already removed by the log's retention before the alert was delivered.
+
+A `security.blocked_ip` alert's `event` has `ip` `null` and names the rule and
+the surface instead:
+
+```jsonc
+// data.event of a security.blocked_ip alert, the site showing networks only
+{
+  "id": "4c1e…",
+  "type": "ip_block_refused",
+  "actor_id": null,
+  "target_type": null,
+  "target_id": null,
+  "ip": null,
+  "metadata": { "rule": "203.0.113.0/24", "surface": "http" }
+}
+```
 
 A **summary** adds `window` and `count` (the window's total) and has no
 `event`:
@@ -409,6 +585,9 @@ Webhook** for the channel).
    Kiln shows only its host."
 4. Untick any events the channel should not get. **Select all** and
    **Reset to defaults** both tick every security event again.
+   A Slack endpoint added before `security.blocked_ip` existed does not have
+   it ticked: edit the endpoint and tick it if the channel should get
+   blocked-address alerts.
 5. Click **Add webhook**. The page says "Slack webhook added." The new row
    shows the URL masked (`https://hooks.slack.com/…/9xQz`) and a **Slack**
    badge. It has no signing secret and no **Rotate secret**: Slack checks no
@@ -496,6 +675,34 @@ What can go wrong:
   failed sign-in tally for its window is gone; no summary sent." in the log
   when the single row has none). Later windows are unaffected once every
   node runs the same release. Nothing needs doing.
+- **Upgrade to blocked-address and rate-limit alerts.** One additive
+  migration, a new table `platform_security_alerts` (one row, the platform
+  kinds a platform admin turned off; empty until someone saves). From the
+  deploy on:
+  - every site with block rules alerts its admins when a blocked address is
+    refused, by default (up to one alert and one summary per 15 minutes; see
+    [Blocked addresses](#blocked-addresses-raise-one-alert-per-window));
+  - existing webhook endpoints, Slack ones included, do not receive
+    `security.blocked_ip` until an admin ticks it. On a site whose alerts go
+    only by webhook (admin notifications off, or no admins), the
+    **Security alerts reach someone** posture line turns **Review** ("Some
+    security alerts on this site reach nobody…") until the event is ticked
+    or **Blocked addresses** is turned off;
+  - platform admins get `api_key_rate_limited`.
+
+  During a rolling deploy, a `blocked_ip` or `api_key_rate_limited` alert
+  that a node still on the previous release picks up is logged as "Security
+  alert … names an unknown kind; not sent." and stamped, so it is lost.
+  Older nodes don't remember verified keys, so a key going over a limit on
+  one of them raises nothing. After a rollback, the new event rows read as
+  "Unrecognized event (ip_block_refused)" and "Unrecognized event
+  (api_key_rate_limited)", a site's stored opt-out of `blocked_ip` is kept
+  and its page still saves, and the new table is left unused. **Editing a
+  webhook endpoint on 1.9.x drops `security.blocked_ip` from it**: the 1.9
+  form lists only the events it knows, so saving sends the list without it,
+  and that counts as unticking a security event, which sends the site's
+  admins a `webhook_changed` silencing notice. Tick it again after rolling
+  forward.
 - **Mail goes through the instance relay** (the `KilnCMS.Mailer`
   configuration), never a site's own SMTP relay: a site admin can change that
   relay, and an alert about the site must not depend on it. Alert mail is
@@ -516,9 +723,16 @@ What can go wrong:
     summary was not), with "Security alert (id) ((kind), (phase)) was not
     delivered after its last attempt; it is stamped failed and will not be
     retried." It fires once per dispatch.
+- **Watch** `kiln_cms.security.api_key_trip.count`, tagged `result`
+  (`unverified`, `debounced`, `noted`) and `bucket`: rate-limit refusals of
+  requests that carried a credential. A high `unverified` rate is clients
+  over a limit with keys this server has not seen authenticate (forged,
+  revoked, or used only on other servers); `noted` is what alerted. See
+  [Observability](observability.md#security-log-and-alerts).
 - **A reused API key** is recorded as `api_key_reuse_detected` in the key
   owner's site when the owner has exactly one active membership, else in the
-  default site; the request's host never chooses. If the event cannot be
+  default site; the request's host never chooses. A key over a rate limit
+  (`api_key_rate_limited`) is recorded by the same rule. If the event cannot be
   recorded, the platform admins get the plain email this check sent before
   alerts existed, and the log says "API key reuse event for key … not
   recorded (…); mailing the platform admins directly."
@@ -550,10 +764,30 @@ What can go wrong:
   `CMS.update_site_security_alerts/2` and `CMS.reset_site_security_alerts/1`
   (admin only). `:save` writes every field it is not given back to its
   default, so pass all three.
+- `KilnCMS.Security.BlockedIpAlert.note/4`: called by every edge that refuses
+  a blocked address (`KilnCMSWeb.Plugs.IpBlock`, `KilnCMSWeb.IpBlock`) with
+  the rule `KilnCMS.Security.IpBlocklist.match/2` returned. `blocked?/2` has
+  no side effect, so the scanner guard asking it raises nothing.
+- `KilnCMS.Security.ApiKeyTrip`: the node-local cache of verified keys
+  (`remember/2`, called by `KilnCMSWeb.Plugs.ApiKeyAuth` and, on `/mcp`, by
+  `KilnCMSWeb.Plugs.RememberApiKey`) and `note/2`, called from the refusal
+  branch of `KilnCMSWeb.Plugs.RateLimit` and
+  `KilnCMSWeb.Plugs.GraphqlBatchLimit`. `buckets/0` lists the limits it
+  covers. A new rate-limited API surface that should alert needs its bucket
+  there and a key that reaches `remember/2`.
+- `KilnCMS.Security.PlatformAlertSettings`: the platform's one settings row,
+  through `KilnCMS.Security.list_platform_alert_settings/1` and
+  `KilnCMS.Security.save_platform_alert_settings/2` (platform admins only).
+  `:save` takes the whole `disabled_kinds` list; only
+  `KilnCMS.Security.Alerts.platform_optional_kinds/0` may be added, and a
+  save adding another kind is refused with "has alert kinds that cannot be
+  turned off". `KilnCMS.Security.Alerts.platform_enabled?/1` is what
+  delivery asks.
 - `KilnCMS.Security.AlertText`: the kind and change labels and the
   one-line headline, gettext'd. The inbox renders it in the reader's locale
   from `Notification.details` (the values `AlertText.details/1` keeps: phase,
-  kind, channel, change, kinds, count, display IP, event type);
+  kind, channel, change, kinds, count, display IP, display block rule, event
+  type);
   `KilnCMS.Security.AlertMail` and `KilnCMS.Webhooks.SlackFormat` pin English.
   `KilnCMSWeb.NotificationText.excerpt/1` picks the line for a row.
 - `KilnCMS.Notifications.unread_platform_alert_count/2`: the number behind
@@ -586,6 +820,11 @@ What can go wrong:
 | "Couldn't reveal that URL." on Webhooks | The endpoint was deleted after the page loaded, or you are no longer an admin of the site. Reload. |
 | A Slack endpoint was auto-disabled after an upgrade or rollback | A node running 1.9 sent it the Kiln envelope and Slack refused it. Once every node runs this release, tick **Active** on the endpoint. |
 | Several events, one alert | They fell in one 15-minute window. The summary follows about a minute after the window closes. |
+| A blocked-address alert every 15 minutes | A blocked client keeps trying. Untick **Blocked addresses** on Security alerts to stop the alerts, or remove the rule on `/editor/ip-blocks` if it is no longer wanted. |
+| A blocked-address summary counts far fewer than the refusals | The summary counts client networks (at most 20 per server per window), not requests. `kiln_cms.ip_block.refused.count` counts every refusal. |
+| An API key went over a rate limit and no alert came | The key had not been used successfully on that server in the last 5 minutes, the route was `/ws/gql`, the limit is not one of the [five covered](#api-keys-over-a-rate-limit), the key was revoked in the meantime, or a platform admin turned the kind off. |
+| An API key alert for a client that did nothing wrong | Limits are per address: someone else behind the same NAT or proxy used up the limit. |
+| "Security alerts reach someone" says some alerts reach nobody after an upgrade | Alerts go only by webhook on this site, and no endpoint has `security.blocked_ip` ticked. Tick it, or untick **Blocked addresses**. |
 | "You don't have permission to change this site's security alerts." | Your role on the site was lowered while the page was open. Reload. |
 | "The security alert settings could not be saved." | The save failed, for example because its notice could not be written; nothing changed. Try again, and check the application log. |
 | "can only be changed by the account holder" | Someone other than the account holder tried to change its security alert email setting. |

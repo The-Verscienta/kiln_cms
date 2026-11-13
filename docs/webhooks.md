@@ -216,8 +216,8 @@ setup is in [Send alerts to Slack](security-alerts.md#send-alerts-to-slack).
   `blocks`), `blocks` (a section with the headline, the site and when, and a
   context line with a link to the security log and the event name) and
   `"unfurl_links": false, "unfurl_media": false`. The wording is the same
-  English headline as the alert email. The site name, the IP address and the
-  event name are put in code spans, with backticks replaced and line breaks
+  English headline as the alert email. The site name, the IP address, a
+  blocked-address alert's block rule and the event name are put in code spans, with backticks replaced and line breaks
   collapsed, and `&`, `<` and `>` are escaped, so nothing typed into a site
   name can mention `@channel`, add a link or format the message. It carries no
   user id, delivery id or endpoint id.
@@ -370,8 +370,8 @@ More event names exist outside the `<type>.<verb>` pattern:
   [Taxonomy events](#taxonomy-events) below.
 - **`security.new_admin`**, **`security.role_elevation`**,
   **`security.failed_sign_ins`**, **`security.lockout`**,
-  **`security.two_factor_disabled`**, **`security.sso_config_changed`** and
-  **`security.alerts_silenced`** — the site's
+  **`security.two_factor_disabled`**, **`security.sso_config_changed`**,
+  **`security.blocked_ip`** and **`security.alerts_silenced`** — the site's
   [security alerts](security-alerts.md) and the notice that someone turned
   them down ([#2245](https://github.com/The-Verscienta/kiln_cms/issues/2245));
   opt in. See [Security alert events](#security-alert-events) below.
@@ -500,6 +500,9 @@ site's mail relay changed).
 - **Opt in.** None is in the defaults, so an endpoint receives none until an
   admin ticks them in the `security` group of its event list. The list's
   **Select all** does not tick them; the `security` group's own toggle does.
+  A kind added in a later release is not ticked on existing endpoints either:
+  `security.blocked_ip` (a request from a blocked address refused) reaches
+  an endpoint, Slack-format ones included, only once someone ticks it.
 - **To a chat channel.** A [Slack-format endpoint](#slack-format-endpoints)
   receives these events as a chat message instead of this JSON envelope.
 - **When.** Within about a minute of the event. Alerts are grouped per kind
@@ -513,11 +516,15 @@ site's mail relay changed).
 - **What it carries.** The site, the window, and for an alert the security log
   event that raised it (id, type, actor and target ids, metadata), with its IP
   address cut to the network (`/24`, `/48`) unless the site shows full
-  addresses. Never an email address, user agent, secret or endpoint URL. The
+  addresses. A `security.blocked_ip` alert's event has no address at all
+  (`ip` is `null`); its `metadata` names the block `rule` that matched,
+  masked the same way, and the `surface`. Never an email address, user
+  agent, secret or endpoint URL. The
   full shape and examples are in
   [Security alerts → Payload](security-alerts.md#payload).
 - **Platform alerts** (new platform admins, platform role changes, new API
-  keys, a stolen API key used again) are not webhook events in this release;
+  keys, a stolen API key used again, an API key over a rate limit) are not
+  webhook events in this release;
   they go to the platform admins by bell and email only.
 - **Sent only to the endpoint.** A security event is not a content change:
   it does not run [automation](automation.md) rules, federate, purge the CDN

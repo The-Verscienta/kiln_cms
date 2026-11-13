@@ -51,6 +51,44 @@ carries the reasoning.
     can stay. Their resumes are unpinned again.
   (Part of #2539.)
 
+<a id="blocked-ip-alerts-upgrade"></a>
+
+- **Run `mix ash.migrate` (new table `platform_security_alerts`). Sites with block rules now alert their admins when a blocked address is refused, on by default; existing webhook endpoints don't receive `security.blocked_ip` until it is ticked.**
+  One additive migration: `platform_security_alerts`, one row holding the
+  platform alert kinds a platform admin turned off. It stays empty until
+  someone saves, and an older release ignores it, so it can stay after a
+  rollback. What changes from the deploy on:
+  - **Blocked-address alerts are on for every site.** A blocked client that
+    keeps trying raises one alert every 15 minutes, by bell and email, to
+    each of the site's admins (96 a day); when several networks are refused
+    in a window a summary follows each alert, up to 192 a day. Rules the
+    scanner guard adds for a while alert like any other. To stop them,
+    untick **Security alerts** → **Blocked addresses** on the site.
+  - **Webhooks need ticking.** Existing endpoints, Slack-format ones
+    included, don't receive `security.blocked_ip` until an admin ticks it
+    in the endpoint's `security` group. On a site whose alerts go only by
+    webhook (admin notifications off, or no admins at all), the existing
+    posture line **Security alerts reach someone**
+    (`core.security_alerts_reach_someone`) turns **Review** ("Some security
+    alerts on this site reach nobody…") until the event is ticked or the
+    kind is turned off.
+  - **Platform admins get a new alert,** `api_key_rate_limited`, when a
+    verified API key goes over a rate limit. A platform admin can turn it
+    off on the Security alerts page.
+
+  During a rolling deploy, a `blocked_ip` or `api_key_rate_limited` alert
+  picked up by a node still on 1.9.x is logged as "names an unknown kind;
+  not sent" and stamped, so it is lost; and a key going over a limit on a
+  1.9.x node raises nothing, because those nodes don't remember verified
+  keys. After rolling back to 1.9.x, the new security log rows read as
+  "Unrecognized event (ip_block_refused)" and "Unrecognized event
+  (api_key_rate_limited)", and a site that turned **Blocked addresses** off
+  keeps that and can still save its settings. **On 1.9.x, saving an
+  endpoint subscribed to `security.blocked_ip` drops the event**: the 1.9
+  form only lists the events it knows, and the save counts as unticking a
+  security event, so the site's admins get a `webhook_changed` silencing
+  notice. Tick it again after rolling forward. (Part of #2245.)
+
 ## Added
 
 <a id="slack-webhook-format"></a>
@@ -121,6 +159,64 @@ carries the reasoning.
   the fallback settings when the row can't be read. See
   [Security alerts](../security-posture.md#security-alerts) in the posture
   guide. (#2640)
+
+<a id="blocked-ip-alerts"></a>
+
+- **Security alerts have a new site kind, `blocked_ip`: a request refused by the site's block list alerts the site's admins, naming the rule that matched and never the address.**
+  Until now a blocked address left no trace but a counter, so an admin
+  learned of a client still knocking only by looking at metrics. Every
+  refusal (HTTP, the LiveView socket, `/ws/gql`, `/ws/collab`,
+  `/ws/bridge`) is noted; in-memory gates on each server let through the
+  first refusal of each client network (an IPv4 address, an IPv6 `/64`)
+  per site per 15-minute window, at most 20 networks per site per window,
+  so a flood costs no database write per request. What passes is written
+  to the security log as `ip_block_refused` (metadata `rule`, `surface`),
+  with **no IP address and no user agent**, so "nothing logs the address"
+  (ADR 0026) still holds, and raises the alert: "A blocked address was
+  refused (rule 203.0.113.0/24)", then a summary counting the client
+  networks. A rule narrower than a `/24` or `/48` is shown as that network
+  unless the site shows full addresses. The event is written even when the
+  kind is off; only the alert is dropped. It is on by default (see the
+  upgrade note), labeled **Blocked addresses** on `/editor/security-alerts`,
+  and sent to webhooks as `security.blocked_ip`, whose `event.ip` is
+  `null`. New: `KilnCMS.Security.BlockedIpAlert`,
+  `KilnCMS.Security.IpBlocklist.match/2` (the rule that matched;
+  `blocked?/2` stays side-effect-free) and
+  `KilnCMS.Security.Cidr.truncate_range/1`. See
+  [Blocked addresses raise one alert per window](../security-alerts.md#blocked-addresses-raise-one-alert-per-window).
+  (Part of #2245.)
+
+<a id="api-key-rate-limited-alerts"></a>
+
+- **Platform admins are alerted when a verified API key goes over a rate limit (`api_key_rate_limited`), and can turn that one platform alert off.**
+  A key hitting its limits can be a stolen key in heavy use, or a client
+  gone wrong. The alert covers the limits an API key reaches: `api`
+  (JSON:API, `/api/*`, `/api/feed`, `/mcp`, the ActivityPub inbox), `gql`
+  (`/gql`, its batch limit included), `media_upload`, `media_transform` and
+  `plugin_endpoint`. A limit refuses before the key is checked, so each
+  server remembers, in memory, the SHA-256 of every key that authenticated
+  on it in the last 5 minutes; only a refusal carrying one of those keys
+  counts, which costs no database read and lets no forged key use up the
+  real key's alert. It is recorded as `api_key_rate_limited` (no person;
+  target the key; metadata `name`, `bucket`), once per key and limit per
+  15 minutes, in the key owner's site when the owner has exactly one
+  active membership, otherwise the default site. It goes to every platform
+  admin by bell and email (no mute, no webhook), with its own alert window,
+  so it never delays a stolen-key `api_key_abuse` alert. Known gaps: `/ws/gql`
+  can't carry an API key; image transforms and plugin routes never check a
+  key, so they alert only for a key used on an authenticated API on the
+  same server within 5 minutes; and limits are per address, so a
+  legitimate key behind a NAT someone else floods alerts too. It is the one
+  platform kind that can be turned off: platform admins see a new
+  **Platform alerts** part on `/editor/security-alerts` with **API keys over
+  a rate limit**, stored in the new `KilnCMS.Security.PlatformAlertSettings`
+  (`Security.list_platform_alert_settings/1`,
+  `Security.save_platform_alert_settings/2`, platform admins only), and each
+  save is recorded in the instance security log as `platform_alerts_changed`.
+  New telemetry: `kiln_cms.security.api_key_trip.count`, tagged `result`
+  (`unverified`, `debounced`, `noted`) and `bucket`. See
+  [API keys over a rate limit](../security-alerts.md#api-keys-over-a-rate-limit).
+  (The last part of #2245.)
 
 ## Changed
 

@@ -15,12 +15,13 @@ defmodule KilnCMS.Security.AlertText do
   `details/1` reduces an alert's payload (the map its webhooks carry,
   `KilnCMS.Security.Changes.DeliverAlert`) to the few values a headline is
   made of: `phase`, `kind`, `channel`, `change`, `kinds`, `count`, the
-  display `ip` and the `event_type`. That map is stored on the bell row as
+  display `ip`, the display block `rule` (a `blocked_ip` alert's, which
+  carries no address) and the `event_type`. That map is stored on the bell row as
   `Notification.details`, with string keys, so the inbox can say the line
   again in another language. It holds nothing the English excerpt did not
-  already say: the address is the one the site's settings allow
-  (`KilnCMS.Security.Alerts.display_ip/2`), never the user agent, an email
-  address or a URL.
+  already say: the address and rule are the ones the site's settings allow
+  (`KilnCMS.Security.Alerts.display_ip/2`, `display_rule/2`), never the user
+  agent, an email address or a URL.
 
   A kind or change this release does not know (a newer node wrote the row
   during a rolling deploy) falls back to a neutral label rather than raising.
@@ -50,6 +51,7 @@ defmodule KilnCMS.Security.AlertText do
       "kinds" => List.wrap(field(data, :kinds)),
       "count" => field(data, :count),
       "ip" => field(event, :ip),
+      "rule" => field(field(event, :metadata), :rule),
       "event_type" => field(event, :type)
     }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
@@ -78,6 +80,11 @@ defmodule KilnCMS.Security.AlertText do
         count: count
       )
 
+  # A `blocked_ip` event records no address (`KilnCMS.Security.BlockedIpAlert`):
+  # the rule that matched is all the headline names.
+  def headline(%{"kind" => "blocked_ip", "rule" => rule} = details) when is_binary(rule),
+    do: gettext("%{label} (rule %{rule})", label: kind_label(details["kind"]), rule: rule)
+
   def headline(%{"ip" => ip} = details) when is_binary(ip),
     do: gettext("%{label} (from %{ip})", label: kind_label(details["kind"]), ip: ip)
 
@@ -95,6 +102,8 @@ defmodule KilnCMS.Security.AlertText do
   def kind_label("platform_role_changed"), do: gettext("A platform administrator lost the role")
   def kind_label("new_api_key"), do: gettext("An API key was created")
   def kind_label("api_key_abuse"), do: gettext("A rotated API key was used again")
+  def kind_label("api_key_rate_limited"), do: gettext("An API key hit a rate limit")
+  def kind_label("blocked_ip"), do: gettext("A blocked address was refused")
   def kind_label(_unknown), do: gettext("Security alert")
 
   @doc "The label of an `alerts_silenced` notice's change, in the current locale."

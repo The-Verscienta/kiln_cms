@@ -73,7 +73,7 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
 
   @impl true
   def call(conn, {opts, loads_bearer?}) do
-    case api_key(conn) do
+    case presented_key(conn) do
       {:ok, key} -> authenticate_key(conn, key, opts)
       :error when loads_bearer? -> if unverified_bearer?(conn), do: stale_bearer(conn), else: conn
       :error -> conn
@@ -82,14 +82,22 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
 
   # The key plug reads only the first `authorization` value and needs the
   # exact `Bearer ` prefix, so it is handed one normalized header. The
-  # caller's headers are put back afterwards for everything downstream.
+  # caller's headers are put back afterwards for everything downstream. A key
+  # that authenticated is remembered on this node, so a later rate-limit
+  # refusal can tell it was a real key (`KilnCMS.Security.ApiKeyTrip`).
   defp authenticate_key(conn, key, opts) do
     original = conn.req_headers
 
+    conn =
+      conn
+      |> Plug.Conn.put_req_header("authorization", "Bearer " <> key)
+      |> AshAuthentication.Strategy.ApiKey.Plug.call(opts)
+      |> Map.put(:req_headers, original)
+
+    unless conn.halted,
+      do: KilnCMS.Security.ApiKeyTrip.remember(key, Ash.PlugHelpers.get_actor(conn))
+
     conn
-    |> Plug.Conn.put_req_header("authorization", "Bearer " <> key)
-    |> AshAuthentication.Strategy.ApiKey.Plug.call(opts)
-    |> Map.put(:req_headers, original)
   end
 
   defp stale_bearer(conn) do
@@ -190,10 +198,15 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   defp send_error(conn),
     do: KilnCMSWeb.ApiError.send(conn, :unauthorized, "invalid_token", @message)
 
-  # The first `kiln_…` token under a `Bearer` scheme (any case) across every
-  # `authorization` value (#2633). It decides the request: a later key is
-  # ignored, and an invalid first key is a 401 even when a later one is valid.
-  defp api_key(conn) do
+  @doc """
+  The API key `conn` presents, unverified: the first `kiln_…` token under a
+  `Bearer` scheme (any case) across every `authorization` value (#2633), or
+  `:error`. It decides the request: a later key is ignored, and an invalid
+  first key is a 401 even when a later one is valid. Pure; reads only the
+  headers.
+  """
+  @spec presented_key(Plug.Conn.t()) :: {:ok, String.t()} | :error
+  def presented_key(conn) do
     Enum.find_value(bearer_headers(conn), :error, fn value ->
       case bearer_token(value) do
         @key_prefix <> _ = token -> {:ok, token}

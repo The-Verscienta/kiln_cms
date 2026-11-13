@@ -47,6 +47,7 @@ defmodule KilnCMS.Accounts.ApiKeyReuse do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.ApiKey
   alias KilnCMS.Mail
+  alias KilnCMS.Security.ApiKeyTrip
   alias KilnCMS.Security.Recorder
 
   @grace_seconds 120
@@ -89,10 +90,15 @@ defmodule KilnCMS.Accounts.ApiKeyReuse do
 
   def check(_plaintext, _context), do: :ok
 
-  # The `kiln_<base62(32 random bytes <> 16-byte id)>_<base62(crc32)>` shape
-  # `AshAuthentication.Strategy.ApiKey.GenerateApiKey` mints, and whose hash is
-  # `sha256(random <> id)`. Mirrors the strategy's own decoder.
-  defp decode(plaintext) do
+  @doc """
+  Decode a `kiln_…` secret into `{:ok, key_id, token}`, or `:error`: the
+  `kiln_<base62(32 random bytes <> 16-byte id)>_<base62(crc32)>` shape
+  `AshAuthentication.Strategy.ApiKey.GenerateApiKey` mints, whose hash is
+  `sha256(token)`. Mirrors the strategy's own decoder. Decoding proves
+  nothing: the token must still be compared with the key's hash.
+  """
+  @spec decode(String.t()) :: {:ok, Ash.UUID.t(), binary()} | :error
+  def decode(plaintext) when is_binary(plaintext) do
     with [_prefix, middle, crc] <- String.split(plaintext, "_", parts: 3),
          true <- byte_size(middle) <= 65 and byte_size(crc) <= 6,
          {:ok, <<_random::binary-size(32), id::binary-size(16)>> = token} <-
@@ -104,6 +110,8 @@ defmodule KilnCMS.Accounts.ApiKeyReuse do
       _ -> :error
     end
   end
+
+  def decode(_plaintext), do: :error
 
   defp within_grace?(successor) do
     DateTime.diff(DateTime.utc_now(), successor.created_at, :second) < @grace_seconds
@@ -170,7 +178,7 @@ defmodule KilnCMS.Accounts.ApiKeyReuse do
   # back to the mail.
   defp record_reuse(key, revoked, context) do
     Recorder.record(:api_key_reuse_detected,
-      tenant: owner_org_id(key),
+      tenant: ApiKeyTrip.owner_org_id(key),
       user: nil,
       target_type: "api_key",
       target_id: key.id,
@@ -184,24 +192,6 @@ defmodule KilnCMS.Accounts.ApiKeyReuse do
 
   defp describe({:error, %{__exception__: true} = error}), do: inspect(error.__struct__)
   defp describe(other), do: inspect(other)
-
-  # The owner's one site, read as the owner (the self-only read admits it):
-  # the key verified, so this is the key's own account, not a claim of the
-  # presenter's. Several sites, none, or a read that fails: the default org.
-  defp owner_org_id(%{user: %Accounts.User{id: user_id} = owner}) do
-    case Accounts.list_memberships_for_user(user_id, actor: owner, authorize_with: :error) do
-      {:ok, memberships} ->
-        case Enum.filter(memberships, &(&1.status == :active)) do
-          [only] -> only.organization_id
-          _none_or_several -> Accounts.default_org_id()
-        end
-
-      {:error, _refused} ->
-        Accounts.default_org_id()
-    end
-  end
-
-  defp owner_org_id(_key), do: Accounts.default_org_id()
 
   defp alert_admins(key) do
     site = KilnCMS.Branding.for_org(nil).site_name
