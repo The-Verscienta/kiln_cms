@@ -1,11 +1,10 @@
 # 0026. The IP block list fails open, and covers dynamic routes only
 
-- **Status** — accepted (2026-11-10); amended 2026-11-13 by
-  [#2808](https://github.com/The-Verscienta/kiln_cms/pull/2808): the counter
-  is no longer the only trace. A refusal also records a sampled
-  `ip_block_refused` security event with the matched rule and the surface,
-  and still no address. See
-  [ADR 0027](0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md).
+- **Status** — accepted (2026-11-10). Partly superseded by
+  [ADR 0027](0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md)
+  (#2808, merged 2026-11-12): a refusal also records a sampled
+  `ip_block_refused` event, still without an address, so the counter below is
+  no longer the only trace.
 - **References** — [#2242](https://github.com/The-Verscienta/kiln_cms/issues/2242)
   (PRs #2398, #2404, #2428, #2429); the threat model's "Blocked addresses"
   section; [ADR 0019](0019-the-admin-allowlist-fails-closed-and-only-the-operator-lifts-it-from-outside.md)

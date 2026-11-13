@@ -759,11 +759,13 @@ The gates in front of blocked-address and rate-limit alerts are kept in each
 server's memory, so a cluster behaves differently from one server in three
 ways.
 
-- **Most rate limits are per server.** Every limit except sign-in (`auth`),
-  registration (`register`) and unlock (`unlock`) is counted in each server's
-  memory, the five limits that raise `api_key_rate_limited` included. Behind
-  a load balancer an address can make up to N times the configured number of
-  requests on N servers before it is refused, so a key goes over a limit, and
+- **Most request-rate limits are per server.** Every request-rate limit
+  (`KilnCMSWeb.RateLimit`) except sign-in (`auth`), registration (`register`)
+  and unlock (`unlock`) is counted in each server's memory, the five limits
+  that raise `api_key_rate_limited` included. (The per-account budgets, such as
+  sign-in lockout and invitations, are shared through the database and don't
+  multiply.) Behind a load balancer an address can make up to N times the
+  configured number of requests on N servers before it is refused, so a key goes over a limit, and
   alerts, less often than the numbers suggest.
 - **A rate-limit alert needs the refusing server to know the key.** It is
   raised only when that server [verified the key](#api-keys-over-a-rate-limit)

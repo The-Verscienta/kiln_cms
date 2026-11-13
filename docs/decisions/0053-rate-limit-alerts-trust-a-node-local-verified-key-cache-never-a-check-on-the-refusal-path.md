@@ -23,9 +23,10 @@ anyone can send `Authorization: Bearer kiln_…` with a made-up string, and an
 alert on that would let a stranger fill the platform's bell, or use up the
 real key's alert for the window.
 
-But `KilnCMSWeb.Plugs.RateLimit` runs first in every pipeline it guards
-(`:api`, `:graphql`, `:mcp`, `:media_transform`, `:plugin_endpoint`, the
-ActivityPub inbox), ahead of `KilnCMSWeb.Plugs.ApiKeyAuth`. At a `429` the
+But `KilnCMSWeb.Plugs.RateLimit` runs ahead of `KilnCMSWeb.Plugs.ApiKeyAuth`
+in every pipeline that authenticates a key (`:api`, `:feed`, `:graphql`,
+`:mcp`), and `:media_transform`, `:plugin_endpoint` and the ActivityPub inbox
+charge a limit without ever authenticating one. At a `429` the
 bearer is only a string someone sent. Something has to decide, at that
 moment, whether it is a real key, and the obvious ways of deciding each cost
 something on the one path that has to stay cheap.

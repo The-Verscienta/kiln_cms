@@ -4,7 +4,7 @@ defmodule KilnCMS.Security.ApiKeyTrip do
   `api_key_rate_limited` alert (#2245). Called from the refusal branch of
   `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the
   buckets an API key reaches: `:api` (JSON:API, `/api/*`, `/api/feed`,
-  `/mcp`), `:gql` (`/gql`, batches included), `:media_upload`,
+  `/mcp`, and the ActivityPub inbox, which authenticates no key), `:gql` (`/gql`, batches included), `:media_upload`,
   `:media_transform` and `:plugin_endpoint`. Every other bucket is ignored.
 
   ## Only a key this node has verified
