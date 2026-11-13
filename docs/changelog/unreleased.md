@@ -1418,6 +1418,43 @@ carries the reasoning.
   takes the same operators and groups too. A test now pins both the
   one-condition form and the `400`. No behavior changes. (#2856)
 
+<a id="setup-page-passkey-removal"></a>
+
+- **The two-step sign-in setup page, `/account/two-factor`, now lists the account's passkeys and removes one, as Settings does.**
+  At 20 passkeys the page said "Remove one to add another", but the only
+  page with a remove button was `/editor/settings`, which a reader (viewer)
+  can't open, and no admin screen removes another person's passkey. The
+  **Passkey** section of `/account/two-factor` now lists each passkey with
+  its name, "Added (date)" and "last used (date)", and a trash button
+  ("Remove passkey") that asks "Remove this passkey? You can no longer sign
+  in with it." and then says "Passkey removed." Below the limit again, the
+  add form comes back (on a host where a passkey can be added). Anyone signed in can use it for their own passkeys;
+  the page is still served only on the main host and console hosts.
+
+  It behaves as Settings does. While a site the account belongs to requires
+  a second factor and the passkey is the account's last one (no
+  authenticator app), the trash button is replaced by "A site you use
+  requires two-step sign-in, so you can't remove your last second factor.
+  Add another one first." The shared demo account sees no list. Another
+  person's passkey id, or one that no longer exists, is refused with
+  "Couldn't remove that passkey." The `Passkey` `:destroy` action still
+  decides all three, whatever the page shows. Removing asks for no emailed
+  code (that step gates adding a factor), and the removal is recorded in the
+  site's security log as `passkey_removed`, as on Settings.
+
+  The list is shown on any host that serves the page, since removing needs
+  no browser ceremony. On a console host where a passkey can't be
+  registered, the section has the list and the trash buttons but no add
+  form, no limit note and no "We'll email you each time a passkey is added
+  to your account." line.
+
+  Both pages now remove through `KilnCMSWeb.TotpEnrolment.remove_passkey/3`,
+  and share `last_factor?/4` and `last_factor_note/1`; Settings' behavior is
+  unchanged. The new screen text reuses Settings' strings, already
+  translated into Spanish and French. [Passkeys](../passkeys.md#remove-a-passkey)
+  has a "Remove a passkey" walk-through. No migration, API or config change;
+  rolling back removes the list from the setup page. (#2900)
+
 ## Fixed
 
 <a id="backup-resume-safety"></a>

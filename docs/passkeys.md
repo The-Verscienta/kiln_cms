@@ -14,6 +14,9 @@ ID, Windows Hello, a phone, a security key) and signs in without a password.
   while the page reads "Waiting for your device…". The credential is then listed with its name, the date it was
   added and the date it was last used. A passkey can't be renamed: remove it
   with the trash button and add it again. Multiple passkeys per account.
+  Settings is for editors and admins; anyone signed in, readers included,
+  adds and removes passkeys at `/account/two-factor` instead
+  ([Remove a passkey](#remove-a-passkey)).
 - **Sign in** at `/sign-in` → "Use a passkey" (the button appears only in
   WebAuthn-capable browsers). The browser offers your saved passkeys, with no
   email or password typed. If the ceremony fails, the page says "Passkey
@@ -58,8 +61,57 @@ requirement sends people to; there, a session that signed in with only a
 password may first have to confirm a code sent by email.
 
 While a site requires a second factor of the account, its last passkey can't
-be removed if it has no authenticator app: the trash button is replaced by a
-note saying so.
+be removed if it has no authenticator app: on both pages the trash button is
+replaced by a note saying so.
+
+### Remove a passkey
+
+Anyone signed in can remove their own passkeys, readers included. Editors and
+admins can use either page below; a reader uses `/account/two-factor`, since
+`/editor/settings` is editors only.
+
+1. Open the page:
+   - **Editors and admins:** `/editor/settings`, the **Passkeys** section.
+   - **Anyone:** `/account/two-factor`, the **Passkey** section. The page is
+     served on the main host (`PHX_HOST`) and on console hosts; a site's own
+     address redirects to the main host's page, where you sign in again.
+
+   Each passkey is listed with its name, "Added (date)" and, once it has been
+   used, "last used (date)".
+2. Click the trash button (labeled "Remove passkey" for screen readers) on the
+   row of the passkey to remove.
+3. Confirm the browser's prompt, "Remove this passkey? You can no longer sign
+   in with it."
+
+The row disappears and the page says "Passkey removed." On
+`/account/two-factor`, the count above the list goes down, and at the limit
+the add form comes back (see [Limits on adding passkeys](#limits-on-adding-passkeys)).
+
+The list and the trash buttons are on `/account/two-factor` on every host
+that serves the page, since removing a passkey needs no ceremony. On a host
+where a passkey can't be registered (a console host where the ceremony can't
+run), the section shows the list without the add form, the limit note or the
+"We'll email you each time a passkey is added to your account." line. With
+no passkeys there, the section is not shown at all.
+
+Removing a passkey asks for no emailed code, even where adding one would: the
+code gates adding a factor, not removing one. Removal does not email the
+owner; only an added factor is mailed. It is recorded in the security log
+like any other removal (below).
+
+What can go wrong:
+
+- **No trash button, and "A site you use requires two-step sign-in, so you
+  can't remove your last second factor. Add another one first."** This is
+  your only second factor and a site you belong to requires one. Add an
+  authenticator app or another passkey first, then remove this one.
+- **No passkey list on `/account/two-factor`, and "This is a shared demo
+  account, so its password and sign-in methods can't be changed."** You are
+  signed in to the instance's shared demo account, whose passkeys can't be
+  removed or added ([Demo mode](demo-mode.md)).
+- **"Couldn't remove that passkey."** The passkey no longer exists (removed
+  in another tab, for example) or isn't yours. Reload the page to see the
+  current list.
 
 Adding or removing a passkey is recorded in the site's
 [security log](security-events.md) as `passkey_added` / `passkey_removed`,
@@ -72,10 +124,13 @@ Because every passkey added emails the owner, an account can hold at most
 **20** passkeys and add at most **5 in an hour** (#2247). Without the limits, a
 stolen session could flood the owner's inbox and the instance's mail quota.
 
-- At 20, the *Passkeys* section of `/editor/settings` shows "You have 20
-  passkeys, the most an account can hold. Remove one to add another." in
-  place of the add form. Remove one with its trash button and the form comes
-  back. An account that already had more than 20 keeps them all.
+- At 20, the *Passkeys* section of `/editor/settings` and the *Passkey*
+  section of `/account/two-factor` show "You have 20 passkeys, the most an
+  account can hold. Remove one to add another." in place of the add form.
+  Remove one with its trash button on the same page and the form comes back.
+  (On `/account/two-factor`, the note and the form appear only on a host where
+  a passkey can be added.) An account that already had more than 20 keeps
+  them all.
 - Over the hourly budget, adding one fails with "You've added several passkeys
   in a short time. Try again in N minutes." The budget counts every
   registration the browser completed and the server verified, including one
@@ -108,8 +163,8 @@ them, and refuse with `KilnCMS.Accounts.Errors.PasskeyLimitReached` and
   globally unique), COSE public key, signature counter, usage timestamps.
   Registered credentials are **discoverable** (resident keys), which is what
   makes usernameless sign-in possible.
-- **Enrolment** runs over the settings LiveView socket (`PasskeyEnroll` JS
-  hook): the server parks the challenge in LiveView state, the browser runs
+- **Enrolment** runs over the LiveView socket of `/editor/settings` or
+  `/account/two-factor` (`PasskeyEnroll` JS hook): the server parks the challenge in LiveView state, the browser runs
   `navigator.credentials.create()`, and the attestation comes back as an
   event for server-side verification.
 - **Sign-in** is a two-step JSON ceremony (`POST /auth/passkey/options` →
@@ -150,7 +205,9 @@ them, and refuse with `KilnCMS.Accounts.Errors.PasskeyLimitReached` and
   #2453), since whoever registered the address first may have enrolled them.
   Only the invitations system actor may call that action, never a person, a
   platform admin included; an owner or admin removes a passkey with
-  `:destroy`. See
+  `:destroy`. Both pages remove through `KilnCMSWeb.TotpEnrolment.remove_passkey/3`,
+  which passes the page's security context so the `passkey_removed` event
+  is recorded for the site. See
   [What taking over an account removes](account-administration.md#what-taking-over-an-account-removes).
   A registration already under way when the takeover starts cannot outlive
   it: `:register` takes the account's row first (`Changes.GuardAccountTakeover`)

@@ -394,7 +394,10 @@ can submit again.
 
 The invitee signs in with the new password alone. An editor or admin sets up
 **Two-factor authentication** and **Passkeys** again under **Settings**
-(`/editor/settings`); a viewer cannot reach that page. An
+(`/editor/settings`). A viewer cannot reach that page, and sets up an
+authenticator app or a passkey on `/account/two-factor` instead, where they
+can also remove a passkey later
+([Remove a passkey](passkeys.md#remove-a-passkey)). An
 admin who minted an API key for the account mints a new one under **API keys**
 if it is still wanted; the old key stays listed as revoked.
 

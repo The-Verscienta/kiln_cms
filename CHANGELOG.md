@@ -188,6 +188,9 @@ Every summary line below that was shortened links to its own entry there.
 - **MCP read tools' `custom_filter`, `custom_where` and `custom_sort` are documented (snake_case input, though some errors spell `notEq`/`dateTime`); JSON:API's `custom_where` takes one condition per query string, and the indexed form is a `400`.**
   ([#2914](https://github.com/The-Verscienta/kiln_cms/pull/2914) · [long form](docs/changelog/unreleased.md#mcp-custom-field-filters-documented))
 
+- **`/account/two-factor` lists your passkeys with a trash button to remove one, so a reader, who can't open Settings, can remove a passkey and get past the 20-passkey limit.**
+  ([long form](docs/changelog/unreleased.md#setup-page-passkey-removal))
+
 ### Fixed
 
 - **Backup Resume is safe: the re-open is atomic, Resume waits ~2.5 min after a Cancel, a step that outlived its Cancel can't overwrite state or history, a resume runs on the node with its files, and a refused one says why on its row.**

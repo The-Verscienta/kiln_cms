@@ -138,7 +138,8 @@ and is then offered the passkey alone. A passkey sign-in from the sign-in page
 is still a complete sign-in on its own (see [Passkeys](passkeys.md)).
 
 You need an account with an authenticator app and at least one passkey, both
-added at `/editor/settings`, and a browser that supports passkeys. Then:
+added at `/editor/settings` or `/account/two-factor`, and a browser that
+supports passkeys. Then:
 
 1. Sign in at `/sign-in` with your password (a sign-in link by email or
    single sign-on works the same). The **Two-factor authentication** page
@@ -571,6 +572,8 @@ not reach your second factors.
 
 The owner of the account is emailed for every factor added, as always
 ([We email you when a second factor is added](#we-email-you-when-a-second-factor-is-added)).
+Under **Passkey**, the page lists the passkeys you already have, each with a
+trash button that removes it ([Remove a passkey](passkeys.md#remove-a-passkey)).
 The page also has **Sign out**. A reader held on a site that requires
 everyone also sees **Your membership and data**, with **Manage billing** (when
 they have a paid membership to manage) and **Export my data**.
@@ -744,7 +747,10 @@ period too), the owner cannot remove the account's last one. On
 `/editor/settings`, the authenticator app's **Disable** form, or the last
 passkey's remove (trash) button, is replaced by "A site you use requires
 two-step sign-in, so you can't remove your last second factor. Add another one
-first." The same refusal comes from
+first." `/account/two-factor`, where anyone signed in can remove their own
+passkeys, replaces the last passkey's trash button with the same note; it has
+no control that turns the authenticator app off
+([Remove a passkey](passkeys.md#remove-a-passkey)). The same refusal comes from
 the action itself, before any code is checked, so it costs no attempt.
 
 Replacing the authenticator app still works (also after signing in with a
