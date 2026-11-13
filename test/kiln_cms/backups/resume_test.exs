@@ -1126,7 +1126,7 @@ defmodule KilnCMS.Backups.ResumeTest do
     end
 
     test "a media-only run on a node with no media directory keeps its status, and says why",
-         %{base: base, dir: dir} do
+         %{base: base} do
       tools = stub_tools(base)
       File.write!(tools.gate, "")
       assert {:error, _} = BackupChain.run("manual", components: [:media])
