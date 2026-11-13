@@ -694,7 +694,8 @@ carries the reasoning.
   (`/gql`, its batch limit included), `media_upload`, `media_transform` and
   `plugin_endpoint`. A limit refuses before the key is checked, so each
   server remembers, in memory, the SHA-256 of every key that authenticated
-  on it in the last 5 minutes; only a refusal carrying one of those keys
+  on it recently (a key is forgotten 2.5 to 5 minutes after its last
+  successful request there); only a refusal carrying one of those keys
   counts, which costs no database read and lets no forged key use up the
   real key's alert. It is recorded as `api_key_rate_limited` (no person;
   target the key; metadata `name`, `bucket`), once per key and limit per
@@ -703,8 +704,8 @@ carries the reasoning.
   admin by bell and email (no mute, no webhook), with its own alert window,
   so it never delays a stolen-key `api_key_abuse` alert. Known gaps: `/ws/gql`
   can't carry an API key; image transforms and plugin routes never check a
-  key, so they alert only for a key used on an authenticated API on the
-  same server within 5 minutes; and limits are per address, so a
+  key, so they alert only for a key the same server still remembers from
+  an authenticated API; and limits are per address, so a
   legitimate key behind a NAT someone else floods alerts too. It is the one
   platform kind that can be turned off: platform admins see a new
   **Platform alerts** part on `/editor/security-alerts` with **API keys over
@@ -718,10 +719,14 @@ carries the reasoning.
   On more than one server, the limits that raise this alert are counted per
   server, so a key trips them less often than the configured numbers
   suggest, and a refusal alerts only if the refusing server verified the key
-  in the last 5 minutes; [Running more than one server](../security-alerts.md#running-more-than-one-server)
+  recently; [Running more than one server](../security-alerts.md#running-more-than-one-server)
   lists when it doesn't, and
   [ADR 0053](../decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md)
-  argues why servers don't share what they remember (#2812, #2813).
+  argues why servers don't share what they remember (#2812, #2813). A **?**
+  at the end of the kind's line on **Platform alerts** says so on the page
+  ("Some refusals raise no alert, especially when Kiln runs on more than one
+  server: an alert is raised only by a server that recently verified the
+  key.") and links that section (#2896).
   (The last part of #2245.)
 
 <a id="second-factor-requirement"></a>

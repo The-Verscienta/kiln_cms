@@ -448,7 +448,9 @@ build if a resource is ever registered without that authorizer.
   on `:api`, `:gql`, `:media_upload`, `:media_transform` or `:plugin_endpoint`
   raises the platform's `api_key_rate_limited` alert (#2245). The limit runs
   before the key is checked, so "verified" means a key that authenticated on
-  the same node within 5 minutes, held in memory as a SHA-256 of the key
+  the same node recently (an entry lasts 5 minutes and is refreshed at most
+  every 2.5, so a key is forgotten 2.5 to 5 minutes after its last use there),
+  held in memory as a SHA-256 of the key
   (`KilnCMS.Security.ApiKeyTrip`); nothing on the refusal path reads the
   database or keys on the presented string, so a client sending a fresh forged
   key each time costs nothing and cannot use up the real key's alert. It is a

@@ -2415,6 +2415,11 @@ msgstr "Acerca de los carriles"
 msgid "About task anchoring"
 msgstr "Acerca del anclaje de tareas"
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "About when a rate-limit alert is raised"
+msgstr "Acerca de cuándo se genera una alerta de límite de frecuencia"
+
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "Above 100%, this applies only to addresses verified as the search engine they name. Any other claim gets at most %{browser} per address, like a browser."
@@ -20479,6 +20484,11 @@ msgstr "Algunas claves tienen más de 180 días (su antigüedad sustituye al úl
 msgid "Some notifications could not be marked read."
 msgstr "No se pudieron marcar como leídas algunas notificaciones."
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some refusals raise no alert, especially when Kiln runs on more than one server: an alert is raised only by a server that recently verified the key."
+msgstr "Algunos rechazos no generan ninguna alerta, sobre todo cuando Kiln se ejecuta en más de un servidor: solo genera la alerta un servidor que haya verificado la clave recientemente."
+
 #: lib/kiln_cms/security/posture/checks/security_alerts.ex
 #, elixir-autogen, elixir-format
 msgid "Some security alerts on this site reach nobody: no webhook carries them, and no administrator gets them."
@@ -25592,6 +25602,11 @@ msgstr "Cuando falta una traducción"
 #, elixir-autogen, elixir-format
 msgid "When administrators always sign in from known networks (an office, a VPN), an allowlist keeps everyone else away from the console and sign-in."
 msgstr "Si los administradores siempre entran desde redes conocidas (una oficina, una VPN), una lista de redes permitidas aleja a todos los demás de la consola y del inicio de sesión."
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "When an alert is raised"
+msgstr "Cuándo se genera una alerta"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format

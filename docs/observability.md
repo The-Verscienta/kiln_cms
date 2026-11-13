@@ -437,8 +437,10 @@ that carried a credential, on the limits an API key reaches (`api`, `gql`,
 `media_upload`, `media_transform`, `plugin_endpoint`), tagged `bucket` and
 `result`:
 
-- `unverified`: the credential was not a key this server verified in the last
-  5 minutes (forged, unknown, revoked, expired, never used here, or a JWT).
+- `unverified`: the credential was not a key this server still remembers
+  verifying (it forgets a key 2.5 to 5 minutes after the key's last
+  successful request there): forged, unknown, revoked, expired, not used here
+  recently, or a JWT.
   Nothing is recorded.
 - `debounced`: a verified key already noted for this limit in this
   15-minute window, on this server.
