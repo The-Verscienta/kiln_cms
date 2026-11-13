@@ -238,6 +238,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Calendar clients no longer drop or add the last occurrence of a timed repeating event with an end date: the `.ics` `UNTIL` is now the end of that day in the event's time zone.**
   ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#ics-until-end-of-local-day))
 
+- **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
+  ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
+
 ### Security
 
 - **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**
