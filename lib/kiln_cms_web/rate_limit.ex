@@ -268,6 +268,24 @@ defmodule KilnCMSWeb.RateLimit do
   end
 
   @doc """
+  Gives back one charge a `hit/3` or `hit/4` made on `key` in the current
+  `scale` window, never taking the count below zero, and returns the new
+  count. For a caller that charged before it knew whether the work could run
+  (`KilnCMS.CrawlerVerification`, #2588), and only inside the window it
+  charged in.
+
+  Hammer's own `inc/3` takes a positive increment only; this is the same
+  counter update on the same row (`Hammer.ETS.FixWindow`'s `{key, window}`),
+  with a floor.
+  """
+  @spec refund(String.t(), pos_integer()) :: non_neg_integer()
+  def refund(key, scale) when is_binary(key) and is_integer(scale) and scale > 0 do
+    window = div(System.system_time(:millisecond), scale)
+    full_key = {key, window}
+    :ets.update_counter(__MODULE__, full_key, {2, -1, 0, 0}, {full_key, 0, (window + 1) * scale})
+  end
+
+  @doc """
   Milliseconds until `bucket`'s current fixed window closes: the retry-after of
   a refusal decided after the charge (a site's ceiling under `check_limit/3`'s).
   Hammer's windows are clock-aligned, so this is the same for every key.

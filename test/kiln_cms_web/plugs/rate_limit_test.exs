@@ -17,6 +17,24 @@ defmodule KilnCMSWeb.Plugs.RateLimitTest do
     assert %{auth: {40, 60_000}} = Map.take(KilnCMSWeb.RateLimit.default_limits(), [:auth])
   end
 
+  # #2588: crawler verification charges its lookup caps before it knows the
+  # lookup can start, and gives a charge back when it cannot. An hour-long
+  # window keeps the test from straddling a rollover.
+  test "refund/2 gives back one charge and never goes below zero" do
+    key = "refund-test-#{System.unique_integer([:positive])}"
+    scale = :timer.hours(1)
+
+    assert {:allow, 1} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
+    assert {:allow, 2} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
+    assert KilnCMSWeb.RateLimit.refund(key, scale) == 1
+    assert {:allow, 2} = KilnCMSWeb.RateLimit.hit(key, scale, 2)
+
+    assert KilnCMSWeb.RateLimit.refund(key, scale) == 1
+    assert KilnCMSWeb.RateLimit.refund(key, scale) == 0
+    assert KilnCMSWeb.RateLimit.refund(key, scale) == 0
+    assert KilnCMSWeb.RateLimit.refund("never-charged-#{key}", scale) == 0
+  end
+
   test "returns 429 when the auth bucket is exceeded", %{conn: conn} do
     # Deliberately NOT under ConnCase's default `10.128.0.0/9` range
     # (`RateLimitHelpers.client_address/0`): this file drives `10.1` / `10.3` /

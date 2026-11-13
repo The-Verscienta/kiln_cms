@@ -9,6 +9,7 @@ defmodule KilnCMS.Security.ScannerGuardTest do
   use KilnCMS.DataCase, async: false
 
   import KilnCMS.OrgFixtures, only: [org: 1]
+  import KilnCMS.Test.Eventually
 
   alias KilnCMS.CMS
   alias KilnCMS.CrawlerVerification
@@ -350,8 +351,50 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       assert event.metadata["reason"] == "miss_threshold"
     end
 
-    test "a resolver error is not a proof: still exempt", %{ip: ip} do
+    # #2588: a scanner on an address whose reverse zone never answers must not
+    # keep the exemption while this node's resolver answers everyone else.
+    test "a silent reverse zone is counted while the resolver answers other lookups",
+         %{ip: ip} do
+      CrawlerVerification.reset_health()
+      on_exit(&CrawlerVerification.reset_health/0)
       CrawlerVerification.put_result(:google, ip, {:error, :timeout})
+
+      answered = KilnCMS.Test.PublicAddress.v4()
+      CrawlerVerification.forget(answered)
+      on_exit(fn -> CrawlerVerification.forget(answered) end)
+
+      eventually(fn ->
+        CrawlerVerification.check(:google, answered) == {:unverified, :failed}
+      end)
+
+      refute CrawlerVerification.resolver_failing?()
+
+      miss(3, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @googlebot, ip: ip)
+      assert [event] = events()
+      assert event.metadata["reason"] == "miss_threshold"
+    end
+
+    test "a resolver error keeps the exemption while the resolver itself is failing",
+         %{ip: ip} do
+      CrawlerVerification.reset_health()
+      on_exit(&CrawlerVerification.reset_health/0)
+      CrawlerVerification.put_result(:google, ip, {:error, :timeout})
+
+      # No lookup has answered, and the canary gets no answer either.
+      canary = KilnCMS.Test.PublicAddress.v4()
+      StubCrawlerResolver.put_ptr(canary, {:error, :timeout})
+      on_exit(fn -> StubCrawlerResolver.reset(canary) end)
+      previous = Application.get_env(:kiln_cms, CrawlerVerification, [])
+
+      Application.put_env(
+        :kiln_cms,
+        CrawlerVerification,
+        Keyword.put(previous, :canary_address, canary)
+      )
+
+      eventually(fn -> CrawlerVerification.resolver_failing?() end)
 
       miss(10, "/gone", ua: @googlebot, ip: ip)
       assert rules() == []

@@ -51,7 +51,10 @@ defmodule KilnCMS.CrawlerVerification do
   per network (IPv4 `/24` and `/16`, IPv6 `/64`, `/48` and `/32`) and per node
   (`:lookups_per_minute`, 600). The per-network caps are what stop one
   attacker from rotating through the addresses of a `/48` to buy a lookup
-  each.
+  each. The caps are charged before the lookup starts; one that then cannot
+  start because every slot is busy gives back what it charged in that window
+  (#2588), so a flood of turned-away starts cannot spend a network's or the
+  node's budget.
 
   ## The cache
 
@@ -62,6 +65,24 @@ defmodule KilnCMS.CrawlerVerification do
   second lookup. A confirmed name is kept for `:verified_ttl_ms` (6 h), a
   proven failure for `:rejected_ttl_ms` (1 h), a resolver error for
   `:error_ttl_ms` (5 min). Per node, never shared.
+
+  Confirmed names live in a cache of their own (`:max_verified_entries`),
+  apart from rejections and errors (`:max_entries`), and a read asks it
+  first (#2588). Both are bounded least-recently-written, but an attacker can
+  only write the second, so rotating through new addresses cannot evict a
+  verified crawler.
+
+  ## Is the resolver failing?
+
+  A lookup that gets no answer means one of two things: this node's resolver
+  is down, so no claim can be checked, or the address's own reverse zone is
+  silent, which its owner chooses. `resolver_failing?/1` tells them apart for
+  `KilnCMS.Security.ScannerGuard` (#2588). It is `false` while some lookup got
+  an answer within `:health_window_ms` (1 min). Otherwise it starts one
+  *canary* per window, a PTR query for `:canary_address` (`8.8.8.8`), whose
+  reverse zone always answers; and answers what the last canary found,
+  `false` until one has. The canary runs on a one-slot supervisor of its own,
+  so it runs even while every lookup slot is busy, and charges no rate cap.
 
   ## Configuration
 
@@ -78,7 +99,12 @@ defmodule KilnCMS.CrawlerVerification do
     * `:prefix_lookups_per_minute`: new lookups per network, as
       `[inet: [{prefix, limit}], inet6: [{prefix, limit}]]`
     * `:error_warning_after` (20): consecutive failed lookups before a warning
-    * `:max_entries`, `:max_concurrency`: read once, by
+    * `:health_window_ms` (60,000): how recent an answered lookup must be for
+      `resolver_failing?/1` to trust the resolver without a canary
+    * `:canary_address` (`{8, 8, 8, 8}`): the address the canary's PTR query
+      asks about; never a visitor's
+    * `:max_entries` (50,000), `:max_verified_entries` (10,000),
+      `:max_concurrency` (16): read once, by
       `KilnCMS.CrawlerVerification.Supervisor`
 
   ## Telemetry
@@ -110,7 +136,9 @@ defmodule KilnCMS.CrawlerVerification do
   alias KilnCMSWeb.RateLimit
 
   @cache :kiln_cms_crawler_verification
+  @verified_cache :kiln_cms_crawler_verification_verified
   @task_supervisor KilnCMS.CrawlerVerification.TaskSupervisor
+  @canary_supervisor KilnCMS.CrawlerVerification.CanarySupervisor
 
   # The first this-many PTR names are read; of those, at most @max_forward are
   # confirmed by a forward query. Together they bound a lookup at 3 queries.
@@ -138,7 +166,9 @@ defmodule KilnCMS.CrawlerVerification do
     ],
     rate_window_ms: :timer.minutes(1),
     rate_scope: "crawler_verify",
-    error_warning_after: 20
+    error_warning_after: 20,
+    health_window_ms: :timer.minutes(1),
+    canary_address: {8, 8, 8, 8}
   ]
 
   # Error reasons named in telemetry; anything else is `:other`, so a metric
@@ -152,13 +182,21 @@ defmodule KilnCMS.CrawlerVerification do
           | {:rejected, :no_ptr | :wrong_domain | :forward_mismatch}
           | {:error, term()}
 
-  @doc "The result cache's name."
+  @doc "The result cache's name: rejections and resolver errors."
   @spec cache_name() :: atom()
   def cache_name, do: @cache
+
+  @doc "The verified-result cache's name: confirmed crawler names only."
+  @spec verified_cache_name() :: atom()
+  def verified_cache_name, do: @verified_cache
 
   @doc "The lookup task supervisor's name."
   @spec task_supervisor() :: atom()
   def task_supervisor, do: @task_supervisor
+
+  @doc "The resolver-health canary's one-slot task supervisor's name."
+  @spec canary_supervisor() :: atom()
+  def canary_supervisor, do: @canary_supervisor
 
   @doc "Is verification on? On unless `config :kiln_cms, #{inspect(__MODULE__)}, enabled: false`."
   @spec enabled?() :: boolean()
@@ -231,10 +269,12 @@ defmodule KilnCMS.CrawlerVerification do
   end
 
   @doc false
-  # Test seam: drop whatever is cached for `ip`.
+  # Test seam: drop whatever is cached for `ip`, in both caches.
   @spec forget(:inet.ip_address(), keyword()) :: :ok
   def forget(ip, _opts \\ []) do
-    Cachex.del(@cache, normalize_ip(ip))
+    ip = normalize_ip(ip)
+    Cachex.del(@verified_cache, ip)
+    Cachex.del(@cache, ip)
     :ok
   end
 
@@ -245,16 +285,57 @@ defmodule KilnCMS.CrawlerVerification do
     InFlight.reset(:consecutive_errors)
   end
 
+  @doc false
+  # Test seam: forget every answer and canary verdict, and let a canary start
+  # in the current window again.
+  def reset_health do
+    InFlight.reset_health()
+    InFlight.reset_latches()
+  end
+
+  @doc """
+  Is this node's resolver itself failing, rather than one address's reverse
+  zone staying silent? See "Is the resolver failing?" in the moduledoc.
+
+  Never waits on DNS: it may start the window's canary, and answers what the
+  last canary found. `false` with verification off, and when the verifier's
+  processes are restarting.
+  """
+  @spec resolver_failing?(keyword()) :: boolean()
+  def resolver_failing?(opts \\ []) do
+    config = config(opts)
+    window_ms = config[:health_window_ms]
+    now = now()
+
+    cond do
+      config[:enabled] != true -> false
+      answered_within?(now, window_ms) -> false
+      true -> canary_verdict(now, window_ms, config) == :failing
+    end
+  rescue
+    _exception -> false
+  catch
+    :exit, _reason -> false
+  end
+
   # ---- check/3 --------------------------------------------------------------
 
   defp check_address(engine, ip, config) do
     if worth_a_lookup?(ip, config) do
-      case Cachex.get(@cache, ip) do
+      case cached(ip) do
         {:ok, stored} when not is_nil(stored) -> engine |> judge(stored) |> status()
         _miss -> request_lookup(engine, ip, config)
       end
     else
       {:unverified, :not_public}
+    end
+  end
+
+  # A verified result first: it is never in the other cache too, except for
+  # the moment between a write and its delete.
+  defp cached(ip) do
+    with {:ok, nil} <- Cachex.get(@verified_cache, ip) do
+      Cachex.get(@cache, ip)
     end
   end
 
@@ -279,34 +360,67 @@ defmodule KilnCMS.CrawlerVerification do
         {:unverified, :pending}
 
       {:ok, claim} ->
-        with :ok <- within_caps(ip, config),
-             :ok <- start(engine, ip, claim, config) do
-          {:unverified, :pending}
-        else
-          {:skipped, reason} ->
-            InFlight.release(claim)
-            skipped(engine, reason)
-            {:unverified, :skipped}
+        case within_caps(ip, config) do
+          {:ok, charged} -> start_or_refund(engine, ip, claim, charged, config)
+          {:skipped, reason} -> turn_away(engine, claim, reason)
         end
     end
+  end
+
+  # A lookup that could not start gives back what it charged (#2588), or a
+  # flood of turned-away starts would spend every network's budget, and the
+  # node's, without a lookup.
+  defp start_or_refund(engine, ip, claim, charged, config) do
+    case start(engine, ip, claim, config) do
+      :ok ->
+        {:unverified, :pending}
+
+      {:skipped, :busy} ->
+        refund(charged, config)
+        turn_away(engine, claim, :busy)
+    end
+  end
+
+  defp turn_away(engine, claim, reason) do
+    InFlight.release(claim)
+    skipped(engine, reason)
+    {:unverified, :skipped}
   end
 
   defp claim_ttl(config),
     do: Keyword.get(config, :in_flight_ttl_ms, config[:deadline_ms] + @claim_grace_ms)
 
   # Narrowest network first, then the node: a network over its budget is
-  # turned away before it spends the node's.
+  # turned away before it spends the node's. Answers the keys it charged and
+  # the window they were charged in, for `refund/2`. A refusal keeps its
+  # charges, as it always has: Hammer counts a denied hit too.
   defp within_caps(ip, config) do
     window = config[:rate_window_ms]
     scope = config[:rate_scope]
+    keys = for {key, limit} <- caps(ip, config), do: {"#{scope}:#{key}", limit}
 
-    Enum.reduce_while(caps(ip, config), :ok, fn {key, limit}, :ok ->
-      case RateLimit.hit("#{scope}:#{key}", window, limit) do
-        {:allow, _count} -> {:cont, :ok}
+    Enum.reduce_while(keys, {:ok, {rate_window(window), []}}, fn {key, limit},
+                                                                 {:ok, {index, charged}} ->
+      case RateLimit.hit(key, window, limit) do
+        {:allow, _count} -> {:cont, {:ok, {index, [key | charged]}}}
         {:deny, _retry_after} -> {:halt, {:skipped, :rate_limited}}
       end
     end)
   end
+
+  # Gives back each charge, only inside the window it was charged in: once
+  # that window has closed, the charge expired with it, and a refund would
+  # lower the next window's count instead.
+  defp refund({index, charged}, config) do
+    window = config[:rate_window_ms]
+
+    if rate_window(window) == index do
+      Enum.each(charged, &RateLimit.refund(&1, window))
+    end
+  end
+
+  # The fixed window Hammer counts a hit in (`Hammer.ETS.FixWindow`).
+  defp rate_window(window_ms), do: div(System.system_time(:millisecond), window_ms)
 
   defp caps(ip, config) do
     family = if tuple_size(ip) == 4, do: :inet, else: :inet6
@@ -497,10 +611,21 @@ defmodule KilnCMS.CrawlerVerification do
 
   defp put_stored(nil, _stored, _config), do: :ok
 
+  # A confirmed name goes to the verified cache and anything else to the
+  # other; the write drops whatever the other cache held for the address, so
+  # the newest result is the one read.
   defp put_stored(ip, stored, config) do
-    Cachex.put(@cache, ip, stored, expire: ttl(stored, config))
+    {into, other} =
+      if verified?(stored), do: {@verified_cache, @cache}, else: {@cache, @verified_cache}
+
+    Cachex.put(into, ip, stored, expire: ttl(stored, config))
+    Cachex.del(other, ip)
     :ok
   end
+
+  # The results `ttl/2` keeps for `:verified_ttl_ms`.
+  defp verified?({:ptr, %{confirmed: [_ | _], errors: []}}), do: true
+  defp verified?(_stored), do: false
 
   defp ttl(:no_ptr, config), do: config[:rejected_ttl_ms]
   defp ttl({:error, _reason}, config), do: config[:error_ttl_ms]
@@ -508,7 +633,8 @@ defmodule KilnCMS.CrawlerVerification do
   defp ttl({:ptr, %{confirmed: [_ | _]}}, config), do: config[:verified_ttl_ms]
   defp ttl({:ptr, _rejected}, config), do: config[:rejected_ttl_ms]
 
-  # Count lookups in a row that got no answer at all; any answer resets it.
+  # Count lookups in a row that got no answer at all; any answer resets it
+  # and is the resolver-health signal `resolver_failing?/1` reads.
   defp note_outcome(stored, config) do
     if unanswered?(stored) do
       count = InFlight.bump(:consecutive_errors)
@@ -522,6 +648,45 @@ defmodule KilnCMS.CrawlerVerification do
       end
     else
       InFlight.reset(:consecutive_errors)
+      InFlight.put_health(:last_answer_at, now())
+    end
+  end
+
+  # ---- resolver health ------------------------------------------------------
+
+  defp answered_within?(now, window_ms) do
+    case InFlight.health(:last_answer_at) do
+      at when is_integer(at) -> now - at < window_ms
+      nil -> false
+    end
+  end
+
+  # Starts this window's canary if no caller has, then answers the last
+  # canary's verdict: `:healthy` until one has found otherwise, including
+  # while this one runs or when it could not start.
+  defp canary_verdict(now, window_ms, config) do
+    if InFlight.claim_probe(:canary, Integer.floor_div(now, window_ms)) do
+      start_canary(config)
+    end
+
+    InFlight.health(:canary) || :healthy
+  end
+
+  defp start_canary(config) do
+    supervisor = Keyword.get(config, :canary_supervisor, @canary_supervisor)
+    Task.Supervisor.start_child(supervisor, fn -> run_canary(config) end)
+  catch
+    :exit, _reason -> :ok
+  end
+
+  # The same bounded lookup as a claim's, for a fixed address whose reverse
+  # zone always answers. Charges no rate cap and caches nothing.
+  defp run_canary(config) do
+    if unanswered?(lookup(normalize_ip(config[:canary_address]), config)) do
+      InFlight.put_health(:canary, :failing)
+    else
+      InFlight.put_health(:canary, :healthy)
+      InFlight.put_health(:last_answer_at, now())
     end
   end
 

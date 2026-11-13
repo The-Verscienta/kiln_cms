@@ -50,9 +50,13 @@ defmodule KilnCMS.Security.ScannerGuard do
     * an address the block list already matches
     * a search-engine claim (`KilnCMS.BotClass.search_engine/1`: Googlebot,
       bingbot, ...) is exempt from the miss threshold only, and only until
-      `KilnCMS.CrawlerVerification` proves it false (#2254): verified, pending,
-      skipped or unanswered claims keep the exemption, a claim whose address
-      fails the reverse-DNS check counts like any other client. With
+      `KilnCMS.CrawlerVerification` proves it false (#2254): verified, pending
+      and skipped claims keep the exemption, a claim whose address fails the
+      reverse-DNS check counts like any other client. A claim whose lookup got
+      no answer (a timeout, SERVFAIL) keeps it only while this node's resolver
+      is itself failing (`CrawlerVerification.resolver_failing?/1`, #2588):
+      while other lookups get answers, the silence is the address's own
+      reverse zone, which a scanner can choose, and its misses count. With
       verification off (`KILN_CRAWLER_VERIFICATION=false`) the engine's name
       in the user agent is enough. Link-preview fetchers (facebookexternalhit,
       Twitterbot, LinkedInBot) and Slurp are not exempt. **Bait paths count
@@ -224,24 +228,30 @@ defmodule KilnCMS.Security.ScannerGuard do
   end
 
   # A search-engine claim is exempt from the miss threshold unless DNS has
-  # proven it false (#2254): a lookup still pending, skipped or unanswered
-  # keeps the exemption, so a real crawler's first misses from a new address
-  # never count. `context/2` has already turned away untrusted forwarding and
-  # non-public addresses, so the check sees the client's own address. With
-  # verification off, the name in the user agent is enough, as before.
+  # proven it false (#2254): a lookup still pending or skipped keeps the
+  # exemption, so a real crawler's first misses from a new address never
+  # count. An unanswered lookup keeps it only while the resolver itself is
+  # failing (#2588); otherwise the silence is the address's own reverse zone.
+  # `context/2` has already turned away untrusted forwarding and non-public
+  # addresses, so the check sees the client's own address. With verification
+  # off, the name in the user agent is enough, as before.
   defp good_bot?(conn, ip) do
     ua = conn |> Plug.Conn.get_req_header("user-agent") |> List.first("")
 
     if CrawlerVerification.enabled?() do
       case BotClass.search_engine(ua) do
         nil -> false
-        engine -> CrawlerVerification.check(engine, ip) != {:unverified, :failed}
+        engine -> exempt_claim?(CrawlerVerification.check(engine, ip))
       end
     else
       lowered = String.downcase(ua)
       Enum.any?(@search_bots, &String.contains?(lowered, &1))
     end
   end
+
+  defp exempt_claim?({:unverified, :failed}), do: false
+  defp exempt_claim?({:unverified, :error}), do: CrawlerVerification.resolver_failing?()
+  defp exempt_claim?(_verified_or_unproven), do: true
 
   defp bait?(path) do
     normalized = path |> String.downcase() |> String.trim_trailing("/")
