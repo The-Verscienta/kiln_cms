@@ -41,6 +41,13 @@ defmodule KilnCMS.CMS.Changes.SaverVerifiedSecondFactor do
 
   The clock is the server's, unless the changeset context carries `:now` (a
   `DateTime`), which tests set. No request path does.
+
+  Two context values are trusted as the server's: `:now` and the verified
+  mark `:second_factor_verified_at`. Ash context is set only by server code
+  (no API exposes this resource, and no client can set context), and the
+  console sets the mark from the session it has authenticated. The code's
+  verdict is not one of them: it lives under a module-namespaced key that
+  this change always overwrites.
   """
   use Ash.Resource.Change
 
@@ -57,7 +64,9 @@ defmodule KilnCMS.CMS.Changes.SaverVerifiedSecondFactor do
   # How far ahead of this node's clock a mark may be (another node's clock).
   @skew_seconds 60
 
-  @verdict :second_factor_code_verdict
+  # Module-namespaced, and always written by `charge_code/1`, so a value a
+  # caller put in the context can never reach `code_verdict/1`.
+  @verdict {__MODULE__, :code_verdict}
 
   @not_enrolled "Set up two-step sign-in on your own account first."
   @not_verified "Confirm with a code from your authenticator app, or sign in again with your passkey."
@@ -81,13 +90,17 @@ defmodule KilnCMS.CMS.Changes.SaverVerifiedSecondFactor do
   # The code, if any, is checked now: see "The code is charged before the
   # decision". The outcome waits in the context for `decide/1`.
   defp charge_code(changeset) do
-    with %User{} = actor <- changeset.context[:private][:actor],
-         code when is_binary(code) and code != "" <- Ash.Changeset.get_argument(changeset, :code),
-         %User{totp_secret: secret} = user when is_binary(secret) <- reload(actor) do
-      Ash.Changeset.set_context(changeset, %{@verdict => check_code(changeset, user, code)})
-    else
-      _no_code_or_no_app -> changeset
-    end
+    verdict =
+      with %User{} = actor <- changeset.context[:private][:actor],
+           code when is_binary(code) and code != "" <-
+             Ash.Changeset.get_argument(changeset, :code),
+           %User{totp_secret: secret} = user when is_binary(secret) <- reload(actor) do
+        check_code(changeset, user, code)
+      else
+        _no_code_or_no_app -> nil
+      end
+
+    Ash.Changeset.set_context(changeset, %{@verdict => verdict})
   end
 
   defp check_code(changeset, user, code) do

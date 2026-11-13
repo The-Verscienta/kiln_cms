@@ -219,6 +219,20 @@ defmodule KilnCMS.CMS.SiteSecondFactorPolicyTest do
       assert stored(site) == nil
     end
 
+    test "a verdict a caller puts in the context is not a verified code", %{
+      site: site,
+      admin: admin
+    } do
+      # The guard's own key is not an atom, so Ash will not even accept it as
+      # caller context; the old atom key must not be read either.
+      result =
+        save(%{required_for: :admins}, admin, site, %{second_factor_code_verdict: :verified})
+
+      assert code_errors(result) == [@messages.not_verified]
+
+      assert stored(site) == nil
+    end
+
     test "a fresh verified mark is accepted, up to 15 minutes old", %{site: site, admin: admin} do
       at = ~U[2026-11-13 10:00:00.000000Z]
       now = DateTime.add(at, SaverVerifiedSecondFactor.fresh_seconds(), :second)

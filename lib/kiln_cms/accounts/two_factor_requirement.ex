@@ -305,7 +305,8 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
   warning to the admin doing it (decision 6 on #2247): `nil` (the tier is not
   covered, or they hold a factor or are exempt), `{:grace, deadline}`, or
   `{:enforced_now, deadline}` — the promotion does not restart the grace, so
-  a long-standing account is held at once.
+  a long-standing account is held at once. `nil` for a platform
+  administrator, whom a membership here does not change.
   """
   @spec promotion_warning(Accounts.User.t(), Ash.UUID.t(), :admin | :editor | :viewer, keyword()) ::
           nil | {:grace, DateTime.t()} | {:enforced_now, DateTime.t()}
@@ -321,8 +322,16 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
   end
 
   defp promoted(user, org_id, new_tier, policy, opts) do
-    {_tier, source, record} = tier_source(user, org_id, opts)
+    case tier_source(user, org_id, opts) do
+      # A platform administrator is an administrator here whatever membership
+      # they are given, so the promotion changes nothing `status/3` does not
+      # already say about them.
+      {_tier, :platform, _user} -> nil
+      {_tier, source, record} -> promoted_member(user, source, record, new_tier, policy, opts)
+    end
+  end
 
+  defp promoted_member(user, source, record, new_tier, policy, opts) do
     # A new member's membership is created by the promotion itself: now.
     record =
       if source == :member, do: record, else: %{inserted_at: now(opts)}

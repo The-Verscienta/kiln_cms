@@ -329,6 +329,16 @@ defmodule KilnCMS.Accounts.TwoFactorRequirementTest do
     end
   end
 
+  describe "promotion_warning/4 for a platform admin" do
+    test "agrees with status/3: a membership changes nothing for them", %{site: site} do
+      platform = user(%{role: :admin})
+      opts = [policy: policy(:admins), now: at(30)]
+
+      assert TwoFactorRequirement.status(platform, site.id, opts) == {:enforced, at(14)}
+      assert TwoFactorRequirement.promotion_warning(platform, site.id, :admin, opts) == nil
+    end
+  end
+
   describe "roster/3" do
     test "per covered tier: total, enrolled, in grace, overdue, earliest deadline", %{site: site} do
       member!(totp_user(), site, :admin)
