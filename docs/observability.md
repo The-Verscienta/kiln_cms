@@ -168,8 +168,9 @@ separates them.
 ## Crawler verification
 
 A `:delivery` request whose user agent names a search engine is checked against
-DNS (#2254, `KilnCMS.CrawlerVerification`; see
-[bot-budgets.md](bot-budgets.md#verified-search-engines)). Three events cover
+the engine's published IP ranges (#2586) and DNS (#2254,
+`KilnCMS.CrawlerVerification`; see
+[bot-budgets.md](bot-budgets.md#verified-search-engines)). Four events cover
 it. None carries an address, a hostname, a user agent or an org.
 
 | Event | Emitted | Measurements | Metadata |
@@ -177,16 +178,19 @@ it. None carries an address, a hostname, a user agent or an org.
 | `[:kiln_cms, :delivery, :unverified_crawler]` | by `KilnCMSWeb.Plugs.RateLimit`, once per search-engine request whose claim is not verified | `count` (always `1`) | `engine`, `reason` |
 | `[:kiln_cms, :crawler_verification, :lookup]` | once per finished background lookup | `duration` (native units) | `engine`, `result`, `reason` |
 | `[:kiln_cms, :crawler_verification, :skipped]` | once per lookup that was not started | `count` (always `1`) | `engine`, `reason` |
+| `[:kiln_cms, :crawler_verification, :ranges_fetch]` | by `KilnCMS.CrawlerVerification.RangesWorker`, once per vendor per fetch of the published IP lists | `count` (always `1`) | `engine`, `result` |
 
 - `engine` -- `:google`, `:bing`, `:duckduckgo`, `:baidu`, `:yandex` or
   `:apple`: what the user agent claims.
 - `reason` on `unverified_crawler` -- `:failed` (proven false: charged as
-  `empty`), `:pending` (a lookup is running or was just started), `:error` (the
+  `empty`; for DuckDuckBot, an address outside DuckDuckGo's fresh published
+  list), `:pending` (a lookup is running or was just started), `:error` (the
   last lookup got no DNS answer), `:forward_error` (the PTR named a host under
   the engine's domain and that host's A/AAAA query got no answer, though it
   had a full per-query budget, #2588; a forward query cut short by a slow PTR
   answer is `:error`), `:skipped` (no lookup could start),
-  `:unverifiable` (DuckDuckBot) or `:not_public` (a private or
+  `:unverifiable` (DuckDuckBot while its list is missing or stale, or over
+  IPv6) or `:not_public` (a private or
   `TRUSTED_PROXIES` address, or a forwarding header nothing trusts). Every
   reason but `:failed` keeps the search-engine class, held to the browser
   limit. The `lookup` event of a lookup that leaves a claim at
@@ -200,6 +204,17 @@ it. None carries an address, a hostname, a user agent or an org.
 - `reason` on `skipped` -- `:busy` (16 lookups already running on this node)
   or `:rate_limited` (the address's network, or the node, used its lookup
   budget for the minute).
+- `engine` on `ranges_fetch` -- `:google`, `:bing`, `:apple` or
+  `:duckduckgo`, the engines that publish a list.
+- `result` on `ranges_fetch` -- `:ok` (fetched and installed); `:http_error`
+  (an answer other than 200, a redirect included), `:transport_error` (no
+  connection or no answer), `:too_large` (over 512 KB) or `:blocked` (the
+  host resolved to an address `KilnCMS.SafeFetch` refuses); `:invalid` (not
+  the expected JSON), `:no_prefixes`, `:too_many`, `:too_broad` or
+  `:not_public` (the list was refused, see
+  [Published IP ranges](bot-budgets.md#published-ip-ranges)); or `:other`.
+  Anything but `:ok` keeps the list held before, which stops counting once it
+  is 24 hours old.
 
 Exported metrics (Prometheus names in brackets):
 
@@ -212,6 +227,8 @@ Exported metrics (Prometheus names in brackets):
   (`kiln_cms_crawler_verification_lookup_duration_bucket` / `_sum` / `_count`).
 - `kiln_cms.crawler_verification.skipped.count`, tagged `reason`
   (`kiln_cms_crawler_verification_skipped_count`).
+- `kiln_cms.crawler_verification.ranges_fetch.count`, tagged `engine` and
+  `result` (`kiln_cms_crawler_verification_ranges_fetch_count`).
 
 Useful panels:
 
@@ -223,13 +240,26 @@ Useful panels:
   share means the node sees a proxy's address (set `TRUSTED_PROXIES`).
 - `sum(rate(kiln_cms_crawler_verification_skipped_count[5m])) by (reason)`:
   should be near zero. A steady `busy` rate means lookups are slow.
+- `sum(increase(kiln_cms_crawler_verification_ranges_fetch_count{result!="ok"}[1d])) by (engine, result)`:
+  should be zero. With the defaults each engine is fetched about four times a
+  day; four failures in a row and that list is stale. For a per-node answer,
+  `KilnCMS.CrawlerVerification.Ranges.status/0` over `rpc` reports each list's
+  count, age and freshness (see
+  [Check that a node can verify crawlers](bot-budgets.md#check-that-a-node-can-verify-crawlers)).
 
 Three warnings are also logged, each once per node: the first time the
 concurrency limit turns a lookup away, after 20 lookups in a row got no DNS
 answer (that one names `KILN_CRAWLER_VERIFICATION=false`), and "Crawler
 verification could not refund a rate-limit charge ..." if a lookup turned away
 as busy could not give back its lookup-budget charge (#2588; it then keeps the
-charge, and requests are unaffected).
+charge, and requests are unaffected). The published IP lists (#2586) add three:
+"Crawler verification: <engine>'s published crawler IP ranges are missing or
+stale ...", once per engine per node from the 10-minute check until that list
+is fresh again; "Crawler verification: could not refresh the published
+crawler IP ranges of <engines> ...", once per fetch job that had a failure;
+and "Crawler verification: could not queue a range fetch: ...", when a node
+could not insert its boot or stale-list fetch job (the next check or the
+schedule tries again).
 
 The resolver-health canary (#2588) emits no event and is not counted in
 `lookup`: with the smart 404 guard on, a node whose lookups have had no answer

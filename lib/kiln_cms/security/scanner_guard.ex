@@ -52,7 +52,9 @@ defmodule KilnCMS.Security.ScannerGuard do
       bingbot, ...) is exempt from the miss threshold only, and only until
       `KilnCMS.CrawlerVerification` proves it false (#2254): verified, pending
       and skipped claims keep the exemption, a claim whose address fails the
-      reverse-DNS check counts like any other client. A claim whose PTR query
+      reverse-DNS check, or a DuckDuckBot claim from an address outside
+      DuckDuckGo's fresh published list (#2586), counts like any other
+      client. A claim whose PTR query
       got no answer (a timeout, SERVFAIL) keeps it only while this node's
       resolver is itself failing (`CrawlerVerification.resolver_failing?/1`,
       #2588): while other lookups get answers, the silence is the address's

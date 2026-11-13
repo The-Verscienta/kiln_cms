@@ -5,13 +5,15 @@ minute from one address before it is refused (the `:delivery` limit). Since
 #2243 a request that says it is something other than a browser (a search
 engine, an AI crawler, a script, or nothing at all) is refused at its own share
 of that limit. By default scripts get half and clients with no user agent a
-fifth; AI crawlers keep the full limit, and search engines whose address DNS
-has verified get twice it. A site admin can
+fifth; AI crawlers keep the full limit, and search engines whose address has
+been verified (by DNS, or by the engine's own published list of addresses) get
+twice it. A site admin can
 lower those shares for their site; the operator sets the most any site may have.
 
 **This is cost control, not security.** The class comes from the `User-Agent`
 header, which is whatever the client typed. Anyone can claim to be a browser.
-A claim to be a search engine is checked against DNS since #2254, and a claim
+A claim to be a search engine is checked against DNS since #2254, and against
+the engine's published IP ranges since #2586, and a claim
 proven false is charged as no user agent (see
 [Verified search engines](#verified-search-engines)), but every other class is
 taken on trust. A budget limits how much a well-behaved crawler or a careless
@@ -36,8 +38,8 @@ that matches decides:
 
 A missing, empty or all-whitespace user agent is **No user agent**.
 
-A request put in **Search engine** is then checked against DNS before it is
-charged, and charged as **No user agent** if the address is proven not to be
+A request put in **Search engine** is then checked against the engine's
+published IP ranges and DNS before it is charged, and charged as **No user agent** if the address is proven not to be
 the engine's. See [Verified search engines](#verified-search-engines).
 
 Rule 7 is deliberate. Media players (`AppleCoreMedia`, `stagefright`,
@@ -261,8 +263,12 @@ rather than one per request.
 ## Verified search engines
 
 A user agent is easy to fake, so since #2254 Kiln checks a claim to be a search
-engine against DNS before it trusts it with that class's ceiling
-(`KilnCMS.CrawlerVerification`). The check is the one each engine documents:
+engine before it trusts it with that class's ceiling
+(`KilnCMS.CrawlerVerification`). Since #2586 the first check is the engine's
+own published list of its crawlers' addresses, where it has one (see
+[Published IP ranges](#published-ip-ranges)): an address inside a fresh list is
+verified at once, with no DNS query. Every other claim gets the DNS check each
+engine documents:
 
 1. Look up the address's PTR (reverse DNS) name.
 2. The name must be the engine's domain or end in `.` and that domain.
@@ -280,7 +286,7 @@ resolve to that address.
 | Apple (`Applebot`) | `applebot.apple.com` | [About Applebot](https://support.apple.com/en-us/119829) |
 | Yandex (`YandexBot`) | `yandex.ru`, `yandex.net` or `yandex.com` | [How to check that a robot belongs to Yandex](https://yandex.com/support/webmaster/en/robot-workings/check-yandex-robots.html) |
 | Baidu (`Baiduspider`) | `baidu.com` or `baidu.jp` | [Baiduspider help](https://help.baidu.com/question?prod_id=99&class=0&id=3001) |
-| DuckDuckGo (`DuckDuckBot`) | cannot be checked: DuckDuckGo publishes IP addresses only | [DuckDuckBot](https://duckduckgo.com/duckduckgo-help-pages/results/duckduckbot) |
+| DuckDuckGo (`DuckDuckBot`) | no DNS check: DuckDuckGo publishes IP addresses only, and its claims are checked against that list | [DuckDuckBot](https://duckduckgo.com/duckduckgo-help-pages/results/duckduckbot) |
 
 Google also lists `google.com` and `googleusercontent.com` names, but those are
 its special-case crawlers and user-triggered fetchers, not the crawlers above,
@@ -288,16 +294,90 @@ and `googleusercontent.com` is the reverse DNS of any Google Cloud customer.
 Kiln does not accept them. So `evilgooglebot.com`, `googlebot.com.example.net`
 and `crawl.googleusercontent.com` all fail for Google.
 
+### Published IP ranges
+
+Google, Bing, Apple and DuckDuckGo each publish a JSON list of the addresses
+their crawlers use. Kiln fetches the four lists and checks a claim against the
+claimed engine's list before it asks DNS (#2586,
+`KilnCMS.CrawlerVerification.Ranges`). Yandex and Baidu publish no list and
+are checked by DNS only.
+
+| Engine | List Kiln fetches |
+|---|---|
+| Google | `https://developers.google.com/static/crawling/ipranges/common-crawlers.json` |
+| Bing | `https://www.bing.com/toolbox/bingbot.json` |
+| Apple | `https://search.developer.apple.com/applebot.json` |
+| DuckDuckGo | `https://duckduckgo.com/duckduckbot.json` |
+
+What a list decides:
+
+- **An address inside the claimed engine's fresh list is verified**, with no
+  DNS query, no lookup charged against the limits below and nothing cached.
+- **An address outside it is checked by DNS as before**, for Google, Bing and
+  Apple. A list that lags behind the vendor therefore never turns a real
+  Googlebot into a failure.
+- **A DuckDuckBot claim from an address outside DuckDuckGo's fresh list is
+  proven false**, because there is no DNS check to fall back on. It is charged
+  as no user agent, and with the smart 404 guard on it counts toward the miss
+  threshold. DuckDuckGo publishes IPv4 addresses only, so a DuckDuckBot claim
+  over IPv6 is never proven false: it stays "not proven".
+- **A missing or stale list decides nothing.** A list is fresh for 24 hours
+  after it was fetched. A stale or missing list never verifies an address and
+  never proves a claim false: Google, Bing and Apple fall back to DNS, and
+  DuckDuckBot stays "not proven", as before #2586.
+
+**When the lists are fetched.** One node in the cluster fetches all four every
+6 hours (an Oban cron job, `17 */6 * * *`, `KILN_CRAWLER_RANGES_CRON`), and
+sends each list it accepted to the other nodes over Phoenix PubSub. A node
+that still has no fresh list 20 seconds after it starts queues a fetch of the
+missing ones, and so does a node whose check every 10 minutes finds a list
+stale. However many nodes ask, at most one fetch job runs per 10 minutes
+across the cluster. A node that starts or reconnects also asks its peers for
+the lists they hold. Each list is a few kilobytes to a few tens of kilobytes.
+
+**This is the first call a default install makes on a schedule.** Every other
+default outbound call happens because someone did something (opened a page,
+set a password, sent a request). Each fetch is an unauthenticated HTTPS `GET`
+of the fixed URL above, through `KilnCMS.SafeFetch`, with a bare `KilnCMS`
+user agent, no redirect followed and at most 512 KB read. It carries nothing
+about the instance or its visitors; each vendor sees the fetching node's IP
+address. Allow it out of your firewall, or turn it off (see
+[Turn the published lists off](#turn-the-published-lists-off)).
+
+**What makes Kiln refuse a list.** A list is a claim that every address in it
+is the vendor's crawler, so a list that would verify too much is refused
+whole, never trimmed, and the list held before is kept with its old age. Kiln
+refuses a list that:
+
+- is not JSON, or not the `{"prefixes": [{"ipv4Prefix": …}, {"ipv6Prefix": …}]}`
+  shape the four vendors publish (a top-level list of strings is read too);
+- has no usable range, or more than 5,000 entries;
+- holds a range wider than an IPv4 `/20` or an IPv6 `/48`, or ranges that
+  together cover more than 65,536 IPv4 addresses or 2^80 IPv6 addresses;
+- holds a range that overlaps private, loopback, shared, link-local,
+  multicast, documentation, benchmarking, 6to4, Teredo or NAT64 space, or an
+  IPv6 range outside `2000::/3`.
+
+A failed fetch (an HTTP error, no connection, a body over 512 KB, a redirect,
+a refused list) also keeps the old list with its old age, so after four failed
+runs in a row it goes stale and stops deciding anything. The vendors' own
+lists sit well inside these limits.
+
+**A match is only as good as the vendor's list.** An address in a list is
+trusted because the vendor put it there. Bing's list, for one, includes `/28`s
+in Microsoft Azure space; whoever holds an address the list names is verified
+as Bingbot.
+
 ### What a request is charged as
 
 Only the search-engine class is checked; a browser, an AI crawler or a script
 never triggers a lookup.
 
-| What DNS says about the claim | Charged as | Ceiling with the defaults |
+| What the check says about the claim | Charged as | Ceiling with the defaults |
 |---|---|---|
-| **Verified**: the name is under the engine's domain and resolves back to the address | Search engine | 600 a minute |
-| **Proven false**: no PTR record, a PTR name outside the engine's domain, or a name that does not resolve back to the address | No user agent | 60 a minute |
-| **Not proven either way**: the lookup has only just started, could not start (the node is busy, the network used its lookup budget, the verifier is restarting), timed out or got a DNS error; the engine is DuckDuckBot; or the address is private, a `TRUSTED_PROXIES` address, or arrived through a forwarding header nothing trusts | Search engine, but never above the browser limit | 300 a minute |
+| **Verified**: the address is in the engine's fresh published list, or the name is under the engine's domain and resolves back to the address | Search engine | 600 a minute |
+| **Proven false**: no PTR record, a PTR name outside the engine's domain, or a name that does not resolve back to the address; for DuckDuckBot, an IPv4 address outside DuckDuckGo's fresh list | No user agent | 60 a minute |
+| **Not proven either way**: the lookup has only just started, could not start (the node is busy, the network used its lookup budget, the verifier is restarting), timed out or got a DNS error; DuckDuckBot while DuckDuckGo's list is missing or stale, or over IPv6; or the address is private, a `TRUSTED_PROXIES` address, or arrived through a forwarding header nothing trusts | Search engine, but never above the browser limit | 300 a minute |
 | Verification is off (`KILN_CRAWLER_VERIFICATION=false`) | Search engine | 300 a minute (the default is 100% while verification is off) |
 
 So only a verified address gets more than a browser, whatever the
@@ -305,7 +385,8 @@ search-engine percentage. A site's lower value applies in every row.
 
 **A request never waits for DNS.** The first request from a new address is
 judged as "not proven" while a lookup starts in the background, and later
-requests from that address are judged by its result.
+requests from that address are judged by its result. An address inside a
+fresh published list needs no lookup, so its first request is verified too.
 
 **Results are cached per node, per address.** A verified address is trusted for
 6 hours, a proven false one is held for 1 hour, and a DNS error is retried after
@@ -371,6 +452,35 @@ these steps confirm it can work where you deploy.
    lookups. A real crawler's lookups end `result="verified"`; a steady
    `timeout` or `error` share means the node cannot reach DNS. See
    [Observability](observability.md#crawler-verification).
+5. **Let the node fetch the published lists.** One node fetches them over
+   HTTPS (port 443) from `developers.google.com`, `www.bing.com`,
+   `search.developer.apple.com` and `duckduckgo.com`; any node may be the one,
+   so allow all of them. About a minute after the node starts, ask it what it
+   holds:
+
+   ```sh
+   bin/kiln_cms rpc 'IO.inspect(KilnCMS.CrawlerVerification.Ranges.status())'
+   ```
+
+   Each engine with a list shows its URL, how many ranges it holds, how long
+   ago it was fetched (in milliseconds, `nil` if never) and whether it is
+   fresh. You should see something like this; the counts change whenever the
+   vendors update their lists:
+
+   ```
+   %{
+     apple: %{age_ms: 41213, count: 24, fresh?: true, source: "https://search.developer.apple.com/applebot.json"},
+     bing: %{age_ms: 41213, count: 29, fresh?: true, source: "https://www.bing.com/toolbox/bingbot.json"},
+     duckduckgo: %{age_ms: 41213, count: 486, fresh?: true, source: "https://duckduckgo.com/duckduckbot.json"},
+     google: %{age_ms: 41213, count: 317, fresh?: true, source: "https://developers.google.com/static/crawling/ipranges/common-crawlers.json"}
+   }
+   ```
+
+   `fresh?: false` with `count: 0` means the list was never fetched on this
+   node or sent to it. Run it on any node: every node should show the same
+   counts. For a health check, alert when an engine's `fresh?` is `false`, or
+   on the `ranges_fetch` metric
+   ([Observability](observability.md#crawler-verification)).
 
 ### What can go wrong
 
@@ -382,6 +492,9 @@ these steps confirm it can work where you deploy.
 | Log warning "Crawler verification: 20 DNS lookups in a row timed out or failed; check that this node can reach its DNS resolver, or set KILN_CRAWLER_VERIFICATION=false to turn verification off" | Logged once per node. Every claim is being judged "not proven", which keeps the search-engine ceiling up to the browser limit, so crawlers are not refused because of it. |
 | Log warning "Crawler verification is at its concurrent-lookup limit; new search-engine claims go unchecked until a lookup finishes" | Logged once per node, the first time 16 lookups were already running. Unchecked claims are "not proven". Occasional is normal; a steady `kiln_cms_crawler_verification_skipped_count{reason="busy"}` means slow DNS. |
 | `kiln_cms_delivery_unverified_crawler_count{reason="not_public"}` for most claims | The node sees a proxy's address, not the client's. Set `TRUSTED_PROXIES` (step 2). |
+| Log warning "Crawler verification: google's published crawler IP ranges are missing or stale, so its claims fall back to DNS (DuckDuckBot's go unverified). Check that this node can reach the vendor over HTTPS, or set KILN_CRAWLER_RANGES=false to stop fetching them" | Logged once per engine per node by the 10-minute check, until that list is fresh again. Nothing is refused because of it: Google, Bing and Apple claims go to DNS, DuckDuckBot claims stay "not proven". Open HTTPS egress to the vendor (step 5), or turn the lists off. |
+| Log warning "Crawler verification: could not refresh the published crawler IP ranges of duckduckgo; each keeps the list held before until it goes stale" | A fetch failed. `kiln_cms_crawler_verification_ranges_fetch_count{result}` says why: `http_error` (not a 200, including a redirect: the vendor may have moved its list), `transport_error` (no connection), `blocked` (the host resolved to an address `SafeFetch` refuses), `too_large`, or one of the reasons Kiln refused the list (`invalid`, `no_prefixes`, `too_many`, `too_broad`, `not_public`). The old list keeps working until it is 24 hours old. A moved URL can be pointed elsewhere in code config; see [For developers](#for-developers-the-range-list-configuration). |
+| A real DuckDuckBot address is charged as no user agent, or blocked by the 404 guard | DuckDuckGo started crawling from an address that was not in its list when this node last fetched it. The next successful fetch, normally within 6 hours, fixes it; with fetches failing, the list goes stale within 24 hours and DuckDuckBot claims go back to "not proven". Remove the block on `/editor/ip-blocks`. |
 
 ### Turn verification off
 
@@ -398,7 +511,61 @@ engines (%)**. Because no claim is proven, the search-engine default drops from
 set still applies, to every claim. The smart 404 guard also goes back to exempting the six search
 engines by name (see [Block scanners automatically](ip-blocking.md#block-scanners-automatically)).
 The variable is read at boot in every environment except `:test`; there is no
-per-site switch.
+per-site switch. It also turns off the published lists below, and nothing is
+fetched from the four vendors.
+
+### Turn the published lists off
+
+To keep DNS verification but make no request to Google, Bing, Apple or
+DuckDuckGo, set:
+
+```sh
+KILN_CRAWLER_RANGES=false
+```
+
+and restart. No list is read or fetched. Google, Bing and Apple claims are
+checked by DNS alone, and DuckDuckBot claims are never verified nor proven
+false: they keep the search-engine class, held to the browser limit, as before
+#2586. Set it on every node.
+
+To keep the lists but stop Kiln fetching them on its own, set
+`KILN_CRAWLER_RANGES_CRON=false`. That removes the 6-hourly job **and** the
+fetches a node queues at boot and when a list goes stale. A list then reaches a
+node only from a peer, or from a fetch you queue yourself:
+
+```sh
+bin/kiln_cms rpc 'KilnCMS.CrawlerVerification.RangesWorker.new(%{}) |> Oban.insert() |> IO.inspect()'
+```
+
+Without such a fetch every list goes stale within a day, which is the same as
+turning them off, with a warning logged once per engine on each node. A cron
+expression that does not parse also removes the job and, like `false`, every
+automatic fetch; it is reported on stderr at boot.
+
+In dev the lists are off unless you start with `KILN_CRAWLER_RANGES=true`, so
+`mix phx.server` makes no request to the vendors; with it set, the node queues
+one fetch 20 seconds after boot. The test and end-to-end environments never
+fetch them.
+
+### For developers: the range list configuration
+
+Code config, for a deployment that needs to point a list elsewhere (a vendor
+that moved its URL before Kiln was updated, or a mirror inside your network):
+
+```elixir
+config :kiln_cms, KilnCMS.CrawlerVerification.Ranges,
+  # Per engine: a URL replaces the built-in one, false drops that engine's
+  # list. An engine left out keeps its default.
+  sources: %{google: "https://mirror.example.com/common-crawlers.json", apple: false}
+```
+
+The other keys are `:enabled` (`true`), `:max_age_ms` (24 hours, how long a
+list stays fresh), `:max_bytes` (524,288), `:max_prefixes` (5,000),
+`:bootstrap?` (`true`, whether a node queues fetches of its own at boot and
+when a list is stale) and `:bootstrap_after_ms` (20,000). A source is fetched
+through `KilnCMS.SafeFetch`, so it must be a public address that answers 200
+without a redirect; use HTTPS, since the list decides who is verified. See `KilnCMS.CrawlerVerification.Ranges` and
+`KilnCMS.CrawlerVerification.Engines`.
 
 ## Watching the traffic mix
 
@@ -456,6 +623,26 @@ a search engine.
   nothing changes there either. To keep 300, set
   `KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT=100` and restart. Rolling the pin back
   goes back to 300.
+- **Kiln now fetches Google's, Bing's, Apple's and DuckDuckGo's published
+  crawler IP lists every 6 hours (#2586), on by default.** It is an outbound
+  HTTPS request from one node to `developers.google.com`, `www.bing.com`,
+  `search.developer.apple.com` and `duckduckgo.com`, plus one about 20 seconds
+  after a node starts while no list is fresh. Allow that egress on every node
+  (any node may be the one that fetches), or set `KILN_CRAWLER_RANGES=false`.
+  Blocked, nothing breaks: each list stays missing, claims are checked by DNS
+  as before, and a warning is logged per engine. See
+  [Published IP ranges](#published-ip-ranges).
+- **DuckDuckBot is now verified, and can be proven false (#2586).** A
+  DuckDuckBot claim from an address in DuckDuckGo's list gets the verified
+  ceiling (600 a minute by default) where it had 300. One from an IPv4 address
+  outside the list is charged as no user agent (60 a minute) and, with the 404
+  guard on, counts toward the miss threshold. A real DuckDuckBot on an address
+  DuckDuckGo added since the last fetch is treated that way until the next
+  successful fetch: normally up to 6 hours, at most 24 if fetches fail, after
+  which the list is stale and claims go back to "not proven". No migration;
+  nothing is stored, so rolling the pin back is safe and goes back to DNS alone.
+  In a cluster upgraded node by node, older nodes ignore the lists the new ones
+  send.
 
 ## What this is not
 
@@ -463,10 +650,11 @@ a search engine.
   typing its user agent, and a search-engine claim keeps its ceiling (up to the
   browser limit) until DNS proves it false. Verification only decides how much
   an address may spend; it never lets anyone in.
-- **Not verification by IP range.** DuckDuckBot publishes only IP addresses, so
-  it is never verified, and the published ranges of the other engines are not
-  read either. A DuckDuckBot claim keeps the search-engine ceiling, up to the
-  browser limit.
+- **Not a range check for every engine.** Only Google, Bing, Apple and
+  DuckDuckGo publish lists. Yandex and Baidu are checked by DNS alone, and a
+  Google, Bing or Apple address outside its list still goes to DNS. A list is
+  only as trustworthy as its vendor's publishing: Kiln believes it, within the
+  limits in [Published IP ranges](#published-ip-ranges).
 - **Not a way to block a crawler.** No value is 0. To refuse an address or range,
   use [Blocked addresses](ip-blocking.md). To ask a crawler to stay away, use
   `robots.txt`; note that Kiln's generated `/robots.txt` allows every crawler and

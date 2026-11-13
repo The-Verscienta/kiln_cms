@@ -1,7 +1,8 @@
 defmodule KilnCMS.CrawlerVerification.Engines do
   @moduledoc """
   The reverse-DNS domains each search engine publishes for its crawlers
-  (#2254), and the hostname rules a PTR answer is read under.
+  (#2254), the published IP range list each one offers (#2586), and the
+  hostname rules a PTR answer is read under.
 
   One row per engine `KilnCMS.BotClass.search_engine/1` can name; a test
   checks that every engine has one.
@@ -14,6 +15,23 @@ defmodule KilnCMS.CrawlerVerification.Engines do
   | `:yandex`     | `yandex.ru`, `yandex.net`, `yandex.com`      | <https://yandex.com/support/webmaster/en/robot-workings/check-yandex-robots.html> |
   | `:baidu`      | `baidu.com`, `baidu.jp`                      | <https://help.baidu.com/question?prod_id=99&class=0&id=3001> |
   | `:duckduckgo` | none: DuckDuckBot publishes IP ranges only   | <https://duckduckgo.com/duckduckgo-help-pages/results/duckduckbot> |
+
+  ## Published IP ranges
+
+  The lists `KilnCMS.CrawlerVerification.Ranges` fetches, each the vendor's
+  own published list of its crawlers' addresses. Yandex and Baidu publish
+  none and are checked by DNS only.
+
+  | Engine        | Published list |
+  | ------------- | -------------- |
+  | `:google`     | <https://developers.google.com/static/crawling/ipranges/common-crawlers.json> |
+  | `:bing`       | <https://www.bing.com/toolbox/bingbot.json> |
+  | `:apple`      | <https://search.developer.apple.com/applebot.json> |
+  | `:duckduckgo` | <https://duckduckgo.com/duckduckbot.json> |
+
+  `config :kiln_cms, KilnCMS.CrawlerVerification.Ranges, sources: %{engine =>
+  url | false}` overrides a source per engine: an engine the map leaves out
+  keeps its default, and `false` drops that engine's list.
 
   Google's own list also names `googleusercontent.com` and `google.com`, but
   those carry Google's user-triggered fetchers and other products, not the
@@ -42,6 +60,13 @@ defmodule KilnCMS.CrawlerVerification.Engines do
     duckduckgo: :none
   }
 
+  @range_sources %{
+    google: "https://developers.google.com/static/crawling/ipranges/common-crawlers.json",
+    bing: "https://www.bing.com/toolbox/bingbot.json",
+    apple: "https://search.developer.apple.com/applebot.json",
+    duckduckgo: "https://duckduckgo.com/duckduckbot.json"
+  }
+
   @label ~r/\A[a-z0-9_-]{1,63}\z/
 
   @doc "Every engine with a row, in `BotClass.engines/0` order."
@@ -55,9 +80,45 @@ defmodule KilnCMS.CrawlerVerification.Engines do
   @spec suffixes(atom()) :: [String.t()] | :none
   def suffixes(engine), do: Map.get(@suffixes, engine, :none)
 
-  @doc "Can `engine` be verified by reverse DNS?"
+  @doc """
+  Can `engine` be verified by reverse DNS? Says nothing about a published
+  range list (`range_source/1`): DuckDuckBot is not verifiable here, yet an
+  address in its list is verified.
+  """
   @spec verifiable?(atom()) :: boolean()
   def verifiable?(engine), do: suffixes(engine) != :none
+
+  @doc "Does `engine` have a row at all?"
+  @spec known?(atom()) :: boolean()
+  def known?(engine), do: Map.has_key?(@suffixes, engine)
+
+  @doc """
+  The HTTPS URL of `engine`'s published crawler range list, or `nil` when it
+  publishes none or the operator turned it off. The operator's `:sources`
+  map overrides one engine at a time (see the moduledoc). An override that is
+  not an `https://` URL is ignored and the engine has no list: the list
+  decides which addresses are verified, so it is never fetched in the clear.
+  """
+  @spec range_source(atom()) :: String.t() | nil
+  def range_source(engine) do
+    overrides = Map.new(ranges_config()[:sources] || %{})
+
+    case Map.fetch(overrides, engine) do
+      {:ok, "https://" <> _ = url} -> if known?(engine), do: url
+      {:ok, _off_or_insecure} -> nil
+      :error -> Map.get(@range_sources, engine)
+    end
+  end
+
+  @doc "The engines with a range list to fetch, in `engines/0` order."
+  @spec range_engines() :: [BotClass.engine()]
+  def range_engines, do: Enum.filter(engines(), &range_source/1)
+
+  @doc "The built-in range list URLs, before any override."
+  @spec default_range_sources() :: %{BotClass.engine() => String.t()}
+  def default_range_sources, do: @range_sources
+
+  defp ranges_config, do: Application.get_env(:kiln_cms, KilnCMS.CrawlerVerification.Ranges, [])
 
   @doc """
   A PTR answer as a comparable hostname: lowercased, one trailing dot dropped.
