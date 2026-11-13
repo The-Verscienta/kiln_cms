@@ -24,6 +24,7 @@ defmodule KilnCMSWeb.SurfaceTest do
     /editor /editor/account/export.json /editor/accounts /editor/accounts/:id
     /editor/admin-allowlist /editor/analytics /editor/analytics/export.csv
     /editor/analytics/export.json /editor/api-keys /editor/automation /editor/backups
+    /editor/backups/schedules
     /editor/billing /editor/bot-budgets /editor/branding /editor/calendar /editor/code-injection
     /editor/compliance /editor/configure /editor/content/:type/:id /editor/content/:type/new
     /editor/content/export.csv /editor/content/export.json

@@ -93,6 +93,11 @@ msgstr "tiene un formato no válido"
 msgid "is invalid"
 msgstr "no es válido"
 
+#: lib/kiln_cms/backups/schedule/validations/known_zone.ex
+#, elixir-autogen, elixir-format
+msgid "is not a known time zone"
+msgstr "no es una zona horaria conocida"
+
 msgid "is reserved"
 msgstr "está reservado"
 
@@ -103,6 +108,11 @@ msgstr "todavía está asociado a esta entrada"
 #, elixir-autogen, elixir-format
 msgid "may not be more than %{ceiling}%: this server's operator caps it there. Ask them to raise it, or choose a lower value."
 msgstr "no puede ser más de %{ceiling}%: el operador de este servidor lo limita ahí. Pídele que lo suba, o elige un valor más bajo."
+
+#: lib/kiln_cms/backups/schedule/validations/media_available.ex
+#, elixir-autogen, elixir-format
+msgid "media isn't archived on this deployment"
+msgstr "los medios no se archivan en este despliegue"
 
 ## From KilnCMS.Accounts.OrgSlug.message/1 (#1710)
 msgid "must be 1 to 63 lowercase letters, digits or hyphens, and cannot start or end with a hyphen"
@@ -170,3 +180,8 @@ msgid "should have at most %{count} item(s)"
 msgid_plural "should have at most %{count} item(s)"
 msgstr[0] "debe tener como máximo %{count} elemento"
 msgstr[1] "debe tener como máximo %{count} elementos"
+
+#: lib/kiln_cms/backups/schedule/validations/interval_available.ex
+#, elixir-autogen, elixir-format
+msgid "sub-daily schedules arrive with keep-N retention; choose daily or longer"
+msgstr "las programaciones más frecuentes que una vez al día llegarán con la retención de las N últimas; elige diaria o más larga"

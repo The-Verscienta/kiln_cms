@@ -47,6 +47,8 @@ defmodule KilnCMS.Backups.Scheduler do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Schedule.Window
 
+  import Ecto.Query, only: [from: 2]
+
   require Ash.Query
   require Logger
 
@@ -64,6 +66,31 @@ defmodule KilnCMS.Backups.Scheduler do
   """
   @spec enabled?() :: boolean()
   def enabled?, do: KilnCMS.Application.cron_expression(:backup_scheduler_cron) != nil
+
+  # The job states of a tick that was picked up (an `attempted_at` is set).
+  @ticked_states ~w(executing completed retryable discarded cancelled)
+
+  @doc """
+  When a scheduler job last started, on any node, or nil when none is on
+  record. What the Schedule tab's "the scheduler hasn't run" warning reads.
+
+  Reads `oban_jobs` (Oban's own table, not an Ash resource): the newest
+  `attempted_at` among this worker's jobs on the `scheduling` queue. Oban
+  indexes the table by state and queue, not by worker, so this scans the
+  queue's rows that Oban's pruner has kept (a week by default; about 10 000
+  at one tick a minute). The caller asks only when an enabled schedule has
+  existed long enough to expect a tick.
+  """
+  @spec last_tick_at() :: DateTime.t() | nil
+  def last_tick_at do
+    worker = Oban.Worker.to_string(__MODULE__)
+
+    from(j in Oban.Job,
+      where: j.queue == "scheduling" and j.state in @ticked_states and j.worker == ^worker,
+      select: max(j.attempted_at)
+    )
+    |> KilnCMS.Repo.one()
+  end
 
   @doc """
   One tick at `now` (the node clock): what the cron job runs, public for a

@@ -685,6 +685,9 @@ defmodule KilnCMSWeb.Router do
       # the artifact list names the database dump, and an editor has no action
       # to take on it. Restore stays a documented ops procedure.
       live "/editor/backups", BackupLive, :index
+      # The in-app backup schedules (part of #2219): platform admins only,
+      # checked in the LiveView as for `/editor/backups`.
+      live "/editor/backups/schedules", BackupScheduleLive, :index
       live "/editor/mail", MailSettingsLive, :index
       # A site's own object storage (#1559). Org-scoped; the operator's `S3_*`
       # storage stays underneath for every site without one.
