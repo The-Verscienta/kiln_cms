@@ -793,13 +793,22 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
 - **Search-engine exemption, checked by DNS.** A `User-Agent` naming a search
   engine (`KilnCMS.BotClass.search_engine/1`) skips the miss threshold only,
   never the bait threshold, and only until crawler verification (#2254, below)
-  proves the claim false. A claim not yet checked, skipped, or whose DNS gave no
-  answer keeps the exemption, so a real crawler's first misses from a new
-  address never count. A scanner claiming to be Googlebot is therefore counted
-  once its address fails the reverse-DNS check, but one whose PTR zone never
-  answers (an attacker's own reverse zone left silent) keeps the exemption, as
-  every claim did before #2254. A DuckDuckBot claim cannot be checked and is
-  always exempt. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
+  proves the claim false. A claim not yet checked or skipped keeps the
+  exemption, so a real crawler's first misses from a new address never count.
+  A scanner claiming to be Googlebot is therefore counted once its address
+  fails the reverse-DNS check. A claim whose PTR query got no answer (a
+  timeout, SERVFAIL) keeps the exemption only while this node's resolver is
+  itself failing (#2588, `KilnCMS.CrawlerVerification.resolver_failing?/1`):
+  no lookup got an answer in the last minute, and a *canary* PTR query for a
+  fixed address (`8.8.8.8`, whose reverse zone always answers) went
+  unanswered too. Otherwise the silence is the address's own reverse zone,
+  which its owner chooses, and its misses count. The guard goes by the last
+  canary's answer and assumes the resolver works until one has found
+  otherwise. A claim whose PTR names a host under
+  the engine's domain, and whose forward query for that host got no answer
+  with its full one-second budget, keeps the exemption: that silence is in
+  the engine's zone, not the address owner's. A DuckDuckBot claim cannot be
+  checked and is always exempt. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
   names in the user agent are enough, as before. Link-preview fetchers
   (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and `Slurp` are not
   exempt in either mode: anyone can claim them and there is nothing to check.
@@ -863,27 +872,54 @@ see [bot-budgets.md](bot-budgets.md).
   proven false, 5 min DNS error), at most 16 concurrent lookups per node with
   no queue, and new lookups rate limited per network (IPv4 `/24` 30 and `/16`
   120 a minute; IPv6 `/64` 30, `/48` 60, `/32` 120) and per node (600 a
-  minute). The cache is bounded (50,000 addresses, evicted oldest-written
-  first) and is its own Cachex instance, so a flood of new addresses cannot
-  evict anything else. No address, hostname, user agent or org is in any
-  verification event or log line.
-- **Residual: lookup starvation.** An attacker who controls a slow or silent
-  reverse zone can hold lookup slots until the deadline, and an attacker with
-  many addresses can spend the per-network and per-node lookup budgets or churn
-  the cache. Either way new real-crawler addresses stay unverified for longer.
-  That only costs anything when the operator has set the search-engine value
-  above 100%, because an unverified claim is held to the browser limit, not
-  refused.
+  minute). A lookup turned away because all 16 slots are busy gives back
+  every cap it charged in that minute (#2588), so turned-away starts cannot
+  spend a network's or the node's budget. Results are kept in two bounded
+  caches, each its own Cachex instance evicted oldest-written first, so a
+  flood of new addresses cannot evict anything else: confirmed crawler names
+  (10,000 addresses) apart from rejections and DNS errors (50,000). An
+  attacker can only write the second, so rotating through addresses cannot
+  evict a verified crawler (#2588). The resolver-health canary is one PTR
+  query for a fixed address, at most once a minute per node, only while
+  lookups go unanswered and the 404 guard asks; it runs on a one-slot
+  supervisor of its own and charges no cap. No address, hostname, user agent
+  or org is in any verification event or log line.
+- **Residual: pending and skipped claims keep the 404 exemption.** A claim
+  whose lookup is running, or was not started because the node is busy or the
+  network used its lookup budget, skips the miss threshold. A spoofer rotating
+  through the addresses of one IPv6 `/64` gets 30 lookups a minute; every
+  further new address is skipped and its misses are not counted. Bait paths
+  still count. This predates #2588 and is not fixed by it.
+- **Residual: lookup starvation, narrowed.** An attacker who controls a slow or
+  silent reverse zone can still hold lookup slots until the deadline, and an
+  attacker who rents several networks (five `/16`s or `/32`s at their
+  120-a-minute cap) can spend the node's 600 lookups a minute with real
+  lookups. New real-crawler addresses then stay unverified for longer. That
+  only costs anything when the operator has set the search-engine value above
+  100%, because an unverified claim is held to the browser limit, not
+  refused. Busy starts no longer spend the budgets, and a verified result is
+  no longer evicted by churn (#2588).
+- **Residual: the resolver-health check can be wrong both ways.** A real
+  crawler whose reverse zone is slow or flaky (Baidu's and Yandex's are the
+  likeliest) is counted like a silent one while the resolver answers others,
+  so with the 404 guard on its address can be blocked; the block expires, and
+  an admin can remove it. In the other direction, a partial recursion outage
+  can look healthy: an answer the resolver serves from its own cache (the
+  canary's included) marks the resolver working for a minute, while queries
+  it must recurse for fail, and real crawlers' misses are counted meanwhile.
+  The 404 guard is off by default.
 - **Residual: no IP-range verification.** DuckDuckBot publishes IP ranges only,
   so its claims are never verified (and never proven false); the other
-  engines' published ranges are not read either.
+  engines' published ranges are not read either (#2586).
 - **Outbound DNS to the system resolver.** Each node sends PTR, A and AAAA
   queries for visitors' addresses to the nameservers in its `/etc/resolv.conf`
   (`:inet_res`, not `SafeFetch`: no HTTP, and the names queried are the
   `in-addr.arpa` / `ip6.arpa` name of the client's address, then PTR names
   that matched an engine's domain). The resolver, and the authoritative server
   of the address's reverse zone, learn that this server was visited from that
-  address; see [data-flows.md](data-flows.md#optional-subprocessors).
+  address; see [data-flows.md](data-flows.md#optional-subprocessors). With
+  the 404 guard on, the canary adds at most one PTR query a minute for
+  `8.8.8.8`, which names no visitor.
   `KILN_CRAWLER_VERIFICATION=false` turns all of it off.
 - **Switching user agents gains nothing.** Every class charges the one
   per-address counter, so an address never gets past the highest single class

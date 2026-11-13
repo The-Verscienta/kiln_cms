@@ -74,6 +74,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `platform_security_alerts`). Blocked-address alerts are on for every site (up to one alert and one summary per 15 minutes; off under Security alerts → Blocked addresses). Existing webhook endpoints, Slack too, need `security.blocked_ip` ticked; until then a webhook-only site's "Security alerts reach someone" line reads Review.**
   ([long form](docs/changelog/unreleased.md#blocked-ip-alerts-upgrade))
 
+- **With the smart 404 guard on (`KILN_SCANNER_BLOCKING`), a search-engine claim whose reverse DNS gets no answer now counts toward the miss threshold unless the node's resolver is itself failing, checked by at most one PTR query a minute for `8.8.8.8`. No migration; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#crawler-verification-silent-ptr-upgrade))
+
 ### Added
 
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
@@ -164,6 +167,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The Backups page shows recovery-point and last-good badges on History rows and a last-good summary, explains the backup queue under Back up now, and hides Cancel on a finishing row.**
   ([long form](docs/changelog/unreleased.md#backups-page-markers-and-queue-help))
+
+### Security
+
+- **Crawler verification: a lookup turned away as busy no longer spends the network and node lookup budgets, and verified crawlers keep their cached result through a flood of rejected lookups (own 10,000-entry cache).**
+  ([long form](docs/changelog/unreleased.md#crawler-verification-hardening))
 
 ## [1.9.2] - 2026-11-12
 

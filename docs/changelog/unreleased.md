@@ -110,6 +110,39 @@ carries the reasoning.
   security event, so the site's admins get a `webhook_changed` silencing
   notice. Tick it again after rolling forward. (Part of #2245.)
 
+<a id="crawler-verification-silent-ptr-upgrade"></a>
+
+- **With the smart 404 guard on, a search-engine claim whose reverse DNS gets no answer now counts toward the miss threshold, unless the node's resolver is itself failing.**
+  Only matters with `KILN_SCANNER_BLOCKING` on (it is off by default). Until
+  now, a claim to be Googlebot, bingbot, Applebot, YandexBot or Baiduspider
+  whose PTR query timed out or failed (SERVFAIL, refused) kept the guard's
+  miss-threshold exemption, so a scanner on addresses whose reverse zone it
+  leaves silent was never counted (#2588). Now the silence is read as the
+  address's own zone, and its misses count, while the node's resolver is
+  otherwise answering. The exemption is kept, as before, when the resolver
+  itself is failing: no lookup got an answer in the last minute and a
+  *canary* PTR query also went unanswered. The guard starts the canary only
+  while that is the case. It is one PTR query for a fixed address, `8.8.8.8`
+  (`dns.google`), never a visitor's, at most once a minute per node, and it
+  goes to the same resolvers as every other verification query. Nothing to
+  configure; no migration and no new environment variable.
+  - **Watch for real crawlers being blocked.** A crawler whose reverse zone
+    is slow or flaky (Baidu's and Yandex's are the likeliest) can now pass
+    the miss threshold and have its address blocked for
+    `KILN_SCANNER_BLOCKING_BLOCK_MINUTES`. Remove such a block on
+    `/editor/ip-blocks`. Bait paths counted for everyone already.
+  - **A forward query is different.** When the PTR names a host under the
+    engine's own domain and *that* host's A/AAAA query gets no answer, the
+    claim keeps the exemption: the silence is in the engine's zone, which
+    the address's owner does not control. It is reported with the new
+    `unverified_crawler` reason `forward_error`
+    ([below](#crawler-verification-hardening)).
+  - **Firewalls.** The canary is an ordinary PTR query to the nameservers in
+    `/etc/resolv.conf`. A node that can verify crawlers can send it; one that
+    cannot gets no canary answer either, so the exemption stays as before.
+  - **Rolling back** is safe: nothing is stored outside each node's memory,
+    and the previous release exempts every unanswered claim again.
+
 ## Added
 
 <a id="backup-schedules"></a>
@@ -765,3 +798,57 @@ carries the reasoning.
   failed or interrupted, and the trigger reads **Manual**, **Cron** or
   **Console** instead of the raw value. No migration and no configuration.
   See [Backup history](../backups.md#backup-history-2217). (#2542)
+
+## Security
+
+<a id="crawler-verification-hardening"></a>
+
+- **Crawler verification holds up better against lookup starvation, cache churn and silent reverse zones (#2588).**
+  #2254's verifier was bounded, but an attacker could still keep real
+  crawlers unverified for longer, or keep a fake one exempt from the smart
+  404 guard. None of this could push a real crawler below the browser
+  ceiling; it mattered when an operator set the search-engine value above
+  100% (the default is 200%), or had the 404 guard on.
+  - **A busy start no longer spends the lookup budgets.** The per-network
+    caps (IPv4 `/24`, `/16`; IPv6 `/64`, `/48`, `/32`) and the node's 600 a
+    minute are charged before a lookup starts. When it then cannot start
+    because all 16 lookup slots are busy, it gives back every charge it made,
+    so a flood of turned-away starts no longer uses up a network's or the
+    node's budget. A refund only applies in the minute the charge was made;
+    a charge that straddled a minute boundary is kept. If a refund cannot be
+    made, a warning is logged once per node ("Crawler verification could not
+    refund a rate-limit charge ...") and the lookup keeps its charge. A start
+    refused by a cap keeps its charges, as before.
+  - **Verified crawlers keep their results.** Confirmed names now live in a
+    cache of their own (10,000 addresses per node), separate from the 50,000
+    rejections and DNS errors. An attacker rotating through IPv6 addresses
+    can only write rejections, so it can no longer evict a real crawler's
+    result (about 80 minutes of rotation used to be enough). One exception:
+    a lookup that confirmed one name but got no answer for another is still
+    judged verified, but is kept for 5 minutes, as before, in the larger
+    cache, where a flood can evict it.
+  - **A silent reverse zone counts toward the 404 guard.** See the
+    [upgrade note](#crawler-verification-silent-ptr-upgrade).
+  - **New reason `forward_error`.** A claim whose PTR names a host under the
+    engine's domain, and whose forward (A/AAAA) query for that host got no
+    answer although it had a full per-query budget (1 second), is now
+    `{:unverified, :forward_error}` from `KilnCMS.CrawlerVerification.check/3`
+    and `reason="forward_error"` on
+    `kiln_cms_delivery_unverified_crawler_count`. Rate limiting treats it
+    like `error` (search engine, held to the browser limit); the 404 guard
+    keeps its exemption. A forward query squeezed by a slow PTR answer is
+    still `error`. Dashboards that list reasons should add it; see
+    [Observability](../observability.md#crawler-verification).
+  - **Developers.** New `KilnCMS.CrawlerVerification.resolver_failing?/1`
+    (never waits on DNS), `KilnCMSWeb.RateLimit.window_index/1` and
+    `KilnCMSWeb.RateLimit.refund/3` (gives back one fixed-window charge,
+    floored at zero, only while that window is current). New config keys on
+    `config :kiln_cms, KilnCMS.CrawlerVerification`: `:max_verified_entries`
+    (10,000), `:health_window_ms` (60,000) and `:canary_address`
+    (`{8, 8, 8, 8}`). No environment variable and no migration.
+  - **Still open.** A claim whose lookup is pending or was skipped keeps the
+    404 exemption, so a spoofer rotating addresses inside one IPv6 `/64`
+    stays exempt once the `/64`'s 30 lookups a minute are spent; several
+    rented networks can still spend the node's 600 lookups a minute with
+    real lookups; and published IP ranges are not read yet (#2586). See
+    [the threat model](../threat-model.md#bot-budgets).
