@@ -94,6 +94,39 @@ defmodule KilnCMS.CMS.MediaArchivalTest do
     refute archived_at(item.id)
   end
 
+  # #2610: `:purge` also took any quarantined row, for the pipeline, so an
+  # item trashed while quarantined and restored meanwhile could still be
+  # hard-deleted from a stale trash page.
+  test "purge of a held quarantined item someone restored is refused, and the item stays" do
+    admin = user(:admin)
+    item = media(%{quarantined: true})
+    assert :ok = CMS.destroy_media_item!(item, actor: admin)
+
+    [held] = CMS.list_trashed_media_items!(actor: admin)
+    assert {:ok, _} = CMS.restore_media_item(held, actor: admin)
+
+    assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}} =
+             CMS.purge_media_item(held, actor: admin)
+
+    assert CMS.get_media_item!(item.id, actor: admin).id == item.id
+    refute archived_at(item.id)
+  end
+
+  test "purge of a trashed quarantined item removes the row" do
+    admin = user(:admin)
+    item = media(%{quarantined: true})
+    assert :ok = CMS.destroy_media_item!(item, actor: admin)
+
+    [trashed] = CMS.list_trashed_media_items!(actor: admin)
+    assert :ok = CMS.purge_media_item(trashed, actor: admin)
+
+    assert is_nil(
+             KilnCMS.Repo.one(
+               from m in "media_items", where: m.id == ^Ecto.UUID.dump!(item.id), select: m.id
+             )
+           )
+  end
+
   test "purge of an item that was never trashed is refused" do
     admin = user(:admin)
     item = media()
@@ -102,6 +135,34 @@ defmodule KilnCMS.CMS.MediaArchivalTest do
              CMS.purge_media_item(item, actor: admin)
 
     assert CMS.get_media_item!(item.id, actor: admin).id == item.id
+  end
+
+  # #2611: `:restore` took any row, so a second restore of a held struct
+  # "succeeded" on a live item.
+  test "restore of a held item someone restored meanwhile is a stale record" do
+    admin = user(:admin)
+    item = media()
+    assert :ok = CMS.destroy_media_item!(item, actor: admin)
+
+    [held] = CMS.list_trashed_media_items!(actor: admin)
+    assert {:ok, _} = CMS.restore_media_item(held, actor: admin)
+
+    assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}} =
+             CMS.restore_media_item(held, actor: admin)
+
+    refute archived_at(item.id)
+  end
+
+  test "restore of a held item someone purged meanwhile is a stale record" do
+    admin = user(:admin)
+    item = media()
+    assert :ok = CMS.destroy_media_item!(item, actor: admin)
+
+    [held] = CMS.list_trashed_media_items!(actor: admin)
+    assert :ok = CMS.purge_media_item(held, actor: admin)
+
+    assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}} =
+             CMS.restore_media_item(held, actor: admin)
   end
 
   test "delete, trash, and restore are admin-only" do

@@ -88,6 +88,30 @@ defmodule KilnCMS.Media.SystemActorAuthorizationTest do
 
   defp stored?(item), do: Ash.get(MediaItem, item.id, authorize?: false) |> elem(0) == :ok
 
+  # Hard-deleted, not soft: `stored?/1` reads through AshArchival's filter, so
+  # a purge that only stamped `archived_at` would pass it. The trash read sees
+  # that row.
+  defp trashed?(item) do
+    CMS.list_trashed_media_items!(
+      authorize?: false,
+      tenant: org_id(),
+      query: [filter: [id: item.id]]
+    ) != []
+  end
+
+  # An admin of this site by membership, not by `User.role`.
+  defp org_admin do
+    user = user(:editor)
+
+    {:ok, _} =
+      KilnCMS.Accounts.create_org_membership(
+        %{user_id: user.id, organization_id: org_id(), role: :admin},
+        authorize?: false
+      )
+
+    user
+  end
+
   defp args(item), do: %{"media_item_id" => item.id, "org_id" => item.org_id}
 
   test "Media.system/0 is a system actor labelled :media" do
@@ -201,15 +225,56 @@ defmodule KilnCMS.Media.SystemActorAuthorizationTest do
 
     test "the system purges a quarantined item, but never a released one" do
       quarantined = quarantined!()
-      assert :ok = CMS.purge_media_item(quarantined, actor: system(), tenant: org_id())
+
+      assert :ok =
+               CMS.purge_quarantined_media_item(quarantined, actor: system(), tenant: org_id())
+
       refute stored?(quarantined)
+      refute trashed?(quarantined)
 
       released = item!()
 
       assert {:error, %Ash.Error.Forbidden{}} =
-               CMS.purge_media_item(released, actor: system(), tenant: org_id())
+               CMS.purge_quarantined_media_item(released, actor: system(), tenant: org_id())
 
       assert stored?(released)
+    end
+
+    # #2610: the strip released the item after the reaper read it. The held
+    # struct still says quarantined, but the policy's `quarantined == true`
+    # is checked against the row, not the struct, so the purge is refused.
+    # (The action's own filter covers the window between that check and the
+    # DELETE.)
+    test "a held quarantined item released meanwhile is refused, and stays" do
+      held = quarantined!()
+      {:ok, _} = CMS.release_media_quarantine(held, %{}, actor: system(), tenant: org_id())
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.purge_quarantined_media_item(held, actor: system(), tenant: org_id())
+
+      assert stored?(held)
+    end
+
+    # #2610: `:purge` is the admin trash's, and takes only a trashed row; the
+    # pipeline's purge is `:purge_quarantined` alone.
+    test "the system cannot run the trash's purge, even on a quarantined item" do
+      quarantined = quarantined!()
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.purge_media_item(quarantined, actor: system(), tenant: org_id())
+
+      assert stored?(quarantined)
+    end
+
+    test "no person runs the pipeline's purge — an admin of the site or the platform included" do
+      for actor <- [user(:editor), org_admin(), user(:admin), nil] do
+        quarantined = quarantined!()
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 CMS.purge_quarantined_media_item(quarantined, actor: actor, tenant: org_id())
+
+        assert stored?(quarantined)
+      end
     end
 
     test "the system cannot soft-delete even a quarantined item — `purge` is its only delete" do

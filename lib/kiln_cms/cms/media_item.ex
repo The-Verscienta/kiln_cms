@@ -84,10 +84,12 @@ defmodule KilnCMS.CMS.MediaItem do
     end
   end
 
-  # Let `:trashed` see soft-deleted rows and `:purge` actually hard-delete.
+  # Let `:trashed` see soft-deleted rows, and `:purge` and the pipeline's
+  # `:purge_quarantined` actually hard-delete (left out, the latter would only
+  # stamp `archived_at`, and a refused upload would sit in the trash).
   archive do
     exclude_read_actions([:trashed])
-    exclude_destroy_actions([:purge])
+    exclude_destroy_actions([:purge, :purge_quarantined])
   end
 
   # Content-focused AshAdmin overrides (issue #25). Group media with the other
@@ -315,6 +317,11 @@ defmodule KilnCMS.CMS.MediaItem do
     update :restore do
       accept []
       require_atomic? false
+      # Only a row still in the trash (#2611), as `:purge` above: a held
+      # struct whose row someone restored or purged meanwhile is a
+      # `StaleRecord`, which the media trash reports as such, rather than a
+      # restore that "succeeds" on a live item.
+      change filter(expr(not is_nil(^ref(:archived_at))))
       change set_attribute(:archived_at, nil)
     end
 
@@ -414,12 +421,24 @@ defmodule KilnCMS.CMS.MediaItem do
     destroy :purge do
       # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
       require_atomic? false
-      # Only a row still in the trash (#2531), or one still quarantined — the
-      # media pipeline's purge of a refused or stuck upload (#1659), which is
-      # never trashed. AshArchival leaves `:purge` unfiltered, so a held
-      # struct whose row someone restored meanwhile hard-deleted a live item.
-      # A miss is a `StaleRecord`, and the caller keeps the blobs.
-      change filter(expr(not is_nil(^ref(:archived_at)) or quarantined == true))
+      # Only a row still in the trash (#2531, #2610). AshArchival leaves
+      # `:purge` unfiltered, so a held struct whose row someone restored
+      # meanwhile hard-deleted a live item. A miss is a `StaleRecord`, and the
+      # caller keeps the blobs. The pipeline's purge of an untrashed upload is
+      # `:purge_quarantined` below, not a branch here: a branch would apply to
+      # the admin trash too.
+      change filter(expr(not is_nil(^ref(:archived_at))))
+    end
+
+    # The media pipeline's hard delete (#1659, #2610): `AVStripWorker` purges
+    # an upload its strip refused, `QuarantineReaper` one stuck in quarantine.
+    # Neither was ever trashed. Only a row still quarantined, so a held struct
+    # whose quarantine was released meanwhile is a `StaleRecord`, not a
+    # deleted library item. System-only, by a policy above the admin bypass.
+    destroy :purge_quarantined do
+      # Not atomic: the `BustMediaCache` after-action runs an in-BEAM side effect.
+      require_atomic? false
+      change filter(expr(quarantined == true))
     end
 
     # Faceted library browse (#1316): every argument is optional and absent
@@ -536,6 +555,15 @@ defmodule KilnCMS.CMS.MediaItem do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :media}
     end
 
+    # The pipeline's purge of an untrashed quarantined upload (#2610) is the
+    # pipeline's alone, and only while the item is quarantined. Above the
+    # admin bypass on purpose: an admin deletes through the trash (`:purge`),
+    # which requires the item to be trashed.
+    policy action(:purge_quarantined) do
+      forbid_unless {KilnCMS.Checks.SystemActor, subsystem: :media}
+      authorize_if expr(quarantined == true)
+    end
+
     # Read-scoped API keys can never write media, and no key may delete it —
     # before the admin bypass so a key on an admin account can't skip it
     # (mirrors the content policy; see Checks.ApiKeyWithoutWriteAccess).
@@ -600,14 +628,15 @@ defmodule KilnCMS.CMS.MediaItem do
     # Deletes are admin-only (allowed by the bypass; denied here for all other
     # roles). Covers both the soft `:destroy` and the permanent `:purge`.
     #
-    # One exception (#1659): the media pipeline may `:purge` an item that is
-    # still **quarantined** — an A/V upload whose strip refused it, or one the
-    # reaper found stuck. Never a released item: those are in the library, may
-    # be referenced by content, and deleting them stays an admin act.
+    # One exception (#1659, #2610): the media pipeline runs
+    # `:purge_quarantined`, and only that, on an item still **quarantined** —
+    # an A/V upload whose strip refused it, or one the reaper found stuck (the
+    # quarantine itself is checked by that action's policy above). Never a
+    # released item: those are in the library, may be referenced by content,
+    # and deleting them stays an admin act.
     policy action_type(:destroy) do
-      forbid_unless action(:purge)
-      forbid_unless {KilnCMS.Checks.SystemActor, subsystem: :media}
-      authorize_if expr(quarantined == true)
+      forbid_unless action(:purge_quarantined)
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :media}
     end
 
     # Trash browsing and restore are admin-only too (mirrors delete).
@@ -646,8 +675,8 @@ defmodule KilnCMS.CMS.MediaItem do
   # destroy/purge). Attribute-only writes like `download_count` must not keep
   # the cache cold on every download (#1137).
   changes do
-    # `on:` filters by action TYPE, not name — `:purge` (below) is a `:destroy`
-    # action (`destroy :purge do`), so `:destroy` here already covers it.
+    # `on:` filters by action TYPE, not name — `:purge` and `:purge_quarantined`
+    # (above) are `:destroy` actions, so `:destroy` here already covers them.
     change KilnCMS.CMS.Changes.BustMediaCache, on: [:create, :destroy]
 
     # `where:` wraps a list of validations (AND-combined) or a plain 2-arity

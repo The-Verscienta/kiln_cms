@@ -376,6 +376,7 @@ defmodule KilnCMS.CMS do
       define :release_media_quarantine, action: :release_quarantine
       define :adopt_media_item_into_image_backend, action: :adopt_into_image_backend
       define :list_expired_quarantined_media, action: :quarantine_expired, args: [:cutoff]
+      define :purge_quarantined_media_item, action: :purge_quarantined
     end
 
     # Cached on-the-fly transforms (`KilnCMS.Media.Derivatives`) — system-only,

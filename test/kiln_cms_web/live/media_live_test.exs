@@ -59,6 +59,50 @@ defmodule KilnCMSWeb.MediaLiveTest do
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
+  # Points Storage.Local at a fresh temp dir for this test (global app env,
+  # hence the module's `async: false`) and returns it.
+  defp local_storage(prefix) do
+    root = Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    Application.put_env(:kiln_cms, KilnCMS.Storage.Local, root: root, base_url: "/uploads")
+
+    on_exit(fn ->
+      File.rm_rf!(root)
+      Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
+    end)
+
+    root
+  end
+
+  # Stores a small PNG through `KilnCMS.Storage` and returns its key.
+  defp store_png(prefix) do
+    src = Path.join(System.tmp_dir!(), "#{prefix}-src-#{System.unique_integer([:positive])}.png")
+    {:ok, image} = Image.new(60, 40, color: :green)
+    {:ok, _} = Image.write(image, src)
+    key = "#{prefix}-orig-#{System.unique_integer([:positive])}.png"
+    {:ok, ^key} = KilnCMS.Storage.store(key, src)
+    File.rm(src)
+    key
+  end
+
+  defp trashed_media(filename, admin) do
+    item = seed_media(filename)
+    :ok = CMS.destroy_media_item(item, actor: admin)
+    item
+  end
+
+  defp open_trash(conn, actor) do
+    {:ok, lv, _html} = conn |> log_in(actor) |> live(~p"/media")
+    lv |> element("button", "Trash") |> render_click()
+    lv
+  end
+
+  defp trash_button(event, item),
+    do: ~s(button[phx-value-id="#{item.id}"][phx-click="#{event}"])
+
+  defp click_trash_button(lv, event, item),
+    do: lv |> element(trash_button(event, item)) |> render_click()
+
   describe "authorization" do
     test "anonymous users are redirected to sign-in", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/media")
@@ -885,7 +929,106 @@ defmodule KilnCMSWeb.MediaLiveTest do
       html =
         lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="purge"])) |> render_click()
 
-      assert html =~ "someone else restored or deleted it"
+      assert html =~ "Someone else already restored that item."
+      refute html =~ "permission to delete media"
+      assert CMS.get_media_item!(item.id, actor: admin).id == item.id
+      assert File.exists?(Path.join(root, key))
+    end
+
+    # #2611: Restore of an item someone else restored or purged after this
+    # page rendered said "You don't have permission to restore media.", or
+    # "Restored" for a second restore.
+    test "restore of an item someone restored meanwhile says so, and the row leaves the trash",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      item = trashed_media("again.png", admin)
+      lv = open_trash(conn, admin)
+
+      [held] = CMS.list_trashed_media_items!(actor: admin, query: [filter: [id: item.id]])
+      {:ok, _} = CMS.restore_media_item(held, actor: admin)
+
+      html = click_trash_button(lv, "restore", item)
+
+      assert html =~ "Someone else already restored that item."
+      refute html =~ "Restored again.png"
+      refute has_element?(lv, trash_button("restore", item))
+      assert CMS.get_media_item!(item.id, actor: admin).id == item.id
+    end
+
+    test "restore of an item someone purged meanwhile says it was permanently deleted",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      item = trashed_media("purged.png", admin)
+      lv = open_trash(conn, admin)
+
+      [held] = CMS.list_trashed_media_items!(actor: admin, query: [filter: [id: item.id]])
+      :ok = CMS.purge_media_item(held, actor: admin)
+
+      html = click_trash_button(lv, "restore", item)
+
+      assert html =~ "That item is no longer in the trash — someone permanently deleted it."
+      refute has_element?(lv, trash_button("restore", item))
+    end
+
+    # The refused actor (#2611): an admin by membership opens the trash, then
+    # loses the admin tier. The refusal is not mistaken for a stale item, and
+    # nothing is restored.
+    test "a refused restore keeps the permission message and the item in the trash",
+         %{conn: conn} do
+      actor = authed_user(:editor)
+
+      {:ok, membership} =
+        KilnCMS.Accounts.create_org_membership(
+          %{user_id: actor.id, organization_id: KilnCMS.Accounts.default_org_id(), role: :admin},
+          authorize?: false
+        )
+
+      item = trashed_media("kept.png", actor)
+      lv = open_trash(conn, actor)
+
+      {:ok, _} =
+        KilnCMS.Accounts.update_org_membership(membership, %{role: :viewer}, authorize?: false)
+
+      html = click_trash_button(lv, "restore", item)
+
+      assert html =~ "You don&#39;t have permission to restore media."
+      refute html =~ "already restored"
+      refute html =~ "permanently deleted it"
+
+      assert CMS.list_trashed_media_items!(authorize?: false, query: [filter: [id: item.id]]) !=
+               []
+    end
+
+    # #2610: an item trashed while still quarantined, then restored by
+    # someone else. `:purge` used to take any quarantined row (the pipeline's
+    # branch), so the stale click hard-deleted a live item and its file.
+    test "purge of a quarantined item someone restored meanwhile keeps the item and its file",
+         %{conn: conn} do
+      root = local_storage("kiln_ui_stale_q")
+      key = store_png("stale-q")
+
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "held.mp4",
+          url: "/uploads/#{key}",
+          storage_key: key,
+          content_type: "video/mp4",
+          quarantined: true
+        })
+
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_media_item(item, actor: admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/media")
+      lv |> element("button", "Trash") |> render_click()
+
+      [held] = CMS.list_trashed_media_items!(actor: admin, query: [filter: [id: item.id]])
+      {:ok, _} = CMS.restore_media_item(held, actor: admin)
+
+      html =
+        lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="purge"])) |> render_click()
+
+      assert html =~ "restored"
+      refute html =~ "Permanently deleted"
       refute html =~ "permission to delete media"
       assert CMS.get_media_item!(item.id, actor: admin).id == item.id
       assert File.exists?(Path.join(root, key))
