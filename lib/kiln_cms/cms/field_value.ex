@@ -52,7 +52,7 @@ defmodule KilnCMS.CMS.FieldValue do
   @doc """
   What a filter operand `raw` on the single field `definition` is compared as
   besides itself (#2677): the value a write would have stored for it —
-  `{:ok, "#ffffff"}` for a colour's `"#FFF"`, the option's value for a
+  `{:ok, "#ffffff"}` for a color's `"#FFF"`, the option's value for a
   select's label — or `:none` when the type keeps operands as sent, or the
   field could never hold `raw` (it then simply matches nothing).
   """

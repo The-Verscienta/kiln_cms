@@ -329,7 +329,7 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
     end
   end
 
-  # #2677: a write tidies what it stores (a colour's case, an email's domain, a
+  # #2677: a write tidies what it stores (a color's case, an email's domain, a
   # phone number's spacing, a time's padding, a slug, a select's label), so an
   # equality operand is matched both as sent and as a write would have stored
   # it. Range operators and text matching take the operand as sent.

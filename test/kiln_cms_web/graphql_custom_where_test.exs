@@ -275,7 +275,7 @@ defmodule KilnCMSWeb.GraphqlCustomWhereTest do
   # #2677: the issue's four examples, through both arguments — an operand is
   # matched as sent and as the write stored it.
   describe "operands tidied as the write tidied the value" do
-    test "colour, email, telephone and time match their stored spelling", %{admin: admin} do
+    test "color, email, telephone and time match their stored spelling", %{admin: admin} do
       for {type, written, operand} <- [
             {:color, "#ffffff", "#FFF"},
             {:email, "a@example.com", "a@Example.com"},

@@ -42,7 +42,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   An equality operand (`eq`, `not_eq`, each item of `in`) on a field whose
   write tidies the value — a string or URL's spaces, a select's label, an
-  email, colour, telephone, time or slug — matches both as sent and as the
+  email, color, telephone, time or slug — matches both as sent and as the
   write would have stored it (#2677, `KilnCMS.CMS.FieldValue.canonical/2`),
   so `#FFF` finds a stored `#ffffff` and a value stored before a retype is
   still found by its own spelling. Range operators and text matching take the
@@ -71,7 +71,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   "does not", and `in` "contains any of them".
 
   A `multiple` scalar field — a list of phrases, terms, numbers, dates,
-  times, links, addresses, phone numbers, colours or slugs (#2289) — reads
+  times, links, addresses, phone numbers, colors or slugs (#2289) — reads
   the same way for its items (`custom_filter[properties]=tonic`,
   `custom_filter[scores]=10`), and also takes `has` / `has_all` / `has_none`
   over values and `count` over its items; `has_none` matches a record with
@@ -829,7 +829,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   # The values an equality operand matches (#2677): each cast as sent — so a
   # value stored before the field was retyped (a `:string` holding `"#FFF"`,
-  # now a colour) is still found by its own spelling — and, where it differs,
+  # now a color) is still found by its own spelling — and, where it differs,
   # as a write would have stored it (`FieldValue.canonical/2`): `#FFF` finds a
   # stored `#ffffff`, a select's label its option's value. `values` are the
   # cast operands of `raws`, item for item.
