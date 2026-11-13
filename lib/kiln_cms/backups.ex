@@ -1051,6 +1051,34 @@ defmodule KilnCMS.Backups do
     end
   end
 
+  @doc """
+  The newest run each schedule in `schedule_ids` took part in (part of
+  #2219): what its backup actually did, which a window's claim
+  (`last_outcome: :started`) can't say. A run records the schedules it ran
+  for in `schedule_ids`.
+
+  Read as `actor` (a platform admin; the `Run` read policy decides), one
+  `limit 1` query per schedule, newest `started_at` first, so a schedule that
+  runs often never crowds out one that runs rarely. `{:ok, %{id => run | nil}}`,
+  or the first read's error.
+  """
+  @spec last_scheduled_runs([String.t()], term()) ::
+          {:ok, %{optional(String.t()) => Run.t() | nil}} | {:error, term()}
+  def last_scheduled_runs(schedule_ids, actor) do
+    Enum.reduce_while(schedule_ids, {:ok, %{}}, fn id, {:ok, acc} ->
+      query =
+        Run
+        |> Ash.Query.filter(fragment("? = ANY(?)", type(^id, :uuid), schedule_ids))
+        |> Ash.Query.sort(started_at: :desc)
+        |> Ash.Query.limit(1)
+
+      case list_runs(query: query, actor: actor, authorize_with: :error) do
+        {:ok, runs} -> {:cont, {:ok, Map.put(acc, id, List.first(runs))}}
+        {:error, error} -> {:halt, {:error, error}}
+      end
+    end)
+  end
+
   defp put_resume(input, opts) do
     if Keyword.has_key?(opts, :resume) do
       resume = Keyword.get(opts, :resume)

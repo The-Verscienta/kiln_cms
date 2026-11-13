@@ -12,6 +12,8 @@ defmodule KilnCMSWeb.OverviewLive do
 
   require Ash.Query
 
+  import KilnCMSWeb.BackupComponents, only: [until: 1]
+
   alias KilnCMS.Accounts.ApiKey
   alias KilnCMS.Branding
   alias KilnCMS.CMS
@@ -457,9 +459,12 @@ defmodule KilnCMSWeb.OverviewLive do
         <%!-- #1772: without an in-app schedule, scheduled backups are the
               operator's cron job (`scripts/backup.sh`, docs/backups.md), so the
               copy says who sets the schedule, and the strip is a plain box with
-              two links — the panel, and the guide. Once an enabled in-app
-              schedule exists (part of #2219) the copy names both, rather than
-              claiming the schedule lives only in cron. --%>
+              two links — the panel, and the guide. With in-app schedules (part
+              of #2219, the Schedule tab) the copy says when the next one backs
+              up the components in question (`@backup_next_at`) and links to
+              the tab; schedules that exist but can't run here (none of them
+              covers those components here, or the scheduler is off) keep the
+              sentence that names both the tab and cron. --%>
         <.overview_strip
           :if={@platform_admin? and @backup_state == :never}
           id="overview-backup-setup"
@@ -475,12 +480,24 @@ defmodule KilnCMSWeb.OverviewLive do
               "Scheduled backups are a cron job set up by whoever runs this server. You can take the first one now from Backups."
             )}
           </span>
-          <span :if={@backup_scheduled?} class="block text-xs text-base-content/70">
-            {gettext(
-              "Scheduled backups run from the in-app schedules listed on the Backups page or from a cron job set up by whoever runs this server. You can take the first one now from Backups."
+          <span
+            :if={@backup_scheduled? and @backup_next_at}
+            data-role="backup-next"
+            class="block text-xs text-base-content/70"
+          >
+            {gettext("First scheduled backup: %{when}. You can take one now from Backups.",
+              when: until(@backup_next_at)
             )}
           </span>
-          <.backup_strip_links />
+          <span
+            :if={@backup_scheduled? and is_nil(@backup_next_at)}
+            class="block text-xs text-base-content/70"
+          >
+            {gettext(
+              "Scheduled backups run from the in-app schedules on the Schedule tab of Backups or from a cron job set up by whoever runs this server. You can take the first one now from Backups."
+            )}
+          </span>
+          <.backup_strip_links scheduled?={@backup_scheduled?} />
         </.overview_strip>
 
         <.overview_strip
@@ -502,12 +519,24 @@ defmodule KilnCMSWeb.OverviewLive do
               "Scheduled backups run from the server's cron job — ask whoever runs this server to check it, or take one now from Backups."
             )}
           </span>
-          <span :if={@backup_scheduled?} class="block text-xs text-base-content/70">
-            {gettext(
-              "Scheduled backups run from the in-app schedules listed on the Backups page or from the server's cron job — check both, or take one now from Backups."
+          <span
+            :if={@backup_scheduled? and @backup_next_at}
+            data-role="backup-next"
+            class="block text-xs text-base-content/70"
+          >
+            {gettext("Next scheduled backup: %{when}. You can also take one now from Backups.",
+              when: until(@backup_next_at)
             )}
           </span>
-          <.backup_strip_links />
+          <span
+            :if={@backup_scheduled? and is_nil(@backup_next_at)}
+            class="block text-xs text-base-content/70"
+          >
+            {gettext(
+              "Scheduled backups run from the in-app schedules on the Schedule tab of Backups or from the server's cron job — check both, or take one now from Backups."
+            )}
+          </span>
+          <.backup_strip_links scheduled?={@backup_scheduled?} />
         </.overview_strip>
 
         <%!-- Unsigned content (#1929): provenance is on but no key resolves,
@@ -949,6 +978,9 @@ defmodule KilnCMSWeb.OverviewLive do
   # read the manifest) and the operator guide that owns the schedule.
   @backup_guide_url "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/backups.md"
 
+  # With in-app schedules (part of #2219), a third: the Schedule tab.
+  attr :scheduled?, :boolean, default: false
+
   defp backup_strip_links(assigns) do
     assigns = assign(assigns, :guide_url, @backup_guide_url)
 
@@ -956,6 +988,14 @@ defmodule KilnCMSWeb.OverviewLive do
     <span class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium">
       <.link navigate={~p"/editor/backups"} data-role="open-backups" class="underline">
         {gettext("Open Backups")}
+      </.link>
+      <.link
+        :if={@scheduled?}
+        navigate={~p"/editor/backups/schedules"}
+        data-role="open-schedule"
+        class="underline"
+      >
+        {gettext("Open the schedule")}
       </.link>
       <a
         href={@guide_url}
@@ -1052,6 +1092,7 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:backup_state, backup_state(status))
     |> assign(:backup_headline, backup_headline(status))
     |> assign(:backup_scheduled?, backup_scheduled?(status))
+    |> assign(:backup_next_at, backup_next_at(status))
   end
 
   defp assign_backup_warning(socket) do
@@ -1059,6 +1100,23 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:backup_state, :ok)
     |> assign(:backup_headline, [])
     |> assign(:backup_scheduled?, false)
+    |> assign(:backup_next_at, nil)
+  end
+
+  # When the next scheduled backup of the components the strip is about (one
+  # never backed up, failed or stale) is, or nil unless EVERY one of them has
+  # a schedule that runs here: not `status.next_at`, which may be a schedule
+  # of a healthy component, and not the one component that is scheduled when
+  # another isn't (that one is the sentence naming the tab and cron).
+  defp backup_next_at(status) do
+    next_ats =
+      status.components
+      |> Enum.filter(fn {_component, cs} -> cs.never? or cs.failed? or cs.stale? end)
+      |> Enum.map(fn {_component, cs} -> cs.next_at end)
+
+    if next_ats != [] and Enum.all?(next_ats, &match?(%DateTime{}, &1)),
+      do: Enum.min(next_ats, DateTime),
+      else: nil
   end
 
   # An enabled in-app backup schedule exists (part of #2219).
