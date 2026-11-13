@@ -38,9 +38,10 @@ defmodule KilnCMS.Security.BlockedIpAlert do
   The event carries the rule that matched and the surface, and no request
   context: its `ip` and `user_agent` are `nil` (#2245), so ADR 0026's
   "nothing logs the address" holds for the audit log, the alert and its
-  webhooks alike. The client network is only the sampling key: hashed in
-  `throttle_counters` (`KilnCMS.Accounts.ThrottleStore.key_hash/1`) and held
-  in this node's ETS for one window, never stored as text. A rule is the
+  webhooks alike. The client network is only the sampling key: stored in
+  `throttle_counters` as its SHA-256 (`KilnCMS.Accounts.ThrottleStore`
+  hashes every key) and held in this node's ETS for one window, never
+  written to the database as text. A rule is the
   site's own text, masked the way the site's settings mask an address
   (`KilnCMS.Security.Alerts.display_metadata/3`). Nothing here raises, and
   nothing logs an address.

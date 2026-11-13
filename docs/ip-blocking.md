@@ -22,6 +22,17 @@ Static assets and uploads are served before the request is matched to a site, so
 they cannot be blocked per site. If you need those refused too, add the rule at
 your CDN, reverse proxy or firewall.
 
+### What a refusal tells your admins
+
+A refusal raises the site's `blocked_ip` [security alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window),
+on by default: the site's admins get one alert per 15 minutes naming the rule
+that matched ("A blocked address was refused (rule 203.0.113.0/24)"), then a
+summary of how many client networks were refused. Refusals are also written to
+the [security log](security-events.md) as `ip_block_refused`, sampled to one
+per client network per 15 minutes, with the rule and the surface and **without
+the address**. To stop the alerts, untick **Blocked addresses** on **Security
+alerts** (`/editor/security-alerts`); the log entries continue.
+
 ## Block an address or range
 
 You need the admin role. An editor does not see the page.
@@ -208,7 +219,9 @@ The counter `kiln_cms.scanner_guard.blocked.count`, tagged `reason`
 (`miss_threshold` or `bait_path`), counts new blocks; see
 [Observability](observability.md#blocked-addresses). Each block is also one
 `ip_auto_blocked` event in the security log. The address is never a metric tag
-or a log field.
+or a log field. Creating the block raises no alert; the requests it then
+refuses raise `blocked_ip` like any rule's (see
+[What a refusal tells your admins](#what-a-refusal-tells-your-admins)).
 
 ### What can go wrong
 
@@ -280,9 +293,11 @@ never blocked.
 - **It fails open.** If the rule list cannot be read (database down), requests are
   let through and a warning without any address is logged. Nothing is cached from
   a failed read, so the next request tries again.
-- **No address is logged.** The only trace of a refusal is the
-  `kiln_cms.ip_block.refused.count` counter, tagged by surface; see
-  [Observability](observability.md#blocked-addresses).
+- **No address is logged.** Every refusal counts on the
+  `kiln_cms.ip_block.refused.count` counter, tagged by surface (see
+  [Observability](observability.md#blocked-addresses)), and a sample of them is
+  written to the security log as `ip_block_refused` with the rule and surface
+  only. Neither carries the address, nor does the `blocked_ip` alert.
 - **Automatic rules share the list.** They carry an expiry, so they follow the
   "expired rules" behaviour above too, and the scanner guard may only add rules;
   an admin can still remove one at any time.
