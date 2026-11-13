@@ -535,7 +535,7 @@ carries the reasoning.
     `[:kiln_cms, :backups, :status, :schedules_unreadable]`.
 
   See [Schedule backups in the app](../backups.md#schedule-backups-in-the-app),
-  and [ADR 0031](../decisions/0031-a-schedule-sets-the-alarm-threshold-only-while-it-can-run-and-a-claimed-window-is-never-retried.md)
+  and [ADR 0044](../decisions/0044-a-schedule-sets-the-alarm-threshold-only-while-it-can-run-and-a-claimed-window-is-never-retried.md)
   for why a schedule sets the threshold only while it can run, why a claimed
   window is never retried, and why the claim shares the backup lock's
   transaction.
