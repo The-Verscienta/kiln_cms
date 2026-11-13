@@ -64,6 +64,9 @@ defmodule KilnCMSWeb.SettingsLive do
      # What the enrolment actions are told about this session, for the email
      # proof a site's requirement may ask for (#2247).
      |> assign(:enrolment_session, KilnCMSWeb.SignInMarker.enrolment_session(session))
+     # Whether that proof is owed (#2872): this page has no step to give it,
+     # so the add controls say where to go instead of only refusing.
+     |> assign_proof_elsewhere()
      # Passkeys (#331): registered credentials + the in-flight enrolment
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
@@ -111,6 +114,25 @@ defmodule KilnCMSWeb.SettingsLive do
         socket.assigns.enrolment_session,
         nil
       )
+
+  # The email proof is `EnrolmentProof.decide/4`'s, the same call the actions
+  # make: when it is owed, this page's adds are refused (it passes no proof),
+  # and the setup page is where the code is emailed and entered. That page is
+  # not served on a tenant site host, so the link there goes to the main
+  # host's and says so (as `/account` does).
+  defp assign_proof_elsewhere(socket) do
+    %{current_user: user, current_org: org, enrolment_session: session} = socket.assigns
+    host = KilnCMSWeb.SecondFactorGate.socket_host(socket)
+    url = KilnCMSWeb.SecondFactorGate.setup_href(host)
+
+    socket
+    |> assign(:proof_elsewhere?, EnrolmentProof.required?(user, org && org.id, session))
+    |> assign(:setup_url, url)
+    |> assign(
+      :setup_host,
+      if(KilnCMSWeb.SecondFactorGate.setup_host?(host), do: nil, else: URI.parse(url).host)
+    )
+  end
 
   # "Your access" (#2142): the tier this page was reached with, as the policies
   # resolve it on this site, and when a temporary one changes. Read-only, and
@@ -873,9 +895,17 @@ defmodule KilnCMSWeb.SettingsLive do
                       "Set up a new authenticator app so you can keep signing in without using another recovery code."
                     )}
                   </p>
+                  <.proof_elsewhere_note
+                    :if={@proof_elsewhere?}
+                    id="totp-proof-elsewhere"
+                    setup_url={@setup_url}
+                    setup_host={@setup_host}
+                    class="mt-3"
+                  />
                   <.button phx-click="start_totp" variant="primary" class="mt-3">
                     {gettext("Set up a new authenticator")}
                   </.button>
+                  <TotpEnrolment.added_mail_note />
                 </div>
                 <form
                   id="regenerate-recovery-form"
@@ -913,23 +943,24 @@ defmodule KilnCMSWeb.SettingsLive do
                 </form>
               </div>
 
-              <TotpEnrolment.setup :if={@enrolling && !@credentials_locked?} enrolling={@enrolling} />
+              <div :if={@enrolling && !@credentials_locked?}>
+                <TotpEnrolment.setup enrolling={@enrolling} />
+                <TotpEnrolment.added_mail_note />
+              </div>
 
               <div :if={!@totp_enabled? && !@enrolling && !@credentials_locked?}>
+                <.proof_elsewhere_note
+                  :if={@proof_elsewhere?}
+                  id="totp-proof-elsewhere"
+                  setup_url={@setup_url}
+                  setup_host={@setup_host}
+                  class="mb-3"
+                />
                 <.button phx-click="start_totp" variant="primary">
                   {gettext("Enable two-factor authentication")}
                 </.button>
+                <TotpEnrolment.added_mail_note />
               </div>
-
-              <%!-- `User.:confirm_totp` mails the owner on a first setup and on
-                    a replacement alike (`NotifyFactorAdded`). --%>
-              <p
-                :if={!@credentials_locked?}
-                id="totp-added-mail"
-                class="mt-3 text-xs text-base-content/70"
-              >
-                {gettext("We'll email you when an authenticator app is added or replaced.")}
-              </p>
             </section>
 
             <section
@@ -1016,6 +1047,16 @@ defmodule KilnCMSWeb.SettingsLive do
                 <.icon name="hero-information-circle" class="size-4 shrink-0" />
                 {passkey_limit_message()}
               </p>
+              <.proof_elsewhere_note
+                :if={
+                  @proof_elsewhere? && !@credentials_locked? && !@passkey_challenge &&
+                    length(@passkeys) < @passkey_limit
+                }
+                id="passkey-proof-elsewhere"
+                setup_url={@setup_url}
+                setup_host={@setup_host}
+                class="mb-3"
+              />
               <form
                 :if={
                   !@credentials_locked? && !@passkey_challenge &&
@@ -1459,11 +1500,7 @@ defmodule KilnCMSWeb.SettingsLive do
 
   defp passkey_refusal(_reason), do: nil
 
-  defp passkey_limit_message do
-    gettext("You have %{max} passkeys, the most an account can hold. Remove one to add another.",
-      max: Passkey.max_per_account()
-    )
-  end
+  defp passkey_limit_message, do: TotpEnrolment.passkey_limit_message()
 
   defp demo_locked_message, do: TotpEnrolment.demo_locked_message()
 
@@ -1482,6 +1519,36 @@ defmodule KilnCMSWeb.SettingsLive do
       <.icon name="hero-lock-closed" class="mt-0.5 size-4 shrink-0" />
       {TotpEnrolment.last_factor_message()}
     </p>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :setup_url, :string, required: true
+  attr :setup_host, :string, default: nil, doc: "set when the setup page is on another host"
+  attr :class, :any, default: nil
+
+  # Up front, where `RequireEnrolmentProof` would refuse this page's add: the
+  # refusal flash ("Confirm your email address before adding a second
+  # factor.") stays as the backstop.
+  defp proof_elsewhere_note(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class={["rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm", @class]}
+    >
+      <p class="flex items-start gap-1.5">
+        <.icon name="hero-envelope" class="mt-0.5 size-4 shrink-0" />
+        {gettext(
+          "You need to confirm your email address before you add a second factor. Do that on the two-step sign-in page, and add it there."
+        )}
+      </p>
+      <p :if={@setup_host} class="mt-1 text-base-content/70">
+        {gettext("This opens on %{host}, where you sign in again.", host: @setup_host)}
+      </p>
+      <.link href={@setup_url} class="btn btn-sm btn-default mt-2">
+        {gettext("Set up two-step sign-in")}
+      </.link>
+    </div>
     """
   end
 

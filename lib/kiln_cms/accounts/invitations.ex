@@ -11,10 +11,13 @@ defmodule KilnCMS.Accounts.Invitations do
   `User.:register_with_invitation`, so nothing exists for the address until
   then. An unconfirmed, passwordless `User` written at invite time would break
   single sign-on for the invitee (an unconfirmed row cannot be confirmed by an
-  identity provider, and site sign-on refuses one), would answer the
-  self-registration form as "already taken", would be mailed "confirm your
-  email" by the confirmation add-on, and would hold a role before anyone
-  accepted it.
+  identity provider, and site sign-on refuses one), would turn the invitee's
+  own self-registration into "check your email" plus a mail saying someone
+  tried to register their address, something they never did
+  (`KilnCMS.Accounts.Changes.RefuseExistingAddress`,
+  `KilnCMS.Accounts.User.Senders.SendRegistrationNotice`, #2255), would be
+  mailed "confirm your email" by the confirmation add-on, and would hold a role
+  before anyone accepted it.
 
   ## The token
 
@@ -38,10 +41,14 @@ defmodule KilnCMS.Accounts.Invitations do
       one, nothing changes and the page says so (#2452). Never lowered;
     * an **unconfirmed** account: treated as if there were none. Anyone can
       register an unconfirmed account for any address, so its password is not
-      the invitee's: the invitee sets a new one, the account is confirmed and
-      every token it held is revoked before the membership is added.
+      the invitee's: the invitee sets a new one, the account is confirmed,
+      every token it held is revoked, and every credential the earlier
+      registrant could have added is forgotten
+      (`KilnCMS.Accounts.Changes.ForgetPriorCredentials`, #2453: the
+      authenticator app and its recovery codes, passkeys, identity-provider
+      links, push devices and API keys) before the membership is added.
 
-  An `:admin` invitation is honoured only while the admin who sent it is still
+  An `:admin` invitation is honored only while the admin who sent it is still
   a standing platform admin (`inviter_still_admin?/1`).
   """
 

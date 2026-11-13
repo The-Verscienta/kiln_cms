@@ -165,6 +165,17 @@ defmodule KilnCMSWeb.TotpEnrolment do
     )
   end
 
+  @doc """
+  Why no passkey can be added: the account holds the most it may
+  (`KilnCMS.Accounts.Passkey.max_per_account/0`, `Validations.PasskeyCap`).
+  """
+  @spec passkey_limit_message() :: String.t()
+  def passkey_limit_message do
+    gettext("You have %{max} passkeys, the most an account can hold. Remove one to add another.",
+      max: KilnCMS.Accounts.Passkey.max_per_account()
+    )
+  end
+
   @doc "Why the shared demo account's sign-in methods can't be changed."
   @spec demo_locked_message() :: String.t()
   def demo_locked_message do
@@ -208,6 +219,20 @@ defmodule KilnCMSWeb.TotpEnrolment do
         </button>
       </form>
     </div>
+    """
+  end
+
+  @doc """
+  That adding or replacing the app sends the owner a mail (#2828, #2886):
+  `User.:confirm_totp` mails on a first setup and a replacement alike
+  (`NotifyFactorAdded`). Drawn beside a control that starts or confirms one,
+  never where none is shown.
+  """
+  def added_mail_note(assigns) do
+    ~H"""
+    <p id="totp-added-mail" class="mt-3 text-xs text-base-content/70">
+      {gettext("We'll email you when an authenticator app is added or replaced.")}
+    </p>
     """
   end
 

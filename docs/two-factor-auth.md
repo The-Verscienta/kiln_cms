@@ -251,10 +251,12 @@ Whenever a second factor is added to an account, its owner gets an email
 - a passkey is added.
 
 One email per factor, every time. Regenerating recovery codes adds no factor
-and sends nothing; nor does a wrong code or a refused passkey. `/editor/settings`
-says so where you add each: "We'll email you when an authenticator app
-is added or replaced." under **Two-factor authentication**, and "We'll email
-you each time a passkey is added to your account." under **Passkeys**.
+and sends nothing; nor does a wrong code or a refused passkey.
+`/editor/settings` and `/account/two-factor` say so where you add each: "We'll
+email you when an authenticator app is added or replaced." beside the button
+that sets one up (or a new one after a recovery-code sign-in) and the setup
+form, and "We'll email you each time a passkey is added to your account."
+beside the passkey form.
 
 Why: adding a factor needs only a signed-in session. Someone who got hold of
 a session could add a passkey of their own and use it to sign in again after
@@ -445,7 +447,10 @@ at `/account/two-factor` on the main host (`PHX_HOST`) or the console host.
    with three parts: **Who it covers now**, **Requirement** and **If nobody can
    get in**. If you hold no second factor, a notice at the top says "Set up
    two-step sign-in on your own account first." with a **Set up two-step
-   sign-in** button.
+   sign-in** button. Where the console is served on the site's own address
+   (no console host is configured), the button goes to the main host's setup
+   page, and the notice says "This opens on (main host), where you sign in
+   again."
 2. Under **Require two-step sign-in for**, choose **Administrators**,
    **Editors and administrators** or **Everyone**. (**Off** turns the
    requirement off.)
@@ -456,8 +461,15 @@ at `/account/two-factor` on the main host (`PHX_HOST`) or the console host.
    1 of them right away." Nothing is saved yet.
 4. If the page shows **Code from your authenticator app**, type a current code
    from your app. It is shown when your sign-in did not verify a second factor
-   in the last 15 minutes. If your only factor is a passkey, sign out and sign
-   in again with it instead, then come back within 15 minutes.
+   in the last 15 minutes. If your only factor is a passkey, what the line
+   under the field says depends on the address:
+   - on the main host, or a console host where passkeys work: "No
+     authenticator app? Sign out and sign in again with your passkey, then
+     save within 15 minutes." Do that, and come back within 15 minutes.
+   - where a passkey can't be used (the site's own address, or a console host
+     outside `PHX_HOST`), the line says to add an authenticator app, with a
+     **Set up an authenticator app** link to the setup page (the main host's,
+     on a site's own address). Add one there, then enter its code here.
 5. Click **Save**. The page says "Two-step sign-in settings saved.", and the
    **Who it covers now** table shows, for each covered role, how many
    **People** it has, how many have **Set up** a factor, how many are **Still
@@ -618,9 +630,14 @@ if you did not ask for it: reset your password, which signs out every session.
 
 The check is made again by the enrollment itself (`User` `:confirm_totp`,
 `Passkey` `:register`), not only by the page, so a page that skipped the step
-cannot add a factor. `/editor/settings` has no email step: an account that
-owes one is refused there with "Confirm your email address before adding a
-second factor." and sets up on `/account/two-factor` instead.
+cannot add a factor. `/editor/settings` has no email step. For an account
+that owes one, it says so beside **Enable two-factor authentication**, beside
+**Set up a new authenticator** after a recovery-code sign-in, and beside the
+passkey form: "You need to confirm your email address before you add a second
+factor. Do that on the two-step sign-in page, and add it there." with
+a **Set up two-step sign-in** button to `/account/two-factor` (on a site's own
+address, the main host's page, and it says so). Adding there anyway is
+refused with "Confirm your email address before adding a second factor."
 
 What can go wrong on the setup page:
 

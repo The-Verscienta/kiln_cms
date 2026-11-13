@@ -150,7 +150,9 @@ defmodule KilnCMSWeb.TwoFactorPolicyLiveTest do
 
       {:ok, view, html} = conn |> session(admin, site, nil) |> live(@path)
       assert html =~ ~s(id="two-factor-policy-not-enrolled")
-      assert html =~ ~s(href="/account/two-factor")
+      # On the site's host: the main host's setup page (the page is not
+      # served here). Which host says what is `TwoFactorPolicyLiveHostTest`.
+      assert html =~ ~s(href="#{KilnCMSWeb.SecondFactorGate.main_setup_url()}")
 
       html = submit(view, %{required_for: "admins", grace_days: "14"})
 
