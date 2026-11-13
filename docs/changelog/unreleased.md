@@ -327,9 +327,32 @@ carries the reasoning.
 
 <a id="backup-schedules"></a>
 
-- **In-app backup schedules: a platform admin can schedule database and media backups daily, weekly, fortnightly or monthly at a local time in a time zone, from a release console; the Backups page lists them.**
-  The alternative to the host's cron job (part of #2219). Created, changed
-  and deleted from a release console in this release, as a platform admin:
+- **In-app backup schedules: a platform admin can schedule database and media backups daily, weekly, every 2 weeks or monthly at a local time in a time zone, on the new Schedule tab of the Backups page.**
+  The alternative to the host's cron job (part of #2219). Open **Backups** →
+  **Schedule** (`/editor/backups/schedules`, platform admins only) and click
+  **Add a schedule**: what to back up, how often, the time (`HH:MM`), the
+  start date and the time zone (a text box that suggests common zones). A
+  preview shows the cadence and the first backup as you type, or says why it
+  won't run (paused, the scheduler off, backups unavailable here). Each
+  schedule's card has **Edit**, **Pause**/**Resume** and **Delete**, its next
+  run, its last window and how its newest scheduled run ended, and the tab
+  warns when the scheduler is off, backups can't run here, the scheduler job
+  hasn't run lately, or a schedule names media the deployment doesn't
+  archive. A save is refused, "This schedule changed since you opened it…",
+  when another admin changed the schedule since the form opened, so a stale
+  form never undoes a pause. A schedule the form can't offer (a value from a
+  newer release, a sub-daily interval, media with no media directory) can
+  only be paused, resumed or deleted. There is no keep setting per schedule
+  yet: retention stays `BACKUP_KEEP_DAYS`.
+
+  The **Backups** tab says "Next scheduled backup: in …" (linking to the
+  tab) and shows each component's alarm threshold and where it came from.
+  On the Overview, the platform admins' backup strips say when the next
+  scheduled backup is once every component they warn about has a schedule
+  that can run here, otherwise that backups run from the Schedule tab or
+  cron, and link to the tab.
+
+  The same code interfaces work from a release console, for scripts:
 
   ```bash
   bin/kiln_cms rpc '
@@ -340,15 +363,10 @@ carries the reasoning.
   ```
 
   `update_backup_schedule/3` edits, pauses (`enabled: false`) and resumes
-  one, `destroy_backup_schedule/2` deletes it, and each is recorded in the
-  instance security log (`backup_schedule_created`, `_changed`, `_deleted`).
-  The **Backups** page gains a read-only **Schedules** section: each
-  schedule's cadence and components, "Paused", "Next run" (only when it can
-  fire here), the last window's outcome, and each component's alarm threshold
-  and where it came from, with a warning when `KILN_BACKUP_SCHEDULER_CRON` is
-  off or this node can't run backups. Scheduled runs read **Scheduled** in
-  History, and the Overview's backup strips mention the in-app schedules once
-  one is enabled.
+  one, `destroy_backup_schedule/2` deletes it, and each change, from the tab
+  or a console, is recorded in the instance security log
+  (`backup_schedule_created`, `_changed`, `_deleted`). Scheduled runs read
+  **Scheduled** in History.
 
   How it behaves:
   - A window fires once across every node: it is claimed in the transaction
@@ -382,7 +400,11 @@ carries the reasoning.
     :refused | :narrowed | :missed | :invalid | :unreadable]` and
     `[:kiln_cms, :backups, :status, :schedules_unreadable]`.
 
-  See [Schedule backups in the app](../backups.md#schedule-backups-in-the-app).
+  See [Schedule backups in the app](../backups.md#schedule-backups-in-the-app),
+  and [ADR 0031](../decisions/0031-a-schedule-sets-the-alarm-threshold-only-while-it-can-run-and-a-claimed-window-is-never-retried.md)
+  for why a schedule sets the threshold only while it can run, why a claimed
+  window is never retried, and why the claim shares the backup lock's
+  transaction.
 
 <a id="slack-webhook-format"></a>
 

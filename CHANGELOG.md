@@ -99,7 +99,7 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
-- **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
+- **In-app backup schedules (part of #2219): daily, weekly, every 2 weeks or monthly at a local time, managed by platform admins on the new Schedule tab of Backups (or from a release console). Sub-daily intervals wait for keep-N retention.**
   ([long form](docs/changelog/unreleased.md#backup-schedules))
 
 - **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
