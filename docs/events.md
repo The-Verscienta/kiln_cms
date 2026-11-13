@@ -239,6 +239,10 @@ response echoes the window that was actually applied. Nothing earlier is stored,
 so a request for last year would otherwise answer with this year's events while
 appearing to have searched.
 
+The HTML index is not a route of its own. Kiln tries it last, just before
+answering 404, so a path alias or a redirect at `/<plural>` wins over it; use
+one to put a page of your own there. Why: [ADR 0059](decisions/0059-a-generated-page-is-served-only-as-the-last-fallback-of-the-404-funnel-not-as-a-route-or-a-reserved-segment.md).
+
 ### How the ordering works, and what it cannot do
 
 "Next occurrence" is a function of `now()`, so it is not something `sort:` can
