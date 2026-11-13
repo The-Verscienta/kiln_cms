@@ -115,6 +115,9 @@ defmodule KilnCMS.Security.ApiKeyTrip do
     end
 
     :ok
+  rescue
+    # The table is gone while its owner restarts: the request still serves.
+    ArgumentError -> :ok
   end
 
   def remember(_plaintext, _actor), do: :ok

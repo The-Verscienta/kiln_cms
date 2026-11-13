@@ -7,7 +7,7 @@ defmodule KilnCMS.Security.PlatformAlertSettings do
     * `disabled_kinds` — the platform kinds turned off, as strings. Only the
       kinds in `KilnCMS.Security.Alerts.platform_optional_kinds/0` may be
       added: today `api_key_rate_limited`, the one platform kind a platform
-      admin can turn off (owner decision D-A on #2245, 2026-11-13). Every
+      admin can turn off (owner decision on #2245, 2026-11-12). Every
       other platform kind is always on. Default `[]`: an opt-out list, so the
       kind starts on, and a kind a later release makes optional starts on too.
 
