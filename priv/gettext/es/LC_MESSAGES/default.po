@@ -2034,8 +2034,8 @@ msgstr "Se volvió a usar una clave de API rotada"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "A row is skipped when it can't take this step: it isn't in a state that allows it, or you may not change it on this site."
-msgstr "Se omite una fila cuando no puede dar este paso: no está en un estado que lo permita, o no puedes cambiarla en este sitio."
+msgid "A row is skipped when it can't take this step: it isn't in a state that allows it, you may not change it on this site, or something on it needs fixing first (open it to see what)."
+msgstr "Se omite una fila cuando no puede dar este paso: no está en un estado que lo permita, no puedes cambiarla en este sitio o hay algo en ella que corregir antes (ábrela para ver qué)."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format

@@ -283,7 +283,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert html =~ "Unpublish: 1 updated, 1 skipped"
 
       assert html =~
-               "A row is skipped when it can&#39;t take this step: it isn&#39;t in a state that allows it, or you may not change it on this site."
+               "A row is skipped when it can&#39;t take this step: it isn&#39;t in a state that allows it, you may not change it on this site, or something on it needs fixing first (open it to see what)."
 
       assert CMS.get_page!(live.id, authorize?: false).state == :draft
     end

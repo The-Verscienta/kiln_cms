@@ -2034,7 +2034,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "A row is skipped when it can't take this step: it isn't in a state that allows it, or you may not change it on this site."
+msgid "A row is skipped when it can't take this step: it isn't in a state that allows it, you may not change it on this site, or something on it needs fixing first (open it to see what)."
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiment_live.ex

@@ -2034,8 +2034,8 @@ msgstr "Une clé d'API remplacée a été réutilisée"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "A row is skipped when it can't take this step: it isn't in a state that allows it, or you may not change it on this site."
-msgstr "Une ligne est ignorée quand elle ne peut pas franchir cette étape : elle n'est pas dans un état qui le permet, ou vous ne pouvez pas la modifier sur ce site."
+msgid "A row is skipped when it can't take this step: it isn't in a state that allows it, you may not change it on this site, or something on it needs fixing first (open it to see what)."
+msgstr "Une ligne est ignorée quand elle ne peut pas franchir cette étape : elle n'est pas dans un état qui le permet, vous ne pouvez pas la modifier sur ce site, ou quelque chose doit d'abord y être corrigé (ouvrez-la pour voir quoi)."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
