@@ -68,7 +68,8 @@ Reads (all policy-scoped — drafts are visible only if the owner is an editor):
 > `read_pages`, `read_posts` and `read_entries` take these under `input`.
 > They're JSON:API's parameters as JSON, snake_case throughout. The tool's own
 > `filter` and `sort` reach built-in columns only: a custom field's name in
-> `filter` is a `no such field` error.
+> `filter` is a `no such field` error (or, if it matches a built-in column
+> such as `title`, filters that column).
 >
 > ```json
 > {"name": "read_posts", "arguments": {"input": {
@@ -84,7 +85,8 @@ Reads (all policy-scoped — drafts are visible only if the owner is an editor):
 > ```
 >
 > - `custom_filter` maps field names to a value (equality) or to an object of
->   operators, and takes the `_or`, `_and`, `_not` and `_native` groups. The
+>   operators, and takes the `_or`, `_and` and `_not` groups and `_native` (built-in
+>   columns). The
 >   operators, value shapes, equality matching and private fields are in
 >   [json-api.md](json-api.md) → "Custom fields".
 > - `custom_where` is a list of typed conditions, `{"name": …, <kind>:

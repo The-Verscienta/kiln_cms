@@ -487,12 +487,15 @@ A query string carries **one condition**, with as many operators as you like:
 ```
 GET /api/json/posts?custom_where[][name]=price&custom_where[][int][gt]=10
 GET /api/json/posts?custom_where[][name]=price&custom_where[][int][gt]=10&custom_where[][int][lte]=50
+GET /api/json/posts?custom_where[][name]=price&custom_where[][int][in][]=10&custom_where[][int][in][]=20
 ```
 
 - Every `custom_where[][…]` pair lands in the same list item, so a second
   `[name]` replaces the first and its operators join the first condition. For
   conditions on several fields, use `custom_filter`: it takes the same
-  operators, and groups too.
+  operators (there the null test is `null`, not `is_null`), and groups too.
+  This is how the query-string decoder (Plug) reads repeated `[]` keys, which
+  Plug itself calls unspecified; a test pins it, but prefer `custom_filter`.
 - The indexed form (`custom_where[0][name]=price`) is a `400`
   `invalid_query`. The query string decodes it to a map, and the parameter is
   a list.

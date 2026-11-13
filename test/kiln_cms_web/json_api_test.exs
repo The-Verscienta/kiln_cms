@@ -1096,10 +1096,12 @@ defmodule KilnCMSWeb.JsonApiTest do
 
       assert ids(body) == [dear.id]
 
-      assert {400, _body} =
+      assert {400, %{"errors" => [%{"code" => "invalid_query"} = err | _]}} =
                api_get(
                  "/api/json/posts?custom_where[0][name]=#{price}&custom_where[0][int][gt]=10"
                )
+
+      assert err["source"]["pointer"] =~ "custom_where"
     end
   end
 

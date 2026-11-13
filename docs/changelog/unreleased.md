@@ -1300,6 +1300,33 @@ carries the reasoning.
   change; rolling back restores the earlier wording. (Part of #2872;
   #2886, #2888)
 
+<a id="mcp-custom-field-filters-documented"></a>
+
+- **API consumers: the MCP read tools' `custom_filter`, `custom_where` and `custom_sort` are now documented, and so is JSON:API's `custom_where`, which takes one condition per query string.**
+  `read_pages`, `read_posts` and `read_entries` already take all three under
+  `input`, but
+  [the MCP guide](../mcp.md#tools) didn't say so, and a custom field's name
+  in the tool's own `filter` is a `no such field` error. The guide now has
+  both forms as JSON tool calls. They are JSON:API's parameters as JSON,
+  snake_case throughout: `custom_filter` with its `_or`, `_and`, `_not` and
+  `_native` groups, `custom_sort` as a comma-separated string, and
+  `custom_where` as a list of typed conditions, up to 10, with at most 50
+  values in an `in`. A bad condition comes back with `isError: true` and
+  the error text prefixed by the argument (`custom_where: …`). Some of
+  those messages spell kinds and operators the GraphQL way (`dateTime`,
+  `notEq`, `isNull`, `customWhere`); the MCP tools only accept the
+  snake_case form (`date_time`, `not_eq`, `is_null`).
+
+  [JSON:API](../json-api.md#typed-conditions-custom_where) gains a
+  "Typed conditions" section. A query string carries **one** condition:
+  every `custom_where[][…]` pair lands in the same list item, so a second
+  `[name]` replaces the first and its operators join the first condition.
+  The indexed form, `custom_where[0][name]=price`, is a `400`
+  `invalid_query`, because it decodes to a map and the parameter is a list.
+  To filter on several fields over JSON:API, use `custom_filter`, which
+  takes the same operators and groups too. A test now pins both the
+  one-condition form and the `400`. No behavior changes. (#2856)
+
 ## Fixed
 
 <a id="backup-resume-safety"></a>
