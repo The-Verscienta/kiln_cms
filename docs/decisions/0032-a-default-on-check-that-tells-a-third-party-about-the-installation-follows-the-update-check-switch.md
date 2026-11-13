@@ -16,9 +16,10 @@
 ## The problem
 
 Before 1.9.0, every outbound request a default install made about Kiln
-itself carried nothing about the installation: the kilncms.dev release feed,
-the GitHub fallback and the security notices feed send a bare `KilnCMS`
-user-agent and a fixed query, so each service sees only the server's IP
+itself carried nothing about the installation: the kilncms.dev release feed
+and the GitHub fallback send a bare `KilnCMS` user-agent and a fixed query, so
+each service sees only the server's IP. The security notices feed, read from
+1.9.0 on, works the same way
 ([data flows](../data-flows.md#optional-subprocessors)).
 
 The plugin health check (#2244) cannot work that way. To say whether an
@@ -52,7 +53,10 @@ and on what terms.
    opens **Operations → System** or **Security posture**, calls
    `GET /api/security/posture`, or selects **Check plugins now**, and only when
    no answer is cached (24 hours per node, 15 minutes after a failure; a forced
-   check at most once a minute). There is no Oban job and no request at boot.
+   check at most once a minute), or when an operator runs
+   `mix kiln.plugins.list --health`, which checks even with the switch off
+   because running it is the request. There is no Oban job and no request at
+   boot.
 5. **It is documented as a disclosure, where operators look.** Its row in
    [data flows](../data-flows.md#optional-subprocessors) puts what it discloses
    in bold, and the release that turned it on carried an entry under **Upgrade
@@ -85,10 +89,12 @@ refuse it.
 Not every default-on call meets terms 1 and 2 as written, and this record
 does not change them:
 
-- The **GitHub fallback** of the update check and the core's **security
-  notices** reader have no switch of their own; `KILN_UPDATE_CHECK=false`
-  stops them. They disclose nothing about the installation, so the terms
-  above do not apply to them.
+- The **GitHub fallback** of the update check has no switch of its own
+  (`KILN_UPDATE_FEED_URL=false` turns off only the kilncms.dev leg);
+  `KILN_UPDATE_CHECK=false` stops it. The core's **security notices** reader
+  shares `KILN_SECURITY_NOTICES_URL=false` with the plugin reader. Both
+  disclose nothing about the installation, so the terms above do not apply
+  to them.
 - The **breached-password check** sends a fragment of a password's hash, not
   something about the installation, and has its own switch
   (`BREACHED_PASSWORD_CHECK`), not `KILN_UPDATE_CHECK`. Its reasoning is

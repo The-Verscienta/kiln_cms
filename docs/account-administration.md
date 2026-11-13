@@ -1333,7 +1333,9 @@ counts) and its membership tier on this site.
 ### When the check does nothing
 
 - The operator set `BREACHED_PASSWORD_CHECK=false` (the page says so).
-- The site's policy is **Off**: nothing is sent.
+- The site's policy is **Off**: nothing is sent. (If the saved policy can't
+  be read, the site is treated as **Warn**; only the operator's
+  `BREACHED_PASSWORD_CHECK=false` guarantees no request.)
 - The lookup service is slow or unreachable: the password is accepted. Operators
   can watch for this in [observability](observability.md#breached-password-checks).
 - Passwords an admin does not type: the admin-sent reset *mail* is checked when

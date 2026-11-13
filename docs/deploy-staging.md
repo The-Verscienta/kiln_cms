@@ -73,7 +73,8 @@ Full flow, recipe, and the serve step live in
       `enabled: false`; `KilnCMS.Storage.Local`). Leaving a variable unset
       does not turn off the calls Kiln makes by default: set
       `KILN_UPDATE_CHECK=false`, `KILN_CRAWLER_VERIFICATION=false` and
-      `BREACHED_PASSWORD_CHECK=false` if the clone must make none
+      `BREACHED_PASSWORD_CHECK=false`, and leave `KILN_PLUGIN_HEALTH_CHECK`
+      unset, if the clone must make none
       ([data-flows.md](data-flows.md#optional-subprocessors)). Optionally
       noindex at the proxy.
 - [ ] **Don't copy production's backup settings.** Leave `BACKUP_RCLONE_REMOTE`
