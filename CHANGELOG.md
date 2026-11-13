@@ -81,7 +81,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
 
 - **Replace `scripts/backup.sh` on every host: an older copy doesn't keep a live run's `.partial` files fresh, so a run quiet for 3 h can be recorded as Interrupted. Old killed-run leftovers appear once as failed "Interrupted" runs, and `prune` now deletes abandoned `.partial` files.**
-  ([long form](docs/changelog/unreleased.md#cron-killed-run-recovery-upgrade))
+  ([#2850](https://github.com/The-Verscienta/kiln_cms/pull/2850) · [long form](docs/changelog/unreleased.md#cron-killed-run-recovery-upgrade))
 
 - **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced, and rolling back is safe. Part of #2247.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
@@ -179,10 +179,10 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#backup-marker-sync-cron-only))
 
 - **On a cluster with a `BACKUP_DIR` per host, the last-good marker sync now reaches every host's directory each slot: each node's heartbeat gives a directory that holds backups its `.kiln-dir-id`. Exclude that file when cloning a backup directory.**
-  ([long form](docs/changelog/unreleased.md#backup-marker-sync-every-host))
+  ([#2850](https://github.com/The-Verscienta/kiln_cms/pull/2850) · [long form](docs/changelog/unreleased.md#backup-marker-sync-every-host))
 
 - **A cron backup killed outright now shows in History as a failed "Interrupted" run after 3 quiet hours, and `backup.sh prune` clears its `.partial` files after 12, with no one stepping in.**
-  ([long form](docs/changelog/unreleased.md#cron-killed-run-recovery))
+  ([#2850](https://github.com/The-Verscienta/kiln_cms/pull/2850) · [long form](docs/changelog/unreleased.md#cron-killed-run-recovery))
 
 - **The 1.9.0 known issue "Resume on a failed backup says it is queued but never runs" was fixed in 1.9.0 itself (#2688); the resume is refused with a message instead.**
   ([long form](docs/changelog/unreleased.md#resume-behind-queued-resume-already-fixed))
