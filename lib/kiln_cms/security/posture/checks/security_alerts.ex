@@ -14,8 +14,11 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlerts do
       (`config :kiln_cms, KilnCMS.Security.Alerts, enabled: false`), when the
       site turned every kind off, or when no bell, email or webhook would carry
       one: bell and email off (or no admins at all, not even platform admins)
-      and no subscribed endpoint.
-    * **pass**, saying how, when they go only by webhook, only to the platform
+      and no subscribed endpoint. Also when, with no bell or email, some kind
+      the site has on has no endpoint subscribed to it: an endpoint for one
+      kind does not carry the others.
+    * **pass**, saying how, when they go only by webhook (every kind the site
+      has on has an endpoint subscribed to it), only to the platform
       admins (the site has no admins of its own), or only by bell (every
       recipient muted the email: the bell still rings).
     * **unknown** when the settings or the endpoints cannot be read: an
@@ -90,7 +93,7 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlerts do
   end
 
   # Counts and flags only: who the recipients are never leaves this function.
-  defp facts(org_id, settings, kinds, endpoints) do
+  defp facts(org_id, settings, kinds, {endpoints, uncovered}) do
     member_admins = length(Scoping.site_member_admins(org_id))
     recipients = if settings.notify_admins, do: Alerts.site_recipients(org_id), else: []
 
@@ -103,7 +106,8 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlerts do
       bell_recipients: length(recipients),
       email_recipients:
         Enum.count(recipients, &(&1.notify_on_security_alert and &1.email != nil)),
-      subscribed_endpoints: endpoints
+      subscribed_endpoints: endpoints,
+      uncovered_kinds: uncovered
     }
   end
 
@@ -117,6 +121,13 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlerts do
     do:
       {:warn, gettext("Security alerts on this site reach nobody."),
        if(facts.notify_admins, do: "/editor/team", else: "/editor/security-alerts")}
+
+  defp verdict(%{bell_recipients: 0, uncovered_kinds: uncovered} = facts) when uncovered > 0,
+    do:
+      {:warn,
+       gettext(
+         "Some security alerts on this site reach nobody: no webhook carries them, and no administrator gets them."
+       ), if(facts.notify_admins, do: "/editor/team", else: "/editor/security-alerts")}
 
   defp verdict(%{bell_recipients: 0}),
     do:
@@ -143,10 +154,11 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlerts do
   defp result(:warn, summary, opts), do: warn(summary, opts)
   defp result(:pass, summary, opts), do: pass(summary, opts)
 
-  # How many active endpoints of the site would carry an alert of a kind it
-  # has on. Read as the webhook pipeline's own actor, as delivery reads them,
+  # `{endpoints, uncovered}`: how many active endpoints of the site would carry
+  # an alert of a kind it has on, and how many of those kinds no endpoint
+  # carries. Read as the webhook pipeline's own actor, as delivery reads them,
   # with `authorize_with: :error`: a refused read is an error, not "none".
-  defp subscribed_endpoints(_org_id, []), do: {:ok, 0}
+  defp subscribed_endpoints(_org_id, []), do: {:ok, {0, 0}}
 
   defp subscribed_endpoints(org_id, kinds) do
     events = MapSet.new(kinds, &"security.#{&1}")
@@ -158,13 +170,21 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlerts do
            query: Ash.Query.filter(CMS.WebhookEndpoint, active == true)
          ) do
       {:ok, endpoints} ->
-        {:ok,
-         Enum.count(endpoints, fn endpoint ->
-           Enum.any?(endpoint.events || [], fn event ->
-             MapSet.member?(events, event) and
-               CMS.WebhookEndpoint.receives?(endpoint, event, false)
-           end)
-         end)}
+        # Per endpoint, the alert events it would carry.
+        carried =
+          Enum.map(endpoints, fn endpoint ->
+            endpoint.events
+            |> List.wrap()
+            |> Enum.filter(
+              &(MapSet.member?(events, &1) and CMS.WebhookEndpoint.receives?(endpoint, &1, false))
+            )
+            |> MapSet.new()
+          end)
+
+        covered = Enum.reduce(carried, MapSet.new(), &MapSet.union/2)
+        subscribed = Enum.count(carried, &(MapSet.size(&1) > 0))
+
+        {:ok, {subscribed, MapSet.size(MapSet.difference(events, covered))}}
 
       {:error, _reason} ->
         {:error, :endpoints}

@@ -421,7 +421,8 @@ defmodule KilnCMS.Security.Alerts do
   failed sign-ins on one site does not queue on one row lock. Each attempt
   reads the total after its own increment committed, so at least one attempt
   sees `count >= threshold`; `KilnCMS.Security.AlertTrips` admits the first
-  such attempt per node and window, and `KilnCMS.Security.AlertGate`'s claim
+  such attempt per node and window (once for the shared tally and once for
+  this node's fallback, which a database outage counts on), and `KilnCMS.Security.AlertGate`'s claim
   keeps the alert to one across nodes.
 
   Whether the kind is on comes from a cached read of the site's settings; one
@@ -436,7 +437,7 @@ defmodule KilnCMS.Security.Alerts do
     if failed_sign_ins_enabled?(org_id) do
       window_ms = Keyword.get(opts, :window_ms, window_ms())
 
-      {count, window_index} =
+      {count, window_index, source} =
         ThrottleStore.count_sharded(
           @failed_sign_in_bucket,
           org_id,
@@ -445,8 +446,14 @@ defmodule KilnCMS.Security.Alerts do
           Keyword.take(opts, [:shard])
         )
 
+      # The source is in the trip: a crossing counted only on this node's
+      # fallback (the database down) must not use up the window's shared one,
+      # or the database's crossing after it recovers would never be claimed.
       if count >= @failed_sign_in_threshold and
-           AlertTrips.first?({:failed_sign_ins, org_id, window_ms, window_index}, window_ms) do
+           AlertTrips.first?(
+             {:failed_sign_ins, source, org_id, window_ms, window_index},
+             window_ms
+           ) do
         {:threshold, window_index, count}
       else
         :counted

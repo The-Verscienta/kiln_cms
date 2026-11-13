@@ -94,7 +94,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreShardedBenchmarkTest do
       assert length(sorted) == @writers * @charges_per_writer
 
       assert unboxed(fn ->
-               {_count, idx} = ThrottleStore.count_sharded(bucket, key, window, @shards)
+               {_count, idx, _source} = ThrottleStore.count_sharded(bucket, key, window, @shards)
                ThrottleStore.window_sum(bucket, ThrottleStore.sharded_keys(key, @shards), idx)
              end) == length(sorted) + 1
     end

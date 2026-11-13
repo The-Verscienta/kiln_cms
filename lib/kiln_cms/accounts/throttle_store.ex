@@ -253,8 +253,12 @@ defmodule KilnCMS.Accounts.ThrottleStore do
 
   @doc """
   `count/3` spread over `shards` rows (#2639): adds one to a randomly chosen
-  shard of `key`'s **current** window and returns `{total, window_index}`,
-  the total across every shard (`sharded_keys/2`) as this call saw it.
+  shard of `key`'s **current** window and returns
+  `{total, window_index, source}`: the total across every shard
+  (`sharded_keys/2`) as this call saw it, and where it was counted —
+  `:shared` (the database) or `:local` (this node's fallback, below). A
+  caller latching "already seen" on a total keeps the two apart: a crossing
+  counted only on this node says nothing about the shared tally.
 
   A single row per key serializes concurrent tallies on its row lock. A random
   shard spreads them, and cannot be steered: an attacker choosing the address
@@ -279,11 +283,11 @@ defmodule KilnCMS.Accounts.ThrottleStore do
 
     * **The upsert fails:** the call counts on this node's fallback against
       the *unsharded* key, exactly as `count/3` does, so the node-local total
-      is one number that still climbs to a threshold.
+      is one number that still climbs to a threshold. The source is `:local`.
     * **The upsert succeeded but the sum fails:** the shard's own count is
       returned. It is lower than the total, never higher, and the increment
       it reports is already in the shared table — counting it again on the
-      fallback would restart the total from one.
+      fallback would restart the total from one. The source is `:shared`.
 
   Raises `ArgumentError` inside a transaction, as `count/3` does.
 
@@ -291,7 +295,7 @@ defmodule KilnCMS.Accounts.ThrottleStore do
   function run between the two statements (tests).
   """
   @spec count_sharded(String.t(), String.t(), pos_integer(), pos_integer(), keyword()) ::
-          {pos_integer(), integer()}
+          {pos_integer(), integer(), :shared | :local}
   def count_sharded(bucket, key, scale, shards, opts \\ [])
       when is_binary(bucket) and is_binary(key) and is_integer(scale) and scale > 0 and
              is_integer(shards) and shards > 0 do
@@ -304,11 +308,12 @@ defmodule KilnCMS.Accounts.ThrottleStore do
          end) do
       {:ok, %{rows: [[shard_count, window_index]]}} ->
         Keyword.get(opts, :after_count, fn -> :ok end).()
-        {sharded_total(bucket, key, shards, window_index, shard_count), window_index}
+        {sharded_total(bucket, key, shards, window_index, shard_count), window_index, :shared}
 
       {:unavailable, reason} ->
         log_fallback(bucket, reason)
-        local_count(bucket, key_hash(key), scale)
+        {count, window_index} = local_count(bucket, key_hash(key), scale)
+        {count, window_index, :local}
     end
   end
 

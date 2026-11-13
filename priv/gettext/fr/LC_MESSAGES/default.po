@@ -19665,6 +19665,11 @@ msgstr "Certaines clés ont plus de 180 jours (leur âge tient lieu de dernière
 msgid "Some notifications could not be marked read."
 msgstr "Certaines notifications n'ont pas pu être marquées comme lues."
 
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Some security alerts on this site reach nobody: no webhook carries them, and no administrator gets them."
+msgstr "Certaines alertes de sécurité de ce site n'atteignent personne : aucun webhook ne les transmet et aucun administrateur ne les reçoit."
+
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "Some security alerts were turned off"

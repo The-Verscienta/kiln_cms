@@ -19665,6 +19665,11 @@ msgstr ""
 msgid "Some notifications could not be marked read."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/security_alerts.ex
+#, elixir-autogen, elixir-format
+msgid "Some security alerts on this site reach nobody: no webhook carries them, and no administrator gets them."
+msgstr ""
+
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "Some security alerts were turned off"

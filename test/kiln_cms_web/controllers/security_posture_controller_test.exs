@@ -388,7 +388,8 @@ defmodule KilnCMSWeb.SecurityPostureControllerTest do
                "fallback" => false,
                "bell_recipients" => 2,
                "email_recipients" => 1,
-               "subscribed_endpoints" => 0
+               "subscribed_endpoints" => 0,
+               "uncovered_kinds" => length(KilnCMS.Security.Alerts.site_kinds()) - 1
              }
 
       for user <- [admin, muted] do

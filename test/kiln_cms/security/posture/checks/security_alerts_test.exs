@@ -67,7 +67,8 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlertsTest do
                fallback: false,
                bell_recipients: 1,
                email_recipients: 1,
-               subscribed_endpoints: 0
+               subscribed_endpoints: 0,
+               uncovered_kinds: length(KilnCMS.Security.Alerts.site_kinds()) - 1
              }
     end
 
@@ -134,16 +135,50 @@ defmodule KilnCMS.Security.Posture.Checks.SecurityAlertsTest do
       assert %{bell_recipients: 2, email_recipients: 0} = facts
     end
 
-    test "bell and email off but a webhook subscribed: passes, by webhook only", %{site: site} do
+    test "bell and email off but webhooks carry every kind on: passes, by webhook only",
+         %{site: site} do
       admin = admin!(site)
-      settings!(site, admin, %{notify_admins: false})
-      endpoint!(site, admin, ["security.lockout"])
+      settings!(site, admin, %{notify_admins: false, disabled_kinds: []})
+      [first | rest] = Enum.map(KilnCMS.Security.Alerts.site_kinds(), &"security.#{&1}")
+      endpoint!(site, admin, [first])
+      endpoint!(site, admin, rest)
 
       assert %{status: :pass, summary: summary, fix_path: "/editor/security-alerts", facts: facts} =
                run(site)
 
       assert summary == "Security alerts on this site go out only by webhook."
-      assert %{subscribed_endpoints: 1, notify_admins: false, bell_recipients: 0} = facts
+
+      assert %{subscribed_endpoints: 2, uncovered_kinds: 0, notify_admins: false} = facts
+      assert facts.bell_recipients == 0
+    end
+
+    # A webhook for one kind is not a webhook for the others: with no bell or
+    # email, a kind on that no endpoint carries reaches nobody.
+    test "bell and email off, a webhook for some kinds only: warns, counting the rest",
+         %{site: site} do
+      admin = admin!(site)
+      settings!(site, admin, %{notify_admins: false, disabled_kinds: []})
+      endpoint!(site, admin, ["security.lockout", "security.new_admin"])
+
+      assert %{status: :warn, summary: summary, fix_path: "/editor/security-alerts", facts: facts} =
+               run(site)
+
+      assert summary ==
+               "Some security alerts on this site reach nobody: no webhook carries them, and no administrator gets them."
+
+      kinds = length(KilnCMS.Security.Alerts.site_kinds())
+      assert %{subscribed_endpoints: 1, enabled_kinds: ^kinds} = facts
+      assert facts.uncovered_kinds == kinds - 2
+    end
+
+    test "a webhook for some kinds only, with admins who get them: passes", %{site: site} do
+      admin = admin!(site)
+      endpoint!(site, admin, ["security.lockout"])
+
+      assert %{status: :pass, summary: "Security alerts on this site reach its administrators."} =
+               result = run(site)
+
+      assert result.facts.uncovered_kinds > 0
     end
 
     test "a webhook subscribed only to a kind the site has off carries nothing", %{site: site} do

@@ -157,7 +157,7 @@ backup_scale_exclusion = [:backup_scale]
 # tally's concurrent-writer benchmark (#2639). They print numbers for a PR to
 # record, and timings vary with the host, so they run only when asked:
 #
-#     mix test --only benchmark test/kiln_cms/accounts/throttle_store_sharded_test.exs
+#     mix test --only benchmark test/kiln_cms/accounts/throttle_store_sharded_benchmark_test.exs
 benchmark_exclusion = [:benchmark]
 
 # Not a test: rewrites the schema-export fixture and goldens. Run it with

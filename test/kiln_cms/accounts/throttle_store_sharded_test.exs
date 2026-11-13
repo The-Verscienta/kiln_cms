@@ -40,6 +40,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreShardedTest do
 
     assert Enum.map(results, &elem(&1, 0)) == [1, 2, 3, 4, 5]
     assert [idx] = results |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+    assert Enum.all?(results, &(elem(&1, 2) == :shared))
 
     hashes = Map.new(rows(b), fn [hash, count] -> {hash, count} end)
     assert map_size(hashes) == 3
@@ -71,8 +72,8 @@ defmodule KilnCMS.Accounts.ThrottleStoreShardedTest do
     # An old node counts on `count/3`, the unsharded key.
     for _ <- 1..3, do: ThrottleStore.count(b, "site", window)
 
-    assert {4, idx} = ThrottleStore.count_sharded(b, "site", window, @shards, shard: 5)
-    assert {5, ^idx} = ThrottleStore.count_sharded(b, "site", window, @shards, shard: 1)
+    assert {4, idx, :shared} = ThrottleStore.count_sharded(b, "site", window, @shards, shard: 5)
+    assert {5, ^idx, :shared} = ThrottleStore.count_sharded(b, "site", window, @shards, shard: 1)
 
     assert ThrottleStore.window_sum(b, ThrottleStore.sharded_keys("site", @shards), idx) == 5
     # Another key's rows and another window are not in it.
@@ -132,6 +133,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreShardedFallbackTest do
       assert Enum.map(results, &elem(&1, 0)) == Enum.to_list(1..12)
       assert [idx] = results |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
       assert idx == div(System.system_time(:millisecond), window)
+      assert Enum.all?(results, &(elem(&1, 2) == :local))
 
       # The same fallback count `count/3` keeps: one node-local total.
       assert {13, ^idx} = ThrottleStore.count(b, "site", window)
@@ -149,7 +151,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreShardedFallbackTest do
     # charge on shard 2 is in the table, the total cannot be read.
     log =
       capture_log(fn ->
-        assert {3, _idx} =
+        assert {3, _idx, :shared} =
                  ThrottleStore.count_sharded(b, "site", window, 8,
                    shard: 2,
                    after_count: fn -> Sandbox.checkin(KilnCMS.Repo) end
@@ -254,7 +256,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreShardedRaceTest do
       end)
 
     # The sum reads shard 0's committed row without waiting on its lock.
-    assert {2, _idx} = result
+    assert {2, _idx, :shared} = result
     assert us < 500_000
 
     # Shard 0 itself is still blocked behind the holder.
@@ -269,6 +271,6 @@ defmodule KilnCMS.Accounts.ThrottleStoreShardedRaceTest do
 
     send(holder.pid, :release)
     Task.await(holder)
-    assert {3, _idx} = Task.await(blocked)
+    assert {3, _idx, :shared} = Task.await(blocked)
   end
 end
