@@ -23037,6 +23037,7 @@ msgstr "Esta sesión se cerró desde otro dispositivo."
 msgid "This setting applies to this form only — another site's forms are unaffected by what you allow here."
 msgstr "Este ajuste se aplica solo a este formulario: los formularios de otros sitios no se ven afectados por lo que permitas aquí."
 
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex
 #: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #, elixir-autogen, elixir-format
 msgid "This sign-in can't be finished here. Start again."
