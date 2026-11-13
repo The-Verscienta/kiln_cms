@@ -145,7 +145,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
 
 - **New Prometheus counter `kiln_cms_api_invalid_bearer_count` (labels `enforced`, `surface`, `read`, `reason`; needs `KILN_METRICS_ENABLED`): the stale-token count that gates removing `KILN_API_REJECT_INVALID_BEARER` (ADR 0017).**
-  ([long form](docs/changelog/unreleased.md#invalid-bearer-metric))
+  ([#2907](https://github.com/The-Verscienta/kiln_cms/pull/2907) · [long form](docs/changelog/unreleased.md#invalid-bearer-metric))
 
 ### Changed
 
