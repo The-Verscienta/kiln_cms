@@ -360,6 +360,22 @@ defmodule KilnCMSWeb.Plugs.DeliveryClassLimitTest do
       assert_received {:client_class, _, %{class: :search_engine}}
     end
 
+    # #2588: a distinct reason, charged exactly like `:error`.
+    test "an unanswered forward query for the engine's own name holds the browser ceiling",
+         %{conn: conn, address: address} do
+      host = "crawl-#{System.unique_integer([:positive])}.googlebot.com"
+      StubCrawlerResolver.put_ptr(address, [host])
+      StubCrawlerResolver.put_addresses(host, {:error, :timeout})
+
+      Eventually.eventually(fn ->
+        CrawlerVerification.check(:google, address) == {:unverified, :forward_error}
+      end)
+
+      assert allowed_of(conn, @googlebot, 12) == 10
+      assert_received {:unverified_crawler, _, %{engine: :google, reason: :forward_error}}
+      assert_received {:client_class, _, %{class: :search_engine}}
+    end
+
     test "a forwarding header nothing trusts: no lookup, and the claim is not demoted",
          %{conn: conn, address: address} do
       previous = Application.get_env(:kiln_cms, :trusted_proxies)

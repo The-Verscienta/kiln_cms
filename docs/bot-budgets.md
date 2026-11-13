@@ -310,14 +310,19 @@ requests from that address are judged by its result.
 **Results are cached per node, per address.** A verified address is trusted for
 6 hours, a proven false one is held for 1 hour, and a DNS error is retried after
 5 minutes. Nothing is cached when no lookup was made. Each node keeps its own
-cache, so a new node checks an address again.
+cache, so a new node checks an address again. Verified addresses are kept apart
+from the rest, up to 10,000 of them per node (and 50,000 rejections and DNS
+errors), so a flood of fake claims from new addresses cannot push a real
+crawler's result out (#2588).
 
 **Each lookup is bounded.** At most three DNS queries per address: one PTR query,
 then a forward query for at most two of the first three PTR names. The whole
 lookup has a 3-second deadline. A node runs at most 16 lookups at a time and
 queues none: a claim that arrives while 16 are running is left unchecked, and a
 later request tries again. New lookups are also rate limited per network, so
-one party cannot buy a lookup for every address it holds:
+one party cannot buy a lookup for every address it holds. A lookup left
+unchecked because 16 were running does not count against these limits
+(#2588):
 
 | Network | New lookups a minute |
 |---|---|

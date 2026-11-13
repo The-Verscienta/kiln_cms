@@ -171,9 +171,23 @@ Never counted, so a person or a service is not blocked by mistake:
   engine (Googlebot, Google-InspectionTool, Bingbot, DuckDuckBot, Applebot,
   YandexBot, Baiduspider) and no AI crawler, unless reverse DNS has proven the claim false (see
   [Verified search engines](bot-budgets.md#verified-search-engines)). A claim
-  still being checked, or one DNS could not answer, keeps the exemption, so a
-  real crawler's first misses from a new address never count. DuckDuckBot
-  cannot be checked and is always exempt. With `KILN_CRAWLER_VERIFICATION=false`
+  still being checked, or whose lookup could not start, keeps the exemption,
+  so a real crawler's first misses from a new address never count.
+  DuckDuckBot cannot be checked and is always exempt. When DNS gives no answer
+  (#2588):
+  - **No answer to the reverse (PTR) query**: the claim keeps the exemption
+    only while this node's resolver is itself failing. While the resolver
+    answers other lookups, the silence is the address's own reverse zone,
+    which a scanner can leave silent on purpose, so its misses count. To
+    tell the two apart, when the guard meets such a claim and no lookup on
+    this node has had an answer in the last minute, the node sends one PTR
+    query for `8.8.8.8`, never a visitor's address, at most once a minute;
+    if that goes unanswered too, the resolver is failing and the exemption
+    stays. Until such a query has found the resolver
+    failing, misses count.
+  - **No answer to the forward (A or AAAA) query** for a name under the
+    engine's own domain: the claim keeps the exemption. That silence is in
+    the engine's zone, which the address's owner does not control. With `KILN_CRAWLER_VERIFICATION=false`
   the six names Googlebot, Bingbot, DuckDuckBot, Applebot, YandexBot and
   Baiduspider in the user agent are enough. **Bait paths count for everyone**:
   no crawler has a reason to ask for one.
@@ -229,6 +243,7 @@ refuses raise `blocked_ip` like any rule's (see
 |---|---|
 | Nothing is ever blocked | The variable is not set, or is set to a value Kiln did not recognise (a warning on stderr names it). Or the site is behind a proxy with no `TRUSTED_PROXIES`, or your test client is on a private network. |
 | A visitor reports an empty `403` | They tripped the limit (a crawler gone wrong, a link checker, a browser extension). Find the rule on `/editor/ip-blocks` by its note and **Remove** it, or wait for the expiry. Consider raising `KILN_SCANNER_BLOCKING_THRESHOLD`. |
+| A search engine's address is blocked (most often Baiduspider or YandexBot) | Its claim was proven false, or its reverse zone was slow to answer while this node's resolver answered others, so its misses counted (#2588). Check the address against [Verified search engines](bot-budgets.md#verified-search-engines); if it is the engine's, **Remove** the rule or wait for the expiry. |
 | An address you expected is not blocked | It is exempt (see above), the trip was skipped (cap, recent sign-in) and the window has not rolled over, or the count straddled two windows. |
 | A warning `ScannerGuard: block skipped, at the automatic rule cap` | 300 automatic rules are active on the site. Wait for expiry, remove rules, or raise `max_auto_rules`. |
 | A warning `ScannerGuard: block skipped, could not store the rule` | The rule could not be saved (a database fault, or the range was refused). The request was served normally. |

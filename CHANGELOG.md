@@ -74,6 +74,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `platform_security_alerts`). Blocked-address alerts are on for every site (up to one alert and one summary per 15 minutes; off under Security alerts → Blocked addresses). Existing webhook endpoints, Slack too, need `security.blocked_ip` ticked; until then a webhook-only site's "Security alerts reach someone" line reads Review.**
   ([long form](docs/changelog/unreleased.md#blocked-ip-alerts-upgrade))
 
+- **With the smart 404 guard on (`KILN_SCANNER_BLOCKING`), a search-engine claim whose reverse DNS gets no answer now counts toward the miss threshold unless the node's resolver is itself failing, checked by at most one PTR query a minute for `8.8.8.8`. No migration; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#crawler-verification-silent-ptr-upgrade))
+
 - **`backup.sh` now refuses a `BACKUP_KEEP_DAYS` that is not a whole number of days from 1 to 2147483647, and keeps 14. A host that set `0` keeps 14 days of backups (check the disk); one that set `14d` on Linux, which pruned nothing, deletes backups older than 14 days at its next prune.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
 
@@ -194,6 +197,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-scripts-password-out-of-argv))
+
+- **Crawler verification: a lookup turned away as busy no longer spends the network and node lookup budgets, and verified crawlers keep their cached result through a flood of rejected lookups (own 10,000-entry cache).**
+  ([long form](docs/changelog/unreleased.md#crawler-verification-hardening))
 
 ## [1.9.2] - 2026-11-12
 

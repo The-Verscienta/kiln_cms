@@ -9,6 +9,7 @@ defmodule KilnCMS.Security.ScannerGuardTest do
   use KilnCMS.DataCase, async: false
 
   import KilnCMS.OrgFixtures, only: [org: 1]
+  import KilnCMS.Test.Eventually
 
   alias KilnCMS.CMS
   alias KilnCMS.CrawlerVerification
@@ -95,6 +96,23 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       KilnCMS.Repo.query!("SELECT count(*) FROM throttle_counters WHERE bucket LIKE 'scanner_%'")
 
     n
+  end
+
+  # Forgets every resolver-health signal, then has one lookup answered, so
+  # `CrawlerVerification.resolver_failing?/0` is false: the resolver works.
+  defp healthy_resolver do
+    CrawlerVerification.reset_health()
+    on_exit(&CrawlerVerification.reset_health/0)
+
+    answered = KilnCMS.Test.PublicAddress.v4()
+    CrawlerVerification.forget(answered)
+    on_exit(fn -> CrawlerVerification.forget(answered) end)
+
+    eventually(fn ->
+      CrawlerVerification.check(:google, answered) == {:unverified, :failed}
+    end)
+
+    refute CrawlerVerification.resolver_failing?()
   end
 
   describe "thresholds" do
@@ -350,8 +368,110 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       assert event.metadata["reason"] == "miss_threshold"
     end
 
-    test "a resolver error is not a proof: still exempt", %{ip: ip} do
+    # #2588: a scanner on an address whose reverse zone never answers must not
+    # keep the exemption while this node's resolver answers everyone else.
+    test "a silent reverse zone is counted while the resolver answers other lookups",
+         %{ip: ip} do
       CrawlerVerification.put_result(:google, ip, {:error, :timeout})
+      healthy_resolver()
+
+      miss(3, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @googlebot, ip: ip)
+      assert [event] = events()
+      assert event.metadata["reason"] == "miss_threshold"
+    end
+
+    # #2588: the PTR answered with a name in Google's own zone and only the
+    # forward query for it went unanswered. A scanner cannot silence Google's
+    # zone, so a real crawler keeps its exemption even while the resolver
+    # answers everyone else.
+    test "a forward query unanswered in the engine's own zone keeps the exemption",
+         %{ip: ip} do
+      host = "crawl-#{System.unique_integer([:positive])}.googlebot.com"
+      StubCrawlerResolver.put_ptr(ip, [host])
+      StubCrawlerResolver.put_addresses(host, {:error, :timeout})
+      on_exit(fn -> StubCrawlerResolver.reset(ip) end)
+
+      eventually(fn ->
+        CrawlerVerification.check(:google, ip) == {:unverified, :forward_error}
+      end)
+
+      healthy_resolver()
+
+      miss(10, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+    end
+
+    # A scanner's own reverse zone can answer with a googlebot.com name late
+    # enough that the forward query runs out of time. That failure is the
+    # scanner's doing, so it counts while the resolver answers others.
+    test "a forward query starved by a slow PTR answer gets no forward-error exemption",
+         %{ip: ip} do
+      # The describe's setup restores the whole entry on exit.
+      config = Application.get_env(:kiln_cms, CrawlerVerification)
+
+      Application.put_env(
+        :kiln_cms,
+        CrawlerVerification,
+        Keyword.merge(config, deadline_ms: 1_200, query_timeout_ms: 1_000)
+      )
+
+      host = "crawl-#{System.unique_integer([:positive])}.googlebot.com"
+      StubCrawlerResolver.put_ptr(ip, {:block, self(), [host]})
+      StubCrawlerResolver.put_addresses(host, {:error, :timeout})
+      on_exit(fn -> StubCrawlerResolver.reset(ip) end)
+
+      assert CrawlerVerification.check(:google, ip) == {:unverified, :pending}
+      assert_receive {StubCrawlerResolver, :blocked, resolver, _callers, :ptr, ^ip}, 2_000
+      Process.sleep(300)
+      StubCrawlerResolver.release(resolver)
+
+      eventually(fn -> CrawlerVerification.check(:google, ip) == {:unverified, :error} end)
+      healthy_resolver()
+
+      miss(3, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @googlebot, ip: ip)
+      assert [event] = events()
+      assert event.metadata["reason"] == "miss_threshold"
+    end
+
+    test "a PTR outside the engine's domain gets no forward-error exemption", %{ip: ip} do
+      host = "crawl-#{System.unique_integer([:positive])}.example.net"
+      StubCrawlerResolver.put_ptr(ip, [host])
+      StubCrawlerResolver.put_addresses(host, {:error, :timeout})
+      on_exit(fn -> StubCrawlerResolver.reset(ip) end)
+
+      eventually(fn -> CrawlerVerification.check(:google, ip) == {:unverified, :failed} end)
+      healthy_resolver()
+
+      miss(3, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @googlebot, ip: ip)
+      assert [event] = events()
+      assert event.metadata["reason"] == "miss_threshold"
+    end
+
+    test "a resolver error keeps the exemption while the resolver itself is failing",
+         %{ip: ip} do
+      CrawlerVerification.reset_health()
+      on_exit(&CrawlerVerification.reset_health/0)
+      CrawlerVerification.put_result(:google, ip, {:error, :timeout})
+
+      # No lookup has answered, and the canary gets no answer either.
+      canary = KilnCMS.Test.PublicAddress.v4()
+      StubCrawlerResolver.put_ptr(canary, {:error, :timeout})
+      on_exit(fn -> StubCrawlerResolver.reset(canary) end)
+      previous = Application.get_env(:kiln_cms, CrawlerVerification, [])
+
+      Application.put_env(
+        :kiln_cms,
+        CrawlerVerification,
+        Keyword.put(previous, :canary_address, canary)
+      )
+
+      eventually(fn -> CrawlerVerification.resolver_failing?() end)
 
       miss(10, "/gone", ua: @googlebot, ip: ip)
       assert rules() == []

@@ -32,7 +32,8 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
     * `{:unverified, :failed}`, the claim is **proven** false: charged as
       `:empty`, a client that will not say what it is.
     * any other `{:unverified, reason}` (the lookup is pending, was skipped or
-      got no answer, the engine cannot be verified, or the address is not one
+      got no answer to its PTR or forward query, the engine cannot be
+      verified, or the address is not one
       whose PTR record says anything about the client): a search engine, but
       with the operator's ceiling held to the `:delivery` limit
       (`KilnCMS.BotBudgets.unverified_search_limit/0`). A search-engine
