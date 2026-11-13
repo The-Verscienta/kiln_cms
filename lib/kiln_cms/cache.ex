@@ -463,6 +463,25 @@ defmodule KilnCMS.Cache do
   end
 
   @doc """
+  Cache key for a site's resolved two-step sign-in requirement (#2247) —
+  `KilnCMS.Accounts.TwoFactorRequirement.policy/1`.
+  """
+  @spec second_factor_policy_key(Ash.UUID.t()) :: String.t()
+  def second_factor_policy_key(org_id), do: "second_factor_policy:#{org_id}"
+
+  @doc """
+  Drop a site's cached two-step sign-in requirement after a
+  `SiteSecondFactorPolicy` write. Cluster-wide, like `bust_session_policy/1`:
+  a node that kept the old policy would go on holding people to a requirement
+  the admin just lifted, or let them past one just set, for up to the TTL.
+  """
+  @spec bust_second_factor_policy(Ash.UUID.t()) :: :ok
+  def bust_second_factor_policy(org_id) do
+    if enabled?(), do: ClusterBust.broadcast([second_factor_policy_key(org_id)])
+    :ok
+  end
+
+  @doc """
   Cache key for a site's security alert settings (#2245), read on every
   failed sign-in to decide whether to count it
   (`KilnCMS.Security.Alerts.charge_failed_sign_in/2`).

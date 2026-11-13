@@ -888,6 +888,17 @@ defmodule KilnCMS.CMS do
       define :sign_out_all_sessions, action: :sign_out_all
     end
 
+    # Whether the site requires two-step sign-in, from whom, after how long
+    # (#2247). Read through `KilnCMS.Accounts.TwoFactorRequirement` (cached);
+    # `override_site_second_factor_policy` is the operator's way back in
+    # (`KilnCMS.Release.second_factor_requirement_off/1`).
+    resource KilnCMS.CMS.SiteSecondFactorPolicy do
+      define :list_site_second_factor_policy, action: :read
+      define :save_site_second_factor_policy, action: :save
+      define :update_site_second_factor_policy, action: :update
+      define :override_site_second_factor_policy, action: :operator_override
+    end
+
     # The networks a site's console and sign-in may be reached from (#2248).
     # The gates read it through `KilnCMS.Security.AdminAllowlist` (cached);
     # `override_site_admin_allowlist` is the operator's way back in
