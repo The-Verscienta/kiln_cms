@@ -221,11 +221,13 @@ that must not go live by hand must not go live by scheduler.
 Details worth knowing before switching it on:
 
 **It resolves the settings of the site being published to, uncached.** The gate
-runs inside the write transaction, and a cached resolve there would check out a
-second pool connection while holding the first — see
-`KilnCMS.Compliance.Settings.for_org_uncached/1`. One indexed single-row read
-per publish is nothing; it is the editor's per-keystroke path that needs the
-cache, and that one is not in a transaction.
+runs inside the write transaction. A cached resolve there used to check out a
+second pool connection while holding the first; since #2823
+`KilnCMS.Cache.fetch/3` computes such a miss on the transaction's own
+connection and does not store it, so reading the row directly costs no more
+than a miss would. See `KilnCMS.Compliance.Settings.for_org_uncached/1`. One
+indexed single-row read per publish is nothing; it is the editor's
+per-keystroke path that needs the cache, and that one is not in a transaction.
 
 **It scans the SEO fields too, each on its own.** The title, SEO title and SEO
 description are scanned alongside the block text. A claim in the meta
