@@ -2408,7 +2408,7 @@ msgstr "À propos du rattachement des tâches"
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "About when a rate-limit alert is raised"
-msgstr "À propos du déclenchement d'une alerte de limite de requêtes"
+msgstr "À propos du déclenchement d'une alerte de limite de débit"
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
@@ -20467,7 +20467,7 @@ msgstr "Certaines notifications n'ont pas pu être marquées comme lues."
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some refusals raise no alert, especially when Kiln runs on more than one server: an alert is raised only by a server that recently verified the key."
-msgstr "Certains refus ne déclenchent aucune alerte, surtout quand Kiln tourne sur plusieurs serveurs : seul un serveur ayant vérifié la clé récemment déclenche l'alerte."
+msgstr "Certains refus ne déclenchent aucune alerte, surtout quand Kiln tourne sur plusieurs serveurs : seul un serveur ayant récemment vérifié la clé déclenche l'alerte."
 
 #: lib/kiln_cms/security/posture/checks/security_alerts.ex
 #, elixir-autogen, elixir-format

@@ -2408,7 +2408,7 @@ msgstr "Acerca del anclaje de tareas"
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "About when a rate-limit alert is raised"
-msgstr "Acerca de cuándo se genera una alerta de límite de solicitudes"
+msgstr "Acerca de cuándo se genera una alerta de límite de frecuencia"
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
