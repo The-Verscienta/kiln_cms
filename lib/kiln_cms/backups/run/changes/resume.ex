@@ -14,7 +14,7 @@ defmodule KilnCMS.Backups.Run.Changes.Resume do
   re-checked in the UPDATE's WHERE: the row must still be an in-app run that is
   `failed`, `canceled` long enough ago for the Cancel to have settled (#2538),
   or `running` with both `started_at` and `updated_at` before the stale cutoff
-  (`KilnCMS.Backups.resume_cutoffs/1`). The caller that loses gets an
+  (`resume_cutoffs/1` in `KilnCMS.Backups`). The caller that loses gets an
   `Ash.Error.Changes.StaleRecord` error, and the row keeps the winner's
   `chain_id`.
 

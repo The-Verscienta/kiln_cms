@@ -35,7 +35,11 @@ defmodule KilnCMS.Backups.Steps do
   under the lock, in its transaction, and only while the step's lease still
   holds it (`Chain.while_holding/2`, #2538): a step that outlived its Cancel,
   on a node that missed the signal, can't overwrite the state a resume of the
-  same stamp has written since. It stops there, writing nothing else. The work directory exists
+  same stamp has written since. It stops there, writing nothing else. The cost
+  is that the file write holds the cluster-wide advisory lock: on a backup
+  directory that stalls (a hung NFS mount), Cancel, new requests and the
+  heartbeat sweep wait behind it until their query timeout. `fail/5` already
+  wrote under the lock the same way. The work directory exists
   for every backup, database-only ones included, so any failed backup can be
   resumed. A step after `start` that finds no state (deleted, or another
   chain's) fails the backup without writing a manifest: it has nothing to say
