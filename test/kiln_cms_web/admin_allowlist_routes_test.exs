@@ -23,6 +23,7 @@ defmodule KilnCMSWeb.AdminAllowlistRoutesTest do
     /auth /auth/invite/:invite_token /auth/passkey/options /auth/passkey/verify /auth/site-sso
     /auth/site-sso/callback /auth/unlock/:unlock_token /confirm_new_user/:token /magic_link/:token
     /password-reset/:token /register /reset /sign-in /sign-in/unlock /sign-in/verify
+    /sign-in/verify/passkey /sign-in/verify/passkey/options
   )
 
   @gated @sign_in ++ ~w(/setup)

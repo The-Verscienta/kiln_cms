@@ -26,7 +26,7 @@ import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
-import {PasskeyEnroll, PasskeySignIn} from "./passkeys"
+import {PasskeyEnroll, PasskeySignIn, initPasskeyStepUp} from "./passkeys"
 import {Challenge, mountAllWhenReady as mountFormChallenges} from "./challenge"
 import {PushToggle} from "./push"
 import {initAdvisoryJump} from "./advisory_jump"
@@ -1251,6 +1251,10 @@ mountFormChallenges()
 // A button carrying `data-kiln-reveal="<id>"` scrolls to and focuses that
 // section once its click has been answered — see assets/js/reveal_section.js.
 initRevealSection()
+
+// The passkey option on the second-factor prompt (#2247), a dead page — see
+// `initPasskeyStepUp` in assets/js/passkeys.js.
+initPasskeyStepUp()
 
 // ⌘K / Ctrl-K opens the editor search palette from anywhere (no-op if already
 // there). Skipped while typing in an input so it doesn't hijack the field.

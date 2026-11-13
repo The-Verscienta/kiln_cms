@@ -298,6 +298,85 @@ carries the reasoning.
   [API keys over a rate limit](../security-alerts.md#api-keys-over-a-rate-limit).
   (The last part of #2245.)
 
+<a id="passkey-at-code-prompt"></a>
+
+- **At the two-step sign-in prompt, an account that also has a passkey can finish with it instead of a code.**
+  After the first factor (a password, a magic link or single sign-on), an
+  account with an authenticator app is sent to `/sign-in/verify` for a code.
+  If the account also has a passkey, the page now shows **Use a passkey**
+  below the code form. The browser offers only that account's own passkeys
+  and asks for the device's screen lock, and the sign-in then completes as a
+  code would. The button appears only in a browser with WebAuthn, and only
+  where a passkey ceremony can run: the main host (`PHX_HOST`) or a console
+  host that sits under it (`KILN_CONSOLE_HOST`), never a site's own host.
+  **Who is asked for a second factor is unchanged:** only accounts with an
+  authenticator app reach the prompt, and a passkey sign-in from `/sign-in`
+  is still a complete sign-in on its own. A passkey refused at the prompt
+  counts against the same per-account budget as a wrong code (5 per 15
+  minutes), is recorded the same way (`sign_in_failed`, `method:
+  "second_factor"`, `reason: "invalid_code"`), and at the limit gets the
+  same "Too many attempts" refusal, lockout event and owner email. A verified
+  passkey clears the sign-in throttle as a code does. "Remember me" is issued
+  only after the passkey verifies. If the five-minute pending sign-in has
+  run out, the button sends the browser back to `/sign-in`. The completed
+  `sign_in` event's `method` is the first factor's (`password`,
+  `magic_link`, `sso`, …), as after a code.
+  For developers: two JSON routes on the prompt's pipeline, `POST
+  /sign-in/verify/passkey/options` and `POST /sign-in/verify/passkey`
+  (`KilnCMSWeb.TwoFactorController`), with their own session key and
+  challenges, so a nonce from the anonymous `/auth/passkey/*` ceremony is
+  never accepted there, nor the reverse. New:
+  `KilnCMS.Accounts.WebAuthn.step_up_challenge/1`,
+  `KilnCMS.Accounts.WebAuthn.verify_step_up/3`,
+  `KilnCMS.Accounts.WebAuthn.ceremony_host?/1`,
+  `KilnCMS.Accounts.SecondFactor.check_passkey/3`,
+  `KilnCMS.Accounts.second_factors/1`,
+  `KilnCMS.Accounts.has_second_factor?/1`, and
+  `KilnCMSWeb.SecondFactorStepUp.decide/2`, the one place the browser and
+  headless sign-in doors decide who is prompted.
+  `KilnCMS.Accounts.PendingSignIn.resolve/4` replaces `resolve/3`: the new
+  last argument names the factor the caller is about to check (`:totp`,
+  `:passkey` or `:any`), so a passkey-only account cannot spend the code
+  budget on the code form. Each browser session now also records how it
+  signed in (`KilnCMSWeb.SignInMarker`): session key `"sign_in"`, holding
+  the method and, when one was verified, when the second factor was. It is
+  keyed to the session token's `jti`, so a marker left over from an earlier
+  token (after an idle timeout, say) reads as `nil` and is never inherited;
+  a remember-me sign-in writes `method` `"remember_me"`. Nothing reads it yet. No migration, no
+  API change and no new setting; rolling back removes the button, and an
+  older release ignores the session key. See
+  [Using a passkey at the code prompt](../two-factor-auth.md#using-a-passkey-at-the-code-prompt).
+  (Part of #2247.)
+
+<a id="second-factor-added-email"></a>
+
+- **Account owners are emailed whenever a second factor is added: an authenticator app set up or replaced, or a passkey registered.**
+  Adding a factor needs a signed-in session, so whoever holds a stolen
+  session could add one and use it to sign in again after the owner's
+  session ends, and nothing told the owner. Now confirming an authenticator
+  app on `/editor/settings` (a first one or a new one replacing the old) and
+  every passkey registration mail the owner, after the change commits. A
+  wrong code or a refused registration mails nobody. Regenerating recovery
+  codes adds no factor and mails nobody. The subject is "A second factor was
+  added to your (instance name) account"; the body says which kind ("An
+  authenticator app was set up…", "A new authenticator app replaced the
+  one…", "A passkey was added…"), when (UTC), the browser and platform
+  family it was added from (for example "Firefox on macOS"), and the site,
+  when known. It never contains the secret, recovery codes, the passkey's
+  name or its credential id: the name was typed by whoever added it. "If it
+  wasn't you": reset your password, which signs out every session, then ask
+  an administrator of your site to check the account's sign-in methods. Not
+  "sign in and remove it": the new factor may now be the only one the
+  account has. Like the other account mail it goes through the instance
+  relay (`KilnCMS.Mailer`), never a site's own, in English, and cannot be
+  muted. An erased account gets nothing. A mail that cannot be queued is
+  logged ("Second-factor notice for user … not sent") and does not undo the
+  enrollment. New: `KilnCMS.Accounts.SecondFactorNotice` and the change
+  `KilnCMS.Accounts.Changes.NotifyFactorAdded` on `User` `:confirm_totp`
+  and `Passkey` `:register`. See
+  [We email you when a second factor is added](../two-factor-auth.md#we-email-you-when-a-second-factor-is-added).
+  (Part of #2247.)
+
 ## Changed
 
 <a id="form-field-name-website-reserved"></a>
@@ -381,6 +460,32 @@ carries the reasoning.
   after another, so the cross-process lock protects nothing there) and a
   5-minute step timeout. The real publish workflows are unchanged.
   (#2729, #2572)
+
+<a id="passkey-limits"></a>
+
+- **An account can hold at most 20 passkeys, and add at most 5 in an hour.**
+  Every passkey added now mails the owner (see the entry under Added), so
+  the total and the rate are both bounded: a stolen session must not be able
+  to turn "an email for every factor added" into a flood of the owner's
+  inbox and the instance's mail quota. At 20, the **Passkeys** section of
+  `/editor/settings` replaces the add form with "You have 20 passkeys, the
+  most an account can hold. Remove one to add another." Over the hourly
+  budget a registration is refused with "You've added several passkeys in a
+  short time. Try again in N minutes." The budget counts every registration
+  that passes the browser's verification and reaches the save, including one
+  that then fails (a passkey already registered); one the cap refuses is not
+  counted. An account that already holds more than 20 keeps them, and can add
+  another once it is below 20 again. The cap is fixed
+  (`KilnCMS.Accounts.Passkey.max_per_account/0`). Operators can change the
+  hourly budget, per account and shared by every node:
+  `config :kiln_cms, KilnCMS.Accounts.AccountThrottle,
+  passkey_registration_budget: 5, passkey_registration_window:
+  :timer.hours(1)` (the window in milliseconds; read at run time, so
+  `config/runtime.exs` works). Both refusals are on the `:register` action,
+  so every caller gets them: `KilnCMS.Accounts.Errors.PasskeyLimitReached`
+  (forbidden class, `max`) and
+  `KilnCMS.Accounts.Errors.PasskeyRegistrationThrottled` (invalid class,
+  `retry_after_seconds`). (Part of #2247.)
 
 ## Fixed
 

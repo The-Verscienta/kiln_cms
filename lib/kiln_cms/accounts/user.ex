@@ -1254,6 +1254,10 @@ defmodule KilnCMS.Accounts.User do
               type: :second_factor_enrolled,
               target: fn record, _changeset -> {"user", record.id} end,
               metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
+
+      # Tell the owner (#2247, decision 1a), after the commit: a first
+      # enrollment and a replacement alike.
+      change {KilnCMS.Accounts.Changes.NotifyFactorAdded, kind: :totp}
     end
 
     # Replace the recovery-code set — requires a current authenticator code, so

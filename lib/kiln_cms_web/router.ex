@@ -288,7 +288,9 @@ defmodule KilnCMSWeb.Router do
     # The idle timeout (#2246) is judged first: an idle remember-me cookie, or
     # one older than the site's last "sign out everyone", does not sign in.
     plug KilnCMSWeb.Plugs.IdleTimeout, :remember_me
-    plug :sign_in_with_remember_me
+    # `sign_in_with_remember_me`, which also marks the session it restores as
+    # a remember-me sign-in (#2247, `KilnCMSWeb.SignInMarker`).
+    plug KilnCMSWeb.Plugs.RememberMeSignIn
     # Says why, when the session names a token revoked for inactivity or by
     # "sign out everyone" — read before `load_from_session` drops it (#2246).
     plug KilnCMSWeb.Plugs.IdleTimeout, :notice
@@ -1378,6 +1380,11 @@ defmodule KilnCMSWeb.Router do
     # account (#331). Gated by the signed :pending_2fa session token, not a login.
     get "/sign-in/verify", TwoFactorController, :new
     post "/sign-in/verify", TwoFactorController, :create
+    # The same prompt answered with a passkey (#2247): a JSON two-step like
+    # `/auth/passkey/*`, gated by the same `:pending_2fa` token, and completing
+    # the sign-in the first factor started rather than starting one.
+    post "/sign-in/verify/passkey/options", TwoFactorController, :passkey_options
+    post "/sign-in/verify/passkey", TwoFactorController, :passkey_verify
 
     # Show the registration link/route only when open self-registration is
     # enabled (the default). Set `config :kiln_cms, :registration_enabled, false`
