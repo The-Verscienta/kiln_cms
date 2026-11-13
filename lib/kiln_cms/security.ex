@@ -70,6 +70,14 @@ defmodule KilnCMS.Security do
       define :prune_alert_dispatches, action: :prune
     end
 
+    # Which platform alert kinds a platform admin turned off (#2245): one
+    # tenant-less row, platform admins only; delivery reads it as
+    # `alerts_system/0`.
+    resource KilnCMS.Security.PlatformAlertSettings do
+      define :list_platform_alert_settings, action: :read
+      define :save_platform_alert_settings, action: :save
+    end
+
     # The Security posture page (#2252), and its detail-free snapshot for
     # `GET /api/security/posture` (#2521, cached 30 s per site and scope set).
     resource KilnCMS.Security.PostureReport do

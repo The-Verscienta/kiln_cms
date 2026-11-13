@@ -12,7 +12,8 @@ defmodule KilnCMSWeb.Plugs.IpBlock do
   rule matched, or why. Nothing logs the address. Every refusal counts on the
   `kiln_cms.ip_block.refused.count` counter (tag `surface: :http`), and is noted
   for the site's `blocked_ip` alert (`KilnCMS.Security.BlockedIpAlert`, which
-  records one sampled audit event per client network per alert window).
+  records one sampled audit event per client network per alert window,
+  without the address).
 
   ## What it does not see
 
@@ -42,9 +43,7 @@ defmodule KilnCMSWeb.Plugs.IpBlock do
       {:blocked, rule} ->
         KilnCMSWeb.IpBlock.count_refusal(:http)
 
-        KilnCMS.Security.BlockedIpAlert.note(org.id, ip, rule, :http, fn ->
-          KilnCMS.Security.Recorder.request_context(conn)
-        end)
+        KilnCMS.Security.BlockedIpAlert.note(org.id, ip, rule, :http)
 
         conn |> send_resp(403, "") |> halt()
 

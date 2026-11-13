@@ -235,6 +235,64 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
     end
   end
 
+  describe "the platform's alerts (#2245, D-A)" do
+    test "a site admin sees the note, not the form, and cannot save it", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      assert has_element?(
+               lv,
+               "#security-alerts-platform-note",
+               "Only a platform admin can turn one off, and only API keys over a rate limit."
+             )
+
+      refute has_element?(lv, "#security-alerts-platform")
+      refute has_element?(lv, "#platform-alerts-form")
+
+      # The event a crafted client could still send is refused.
+      html =
+        render_hook(lv, "save_platform", %{
+          "platform_alerts" => %{"api_key_rate_limited" => "false"}
+        })
+
+      assert html =~ "Only platform administrators can change the platform&#39;s security alerts."
+
+      assert {:ok, []} =
+               KilnCMS.Security.list_platform_alert_settings(
+                 actor: KilnCMS.Security.alerts_system()
+               )
+    end
+
+    test "a platform admin turns rate-limit alerts off, and the page says it is logged",
+         %{conn: conn, org: org} do
+      platform = authed_user(:admin)
+
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(platform) |> live(~p"/editor/security-alerts")
+
+      assert has_element?(
+               lv,
+               "#platform-alert-kind-api_key_rate_limited input[type=checkbox][checked]"
+             )
+
+      html =
+        lv
+        |> form("#platform-alerts-form", platform_alerts: %{"api_key_rate_limited" => "false"})
+        |> render_submit()
+
+      assert html =~ "recorded in the instance security log"
+
+      refute has_element?(
+               lv,
+               "#platform-alert-kind-api_key_rate_limited input[type=checkbox][checked]"
+             )
+
+      assert {:ok, [row]} = KilnCMS.Security.list_platform_alert_settings(actor: platform)
+      assert row.disabled_kinds == ["api_key_rate_limited"]
+      # No site notice: the platform setting is not a site's.
+      assert SecurityAlerts.dispatches() == []
+    end
+  end
+
   describe "the mute switch in your settings" do
     test "a member admin sees it and can turn the email off", %{conn: conn, org: org} do
       admin = authed_user(:viewer)

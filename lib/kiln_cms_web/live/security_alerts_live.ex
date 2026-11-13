@@ -25,13 +25,19 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
     * Turning an alert off, or switching off admin notifications, sends every
       member admin of the site an `alerts_silenced` notice that no setting or
       mute stops. The page says so before the save, not after.
-    * Platform alerts go to platform admins and are not settings here.
+    * Platform alerts go to platform admins and are not site settings. The
+      one platform kind that can be turned off, `api_key_rate_limited`, has
+      its own form (`KilnCMS.Security.PlatformAlertSettings`), shown to
+      platform admins only and re-checked on save; the resource policy
+      refuses anyone else. Turning it off is recorded in the instance
+      security log, which the page says.
     * Site alerts go to the site's member admins only. A site with none gets
       no bell and no email for its alerts, and the page warns about it.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.CMS
+  alias KilnCMS.Security
   alias KilnCMS.Security.Alerts
 
   @impl true
@@ -39,7 +45,8 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
     {:ok,
      socket
      |> assign(:page_title, gettext("Security alerts"))
-     |> load_settings()}
+     |> load_settings()
+     |> load_platform_settings()}
   end
 
   @impl true
@@ -81,7 +88,84 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
     end
   end
 
+  def handle_event("save_platform", %{"platform_alerts" => params}, socket)
+      when is_map(params) do
+    with true <- platform_admin?(socket),
+         attrs = platform_attributes(params, socket.assigns.platform_disabled),
+         {:ok, _row} <-
+           Security.save_platform_alert_settings(attrs,
+             actor: socket.assigns.current_user,
+             context: socket.assigns.security_context
+           ) do
+      {:noreply,
+       socket
+       |> put_flash(:info, platform_saved_message(socket.assigns.platform_disabled, attrs))
+       |> load_platform_settings()}
+    else
+      false ->
+        {:noreply, put_flash(socket, :error, platform_forbidden_message())}
+
+      {:error, error} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           ash_error_message(error,
+             forbidden: platform_forbidden_message(),
+             fallback: gettext("The platform alert settings could not be saved.")
+           )
+         )}
+    end
+  end
+
   defp admin?(socket), do: KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin
+
+  # The effective platform role, asked again on every event: the socket
+  # outlives a temporary platform grant.
+  defp platform_admin?(socket), do: KilnCMSWeb.LiveUserAuth.platform_admin?(socket)
+
+  # The platform's disabled kinds, for a platform admin only. Anyone else gets
+  # no form and no read. A row that cannot be read shows every kind on.
+  defp load_platform_settings(socket) do
+    if platform_admin?(socket) do
+      disabled =
+        case Security.list_platform_alert_settings(actor: socket.assigns.current_user) do
+          {:ok, [row | _rest]} -> row.disabled_kinds || []
+          _none_or_refused -> []
+        end
+
+      params = Map.new(Alerts.platform_optional_kinds(), &{key(&1), key(&1) not in disabled})
+
+      socket
+      |> assign(:platform_disabled, disabled)
+      |> assign(:platform_form, to_form(params, as: :platform_alerts))
+    else
+      socket
+      |> assign(:platform_disabled, [])
+      |> assign(:platform_form, nil)
+    end
+  end
+
+  # The full list `:save` writes. Kinds this page does not show stay as the
+  # row has them.
+  defp platform_attributes(params, disabled) do
+    shown = Enum.map(Alerts.platform_optional_kinds(), &key/1)
+    kept = Enum.reject(disabled, &(&1 in shown))
+    %{disabled_kinds: kept ++ Enum.reject(shown, &checked?(params, &1))}
+  end
+
+  defp platform_saved_message(before, attrs) do
+    if attrs.disabled_kinds -- before != [] do
+      gettext(
+        "Platform alert settings saved. Turning an alert off is recorded in the instance security log."
+      )
+    else
+      gettext("Platform alert settings saved.")
+    end
+  end
+
+  defp platform_forbidden_message,
+    do: gettext("Only platform administrators can change the platform's security alerts.")
 
   defp load_settings(socket) do
     settings = current_settings(socket)
@@ -168,6 +252,15 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
   defp kind_label(:two_factor_disabled), do: gettext("Two-factor authentication turned off")
   defp kind_label(:sso_config_changed), do: gettext("Single sign-on changed")
   defp kind_label(:blocked_ip), do: gettext("Blocked addresses")
+
+  defp platform_kind_label(:api_key_rate_limited), do: gettext("API keys over a rate limit")
+
+  defp platform_kind_description(:api_key_rate_limited) do
+    gettext(
+      "A verified API key goes over a rate limit. One alert every %{minutes} minutes, then a summary, to every platform admin.",
+      minutes: div(Alerts.window_ms(), :timer.minutes(1))
+    )
+  end
 
   defp kind_description(:new_admin),
     do:
@@ -315,11 +408,45 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
         <.button phx-disable-with={gettext("Saving…")}>{gettext("Save")}</.button>
       </.form>
 
+      <section
+        :if={@platform_form}
+        id="security-alerts-platform"
+        class="mt-12 max-w-2xl space-y-3 border-t border-base-content/10 pt-8"
+      >
+        <h2 class="text-sm font-semibold">{gettext("Platform alerts")}</h2>
+        <p class="text-sm text-base-content/70">
+          {gettext(
+            "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
+          )}
+        </p>
+        <.form
+          for={@platform_form}
+          id="platform-alerts-form"
+          phx-submit="save_platform"
+          class="space-y-4"
+        >
+          <div
+            :for={kind <- Alerts.platform_optional_kinds()}
+            id={"platform-alert-kind-#{kind}"}
+          >
+            <.input
+              field={@platform_form[key(kind)]}
+              type="checkbox"
+              label={platform_kind_label(kind)}
+            />
+            <p class="-mt-1 ml-6 text-xs text-base-content/70">
+              {platform_kind_description(kind)}
+            </p>
+          </div>
+          <.button phx-disable-with={gettext("Saving…")}>{gettext("Save platform alerts")}</.button>
+        </.form>
+      </section>
+
       <section id="security-alerts-elsewhere" class="mt-12 max-w-2xl space-y-3 text-sm">
         <h2 class="text-sm font-semibold">{gettext("Not set here")}</h2>
         <p id="security-alerts-platform-note" class="text-base-content/70">
           {gettext(
-            "Platform alerts (new platform admins, platform role changes, new API keys, reuse of a stolen API key and API keys over a rate limit) go to the platform's admins and can't be turned off here."
+            "Platform alerts (new platform admins, platform role changes, new API keys, reuse of a stolen API key and API keys over a rate limit) go to the platform's admins and aren't site settings. Only a platform admin can turn one off, and only API keys over a rate limit."
           )}
         </p>
         <p class="text-base-content/70">

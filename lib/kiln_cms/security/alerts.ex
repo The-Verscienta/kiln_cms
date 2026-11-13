@@ -13,8 +13,10 @@ defmodule KilnCMS.Security.Alerts do
   A **site** alert is about one site and goes to that site's member admins
   (`site_recipients/1`); the site's `KilnCMS.CMS.SiteSecurityAlerts` row can
   turn each kind off and mute the bell and email. A **platform** alert is about
-  the deployment and goes to every platform admin; it cannot be turned off or
-  muted.
+  the deployment and goes to every platform admin; it cannot be muted, and
+  only `api_key_rate_limited` can be turned off, by a platform admin
+  (`platform_optional_kinds/0`, stored in
+  `KilnCMS.Security.PlatformAlertSettings`, on by default).
 
   | kind | channel | raised by |
   |------|---------|-----------|
@@ -51,6 +53,7 @@ defmodule KilnCMS.Security.Alerts do
   """
 
   require Ash.Query
+  require Logger
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.RoleGrant
@@ -76,6 +79,11 @@ defmodule KilnCMS.Security.Alerts do
     :api_key_abuse,
     :api_key_rate_limited
   ]
+
+  # The platform kinds a platform admin can turn off (owner decision D-A on
+  # #2245): a key over a rate limit can be routine for an installation whose
+  # clients batch. Every other platform kind is always on.
+  @platform_optional_kinds [:api_key_rate_limited]
 
   @notice_changes ~w(kind_disabled admin_notifications_off webhook_changed webhook_removed
                      webhook_secret_rotated webhook_auto_disabled admin_removed admin_demoted
@@ -137,9 +145,19 @@ defmodule KilnCMS.Security.Alerts do
   @spec site_kinds() :: [kind()]
   def site_kinds, do: @site_kinds
 
-  @doc "The kinds the platform raises, to every platform admin. Never turned off."
+  @doc """
+  The kinds the platform raises, to every platform admin. Only
+  `platform_optional_kinds/0` can be turned off.
+  """
   @spec platform_kinds() :: [kind()]
   def platform_kinds, do: @platform_kinds
+
+  @doc """
+  The platform kinds a platform admin can turn off
+  (`KilnCMS.Security.PlatformAlertSettings`), in display order.
+  """
+  @spec platform_optional_kinds() :: [kind()]
+  def platform_optional_kinds, do: @platform_optional_kinds
 
   @doc "The changes an `alerts_silenced` notice can name."
   @spec notice_changes() :: [String.t()]
@@ -415,6 +433,65 @@ defmodule KilnCMS.Security.Alerts do
       notify_admins: row.notify_admins,
       include_full_ip: row.include_full_ip
     }
+  end
+
+  @doc """
+  The platform kinds turned off, as strings: the
+  `KilnCMS.Security.PlatformAlertSettings` row's `disabled_kinds`, or `[]`
+  when there is no row.
+
+  Read uncached as `KilnCMS.Security.alerts_system/0` with
+  `authorize_with: :error`, so a lost grant is an error rather than "no row".
+  `{:error, error}` when it cannot be read; `platform_disabled_kinds/0` is
+  the caller that falls back.
+  """
+  @spec fetch_platform_disabled_kinds() :: {:ok, [String.t()]} | {:error, term()}
+  def fetch_platform_disabled_kinds do
+    case KilnCMS.Security.list_platform_alert_settings(
+           actor: KilnCMS.Security.alerts_system(),
+           authorize_with: :error
+         ) do
+      {:ok, [row | _]} -> {:ok, row.disabled_kinds || []}
+      {:ok, []} -> {:ok, []}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  @doc """
+  `fetch_platform_disabled_kinds/0`, with a row that cannot be read logged and
+  answered `[]`: every platform kind on, the direction that still alerts.
+  """
+  @spec platform_disabled_kinds() :: [String.t()]
+  def platform_disabled_kinds do
+    case fetch_platform_disabled_kinds() do
+      {:ok, kinds} ->
+        kinds
+
+      {:error, error} ->
+        Logger.warning(
+          "Security alerts: the platform alert settings could not be read " <>
+            "(#{error_kind(error)}); every platform kind is treated as on."
+        )
+
+        []
+    end
+  end
+
+  defp error_kind(%{__struct__: struct}), do: inspect(struct)
+  defp error_kind(_error), do: "unknown error"
+
+  @doc """
+  Whether the platform kind `kind` is on: always for a kind not in
+  `platform_optional_kinds/0`, without a read; otherwise unless the platform's
+  settings turned it off (`platform_disabled_kinds/0`).
+  """
+  @spec platform_enabled?(kind() | String.t()) :: boolean()
+  def platform_enabled?(kind) do
+    name = to_string(kind)
+
+    if Enum.any?(@platform_optional_kinds, &(Atom.to_string(&1) == name)),
+      do: name not in platform_disabled_kinds(),
+      else: true
   end
 
   @doc """

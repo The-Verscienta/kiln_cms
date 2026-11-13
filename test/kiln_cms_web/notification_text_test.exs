@@ -141,7 +141,7 @@ defmodule KilnCMSWeb.NotificationTextTest do
       end)
     end
 
-    test "a blocked address names the rule and the address; a key over a limit its kind" do
+    test "a blocked address names the rule, never an address; a key over a limit its kind" do
       blocked = %{
         event: :security_alert,
         excerpt: "stored",
@@ -149,19 +149,18 @@ defmodule KilnCMSWeb.NotificationTextTest do
           "phase" => "alert",
           "kind" => "blocked_ip",
           "rule" => "203.0.113.0/24",
-          "ip" => "203.0.113.0/24",
           "event_type" => "ip_block_refused"
         }
       }
 
       assert NotificationText.excerpt(blocked) ==
-               "A blocked address was refused (rule 203.0.113.0/24, from 203.0.113.0/24)"
+               "A blocked address was refused (rule 203.0.113.0/24)"
 
-      # Without a rule (no event left to name it) it reads like any alert.
+      # Without a rule (no event left to name it) it is the bare label.
       assert NotificationText.excerpt(%{
                blocked
                | details: Map.delete(blocked.details, "rule")
-             }) == "A blocked address was refused (from 203.0.113.0/24)"
+             }) == "A blocked address was refused"
 
       assert NotificationText.excerpt(%{
                event: :security_alert,

@@ -144,7 +144,7 @@ defmodule KilnCMS.Webhooks.SlackFormatTest do
           alert(%{
             "kind" => "blocked_ip",
             "event" => %{
-              "ip" => "203.0.113.0/24",
+              "ip" => nil,
               "type" => "ip_block_refused",
               "metadata" => %{"rule" => "203.0.113.0/24 <!here>", "surface" => "http"}
             }
@@ -152,8 +152,7 @@ defmodule KilnCMS.Webhooks.SlackFormatTest do
         )
 
       assert section(body) =~
-               "*A blocked address was refused (rule `203.0.113.0/24 &lt;!here&gt;`, " <>
-                 "from `203.0.113.0/24`)* on `Example`"
+               "*A blocked address was refused (rule `203.0.113.0/24 &lt;!here&gt;`)* on `Example`"
 
       refute body.text =~ "<!here>"
     end

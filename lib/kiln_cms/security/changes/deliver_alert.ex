@@ -33,8 +33,11 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
       (`KilnCMS.Security.Alerts.site_recipients/1`) and an email to those who
       have not muted `notify_on_security_alert`.
     * **platform** alert — a bell row (in the default org) and an email for
-      every platform admin. No setting and no mute applies, and no webhook
-      goes (platform kinds are not webhook events).
+      every platform admin. No mute applies, and no webhook goes (platform
+      kinds are not webhook events). The one setting is the platform's own:
+      a kind a platform admin turned off (`api_key_rate_limited`,
+      `KilnCMS.Security.PlatformAlertSettings`) sends nothing, and the row is
+      only stamped. A platform setting that cannot be read is treated as on.
     * **notice** — a bell row and an email for each of the site's member
       admins, muted or not, and the site's webhooks subscribed to
       `security.alerts_silenced`.
@@ -100,7 +103,7 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
         Logger.warning("Security alert #{dispatch.id} names an unknown kind; not sent.")
         empty_plan()
 
-      channel == :site and not Alerts.enabled?(settings, kind) ->
+      turned_off?(channel, kind, settings) ->
         empty_plan()
 
       true ->
@@ -110,6 +113,12 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
         end
     end
   end
+
+  # A site kind the site turned off, or a platform kind a platform admin did:
+  # stamped, nothing sent. A notice is never turned off.
+  defp turned_off?(:site, kind, settings), do: not Alerts.enabled?(settings, kind)
+  defp turned_off?(:platform, kind, _settings), do: not Alerts.platform_enabled?(kind)
+  defp turned_off?(:notice, _kind, _settings), do: false
 
   defp empty_plan, do: %{data: nil, bell: [], mail: [], endpoints: [], event_name: nil}
 

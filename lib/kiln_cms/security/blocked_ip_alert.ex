@@ -33,9 +33,17 @@ defmodule KilnCMS.Security.BlockedIpAlert do
   The event is recorded whether or not the site turned `blocked_ip` off: the
   log is the audit trail, and a kind turned off is dropped at delivery.
 
-  The request context is read before the dispatch, in the caller's process,
-  and only the resulting map crosses into the task: never a conn or a socket.
-  Nothing here raises, and nothing logs an address.
+  ## No address is recorded
+
+  The event carries the rule that matched and the surface, and no request
+  context: its `ip` and `user_agent` are `nil` (#2245), so ADR 0026's
+  "nothing logs the address" holds for the audit log, the alert and its
+  webhooks alike. The client network is only the sampling key: hashed in
+  `throttle_counters` (`KilnCMS.Accounts.ThrottleStore.key_hash/1`) and held
+  in this node's ETS for one window, never stored as text. A rule is the
+  site's own text, masked the way the site's settings mask an address
+  (`KilnCMS.Security.Alerts.display_metadata/3`). Nothing here raises, and
+  nothing logs an address.
   """
 
   require Logger
@@ -56,24 +64,19 @@ defmodule KilnCMS.Security.BlockedIpAlert do
 
   @doc """
   Note one refused request from `ip` (an address tuple) on `org_id`'s site,
-  blocked by `rule` (the rule's text). `request_fun` returns the request
-  context (`KilnCMS.Security.Recorder.request_context/1`); it is called only
-  for a refusal that passes the in-memory gates, in the caller's process.
-  Always `:ok`.
+  blocked by `rule` (the rule's text). `ip` picks the client network the
+  gates count per; it is not recorded. Always `:ok`.
   """
-  @spec note(Ash.UUID.t(), :inet.ip_address(), String.t(), surface(), (-> Recorder.request())) ::
-          :ok
-  def note(org_id, ip, rule, surface, request_fun)
-      when is_binary(org_id) and is_tuple(ip) and is_binary(rule) and is_atom(surface) and
-             is_function(request_fun, 0) do
+  @spec note(Ash.UUID.t(), :inet.ip_address(), String.t(), surface()) :: :ok
+  def note(org_id, ip, rule, surface)
+      when is_binary(org_id) and is_tuple(ip) and is_binary(rule) and is_atom(surface) do
     with network when is_binary(network) <- Cidr.client_range(ip),
          true <- pass?(org_id, network) do
       dispatch(%{
         org_id: org_id,
         network: network,
         rule: rule,
-        surface: surface,
-        request: request_fun.()
+        surface: surface
       })
     end
 
@@ -84,7 +87,7 @@ defmodule KilnCMS.Security.BlockedIpAlert do
       :ok
   end
 
-  def note(_org_id, _ip, _rule, _surface, _request_fun), do: :ok
+  def note(_org_id, _ip, _rule, _surface), do: :ok
 
   defp pass?(org_id, network) do
     window_ms = Alerts.window_ms()
@@ -113,7 +116,8 @@ defmodule KilnCMS.Security.BlockedIpAlert do
   defp record(ctx) do
     Recorder.record_sampled(:ip_block_refused,
       tenant: ctx.org_id,
-      request: ctx.request,
+      # No request context: the event records no address (see the moduledoc).
+      request: nil,
       sample_key: ctx.network,
       limit: 1,
       scale: Alerts.window_ms(),

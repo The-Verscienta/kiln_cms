@@ -3,7 +3,8 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
   The `blocked_ip` alert (#2245) from the request edges: a refused request is
   one sampled `ip_block_refused` event per client network per window, gated
   in memory first so a flood writes nothing per request; the alert goes to
-  the blocking site's own admins, masked, once, then a summary.
+  the blocking site's own admins, masked, once, then a summary. The event
+  records no address and no user agent, only the rule and the surface.
 
   `async: false`: alerts are turned on and the window length is set
   (`Application.put_env`), the rule cache is one named Cachex instance, and
@@ -152,7 +153,9 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
 
       assert [event] = refused_events(ctx.org.id)
       assert event.metadata == %{"rule" => rule.cidr, "surface" => "http"}
-      assert event.ip == text(ip)
+      # No address and no user agent: ADR 0026, nothing logs the address.
+      assert event.ip == nil
+      assert event.user_agent == nil
       assert refused_events(ctx.other.id) == []
       assert [_alert] = alerts(ctx.org.id)
 
@@ -246,7 +249,7 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
       excerpts = bells() |> Enum.map(& &1.excerpt) |> Enum.sort()
 
       assert excerpts == [
-               "A blocked address was refused (rule 10.0.0.0/8, from 10.1.0.0/24)",
+               "A blocked address was refused (rule 10.0.0.0/8)",
                "A blocked address was refused: #{cap} in this alert window"
              ]
     end
@@ -286,7 +289,7 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
       assert deliveries() == []
     end
 
-    test "the webhook carries the network, not the host, unless full addresses are on", ctx do
+    test "the webhook carries the masked rule and no address", ctx do
       endpoint!(ctx.org.id, ["security.blocked_ip"], ctx.admin)
       endpoint!(ctx.org.id, ["security.lockout"], ctx.admin)
       block!(ctx, "203.0.113.7/32")
@@ -295,14 +298,15 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
       SecurityAlerts.deliver()
 
       assert [delivery] = deliveries()
-      assert delivery.payload["event"]["ip"] == "203.0.113.0/24"
+      assert delivery.payload["event"]["ip"] == nil
       assert delivery.payload["event"]["metadata"]["rule"] == "203.0.113.0/24"
       assert delivery.payload["event"]["metadata"]["surface"] == "http"
       refute Jason.encode!(delivery.payload) =~ "203.0.113.7"
       refute Jason.encode!(delivery.payload) =~ "Flood/1.0"
     end
 
-    test "with full addresses on, the webhook carries the address and the rule", ctx do
+    test "with full addresses on, the webhook carries the full rule and still no address",
+         ctx do
       CMS.save_site_security_alerts!(%{include_full_ip: true},
         actor: ctx.admin,
         tenant: ctx.org.id
@@ -315,11 +319,12 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
       SecurityAlerts.deliver()
 
       assert [delivery] = deliveries()
-      assert delivery.payload["event"]["ip"] == "203.0.113.7"
+      assert delivery.payload["event"]["ip"] == nil
       assert delivery.payload["event"]["metadata"]["rule"] == "203.0.113.7/32"
+      refute Jason.encode!(delivery.payload) =~ "Flood/1.0"
     end
 
-    test "an IPv6 address and rule are masked to the /48", ctx do
+    test "an IPv6 rule is masked to the /48, and no address is sent", ctx do
       endpoint!(ctx.org.id, ["security.blocked_ip"], ctx.admin)
       block!(ctx, "2001:db8:1:2::/64")
 
@@ -327,7 +332,8 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
       SecurityAlerts.deliver()
 
       assert [delivery] = deliveries()
-      assert delivery.payload["event"]["ip"] == "2001:db8:1::/48"
+      assert delivery.payload["event"]["ip"] == nil
+      refute Jason.encode!(delivery.payload) =~ "2001:db8:1:2::9"
       assert delivery.payload["event"]["metadata"]["rule"] == "2001:db8:1::/48"
     end
   end
@@ -342,6 +348,7 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
 
       surfaces = ctx.org.id |> refused_events() |> Enum.map(& &1.metadata["surface"])
       assert Enum.sort(surfaces) == ["bridge", "collab", "gql"]
+      assert Enum.all?(refused_events(ctx.org.id), &(is_nil(&1.ip) and is_nil(&1.user_agent)))
     end
 
     test "a /live root join records the live surface", %{conn: conn} = ctx do
@@ -355,6 +362,8 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
       assert {%{reason: "reload", status: 403}, _} = catch_exit(live(conn))
       assert [event] = refused_events(ctx.org.id)
       assert event.metadata["surface"] == "live"
+      assert event.ip == nil
+      assert event.user_agent == nil
     end
   end
 

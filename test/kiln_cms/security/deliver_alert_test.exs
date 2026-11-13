@@ -85,11 +85,13 @@ defmodule KilnCMS.Security.DeliverAlertTest do
     event
   end
 
-  defp refused(org_id, ip \\ @ip, rule \\ "203.0.113.77/32") do
+  # As `KilnCMS.Security.BlockedIpAlert` records it: no request context, so
+  # no address and no user agent (#2245, ADR 0026).
+  defp refused(org_id, rule \\ "203.0.113.77/32") do
     {:ok, event} =
       Recorder.record(:ip_block_refused,
         tenant: org_id,
-        request: %{ip: ip, user_agent: "Secret-Agent/1.0"},
+        request: nil,
         metadata: %{"rule" => rule, "surface" => "http"}
       )
 
@@ -367,7 +369,7 @@ defmodule KilnCMS.Security.DeliverAlertTest do
       assert job.args["delivery_id"] == delivery.id
     end
 
-    test "a blocked_ip alert masks the address and the rule by default (#2245)", ctx do
+    test "a blocked_ip alert carries no address and masks the rule by default (#2245)", ctx do
       endpoint!(ctx.org.id, ["security.blocked_ip"], ctx.admin)
       event = refused(ctx.org.id)
       SecurityAlerts.deliver()
@@ -378,19 +380,21 @@ defmodule KilnCMS.Security.DeliverAlertTest do
       assert payload["kind"] == "blocked_ip"
       assert payload["event"]["id"] == event.id
       assert payload["event"]["type"] == "ip_block_refused"
-      assert payload["event"]["ip"] == "203.0.113.0/24"
+      assert payload["event"]["ip"] == nil
       assert payload["event"]["metadata"] == %{"rule" => "203.0.113.0/24", "surface" => "http"}
       refute Jason.encode!(payload) =~ "203.0.113.77"
 
       assert [bell | _] = Enum.filter(bells(), &(&1.event == :security_alert))
 
       assert bell.excerpt ==
-               "A blocked address was refused (rule 203.0.113.0/24, from 203.0.113.0/24)"
+               "A blocked address was refused (rule 203.0.113.0/24)"
 
       assert bell.details["rule"] == "203.0.113.0/24"
+      refute Map.has_key?(bell.details, "ip")
     end
 
-    test "a blocked_ip alert carries the full address and rule when the site opted in", ctx do
+    test "a blocked_ip alert carries the full rule, still no address, when the site opted in",
+         ctx do
       CMS.save_site_security_alerts!(%{include_full_ip: true},
         actor: ctx.admin,
         tenant: ctx.org.id
@@ -401,17 +405,17 @@ defmodule KilnCMS.Security.DeliverAlertTest do
       SecurityAlerts.deliver()
 
       assert [delivery] = deliveries()
-      assert delivery.payload["event"]["ip"] == @ip
+      assert delivery.payload["event"]["ip"] == nil
       assert delivery.payload["event"]["metadata"]["rule"] == "203.0.113.77/32"
     end
 
-    test "a blocked_ip alert masks an IPv6 address and rule to the /48", ctx do
+    test "a blocked_ip alert masks an IPv6 rule to the /48", ctx do
       endpoint!(ctx.org.id, ["security.blocked_ip"], ctx.admin)
-      refused(ctx.org.id, "2001:db8:1:2::9", "2001:db8:1:2::/64")
+      refused(ctx.org.id, "2001:db8:1:2::/64")
       SecurityAlerts.deliver()
 
       assert [delivery] = deliveries()
-      assert delivery.payload["event"]["ip"] == "2001:db8:1::/48"
+      assert delivery.payload["event"]["ip"] == nil
       assert delivery.payload["event"]["metadata"]["rule"] == "2001:db8:1::/48"
     end
 

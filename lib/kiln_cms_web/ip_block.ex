@@ -52,9 +52,7 @@ defmodule KilnCMSWeb.IpBlock do
       {:blocked, org_id, ip, rule} ->
         count_refusal(surface)
 
-        KilnCMS.Security.BlockedIpAlert.note(org_id, ip, rule, surface, fn ->
-          KilnCMS.Security.Recorder.request_context(connect_info)
-        end)
+        KilnCMS.Security.BlockedIpAlert.note(org_id, ip, rule, surface)
 
         :error
 
@@ -87,8 +85,7 @@ defmodule KilnCMSWeb.IpBlock do
       connect_info = %{
         uri: get_connect_info(socket, :uri),
         x_headers: get_connect_info(socket, :x_headers),
-        peer_data: get_connect_info(socket, :peer_data),
-        user_agent: get_connect_info(socket, :user_agent)
+        peer_data: get_connect_info(socket, :peer_data)
       }
 
       if check_connect(:live, connect_info) == :error, do: raise(BlockedError)

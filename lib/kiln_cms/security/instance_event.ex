@@ -43,11 +43,17 @@ defmodule KilnCMS.Security.InstanceEvent do
 
   @types [
     # A platform admin stopped a running in-app backup (#2218).
-    :backup_canceled
+    :backup_canceled,
+    # A platform admin saved the platform's security alert settings (#2245):
+    # which platform alert kinds are off (`KilnCMS.Security.PlatformAlertSettings`).
+    :platform_alerts_changed
   ]
 
   @metadata_keys %{
-    backup_canceled: ~w(stamp step)
+    backup_canceled: ~w(stamp step),
+    # `disabled_kinds`: the platform kinds off after the save, comma-joined,
+    # or "none".
+    platform_alerts_changed: ~w(disabled_kinds)
   }
 
   # Alerts: none of these types raises one today. Instance events could carry
