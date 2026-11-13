@@ -1,4 +1,4 @@
-# 0031. A schedule sets the alarm threshold only while it can run, and a claimed window is never retried
+# 0044. A schedule sets the alarm threshold only while it can run, and a claimed window is never retried
 
 - **Status** — accepted (2026-11-13).
 - **References** — [#2821](https://github.com/The-Verscienta/kiln_cms/issues/2821)

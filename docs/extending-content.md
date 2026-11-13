@@ -1545,6 +1545,8 @@ What to know before relying on it:
   change, then deletes layouts no field names any more, reading both fresh,
   so a section another admin has just added keeps its layout.
 
+Why a layout is its own row, keyed by the section name: [ADR 0046](decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md).
+
 If something does not save, the page shows one of these:
 
 | Message | Meaning |
@@ -1654,6 +1656,8 @@ What to know before relying on it:
 | `<name> is not an editor input for this field (use one of: …)` | The field's type and settings don't offer that input. |
 | `this field has no choice of editor input` | The field takes no widget at all (rich text, a list of references, a link field or group sub-field, most types). Send `nil`. |
 | `checkboxes can't take terms of their own: use tags, or turn off new terms` | `checkboxes` on a select with `allow_custom: true`. |
+
+Why the input is an editor-only setting apart from **Editing**, and why a named input is refused rather than reset: [ADR 0048](decisions/0048-a-fields-editor-input-is-an-editor-only-string-separate-from-its-text-format.md) and [ADR 0049](decisions/0049-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md).
 
 ### Delete a field of an unknown type
 

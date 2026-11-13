@@ -158,6 +158,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Contributors: the required `Compile, lint, scan & test` check also waits on docs, strict-tenancy, overlay drift, both clients and the ML job; every required job has a time limit.**
   ([#2801](https://github.com/The-Verscienta/kiln_cms/pull/2801) · [long form](docs/changelog/unreleased.md#ci-required-check-covers-more-jobs))
 
+- **The fields admin says under Editor input that the choice changes only how editors fill a field in; the field's type and text format stay as they are.**
+  ([#2880](https://github.com/The-Verscienta/kiln_cms/pull/2880) · [long form](docs/changelog/unreleased.md#editor-input-help-line))
+
 - **Team says how long an invitation link lasts and links its guide, Settings says adding a passkey or authenticator app emails you, and `/sign-in/verify` says a passkey works too when one can.**
   ([long form](docs/changelog/unreleased.md#account-screens-help-text))
 

@@ -483,8 +483,8 @@ tenant-less, so the gate is the global role (`Accounts.Checks.PlatformAdmin`),
 org. People can only read, except that a platform admin may `cancel` a
 running backup (#2218, audited as `backup_canceled`); every other write is the
 backup pipeline's (`Backups.system/0`), named action by action. There is no
-`destroy` action until retention lands (#2225). Not exposed through GraphQL,
-JSON:API or MCP.
+`destroy` action until history deletion lands (#2225). Not exposed through GraphQL,
+JSON:API or MCP. The reasoning is in [ADR 0033](decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md).
 
 ## Backup lock — `Backups.Lock`, `Backups.NodeBeat`
 
@@ -497,7 +497,11 @@ JSON:API or MCP.
 The step chain's lock and the nodes' heartbeats (#2218). Instance-wide and
 tenant-less, gated on the global role. A platform admin asks for a backup
 (`request`, which writes the row as the system actor) and sees what is in
-flight; the row itself is written only by the pipeline.
+flight; the row itself is written only by the pipeline. The reasoning is in
+[ADR 0038](decisions/0038-a-backup-asked-for-while-one-runs-queues-and-only-like-folds-into-like.md) (one lock that
+queues), [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md) (the
+heartbeats) and [ADR 0045](decisions/0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md)
+(why History writes stay out of the lock's transaction).
 
 ## Backup schedules — `Backups.Schedule`
 
@@ -514,7 +518,9 @@ log (`backup_schedule_created`, `backup_schedule_changed`,
 `backup_schedule_deleted`); `create` and `update` accept none of the window
 fields, `baseline_at` or the keep fields. The window writes are the
 scheduler's (`Backups.system/0`), so no person can mark a window claimed,
-refused or waiting. Not exposed through GraphQL, JSON:API or MCP.
+refused or waiting. Not exposed through GraphQL, JSON:API or MCP. Why a
+claimed window is never asked for again is argued in
+[ADR 0044](decisions/0044-a-schedule-sets-the-alarm-threshold-only-while-it-can-run-and-a-claimed-window-is-never-retried.md).
 
 ## Bounce suppression — `Mail.SuppressedRecipient`
 
