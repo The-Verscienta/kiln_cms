@@ -826,4 +826,27 @@ defmodule KilnCMS.Backups.WorkerTest do
       end
     end
   end
+
+  describe "a legacy resume job right after a Cancel (#2538)" do
+    @tag :pg_tools
+    test "waits out the rest of the window instead of giving up", %{dir: dir} do
+      stamp = "20260101-000000"
+
+      Ash.Seed.seed!(KilnCMS.Backups.Run, %{
+        stamp: stamp,
+        status: :canceled,
+        finished_at: DateTime.utc_now()
+      })
+
+      work = KilnCMS.Backups.WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = KilnCMS.Backups.WorkState.write(work, KilnCMS.Backups.WorkState.new(stamp))
+
+      assert {:snooze, seconds} =
+               Worker.perform(%Oban.Job{id: 1, args: %{"trigger" => "manual", "resume" => stamp}})
+
+      assert seconds > 0 and seconds <= div(KilnCMS.Backups.Heartbeat.settled_after_ms(), 1000)
+      assert Backups.in_flight() == nil
+    end
+  end
 end

@@ -26,8 +26,21 @@ defmodule KilnCMS.Backups.StepWorker do
   `<BACKUP_DIR>/.kiln-dir-id` (`KilnCMS.Backups.DirId`) is not the chain's
   snoozes (30 s, which costs no attempt) up to 20 times per attempt, about ten
   minutes, then fails the attempt so the backoff and the attempt budget take
-  over. `start` runs anywhere: the chain is bound to the directory its `start`
-  wrote `state.json` to only when it hands over (`Chain.begin_step/1`).
+  over. A fresh backup's `start` runs anywhere: the chain is bound to the
+  directory its `start` wrote `state.json` to only when it hands over
+  (`Chain.begin_step/1`).
+
+  A resume's `start` runs where the run's files are (#2539): on a node that
+  has `.work/<stamp>/state.json` itself, or whose directory id is the one the
+  run records (`KilnCMS.Backups.Run`'s `dir_id`; the start step then refuses
+  visibly when the files are gone). Anywhere else it snoozes with the same
+  budget as the other steps. When the last attempt has used its budget too,
+  the resume is given up (`Chain.abandon_start/2`): the lock is released, the
+  waiting request promoted, and the run's row says why. A run with no
+  directory id (imported, from before #2539) runs anywhere, as does a start
+  whose run can't be read. Local files win over the recorded id, so a backup
+  directory that was copied or rebuilt with a new `.kiln-dir-id` still
+  resumes where its files are.
 
   Oban counts a job's snoozes in `meta["snoozed"]` across all its attempts. The
   per-attempt count is the snoozes since `meta["affinity_base"]`, which is
@@ -56,6 +69,7 @@ defmodule KilnCMS.Backups.StepWorker do
 
   import Ecto.Query
 
+  alias KilnCMS.Backups
   alias KilnCMS.Backups.{Chain, DirId, Steps}
 
   require Logger
@@ -88,13 +102,21 @@ defmodule KilnCMS.Backups.StepWorker do
   def perform(%Oban.Job{args: args} = job) do
     with :ok <- affinity(job) do
       # `:duplicate` keys: a test drains every step in one process. The
-      # heartbeat's self-fence kills what is registered here.
-      {:ok, _} = Registry.register(KilnCMS.Backups.StepRegistry, args["chain"], args["step"])
+      # heartbeat kills what is registered here: every step on its self-fence,
+      # and a step whose job is canceled or otherwise over, by the job id
+      # (#2538). Unregistered on the way out, so a step that returned is never
+      # seen with its job already acked.
+      value = {args["step"], job.id}
+      {:ok, _} = Registry.register(KilnCMS.Backups.StepRegistry, args["chain"], value)
 
-      case Chain.begin_step(job) do
-        {:ok, lease} -> run(lease, job)
-        {:error, :superseded} -> {:cancel, :superseded}
-        {:error, reason} -> {:error, reason}
+      try do
+        case Chain.begin_step(job) do
+          {:ok, lease} -> run(lease, job)
+          {:error, :superseded} -> {:cancel, :superseded}
+          {:error, reason} -> {:error, reason}
+        end
+      after
+        Registry.unregister_match(KilnCMS.Backups.StepRegistry, args["chain"], value)
       end
     end
   end
@@ -113,9 +135,47 @@ defmodule KilnCMS.Backups.StepWorker do
       Steps.crashed(lease, job, {:crashed, Exception.message(error)})
   end
 
+  # A resume's start (#2539): local files first, then the run's directory id.
+  # A legacy `Worker` job's snoozes (`Steps`) also count in `meta["snoozed"]`,
+  # so they can spend this budget: that needs a node from before #2218 still
+  # running next to a run pinned by #2539, and the outcome is a visible
+  # refusal.
+  defp affinity(%Oban.Job{args: %{"step" => "start", "resume" => stamp}} = job)
+       when is_binary(stamp) do
+    if Backups.work_state?(stamp),
+      do: rebase_snoozes(job),
+      else: run_dir(job, stamp)
+  end
+
   defp affinity(%Oban.Job{args: %{"step" => "start"}}), do: :ok
 
-  defp affinity(%Oban.Job{args: %{"dir" => dir_id}} = job) do
+  defp affinity(%Oban.Job{args: %{"dir" => dir_id}} = job),
+    do: pinned(job, dir_id, fn -> {:error, :backup_dir_elsewhere} end)
+
+  # No files here: the node whose directory the run records. A run with none,
+  # or one that can't be read, isn't pinned.
+  defp run_dir(job, stamp) do
+    case Backups.resume_dir_id(stamp) do
+      {:ok, nil} ->
+        :ok
+
+      {:ok, dir_id} ->
+        pinned(job, dir_id, fn -> Chain.abandon_start(job, {:backup_dir_elsewhere, dir_id}) end)
+
+      {:error, error} ->
+        Logger.warning(
+          "Backup resume of #{stamp}: couldn't read where its files are " <>
+            "(#{inspect(error, limit: 5)}); starting it here"
+        )
+
+        :ok
+    end
+  end
+
+  # Runs here, snoozes, or (budget spent) fails the attempt. A resume's start
+  # gives up on its last attempt (`give_up`); every other step's last attempt
+  # fails like any other, and the reaper closes the chain.
+  defp pinned(job, dir_id, give_up) do
     cond do
       DirId.current() == {:ok, dir_id} ->
         rebase_snoozes(job)
@@ -123,9 +183,13 @@ defmodule KilnCMS.Backups.StepWorker do
       snoozes_this_attempt(job) < @affinity_max_snoozes ->
         {:snooze, @affinity_snooze_s}
 
-      true ->
+      job.attempt < job.max_attempts ->
         rebase_snoozes(job)
         {:error, :backup_dir_elsewhere}
+
+      true ->
+        rebase_snoozes(job)
+        give_up.()
     end
   end
 

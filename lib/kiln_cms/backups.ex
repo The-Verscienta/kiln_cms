@@ -62,7 +62,7 @@ defmodule KilnCMS.Backups do
 
   use Ash.Domain
 
-  alias KilnCMS.Backups.{Chain, Lock, Manifest, Refused, Run, StepWorker, WorkState}
+  alias KilnCMS.Backups.{Chain, Heartbeat, Lock, Manifest, Refused, Run, StepWorker, WorkState}
 
   require Ash.Query
   require Logger
@@ -79,6 +79,7 @@ defmodule KilnCMS.Backups do
       define :finish_run, action: :finish
       define :fail_run, action: :fail
       define :resume_run, action: :resume
+      define :note_run_resume_refused, action: :note_resume_refused, args: [:reason]
       define :import_run, action: :import
       define :list_runs, action: :read
       define :run_history, action: :history
@@ -230,7 +231,7 @@ defmodule KilnCMS.Backups do
   """
   @spec run_stale?(Run.t(), DateTime.t()) :: boolean()
   def run_stale?(%Run{} = run, now \\ DateTime.utc_now()) do
-    cutoff = DateTime.add(now, -stale_after_ms(), :millisecond)
+    %{stale: cutoff} = resume_cutoffs(now)
 
     # No timestamp at all (a bare struct) is not evidence of anything: not stale.
     case Enum.filter([run.started_at, run.updated_at], &match?(%DateTime{}, &1)) do
@@ -239,8 +240,25 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  defp stale_after_ms do
+  # How long a `running` run may go without a write before it counts as
+  # stale: the worker's timeout plus grace.
+  @doc false
+  @spec stale_after_ms() :: pos_integer()
+  def stale_after_ms do
     StepWorker.timeout(nil) + :timer.minutes(@stale_grace_minutes)
+  end
+
+  # The instants a resume is judged against, one definition for the early
+  # check (`run_resumable?/2`) and the `:resume` action's UPDATE filter:
+  # `stale`, before which a `running` run's last write makes it stale, and
+  # `canceled`, before which a Cancel has settled (`Heartbeat.settled_after_ms/0`).
+  @doc false
+  @spec resume_cutoffs(DateTime.t()) :: %{stale: DateTime.t(), canceled: DateTime.t()}
+  def resume_cutoffs(%DateTime{} = now) do
+    %{
+      stale: DateTime.add(now, -stale_after_ms(), :millisecond),
+      canceled: DateTime.add(now, -Heartbeat.settled_after_ms(), :millisecond)
+    }
   end
 
   @doc """
@@ -268,6 +286,9 @@ defmodule KilnCMS.Backups do
   Reasons: `:invalid_stamp`, `:in_flight` (the running backup is that stamp's,
   or a resume of it is about to start), `:no_such_run`,
   `{:not_resumable, status}` (a succeeded run, or one still running),
+  `{:canceled_recently, seconds}` (#2538: canceled less than
+  `Heartbeat.settled_after_ms/0` ago, so a step on a node that lost the
+  database may still be stopping; `seconds` is how long is left, rounded up),
   `:no_state`.
 
   `lock: false` skips the `:in_flight` check: for the resume's own start step,
@@ -279,6 +300,7 @@ defmodule KilnCMS.Backups do
          :ok <- check_not_held(stamp, Keyword.get(opts, :lock, true)),
          {:ok, run} <- fetch_run(stamp),
          :ok <- check_resumable(run, now),
+         :ok <- check_settled(run, now),
          :ok <- check_state(stamp) do
       {:ok, run}
     end
@@ -303,6 +325,22 @@ defmodule KilnCMS.Backups do
   defp check_resumable(run, now),
     do: if(run_resumable?(run, now), do: :ok, else: {:error, {:not_resumable, run.status}})
 
+  # A Cancel reaches the step's node through Oban's notifier, which a node cut
+  # off from the database misses; that node stops the step itself, by its
+  # heartbeat, within `Heartbeat.settled_after_ms/0` (#2538). A resume before
+  # then could share the step's files with it. A nil `finished_at` (a row
+  # canceled before it was recorded) is not evidence of a recent Cancel.
+  defp check_settled(%Run{status: :canceled, finished_at: %DateTime{} = at}, now) do
+    %{canceled: cutoff} = resume_cutoffs(now)
+
+    case DateTime.diff(at, cutoff, :millisecond) do
+      left when left > 0 -> {:error, {:canceled_recently, ceil(left / 1000)}}
+      _settled -> :ok
+    end
+  end
+
+  defp check_settled(_run, _now), do: :ok
+
   defp check_state(stamp),
     do: if(work_state?(stamp), do: :ok, else: {:error, :no_state})
 
@@ -313,6 +351,20 @@ defmodule KilnCMS.Backups do
   @spec work_state?(term()) :: boolean()
   def work_state?(stamp) do
     WorkState.valid_stamp?(stamp) and stamp |> work_dir() |> WorkState.exists?()
+  end
+
+  @doc false
+  # The backup directory a resume of `stamp` must run in (#2539): the run's
+  # `dir_id`, nil when the run has none (imported, from before #2539) or
+  # doesn't exist. Fails closed on a refused read, so the caller can tell
+  # "unpinned" from "unknown".
+  @spec resume_dir_id(String.t()) :: {:ok, String.t() | nil} | {:error, term()}
+  def resume_dir_id(stamp) do
+    case get_run_by_stamp(stamp, actor: system(), authorize_with: :error) do
+      {:ok, %Run{dir_id: dir_id}} -> {:ok, dir_id}
+      {:ok, nil} -> {:ok, nil}
+      {:error, _} = error -> error
+    end
   end
 
   @doc "The work directory of a (valid) stamp. Raises for any other."
@@ -721,7 +773,8 @@ defmodule KilnCMS.Backups do
       once the queue clears (#2540).
     * `{:error, reason}`: `availability/0`'s reason, a resume refusal
       (`resumable_run/2`: `:invalid_stamp`, `:in_flight`, `:no_such_run`,
-      `{:not_resumable, status}`, `:no_state`), a `:components` refusal, or
+      `{:not_resumable, status}`, `{:canceled_recently, seconds}`,
+      `:no_state`), a `:components` refusal, or
       `:forbidden` for an actor the policy refuses (only a platform admin and
       `system/0` may ask).
   """

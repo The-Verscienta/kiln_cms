@@ -746,13 +746,17 @@ so it can be resumed later.
 What Cancel does:
 
 - It cancels the backup's step jobs. A step that is running is stopped, and
-  the `pg_dump`, `tar` or `rclone` it started is killed.
+  the `pg_dump`, `tar` or `rclone` it started is killed. The signal reaches
+  the step's node through the database; a node that has lost the database
+  stops the step itself instead (see
+  [Several nodes and the backup lock](#several-nodes-and-the-backup-lock)).
 - It releases the lock, so a queued backup starts next.
 - It does **not** write `manifest.json`: the status panel keeps showing the
   last backup that finished.
 - It keeps every file and `.work/<stamp>/`. **Resume** on the `Canceled` row
-  continues from them. Retention does not delete a backup whose work directory
-  still exists; the work directory is swept after three days, like any other.
+  continues from them, after a short wait (below). Retention does not delete a
+  backup whose work directory still exists; the work directory is swept after
+  three days, like any other.
 - It records a **Backup canceled** event in the instance security log, which
   only platform admins can read (not in any site's log, #2541), with the
   backup's stamp and the step it was on
@@ -766,6 +770,30 @@ What can go wrong:
 | "That backup already finished." | It ended between the page loading and the click. |
 | "Only a platform admin can cancel a backup." | Your account is no longer a platform admin. |
 | "That backup can't be canceled." | Anything else, for example a run that is not an in-app backup. |
+
+**Resume waits about two and a half minutes after a Cancel (#2538).** A node
+that lost the database misses the Cancel, and stops its step only once its
+heartbeat has failed for 90 seconds. A resume that started sooner could write
+the same files as that step. So for 150 seconds after the Cancel (counted from
+the time the row was canceled), **Resume** on that row is refused with "That
+backup was canceled moments ago. Resume it again in N seconds: a step on a
+server that lost contact with the database may still be stopping." The button
+stays; click it again when the time is up. The `Canceled` row's tooltip says
+to wait about two and a half minutes.
+
+- A resume that starts inside the window without a click (one queued
+  earlier, or a start step Oban retries) waits inside its step instead, at
+  most 180 seconds, and the run's log says "Waited N s after the Cancel
+  before resuming".
+- From a console, `KilnCMS.Backups.request/2` returns
+  `{:error, {:canceled_recently, seconds}}`. A legacy `KilnCMS.Backups.Worker`
+  job waits that many seconds and asks again.
+
+The window is typically enough, not a guarantee. A heartbeat that hangs on a
+half-open database connection waits out the database timeouts first, and so
+stops its step later. The backup's `state.json` and its History row are
+protected from such a step either way; only its temporary `.partial` files
+depend on the window ([below](#what-a-step-that-outlives-its-cancel-can-write)).
 
 ### Several nodes and the backup lock
 
@@ -790,6 +818,16 @@ looks at the lock:
   the lock is released.
 - A node that cannot write its beat for 90 seconds (it lost the database)
   stops its own backup steps before the others take them over.
+- A node that missed a Cancel or a take-back while it couldn't reach the
+  database (it got the connection back before the 90 seconds were up, say)
+  stops that step after its next successful beat: it looks up the job of each
+  backup step it runs, and stops the step whose job is `cancelled`,
+  `completed` or `discarded`. The server log says "Backup heartbeat: stopping
+  N backup step(s) whose job was canceled or has ended, a signal this node
+  missed while it couldn't reach the database". A job row that is missing
+  stops nothing: a failover to a lagging standby, or a database restore, can
+  lose the row of a step that is legitimately running. That step is left to
+  the 90-second self-fence and the lock.
 
 The same checks run before every backup request, so a stopped node's backup
 never makes a request queue behind it for good. The heartbeat is on by
@@ -817,14 +855,40 @@ step after `start` runs only on a node that reads the same id:
   then fails the attempt (`:backup_dir_elsewhere`), which uses one of the four.
   If that host is gone, the backup ends up failed; take a new one.
 - **A copied backup directory** (restored onto a new host, or cloned) carries
-  the old host's id. Delete `.kiln-dir-id` on the copy so it gets its own.
+  the old host's id. Delete `.kiln-dir-id` on the copy so it gets its own. A
+  resume follows the files, not the id, so a backup whose `.work/<stamp>/`
+  came along with the copy can still be resumed there.
 
-**Resume needs the host with the files.** The Resume button shows only on a
-node that can see the backup's `.work/<stamp>/`, and the resume's `start` step
-must run on such a node too. On a cluster with a `BACKUP_DIR` per host, a
-resume whose `start` lands elsewhere is refused there (server log: "Backup
-resume refused: :no_state") and the row keeps its status; click **Resume**
-again.
+**A resume runs on the host with the files (#2539).** The Resume button shows
+only on a node that can see the backup's `.work/<stamp>/`. Each run records
+the id of the directory its files are in (its `dir_id`, set when it starts and
+again each time it is resumed), and the resume's `start` step runs only on a
+node that either:
+
+- has `.work/<stamp>/state.json` in its own backup directory, or
+- reads the run's recorded id in its `.kiln-dir-id`.
+
+The local files win, so a directory that was copied, or given a new
+`.kiln-dir-id`, still resumes where its files are. A run with no recorded id
+(imported from cron, or last run before this release) is resumed by whichever
+node picks it up, and records an id when it does.
+
+Any other node that picks up the start waits 30 seconds and puts it back, up
+to 20 times per attempt, like every other step, across the job's four attempts
+and the 1-, 5- and 15-minute pauses between them. When the last attempt has
+waited too, the resume is given up:
+
+- the lock is released, and a queued backup starts;
+- the History row keeps its status and its **Resume** button, and reads
+  "Resume refused: no server with its backup directory (id `<id>`) picked it
+  up; every attempt waited about 10 minutes for one", above its original
+  error.
+
+That is about an hour in which the resume holds the lock, and a backup asked
+for meanwhile [queues behind it](#back-up-while-another-backup-runs): the price of not refusing a resume just
+because the wrong nodes happened to pick it up first. Nothing on the page can
+cancel it while it waits, because **Cancel** appears only once the row is
+`Running` again. Bring the host with the files back, or wait for the give-up.
 
 **Pool size.** The `backup_steps` queue runs one job at a time on each node.
 If you size `POOL_SIZE` as the sum of queue limits plus web traffic
@@ -834,6 +898,27 @@ If you size `POOL_SIZE` as the sum of queue limits plus web traffic
 does not take the lock, so a cron backup and an in-app backup can run at the
 same time. They write different stamps; schedule them apart to keep the load
 down.
+
+### What a step that outlives its Cancel can write
+
+A step on a node that missed its Cancel or its take-back keeps running until
+its node stops it ([above](#several-nodes-and-the-backup-lock)). Until then:
+
+- **`state.json`**: it can't overwrite it. Each step writes it under the
+  cluster-wide backup lock, and only while its job still holds the lock, so a
+  step whose chain was canceled or taken back stops there and writes nothing
+  else.
+- **The History row**: it can't write it. A step's progress, success and
+  failure land only on a `Running` run that is still on that step's chain,
+  so it can't overwrite a Cancel or the progress of a resume of the same run.
+- **Its own temporary files** (`kiln-db-<stamp>.dump.partial`, a media part's
+  `.partial`): these are not fenced. A resume of the same backup could share
+  them, and only the wait after a Cancel
+  ([above](#cancel-a-running-backup)) keeps the two apart.
+
+Because the `state.json` write holds the backup lock, a backup directory that
+stalls (a hung NFS mount) makes Cancel, new backup requests and the
+heartbeat's sweep wait behind it until their database query times out.
 
 ### Start a backup from a release console
 
@@ -855,7 +940,7 @@ is one of:
 | `{:ok, %{status: :queued, chain: running}}` | Another backup is running; this one starts after it. `chain` is the running one. |
 | `{:ok, %{status: :folded, chain: running}}` | One of the same kind is already queued (a fresh backup, or a resume of the same stamp), and it covers this request. |
 | `{:error, {:queue_busy, queued}}` | One of another kind is queued (`queued` is `:backup` or `{:resume, stamp}`). Nothing changed; ask again once it has started ([above](#back-up-while-another-backup-runs)). |
-| `{:error, reason}` | `:disabled`, `:no_database_url`, `:no_pg_dump` or `:no_pg_restore`; for a resume, `:invalid_stamp`, `:in_flight`, `:no_such_run`, `{:not_resumable, status}` or `:no_state`; for `:components`, `:invalid_components`, `:components_with_resume` or `:no_media_dir` ([below](#back-up-only-the-database-or-only-the-media)); or `:forbidden` for an actor who may not ask. |
+| `{:error, reason}` | `:disabled`, `:no_database_url`, `:no_pg_dump` or `:no_pg_restore`; for a resume, `:invalid_stamp`, `:in_flight`, `:no_such_run`, `{:not_resumable, status}`, `{:canceled_recently, seconds}` (canceled less than 150 seconds ago, [above](#cancel-a-running-backup); `seconds` is what is left) or `:no_state`; for `:components`, `:invalid_components`, `:components_with_resume` or `:no_media_dir` ([below](#back-up-only-the-database-or-only-the-media)); or `:forbidden` for an actor who may not ask. |
 
 The trigger is cut to 64 characters, with credentials redacted, before it is
 stored. Other calls:
@@ -927,7 +1012,9 @@ What a partial backup does differently:
 - **Resume** continues a run with the components it had: a resumed
   database-only run backs up only the database. A resume of a media-only run
   whose start step lands on a node without a media directory is refused there
-  (server log: "Backup resume refused: :no_media_dir").
+  (server log: "Backup resume refused: :no_media_dir"), and its History row
+  reads "Resume refused: it backs up only media, and the server that picked it
+  up has no media directory".
 - A request queued behind a running backup keeps its components, and a fresh
   request folding into it widens them
   ([What the queued backup covers after a fold](#back-up-while-another-backup-runs)).
@@ -1044,6 +1131,32 @@ automatically, and with it the chance to resume.
    same row goes back to `Running`, keeping its stamp and start time. If
    another backup is running, the resume
    [queues behind it](#back-up-while-another-backup-runs) instead.
+
+Right after a Cancel, wait about two and a half minutes before clicking
+**Resume** ([why](#cancel-a-running-backup)); a click sooner is refused with
+how many seconds are left.
+
+**A resume that can't run says so on its row (#2539).** A resume can be
+refused after the click, once its start step runs: its files aren't on the
+server that picked it up, no server with its backup directory picked it up
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)), or
+its start step crashed before it re-opened the run. The row then shows
+"Resume refused: `<reason>`" above the error it already had, and keeps its
+status (`Failed` or `Canceled`) and its **Resume** button. A second refusal
+replaces the first note rather than adding to it. An interrupted row (still
+`Running`, but quiet) is marked `Failed` instead, with the refusal above
+"Interrupted: the job was killed or the node stopped". The lock is released,
+so a queued backup starts.
+
+What can go wrong when you click **Resume**:
+
+| Message | Meaning |
+|---|---|
+| "That backup was canceled moments ago. Resume it again in N seconds: a step on a server that lost contact with the database may still be stopping." | It was canceled less than 150 seconds ago. Click again when the time is up. |
+| "That backup is running right now." | It is the backup that is running. |
+| "That backup can't be resumed: only a failed, interrupted or canceled backup can." | It succeeded, was skipped or imported, or is still working. |
+| "That backup can't be resumed: the files it had written are gone." | Its `.work/<stamp>/` is not on this server (swept, deleted, or on another host). |
+| "That backup can't be resumed." | Anything else, for example a malformed stamp. |
 
 A resume reuses a part only if its recorded SHA-256 still matches the file on
 disk; anything else is rebuilt. The file list is the one frozen by the first
@@ -1309,7 +1422,9 @@ admins only, like the rest of the page.
    still on this host. A media set written in several parts shows "N parts".
    A failed, interrupted or canceled run shows **Resume**
    ([above](#media-backups-in-parts-2218)); its tooltip names which of the
-   three it is. A running in-app one shows **Cancel**
+   three it is and, for a canceled one, says to wait about two and a half
+   minutes after the Cancel. A resume that was refused after the click shows
+   "Resume refused: …" above the row's error. A running in-app one shows **Cancel**
    ([above](#cancel-a-running-backup)) until it is finishing.
 3. Use **Previous** / **Next** to page ("Page 1 of 3").
 
