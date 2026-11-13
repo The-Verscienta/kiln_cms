@@ -4,7 +4,9 @@ Status: in progress. Tracking epic: #2216 (children are checklisted there).
 #2217 (backup history) is built; #2218 (split archives and checksums) is built
 except for the Oban job-per-step chain, which stays open as a follow-up;
 #2219 has its retention module (per-component units, recovery-point markers,
-fail-closed prune) built, with the schedules, scheduler and UI still to come;
+fail-closed prune), the schedules and scheduler (daily to monthly, managed from
+a release console, listed read-only on the Backups page) built, with the
+Schedule tab, sub-daily intervals and keep-N retention still to come;
 the rest is proposed.
 Builds on #484 (in-app status + "Back up now"), `scripts/backup.sh`,
 `scripts/restore.sh` and `docs/backups.md`.

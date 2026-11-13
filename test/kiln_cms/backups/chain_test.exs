@@ -403,6 +403,41 @@ defmodule KilnCMS.Backups.ChainTest do
     end
   end
 
+  # Part of #2219: a scheduled request's window claims run inside the lock
+  # transaction, after the decision.
+  describe "the claim" do
+    test "a claim that errors rolls back the decision's lock write and its Oban insert" do
+      jobs = Repo.aggregate(Oban.Job, :count)
+      parent = self()
+
+      claim = fn status ->
+        send(parent, {:claimed, status})
+        {:error, :window_taken}
+      end
+
+      assert {:error, :window_taken} =
+               Chain.request(%{trigger: "schedule", components: [:db], claim: claim})
+
+      assert_received {:claimed, :started}
+      assert Repo.aggregate(Oban.Job, :count) == jobs
+      assert %{chain_id: nil, step_job_id: nil, epoch: 0} = lock()
+    end
+
+    test "a refused decision never runs the claim" do
+      {:ok, %{status: :started}} = request()
+      claim = fn _status -> flunk("the claim must not run") end
+
+      set_config(enabled: false)
+      assert {:error, :disabled} = Chain.request(%{trigger: "schedule", claim: claim})
+    end
+
+    test "with no :claim, request/1 behaves as before" do
+      assert {:ok, %{status: :started}} = Chain.request(%{trigger: "manual"})
+      assert {:ok, %{status: :queued}} = Chain.request(%{trigger: "manual"})
+      assert {:ok, %{status: :folded}} = Chain.request(%{trigger: "manual"})
+    end
+  end
+
   describe "fencing" do
     test "a step of another chain, or an old job of this one, does not begin" do
       {:ok, %{status: :started, chain: chain}} = request()

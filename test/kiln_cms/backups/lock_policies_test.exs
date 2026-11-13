@@ -111,6 +111,33 @@ defmodule KilnCMS.Backups.LockPoliciesTest do
     end
   end
 
+  # Part of #2219: only the scheduler may ask for a backup that carries
+  # `scheduled`/`schedule_ids` and claims windows.
+  describe "request_scheduled" do
+    test "is refused for a platform admin, editor, viewer, site admin and anonymous" do
+      input = %{schedule_ids: [Ash.UUID.generate()], at: DateTime.utc_now()}
+
+      for actor <- people() do
+        refute Backups.can_request_scheduled_backup?(actor, input),
+               "request_scheduled must refuse #{inspect(actor && actor.role)}"
+
+        assert {:error, :forbidden} =
+                 Backups.request_scheduled(input.schedule_ids, input.at, actor)
+      end
+
+      refute Backups.can_request_scheduled_backup?(SystemActor.new(:billing), input)
+      assert Backups.in_flight() == nil
+    end
+
+    test "is admitted for the :backups system actor" do
+      input = %{schedule_ids: [Ash.UUID.generate()], at: DateTime.utc_now()}
+      assert Backups.can_request_scheduled_backup?(Backups.system(), input)
+
+      assert {:ok, %{status: :nothing_due}} =
+               Backups.request_scheduled(input.schedule_ids, input.at, Backups.system())
+    end
+  end
+
   describe "the row" do
     test "the :backups system actor makes every write" do
       for {action, call} <- row_writes() do

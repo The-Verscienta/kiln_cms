@@ -288,4 +288,178 @@ defmodule KilnCMS.Backups.StatusTest do
     assert %{never?: true, stale?: true} = status.components.media
     assert status.stale?
   end
+
+  # Part of #2219: in-app schedules set a component's staleness threshold
+  # while they are known to run, and say when it is backed up next. Needs
+  # `pg_dump` and `pg_restore` on PATH: without them backups are unavailable
+  # here and no schedule counts.
+  describe "in-app schedules" do
+    @describetag :pg_tools
+
+    import Ecto.Query
+    import KilnCMS.Test.BackupSchedules
+
+    @baseline ~U[2026-01-01 00:00:00.000000Z]
+
+    defp scheduled!(attrs),
+      do:
+        force!(schedule!(Map.merge(%{starts_on: ~D[2026-01-01]}, attrs)), baseline_at: @baseline)
+
+    # A good backup made by neither host cron nor a schedule: no cron evidence.
+    defp manual_run!(components, hours) do
+      run = run!(components, hours)
+      {:ok, id} = Ecto.UUID.dump(run.id)
+
+      {1, _} =
+        KilnCMS.Repo.update_all(from(r in "backup_runs", where: r.id == ^id),
+          set: [trigger: "manual"]
+        )
+
+      run
+    end
+
+    defp put_cron(value) do
+      original = Application.fetch_env(:kiln_cms, :backup_scheduler_cron)
+      Application.put_env(:kiln_cms, :backup_scheduler_cron, value)
+
+      on_exit(fn ->
+        case original do
+          {:ok, old} -> Application.put_env(:kiln_cms, :backup_scheduler_cron, old)
+          :error -> Application.delete_env(:kiln_cms, :backup_scheduler_cron)
+        end
+      end)
+    end
+
+    defp set_config(overrides) do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.merge(Application.get_env(:kiln_cms, KilnCMS.Backups), overrides)
+      )
+    end
+
+    test "a weekly media schedule: not stale at 40 h, stale at 253 h, stale_source {:schedule, id}" do
+      s = scheduled!(%{components: [:media], interval: :weekly})
+      manual_run!([:media], 40)
+
+      media = Backups.status().components.media
+      assert %{stale?: false, stale_after_hours: 252, stale_source: {:schedule, id}} = media
+      assert id == s.id
+
+      # Only a 253-hour-old media backup: past the weekly threshold.
+      KilnCMS.Repo.delete_all("backup_runs")
+      manual_run!([:media], 253)
+      assert %{stale?: true, stale_after_hours: 252} = Backups.status().components.media
+
+      # The database has no schedule: the environment's threshold.
+      assert %{stale_after_hours: 36, stale_source: {:env, "BACKUP_STALE_AFTER_HOURS"}} =
+               Backups.status().components.db
+    end
+
+    test "W-i: with a cron import in the last 8 days, the threshold is min(env, schedule) and the source names the winner" do
+      weekly = scheduled!(%{components: [:media], interval: :weekly})
+      daily = scheduled!(%{components: [:db]})
+      # `run!/2` imports cron's backups.
+      run!([:db, :media], 40)
+
+      status = Backups.status()
+
+      assert %{
+               stale_after_hours: 36,
+               stale_source: {:cron, "BACKUP_STALE_AFTER_HOURS"},
+               stale?: true
+             } =
+               status.components.media
+
+      # Daily (36) is not above the environment's 36: the schedule's.
+      assert %{stale_after_hours: 36, stale_source: {:schedule, id}} = status.components.db
+      assert id == daily.id
+      refute id == weekly.id
+    end
+
+    test "no schedules: the environment's threshold and source, and :none" do
+      status = Backups.status()
+      assert status.schedules == :none
+      assert status.next_at == nil
+
+      assert %{stale_source: {:env, "BACKUP_STALE_AFTER_HOURS"}, next_at: nil} =
+               status.components.db
+    end
+
+    test "a paused schedule is ignored, and has no next run" do
+      s = scheduled!(%{components: [:db], interval: :weekly})
+      {:ok, _} = Backups.update_backup_schedule(s, %{enabled: false}, actor: platform_admin())
+
+      status = Backups.status()
+      assert %{stale_source: {:env, _}, next_at: nil} = status.components.db
+      assert [%{next_at: nil}] = status.schedules
+    end
+
+    test "scheduler cron off: schedules are ignored" do
+      scheduled!(%{components: [:db], interval: :weekly})
+      put_cron("false")
+
+      status = Backups.status()
+      refute status.scheduler_enabled?
+      assert %{stale_source: {:env, _}, next_at: nil} = status.components.db
+      assert [%{next_at: nil}] = status.schedules
+    end
+
+    test "D1: BACKUP_ENABLED=false, a start date ahead, or a refused last window: the environment's threshold" do
+      s = scheduled!(%{components: [:db], interval: :weekly})
+      set_config(enabled: false)
+      assert %{stale_source: {:env, _}} = Backups.status().components.db
+      set_config(enabled: true)
+      assert %{stale_source: {:schedule, _}} = Backups.status().components.db
+
+      force!(s, last_outcome: "refused")
+      assert %{stale_source: {:env, _}} = Backups.status().components.db
+
+      KilnCMS.Repo.delete_all("backup_schedules")
+      next_month = Date.utc_today() |> Date.end_of_month() |> Date.add(1)
+      scheduled!(%{components: [:db], interval: :weekly, starts_on: next_month})
+      assert %{stale_source: {:env, _}, next_at: next_at} = Backups.status().components.db
+      assert Date.compare(DateTime.to_date(next_at), next_month) != :lt
+    end
+
+    test "D1: no pg_dump on the node computing the status: the environment's threshold" do
+      scheduled!(%{components: [:db], interval: :weekly})
+      assert %{stale_source: {:schedule, _}} = Backups.status().components.db
+
+      without_pg_tools(fn ->
+        assert %{stale_source: {:env, _}} = Backups.status().components.db
+      end)
+    end
+
+    test "an unreadable schedule list falls back to the environment with schedules: :unreadable" do
+      scheduled!(%{components: [:db], interval: :weekly})
+      :persistent_term.erase({Backups, :schedules_warned_at})
+      on_exit(fn -> :persistent_term.erase({Backups, :schedules_warned_at}) end)
+
+      status = Backups.with_actor(KilnCMS.SystemActor.new(:billing), fn -> Backups.status() end)
+      assert status.schedules == :unreadable
+      assert %{stale_source: {:env, _}, next_at: nil} = status.components.db
+    end
+
+    test "next_at per component and at the top; an overdue (deferred) window is due now" do
+      now = DateTime.utc_now()
+      db = scheduled!(%{components: [:db]})
+      media = scheduled!(%{components: [:media], interval: :weekly})
+
+      # The database's latest window was claimed: its next is tomorrow's.
+      {:ok, latest} = KilnCMS.Backups.Schedule.Window.latest(db, now)
+      force!(db, last_window_at: latest)
+      # The media's latest window is still due (waiting): due now.
+      {:ok, media_due} = KilnCMS.Backups.Schedule.Window.latest(media, now)
+
+      status = Backups.status()
+      assert status.components.media.next_at == media_due
+      assert DateTime.compare(status.components.db.next_at, now) == :gt
+      assert status.next_at == media_due
+
+      entries = Map.new(status.schedules, &{&1.schedule.id, &1.next_at})
+      assert entries[media.id] == media_due
+      assert entries[db.id] == status.components.db.next_at
+    end
+  end
 end

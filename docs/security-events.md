@@ -109,8 +109,11 @@ skipped, so a fault never deletes on a window nobody confirmed.
 ## The instance log
 
 Some events are about the whole installation, not one site: today, a platform
-admin canceling a backup (`backup_canceled`) and a platform admin changing the
-platform's security alerts (`platform_alerts_changed`). A site's log is readable by that
+admin canceling a backup (`backup_canceled`), creating, changing or
+deleting an in-app backup schedule (`backup_schedule_created`,
+`backup_schedule_changed`, `backup_schedule_deleted`; part of #2219), and a
+platform admin changing the platform's security alerts
+(`platform_alerts_changed`). A site's log is readable by that
 site's admins, who need not be platform admins, so these go to a separate
 **instance security log** instead (#2541).
 
@@ -162,8 +165,9 @@ No instance event raises a [security alert](security-alerts.md).
 
 ## What is recorded
 
-Every type below goes to a site's log except `backup_canceled` and
-`platform_alerts_changed`, which go to the [instance log](#the-instance-log).
+Every type below goes to a site's log except `backup_canceled`, the three
+`backup_schedule_*` types and `platform_alerts_changed`, which go to the
+[instance log](#the-instance-log).
 
 Every event has a time, a type, the person who acted (an email snapshot and
 their id, only for a known account), an optional target (a user, an API key, a
@@ -204,6 +208,9 @@ a type may carry only the keys below; anything else is dropped.
 | `registration_approved` | Registration approved | A waiting or rejected registration was approved: by a site admin on Registrations, by the applicant accepting an invitation to the site (no person), or by a platform admin adding the address on Team. The target is the applicant | `role`, `via` |
 | `registration_rejected` | Registration rejected | A site admin rejected a waiting registration. The person is the admin; the target is the applicant, or none when the account was erased | `outcome` |
 | `backup_canceled` | Backup canceled | A platform admin [canceled a running backup](backups.md#cancel-a-running-backup). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `step` |
+| `backup_schedule_created` | Backup schedule created | A platform admin [created an in-app backup schedule](backups.md#schedule-backups-in-the-app) (part of #2219). In the instance log. The person is the admin; the target is the schedule (target type `backup_schedule`) | `components` (comma-joined, `db,media`), `interval`, `time_of_day` (`HH:MM`), `time_zone`, `starts_on` (ISO date), `enabled`, `keep_count`, `keep_days`. The keep fields can't be set yet (#2219, part 3), and an empty value is dropped, so today they are absent |
+| `backup_schedule_changed` | Backup schedule changed | A platform admin changed a schedule: paused, resumed or edited it. Only when a field's value changed; resubmitting the same values records nothing. In the instance log; target as above | `changed` (the fields that changed, comma-joined), `components`, `interval`, `enabled` (the values after), `keep_count_before`, `keep_count_after`, `keep_days_before`, `keep_days_after` (absent today, as above) |
+| `backup_schedule_deleted` | Backup schedule deleted | A platform admin deleted a schedule. In the instance log; target as above | `components`, `interval`, `enabled`, `keep_count`, `keep_days` (absent today, as above) |
 | `api_key_reuse_detected` | Rotated API key used again | A draft-write key that had been rotated away was presented to `POST /api/keys/rotate` more than 120 seconds after its rotation, so two parties held it, and the live key of its lineage was revoked ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)). No person; the target is the presented key (target type `api_key`), the IP the request's. Raises the platform's `api_key_abuse` [alert](security-alerts.md) | `name`, `revoked` |
 | `ip_block_refused` | Blocked address refused | A request or socket connect from an address on the site's [block list](ip-blocking.md) was refused. **No IP address and no user agent**, and no person: nothing records a blocked address. Sampled: see below. Raises the site's `blocked_ip` [alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window), and is written even when the site turned that alert off | `rule`, `surface` |
 | `api_key_rate_limited` | API key hit a rate limit | An API key this server verified in the last 5 minutes went over a rate limit an API key can reach. No person (whoever presented it is not known to be the owner); the target is the key (target type `api_key`), the IP the request's. Sampled: see below. Raises the platform's `api_key_rate_limited` [alert](security-alerts.md#api-keys-over-a-rate-limit) | `name`, `bucket` |
@@ -467,6 +474,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in_unlock_refused` | `sign_in_unlock.ex`: `redeem/2` on every refusal, including the loser of two concurrent redeems (`AuthEvents.sign_in_unlock_refused/3`) | sampled, after commit; `reason` |
 | `registration_queued`, `registration_approved`, `registration_rejected` | `lib/kiln_cms/security/changes/record_registration.ex`, on `OrgMembership` `:queue_registration` (from `Changes.QueueRegistration` inside `User` `:register_with_password`, and from `SiteSso.Admission` for a new site single sign-on account), `:approve_registration`, `:approve_registration_by_invitation` (from `Invitations.grant_membership/4` when an invitation is accepted, and from `Invitations.AddOrInvite`) and `:reject_registration` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; tenant is the membership's site |
 | `backup_canceled` | `KilnCMS.Security.Changes.Record` on `Backups.Run` `:cancel` (`lib/kiln_cms/backups/run.ex`), called from the Backups page | in txn, with the cancel: if the event cannot be written the backup is not canceled; `scope: :instance`, so it goes to the instance log (`KilnCMS.Security.InstanceEvent`) |
+| `backup_schedule_created`, `backup_schedule_changed`, `backup_schedule_deleted` | `KilnCMS.Security.Changes.Record` on `Backups.Schedule` `:create`, `:update` and `:destroy` (`lib/kiln_cms/backups/schedule.ex`; metadata from `KilnCMS.Backups.Schedule.Audit`), called from a release console | in txn, with the write: if the event cannot be written the schedule does not change; `scope: :instance`; `changed` only when a field's value changed |
 | `api_key_reuse_detected` | `lib/kiln_cms/accounts/api_key_reuse.ex`: `check/2`, called by `KilnCMSWeb.ApiKeyRotationController` with the request context, after the lineage's live keys are revoked | `Recorder.record/2` outside any transaction, with `alert_required: true`: if its `api_key_abuse` alert cannot be claimed the event is not written either, and when the event is not written the platform admins get the plain reuse email instead |
 | `ip_block_refused` | `lib/kiln_cms/security/blocked_ip_alert.ex`: `note/4`, called by `KilnCMSWeb.Plugs.IpBlock` (`surface` `http`) and by `KilnCMSWeb.IpBlock.check_connect/2`, from its LiveView `on_mount` (`live`) and the `/ws/gql`, `/ws/collab` and `/ws/bridge` connects (`gql`, `collab`, `bridge`), with the rule `IpBlocklist.match/2` returned. Never by `IpBlocklist.blocked?/2`, which the scanner guard also asks | sampled, after commit, off the request path (a task under `KilnCMS.TaskSupervisor`); in-memory gates first; `request: nil`, so no IP or user agent |
 | `api_key_rate_limited` | `lib/kiln_cms/security/api_key_trip.ex`: `note/2`, called from the refusal branch of `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the `api`, `gql`, `media_upload`, `media_transform` and `plugin_endpoint` buckets | sampled, after commit, off the request path; only for a key in the node's verified-key cache (filled by `KilnCMSWeb.Plugs.ApiKeyAuth` and `KilnCMSWeb.Plugs.RememberApiKey`), reloaded and still valid; tenant from `ApiKeyTrip.owner_org_id/1`; `user: nil` |

@@ -112,6 +112,21 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Backups.Run, :count) == 0
     end
 
+    # Part of #2219: a clone must not run production's backup schedule.
+    test "disables every backup schedule and reports backup_schedules_disabled" do
+      a = KilnCMS.Test.BackupSchedules.schedule!()
+      b = KilnCMS.Test.BackupSchedules.schedule!(%{interval: :weekly})
+
+      summary = Scrub.run([])
+
+      assert summary.backup_schedules_disabled == 2
+
+      for s <- [a, b] do
+        assert %{enabled: false} =
+                 KilnCMS.Backups.get_backup_schedule!(s.id, actor: KilnCMS.Backups.system())
+      end
+    end
+
     test "purges the security audit log (raw IPs and email snapshots)" do
       KilnCMS.Security.record!(%{type: :sign_in, ip: "203.0.113.5"},
         actor: KilnCMS.Security.system(),

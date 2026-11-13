@@ -33,6 +33,27 @@ carries the reasoning.
   `platform_security_alert`; 1.9 shows them in the default site's bell as
   before. (Part of #2245.)
 
+<a id="backup-schedules-upgrade"></a>
+
+- **Run `mix ash.migrate` (new table `backup_schedules`). Nothing is scheduled until a platform admin creates a schedule; rolling the pin back is safe, and an older release ignores the table.**
+  The `add_backup_schedules` migration is expand-only: it creates one table
+  and touches nothing else. A new scheduler job (`KilnCMS.Backups.Scheduler`,
+  `KILN_BACKUP_SCHEDULER_CRON`, every minute by default on the `scheduling`
+  queue) starts with the release; with no schedules it reads an empty table
+  and does nothing. About 10 000 completed job rows a week, pruned after 7
+  days; `*/5 * * * *` is fine, and `false` turns every schedule off.
+  - **During a rolling deploy**, a node still on the previous release that
+    picks up a scheduler job discards it as an unknown worker. A window stays
+    due, so a newer node's next tick fires it.
+  - **After rolling back**, the older release has no scheduler: no schedule
+    fires, and backups come only from host cron and **Back up now**. The table
+    and its rows stay and fire again when you roll forward. Rolling the
+    migration itself back (`mix ecto.rollback`) drops the schedules.
+  - **Once you create a schedule**, the alarm threshold of each component it
+    covers follows the schedule (a weekly one raises it from 36 h to 252 h),
+    and host cron *and* a schedule on the same component take two backups
+    per window. See the Added entry below. (Part of #2219.)
+
 <a id="backup-run-dir-id-upgrade"></a>
 
 - **Run `mix ash.migrate` (new nullable `backup_runs.dir_id`); a backup resumed during a rolling deploy may run unpinned.**
@@ -90,6 +111,65 @@ carries the reasoning.
   notice. Tick it again after rolling forward. (Part of #2245.)
 
 ## Added
+
+<a id="backup-schedules"></a>
+
+- **In-app backup schedules: a platform admin can schedule database and media backups daily, weekly, fortnightly or monthly at a local time in a time zone, from a release console; the Backups page lists them.**
+  The alternative to the host's cron job (part of #2219). Created, changed
+  and deleted from a release console in this release, as a platform admin:
+
+  ```bash
+  bin/kiln_cms rpc '
+  admin = KilnCMS.Accounts.get_user_by_email!("you@example.com", authorize?: false)
+  {:ok, s} = KilnCMS.Backups.create_backup_schedule(%{components: [:db], interval: :daily,
+    time_of_day: ~T[03:00:00], starts_on: Date.utc_today(), time_zone: "Europe/Paris"}, actor: admin)
+  IO.inspect(s.id)'
+  ```
+
+  `update_backup_schedule/3` edits, pauses (`enabled: false`) and resumes
+  one, `destroy_backup_schedule/2` deletes it, and each is recorded in the
+  instance security log (`backup_schedule_created`, `_changed`, `_deleted`).
+  The **Backups** page gains a read-only **Schedules** section: each
+  schedule's cadence and components, "Paused", "Next run" (only when it can
+  fire here), the last window's outcome, and each component's alarm threshold
+  and where it came from, with a warning when `KILN_BACKUP_SCHEDULER_CRON` is
+  off or this node can't run backups. Scheduled runs read **Scheduled** in
+  History, and the Overview's backup strips mention the in-app schedules once
+  one is enabled.
+
+  How it behaves:
+  - A window fires once across every node: it is claimed in the transaction
+    that starts, queues or folds the backup. Schedules due together make one
+    backup. Only the latest window fires after downtime (missed ones are
+    logged), and a failed backup is not retried within its window.
+  - Editing a schedule's timing or components, or resuming it, rebaselines
+    it, so no window from before the edit fires. Pausing doesn't.
+  - A scheduled backup never folds into a queued Resume (#2540): the window
+    stays due and is retried every minute. A node with no `pg_dump`,
+    `pg_restore` or database URL defers the window the same way, so another
+    node can take it; each wait is logged once per window.
+    `BACKUP_ENABLED=false` refuses the window (claimed, not retried). A
+    database and media schedule ticked on a node with no media directory backs
+    up the database only, with a warning; a media-only one is refused.
+  - **Sub-daily intervals are refused** until keep-N retention ships (a later
+    part of #2219). Retention is unchanged and age-only, and every run is a
+    full set, so the sets on disk per component are about runs per day ×
+    `BACKUP_KEEP_DAYS`: a two-hourly schedule would keep 168 with the default
+    14 days.
+  - A schedule sets the alarm threshold of the components it covers
+    (interval plus half, at least 6 h: daily 36 h, weekly 252 h) only while it
+    can actually run here and has fired at least once since its baseline;
+    otherwise `BACKUP_STALE_AFTER_HOURS` applies. If host cron also backed the
+    component up in the last eight days, the lower of the two wins.
+  - Restoring a database dump brings back the schedules as they were,
+    deleted ones included, and each enabled one fires its latest window
+    within a minute. The staging scrub pauses every schedule
+    (`backup_schedules_disabled`).
+  - Telemetry: `[:kiln_cms, :backups, :schedule, :fired | :deferred |
+    :refused | :narrowed | :missed | :invalid | :unreadable]` and
+    `[:kiln_cms, :backups, :status, :schedules_unreadable]`.
+
+  See [Schedule backups in the app](../backups.md#schedule-backups-in-the-app).
 
 <a id="slack-webhook-format"></a>
 

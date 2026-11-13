@@ -481,6 +481,9 @@ defmodule KilnCMS.Application do
     {:backup_marker_sync_cron, KilnCMS.Backups.MarkerSyncWorker, "KILN_BACKUP_MARKER_SYNC_CRON",
      "backups made by host cron will NOT get a last-good marker, so backup.sh prune keeps " <>
        "only the newest complete set. See #2554."},
+    {:backup_scheduler_cron, KilnCMS.Backups.Scheduler, "KILN_BACKUP_SCHEDULER_CRON",
+     "in-app backup schedules will NOT run; backups come only from host cron or Back up " <>
+       "now. Refs #2219."},
     # Only ever set when KILN_DEMO_RESET=confirm (config/runtime.exs).
     {:demo_reset_cron, KilnCMS.Demo.ResetWorker, "KILN_DEMO_RESET_CRON",
      "the demo will NOT reset on a schedule. See docs/demo-mode.md."}
@@ -496,15 +499,41 @@ defmodule KilnCMS.Application do
   end
 
   defp cron_entry({key, worker, env_var, consequence}) do
-    case Application.get_env(:kiln_cms, key, false) do
-      cron when is_binary(cron) ->
-        case validated_cron(String.trim(cron), env_var, consequence) do
-          nil -> []
-          valid -> [{valid, worker}]
-        end
+    case cron_value(key) do
+      {:ok, cron} ->
+        [{cron, worker}]
 
-      _disabled ->
+      {:invalid, cron} ->
+        IO.puts(
+          :standard_error,
+          "#{env_var}=#{inspect(cron)} is not a valid cron expression - " <> consequence
+        )
+
         []
+
+      :off ->
+        []
+    end
+  end
+
+  @doc false
+  # The cron expression the scheduled-work key `key` resolves to, or nil when
+  # it is off or unparseable: what the crontab holds for it. Silent; the boot
+  # (`with_cron_entries/1`) is where an unparseable value warns. For a page or
+  # a status that says whether a scheduled job runs here
+  # (`KilnCMS.Backups.Scheduler.enabled?/0`).
+  @spec cron_expression(atom()) :: String.t() | nil
+  def cron_expression(key) do
+    case cron_value(key) do
+      {:ok, cron} -> cron
+      _off_or_invalid -> nil
+    end
+  end
+
+  defp cron_value(key) do
+    case Application.get_env(:kiln_cms, key, false) do
+      cron when is_binary(cron) -> parse_cron(String.trim(cron))
+      _disabled -> :off
     end
   end
 
@@ -532,22 +561,14 @@ defmodule KilnCMS.Application do
   # literal `false` the config comment names as the way to switch this off, which
   # arrives from the environment as the *string* `"false"`. A misconfigured
   # schedule must cost the schedule, never the boot.
-  defp validated_cron("", _env_var, _consequence), do: nil
+  defp parse_cron(""), do: :off
 
-  defp validated_cron(cron, _env_var, _consequence) when cron in ~w(false off no 0), do: nil
+  defp parse_cron(cron) when cron in ~w(false off no 0), do: :off
 
-  defp validated_cron(cron, env_var, consequence) do
+  defp parse_cron(cron) do
     case Oban.Cron.Expression.parse(cron) do
-      {:ok, _expression} ->
-        cron
-
-      {:error, _reason} ->
-        IO.puts(
-          :standard_error,
-          "#{env_var}=#{inspect(cron)} is not a valid cron expression - " <> consequence
-        )
-
-        nil
+      {:ok, _expression} -> {:ok, cron}
+      {:error, _reason} -> {:invalid, cron}
     end
   end
 

@@ -60,6 +60,12 @@ Meilisearch/embedding reindex) if stale.
 | Secrets/env snapshot | on change | — | password manager |
 | **Restore drill** | **quarterly** | — | recorded below |
 
+The cadence above is host cron's. An in-app schedule, created from a release
+console, can take the database and media backups instead
+([Schedule backups in the app](#schedule-backups-in-the-app), part of #2219);
+run one or the other on each component, not both, or each window takes two
+backups.
+
 Implied objectives with the nightly cadence: **RPO ≤ 24 h** (worst case, one day
 of content; tighten by raising the cron frequency — dumps are cheap at this DB
 size), **RTO ≈ 1 h** (fresh-VPS walkthrough below). If either stops being
@@ -496,7 +502,9 @@ the database and the media were last backed up, how big the last backup was,
 which files it produced and whether each verified — plus a **Back up now**
 button. For platform admins, the overview grid grows a red strip when either
 component's last good backup is older than `BACKUP_STALE_AFTER_HOURS`
-(default 36), when its last attempt failed, or when one has been backed up and
+(default 36, or the threshold an
+[in-app schedule](#how-a-schedule-sets-the-alarm-threshold) sets), when its
+last attempt failed, or when one has been backed up and
 the other never has; a neutral "Backups aren't set up yet" strip when neither
 ever has ([Check the last backup of each component](#check-the-last-backup-of-each-component)).
 
@@ -527,7 +535,11 @@ Platform admins only, like the rest of the page.
 2. Each line names the component and reads one of (for example "Database:
    Backed up 3 hours ago"):
    - "Backed up 3 hours ago": its last good backup is newer than
-     `BACKUP_STALE_AFTER_HOURS`.
+     `BACKUP_STALE_AFTER_HOURS`, or than the threshold an in-app schedule
+     sets for it
+     ([How a schedule sets the alarm threshold](#how-a-schedule-sets-the-alarm-threshold)).
+     The **Schedules** section shows each component's threshold and where it
+     came from.
    - "Last backup was 2 days ago": its last good backup is older than that.
    - "The last backup failed": the newest attempt that covered it failed.
    - "No backup has ever been recorded": neither History nor the manifest has
@@ -662,6 +674,11 @@ as before.
 | `[:kiln_cms, :backups, :lock, :reclaimed]` | `chain`, `stamp`, `step`, `node`, `outcome` (`:requeued` or `:interrupted`) | A step was taken back from a node that stopped responding ([below](#several-nodes-and-the-backup-lock)). |
 | `[:kiln_cms, :backups, :status, :history_unreadable]` | `error` (the error's module) | The status could not read History and fell back to the manifest ([above](#check-the-last-backup-of-each-component)). |
 
+The in-app schedules emit their own events,
+`[:kiln_cms, :backups, :schedule, …]` and
+`[:kiln_cms, :backups, :status, :schedules_unreadable]`
+([The scheduler job](#the-scheduler-job)).
+
 ### Back up while another backup runs
 
 **Back up now** stays enabled while a backup runs. Platform admins only, like
@@ -712,9 +729,10 @@ queued").
 
 Folding them would lose work: a resume finishes the old backup's stamp, so a
 fresh backup folded into it would never be taken, and a resume folded into a
-fresh backup would never resume. In-app schedules (#2219, planned and not in
-v1.9) will get the same answer: a scheduled tick is never folded into a queued Resume,
-and is retried on a later tick once the queue clears.
+fresh backup would never resume. In-app schedules (part of #2219) get the same
+answer: a scheduled backup is never folded into a queued Resume. Its window
+stays due and is asked for again every minute until the queue clears
+([When a schedule fires](#when-a-schedule-fires)).
 
 **What the queued backup covers after a fold.** A request that folds into a
 queued backup never leaves it covering less than either asked for:
@@ -1043,6 +1061,280 @@ safe, but a partial request can turn into a full one:
 
 Nothing is backed up less than asked for. Once every node runs this release,
 partial requests are kept as asked.
+
+### Schedule backups in the app
+
+An in-app schedule takes backups from inside the application, as an
+alternative to the host's cron job (part of #2219). It runs the same backup as
+**Back up now**, through the same lock and queue, and writes the same files.
+In this release a schedule is **created, changed and deleted from a release
+console only**; the **Backups** page lists the schedules read-only. Only a
+platform admin may manage them: the actor must be an account whose effective
+platform role is admin.
+
+**Before you start:** a running release with the `add_backup_schedules`
+migration applied, in-app backups working on at least one node (**Back up
+now** succeeds), and the email address of a platform admin account.
+
+1. Create the schedule on a running node with `rpc`. This one backs up the
+   database every day at 03:00 Paris time, starting today:
+
+   ```bash
+   bin/kiln_cms rpc '
+   admin = KilnCMS.Accounts.get_user_by_email!("you@example.com", authorize?: false)
+
+   {:ok, s} =
+     KilnCMS.Backups.create_backup_schedule(
+       %{components: [:db], interval: :daily, time_of_day: ~T[03:00:00],
+         starts_on: Date.utc_today(), time_zone: "Europe/Paris"},
+       actor: admin
+     )
+
+   IO.inspect(Map.take(s, [:id, :interval, :time_of_day, :time_zone, :starts_on, :enabled, :baseline_at]))'
+   # %{baseline_at: ~U[2026-11-12 10:41:07.512903Z], enabled: true, id: "0c4e…",
+   #   interval: :daily, starts_on: ~D[2026-11-12], time_of_day: ~T[03:00:00],
+   #   time_zone: "Europe/Paris"}
+   ```
+
+   The match makes `rpc` fail loudly on a refusal rather than exit 0. The
+   fields are:
+
+   | Field | Values | Default |
+   |---|---|---|
+   | `components` | `[:db]`, `[:media]` or `[:db, :media]` (de-duplicated and put in that order) | required |
+   | `interval` | `:daily`, `:weekly`, `:fortnightly` or `:monthly` ([sub-daily ones are refused](#sub-daily-schedules-wait-for-keep-n-retention)) | required |
+   | `time_of_day` | local wall time in `time_zone`, cut to the minute | required |
+   | `starts_on` | a local date in `time_zone`; nothing fires before it. Weekly and fortnightly take their weekday from it, fortnightly also its week parity, monthly its day of the month (the 31st becomes the month's last day) | required |
+   | `time_zone` | an IANA zone such as `"Europe/Paris"` | `"Etc/UTC"` |
+   | `enabled` | `true` or `false` | `true` |
+
+   The create is recorded in the instance security log as **Backup schedule
+   created** ([security-events.md](security-events.md#the-instance-log)).
+2. Open **Backups** (`/editor/backups`) as a platform admin. The **Schedules**
+   section, above **History**, has one line per schedule: its cadence ("Every
+   day at 03:00 (Europe/Paris)", "Every week on Thursday at 02:30 (Etc/UTC)",
+   "Every 2 weeks on Thursday at 02:30 (Etc/UTC), from 2026-01-01", "Every
+   month on day 15 at 03:00 (Etc/UTC)"), what it backs up ("Database",
+   "Database + Media") and "Next run: in 16 hours".
+3. After the window has passed, the schedule's line reads "Last window:
+   started", and **History** has a new row whose trigger reads **Scheduled**.
+
+**Other calls**, each with `actor: admin` as above:
+
+- **List them:** `KilnCMS.Backups.list_backup_schedules(actor: admin)`.
+- **Fetch one:** `KilnCMS.Backups.get_backup_schedule(id, actor: admin)`
+  (`{:ok, nil}` when there is none).
+- **Change one:** `KilnCMS.Backups.update_backup_schedule(s, %{time_of_day: ~T[02:00:00]}, actor: admin)`.
+  It accepts the same six fields; anything else is refused.
+- **Pause and resume:** `update_backup_schedule(s, %{enabled: false}, actor: admin)`,
+  then `%{enabled: true}`. A paused schedule keeps its settings and its line
+  reads "Paused".
+- **Delete one:** `KilnCMS.Backups.destroy_backup_schedule(s, actor: admin)`
+  returns `:ok`.
+
+Every change that alters a field is recorded as **Backup schedule changed**,
+and a delete as **Backup schedule deleted**. A change that resubmits the same
+values records nothing.
+
+**What can go wrong:**
+
+| Error | Meaning |
+|---|---|
+| `time_zone`: "is not a known time zone" | The zone isn't in the time zone database. Use an IANA name (`"Europe/Paris"`, `"America/New_York"`), not an abbreviation (`"CET"`). |
+| `interval`: "sub-daily schedules arrive with keep-N retention; choose daily or longer" | `:every_2h`, `:every_4h`, `:every_8h` or `:every_12h` ([below](#sub-daily-schedules-wait-for-keep-n-retention)). |
+| `components`: "media isn't archived on this deployment" | `:media` on a deployment with no media directory (S3 media, or no `MEDIA_DIR`). |
+| `Ash.Error.Invalid` on `components` or `interval` | An empty list, a component other than `:db` or `:media`, or an interval that doesn't exist. |
+| `Ash.Error.Forbidden` | The actor is not a platform admin (a site admin is not enough), or you passed `KilnCMS.Backups.system()`, which may not manage schedules. |
+| `** (Ash.Error.Query.NotFound)` from `get_user_by_email!` | No account has that email address. |
+
+### What the Schedules list shows
+
+Everything in the section comes from the same status the alarm uses, so a
+"Next run" shown there is one the scheduler will act on:
+
+- **"Next run: in 16 hours"** (or "due now") only when the schedule can fire
+  here: it is enabled, the scheduler is on, this node can run backups, and it
+  covers a component this deployment has. Otherwise there is no next run.
+- **"Paused"** for a disabled schedule.
+- **The last window's outcome:** "Last window: started", "Last window: queued
+  behind another backup", "Last window: joined a queued backup", "Waiting:
+  another kind of backup is queued; this one starts once the queue clears.",
+  "Waiting: the server that checked can't run backups (`<reason>`); another
+  server can take it." (`no_pg_dump`, `no_pg_restore` or `no_database_url` on
+  the node that ticked), or "Last window refused: `<reason>`" (`disabled` or
+  `no_media_dir`).
+- **One alarm line per component**, with its threshold and where it came from:
+  "Alarm after 36 hours without a good backup (BACKUP_STALE_AFTER_HOURS)",
+  "Alarm after 252 hours without a good backup (its schedule)", or "Alarm after
+  36 hours without a good backup (BACKUP_STALE_AFTER_HOURS; host cron backs it
+  up too)" ([below](#how-a-schedule-sets-the-alarm-threshold)).
+- **Warnings:** "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
+  when the scheduler job is off, and "Scheduled backups can't run here:
+  `<reason>`" when this node can't run backups (`BACKUP_ENABLED=false`, no
+  database connection, or no PostgreSQL client tools).
+- "No schedules yet. Backups run when you click Back up now, or from the
+  host's cron job." when there are none, and "Couldn't load the backup
+  schedules." when they can't be read (the thresholds are then the
+  environment's).
+
+Once an enabled schedule exists, the **Overview** page's backup strips for
+platform admins say that scheduled backups run "from the in-app schedules
+listed on the Backups page or from" the host's cron job, rather than from cron
+alone.
+
+### When a schedule fires
+
+`KilnCMS.Backups.Scheduler` runs every minute on the `scheduling` queue
+(`KILN_BACKUP_SCHEDULER_CRON`). Each tick reads the enabled schedules and asks
+for a backup for every schedule whose **window** (one occurrence, such as
+"03:00 Paris on 12 November") has come and not yet been claimed. The claim is
+written in the same transaction that starts, queues or folds the backup, so a
+window fires once however many nodes tick.
+
+- **Schedules due together make one backup.** Two schedules due in the same
+  minute (a database one and a media one, say) are one backup covering both,
+  not one queued behind the other.
+- **It goes through the queue like Back up now.** While a backup runs, the
+  scheduled one queues behind it ("Last window: queued behind another
+  backup"), or folds into a queued fresh backup ("Last window: joined a queued
+  backup"). It never folds into a queued **Resume** (#2540): the window stays
+  due, is asked for again every minute, and starts once the queue clears. The
+  wait is logged once per window, "Scheduled backup `<id>` waits: a resume of
+  `<stamp>` is queued; …".
+- **Only the latest window fires.** A window that passed while nothing ran the
+  scheduler (the app was down, or the job was off) is not made up later: when
+  the scheduler runs again, the latest window fires within a minute, and
+  earlier skipped ones are logged once, "Scheduled backup `<id>` missed earlier
+  windows (nothing ran the scheduler): only the latest one runs".
+- **No retry within a window.** A window is claimed when its backup is asked
+  for. If that backup then fails (after its steps' own retries), the schedule
+  waits for its next window; take one with **Back up now** or **Resume** in
+  the meantime.
+- **Editing rebaselines it.** Changing the interval, time, time zone, start
+  date or components, or resuming a paused schedule, means no window from
+  before the change fires: moving a 03:00 schedule to 02:00 at 02:30 doesn't
+  fire 02:00 at once, and resuming a schedule paused for a week doesn't fire
+  the window it missed. Pausing changes nothing else.
+- **Time zones and daylight saving.** A time that doesn't exist on a
+  spring-forward night moves forward past the gap (02:30 fires at 03:00 local),
+  and a time that occurs twice on a fall-back night fires at its first
+  occurrence. It fires once either way.
+- **Media on a node without a media directory.** The node that ticks decides.
+  A database and media schedule there backs up the database only, with the
+  warning "Scheduled backup `<id>` covers the media, but this node has no
+  media directory configured (MEDIA_DIR): only the database is backed up". A
+  media-only schedule there has nothing to back up: its window is refused
+  ("Last window refused: no_media_dir").
+- **`BACKUP_ENABLED=false` refuses each window.** The window is claimed as
+  refused ("Last window refused: disabled", logged once), so nothing asks
+  again until the next window.
+- **A node that can't run backups defers the window.** With no `pg_dump`, no
+  `pg_restore` or no database URL on the node that ticked, the window stays
+  due and is asked for again every minute, so a node that can run backups
+  takes it. The wait is logged once per window, "Scheduled backup `<id>` waits:
+  :no_pg_dump on this node; …".
+- **Host cron and a schedule on one component take two backups.** The
+  scheduler does not know about cron. Turn one of them off, or schedule them
+  apart (cron does not take the backup lock).
+- **Retention is unchanged.** Every scheduled backup is a full set of its
+  components and is pruned by `BACKUP_KEEP_DAYS` like any other
+  ([What retention deletes and what it keeps](#what-retention-deletes-and-what-it-keeps)).
+  A schedule does not change what is deleted.
+
+### Sub-daily schedules wait for keep-N retention
+
+`:every_2h`, `:every_4h`, `:every_8h` and `:every_12h` exist in the schema but
+are refused when a schedule is created or its interval changed, until keep-N
+retention (a later part of #2219) can cap how many backups a schedule keeps.
+Retention today is by age alone, and every run is a full set, so the sets on
+disk for each component are about:
+
+> runs per day × `BACKUP_KEEP_DAYS`
+
+With the default 14 days, a daily schedule keeps about 14 sets of each
+component it covers; a two-hourly one would keep 12 × 14 = 168, each a full
+database dump (and a full media archive, if it covers media). Need more than
+one backup a day now? Run host cron more often, where you control what
+`backup.sh prune` keeps.
+
+### How a schedule sets the alarm threshold
+
+Without a schedule, a component's last good backup is stale after
+`BACKUP_STALE_AFTER_HOURS` (default 36). A schedule replaces that threshold for
+the components it covers, but only while it is known to run: this node can
+run backups, the scheduler is on, the schedule is enabled, its last window was
+not refused, and at least one of its windows has come since it was created or
+last rebaselined (and since `starts_on`). Until then the environment's
+threshold applies, so a schedule that never fires never silences the alarm.
+
+The threshold is the interval plus half of it, at least six hours, for the
+shortest such schedule on that component:
+
+| Interval | Stale after |
+|---|---|
+| daily | 36 h |
+| weekly | 252 h |
+| fortnightly | 504 h |
+| monthly | 1116 h |
+
+A weekly schedule therefore **raises** the threshold from the default 36 h:
+weekly backups are not an alarm on day two. When host cron has also backed the
+component up in the last eight days (an imported run with trigger `cron`), the
+threshold is the lower of the schedule's and `BACKUP_STALE_AFTER_HOURS`, and
+the Backups page says "host cron backs it up too".
+
+### Restoring the database brings back the schedules
+
+The schedules are rows in the database, so restoring a dump restores them as
+they were when it was taken: deleted schedules come back, paused or enabled as
+they were then, with the last window they had claimed. On the first tick after
+the restore, each enabled schedule whose latest window is newer than that fires
+within a minute (one extra backup). To avoid it, pause the schedules before
+anything ticks: start the restored release with `KILN_BACKUP_SCHEDULER_CRON=false`,
+pause or delete them from a console, then unset the variable and restart.
+
+A staging clone made with the [staging scrub](staging-environments.md#the-scrub)
+pauses every schedule (`backup_schedules_disabled` in the scrub's summary), so
+a clone never runs production's schedules against its own backup directory.
+
+### The scheduler job
+
+`KILN_BACKUP_SCHEDULER_CRON` (default `* * * * *`) is when the scheduler checks
+the schedules, not when they fire: a window is the schedule's own time, so a
+coarser cadence such as `*/5 * * * *` only makes a backup start up to five
+minutes late. Every minute leaves about 10 000 completed job rows a week, which
+Oban prunes after 7 days. `false` (also `off`, `no`, `0` or blank) turns every
+schedule off, and the Backups page says so; an unparseable value does the same
+and warns on stderr at boot. It is read in every environment, and
+`BACKUP_ENABLED=false` does not remove it
+([environment-variables.md](environment-variables.md)).
+
+From a console, `KilnCMS.Backups.Scheduler.tick(DateTime.utc_now())` runs one
+tick now and returns `:ok`; what it did is in the log and the telemetry below.
+
+**Telemetry.** Each event has measurements `%{count: n}`, emitted only when
+`n` is above zero:
+
+| Event | Metadata | When |
+|---|---|---|
+| `[:kiln_cms, :backups, :schedule, :fired]` | `status` (`:started`, `:queued` or `:folded`), `schedule_ids`, `chain` | A tick asked for a backup and claimed the windows. |
+| `[:kiln_cms, :backups, :schedule, :deferred]` | `schedule_ids` | Due windows were refused for now (a queued Resume, or this node can't run backups). Every tick while they wait; the log line is once per window. |
+| `[:kiln_cms, :backups, :schedule, :refused]` | `schedule_ids` | Windows were claimed as refused (`BACKUP_ENABLED=false`, or media-only with no media directory). |
+| `[:kiln_cms, :backups, :schedule, :narrowed]` | `schedule_ids` | Database and media schedules backed up the database only (no media directory on this node). |
+| `[:kiln_cms, :backups, :schedule, :missed]` | `schedule_ids` | Schedules skipped earlier windows; only the latest fired. |
+| `[:kiln_cms, :backups, :schedule, :invalid]` | `schedule_ids` (one) | A schedule's window can't be computed (an interval, zone or component this release doesn't know). Logged at most once an hour per schedule per node. |
+| `[:kiln_cms, :backups, :schedule, :unreadable]` | `error` (the error's module) | The tick couldn't read the schedules. Logged at most once every 15 minutes. |
+| `[:kiln_cms, :backups, :status, :schedules_unreadable]` | `error` (the error's module) | The status couldn't read the schedules and used `BACKUP_STALE_AFTER_HOURS` for every component. Logged at most once every 15 minutes. |
+
+**Rolling deploys and rolling back.** The `add_backup_schedules` migration
+only creates the `backup_schedules` table, so an older release runs against
+it unchanged. During a rolling deploy a node from before this release that
+picks up a scheduler job discards it as an unknown worker; the window stays
+due, and the next tick on a newer node fires it. After rolling back, the
+older release has no scheduler, so **no schedule fires**: make sure host cron
+covers you. The table and its rows stay, and fire again when you roll
+forward. (`mix ecto.rollback` of the migration drops the table and the
+schedules with it.)
 
 ### Media backups in parts (#2218)
 
@@ -1628,6 +1920,12 @@ env snapshot. Order matters.
    `SECRET_KEY_BASE`** (see above), `DATABASE_URL`, storage/OIDC/SMTP vars —
    and deploy. Boot runs `bin/migrate`, which also catches the dump up to a
    newer image's schema.
+   The restored database holds the in-app backup schedules as they were when
+   the dump was taken, and each enabled one fires its latest window within a
+   minute of the app starting
+   ([Restoring the database brings back the schedules](#restoring-the-database-brings-back-the-schedules)).
+   Set `KILN_BACKUP_SCHEDULER_CRON=false` for the first boot if that backup
+   is unwanted.
 6. **Verify** (the same checks the drill runs, plus app-level):
    - sign in; content list renders; a published page serves publicly
    - media renders (an image URL resolves)
@@ -1753,7 +2051,8 @@ The app reads them in production only.
 | `BACKUP_KEEP_DAYS` | backup + app | local retention (default 14): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)) |
 | `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
 | `KILN_BACKUP_MARKER_SYNC_CRON` | app | when the app moves the [last-good markers](#the-last-good-marker) for cron's backups (default `*/15 * * * *`; `false` turns it off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
-| `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36) |
+| `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36); an in-app schedule replaces it for the components it covers ([threshold rules](#how-a-schedule-sets-the-alarm-threshold)) |
+| `KILN_BACKUP_SCHEDULER_CRON` | app | when the app checks its [in-app schedules](#schedule-backups-in-the-app) (default `* * * * *`; `false` turns every schedule off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
 | `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
 | `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |

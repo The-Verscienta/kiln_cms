@@ -34,6 +34,7 @@ defmodule KilnCMS.Staging.Scrub do
           billing_settings_purged: non_neg_integer(),
           billing_events_purged: non_neg_integer(),
           backup_runs_purged: non_neg_integer(),
+          backup_schedules_disabled: non_neg_integer(),
           security_events_purged: non_neg_integer(),
           instance_security_events_purged: non_neg_integer(),
           security_alert_dispatches_purged: non_neg_integer(),
@@ -96,6 +97,15 @@ defmodule KilnCMS.Staging.Scrub do
     # carry it, and the staging host's own backups start a history of their own.
     {backup_runs_purged, _} = Repo.delete_all(KilnCMS.Backups.Run)
 
+    # In-app backup schedules (part of #2219) are paused, not deleted: a clone
+    # must not run production's schedule against the staging host's backup
+    # directory, but whoever runs staging can see them and resume one.
+    {backup_schedules_disabled, _} =
+      Repo.update_all(
+        from(s in KilnCMS.Backups.Schedule, where: s.enabled == true),
+        set: [enabled: false]
+      )
+
     # The security audit log (#2241) holds raw IPs, user agents and email
     # snapshots of the production sign-ins: personal data a clone must not carry.
     {security_events_purged, _} = Repo.delete_all(KilnCMS.Security.Event)
@@ -154,6 +164,7 @@ defmodule KilnCMS.Staging.Scrub do
       billing_settings_purged: billing_settings_purged,
       billing_events_purged: billing_events_purged,
       backup_runs_purged: backup_runs_purged,
+      backup_schedules_disabled: backup_schedules_disabled,
       security_events_purged: security_events_purged,
       instance_security_events_purged: instance_security_events_purged,
       security_alert_dispatches_purged: security_alert_dispatches_purged,
