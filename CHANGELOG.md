@@ -180,7 +180,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2899](https://github.com/The-Verscienta/kiln_cms/pull/2899) · [long form](docs/changelog/unreleased.md#second-factor-help-follows-the-host))
 
 - **Calendar chips offer the drag and arrow keys only to someone who may move that date; the content list's bulk bar now says why it skipped rows.**
-  ([long form](docs/changelog/unreleased.md#calendar-drag-and-bulk-skip-reason))
+  ([#2916](https://github.com/The-Verscienta/kiln_cms/pull/2916) · [long form](docs/changelog/unreleased.md#calendar-drag-and-bulk-skip-reason))
 
 - **MCP read tools' `custom_filter`, `custom_where` and `custom_sort` are documented (snake_case input, though some errors spell `notEq`/`dateTime`); JSON:API's `custom_where` takes one condition per query string, and the indexed form is a `400`.**
   ([#2914](https://github.com/The-Verscienta/kiln_cms/pull/2914) · [long form](docs/changelog/unreleased.md#mcp-custom-field-filters-documented))
