@@ -345,6 +345,19 @@ Because anonymous traffic writes this table, three bounds apply, all in
 * **off-request writes** — the upsert runs in a supervised task, so delivery
   never waits on it and a spike drops counters rather than queueing 404s.
 
+A path that carries a credential is never recorded (#2449). A mangled sign-in
+or preview link (`/magic_link/<token>/x`, `/fr/password-reset/<token>/x`)
+falls through to the 404 catch-all like any other dead URL, but the list is
+visible to admins and a stored token is a working one, so the miss is dropped
+before any DB work. The test is `KilnCMSWeb.RequestRedaction`'s: the path,
+with its locale already stripped, starts with a route whose parameter name
+contains `token` or `secret` (`/magic_link/:token`, `/auth/invite/:invite_token`,
+`/preview/:token`, `/newsletter/confirm/:token` and the rest). A token route
+name further in is an ordinary miss: `/products/magic_link/old-page` is
+recorded. If the router cannot be read to build those patterns, every path
+counts as a credential and nothing is recorded until it can (retried after 30
+seconds).
+
 The path recorded is the one delivery actually resolved against — routed and
 percent-decoded, empty segments collapsed — so the tab's one-click redirect
 writes a rule that fires, and one URL can't occupy several rows.

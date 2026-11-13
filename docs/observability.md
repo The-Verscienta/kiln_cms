@@ -693,6 +693,66 @@ node can't reach its DNS resolver, so search-engine claims stay unverified
 
 The thresholds are placeholders. Set them from a week of your own traffic.
 
+## Request log lines for token links
+
+Phoenix writes two lines per request at `:info`, the production level:
+`GET <path>` when it starts and `Sent <status> in <duration>` when it ends.
+Several links carry their credential in the path: a magic sign-in link, a
+password reset, an account confirmation, a site invitation, a sign-in unlock,
+a preview link and a newsletter confirm or unsubscribe link. Whoever reads
+the log could follow one of those as it is written there, and
+`:filter_parameters` cannot help, because it filters params maps, never a
+path. So for those paths the start line shows the credential as `[FILTERED]`
+(#2449):
+
+```text
+GET /magic_link/[FILTERED]
+GET /auth/invite/[FILTERED]
+POST /newsletter/unsubscribe/[FILTERED]
+GET /fr/magic_link/[FILTERED]
+Sent 200 in 4ms
+```
+
+Every other request logs exactly as Phoenix logs it. The redacted start line
+is written by `KilnCMSWeb.RequestLog` (the endpoint's `Plug.Telemetry` `log:`
+callback) instead of by Phoenix, from the request process, so it carries the
+same `request_id` metadata as the `Sent` line that follows it, which Phoenix
+still writes. A log query that joins the two lines on `request_id` keeps
+working.
+
+Which paths count is read off the router (`KilnCMSWeb.RequestRedaction`), not
+kept as a list: a route whose parameter name contains `token` or `secret`
+(`:token`, `:invite_token`, `:unlock_token`) is a credential route, so a token
+route added later, by the core or a plugin, is covered the day it is added.
+The match deliberately errs toward redacting:
+
+- **Locale prefixes.** The line is written before the locale prefix is
+  stripped, so a route is matched at the first segment and at the second,
+  whatever locales are configured. `/fr/magic_link/<token>` is caught, and so
+  is a path that only looks like a token route one segment in:
+  `/products/magic_link/old-page` logs as `/products/magic_link/[FILTERED]`.
+- **Trailing segments are kept.** A mangled link logs as
+  `/magic_link/[FILTERED]/x`.
+- **Every matching route applies.** `/preview/release/<token>` matches both
+  `/preview/:token` and `/preview/release/:token`, so it logs as
+  `/preview/[FILTERED]/[FILTERED]`.
+- **Empty segments are dropped**, as the router drops them: `//magic_link/<token>`
+  logs as `/magic_link/[FILTERED]`.
+
+An odd `[FILTERED]` on a path that is not a token link is the cost of never
+logging one that is.
+
+If the router cannot be read to build the route patterns, redaction fails
+closed. Each failed attempt logs at `error`:
+
+```text
+request path redaction could not read the router (...); every request path is logged as /[FILTERED] until it can
+```
+
+Until then every start line is `GET /[FILTERED]` (with the request's own
+method). The next request at least 30 seconds after a failure tries again. While that lasts, no path is
+recorded in the [404 list](data-flows.md#404-capture-472) either.
+
 ## Error tracking (Sentry)
 
 Crashes and unhandled exceptions are reported to [Sentry](https://sentry.io) when

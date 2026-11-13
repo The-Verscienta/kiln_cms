@@ -207,6 +207,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Crawler verification: a lookup turned away as busy no longer spends the network and node lookup budgets, and verified crawlers keep their cached result through a flood of rejected lookups (own 10,000-entry cache).**
   ([long form](docs/changelog/unreleased.md#crawler-verification-hardening))
 
+- **Credential tokens in sign-in, invitation, preview and newsletter links are redacted from the request log and not recorded as missed paths.**
+  ([long form](docs/changelog/unreleased.md#token-paths-redacted-from-request-log))
+
 ## [1.9.2] - 2026-11-12
 
 Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —

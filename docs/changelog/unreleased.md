@@ -1187,3 +1187,51 @@ carries the reasoning.
     rented networks can still spend the node's 600 lookups a minute with
     real lookups; and published IP ranges are not read yet (#2586). See
     [the threat model](../threat-model.md#bot-budgets).
+
+<a id="token-paths-redacted-from-request-log"></a>
+
+- **Credential tokens in sign-in, invitation, preview and newsletter links are redacted from the request log and not recorded as missed paths.**
+  A magic sign-in link, password reset, account confirmation, site
+  invitation, sign-in unlock, preview link and newsletter confirm or
+  unsubscribe link each carry their secret in the URL path. Phoenix's
+  request line (`GET <path>`, at `:info`) wrote that path out whole, token
+  included, so anyone who could read the request log could follow the link
+  while it was still valid; `:filter_parameters` filters params maps, never a
+  path. A mangled link (`/magic_link/<token>/x`) also fell through to the 404
+  catch-all and was stored in the missed-path list on `/editor/redirects`.
+
+  Now the request line for such a path shows the token as `[FILTERED]`
+  (`GET /magic_link/[FILTERED]`, `GET /fr/preview/[FILTERED]/live`), and a
+  path that starts with one is never recorded as a missed path. Every other
+  request line is unchanged, and the `Sent <status> in <duration>` line is
+  still Phoenix's. The redacted start line is written by
+  `KilnCMSWeb.RequestLog` from the request process, so it carries the same
+  `request_id` metadata as before.
+
+  The set of credential routes is read off the router, not kept as a list: a
+  route whose parameter name contains `token` or `secret` is one, so a new
+  token route, in the core or a plugin, is covered without a change here. The
+  match over-redacts on purpose: it is tried at the first and second path
+  segment because the line is written before the locale prefix is stripped,
+  so a path that only resembles a token route one segment in
+  (`/products/magic_link/old-page`) is logged with its last segment as
+  `[FILTERED]`. If the router cannot be read, it fails closed: every request
+  line is `<METHOD> /[FILTERED]`, nothing is added to the missed-path list,
+  an error is logged, and it retries after 30 seconds. See
+  [Request log lines for token links](../observability.md#request-log-lines-for-token-links).
+
+  Operators: nothing to configure, no migration. Request logs written before
+  this release still hold the tokens of the links they recorded; most have
+  expired, but treat those logs as sensitive until they age out. Missed-path
+  rows already stored are not touched: an admin can remove one that holds a
+  token with its remove button (the x, "Remove … from the 404 list") on the
+  **404s** tab of `/editor/redirects`; otherwise it is purged 30 days (the
+  default `retention_days`) after its last hit.
+
+  Plugin authors: name a path parameter that carries a credential with
+  `token` or `secret` in it. Routes below a `forward` (a plugin's
+  `{:forward, …}` plug route included) are not seen, so a forwarded router
+  must keep credentials out of its paths; see "Credentials in the path" under
+  Plug routes in [Plugin extensibility](../plugin-extensibility.md).
+  New public functions: `KilnCMSWeb.RequestRedaction.redact/2`,
+  `redact_path/1`, `secret?/2`, `credential_param?/1`. (#2449)

@@ -41,7 +41,7 @@ defmodule KilnCMSWeb.MissedPathTracking do
   referrer or actor is read here, let alone stored. A path that carries a
   credential (`KilnCMSWeb.RequestRedaction` — a mangled `/magic_link/<token>/x`
   falls through to the catch-all and lands here) is not recorded at all: the
-  list is visible to editors, and a stored token is a working one (#2449).
+  list is visible to site admins, and a stored token is a working one (#2449).
   """
 
   require Ash.Query
