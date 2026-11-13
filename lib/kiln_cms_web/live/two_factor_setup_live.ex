@@ -25,6 +25,12 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
       and replacing it after a recovery-code sign-in;
     * a passkey, on a host where the ceremony can run
       (`KilnCMS.Accounts.WebAuthn.ceremony_host?/1`);
+    * the account's passkeys, each with "Remove" (#2900), on any host, since
+      removing needs no ceremony: this is the only page a reader can manage
+      them on. As on `/editor/settings`, the last factor a site requires has
+      a note instead of the button, and `Passkey.:destroy` refuses it
+      regardless (`KeepsRequiredSecondFactor`). No email proof is asked: it
+      gates adding a factor, not removing one;
     * with `?reminder=1` and only during the grace period, "Not now";
     * for a reader held by a site that requires everyone, "Manage billing"
       and "Export my data" (decision 4): both stay reachable for them;
@@ -81,6 +87,9 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
      |> assign(:passkeys, WebAuthn.list(user))
      |> assign(:passkey_challenge, nil)
      |> assign(:passkey_capable?, passkey_capable?(socket))
+     # Whether a site this account uses requires a second factor, as on
+     # `/editor/settings`: if so, the last passkey left has no "Remove".
+     |> assign(:second_factor_required?, TwoFactorRequirement.required_somewhere?(user))
      |> assign(:return_to, default_return(tier))
      |> assign(:reminder?, false)
      |> assign_status()}
@@ -225,6 +234,27 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
 
   def handle_event("passkey_cancel", _params, socket),
     do: {:noreply, assign(socket, :passkey_challenge, nil)}
+
+  # As `/editor/settings`: the action decides (owner only, not the demo
+  # account, not the last factor a site requires) and records
+  # `passkey_removed` with this session's context.
+  def handle_event("remove_passkey", %{"id" => id}, socket) when is_binary(id) do
+    user = socket.assigns.current_user
+
+    socket =
+      case TotpEnrolment.remove_passkey(user, id, socket.assigns.security_context) do
+        {:ok, message} ->
+          socket
+          |> assign(:passkeys, WebAuthn.list(user))
+          |> assign_status()
+          |> put_flash(:info, message)
+
+        {:error, message} ->
+          put_flash(socket, :error, message)
+      end
+
+    {:noreply, socket}
+  end
 
   @impl true
   def handle_async(:send_proof_code, {:ok, result}, socket) do
@@ -503,7 +533,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
         </section>
 
         <section
-          :if={!@credentials_locked? && @passkey_capable?}
+          :if={!@credentials_locked? && (@passkey_capable? || @passkeys != [])}
           id="two-factor-passkey"
           phx-hook="PasskeyEnroll"
           class="card card-pad space-y-3"
@@ -522,8 +552,46 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
               count: length(@passkeys)
             )}
           </p>
+          <ul :if={@passkeys != []} id="passkey-list" class="divide-y divide-base-content/10">
+            <li
+              :for={passkey <- @passkeys}
+              id={"passkey-#{passkey.id}"}
+              class="flex items-center justify-between gap-3 py-2"
+            >
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium">{passkey.name}</p>
+                <p class="text-xs text-base-content/70">
+                  {gettext("Added %{date}", date: on_date(passkey.inserted_at))}
+                  <span :if={passkey.last_used_at}>
+                    · {gettext("last used %{date}", date: on_date(passkey.last_used_at))}
+                  </span>
+                </p>
+              </div>
+              <button
+                :if={
+                  !TotpEnrolment.last_factor?(
+                    @second_factor_required?,
+                    @totp_enabled?,
+                    @passkeys,
+                    :passkey
+                  )
+                }
+                type="button"
+                phx-click="remove_passkey"
+                phx-value-id={passkey.id}
+                data-confirm={gettext("Remove this passkey? You can no longer sign in with it.")}
+                aria-label={gettext("Remove passkey")}
+                class="btn btn-sm btn-ghost text-base-content/70 hover:text-error"
+              >
+                <.icon name="hero-trash" class="size-4" />
+              </button>
+            </li>
+          </ul>
+          <TotpEnrolment.last_factor_note :if={
+            TotpEnrolment.last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
+          } />
           <p
-            :if={length(@passkeys) >= Passkey.max_per_account()}
+            :if={@passkey_capable? && length(@passkeys) >= Passkey.max_per_account()}
             id="passkeys-at-limit"
             class="flex items-center gap-1.5 text-sm text-base-content/70"
           >
@@ -531,7 +599,10 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
             {TotpEnrolment.passkey_limit_message()}
           </p>
           <form
-            :if={!@passkey_challenge && length(@passkeys) < Passkey.max_per_account()}
+            :if={
+              @passkey_capable? && !@passkey_challenge &&
+                length(@passkeys) < Passkey.max_per_account()
+            }
             id="add-passkey-form"
             phx-submit="passkey_begin"
             class="flex items-end gap-2"
@@ -551,7 +622,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
                 (`NotifyFactorAdded`, `SecondFactorNotice`). Hidden with the
                 form once the account holds the most it may. --%>
           <p
-            :if={length(@passkeys) < Passkey.max_per_account()}
+            :if={@passkey_capable? && length(@passkeys) < Passkey.max_per_account()}
             id="passkey-added-mail"
             class="text-xs text-base-content/70"
           >

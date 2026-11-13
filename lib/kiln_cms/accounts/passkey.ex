@@ -8,7 +8,8 @@ defmodule KilnCMS.Accounts.Passkey do
   key). The ceremony itself — challenge minting, attestation and assertion
   verification — lives in `KilnCMS.Accounts.WebAuthn`; this resource is the
   storage + self-service management surface (list/rename/remove in
-  `/editor/settings`).
+  `/editor/settings`; list and remove on `/account/two-factor`, the page a
+  reader can reach, #2900).
 
   Writes happen only from the ceremony code after cryptographic verification
   (`authorize?: false` system calls); the policies expose reads and destroys to
@@ -47,7 +48,7 @@ defmodule KilnCMS.Accounts.Passkey do
     defaults [:read]
 
     read :for_user do
-      description "A user's registered passkeys (backs /editor/settings)."
+      description "A user's registered passkeys (backs /editor/settings and /account/two-factor)."
       argument :user_id, :uuid, allow_nil?: false
       filter expr(user_id == ^arg(:user_id))
     end

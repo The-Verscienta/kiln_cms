@@ -2997,6 +2997,7 @@ msgid "Added %{count} item(s); %{skipped} skipped — already in another open re
 msgstr "Se añadieron %{count} elemento(s); %{skipped} omitido(s) — ya están en otro lanzamiento abierto o no se pueden añadir"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Added %{date}"
 msgstr "Añadido el %{date}"
@@ -6650,7 +6651,7 @@ msgstr "No se pudo quitar ese elemento."
 msgid "Couldn't remove that member."
 msgstr "No se pudo quitar a ese miembro."
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't remove that passkey."
 msgstr "No se pudo eliminar esa clave de acceso."
@@ -15780,7 +15781,7 @@ msgstr "Clave de acceso añadida: ya puede iniciar sesión con ella."
 msgid "Passkey removed"
 msgstr "Llave de acceso eliminada"
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey removed."
 msgstr "Clave de acceso eliminada."
@@ -17498,6 +17499,7 @@ msgid "Remove item %{position}"
 msgstr "Quitar el elemento %{position}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove passkey"
 msgstr "Eliminar clave de acceso"
@@ -17583,6 +17585,7 @@ msgid "Remove this new block"
 msgstr "Quitar este bloque nuevo"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove this passkey? You can no longer sign in with it."
 msgstr "¿Eliminar esta clave de acceso? Ya no podrá iniciar sesión con ella."
@@ -27744,6 +27747,7 @@ msgid "last used %{ago} ago"
 msgstr "usado por última vez hace %{ago}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "last used %{date}"
 msgstr "último uso el %{date}"

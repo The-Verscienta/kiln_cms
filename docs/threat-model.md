@@ -1545,8 +1545,8 @@ decision: [ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and
   sign-in is checked, and every door that holds an account there (sign-in,
   `:browser`, the LiveView gate) sends it to that URL, with no `return_to`.
   Two reasons: a site host is the origin a site administrator's code
-  injection runs on ([residual risk 16](#residual-risks)), so a page that adds
-  and replaces a member's factors must not share it; and a passkey cannot be
+  injection runs on ([residual risk 16](#residual-risks)), so a page that adds,
+  replaces and removes a member's factors must not share it; and a passkey cannot be
   registered there (`WebAuthn.ceremony_host?/1`). Cookies are host-only, so
   the account signs in again on the main host. An account in its grace
   period that signs in on a site host is not sent away; the grace banner and

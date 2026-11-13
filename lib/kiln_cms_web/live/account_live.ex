@@ -11,7 +11,10 @@ defmodule KilnCMSWeb.AccountLive do
   `KilnCMS.Accounts.User`, so this is a member-appropriate front end for actions a
   viewer may already run. `/editor/settings` stays editor-gated; opening it would
   mean auditing its 2FA, recovery-code and passkey cards for a reader account,
-  which is a separate decision.
+  which is a separate decision. A reader sets up a second factor, and lists and
+  removes their own passkeys, on `/account/two-factor`
+  (`KilnCMSWeb.TwoFactorSetupLive`, #2247, #2900), which is served on the main
+  and console hosts only.
 
   ## Closing the return-from-checkout race
 
