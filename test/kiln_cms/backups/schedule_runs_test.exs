@@ -71,7 +71,7 @@ defmodule KilnCMS.Backups.ScheduleRunsTest do
 
   describe "Scheduler.last_tick_at/0" do
     test "nil before any tick" do
-      assert Scheduler.last_tick_at() == nil
+      assert Scheduler.last_tick_at() == {:ok, nil}
     end
 
     test "the newest start of a scheduler job, whatever became of it" do
@@ -82,7 +82,7 @@ defmodule KilnCMS.Backups.ScheduleRunsTest do
       job!("KilnCMS.Backups.MarkerSyncWorker", "completed", ~U[2026-01-01 00:05:00.000000Z])
       job!(worker, "available", nil)
 
-      assert Scheduler.last_tick_at() == ~U[2026-01-01 00:02:00.000000Z]
+      assert Scheduler.last_tick_at() == {:ok, ~U[2026-01-01 00:02:00.000000Z]}
     end
   end
 end

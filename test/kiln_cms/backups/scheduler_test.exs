@@ -359,10 +359,42 @@ defmodule KilnCMS.Backups.SchedulerTest do
       assert {"*/5 * * * *", Scheduler} = List.keyfind(crontab(), Scheduler, 1)
     end
 
+    test "tick_gap_s: the cron's longest gap between runs, nil when off" do
+      now = ~U[2026-03-01 10:03:30Z]
+      assert Scheduler.tick_gap_s(now) == 60
+
+      put_cron("*/10 * * * *")
+      assert Scheduler.tick_gap_s(now) == 600
+
+      put_cron("0 * * * *")
+      assert Scheduler.tick_gap_s(now) == 3600
+
+      # Uneven gaps: the longer one (17:00 to 09:00).
+      put_cron("0 9,17 * * *")
+      assert Scheduler.tick_gap_s(now) == 16 * 3600
+
+      put_cron("false")
+      assert Scheduler.tick_gap_s(now) == nil
+    end
+
     test "one attempt on the scheduling queue" do
       opts = Scheduler.__opts__()
       assert opts[:queue] == :scheduling
       assert opts[:max_attempts] == 1
+    end
+  end
+
+  describe "Scheduler.last_tick_at/0" do
+    # The prefix Oban is configured with is where `oban_jobs` is read: one
+    # that doesn't exist is a database error, which is `:error`, not a raise.
+    test "a table it can't read is :error" do
+      original = Application.get_env(:kiln_cms, Oban)
+      on_exit(fn -> Application.put_env(:kiln_cms, Oban, original) end)
+
+      assert {:ok, nil} = Scheduler.last_tick_at()
+
+      Application.put_env(:kiln_cms, Oban, Keyword.put(original, :prefix, "kiln_no_such_schema"))
+      assert Scheduler.last_tick_at() == :error
     end
   end
 end

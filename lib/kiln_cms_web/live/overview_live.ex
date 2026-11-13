@@ -1103,15 +1103,20 @@ defmodule KilnCMSWeb.OverviewLive do
     |> assign(:backup_next_at, nil)
   end
 
-  # When a schedule next backs up a component the strip is about (one never
-  # backed up, failed or stale), or nil when none can here: not
-  # `status.next_at`, which may be a schedule of a healthy component.
+  # When the next scheduled backup of the components the strip is about (one
+  # never backed up, failed or stale) is, or nil unless EVERY one of them has
+  # a schedule that runs here: not `status.next_at`, which may be a schedule
+  # of a healthy component, and not the one component that is scheduled when
+  # another isn't (that one is the sentence naming the tab and cron).
   defp backup_next_at(status) do
-    status.components
-    |> Enum.filter(fn {_component, cs} -> cs.never? or cs.failed? or cs.stale? end)
-    |> Enum.map(fn {_component, cs} -> cs.next_at end)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.min(DateTime, fn -> nil end)
+    next_ats =
+      status.components
+      |> Enum.filter(fn {_component, cs} -> cs.never? or cs.failed? or cs.stale? end)
+      |> Enum.map(fn {_component, cs} -> cs.next_at end)
+
+    if next_ats != [] and Enum.all?(next_ats, &match?(%DateTime{}, &1)),
+      do: Enum.min(next_ats, DateTime),
+      else: nil
   end
 
   # An enabled in-app backup schedule exists (part of #2219).

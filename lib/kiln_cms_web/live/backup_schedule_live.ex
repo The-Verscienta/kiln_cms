@@ -16,8 +16,13 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   Every handler that names a schedule takes only its **id** from the client
   and reads the schedule again (`Backups.get_backup_schedule/2`): a schedule
   deleted in another tab, or an id that was never one, is a flash, not a
-  crash, and an edit is checked against the stored row, not the one the form
-  was opened on.
+  crash.
+
+  An edit is saved only while the schedule still holds what the form was
+  opened on: the editable values are recorded when the form opens, and a save
+  after someone else changed any of them (another admin paused it, say) is
+  refused with a flash, so a form opened earlier never overwrites the change.
+  Only one form is open at a time: while one is, Add and Edit are hidden.
 
   ## What the form can't offer, it doesn't edit
 
@@ -56,9 +61,13 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   # The intervals the form offers: daily or longer, until keep N (part 3).
   @offered_intervals [:daily, :weekly, :fortnightly, :monthly]
 
-  # How long an enabled schedule may wait for the scheduler's first tick, and
-  # how old the last tick may be, before the page says it hasn't run.
-  @stale_tick_s 300
+  # The least an enabled schedule may wait for the scheduler's first tick, and
+  # how old the last tick may be, before the page says it hasn't run; a
+  # coarser KILN_BACKUP_SCHEDULER_CRON stretches it (`stale_after_s/1`).
+  @stale_tick_floor_s 300
+
+  # Added to the cron's gap: a tick starts a little after its minute.
+  @stale_tick_slack_s 60
 
   @impl true
   def mount(_params, _session, socket) do
@@ -68,6 +77,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
        |> assign(:page_title, gettext("Backup schedule"))
        |> assign(:form, nil)
        |> assign(:editing, nil)
+       |> assign(:opened_values, nil)
        |> assign(:preview, nil)
        |> load()
        |> schedule_refresh()}
@@ -97,6 +107,12 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       else: {:noreply, socket}
   end
 
+  # Add and Edit are hidden while a form is open; a click that was already on
+  # its way doesn't discard the open one.
+  defp event(event, _params, %{assigns: %{form: %Phoenix.HTML.Form{}}} = socket)
+       when event in ["new", "edit"],
+       do: {:noreply, socket}
+
   defp event("new", _params, socket) do
     form = create_form(socket.assigns.current_user, socket.assigns[:security_context])
     {:noreply, open_form(socket, :new, form)}
@@ -106,7 +122,11 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     with_schedule(socket, id, fn schedule ->
       if editable?(schedule) do
         form = edit_form(schedule, socket.assigns.current_user, socket.assigns[:security_context])
-        {:noreply, open_form(socket, id, form)}
+
+        {:noreply,
+         socket
+         |> open_form(schedule.id, form)
+         |> assign(:opened_values, editable_values(schedule))}
       else
         {:noreply, put_flash(socket, :error, locked_flash())}
       end
@@ -116,14 +136,14 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   defp event("cancel", _params, socket), do: {:noreply, close_form(socket)}
 
   defp event("validate", %{"schedule" => params}, socket) when is_map(params) do
-    with_open_form(socket, fn socket, form ->
+    with_open_form(socket, :validate, fn socket, form ->
       form = AshPhoenix.Form.validate(form, normalize(params))
       {:noreply, socket |> assign(:form, to_form(form)) |> assign(:preview, preview(form))}
     end)
   end
 
   defp event("save", %{"schedule" => params}, socket) when is_map(params) do
-    with_open_form(socket, fn socket, form ->
+    with_open_form(socket, :save, fn socket, form ->
       case AshPhoenix.Form.submit(form, params: normalize(params)) do
         {:ok, _schedule} ->
           {:noreply,
@@ -165,7 +185,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         :ok ->
           {:noreply,
            socket
-           |> close_form_of(id)
+           |> close_form_of(schedule.id)
            |> put_flash(:info, gettext("Schedule deleted."))
            |> load()}
 
@@ -194,7 +214,17 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   # The schedule `id` as it is stored now, read as this admin: `fun` gets it,
   # and a schedule that is gone (deleted meanwhile, or never was) is a flash.
+  # The id is compared with the open form's in its stored (lowercase) form, so
+  # `"ABC…"` and `"abc…"` are the same schedule.
   defp with_schedule(socket, id, fun) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} -> with_stored_schedule(socket, id, fun)
+      # An id that isn't a UUID was never a schedule.
+      :error -> {:noreply, put_flash(socket, :error, gone_flash())}
+    end
+  end
+
+  defp with_stored_schedule(socket, id, fun) do
     case Backups.get_backup_schedule(id,
            actor: socket.assigns.current_user,
            not_found_error?: false
@@ -205,7 +235,6 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       {:ok, nil} ->
         {:noreply, socket |> close_form_of(id) |> put_flash(:error, gone_flash()) |> load()}
 
-      # An id that isn't a UUID was never a schedule.
       {:error, %Ash.Error.Invalid{}} ->
         {:noreply, socket |> close_form_of(id) |> put_flash(:error, gone_flash())}
 
@@ -215,25 +244,38 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   end
 
   # The open form, after reading its schedule again when it edits one: a form
-  # whose schedule was deleted, or became one the form can't offer, closes.
-  defp with_open_form(%{assigns: %{form: nil}} = socket, _fun), do: {:noreply, socket}
+  # whose schedule was deleted, or became one the form can't offer, closes,
+  # and a save whose schedule changed since the form opened is refused (see
+  # the moduledoc). `step` is `:validate` or `:save`.
+  defp with_open_form(%{assigns: %{form: nil}} = socket, _step, _fun), do: {:noreply, socket}
 
-  defp with_open_form(%{assigns: %{editing: :new, form: form}} = socket, fun),
+  defp with_open_form(%{assigns: %{editing: :new, form: form}} = socket, _step, fun),
     do: fun.(socket, form.source)
 
-  defp with_open_form(%{assigns: %{editing: id}} = socket, fun) do
+  defp with_open_form(%{assigns: %{editing: id}} = socket, step, fun) do
     with_schedule(socket, id, fn schedule ->
-      if editable?(schedule) do
-        # Built on the row as stored now, so what is saved is checked against
-        # it (and `Rebaseline` compares with it), not with the row the form
-        # was opened on.
-        form = edit_form(schedule, socket.assigns.current_user, socket.assigns[:security_context])
-        fun.(socket, form.source)
-      else
-        {:noreply, socket |> close_form() |> put_flash(:error, locked_flash())}
+      cond do
+        not editable?(schedule) ->
+          {:noreply, socket |> close_form() |> put_flash(:error, locked_flash())}
+
+        step == :save and editable_values(schedule) != socket.assigns.opened_values ->
+          {:noreply, socket |> close_form() |> put_flash(:error, changed_flash()) |> load()}
+
+        true ->
+          # Built on the row as stored now (`Rebaseline` compares with it).
+          form =
+            edit_form(schedule, socket.assigns.current_user, socket.assigns[:security_context])
+
+          fun.(socket, form.source)
       end
     end)
   end
+
+  # What the form edits, as stored: compared on save with what it held when
+  # the form opened.
+  defp editable_values(%Schedule{} = schedule),
+    do:
+      Map.take(schedule, [:components, :interval, :time_of_day, :starts_on, :time_zone, :enabled])
 
   defp open_form(socket, editing, form) do
     socket
@@ -242,13 +284,21 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     |> assign(:preview, preview(form.source))
   end
 
-  defp close_form(socket),
-    do: socket |> assign(:editing, nil) |> assign(:form, nil) |> assign(:preview, nil)
+  defp close_form(socket) do
+    socket
+    |> assign(:editing, nil)
+    |> assign(:form, nil)
+    |> assign(:opened_values, nil)
+    |> assign(:preview, nil)
+  end
 
   defp close_form_of(%{assigns: %{editing: id}} = socket, id), do: close_form(socket)
   defp close_form_of(socket, _id), do: socket
 
   defp gone_flash, do: gettext("That schedule no longer exists.")
+
+  defp changed_flash,
+    do: gettext("This schedule changed since you opened it. Reopen it to see the current values.")
 
   defp locked_flash,
     do: gettext("This schedule can't be edited here: it can only be paused, resumed or deleted.")
@@ -345,8 +395,10 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         "This schedule backs up media, which isn't archived on this deployment, so it can't be edited here. You can pause, resume or delete it."
       )
 
-  # The cadence and first window of what the form holds now, or nil while it
-  # holds something that has none (an invalid zone, a missing date).
+  # The cadence and first window of what the form holds now, and whether it
+  # is enabled, or nil while it holds something that has none (an invalid
+  # zone, a missing date). Whether it would run here at all is the
+  # template's question (`@status`).
   defp preview(%AshPhoenix.Form{source: %Ash.Changeset{} = changeset}) do
     timing =
       Map.new([:interval, :time_of_day, :starts_on, :time_zone], fn field ->
@@ -360,7 +412,12 @@ defmodule KilnCMSWeb.BackupScheduleLive do
          true <- timing.interval in @offered_intervals,
          true <- KilnCMS.Events.known_time_zone?(timing.time_zone),
          {:ok, %DateTime{} = first} <- Window.next(Map.put(timing, :baseline_at, now), now) do
-      %{cadence: cadence(timing), first: first, zone: timing.time_zone}
+      %{
+        cadence: cadence(timing),
+        first: first,
+        zone: timing.time_zone,
+        enabled?: Ash.Changeset.get_attribute(changeset, :enabled) != false
+      }
     else
       _ -> nil
     end
@@ -376,11 +433,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     entries = if is_list(status.schedules), do: status.schedules, else: []
     ids = Enum.map(entries, & &1.schedule.id)
 
-    runs =
-      case Backups.last_scheduled_runs(ids, socket.assigns.current_user) do
-        {:ok, runs} -> runs
-        {:error, _error} -> %{}
-      end
+    runs = last_runs(ids, socket.assigns.current_user)
 
     socket
     |> assign(:status, status)
@@ -392,11 +445,12 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   # `{:stale, last_tick_at | nil}` when the scheduler should have ticked and
   # hasn't: it is on, an enabled schedule has existed (since its baseline)
-  # for more than five minutes, and no tick started in the last five. The
-  # `oban_jobs` read (`Scheduler.last_tick_at/0`) is made only then.
+  # for longer than `stale_after_s/1`, and no tick started within it.
+  # `:unknown` when that couldn't be read. The `oban_jobs` read
+  # (`Scheduler.last_tick_at/0`) is made only when a tick is expected.
   defp stale_tick(%{scheduler_enabled?: true}, entries) do
     now = DateTime.utc_now()
-    expected_since = DateTime.add(now, -@stale_tick_s, :second)
+    expected_since = DateTime.add(now, -stale_after_s(now), :second)
 
     waiting? =
       Enum.any?(entries, fn %{schedule: s} ->
@@ -404,15 +458,37 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       end)
 
     with true <- waiting?,
-         last = Scheduler.last_tick_at(),
+         {:ok, last} <- Scheduler.last_tick_at(),
          true <- is_nil(last) or DateTime.compare(last, expected_since) == :lt do
       {:stale, last}
     else
+      :error -> :unknown
       _ -> nil
     end
   end
 
   defp stale_tick(_status, _entries), do: nil
+
+  # The cron's longest gap between ticks plus a minute's slack, never under
+  # five minutes: at `*/10` a seven-minute-old tick is on time.
+  defp stale_after_s(now) do
+    case Scheduler.tick_gap_s(now) do
+      gap when is_integer(gap) -> max(@stale_tick_floor_s, gap + @stale_tick_slack_s)
+      nil -> @stale_tick_floor_s
+    end
+  end
+
+  @doc false
+  # Each schedule's newest run, or `:unreadable` when they couldn't be read:
+  # the page says so once, instead of every card claiming there was no run.
+  # Public for the tests.
+  @spec last_runs([String.t()], term()) :: %{optional(String.t()) => term()} | :unreadable
+  def last_runs(ids, actor) do
+    case Backups.last_scheduled_runs(ids, actor) do
+      {:ok, runs} -> runs
+      {:error, _error} -> :unreadable
+    end
+  end
 
   defp interval_options do
     [
@@ -504,6 +580,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           editing={@editing}
           preview={@preview}
           media_dir?={@media_dir?}
+          runs_here?={@status.scheduler_enabled? and @status.available?}
         />
 
         <section id="backup-schedules" class="rounded-lg border border-base-content/10 p-4 text-sm">
@@ -520,12 +597,21 @@ defmodule KilnCMSWeb.BackupScheduleLive do
             {gettext("Couldn't load the backup schedules.")}
           </p>
 
+          <p
+            :if={@entries != [] and @runs == :unreadable}
+            id="backup-schedule-runs-unreadable"
+            class="mt-2 text-warning-ink"
+          >
+            {gettext("Couldn't load the last runs.")}
+          </p>
+
           <ul :if={@entries != []} class="mt-3 divide-y divide-base-content/10">
             <.schedule_card
               :for={entry <- @entries}
               entry={entry}
-              run={@runs[entry.schedule.id]}
+              run={if @runs == :unreadable, do: :unreadable, else: @runs[entry.schedule.id]}
               editing?={@editing == entry.schedule.id}
+              form_open?={@form != nil}
             />
           </ul>
 
@@ -583,6 +669,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       <p :if={@stale_tick == {:stale, nil}} id="schedule-stale-tick">
         {gettext("The scheduler hasn't run yet. Check that background jobs are running.")}
       </p>
+      <p :if={@stale_tick == :unknown} id="schedule-tick-unknown">
+        {gettext("Couldn't check when the scheduler last ran.")}
+      </p>
       <p :if={@media_without_dir?} id="schedule-media-missing">
         {gettext("Media isn't archived on this deployment, so a schedule can't include it.")}
       </p>
@@ -591,8 +680,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   end
 
   attr :entry, :map, required: true
-  attr :run, :any, required: true
+  attr :run, :any, required: true, doc: "the newest run, nil, or :unreadable"
   attr :editing?, :boolean, required: true
+  attr :form_open?, :boolean, required: true
 
   defp schedule_card(assigns) do
     assigns = assign(assigns, :schedule, assigns.entry.schedule)
@@ -617,7 +707,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           <p :if={@schedule.last_outcome} data-role="last-outcome">
             {outcome_label(@schedule)}
           </p>
-          <p :if={@run} data-role="last-run">
+          <p :if={is_struct(@run)} data-role="last-run">
             <.link navigate={~p"/editor/backups"} class="underline hover:no-underline">
               {gettext("Last scheduled run: %{status} (%{stamp})",
                 status: run_status_label(@run.status),
@@ -639,7 +729,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
       <div class="flex flex-wrap gap-2">
         <button
-          :if={editable?(@schedule)}
+          :if={editable?(@schedule) and not @form_open?}
           type="button"
           phx-click="edit"
           phx-value-id={@schedule.id}
@@ -677,6 +767,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   attr :editing, :any, required: true
   attr :preview, :any, required: true
   attr :media_dir?, :boolean, required: true
+  attr :runs_here?, :boolean, required: true
 
   defp schedule_form(assigns) do
     field = assigns.form[:components]
@@ -780,11 +871,25 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           class="rounded border border-base-content/10 bg-base-200/40 p-3 text-xs"
         >
           <p class="font-medium" data-role="cadence">{@preview.cadence}</p>
-          <p class="text-base-content/70" data-role="first">
+          <p
+            :if={@preview.enabled? and @runs_here?}
+            class="text-base-content/70"
+            data-role="first"
+          >
             {gettext("Next backup: %{when} (%{at})",
               when: until(@preview.first),
               at: local_stamp(@preview.first, @preview.zone)
             )}
+          </p>
+          <p :if={not @preview.enabled?} class="text-base-content/70" data-role="wont-run">
+            {gettext("It won't run while it's paused.")}
+          </p>
+          <p
+            :if={@preview.enabled? and not @runs_here?}
+            class="text-base-content/70"
+            data-role="wont-run"
+          >
+            {gettext("It won't run on this deployment until the warning above is resolved.")}
           </p>
         </div>
 

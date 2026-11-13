@@ -6267,6 +6267,11 @@ msgstr "No se pudo cambiar la programación de copias de seguridad."
 msgid "Couldn't change your password. Check your current password and try again."
 msgstr "No se pudo cambiar su contraseña. Compruebe su contraseña actual e inténtelo de nuevo."
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't check when the scheduler last ran."
+msgstr "No se pudo comprobar cuándo se ejecutó el planificador por última vez."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't compare those versions."
@@ -6419,6 +6424,11 @@ msgstr "No se pudo cargar el historial de copias de seguridad."
 #, elixir-autogen, elixir-format
 msgid "Couldn't load the backup schedules."
 msgstr "No se pudieron cargar las programaciones de copias de seguridad."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't load the last runs."
+msgstr "No se pudieron cargar las últimas ejecuciones."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
@@ -11418,6 +11428,16 @@ msgstr "Gestiona ajustes que afectan a toda la instalación, así que solo un ad
 #, elixir-autogen, elixir-format
 msgid "It may belong to a different site, or your registration here may still be waiting for approval. If you meant to use another account, sign out and sign in with that one."
 msgstr "Puede que pertenezca a otro sitio, o que tu registro aquí siga pendiente de aprobación. Si querías usar otra cuenta, cierra sesión e inicia sesión con esa."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "It won't run on this deployment until the warning above is resolved."
+msgstr "No se ejecutará en esta instalación hasta que se resuelva la advertencia de arriba."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "It won't run while it's paused."
+msgstr "No se ejecutará mientras esté en pausa."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -23212,6 +23232,11 @@ msgstr "Esta programación copia los medios, que no se archivan en este desplieg
 #, elixir-autogen, elixir-format
 msgid "This schedule can't be edited here: it can only be paused, resumed or deleted."
 msgstr "Esta programación no se puede editar aquí: solo se puede pausar, reanudar o eliminar."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule changed since you opened it. Reopen it to see the current values."
+msgstr "Esta programación cambió desde que la abriste. Vuelve a abrirla para ver los valores actuales."
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format

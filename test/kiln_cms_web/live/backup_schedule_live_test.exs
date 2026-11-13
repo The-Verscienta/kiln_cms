@@ -306,6 +306,45 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
     end
   end
 
+  describe "the form's preview says when it won't run" do
+    defp preview_of(lv, overrides) do
+      lv |> form("#schedule-form", schedule: form_params(overrides)) |> render_change()
+    end
+
+    test "unchecking Enabled: no next backup, it says it won't run", %{conn: conn} do
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      preview_of(lv, %{})
+      assert has_element?(lv, "#schedule-preview [data-role=first]", "Next backup:")
+
+      preview_of(lv, %{"enabled" => "false"})
+      assert has_element?(lv, "#schedule-preview [data-role=cadence]")
+      refute has_element?(lv, "#schedule-preview [data-role=first]")
+      assert has_element?(lv, "#schedule-preview [data-role=wont-run]", "paused")
+    end
+
+    test "the scheduler off: no next backup", %{conn: conn} do
+      put_cron("false")
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      preview_of(lv, %{})
+      refute has_element?(lv, "#schedule-preview [data-role=first]")
+      assert has_element?(lv, "#schedule-preview [data-role=wont-run]", "warning above")
+    end
+
+    test "backups that can't run here: no next backup", %{conn: conn} do
+      put_backups(:enabled, false)
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      preview_of(lv, %{})
+      refute has_element?(lv, "#schedule-preview [data-role=first]")
+      assert has_element?(lv, "#schedule-preview [data-role=wont-run]", "warning above")
+    end
+  end
+
   # E6: the client names a schedule by id; the handler reads it again.
   describe "a schedule that changed or went away meanwhile" do
     test "a deleted schedule's buttons say so instead of crashing", %{conn: conn} do
@@ -347,22 +386,102 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       assert all_schedules() == []
     end
 
-    # The edit is saved against the row as stored now: a value the form shows
-    # unchanged but another admin changed meanwhile is saved as the form shows
-    # it, not dropped as "no change" against the row the form was opened on.
-    test "an edit is saved against the row as it is now", %{conn: conn} do
+    # A form opened before another admin's change would overwrite it with
+    # what it still shows: the save is refused instead.
+    test "an edit whose schedule another admin changed meanwhile is refused", %{conn: conn} do
       admin = platform_admin()
       s = schedule!(%{}, admin)
       lv = mount(conn, admin)
 
       lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
-      Backups.update_backup_schedule!(s, %{time_of_day: ~T[05:00:00]}, actor: admin)
+      Backups.update_backup_schedule!(s, %{time_of_day: ~T[05:00:00]}, actor: platform_admin())
+
+      html =
+        lv
+        |> form("#schedule-form", schedule: form_params(%{"time_of_day" => "03:00"}))
+        |> render_submit()
+
+      assert html =~ "This schedule changed since you opened it."
+      refute has_element?(lv, "#schedule-form")
+      assert stored(s).time_of_day == ~T[05:00:00]
+    end
+
+    test "a save does not resume a schedule another admin paused meanwhile", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+      Backups.update_backup_schedule!(s, %{enabled: false}, actor: platform_admin())
+
+      html =
+        lv
+        |> form("#schedule-form", schedule: form_params(%{"interval" => "weekly"}))
+        |> render_submit()
+
+      assert html =~ "Reopen it to see the current values."
+      after_save = stored(s)
+      refute after_save.enabled
+      assert after_save.interval == :daily
+    end
+
+    # The scheduler writes the window's claim on the row while the form is
+    # open; that is not an edit, and the save goes through.
+    test "the scheduler's own writes don't refuse a save", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+      force!(s, last_outcome: "started", last_window_at: DateTime.utc_now())
 
       lv
-      |> form("#schedule-form", schedule: form_params(%{"time_of_day" => "03:00"}))
+      |> form("#schedule-form", schedule: form_params(%{"interval" => "monthly"}))
       |> render_submit()
 
-      assert stored(s).time_of_day == ~T[03:00:00]
+      assert render(lv) =~ "Schedule saved."
+      assert stored(s).interval == :monthly
+    end
+
+    test "an id in capitals is the same schedule as the form's", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+
+      render_click(lv, "edit", %{"id" => String.upcase(s.id)})
+      assert has_element?(lv, "#schedule-form")
+      assert has_element?(lv, "#backup-schedule-#{s.id}.bg-base-200\\/40")
+
+      # Deleting it closes the form it was open in.
+      lv |> element("#backup-schedule-#{s.id} [data-role=delete]") |> render_click()
+      refute has_element?(lv, "#schedule-form")
+      assert all_schedules() == []
+    end
+
+    test "while a form is open, Add and Edit are hidden and ignored", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      other = schedule!(%{time_of_day: ~T[05:00:00]}, admin)
+      lv = mount(conn, admin)
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+
+      refute has_element?(lv, "#schedule-new")
+      refute has_element?(lv, "[data-role=edit]")
+
+      lv
+      |> form("#schedule-form", schedule: form_params(%{"time_of_day" => "07:45"}))
+      |> render_change()
+
+      # A click already on its way doesn't replace the open form.
+      render_click(lv, "edit", %{"id" => other.id})
+      render_click(lv, "new", %{})
+      assert has_element?(lv, "#schedule-form input[type=time][value='07:45']")
+      assert has_element?(lv, "#schedule-form-panel h2", "Edit schedule")
+
+      lv |> element("#schedule-form button", "Cancel") |> render_click()
+      assert has_element?(lv, "#schedule-new")
+      assert has_element?(lv, "#backup-schedule-#{other.id} [data-role=edit]")
     end
 
     test "the minute's refresh leaves an open form as it is", %{conn: conn} do
@@ -628,6 +747,32 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
     end
   end
 
+  describe "when the last runs can't be read" do
+    test "a refused read is :unreadable, not an empty map" do
+      s = schedule!(%{}, platform_admin())
+
+      assert BackupScheduleLive.last_runs([s.id], user(:editor)) == :unreadable
+      assert BackupScheduleLive.last_runs([s.id], platform_admin()) == %{s.id => nil}
+    end
+
+    # The read itself fails only for an actor the page never mounts for, so
+    # the page is put in that state directly to check what it renders.
+    test "the page says so once, and no card claims there was no run", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+
+      :sys.replace_state(lv.pid, fn state ->
+        update_in(state.socket, &Phoenix.Component.assign(&1, :runs, :unreadable))
+      end)
+
+      render_click(lv, "cancel", %{})
+
+      assert has_element?(lv, "#backup-schedule-runs-unreadable", "Couldn't load the last runs.")
+      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=last-run]")
+    end
+  end
+
   describe "warnings" do
     test "the scheduler turned off", %{conn: conn} do
       put_cron("false")
@@ -684,6 +829,39 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       )
 
       refute has_element?(mount(conn, admin), "#schedule-stale-tick")
+    end
+
+    # The threshold follows KILN_BACKUP_SCHEDULER_CRON: at */10 a tick seven
+    # minutes old is on time, one 25 minutes old is not.
+    test "a coarser scheduler cron stretches the threshold", %{conn: conn} do
+      put_cron("*/10 * * * *")
+      admin = platform_admin()
+
+      force!(schedule!(%{}, admin),
+        baseline_at: DateTime.add(DateTime.utc_now(), -3600, :second)
+      )
+
+      tick_at!(DateTime.add(DateTime.utc_now(), -25 * 60, :second))
+      assert has_element?(mount(conn, admin), "#schedule-stale-tick", "hasn't run since")
+
+      tick_at!(DateTime.add(DateTime.utc_now(), -7 * 60, :second))
+      refute has_element?(mount(conn, admin), "#schedule-stale-tick")
+    end
+
+    test "a tick that couldn't be read says so instead of crashing", %{conn: conn} do
+      admin = platform_admin()
+
+      force!(schedule!(%{}, admin),
+        baseline_at: DateTime.add(DateTime.utc_now(), -600, :second)
+      )
+
+      original = Application.get_env(:kiln_cms, Oban)
+      on_exit(fn -> Application.put_env(:kiln_cms, Oban, original) end)
+      Application.put_env(:kiln_cms, Oban, Keyword.put(original, :prefix, "kiln_no_such_schema"))
+
+      lv = mount(conn, admin)
+      assert has_element?(lv, "#schedule-tick-unknown", "Couldn't check")
+      refute has_element?(lv, "#schedule-stale-tick")
     end
   end
 end

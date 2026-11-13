@@ -1973,6 +1973,58 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
     end
 
+    # Two components in alarm, a schedule for one of them: no time for "the
+    # next scheduled backup", which would leave the other in alarm after it.
+    @tag :pg_tools
+    test "a schedule for only some of the components in alarm shows no next time",
+         %{conn: conn, dir: dir} do
+      admin = authed_user(:admin)
+      media = Path.join(dir, "media-src")
+      File.mkdir_p!(media)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :media_dir, media)
+      )
+
+      at = DateTime.add(DateTime.utc_now(), -5 * 24 * 3600, :second)
+      stamp = KilnCMS.Backups.Artifact.stamp(at)
+
+      Backups.import_run!(
+        %{
+          stamp: stamp,
+          trigger: "cron",
+          status: :succeeded,
+          components: [:db, :media],
+          started_at: at,
+          finished_at: at,
+          artifacts: [
+            %{kind: :db, name: "kiln-db-#{stamp}", bytes: 10, verified: true},
+            %{kind: :media, name: "kiln-media-#{stamp}", bytes: 10, verified: true}
+          ]
+        },
+        actor: Backups.system()
+      )
+
+      s = schedule!(%{components: [:db]}, admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+      assert [_, _] = lv |> element("#overview-backup-warning") |> render() |> headlines()
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-next]")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning",
+               "in-app schedules on the Schedule tab of Backups"
+             )
+
+      # Both scheduled: the next time is shown.
+      Backups.update_backup_schedule!(s, %{components: [:db, :media]}, actor: admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+      assert has_element?(lv, "#overview-backup-warning [data-role=backup-next]")
+    end
+
     # D9: schedules that exist but can't run here keep the sentence that
     # names both the tab and cron, and still link to the tab.
     test "with a schedule that can't run here, the strip names the tab and cron", %{conn: conn} do
