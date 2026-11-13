@@ -205,5 +205,114 @@ defmodule KilnCMS.Events.BackfillTest do
     end
   end
 
+  describe "trashed rows (#2621)" do
+    # The pass stays live-only; `:restore` recomputes instead. The value is
+    # relative to the clock, so one written into the trash would be stale
+    # again by the time the row came out (see `Backfill`'s moduledoc).
+
+    test "the pass skips a trashed row and the restore recomputes it", ctx do
+      # The issue's own scenario: trash an event, run the backfill, restore.
+      record =
+        ctx
+        |> event!(%{"when" => schedule(-365), "repeats" => %{"rrule" => "FREQ=WEEKLY"}})
+        |> unbackfilled!()
+
+      CMS.destroy_entry!(record, actor: ctx.admin)
+
+      assert %{scanned: 0, written: 0} = Backfill.run_org(ctx.org)
+      assert is_nil(trashed!(ctx, record).next_occurrence_at)
+
+      CMS.restore_entry!(trashed!(ctx, record), actor: ctx.admin)
+
+      restored = reload(record)
+      assert restored.next_occurrence_at
+      assert_same(restored.next_occurrence_at, Index.next_occurrence_at(restored, ctx.org))
+    end
+
+    for {label, offset} <- [{"future", 3 * 86_400 + 1234}, {"past", -10 * 86_400}] do
+      test "a stale #{label} value is recomputed on restore", ctx do
+        # A wrong future value is one the sweep never revisits, so restore
+        # is the only thing that can correct it.
+        stale = DateTime.add(Index.anchor(), unquote(offset))
+
+        record =
+          ctx
+          |> event!(%{"when" => schedule(-365), "repeats" => %{"rrule" => "FREQ=WEEKLY"}})
+          |> Ash.Seed.update!(%{next_occurrence_at: stale})
+
+        CMS.destroy_entry!(record, actor: ctx.admin)
+        CMS.restore_entry!(trashed!(ctx, record), actor: ctx.admin)
+
+        restored = reload(record)
+        refute DateTime.compare(restored.next_occurrence_at, stale) == :eq
+        assert_same(restored.next_occurrence_at, Index.next_occurrence_at(restored, ctx.org))
+      end
+    end
+
+    test "a past one-off comes back with no upcoming date", ctx do
+      record =
+        ctx
+        |> event!(%{"when" => schedule(-30)})
+        |> Ash.Seed.update!(%{next_occurrence_at: DateTime.add(Index.anchor(), 86_400)})
+
+      CMS.destroy_entry!(record, actor: ctx.admin)
+      CMS.restore_entry!(trashed!(ctx, record), actor: ctx.admin)
+
+      assert is_nil(reload(record).next_occurrence_at)
+    end
+
+    test "restoring a struct read without custom_fields keeps the stored value", ctx do
+      # `custom_fields` arrives as `%Ash.NotLoaded{}`; computing from it would
+      # answer nil and wipe the sort key.
+      stored = DateTime.add(Index.anchor(), 5 * 86_400)
+
+      record =
+        ctx
+        |> event!(%{"when" => schedule(30)})
+        |> Ash.Seed.update!(%{next_occurrence_at: stored})
+
+      CMS.destroy_entry!(record, actor: ctx.admin)
+
+      fields =
+        Ash.Resource.Info.attribute_names(KilnCMS.CMS.Entry) |> MapSet.delete(:custom_fields)
+
+      partial =
+        [actor: ctx.admin, query: [select: MapSet.to_list(fields)]]
+        |> CMS.list_trashed_entries!()
+        |> Enum.find(&(&1.id == record.id))
+
+      assert %Ash.NotLoaded{} = partial.custom_fields
+
+      CMS.restore_entry!(partial, actor: ctx.admin)
+
+      restored = reload(record)
+      assert restored.custom_fields != %{}
+      assert_same(restored.next_occurrence_at, stored)
+    end
+
+    test "a second restore of the held struct is still refused", ctx do
+      record = event!(ctx, %{"when" => schedule(30)})
+      CMS.destroy_entry!(record, actor: ctx.admin)
+      held = trashed!(ctx, record)
+
+      CMS.restore_entry!(held, actor: ctx.admin)
+
+      assert {:error, _} = CMS.restore_entry(held, actor: ctx.admin)
+    end
+
+    test "the sort-key write stays refused on a trashed row" do
+      refute :set_next_occurrence in KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions()
+    end
+  end
+
+  defp trashed!(ctx, record) do
+    [actor: ctx.admin]
+    |> CMS.list_trashed_entries!()
+    |> Enum.find(&(&1.id == record.id))
+  end
+
+  defp assert_same(%DateTime{} = left, %DateTime{} = right),
+    do: assert(DateTime.compare(left, right) == :eq, "#{left} != #{right}")
+
   defp reload_page(page), do: CMS.get_page!(page.id, authorize?: false)
 end

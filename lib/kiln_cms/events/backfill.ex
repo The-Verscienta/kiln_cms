@@ -43,6 +43,16 @@ defmodule KilnCMS.Events.Backfill do
   values. Those rows are stale, invisible to the sweep (their value has not
   passed) and invisible to the default pass (their type is no longer
   event-shaped), so nothing else will ever correct them.
+
+  ## Trashed rows
+
+  The pass reads live rows only, and `Changes.RefuseTrashed` would refuse its
+  write to a trashed one. That is deliberate, unlike the #2533 backfills
+  (`KilnCMS.CMS.FieldConversion`, `KilnCMS.Media.Resnapshot`) that walk the
+  trash: they write source data a restore cannot re-derive, while
+  `next_occurrence_at` is derived from the row's own schedule fields and the
+  clock, so a value written into the trash is stale again by the time the row
+  comes back. `:restore` recomputes it instead (#2621).
   """
 
   require Logger

@@ -33,8 +33,18 @@ defmodule KilnCMS.CMS.Changes.SetNextOccurrence do
 
   A document that *does* carry custom fields pays one indexed definitions read —
   the same one `ApplyCustomFields` performs, on the same write.
+
+  ## A struct read without `custom_fields` keeps its stored value
+
+  An action that runs this on a struct read with a `select:` leaving out
+  `custom_fields` (`:restore` on a partial row, #2621) sees `%Ash.NotLoaded{}`,
+  not the schedule. Computing from that would answer `nil` and wipe the sort
+  key, so the change keeps the stored (possibly stale) value and never wipes
+  it; the next sweep or full save corrects it. It logs at `:debug` when it does.
   """
   use Ash.Resource.Change
+
+  require Logger
 
   alias KilnCMS.Events.Index
 
@@ -44,11 +54,22 @@ defmodule KilnCMS.CMS.Changes.SetNextOccurrence do
   end
 
   defp set_next_occurrence(changeset) do
-    Ash.Changeset.force_change_attribute(
-      changeset,
-      :next_occurrence_at,
-      next_occurrence_at(changeset)
-    )
+    case Ash.Changeset.get_attribute(changeset, :custom_fields) do
+      %Ash.NotLoaded{} ->
+        Logger.debug(
+          "next_occurrence_at kept on #{inspect(changeset.data.id)}: " <>
+            "custom_fields not loaded on #{inspect(changeset.action && changeset.action.name)}"
+        )
+
+        changeset
+
+      _loaded ->
+        Ash.Changeset.force_change_attribute(
+          changeset,
+          :next_occurrence_at,
+          next_occurrence_at(changeset)
+        )
+    end
   end
 
   # The EFFECTIVE map — merged, coerced, and already written back by
