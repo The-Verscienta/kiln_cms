@@ -7,6 +7,7 @@ defmodule KilnCMS.Backups.Schedule.Validations.MediaAvailable do
   to the database, by `KilnCMS.Backups.request_scheduled/3`).
   """
   use Ash.Resource.Validation
+  use Gettext, backend: KilnCMSWeb.Gettext
 
   @impl true
   def init(opts), do: {:ok, opts}
@@ -17,7 +18,10 @@ defmodule KilnCMS.Backups.Schedule.Validations.MediaAvailable do
 
     if Ash.Changeset.changing_attribute?(changeset, :components) and :media in components and
          is_nil(KilnCMS.Backups.media_dir()),
-       do: {:error, field: :components, message: "media isn't archived on this deployment"},
+       do: {:error, field: :components, message: message()},
        else: :ok
   end
+
+  # Translated where the form shows it (`translate_error/1`).
+  defp message, do: dgettext_noop("errors", "media isn't archived on this deployment")
 end

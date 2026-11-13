@@ -47,6 +47,8 @@ defmodule KilnCMS.Backups.Scheduler do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Schedule.Window
 
+  import Ecto.Query, only: [from: 2]
+
   require Ash.Query
   require Logger
 
@@ -64,6 +66,67 @@ defmodule KilnCMS.Backups.Scheduler do
   """
   @spec enabled?() :: boolean()
   def enabled?, do: KilnCMS.Application.cron_expression(:backup_scheduler_cron) != nil
+
+  # The job states of a tick that was picked up (an `attempted_at` is set).
+  @ticked_states ~w(executing completed retryable discarded cancelled)
+
+  # How many successive gaps `tick_gap_s/1` looks at.
+  @gap_runs 4
+
+  @doc """
+  When a scheduler job last started, on any node: `{:ok, at}`, `{:ok, nil}`
+  when none is on record, or `:error` when `oban_jobs` couldn't be read. What
+  the Schedule tab's "the scheduler hasn't run" warning reads.
+
+  Reads `oban_jobs` (Oban's own table, not an Ash resource, under the prefix
+  Oban is configured with): the newest `attempted_at` among this worker's
+  jobs on the `scheduling` queue. Oban indexes the table by state and queue,
+  not by worker, so this scans the queue's rows that Oban's pruner has kept (a
+  week by default; about 10 000 at one tick a minute). The caller asks only
+  when an enabled schedule has existed long enough to expect a tick.
+  """
+  @spec last_tick_at() :: {:ok, DateTime.t() | nil} | :error
+  def last_tick_at do
+    worker = Oban.Worker.to_string(__MODULE__)
+    prefix = Keyword.get(Application.get_env(:kiln_cms, Oban, []), :prefix, "public")
+
+    query =
+      from(j in Oban.Job,
+        where: j.queue == "scheduling" and j.state in @ticked_states and j.worker == ^worker,
+        select: max(j.attempted_at)
+      )
+
+    {:ok, KilnCMS.Repo.one(query, prefix: prefix)}
+  rescue
+    # A page asks this to decide whether to warn: a database it can't read is
+    # "couldn't check", never a crashed page.
+    _error in [Postgrex.Error, DBConnection.ConnectionError] -> :error
+  end
+
+  @doc """
+  The longest gap, in seconds, between successive runs of the scheduler's
+  cron expression (`KILN_BACKUP_SCHEDULER_CRON`) over its next few runs after
+  `now`, or nil when the scheduler is off. How long a healthy scheduler may go
+  without a tick: 60 at the default `* * * * *`, 3600 at `0 * * * *`.
+  """
+  @spec tick_gap_s(DateTime.t()) :: pos_integer() | nil
+  def tick_gap_s(%DateTime{} = now) do
+    with cron when is_binary(cron) <-
+           KilnCMS.Application.cron_expression(:backup_scheduler_cron),
+         {:ok, expression} <- Oban.Cron.Expression.parse(cron),
+         %DateTime{} = first <- Oban.Cron.Expression.next_at(expression, now) do
+      # Several gaps, not one: an expression like `0 9,17 * * *` alternates.
+      {_last, gaps} =
+        Enum.reduce(1..@gap_runs, {first, []}, fn _, {at, gaps} ->
+          next = Oban.Cron.Expression.next_at(expression, at)
+          {next, [DateTime.diff(next, at) | gaps]}
+        end)
+
+      Enum.max(gaps)
+    else
+      _ -> nil
+    end
+  end
 
   @doc """
   One tick at `now` (the node clock): what the cron job runs, public for a

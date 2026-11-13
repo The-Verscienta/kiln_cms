@@ -5,6 +5,7 @@ defmodule KilnCMS.Backups.Schedule.Validations.KnownZone do
   by a scheduler that can't compute a window.
   """
   use Ash.Resource.Validation
+  use Gettext, backend: KilnCMSWeb.Gettext
 
   @impl true
   def init(opts), do: {:ok, opts}
@@ -15,6 +16,9 @@ defmodule KilnCMS.Backups.Schedule.Validations.KnownZone do
 
     if is_nil(zone) or KilnCMS.Events.known_time_zone?(zone),
       do: :ok,
-      else: {:error, field: :time_zone, message: "is not a known time zone"}
+      else: {:error, field: :time_zone, message: message()}
   end
+
+  # Translated where the form shows it (`translate_error/1`).
+  defp message, do: dgettext_noop("errors", "is not a known time zone")
 end
