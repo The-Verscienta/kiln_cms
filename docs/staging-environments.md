@@ -266,10 +266,19 @@ the gaps the *data* carries — the *config* is already inert:
   (`KILN_CRAWLER_VERIFICATION=false` stops it and the list fetches).
   [data-flows.md](data-flows.md#optional-subprocessors) lists every call a
   default install makes and the variable that stops each.
-- **Secrets come from the environment** (`SECRET_KEY_BASE`, `DATABASE_URL`, provider
-  keys via `KilnCMS.Keys`), not the database — so a fresh set of staging env vars is a
-  clean break from production. The DKIM private key is the one secret that lives in the
-  DB; the scrub purges it.
+- **Secrets in the database are sealed with `SECRET_KEY_BASE`.** `SECRET_KEY_BASE`,
+  `DATABASE_URL`, and any key `KilnCMS.Keys` reads from an environment variable or a
+  file come from the environment, so a fresh set of staging env vars is a clean break
+  from production. Every secret Kiln stores in the database instead is encrypted by
+  `KilnCMS.Keys.Vault` under a key derived from `SECRET_KEY_BASE`: the DKIM private key
+  and the payment provider's API and webhook keys (when they are kept in the database),
+  each site's mail relay password, SSO client secret, storage secret key, AI provider
+  and Meilisearch API keys, and push (VAPID) private key, webhook signing secrets, each
+  site's ActivityPub key, the instance's content-signing key (provenance), and social
+  account credentials. A clone with its own `SECRET_KEY_BASE` cannot decrypt any of them, as
+  long as `PREVIOUS_SECRET_KEY_BASE` is not production's: leave it unset on staging.
+  The scrub also deletes the DKIM key and the billing keys outright, the billing keys
+  before anything else.
 - **A distinct `SECRET_KEY_BASE`** invalidates every cloned session cookie and every
   production-signed preview token automatically.
 
