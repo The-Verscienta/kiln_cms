@@ -4373,11 +4373,6 @@ msgstr ""
 msgid "Backups aren't set up yet — turn them on before you go live."
 msgstr ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
-#, elixir-autogen, elixir-format
-msgid "Before you add a second factor, you need to confirm your email address with a code we send you. Do that on the two-step sign-in page."
-msgstr ""
-
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Best match"
@@ -26297,7 +26292,7 @@ msgid_plural "You have %{count} passkeys set up."
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "You have %{max} passkeys, the most an account can hold. Remove one to add another."
 msgstr ""
@@ -26326,6 +26321,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/link_report_live.ex
 #, elixir-autogen, elixir-format
 msgid "You need admin access to run a check."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You need to confirm your email address before you add a second factor. Do that on the two-step sign-in page, and add it there."
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex

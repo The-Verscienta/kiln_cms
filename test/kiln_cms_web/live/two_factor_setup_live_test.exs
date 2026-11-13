@@ -443,7 +443,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
       refute has_element?(view, "#totp-added-mail")
     end
 
-    test "the passkey line is beside the add form, and not once the account is at the limit",
+    test "the passkey line is beside the add form; at the limit the form and line give way to a note",
          %{conn: conn} do
       site = org("tfs-mail-passkey")
       user = seed_user() |> member!(site)
@@ -467,7 +467,14 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
       {:ok, view, _html} =
         conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
 
+      refute has_element?(view, "#add-passkey-form")
       refute has_element?(view, "#passkey-added-mail")
+
+      assert has_element?(
+               view,
+               "#two-factor-passkey #passkeys-at-limit",
+               "the most an account can hold"
+             )
     end
   end
 

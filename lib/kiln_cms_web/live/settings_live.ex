@@ -1500,11 +1500,7 @@ defmodule KilnCMSWeb.SettingsLive do
 
   defp passkey_refusal(_reason), do: nil
 
-  defp passkey_limit_message do
-    gettext("You have %{max} passkeys, the most an account can hold. Remove one to add another.",
-      max: Passkey.max_per_account()
-    )
-  end
+  defp passkey_limit_message, do: TotpEnrolment.passkey_limit_message()
 
   defp demo_locked_message, do: TotpEnrolment.demo_locked_message()
 
@@ -1543,7 +1539,7 @@ defmodule KilnCMSWeb.SettingsLive do
       <p class="flex items-start gap-1.5">
         <.icon name="hero-envelope" class="mt-0.5 size-4 shrink-0" />
         {gettext(
-          "Before you add a second factor, you need to confirm your email address with a code we send you. Do that on the two-step sign-in page."
+          "You need to confirm your email address before you add a second factor. Do that on the two-step sign-in page, and add it there."
         )}
       </p>
       <p :if={@setup_host} class="mt-1 text-base-content/70">

@@ -97,11 +97,17 @@ defmodule KilnCMSWeb.TwoFactorPolicyLive do
     |> assign(:code_help, code_help(factors, WebAuthn.ceremony_host?(host)))
   end
 
-  defp code_help(%{totp?: true}, true = _ceremony_host?), do: :code_or_passkey
-  defp code_help(%{totp?: true}, false), do: :code
+  # A passkey is offered only to an admin who holds one, on a host where its
+  # ceremony runs. An admin with no factor still sees the code field (it
+  # shows whenever the session's mark is not fresh), with the plain code
+  # line; the notice above it says to set a factor up.
+  defp code_help(%{totp?: true, passkeys: n}, true = _ceremony_host?) when n > 0,
+    do: :code_or_passkey
+
+  defp code_help(%{totp?: true}, _ceremony_host?), do: :code
   defp code_help(%{passkeys: n}, true) when n > 0, do: :passkey_sign_in
   defp code_help(%{passkeys: n}, false) when n > 0, do: :add_app
-  defp code_help(_none, _ceremony_host?), do: :code_or_passkey
+  defp code_help(_none, _ceremony_host?), do: :code
 
   @impl true
   # Typing the confirmation code changes nothing the preview shows, and each

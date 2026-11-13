@@ -632,8 +632,8 @@ The check is made again by the enrollment itself (`User` `:confirm_totp`,
 `Passkey` `:register`), not only by the page, so a page that skipped the step
 cannot add a factor. `/editor/settings` has no email step. For an account
 that owes one, it says so beside **Enable two-factor authentication** and the
-passkey form: "Before you add a second factor, you need to confirm your email
-address with a code we send you. Do that on the two-step sign-in page." with
+passkey form: "You need to confirm your email address before you add a second
+factor. Do that on the two-step sign-in page, and add it there." with
 a **Set up two-step sign-in** button to `/account/two-factor` (on a site's own
 address, the main host's page, and it says so). Adding there anyway is
 refused with "Confirm your email address before adding a second factor."

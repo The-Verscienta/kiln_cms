@@ -4373,11 +4373,6 @@ msgstr "Sauvegardes"
 msgid "Backups aren't set up yet — turn them on before you go live."
 msgstr "Les sauvegardes ne sont pas encore configurées — activez-les avant la mise en ligne."
 
-#: lib/kiln_cms_web/live/settings_live.ex
-#, elixir-autogen, elixir-format
-msgid "Before you add a second factor, you need to confirm your email address with a code we send you. Do that on the two-step sign-in page."
-msgstr "Avant d'ajouter un second facteur, vous devez confirmer votre adresse e-mail avec un code que nous vous envoyons. Faites-le sur la page de connexion en deux étapes."
-
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Best match"
@@ -26297,7 +26292,7 @@ msgid_plural "You have %{count} passkeys set up."
 msgstr[0] "Vous avez %{count} clé d’accès configurée."
 msgstr[1] "Vous avez %{count} clés d’accès configurées."
 
-#: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "You have %{max} passkeys, the most an account can hold. Remove one to add another."
 msgstr "Vous avez %{max} clés d'accès, le maximum pour un compte. Supprimez-en une pour en ajouter une autre."
@@ -26327,6 +26322,11 @@ msgstr "Vous avez besoin d'un accès administrateur pour faire cela."
 #, elixir-autogen, elixir-format
 msgid "You need admin access to run a check."
 msgstr "Vous devez être administrateur pour lancer une vérification."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You need to confirm your email address before you add a second factor. Do that on the two-step sign-in page, and add it there."
+msgstr "Vous devez confirmer votre adresse e-mail avant d'ajouter un second facteur. Faites-le sur la page de connexion en deux étapes, et ajoutez-le là-bas."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format

@@ -25,7 +25,7 @@ defmodule KilnCMSWeb.SettingsLiveEnrolmentProofTest do
 
   @moduletag :capture_log
 
-  @note "Before you add a second factor, you need to confirm your email address with a code we send you."
+  @note "You need to confirm your email address before you add a second factor."
 
   defp main_host, do: URI.parse(SecondFactorGate.main_setup_url()).host
 

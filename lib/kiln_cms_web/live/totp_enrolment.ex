@@ -165,6 +165,17 @@ defmodule KilnCMSWeb.TotpEnrolment do
     )
   end
 
+  @doc """
+  Why no passkey can be added: the account holds the most it may
+  (`KilnCMS.Accounts.Passkey.max_per_account/0`, `Validations.PasskeyCap`).
+  """
+  @spec passkey_limit_message() :: String.t()
+  def passkey_limit_message do
+    gettext("You have %{max} passkeys, the most an account can hold. Remove one to add another.",
+      max: KilnCMS.Accounts.Passkey.max_per_account()
+    )
+  end
+
   @doc "Why the shared demo account's sign-in methods can't be changed."
   @spec demo_locked_message() :: String.t()
   def demo_locked_message do

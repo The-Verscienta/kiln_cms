@@ -9,8 +9,9 @@ defmodule KilnCMSWeb.TwoFactorPolicyLiveHostTest do
 
   A site host serves the console only while no console host is configured
   (with one, it redirects there), so the site-host tests run without one. The
-  "ceremony host" is the site's console host (`<slug>.<console host>`), which
-  resolves to the test's own site; the main host is the default org's.
+  ceremony hosts are the site's console host (`<slug>.<console host>`, under
+  the main host), which resolves to the test's own site, and the main host,
+  which is the default org's. A console host outside the main host is not one.
 
   `async: false`: the console host is `Application.put_env`, VM-global.
   """
@@ -55,9 +56,9 @@ defmodule KilnCMSWeb.TwoFactorPolicyLiveHostTest do
     member!(user, site, :admin)
   end
 
-  defp passkey_admin(site) do
-    user = seed_user() |> member!(site, :admin)
+  defp passkey_admin(site), do: seed_user() |> member!(site, :admin) |> with_passkey()
 
+  defp with_passkey(user) do
     Ash.Seed.seed!(Accounts.Passkey, %{
       user_id: user.id,
       name: "Key",
@@ -67,6 +68,31 @@ defmodule KilnCMSWeb.TwoFactorPolicyLiveHostTest do
     })
 
     user
+  end
+
+  # A console host outside the main host, where the browser would refuse the
+  # passkeys' RP ID (`ConsoleHost.passkey_capable?/0` is false). Restored on
+  # exit, as `with_console_host/0` does.
+  defp with_foreign_console_host do
+    previous = Application.get_env(:kiln_cms, :console_host)
+
+    Application.put_env(
+      :kiln_cms,
+      :console_host,
+      "sfforeign#{System.unique_integer([:positive])}.example.net"
+    )
+
+    KilnCMS.Cache.Hosts.clear()
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:kiln_cms, :console_host, previous),
+        else: Application.delete_env(:kiln_cms, :console_host)
+
+      KilnCMS.Cache.Hosts.clear()
+    end)
+
+    :ok
   end
 
   defp help(view), do: view |> element("#two-factor-policy-code-help") |> render()
@@ -122,14 +148,39 @@ defmodule KilnCMSWeb.TwoFactorPolicyLiveHostTest do
       refute has_element?(view, "#two-factor-policy-add-app")
     end
 
-    test "where passkeys work, an admin with the app may use either", %{conn: conn} do
+    test "where passkeys work, an admin with the app and a passkey may use either", %{
+      conn: conn
+    } do
+      site = org("tfph-console-both")
+      admin = site |> app_admin() |> with_passkey()
+
+      {:ok, view, _html} = conn |> session(admin, console_host(site)) |> live(@path)
+
+      assert has_element?(view, "#two-factor-policy-code-help", @code_or_passkey)
+      refute has_element?(view, "#two-factor-policy-add-app")
+    end
+
+    test "an admin with the app and no passkey is asked for its code only", %{conn: conn} do
       site = org("tfph-console-app")
       admin = app_admin(site)
 
       {:ok, view, _html} = conn |> session(admin, console_host(site)) |> live(@path)
 
-      assert has_element?(view, "#two-factor-policy-code-help", @code_or_passkey)
-      refute help(view) =~ @add_app
+      assert has_element?(view, "#two-factor-policy-code-help", @code_only)
+      refute help(view) =~ "passkey"
+    end
+
+    test "an admin with no factor gets the plain code line under the setup notice", %{
+      conn: conn
+    } do
+      site = org("tfph-console-none")
+      admin = seed_user() |> member!(site, :admin)
+
+      {:ok, view, _html} = conn |> session(admin, console_host(site)) |> live(@path)
+
+      assert has_element?(view, "#two-factor-policy-not-enrolled")
+      assert has_element?(view, "#two-factor-policy-code-help", @code_only)
+      refute help(view) =~ "passkey"
     end
 
     test "Set up two-step sign-in goes to the page on this host, with no host line", %{
@@ -158,6 +209,51 @@ defmodule KilnCMSWeb.TwoFactorPolicyLiveHostTest do
              )
 
       assert html =~ "This opens on #{main_host()}, where you sign in again."
+    end
+  end
+
+  describe "on a console host outside the main host" do
+    setup do
+      with_foreign_console_host()
+    end
+
+    test "a passkey-only admin is sent to add an app on the setup page here, with no host line",
+         %{conn: conn} do
+      refute KilnCMSWeb.Plugs.ConsoleHost.passkey_capable?()
+      site = org("tfph-foreign")
+      admin = passkey_admin(site)
+
+      {:ok, view, _html} = conn |> session(admin, console_host(site)) |> live(@path)
+
+      assert has_element?(view, "#two-factor-policy-code-help", @add_app)
+      assert has_element?(view, ~s(#two-factor-policy-add-app[href="/account/two-factor"]))
+      refute help(view) =~ "where you sign in again"
+    end
+  end
+
+  describe "on the main host" do
+    test "a passkey-only admin of its site is told to sign in again with the passkey", %{
+      conn: conn
+    } do
+      main = %{id: Accounts.default_org_id()}
+      admin = passkey_admin(main)
+
+      {:ok, view, _html} = conn |> session(admin, main_host()) |> live(@path)
+
+      assert has_element?(view, "#two-factor-policy-code-help", @passkey_sign_in)
+      refute has_element?(view, "#two-factor-policy-add-app")
+    end
+
+    test "Set up two-step sign-in goes to the page on this host, with no host line", %{
+      conn: conn
+    } do
+      main = %{id: Accounts.default_org_id()}
+      admin = seed_user() |> member!(main, :admin)
+
+      {:ok, view, html} = conn |> session(admin, main_host()) |> live(@path)
+
+      assert has_element?(view, ~s(#two-factor-policy-setup-link[href="/account/two-factor"]))
+      refute html =~ "where you sign in again"
     end
   end
 end
