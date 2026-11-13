@@ -14,8 +14,12 @@ defmodule KilnCMSWeb.RequestRedaction do
   The rule is read off the router rather than kept as a list of prefixes, so a
   new token route is covered the day it is added: a route segment is secret
   when its parameter name contains `token` or `secret` (`credential_param?/1`),
-  which covers `:token`, `:invite_token`, `:unlock_token` and any plugin route
-  that follows the same naming. `test/kiln_cms_web/request_redaction_test.exs`
+  which covers `:token`, `:invite_token`, `:unlock_token` and any plugin
+  `get`/`post`/`match` route that follows the same naming. Routes inside a
+  forwarded sub-router (a `forward` in the router, or a plugin's `{:forward, …}`
+  plug route) are invisible here: `Phoenix.Router.routes/1` lists only the
+  mount point, so a sub-router must keep credentials out of its paths.
+  `test/kiln_cms_web/request_redaction_test.exs`
   pins the resulting set against an explicit table, so a route that slips the
   rule fails a test instead of reaching a log.
 
@@ -78,13 +82,24 @@ defmodule KilnCMSWeb.RequestRedaction do
 
   A conn is matched on its decoded `path_info`. A string is split on `/` and
   matched as given, for a caller that already holds a decoded path.
-  """
-  @spec redact(Plug.Conn.t() | String.t()) :: {:redacted, String.t()} | :unchanged
-  def redact(%Plug.Conn{path_info: segments}), do: redact_segments(segments, &decode/1)
 
-  def redact(path) when is_binary(path) do
-    path |> String.split("/", trim: true) |> redact_segments(& &1)
+  Patterns are tried at the start of the path and one segment in, because
+  the request log runs before the locale prefix is stripped. A caller whose
+  path has already lost its locale passes `locale_stripped: true` to match at
+  the start only.
+  """
+  @spec redact(Plug.Conn.t() | String.t(), keyword()) ::
+          {:redacted, String.t()} | :unchanged
+  def redact(conn_or_path, opts \\ [])
+
+  def redact(%Plug.Conn{path_info: segments}, opts),
+    do: redact_segments(segments, &decode/1, offsets(opts))
+
+  def redact(path, opts) when is_binary(path) do
+    path |> String.split("/", trim: true) |> redact_segments(& &1, offsets(opts))
   end
+
+  defp offsets(opts), do: if(opts[:locale_stripped], do: [0], else: [0, 1])
 
   @doc """
   The path to write down: redacted when it carries a secret, otherwise the
@@ -98,9 +113,9 @@ defmodule KilnCMSWeb.RequestRedaction do
     end
   end
 
-  @doc "True when the conn's path (or the path string) carries a secret."
-  @spec secret?(Plug.Conn.t() | String.t()) :: boolean()
-  def secret?(conn_or_path), do: redact(conn_or_path) != :unchanged
+  @doc "True when the conn's path (or the path string) carries a secret. Options as `redact/2`."
+  @spec secret?(Plug.Conn.t() | String.t(), keyword()) :: boolean()
+  def secret?(conn_or_path, opts \\ []), do: redact(conn_or_path, opts) != :unchanged
 
   @doc """
   The route paths with at least one secret segment, as the router spells
@@ -128,12 +143,12 @@ defmodule KilnCMSWeb.RequestRedaction do
   defp original(%Plug.Conn{request_path: path}), do: path
   defp original(path) when is_binary(path), do: path
 
-  defp redact_segments(segments, decode) do
+  defp redact_segments(segments, decode, offsets) do
     case patterns() do
       {:ok, patterns} ->
         decoded = Enum.map(segments, decode)
 
-        case secret_positions(decoded, patterns) do
+        case secret_positions(decoded, patterns, offsets) do
           [] -> :unchanged
           positions -> {:redacted, rebuild(segments, MapSet.new(positions))}
         end
@@ -155,8 +170,8 @@ defmodule KilnCMSWeb.RequestRedaction do
     ArgumentError -> segment
   end
 
-  defp secret_positions(segments, patterns) do
-    for offset <- [0, 1],
+  defp secret_positions(segments, patterns, offsets) do
+    for offset <- offsets,
         rest <- [Enum.drop(segments, offset)],
         pattern <- patterns,
         positions <- [match(pattern, rest, offset, [])],

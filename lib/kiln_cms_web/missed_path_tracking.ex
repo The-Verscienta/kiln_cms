@@ -189,7 +189,7 @@ defmodule KilnCMSWeb.MissedPathTracking do
       not junk_prefix?(path) and
       not dotfile?(path) and
       not junk_extension?(path) and
-      not RequestRedaction.secret?(path)
+      not RequestRedaction.secret?(path, locale_stripped: true)
   end
 
   # Any segment beginning with a dot. `junk_extension?/1` reads only the last

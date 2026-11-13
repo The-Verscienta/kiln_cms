@@ -176,8 +176,12 @@ defmodule KilnCMS.CMS.MissedPathTest do
       visit(conn, "/magic_link/#{token}/x")
       visit(build_conn(), "/fr/password-reset/#{token}/x")
       visit(build_conn(), "/legacy-page")
+      # A token route one segment in is an ordinary miss here: the locale is
+      # already gone, so only a match at the start of the path is a credential.
+      visit(build_conn(), "/products/magic_link/old-page")
 
-      assert [%{path: "/legacy-page"}] = rows()
+      assert ["/legacy-page", "/products/magic_link/old-page"] =
+               rows() |> Enum.map(& &1.path) |> Enum.sort()
     end
   end
 
