@@ -426,6 +426,9 @@ Three more things the two paths need from a deployment:
   ([The last-good marker](backups.md#the-last-good-marker)). The script needs
   GNU tar or bsdtar on the host, not busybox tar
   ([system-requirements.md](system-requirements.md#running-the-backup-scripts-on-the-host)).
+  The reasoning is in [ADR 0041](decisions/0041-the-app-and-backup-sh-agree-on-what-to-keep-only-through-presence-only-marker-files.md) (the markers) and
+  [ADR 0042](decisions/0042-backup-sh-re-implements-the-media-planner-in-bash-and-both-change-in-the-same-pull-request.md) (why the script
+  splits media itself).
 - **The `backup_steps` Oban queue.** In-app backups run as a chain of jobs on
   it, one at a time per node, behind a cluster-wide lock. If you size
   `POOL_SIZE` as the sum of queue limits plus web traffic, add one. A
@@ -462,7 +465,8 @@ snippet Phoenix's Fly guide generates), or the nodes stay silently
 disconnected and cache busts never cross them. Give every node its own name:
 in-app backups key each node's heartbeat by it, and two nodes sharing one can
 take a running backup step away from each other
-([backups.md](backups.md#several-nodes-and-the-backup-lock)).
+([backups.md](backups.md#several-nodes-and-the-backup-lock)). The reasoning
+is in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md).
 
 The auth budgets need nothing from the cluster at all. The sign-in, second
 factor, reset-mail and credential-form budgets count in Postgres
@@ -668,7 +672,8 @@ of work:
   at the restarted node's first beat), and requeued under the same stamp with
   the attempts it had left, reusing the files already finished
   ([backups.md](backups.md#several-nodes-and-the-backup-lock)). Its job is
-  canceled first, so Lifeline never re-runs it.
+  canceled first, so Lifeline never re-runs it. The reasoning is in
+  [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md).
 - **`max_attempts: 1` workers are discarded, not re-run:** demo reset, slug
   regeneration, content-release go-live/rollback. A release left in
   `publishing` or `rolling_back` is freed with the admin-only **abandon**
