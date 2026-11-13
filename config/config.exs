@@ -62,6 +62,12 @@ config :kiln_cms, Oban,
     # lock makes it one per cluster. The `backups` queue above only runs
     # legacy jobs enqueued before the upgrade and goes next minor.
     backup_steps: 1,
+    # The boot-time occurrence backfill (`KilnCMS.Events.BackfillWorker`,
+    # #2750). Its own queue for the reason `backup_steps` has one: a node of
+    # the previous release polls `:default`, and picking up a job keyed to a
+    # newer recurrence engine there would recompute with the old engine and
+    # complete it. One job per engine version per day, so concurrency one.
+    occurrence_backfill: 1,
     default: 10
   ],
   repo: KilnCMS.Repo,
@@ -645,9 +651,11 @@ config :kiln_cms, :security_log_prune_cron, "20 3 * * *"
 # `next_occurrence_at` and the sweep above will not, since it visits rows whose
 # occurrence has PASSED and a NULL has passed nothing.
 #
-# Deduplicated for a day at the database level, so replicas queue one job
-# between them, and cheap when there is nothing to do: the pass writes only rows
-# whose value actually changes. Turn it off for a deployment that would rather
+# Deduplicated per recurrence engine version per day at the database level, so
+# replicas queue one job between them and a release that changes the expansion
+# (`KilnCMS.Events.Recurrence.engine_version/0`) always gets its own run. Cheap
+# when there is nothing to do: the pass writes only rows whose value actually
+# changes. Turn it off for a deployment that would rather
 # run `mix kiln.occurrences.backfill` on its own terms.
 config :kiln_cms, :occurrence_backfill_on_boot, true
 

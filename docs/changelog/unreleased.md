@@ -257,6 +257,72 @@ carries the reasoning.
   table and the column, and reads the two new security log types as
   unrecognized events ("Unrecognized event (…)"). (Part of #2247.)
 
+<a id="event-recurrence-rfc-upgrade"></a>
+
+- **Some recurrence rules now expand per RFC 5545, as subscribed calendars already showed them; Kiln recomputes every event's next date about ten minutes after the first boot. A deployment that builds Oban's `queues:` itself must add `occurrence_backfill: 1`.**
+  Kiln's own expansion (the "what's on" listing at `/<plural>`, its JSON,
+  `next_occurrence_at`, the sort) read some rules differently from the
+  calendar clients that receive the same rule text in `.ics` feeds (#2750).
+  It now reads them as the clients do. The rule text a subscriber receives
+  is unchanged (apart from a timed `UNTIL`, see
+  [Fixed](#ics-until-end-of-local-day)), so only Kiln's own dates move. Rules affected:
+  - **Yearly rules with `BYMONTH`, `BYMONTHDAY` or `BYDAY`.** They used to
+    look only at the start date's month. Now:
+    - `FREQ=YEARLY;BYMONTH=3,9` from March is March **and** September (was
+      March only); `BYMONTH=6` from January is June (was nothing at all).
+    - `FREQ=YEARLY;BYDAY=2TU` without `BYMONTH` is the second Tuesday of
+      **January**, counted within the year (was the start month's). Add
+      `BYMONTH=` to keep a month: `FREQ=YEARLY;BYMONTH=5;BYDAY=2TU`.
+    - `FREQ=YEARLY;BYMONTHDAY=15` without `BYMONTH` is the 15th of **every
+      month**; `FREQ=YEARLY;BYDAY=TU` is every Tuesday of the year. Add
+      `BYMONTH=` for once a year.
+  - **Monthly rules with both `BYDAY` and `BYMONTHDAY`** are now the dates
+    that match both: `FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13` is Friday the
+    13th, where it was every Friday plus every 13th.
+  - **Daily and weekly rules with `BYMONTH`** now honor it:
+    `FREQ=DAILY;BYMONTH=6` is June only, where it was every day.
+  - **Weekly rules naming a weekday twice** (`BYDAY=MO,MO`) count it once,
+    so `COUNT=4` is four Mondays, not four occurrences on two.
+
+  Unchanged, and worth knowing: an event whose start date doesn't match its
+  rule (`FREQ=MONTHLY;BYMONTHDAY=15` starting on the 2nd) is not listed on
+  its start date by Kiln, while some clients, Google Calendar among them,
+  show it. [Events](../events.md) has the full rules and the known
+  divergences.
+
+  **Nothing to do on a standard deployment.** Each node's boot queues a
+  recompute (`KilnCMS.Events.BackfillWorker`) on a new Oban queue,
+  `occurrence_backfill` (concurrency 1), to run ten minutes later, once the
+  previous release's nodes have left. The job is keyed to the recurrence
+  engine's version (`KilnCMS.Events.Recurrence.engine_version/0`, now 2), so
+  it runs once for this release even if a backfill already ran today. What
+  to check:
+  - **A deployment that builds Oban's `queues:` list itself** must add
+    `occurrence_backfill: 1`, or the recompute is queued and never runs.
+    If you size `POOL_SIZE` as the sum of queue limits plus web traffic,
+    add one. A plugin that declares a queue of that name turns
+    `mix kiln.plugins.doctor` red.
+  - **With `KILN_OCCURRENCE_BACKFILL_ON_BOOT=false`**, nothing is queued:
+    once every node runs the new release, run
+    `bin/kiln_cms rpc 'KilnCMS.Events.Backfill.run()'` (`rpc`, not `eval`,
+    which starts no application) or `mix kiln.occurrences.backfill`.
+  - **Events whose next date changes are written once**, and get a new
+    `updated_at`, as any save does: expect a sitemap `lastmod` change, JSON:API
+    clients that poll on `updated_at` to fetch them again, and their cached
+    pages to be refreshed.
+  - **The pass logs one line** when it writes anything: "occurrence backfill
+    recomputed N record(s) of M scanned (recurrence engine 2)", how many
+    moved to a different date and how many now have no upcoming date, with
+    up to 50 ids of each. The second group has left the what's-on listings;
+    the line is a warning when there are any.
+  - **An event saved on a node of the previous release after the pass ran**
+    keeps that release's date until a boot more than a day later, or a manual
+    run.
+
+  Rolling back is safe: there is no migration, and an older release
+  recomputes an event's date the old way whenever it next saves or sweeps
+  it.
+
 ## Breaking
 
 <a id="media-purge-quarantined"></a>
@@ -1548,6 +1614,34 @@ carries the reasoning.
   ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678)) is still
   open. No migration and no config. Guide: [json-api.md](../json-api.md) → "Custom fields",
   "Equality operands also match the value as a save stores it".
+
+<a id="restored-event-next-occurrence"></a>
+
+- **Restoring an event from the trash recomputes its next occurrence, which resolves the 1.9.0 known issue "A restored event can show a stale next occurrence" (#2621).**
+  `next_occurrence_at` depends on the current time, and the recompute pass
+  (`mix kiln.occurrences.backfill` and the boot job) reads live rows only,
+  so an event trashed before it ran came back with a stale or empty date and
+  sat in the wrong place in, or missing from, the what's-on listing until
+  someone saved it. The `:restore` action now recomputes the date from the
+  event's own schedule, as a save does. The pass still skips the trash: a
+  date written into a trashed row would be stale again by the time it came
+  back. No migration and no config. Guide: [Trash](../trash.md#restore-a-document).
+
+<a id="ics-until-end-of-local-day"></a>
+
+- **Calendar clients no longer drop or add the last occurrence of a timed repeating event with an end date.**
+  A timed event's `.ics` `RRULE` gave `UNTIL` as 23:59:59 **UTC** on the end
+  date, while Kiln includes the whole end date in the event's own zone
+  (#2751). West of UTC the last occurrence fell after that instant and
+  clients dropped it (a 20:00 New York series ending 3 March); east of UTC
+  clients could show one more on the next day. `UNTIL` is now the last
+  second of the end date in the event's zone, in UTC
+  (`UNTIL=20260405T225959Z` for a London event ending 5 April, on summer
+  time). All-day events keep the DATE form, and an event whose zone the
+  server doesn't know falls back to it rather than failing the feed. Only
+  the exported rule changes; stored rules and Kiln's own dates don't.
+  Subscribers see the fix at their next refresh. Guide:
+  [Events](../events.md#calendars).
 
 ## Security
 

@@ -71,6 +71,33 @@ defmodule KilnCMSWeb.CalendarControllerTest do
       assert body =~ "SUMMARY:The gig"
     end
 
+    test "a timed recurring event's UNTIL is the end of its local date", %{conn: conn} = ctx do
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: ctx.td.id,
+          name: "repeats",
+          label: "Repeats",
+          field_type: "recurrence"
+        },
+        actor: ctx.admin
+      )
+
+      ctx
+      |> event!(%{
+        custom_fields: %{
+          "when" => %{"start" => "2026-03-03T20:00", "time_zone" => "America/New_York"},
+          "repeats" => %{"rrule" => "FREQ=WEEKLY;UNTIL=20260324"}
+        }
+      })
+      |> publish!(ctx)
+
+      body = conn |> get("/#{ctx.plural}/calendar.ics") |> response(200)
+
+      # Midnight of 25 March in New York (EDT) is 04:00 UTC: the 24 March 20:00
+      # occurrence (00:00 UTC on the 25th) is inside it, as Kiln lists it (#2751).
+      assert body =~ "UNTIL=20260325T035959Z"
+    end
+
     test "an unpublished draft is not in it", %{conn: conn} = ctx do
       event!(ctx, %{title: "Still a draft"})
 
