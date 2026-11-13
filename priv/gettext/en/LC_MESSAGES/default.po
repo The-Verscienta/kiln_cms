@@ -2390,6 +2390,11 @@ msgstr ""
 msgid "About Resume"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "About copying backups"
+msgstr ""
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "About health"
@@ -6251,6 +6256,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Copy value"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copying backups elsewhere"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -11092,6 +11102,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
 msgid "If the check doesn't load, you can still send this form — it will be reviewed before it's acted on."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "If you copy backups off this host yourself, copy each backup's .sha256 files with it: without them a media backup in parts won't restore, and nothing can check the others. The built-in off-site copy already includes them."
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex

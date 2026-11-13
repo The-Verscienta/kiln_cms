@@ -1236,6 +1236,18 @@ carries the reasoning.
     [Restore a media set that has several parts](../backups.md#restore-a-media-set-that-has-several-parts)
     in a new tab. A single-archive run shows no label, as before. (#2425)
 
+<a id="backup-offsite-sha256-hint"></a>
+
+- **Backups → Where backups go: a `?` beside the heading says to copy each backup's `.sha256` files when you copy backups off the host yourself.**
+  For platform admins, on **Backups**. It reads: "If you copy backups off this
+  host yourself, copy each backup's .sha256 files with it: without them a
+  media backup in parts won't restore, and nothing can check the others. The
+  built-in off-site copy already includes them." Its **Learn more** opens
+  [The app path and the shell path share one format](../backups.md#the-app-path-and-the-shell-path-share-one-format),
+  which gives the rclone filters that keep them. It shows whether or not an
+  off-site copy is configured: the operators it is for copy backups with their
+  own tools, so the page has no off-site row for them. (#2890)
+
 <a id="take-content-down-guide"></a>
 
 - **A new guide, [Take content down](../take-content-down.md), walks through every way to unpublish or archive a page, who may use each, and what each refusal means.**

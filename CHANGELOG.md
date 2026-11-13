@@ -173,6 +173,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Backups → History: a resumable run has a `?` tip beside Resume explaining what a resume reuses, and a media backup's "N parts" label links to how to restore a part set.**
   ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-history-resume-tip-parts-link))
 
+- **Backups → Where backups go has a `?` saying that a backup copied off the host by hand needs its `.sha256` files with it; the built-in off-site copy already includes them.**
+  ([long form](docs/changelog/unreleased.md#backup-offsite-sha256-hint))
+
 - **New guide "Take content down": unpublishing and archiving from the editor, the content list, a date, the calendar or a release, who may use each, and what each refusal message means.**
   ([#2893](https://github.com/The-Verscienta/kiln_cms/pull/2893) · [long form](docs/changelog/unreleased.md#take-content-down-guide))
 

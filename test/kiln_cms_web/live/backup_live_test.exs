@@ -1653,10 +1653,29 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       for fragment <- [
             "restore-a-media-set-that-has-several-parts",
-            "media-backups-in-parts-2218"
+            "media-backups-in-parts-2218",
+            "the-app-path-and-the-shell-path-share-one-format"
           ] do
         assert fragment in slugs, "docs/backups.md has no heading whose anchor is ##{fragment}"
       end
+    end
+
+    # Shown whatever the off-site row says: the built-in copy already ships
+    # the .sha256 files, so the hint is for operators who copy backups
+    # themselves (#2890).
+    test "Where backups go says to copy the .sha256 files, with or without an off-site copy",
+         %{conn: conn, dir: dir} do
+      lv = mount_admin(conn)
+      assert has_element?(lv, "#offsite-sidecars-help", "in parts won't restore")
+
+      assert has_element?(
+               lv,
+               ~s|#offsite-sidecars-help a[href$="/docs/backups.md#the-app-path-and-the-shell-path-share-one-format"]|
+             )
+
+      seed_manifest!(dir, offsite: "r2:kiln-backups")
+      lv = mount_admin(conn)
+      assert has_element?(lv, "#offsite-sidecars-help", "in parts won't restore")
     end
 
     test "manual, cron, console and schedule read as labels; anything else as recorded", %{
