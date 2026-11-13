@@ -77,6 +77,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`backup.sh` now refuses a `BACKUP_KEEP_DAYS` that is not a whole number of days from 1 to 2147483647, and keeps 14. A host that set `0` keeps 14 days of backups (check the disk); one that set `14d` on Linux, which pruned nothing, deletes backups older than 14 days at its next prune.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
 
+- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced, and rolling back is safe. Part of #2247.**
+  ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
+
 ### Added
 
 - **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
@@ -102,6 +105,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Account owners are emailed whenever an authenticator app is set up or replaced, or a passkey is added, with what to do if it wasn't them.**
   ([long form](docs/changelog/unreleased.md#second-factor-added-email))
+
+- **Groundwork for requiring two-step sign-in by role, not yet enforced (no page; part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
+  ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
 
 ### Changed
 

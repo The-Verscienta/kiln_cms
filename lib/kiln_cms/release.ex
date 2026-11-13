@@ -669,11 +669,12 @@ defmodule KilnCMS.Release do
   It runs the resource's `operator_override` action as the `:operator` system
   actor: it sets the requirement to off and nothing else, records "Two-step
   sign-in requirement changed" (`via: console`) in the site's security log in
-  the same transaction, and the change reaches every node at once. Turn it
-  back on from the console once an administrator has set up a second factor.
+  the same transaction, and the change reaches every node at once. An
+  administrator who has set up a second factor turns it back on from the
+  site's policy page (part 3 of #2247 adds that page).
 
-  Through `rpc`, not `eval`: the cluster-wide cache bust and the message to
-  open pages need the running application. `rpc` exits 0 whatever this
+  Through `rpc`, not `eval`: the cluster-wide cache bust needs the running
+  application. `rpc` exits 0 whatever this
   returns; a script that must fail on an error matches the result:
 
       bin/kiln_cms rpc '{:ok, :off} = KilnCMS.Release.second_factor_requirement_off()'
