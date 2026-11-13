@@ -8,8 +8,10 @@ ID, Windows Hello, a phone, a security key) and signs in without a password.
 
 - **Enroll** at `/editor/settings` → *Passkeys*: optionally fill in "Name this
   passkey" (for example "MacBook Touch ID"), then click "Add a passkey". The
-  browser prompts for the device screen lock while the page reads "Waiting for
-  your device…". The credential is then listed with its name, the date it was
+  line under the form says so in advance: "Your browser will prompt you to
+  confirm with this device's screen lock. We'll email you each time a passkey
+  is added to your account." The browser prompts for the device screen lock
+  while the page reads "Waiting for your device…". The credential is then listed with its name, the date it was
   added and the date it was last used. A passkey can't be renamed: remove it
   with the trash button and add it again. Multiple passkeys per account.
 - **Sign in** at `/sign-in` → "Use a passkey" (the button appears only in

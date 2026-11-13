@@ -158,6 +158,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Contributors: the required `Compile, lint, scan & test` check also waits on docs, strict-tenancy, overlay drift, both clients and the ML job; every required job has a time limit.**
   ([#2801](https://github.com/The-Verscienta/kiln_cms/pull/2801) · [long form](docs/changelog/unreleased.md#ci-required-check-covers-more-jobs))
 
+- **Team says how long an invitation link lasts and links its guide, Settings says adding a passkey or authenticator app emails you, and `/sign-in/verify` says a passkey works too when one can.**
+  ([long form](docs/changelog/unreleased.md#account-screens-help-text))
+
 ### Fixed
 
 - **Backup Resume is safe: the re-open is atomic, Resume waits ~2.5 min after a Cancel, a step that outlived its Cancel can't overwrite state or history, a resume runs on the node with its files, and a refused one says why on its row.**
@@ -249,6 +252,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
   ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
+
+- **Password policy no longer describes Off as "not looked up at all": it covers this site only, and only `BREACHED_PASSWORD_CHECK=false` stops the check server-wide. Docs: the staging scrub table lists all its purges.**
+  ([long form](docs/changelog/unreleased.md#password-policy-off-description))
 
 ### Security
 

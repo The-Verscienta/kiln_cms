@@ -142,9 +142,9 @@ added at `/editor/settings`, and a browser that supports passkeys. Then:
 
 1. Sign in at `/sign-in` with your password (a sign-in link by email or
    single sign-on works the same). The **Two-factor authentication** page
-   opens at `/sign-in/verify`, asking for "the 6-digit code from your
-   authenticator app", with **Use a passkey** below **Use a recovery code
-   instead**.
+   opens at `/sign-in/verify` and reads "Enter the 6-digit code from your
+   authenticator app. You can also use a passkey.", with **Use a passkey**
+   below **Use a recovery code instead**.
 2. Click **Use a passkey**. The browser offers this account's passkeys, and
    only those, and asks for the device's screen lock (PIN, fingerprint or
    face).
@@ -159,7 +159,9 @@ The button is shown only where the passkey can be checked: on the main host
 (`PHX_HOST`) or a console host under it (`KILN_CONSOLE_HOST`), and never on a
 site's own host, because a passkey belongs to the main host and a browser
 refuses it anywhere else. On a site's own host the page shows the code form
-only. It is also hidden in a browser without passkey support.
+only. It is also hidden in a browser without passkey support. "You can also
+use a passkey." is shown and hidden with the button, so the page never offers
+a passkey it cannot take.
 
 ### What counts, and what is recorded
 
@@ -183,9 +185,10 @@ the same rules as a code:
 
 ### If it does not work
 
-- **No Use a passkey button.** The account has no passkey, you are on a site's
-  own host rather than the main or console host, or the browser has no passkey
-  support. The code and recovery-code forms still work.
+- **No Use a passkey button** (and no "You can also use a passkey."). The
+  account has no passkey, you are on a site's own host rather than the main or
+  console host, or the browser has no passkey support. The code and
+  recovery-code forms still work.
 - **"That passkey couldn't be verified. Try again or use another method."**
   The device prompt was canceled or timed out, or the passkey was refused (it
   belongs to another account, did not check the screen lock, or failed the
@@ -248,7 +251,10 @@ Whenever a second factor is added to an account, its owner gets an email
 - a passkey is added.
 
 One email per factor, every time. Regenerating recovery codes adds no factor
-and sends nothing; nor does a wrong code or a refused passkey.
+and sends nothing; nor does a wrong code or a refused passkey. `/editor/settings`
+says so where you add each: "We'll email you when an authenticator app
+is added or replaced." under **Two-factor authentication**, and "We'll email
+you each time a passkey is added to your account." under **Passkeys**.
 
 Why: adding a factor needs only a signed-in session. Someone who got hold of
 a session could add a passkey of their own and use it to sign in again after
