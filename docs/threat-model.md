@@ -1196,6 +1196,8 @@ password leaves the server.
   corpus.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
+- **Why on by default, and why fail open.**
+  [ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md).
 
 ### Human verification (#2249)
 

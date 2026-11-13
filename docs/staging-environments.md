@@ -238,7 +238,7 @@ the gaps the *data* carries — the *config* is already inert:
 - **No third-party scripts** on delivered pages — nothing to point away from prod.
 - **Mail is off unless `MAIL_MODE` is set**; Meilisearch and S3 are opt-in and default
   to `enabled: false` / local storage. A staging env that simply doesn't set them talks
-  to no subprocessor — with one exception: the upstream **update check** is on by
+  to no subprocessor — with a few exceptions. The upstream **update check** is on by
   default, so an admin opening `/editor/system` makes an anonymous request to
   api.github.com (no instance data, see [data-flows.md](data-flows.md)). Set
   `KILN_UPDATE_CHECK=false` on the staging env if that request is unwelcome.
@@ -250,6 +250,13 @@ the gaps the *data* carries — the *config* is already inert:
   verification itself, or the staging firewall does not allow those hosts
   (blocked, it only logs a warning per engine). See
   [bot-budgets.md](bot-budgets.md#published-ip-ranges).
+  Two more need no person to opt in: registering, changing or resetting a
+  password on the clone sends a five-character fragment of its hash to Have I
+  Been Pwned (the scrub's own staging admin is not checked)
+  (`BREACHED_PASSWORD_CHECK=false` stops it), and with a plugin from Hex, an
+  admin opening `/editor/system` asks hex.pm about it (`KILN_UPDATE_CHECK=false`
+  covers it). [data-flows.md](data-flows.md#optional-subprocessors) lists every
+  call a default install makes and the variable that stops each.
 - **Secrets come from the environment** (`SECRET_KEY_BASE`, `DATABASE_URL`, provider
   keys via `KilnCMS.Keys`), not the database — so a fresh set of staging env vars is a
   clean break from production. The DKIM private key is the one secret that lives in the

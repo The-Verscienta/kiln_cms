@@ -70,7 +70,12 @@ Full flow, recipe, and the serve step live in
 - [ ] Serve it as a **second** Coolify app from the **same image/repo**, differing
       only by: `DATABASE_URL` → the clone, a **fresh** `SECRET_KEY_BASE`, a staging
       hostname, and outbound integrations left **off** (no `MAIL_MODE`; Meilisearch
-      `enabled: false`; `KilnCMS.Storage.Local`). Optionally noindex at the proxy.
+      `enabled: false`; `KilnCMS.Storage.Local`). Leaving a variable unset
+      does not turn off the calls Kiln makes by default: set
+      `KILN_UPDATE_CHECK=false`, `KILN_CRAWLER_VERIFICATION=false` and
+      `BREACHED_PASSWORD_CHECK=false` if the clone must make none
+      ([data-flows.md](data-flows.md#optional-subprocessors)). Optionally
+      noindex at the proxy.
 - [ ] **Don't copy production's backup settings.** Leave `BACKUP_RCLONE_REMOTE`
       and any `RCLONE_CONFIG*` variables unset, or point them at a staging
       remote, and give the clone its own `BACKUP_DIR`: otherwise a backup taken

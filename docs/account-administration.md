@@ -1305,7 +1305,8 @@ Requires the admin role.
 1. Open **Password policy** under **Sign-in & access** in the console sidebar (or go to
    `/editor/password-policy`).
 2. In **When a new password is in a known breach**, pick one of the three options:
-   - **Off - don't warn.** The check result is ignored.
+   - **Off - don't warn.** Passwords are not checked, and no request is
+     made to Have I Been Pwned for this site.
    - **Warn - allow it, with a warning.** The default. The password is
      accepted; the person sees a notice asking them to consider another.
    - **Block - refuse it for administrators.** An administrator's new password
@@ -1332,6 +1333,7 @@ counts) and its membership tier on this site.
 ### When the check does nothing
 
 - The operator set `BREACHED_PASSWORD_CHECK=false` (the page says so).
+- The site's policy is **Off**: nothing is sent.
 - The lookup service is slow or unreachable: the password is accepted. Operators
   can watch for this in [observability](observability.md#breached-password-checks).
 - Passwords an admin does not type: the admin-sent reset *mail* is checked when
@@ -1340,7 +1342,9 @@ counts) and its membership tier on this site.
 
 See the [threat model](threat-model.md#breached-passwords) for the limits and
 [environment variables](environment-variables.md#breached-password-check-2240)
-for the two operator settings.
+for the two operator settings. Why the check is on by default and accepts the
+password when the lookup fails is in
+[ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md).
 
 ## Signing an account out
 
