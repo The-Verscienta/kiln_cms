@@ -72,7 +72,11 @@ while it was in the trash: both tasks process trashed documents too
 (#2533), so a field deleted in the meantime does not take the document's
 values with it. Two other background passes still skip the trash: the
 daily refresh of date-based computed fields, which the next save or daily
-run catches up, and `mix kiln.occurrences.backfill`.
+run catches up, and the recompute of events' next dates
+(`mix kiln.occurrences.backfill`). An event's next date doesn't wait for that
+pass: restoring an event recomputes its next occurrence from its schedule and
+the current time, so a published event takes its right place in the "what's on"
+listing straight away (#2621).
 
 A trashed draft is never published by its schedule. If its **Scheduled
 publish at** time passed while it was in the trash, restoring it publishes it

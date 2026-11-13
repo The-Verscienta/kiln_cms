@@ -70,15 +70,21 @@ running a venue should set it.
 ## `recurrence`: an RRULE subset
 
 ```elixir
-%{"rrule" => "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261231T000000Z",
+%{"rrule" => "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261231",
   "exdates" => ["2026-12-25"]}
 ```
 
 Supported: `FREQ` (`DAILY` `WEEKLY` `MONTHLY` `YEARLY`), `INTERVAL`, `COUNT`,
-`UNTIL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH`, `WKST`. Anything else — `BYSETPOS`,
-`BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, `BYMINUTE`, `BYSECOND` — is **rejected at the
-form**, never silently ignored: an editor who writes a rule Kiln cannot honour
-should find out then, not from a subscriber asking why the calendar is wrong.
+`UNTIL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH`, and `WKST=MO`. Anything else —
+`BYSETPOS`, `BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, `BYMINUTE`, `BYSECOND`, a week
+start other than Monday — is **rejected at the form**, never silently ignored:
+an editor who writes a rule Kiln cannot honor should find out then, not from a
+subscriber asking why the calendar is wrong.
+
+`UNTIL` is a **date**, inclusive, in the event's own zone: `UNTIL=20261231`
+keeps an occurrence on 31 December at any time of day. A date-time `UNTIL`
+(`20261231T000000Z`) is accepted, but only its date is read, and the form saves
+it as that date.
 
 Expansion is **wall-clock**, so "every Tuesday at 19:00" stays at 19:00 local
 across a DST boundary rather than drifting to 18:00 or 20:00. Where a local time
@@ -91,6 +97,84 @@ this document" call, because `FREQ=DAILY` with no `UNTIL` has infinitely many.
 The `duration` recurs, not the end instant: an event that runs 19:00–21:00 runs
 two hours on every occurrence, including one on the far side of a DST change
 where the two UTC offsets differ.
+
+### How a rule expands
+
+Kiln expands a rule the way RFC 5545 (§3.3.10) and calendar clients do. That
+matters twice over: the "what's on" listing sorts by Kiln's expansion, while a
+subscribed calendar receives the rule text and expands it itself, so the two
+only agree if both read the rule the same way.
+
+- **`FREQ` sets the period** the rule repeats in: a day, a Monday-start week, a
+  calendar month or a calendar year, stepped by `INTERVAL` from the event's
+  start.
+- **Every other part narrows it.** A date is an occurrence when it passes every
+  part the rule gives: its month is in `BYMONTH`, its day in `BYMONTHDAY`
+  (negative counts from the month's end, `-1` is the last day), its weekday in
+  `BYDAY`. So `BYDAY` with `BYMONTHDAY` is the dates that are both:
+  `FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13` is every Friday the 13th. And
+  `BYMONTH` narrows daily and weekly rules too: `FREQ=DAILY;BYMONTH=6` is every
+  day of June.
+- **A numbered `BYDAY`** (`2TU`, `-1FR`, from 1 to 5 either way) counts within
+  the month for a monthly rule, and for a yearly rule with `BYMONTH`. A yearly
+  rule without `BYMONTH` counts within the **year**: `FREQ=YEARLY;BYDAY=2TU`
+  is the second Tuesday of January, and `FREQ=YEARLY;BYDAY=-1FR` the last
+  Friday of December. Add `BYMONTH` to name a month:
+  `FREQ=YEARLY;BYMONTH=11;BYDAY=4TH` is the fourth Thursday of November.
+- **What the rule leaves out comes from the event's start date.** A weekly rule
+  with no `BYDAY` repeats on the start's weekday; a monthly rule with neither
+  `BYDAY` nor `BYMONTHDAY` on the start's day of the month; a bare yearly rule
+  on the start's month and day; a yearly rule with only `BYMONTH` on the
+  start's day of those months. A yearly rule with `BYMONTHDAY` or `BYDAY` and
+  no `BYMONTH` takes no month from the start: it ranges over the whole year.
+- **A date a month doesn't have is skipped**, not moved: a yearly event that
+  starts on 29 February repeats in leap years only, and `BYMONTHDAY=31` skips
+  the short months.
+- **`COUNT` counts real dates from the start**, before `EXDATE` takes any out,
+  so `COUNT=10` with one skipped date is nine occurrences, here and in every
+  client. Naming a weekday twice (`BYDAY=MO,MO`) is one date, not two.
+
+Some rules and what they produce:
+
+| Rule | Occurrences |
+| --- | --- |
+| `FREQ=YEARLY;BYMONTH=3,9` | every year in March and September, on the start's day of the month |
+| `FREQ=YEARLY;BYMONTHDAY=15` | the 15th of **every** month (add `BYMONTH=` for once a year) |
+| `FREQ=YEARLY;BYDAY=TU` | every Tuesday of the year |
+| `FREQ=YEARLY;BYDAY=2TU` | the second Tuesday of January |
+| `FREQ=YEARLY;BYMONTH=5;BYDAY=2TU` | the second Tuesday of May |
+| `FREQ=MONTHLY;BYDAY=FR;BYMONTHDAY=13` | Friday the 13th, whenever it falls |
+| `FREQ=WEEKLY;BYDAY=SA;BYMONTH=6,7,8` | Saturdays in June, July and August |
+
+**The start date is not an occurrence unless it matches the rule.** An event
+that starts on Monday 2 March with `FREQ=MONTHLY;BYMONTHDAY=15` first happens
+on 15 March: Kiln does not list 2 March, and does not count it toward `COUNT`.
+This follows python-dateutil and rrule.js; RFC 5545 calls such a start
+undefined in one place (§3.8.5.3) and the first instance in another (§3.3.10),
+so some clients, Google Calendar among them, show the start date as an extra
+occurrence. Start the event on its first real date to avoid the difference.
+
+Where Kiln knowingly differs from RFC 5545:
+
+- **A local time that doesn't exist** (the spring-forward gap) moves forward
+  past the gap; the RFC drops that occurrence.
+- **The start date**, as above.
+- **A date-time `UNTIL`** is read as the date it names and compared
+  inclusively in local time: `UNTIL=20261224T000000Z` keeps a 09:00 New York
+  occurrence on 24 December, which the RFC drops. Write `UNTIL` as a date and
+  the question doesn't arise.
+
+A rule the form refuses says why. The messages an editor can see include:
+
+| Message | Meaning |
+| --- | --- |
+| `BYDAY 6TU: the number before the weekday must be 1..5 or -1..-5` | A numbered weekday out of range, or `0TU`. |
+| `an ordinal BYDAY like 2TU only works with MONTHLY or YEARLY` | A numbered weekday in a daily or weekly rule. |
+| `BYDAY isn't supported with FREQ=DAILY — use FREQ=WEEKLY` | Daily rules can't pick weekdays. |
+| `BYMONTHDAY isn't supported with FREQ=WEEKLY — use FREQ=MONTHLY` | Weekly rules can't pick days of the month (daily rules get the same message with `FREQ=DAILY`). |
+| `use COUNT or UNTIL, not both` | A rule may end one way only. |
+| `WKST=SU isn't supported — weeks start on Monday` | Any week start but `MO`. |
+| `BYSETPOS isn't supported` | Likewise `BYWEEKNO`, `BYYEARDAY`, `BYHOUR`, `BYMINUTE`, `BYSECOND`. |
 
 ## Calendars
 
@@ -117,9 +201,18 @@ advertise them with `<link rel="alternate" type="text/calendar">`, so a client
 finds the calendar without being handed the URL.
 
 A recurring event's `UNTIL` and `EXDATE` are rendered in `DTSTART`'s own value
-type — DATE for an all-day event, DATE-TIME at the event's local time otherwise.
-A date-only `EXDATE` on a 19:00 event matches no occurrence, which is the
-classic way a cancelled date comes back.
+type — DATE for an all-day event, DATE-TIME otherwise. A date-only `EXDATE` on
+a 19:00 event matches no occurrence, which is the classic way a cancelled date
+comes back, so a timed `EXDATE` carries the event's local time.
+
+A timed `UNTIL` is the **last second of the `UNTIL` date in the event's zone**,
+written in UTC, because that is how Kiln reads `UNTIL`: the whole local day is
+included. A weekly 19:00 Europe/London event with `UNTIL=20260405` is exported
+with `UNTIL=20260405T225959Z` (London is on summer time by then, so the
+day ends at 23:00 UTC), so an occurrence at any time on 5 April is in the
+series in both Kiln and the subscriber's calendar, and none on the 6th is. If the event's zone isn't one the
+server knows, the `UNTIL` falls back to the DATE form rather than failing the
+feed.
 
 ## What's on: the occurrence-sorted index
 
@@ -155,7 +248,7 @@ document's schedule and recurrence, and an hourly Oban sweep
 occurrence has gone by. Ordering and paging then happen in Postgres over an
 index, so an anonymous request expands no recurrences at all.
 
-### Backfilling an existing site — automatic
+### Recomputing stored dates at boot
 
 The migration adds the column; it cannot fill it, because the value comes out of
 the recurrence engine rather than out of other columns. Neither does the sweep —
@@ -164,14 +257,39 @@ anything. So on a site that had events before upgrading, nothing would ever
 compute a first value.
 
 **This is handled for you.** Booting enqueues a backfill job
-(`KilnCMS.Events.BackfillWorker`), so the first deploy after upgrading fills the
-column and the index works with no upgrade step. The job is deduplicated for a
-day at the database level, so a rolling deploy across replicas queues one
-between them and a restart loop cannot re-trigger it more than daily.
+(`KilnCMS.Events.BackfillWorker`) on its own Oban queue, `occurrence_backfill`,
+to run ten minutes later, so the first deploy after upgrading fills the column
+and the index works with no upgrade step. A deployment that builds Oban's
+`queues:` list itself must include `occurrence_backfill: 1`, or the job is
+queued and never runs.
+
+The same job recomputes **every** stored date when a release changes how rules
+expand. A stored future date is otherwise right until it passes, so nothing
+else would revisit it. Each job carries the recurrence engine's version
+(`KilnCMS.Events.Recurrence.engine_version/0`), and the job is deduplicated per
+engine version per day at the database level: a rolling deploy across
+replicas queues one between them, a restart loop cannot re-trigger it more
+than daily, and a release with a new engine always gets its own run even if
+the previous release's ran an hour earlier. The ten-minute delay lets nodes of
+the previous release, which still compute dates the old way on every save,
+leave the cluster first. An edit saved on one of them after the pass keeps the
+old engine's date until a boot more than a day later, or a manual run.
 
 Because a redundant pass writes nothing, this doubles as a **repair** pass: a
-value knocked out of sync by a restore or a direct database edit is corrected on
-the next boot rather than persisting until someone notices.
+value knocked out of sync by a direct database edit is corrected on the next
+boot rather than persisting until someone notices. (Restoring an event from the
+trash recomputes its date itself, since the pass reads live rows only.)
+
+When the pass writes anything it logs one line, for example:
+
+```text
+occurrence backfill recomputed 14 record(s) of 220 scanned (recurrence engine 2); 9 moved to a different date: <ids>; 2 now have no upcoming date and left the what's-on listings: <ids>
+```
+
+Up to 50 ids are listed for each; the counts are exact. The line is a warning
+when any event now has no upcoming date, because those events have dropped out
+of `/<plural>`, and info otherwise. A row whose date changes gets a new
+`updated_at`, as any save does.
 
 Set `KILN_OCCURRENCE_BACKFILL_ON_BOOT=false` to turn it off and run it yourself,
 at a time you choose:
@@ -180,11 +298,15 @@ at a time you choose:
 mix kiln.occurrences.backfill
 ```
 
-Or, in a release image (no Mix):
+Or, in a release image (no Mix), on the running node:
 
 ```bash
-bin/kiln_cms eval 'KilnCMS.Events.Backfill.run()'
+bin/kiln_cms rpc 'KilnCMS.Events.Backfill.run() |> IO.inspect()'
 ```
+
+`rpc`, not `eval`: `eval` starts a bare VM without the application, and the
+pass needs the running app's caches. It returns
+`%{scanned: …, written: …, moved: [ids], cleared: [ids]}`.
 
 Idempotent, interruptible, and safe on a live site: it writes only the rows
 whose value actually changes, so a second run writes nothing. `--org <uuid>`
