@@ -5656,6 +5656,11 @@ msgstr "Confirmer"
 msgid "Confirm date"
 msgstr "Confirmer la date"
 
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "Confirm it's you with your passkey."
+msgstr "Confirmez que c'est bien vous avec votre clé d'accès."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirm new password"
@@ -21041,6 +21046,12 @@ msgstr "Cet élément n'existe plus."
 msgid "That menu no longer exists."
 msgstr "Ce menu n'existe plus."
 
+#: lib/kiln_cms_web/controllers/two_factor_controller.ex
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "That passkey couldn't be verified. Try again or use another method."
+msgstr "Cette clé d'accès n'a pas pu être vérifiée. Réessayez ou utilisez une autre méthode."
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #, elixir-autogen, elixir-format
 msgid "That passphrase didn't work. Try again."
@@ -22865,6 +22876,11 @@ msgstr "Cette session a été fermée depuis un autre appareil."
 msgid "This setting applies to this form only — another site's forms are unaffected by what you allow here."
 msgstr "Ce réglage ne s'applique qu'à ce formulaire — les formulaires des autres sites ne sont pas affectés par ce que vous autorisez ici."
 
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
+#, elixir-autogen, elixir-format
+msgid "This sign-in can't be finished here. Start again."
+msgstr "Cette connexion ne peut pas être terminée ici. Recommencez."
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
@@ -24058,6 +24074,7 @@ msgstr "Utiliser"
 msgid "Use \"true\" to pre-check the box."
 msgstr "Utilisez « true » pour cocher la case par défaut."
 
+#: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #: lib/kiln_cms_web/live/sign_in_live.ex
 #, elixir-autogen, elixir-format
 msgid "Use a passkey"
@@ -25396,6 +25413,11 @@ msgid_plural "You have %{count} passkeys set up."
 msgstr[0] "Vous avez %{count} clé d’accès configurée."
 msgstr[1] "Vous avez %{count} clés d’accès configurées."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You have %{max} passkeys, the most an account can hold. Remove one to add another."
+msgstr "Vous avez %{max} clés d'accès, le maximum pour un compte. Supprimez-en une pour en ajouter une autre."
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
 msgid "You have already signed in another way, but have not confirmed your account. You can confirm your account using the link we sent to you, or by resetting your password."
@@ -25513,6 +25535,11 @@ msgstr "Vous êtes connecté en tant que lecteur : vous pouvez lire le contenu p
 #, elixir-autogen, elixir-format
 msgid "You're subscribed to the newsletter."
 msgstr "Votre abonnement à la newsletter est actif."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "You've added several passkeys in a short time. Try again in %{minutes} minutes."
+msgstr "Vous avez ajouté plusieurs clés d'accès en peu de temps. Réessayez dans %{minutes} minutes."
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
