@@ -70,7 +70,10 @@ See [`advanced-analytics-plan.md`](./advanced-analytics-plan.md).
 a site's IP block list ([ip-blocking.md](ip-blocking.md), #2242). It is tagged by
 `surface`: `http`, `live`, `gql`, `collab` or `bridge`. The address is deliberately
 not a tag, a metadata field or a log line, so the counter says that blocking is
-happening and where, not who. The underlying telemetry event is
+happening and where, not who. It counts every refusal; the security log's
+`ip_block_refused` events and the `blocked_ip` alert are sampled from them (one
+per client network per site per 15 minutes; see
+[Security alerts](security-alerts.md#blocked-addresses-raise-one-alert-per-window)). The underlying telemetry event is
 `[:kiln_cms, :ip_block, :refused]` (measurement `count`, metadata `surface`).
 
 Useful Grafana panel: `sum(rate(kiln_cms_ip_block_refused_count[5m])) by (surface)`.
@@ -384,6 +387,27 @@ that happened is missing from the record or reached nobody. A sustained rate
 of `event_sampled_out` with `type: :sign_in_failed` is a password-guessing
 attack. `reuse_detected` carries ids: keep it out of an external sink that
 must not hold them.
+
+`kiln_cms.security.api_key_trip.count` (#2245) is in
+`KilnCMSWeb.Telemetry.metrics/0`. It counts rate-limit refusals of requests
+that carried a credential, on the limits an API key reaches (`api`, `gql`,
+`media_upload`, `media_transform`, `plugin_endpoint`), tagged `bucket` and
+`result`:
+
+- `unverified`: the credential was not a key this server verified in the last
+  5 minutes (forged, unknown, revoked, expired, never used here, or a JWT).
+  Nothing is recorded.
+- `debounced`: a verified key already noted for this limit in this
+  15-minute window, on this server.
+- `noted`: a verified key, recorded for the platform's `api_key_rate_limited`
+  [alert](security-alerts.md#api-keys-over-a-rate-limit).
+
+The underlying event is `[:kiln_cms, :security, :api_key_trip]` (measurement
+`count`). No key, user or address is a tag. A sustained `unverified` rate is
+something presenting keys this server has not seen authenticate; `noted`
+tells you which limits real clients run into.
+
+Useful Grafana panel: `sum(rate(kiln_cms_security_api_key_trip_count[5m])) by (result, bucket)`.
 
 ## Where the metrics go
 

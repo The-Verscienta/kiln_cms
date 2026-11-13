@@ -496,6 +496,14 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       assert Enum.sort(endpoint.events) == Enum.sort(all)
     end
 
+    test "the security group offers security.blocked_ip, unticked on a new endpoint (#2245)",
+         %{conn: conn} do
+      {lv, html} = open(conn)
+
+      assert has_element?(lv, ~s(#new-webhook-form input[value="security.blocked_ip"]))
+      refute "security.blocked_ip" in checked(html, "new-webhook-form")
+    end
+
     test "Select all ticks no security event (#2642)", %{conn: conn} do
       {lv, _html} = open(conn)
       security = WebhookEndpoint.security_events()

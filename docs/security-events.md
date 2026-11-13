@@ -109,7 +109,8 @@ skipped, so a fault never deletes on a window nobody confirmed.
 ## The instance log
 
 Some events are about the whole installation, not one site: today, a platform
-admin canceling a backup (`backup_canceled`). A site's log is readable by that
+admin canceling a backup (`backup_canceled`) and a platform admin changing the
+platform's security alerts (`platform_alerts_changed`). A site's log is readable by that
 site's admins, who need not be platform admins, so these go to a separate
 **instance security log** instead (#2541).
 
@@ -154,14 +155,15 @@ see them.
 the installation's API keys but are still written to a site's log: a platform
 role granted, raised or removed (`role_granted`, `role_revoked` and
 `elevation_granted` with `level` `platform`, in the log of the site the
-platform admin was viewing), and `api_key_reuse_detected` for a key whose owner
-has no single site (the default site's). See "Which site's log" below.
+platform admin was viewing), and `api_key_reuse_detected` and
+`api_key_rate_limited` for a key whose owner has no single site (the default
+site's). See "Which site's log" below.
 No instance event raises a [security alert](security-alerts.md).
 
 ## What is recorded
 
-Every type below goes to a site's log except `backup_canceled`, which goes to
-the [instance log](#the-instance-log).
+Every type below goes to a site's log except `backup_canceled` and
+`platform_alerts_changed`, which go to the [instance log](#the-instance-log).
 
 Every event has a time, a type, the person who acted (an email snapshot and
 their id, only for a known account), an optional target (a user, an API key, a
@@ -203,6 +205,9 @@ a type may carry only the keys below; anything else is dropped.
 | `registration_rejected` | Registration rejected | A site admin rejected a waiting registration. The person is the admin; the target is the applicant, or none when the account was erased | `outcome` |
 | `backup_canceled` | Backup canceled | A platform admin [canceled a running backup](backups.md#cancel-a-running-backup). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `step` |
 | `api_key_reuse_detected` | Rotated API key used again | A draft-write key that had been rotated away was presented to `POST /api/keys/rotate` more than 120 seconds after its rotation, so two parties held it, and the live key of its lineage was revoked ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)). No person; the target is the presented key (target type `api_key`), the IP the request's. Raises the platform's `api_key_abuse` [alert](security-alerts.md) | `name`, `revoked` |
+| `ip_block_refused` | Blocked address refused | A request or socket connect from an address on the site's [block list](ip-blocking.md) was refused. **No IP address and no user agent**, and no person: nothing records a blocked address. Sampled: see below. Raises the site's `blocked_ip` [alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window), and is written even when the site turned that alert off | `rule`, `surface` |
+| `api_key_rate_limited` | API key hit a rate limit | An API key this server verified in the last 5 minutes went over a rate limit an API key can reach. No person (whoever presented it is not known to be the owner); the target is the key (target type `api_key`), the IP the request's. Sampled: see below. Raises the platform's `api_key_rate_limited` [alert](security-alerts.md#api-keys-over-a-rate-limit) | `name`, `bucket` |
+| `platform_alerts_changed` | Platform security alerts changed | A platform admin saved the platform's [security alert settings](security-alerts.md#turn-off-rate-limit-alerts-for-api-keys). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the settings row (target type `platform_security_alerts`) | `disabled_kinds` |
 
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials`,
@@ -239,6 +244,18 @@ its predecessor (absent for a key an admin minted). For
 `api_key_reuse_detected`, `name` is the presented key's name and `revoked` the
 number of live keys of its lineage the detection revoked; a lineage that is
 already dead records nothing.
+
+For `ip_block_refused`, `rule` is the block rule that matched, as stored in
+canonical form (`203.0.113.7/32`, `2001:db8:1:2::/64`), and `surface` is
+where the refusal happened: `http` (a request), `live` (a page's LiveView
+connection), `gql` (`/ws/gql`), `collab` (`/ws/collab`) or `bridge`
+(`/ws/bridge`). An alert masks the rule like an address
+([IP addresses in alerts](security-alerts.md#ip-addresses-in-alerts)); the log
+keeps it whole. For `api_key_rate_limited`, `name` is the key's name and
+`bucket` the rate limit it went over: `api`, `gql`, `media_upload`,
+`media_transform` or `plugin_endpoint`. For `platform_alerts_changed`,
+`disabled_kinds` is the platform alert kinds off after the save,
+comma-separated, or `none`.
 
 For `session_idle_expired`, `timeout_minutes` is the timeout that applied,
 `tier` is `admin` when it was the administrators' own timeout and `member` when
@@ -352,7 +369,7 @@ to one, take it over the same way (#2594) and record the same events, with
 came from (the default site when it names none). A reset or a magic link on a
 confirmed account removes nothing and records none of these.
 
-### Failed sign-ins, allowlist and unlock refusals are sampled, lockouts are not
+### Failed sign-ins, refusals and rate-limited keys are sampled, lockouts are not
 
 A password-guessing flood must not fill the log, so at most **5 failed
 sign-ins per IP address per 15 minutes** are written; the rest are dropped.
@@ -363,6 +380,15 @@ other's budget). Anyone can post made-up unlock links, so
 `sign_in_unlock_refused` is capped the same way again, at **5 per address per
 15 minutes** on each site, with a counter of its own. An IPv6 address counts as
 its `/64`, because one client can rotate through its whole prefix.
+Anyone on a site's block list can cause `ip_block_refused` with every
+request, so it is thinned out twice. First in memory, on each server, with no
+database write: the first refusal of each client network (an IPv4 address, an
+IPv6 `/64`) per site per 15-minute window passes, and at most 20 networks per
+site per window. Then it is capped at **1 per client network per site per 15
+minutes** across servers. The network is the sampling key only: it is hashed
+in the counter table and never stored as text. `api_key_rate_limited` is
+noted once per key and limit per window on each server, in memory, and
+capped at **1 per key and limit per 15 minutes** across servers.
 Each lockout is written once per subject and scope per 15 minutes (a locked
 account refuses every attempt until its window rolls, and one event says so).
 When a site has the `failed_sign_ins` [alert](security-alerts.md#failed-sign-ins-are-counted-per-site)
@@ -387,7 +413,11 @@ whole installation, not to a site, so `backup_canceled` goes to the
 [instance log](#the-instance-log), never a site's. A reused API key (`api_key_reuse_detected`) goes to the log
 of the key owner's site when the owner has exactly one active membership, and
 to the default site's otherwise; the host the request named never decides,
-since whoever presents the key chooses it.
+since whoever presents the key chooses it. A key over a rate limit
+(`api_key_rate_limited`) follows the same rule. A blocked address
+(`ip_block_refused`) goes to the log of the site whose block list refused it.
+A change to the platform's alert settings (`platform_alerts_changed`) goes to
+the [instance log](#the-instance-log).
 
 ## Event matrix: where each event comes from
 
@@ -438,6 +468,9 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `registration_queued`, `registration_approved`, `registration_rejected` | `lib/kiln_cms/security/changes/record_registration.ex`, on `OrgMembership` `:queue_registration` (from `Changes.QueueRegistration` inside `User` `:register_with_password`, and from `SiteSso.Admission` for a new site single sign-on account), `:approve_registration`, `:approve_registration_by_invitation` (from `Invitations.grant_membership/4` when an invitation is accepted, and from `Invitations.AddOrInvite`) and `:reject_registration` (`lib/kiln_cms/accounts/org_membership.ex`) | in txn; tenant is the membership's site |
 | `backup_canceled` | `KilnCMS.Security.Changes.Record` on `Backups.Run` `:cancel` (`lib/kiln_cms/backups/run.ex`), called from the Backups page | in txn, with the cancel: if the event cannot be written the backup is not canceled; `scope: :instance`, so it goes to the instance log (`KilnCMS.Security.InstanceEvent`) |
 | `api_key_reuse_detected` | `lib/kiln_cms/accounts/api_key_reuse.ex`: `check/2`, called by `KilnCMSWeb.ApiKeyRotationController` with the request context, after the lineage's live keys are revoked | `Recorder.record/2` outside any transaction, with `alert_required: true`: if its `api_key_abuse` alert cannot be claimed the event is not written either, and when the event is not written the platform admins get the plain reuse email instead |
+| `ip_block_refused` | `lib/kiln_cms/security/blocked_ip_alert.ex`: `note/4`, called by `KilnCMSWeb.Plugs.IpBlock` (`surface` `http`) and by `KilnCMSWeb.IpBlock.check_connect/2`, from its LiveView `on_mount` (`live`) and the `/ws/gql`, `/ws/collab` and `/ws/bridge` connects (`gql`, `collab`, `bridge`), with the rule `IpBlocklist.match/2` returned. Never by `IpBlocklist.blocked?/2`, which the scanner guard also asks | sampled, after commit, off the request path (a task under `KilnCMS.TaskSupervisor`); in-memory gates first; `request: nil`, so no IP or user agent |
+| `api_key_rate_limited` | `lib/kiln_cms/security/api_key_trip.ex`: `note/2`, called from the refusal branch of `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the `api`, `gql`, `media_upload`, `media_transform` and `plugin_endpoint` buckets | sampled, after commit, off the request path; only for a key in the node's verified-key cache (filled by `KilnCMSWeb.Plugs.ApiKeyAuth` and `KilnCMSWeb.Plugs.RememberApiKey`), reloaded and still valid; tenant from `ApiKeyTrip.owner_org_id/1`; `user: nil` |
+| `platform_alerts_changed` | `KilnCMS.Security.Changes.Record` on `Security.PlatformAlertSettings` `:save` (`lib/kiln_cms/security/platform_alert_settings.ex`), called from the Security alerts page | in txn, with the save: if the event cannot be written the setting does not change; `scope: :instance` |
 
 `org_setting_changed` covers every resource built with `use
 KilnCMS.CMS.OrgSettings`, so a new settings resource cannot forget it:
@@ -519,7 +552,7 @@ telemetry events:
 | Telemetry event | Meaning |
 |---|---|
 | `[:kiln_cms, :security, :event_failed]` | An event could not be written. Metadata: `type`. Wire an alert to this one. |
-| `[:kiln_cms, :security, :event_sampled_out]` | An event was dropped on purpose: a failed sign-in, an admin allowlist refusal or a refused unlock link over the per-address cap, or a repeat lockout in the same window. Metadata: `type`. A sustained rate of `sign_in_failed` is a guessing attack. |
+| `[:kiln_cms, :security, :event_sampled_out]` | An event was dropped on purpose: a failed sign-in, an admin allowlist refusal or a refused unlock link over the per-address cap, a blocked address or a rate-limited key already recorded in this window, or a repeat lockout in the same window. Metadata: `type`. A sustained rate of `sign_in_failed` is a guessing attack. Blocked addresses dropped by the in-memory gates before that cap are not counted here; `kiln_cms.ip_block.refused.count` counts every refusal. |
 
 Security alerts have a telemetry event of their own,
 `[:kiln_cms, :security, :alert_failed]`; see

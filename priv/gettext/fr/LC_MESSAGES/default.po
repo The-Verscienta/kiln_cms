@@ -910,6 +910,11 @@ msgstr "%{label} (depuis %{ip})"
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
+msgid "%{label} (rule %{rule})"
+msgstr "%{label} (règle %{rule})"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
 msgid "%{label}: %{count} in this alert window"
 msgstr "%{label} : %{count} dans cet intervalle d'alerte"
 
@@ -1611,6 +1616,11 @@ msgstr "Une ligne vide entre les paragraphes et un retour à la ligne pour chaqu
 msgid "A block"
 msgstr "Un bloc"
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A blocked address was refused"
+msgstr "Une adresse bloquée a été refusée"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A box that grows with the text."
@@ -1955,6 +1965,11 @@ msgstr "Une relation"
 msgid "A release needs a name."
 msgstr "Un lancement doit avoir un nom."
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "A request from an address on this site's block list is refused. One alert every %{minutes} minutes, then a summary."
+msgstr "Une requête provenant d'une adresse de la liste de blocage de ce site est refusée. Une alerte toutes les %{minutes} minutes, puis un résumé."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "A request whose Host header matches no organization is served the default organization's content, branding and analytics — including a bare hostname, an IP address, or a Host a caller made up. With one organization that is the same site either way. With more than one it is another tenant's."
@@ -2147,6 +2162,11 @@ msgstr "Une valeur avec du texte avant ou après, comme « Taille 42 EU »."
 msgid "A value, or a backup value when it's empty."
 msgstr "Une valeur, ou une valeur de secours lorsqu’elle est vide."
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "A verified API key goes over a rate limit. One alert every %{minutes} minutes, then a summary, to every platform admin."
+msgstr "Une clé d'API vérifiée dépasse une limite de débit. Une alerte toutes les %{minutes} minutes, puis un résumé, à chaque administrateur de la plateforme."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "A version you were comparing was superseded."
@@ -2266,6 +2286,11 @@ msgstr "Clé API créée — copiez-la maintenant, elle ne sera plus affichée."
 
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
+msgid "API key hit a rate limit"
+msgstr "Clé d'API a atteint une limite de débit"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
 msgid "API key revoked"
 msgstr "Clé d'API révoquée"
 
@@ -2282,6 +2307,11 @@ msgstr "Clés API"
 #, elixir-autogen, elixir-format
 msgid "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page."
 msgstr "Les clés d’API et les jetons d’applications continuent de fonctionner. Si un compte est peut-être compromis, réinitialisez son mot de passe ; un administrateur de la plateforme peut aussi utiliser « Se déconnecter partout » sur la page Comptes."
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "API keys over a rate limit"
+msgstr "Clés d'API dépassant une limite de débit"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -3301,6 +3331,11 @@ msgstr "Toujours chiffré, et le certificat du serveur est toujours vérifié."
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
+msgid "An API key hit a rate limit"
+msgstr "Une clé d'API a atteint une limite de débit"
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
 msgid "An API key was created"
 msgstr "Une clé d'API a été créée"
 
@@ -4306,8 +4341,14 @@ msgstr "Bloquer toute cette instance ? Tous ses abonnés sont supprimés et les 
 msgid "Blocked"
 msgstr "Bloqués"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Blocked address refused"
+msgstr "Adresse bloquée refusée"
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/ip_block_live.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Blocked addresses"
 msgstr "Adresses bloquées"
@@ -14670,6 +14711,11 @@ msgstr "Un seul enregistrement %{source}"
 msgid "Only one locale is configured — add locales to config :kiln_cms, :i18n."
 msgstr "Une seule langue est configurée — ajoutez des langues dans config :kiln_cms, :i18n."
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only platform administrators can change the platform's security alerts."
+msgstr "Seuls les administrateurs de la plateforme peuvent modifier les alertes de sécurité de la plateforme."
+
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only platform administrators can view the instance security log."
@@ -15571,13 +15617,33 @@ msgstr "Accès à la plateforme"
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Platform alerts (new platform admins, platform role changes, new API keys and reuse of a stolen API key) go to the platform's admins and can't be turned off here."
-msgstr "Les alertes de la plateforme (nouveaux administrateurs de la plateforme, changements de rôle sur la plateforme, nouvelles clés d'API et réutilisation d'une clé d'API volée) vont aux administrateurs de la plateforme et ne peuvent pas être désactivées ici."
+msgid "Platform alert settings saved."
+msgstr "Réglages des alertes de la plateforme enregistrés."
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform alert settings saved. Turning an alert off is recorded in the instance security log."
+msgstr "Réglages des alertes de la plateforme enregistrés. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance."
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform alerts"
+msgstr "Alertes de la plateforme"
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Platform alerts (new platform admins, platform role changes, new API keys, reuse of a stolen API key and API keys over a rate limit) go to the platform's admins and aren't site settings. Only a platform admin can turn one off, and only API keys over a rate limit."
+msgstr "Les alertes de plateforme (nouveaux administrateurs de la plateforme, changements de rôle sur la plateforme, nouvelles clés d'API, réutilisation d'une clé d'API volée et clés d'API dépassant une limite de débit) vont aux administrateurs de la plateforme et ne sont pas des réglages du site. Seul un administrateur de la plateforme peut en désactiver une, et uniquement celle des clés d'API dépassant une limite de débit."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Platform role"
 msgstr "Rôle de plateforme"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Platform security alerts changed"
+msgstr "Alertes de sécurité de la plateforme modifiées"
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -17992,6 +18058,11 @@ msgstr "Enregistrer le champ"
 msgid "Save key source"
 msgstr "Enregistrer la source de la clé"
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save platform alerts"
+msgstr "Enregistrer les alertes de la plateforme"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save preferences"
@@ -19235,6 +19306,11 @@ msgstr "Affiché sur la page de remerciement après une soumission réussie."
 #, elixir-autogen, elixir-format
 msgid "Shown to editors. Leave empty for the standard message."
 msgstr "Affiché aux éditeurs. Laissez vide pour le message standard."
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
+msgstr "Visible par les administrateurs de la plateforme uniquement. Ces alertes vont à chaque administrateur de la plateforme, pour toute l'installation. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -21696,6 +21772,11 @@ msgstr "Le chemin doit commencer par /."
 #, elixir-autogen, elixir-format
 msgid "The payment provider, and the tiers readers can buy."
 msgstr "Le prestataire de paiement, et les niveaux que les lecteurs peuvent acheter."
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "The platform alert settings could not be saved."
+msgstr "Les réglages des alertes de la plateforme n'ont pas pu être enregistrés."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format

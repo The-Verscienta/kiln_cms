@@ -102,6 +102,10 @@ defmodule KilnCMS.Application do
       # instance so a content bust never empties it and a flood of orgs cannot
       # evict published pages.
       KilnCMS.Security.IpBlocklist,
+      # API keys verified on this node in the last 5 minutes, by hash, so a
+      # rate-limit refusal can tell a real key from a forged one without a
+      # database read (#2245). Before the Endpoint: the plugs write to it.
+      KilnCMS.Security.ApiKeyTrip,
       # Search-engine claims checked against DNS (#2254): the per-address
       # result cache, the single-flight table and a capped lookup supervisor.
       # Before the Endpoint, so the first request can already start a lookup;

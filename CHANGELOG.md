@@ -65,6 +65,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new `webhook_endpoints.format`, default `kiln`, and nullable `notifications.details`). Before rolling back to 1.9, deactivate every Slack-format endpoint: 1.9 sends it the Kiln envelope, which Slack refuses, until it auto-disables.**
   ([long form](docs/changelog/unreleased.md#slack-webhooks-upgrade))
 
+- **Run `mix ash.migrate` (new table `platform_security_alerts`). Blocked-address alerts are on for every site (up to one alert and one summary per 15 minutes; off under Security alerts → Blocked addresses). Existing webhook endpoints, Slack too, need `security.blocked_ip` ticked; until then a webhook-only site's "Security alerts reach someone" line reads Review.**
+  ([long form](docs/changelog/unreleased.md#blocked-ip-alerts-upgrade))
+
 ### Added
 
 - **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
@@ -75,6 +78,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Security posture has a new site line, "Security alerts reach someone": Review when the site's alerts are turned off, or some or all of them would reach no admin and no webhook.**
   ([long form](docs/changelog/unreleased.md#posture-security-alerts-reach-someone))
+
+- **Security alerts: a request refused by the site's block list raises a `blocked_ip` alert (and webhook `security.blocked_ip`) naming the matched rule, never the address.**
+  ([long form](docs/changelog/unreleased.md#blocked-ip-alerts))
+
+- **Platform admins are alerted when a verified API key goes over a rate limit (`api_key_rate_limited`), and can turn that alert off under Security alerts → Platform alerts.**
+  ([long form](docs/changelog/unreleased.md#api-key-rate-limited-alerts))
 
 ### Changed
 
