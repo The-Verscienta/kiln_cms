@@ -173,10 +173,15 @@ component older than the window (the newest verified and the newest complete
 can be different stamps), plus every recovery point, plus for cron any unit a
 stale [last-good marker](#the-last-good-marker) still names.
 
-**Never deleted by retention:** `.partial` files (the next in-app backup
-removes those older than an hour), symlinks, directories, `.work/`, and
-recovery-point markers. Last-good markers are never aged either; the app moves
-them itself ([below](#the-last-good-marker)). A `kiln-*` file in `db/` or `media/` that belongs to no
+**Never deleted by retention:** symlinks, directories, `.work/`, and
+recovery-point markers. `.partial` files are cleared by two narrower rules,
+each of which lets History read the stamp first: the start of every in-app
+backup removes those whose stamp has a History row once every file of that
+stamp is more than an hour old, and `backup.sh prune` removes those of a run
+killed outright once every file of that stamp is 12 hours old
+([When a cron run is killed outright](#when-a-cron-run-is-killed-outright-2478)).
+Last-good markers are never aged either; the app moves them itself
+([below](#the-last-good-marker)). A `kiln-*` file in `db/` or `media/` that belongs to no
 unit, such as a part named `part001` instead of `part01`, is a stray: the app
 deletes it once it is older than `BACKUP_KEEP_DAYS`, and `backup.sh` leaves it
 alone.
@@ -379,22 +384,48 @@ With the job turned off, or an app that can't see the directory, a deployment
 that backs up only with cron gets no marker, and its prune keeps only the
 newest complete set, as before.
 
-**Several nodes.** The job runs once per slot across the cluster, and which
-directory it syncs depends on whether the directories have an id
-([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)). Only
-an in-app backup creates `.kiln-dir-id`; `backup.sh` and this job never do.
+**Several nodes.** The job runs once per slot across the cluster, and reaches
+each backup directory by its id, `.kiln-dir-id`
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)).
+While the job is on, each node's heartbeat (every 30 seconds) gives its
+`BACKUP_DIR` an id if it has none (#2789), but only once the directory holds
+backups (it has a `db/` or `media/` subdirectory). An empty directory, such as
+the one the image creates on every replica or the mountpoint of a mount that
+failed, never gets one. Each slot then:
 
-- **No directory has an id** (the usual cron-only deployment): the node that
-  picks up the job syncs its own directory. One shared volume is covered every
-  slot. With a `BACKUP_DIR` per host, each slot syncs one host's directory,
-  whichever node picked the job up, so a host can go several slots without a
-  sync.
-- **Some node reports a directory id** in its heartbeat: the job queues one
-  sync per id, which waits for a node that reads that id, putting itself back every 30 seconds up to
-  20 times (about 10 minutes). If none picks it up, the server log says
-  "Backup last-good marker sync for backup directory `<id>` gave up: no node
-  with that directory picked it up", and the next slot tries again. The node
-  that queued them also syncs its own directory when that one has no id.
+- **syncs the directory of the node that picked up the job**, in place, with
+  or without an id. One shared volume, where every node reads the same id, is
+  covered every slot this way.
+- **queues one sync for every other directory** whose id a node reported in
+  the last 10 minutes (judged on the database's clock, so a node whose clock
+  runs ahead still counts). That sync waits for a node that reads the id,
+  putting itself back every 30 seconds up to 20 times (about 10 minutes). If
+  none picks it up, the server log says "Backup last-good marker sync for
+  backup directory `<id>` gave up: no node with that directory picked it up",
+  and the next slot tries again.
+
+So with a `BACKUP_DIR` per host, each host's directory is synced in a slot
+as long as its node picks up one of the about 21 releases of its queued sync
+in those 10 minutes, the same assumption every backup step makes. A host whose
+node is down is left out until its heartbeat is back.
+
+Two things stop a directory getting an id, and leave it synced only in the
+slots its own node happens to pick up the job:
+
+- **The app can't write `BACKUP_DIR`.** The server log says, once per boot for each error,
+  "Backup heartbeat: no id for the backup directory `<dir>` (`<reason>`). The
+  last-good marker sync can't route to it, so it is synced only in the slots
+  this node runs the sync job." Give the app's user write access to the
+  directory (run cron and the app as the same user).
+- **The job is off** (`KILN_BACKUP_MARKER_SYNC_CRON=false`). The heartbeat
+  then creates no id; only an in-app backup does.
+
+**A cloned directory now always carries an id.** Copying a backup directory to
+another host (`rsync`, a volume snapshot) copies its `.kiln-dir-id`, and two
+directories with one id look like one: the sync for that id is queued once and
+reaches whichever of the two picks it up. Leave the file out of the copy
+(`rsync --exclude .kiln-dir-id`) or delete it on the copy, and the copy's node
+gives it its own.
 
 Things to know:
 
@@ -955,7 +986,13 @@ can be taken from a node that is still running it. The server log then reports
 "Backup heartbeat: another node is beating as …".
 
 **Each backup directory has an id.** `<BACKUP_DIR>/.kiln-dir-id` (mode 0600)
-holds a random id, created the first time a node starts a backup there. Every
+holds a random id, created the first time a node starts a backup there, or
+earlier by the node's heartbeat when the
+[last-good marker sync](#the-last-good-marker) is on and the directory already
+holds backups. It is written to a temporary file, synced, and hard-linked into
+place, so no node ever reads an empty or half-written id, and two nodes racing
+on a shared volume settle on the first one linked. (On a filesystem without
+hard links it is created in place with an exclusive create instead.) Every
 step after `start` runs only on a node that reads the same id:
 
 - **One shared volume** mounted on every node: every node reads the same id,
@@ -966,7 +1003,8 @@ step after `start` runs only on a node that reads the same id:
   then fails the attempt (`:backup_dir_elsewhere`), which uses one of the four.
   If that host is gone, the backup ends up failed; take a new one.
 - **A copied backup directory** (restored onto a new host, or cloned) carries
-  the old host's id. Delete `.kiln-dir-id` on the copy so it gets its own. A
+  the old host's id. Delete `.kiln-dir-id` on the copy, or leave it out of the
+  copy (`rsync --exclude .kiln-dir-id`), so it gets its own. A
   resume follows the files, not the id, so a backup whose `.work/<stamp>/`
   came along with the copy can still be resumed there.
 
@@ -1779,19 +1817,93 @@ A failed or [refused](#when-an-off-site-copy-is-refused) off-site copy after
 the set is complete keeps the set and fails the run, and the files after it are
 not copied.
 
-**When a run is killed outright** (`kill -9`, power loss), no cleanup runs. The
-run leaves its finished parts and an in-progress marker,
-`media/kiln-media-<stamp>.sha256.partial`. While the marker is there, History
-does not import the stamp, `backup.sh verify` skips it, and `restore.sh media`
-refuses it. The next in-app backup removes a `.partial` file older than an hour;
-after that, History imports the leftover parts as failed ("incomplete media
-set: parts but no sidecar"). Delete the stamp's `kiln-media-<stamp>*` files by
-hand to tidy up sooner.
+**When a run is killed outright** (`kill -9`, the OOM killer, power loss), no
+cleanup runs, and the run's `.partial` files stay behind. It recovers on its
+own: see [When a cron run is killed outright](#when-a-cron-run-is-killed-outright-2478).
 
 **`backup.sh verify`** checks the newest media stamp that has no `.partial`
 beside it, and names any newer one it skipped ("Skipping media set <stamp>:
 still being written, or interrupted"). It fails on parts with no sidecar, and
 fails when every media stamp it found is unfinished.
+
+### When a cron run is killed outright (#2478)
+
+A `backup.sh` run that is killed outright (`kill -9`, the OOM killer, a power
+cut) runs no cleanup. It leaves its `.partial` files behind: the in-progress
+marker `media/kiln-media-<stamp>.sha256.partial`, and the dump or part it was
+writing. `backup.sh all` creates the marker before the database dump whenever
+`MEDIA_DIR` is set, so a run killed during its dump, or during the dump's
+off-site copy, leaves one too. While a `.partial` is there, `backup.sh verify`
+skips that stamp's media set and `restore.sh media` refuses it.
+
+Nobody has to step in. While a run is alive, a background loop in `backup.sh`
+touches every `.partial` of its stamp every 5 minutes, so a run that is slow
+(planning a large media tree, a dump waiting on a lock) never looks dead. Once
+the loop stops, the files go quiet, and this is what happens, counting from the
+newest file of the stamp:
+
+1. **For the first 3 hours** the stamp is pending. History has no row for it,
+   and the importer's summary counts it under `pending`.
+2. **After 3 hours with every file of the stamp unchanged**, the next import
+   records it. An import runs when a platform admin opens **Backups**, in every
+   [last-good marker](#the-last-good-marker) sync (every 15 minutes by
+   default), and at the start of every in-app backup. History then shows a
+   **Failed** run whose error reads "Interrupted: the backup stopped before it
+   finished and left .partial files behind". Its log names up to five of the
+   files left behind with their age ("No backup has written to this stamp for
+   hours; left behind: …"). Its artifacts are the finished files (none if the
+   run was killed in its first file), and its components are the kinds of all
+   its files, partial or finished. The row is never rewritten.
+3. **After 12 hours with every file of the stamp unchanged**, `backup.sh prune`
+   deletes the stamp's `.partial` files and prints the path of each. Prune runs
+   at the end of every `backup.sh all` that succeeds and on its own as
+   `backup.sh prune`, so with the nightly cron line at the top of this guide
+   that is the next night's run; with an hourly cron, about the twelfth run
+   after the kill. The stamp's finished files are not touched there: they age
+   under `BACKUP_KEEP_DAYS` like any other unit.
+
+What keeps a killed run's `.partial` files from `backup.sh prune`: a
+`.work/<stamp>/` directory for the stamp, or any file of the stamp, in `db/` or
+`media/`, changed in the last 12 hours. A recovery point (`.keep`) does not:
+`restore.sh` refuses a set with a `.partial` beside it, so keeping one would
+leave the pinned set unrestorable.
+
+The start of every in-app backup also clears `.partial` files, and reads the
+stamp first in the same way. It runs the importer, then removes the `.partial`
+files of a stamp that has a History row (the app's own run, or an imported
+one) once every file of the stamp is more than an hour old. A cron leftover
+with no row yet is left for the importer. A `.partial` whose name carries no
+backup stamp is removed once it is an hour old, as before.
+
+**If the stamp was never read.** With the marker sync turned off
+(`KILN_BACKUP_MARKER_SYNC_CRON=false`) and nobody opening the Backups page, or
+with the host's app down for more than 12 hours after the kill, `prune` can
+remove the marker before the importer has seen the stamp. The stamp then
+imports as what is left of it:
+
+| Left on disk | Imported as |
+|---|---|
+| Media parts with no sidecar | **Failed**, "incomplete media set: parts but no sidecar" |
+| A single media archive with no sidecar (the archive was finished; its sidecar wasn't) | **Succeeded** |
+| A finished dump and no media file | **Succeeded**, database only |
+| Only `.partial` files | No row: prune removed everything the run wrote |
+
+**Run the same `backup.sh` on every host as the app.** The heartbeat loop is
+new in this release. An older copy of the script doesn't keep its files fresh,
+so a live run with a phase in which nothing is written for 3 hours (planning a
+very large media tree on NFS, or `pg_dump` waiting for a lock) can be recorded
+as Interrupted, and that row stays.
+
+What can go wrong:
+
+| Message | Where | Meaning |
+|---|---|---|
+| `Backup files dated in the future (<stamps>): kept pending, as if still being written; check the clocks of this node and of the backup directory's file server` | Server log | A file of a held stamp is dated more than 5 minutes ahead of the node's clock. The stamp stays pending until the clocks agree: a clock that is off must not turn a live run into a dead one. |
+| `warning: could not look for recent files of <stamp>; keeping its partials` | `backup.sh prune` | `find` failed on `db/` or `media/`. Nothing of that stamp was deleted; the next prune tries again. |
+| `warning: could not remove <path>` | `backup.sh prune` | The `.partial` could not be deleted (permissions). The rest went on. |
+| `Removing an abandoned backup partial: <name>` | Server log | The start of an in-app backup removed a `.partial`, as above. |
+| `Partial sweep skipped db/: it can't be listed (<reason>)` | Server log | That directory's `.partial` files were left for the next in-app backup; the other directory's were still swept. |
+| `Partial sweep kept every stamped partial: <error>` | Server log | History could not be read, so no `.partial` named after a stamp was removed. |
 
 ### Backup history (#2217)
 
@@ -1887,13 +1999,23 @@ media set become one artifact. A gap (say `part03` missing) imports the run as
 parts of the same stamp is "ambiguous media set", because a restore from either
 would silently lack files. Parts with no media sidecar import as `failed`
 with "incomplete media set: parts but no sidecar": every part set is written
-with one, so parts without it are what a run killed mid-set leaves (a manifest
-calling them verified does not excuse it). A legacy single archive without a
-sidecar, from before checksums, imports as before. Sidecars are not rows; they supply the per-file
-SHA-256 shown on an imported row. It is safe to repeat
-(idempotent by stamp, never touching a row the application owns), waits until a
-stamp's newest file is 10 minutes old and has no `.partial` sibling (`pending`
-in the summary), and does not need `BACKUP_ENABLED` or `pg_dump`. `manifest.json`
+with one, so parts without it are what a run killed mid-set leaves once its
+`.partial` marker went before the importer read the stamp (a manifest calling
+them verified does not excuse it). A legacy single archive without a sidecar,
+from before checksums, imports as before. Sidecars are not rows; they supply
+the per-file SHA-256 shown on an imported row. It is safe to repeat (idempotent
+by stamp, never touching a row the application owns), and does not need
+`BACKUP_ENABLED` or `pg_dump`. A stamp that `manifest.json` doesn't name is
+`pending` in the summary until:
+
+- **with no `.partial` beside it**, its newest file is 10 minutes old; it then
+  imports as what it is;
+- **with a `.partial` beside it** (of any kind, in `db/` or `media/`), every
+  file of the stamp has been unchanged for 3 hours; it then imports as a failed
+  "Interrupted" run
+  ([When a cron run is killed outright](#when-a-cron-run-is-killed-outright-2478)).
+  A file dated more than 5 minutes in the future keeps the stamp pending, with
+  a warning. `manifest.json`
 only enriches a row whose stamped files it names. Run it as a one-off to see
 older backups already on disk.
 
@@ -2104,7 +2226,7 @@ What can go wrong:
 | `contains an absolute or '..' path, or a link pointing outside the tree` | Refused for safety, see above. |
 | `RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found` | No sidecar next to the archive or parts, and you asked for one. |
 | `the part set for <stamp> has no sidecar, so it is probably incomplete` | Parts with no `kiln-media-<stamp>.sha256`. Fetch the sidecar if it exists; otherwise the set is probably from a killed run. `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` restores it anyway. |
-| `kiln-media-<stamp>.sha256.partial is beside the set for <stamp>` | A backup is writing this stamp, or was killed while writing it. Wait for a running backup to finish, or pick another stamp; a leftover from a killed run is [removed](#cron-backups-in-parts) by the next in-app backup after an hour, or delete it and the set by hand. |
+| `kiln-media-<stamp>.sha256.partial is beside the set for <stamp>` | A backup is writing this stamp, or was killed while writing it. Wait for a running backup to finish, or pick another stamp. A leftover from a killed run is [removed](#when-a-cron-run-is-killed-outright-2478) by `backup.sh prune` once every file of the stamp is 12 hours old, or sooner by an in-app backup once History has recorded the run; the set is then refused for its missing sidecar, unless it was a single finished archive. |
 
 ## Restore drill (quarterly)
 

@@ -43,6 +43,9 @@ defmodule KilnCMSWeb.Plugs.DeliveryClassLimitTest do
     restore_limits_on_exit()
     put_limit(:delivery, 10, BudgetWindow.fresh_window_ms())
     isolate_crawler_verification()
+    # Claims here are settled by planted DNS results; no range list left by
+    # another test may answer first (#2586).
+    KilnCMS.CrawlerVerification.Ranges.clear()
 
     {conn, address} = public_conn(conn)
     CrawlerVerification.put_result(:google, address, :verified)
@@ -553,6 +556,7 @@ defmodule KilnCMSWeb.Plugs.DeliveryClassLimitTest do
       assert tags[[:kiln_cms, :crawler_verification, :lookup, :count]] == [:engine, :result]
       assert tags[[:kiln_cms, :crawler_verification, :lookup, :duration]] == [:result]
       assert tags[[:kiln_cms, :crawler_verification, :skipped, :count]] == [:reason]
+      assert tags[[:kiln_cms, :crawler_verification, :ranges_fetch, :count]] == [:engine, :result]
     end
   end
 end

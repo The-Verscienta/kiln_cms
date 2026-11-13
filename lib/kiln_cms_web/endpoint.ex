@@ -155,7 +155,12 @@ defmodule KilnCMSWeb.Endpoint do
   plug KilnCMSWeb.Plugs.ClientIp
 
   plug Plug.RequestId
-  plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+  # `log:` keeps credentials out of the request line (#2449): a path carrying a
+  # token (`/magic_link/…`, `/preview/…`) is logged with it as `[FILTERED]`,
+  # every other path exactly as Phoenix logs it. See `KilnCMSWeb.RequestLog`.
+  plug Plug.Telemetry,
+    event_prefix: [:phoenix, :endpoint],
+    log: {KilnCMSWeb.RequestLog, :level, []}
 
   # `Plug.Parsers.JSON` already matches any `application/*+json` subtype, which
   # covers the `application/activity+json` a fediverse server POSTs to the

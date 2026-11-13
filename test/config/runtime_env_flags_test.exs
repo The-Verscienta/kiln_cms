@@ -68,7 +68,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             BREACHED_PASSWORD_CHECK BREACHED_PASSWORD_POLICY
             KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT KILN_BOT_BUDGET_AI_CRAWLER_PERCENT
             KILN_BOT_BUDGET_DECLARED_BOT_PERCENT KILN_BOT_BUDGET_EMPTY_UA_PERCENT
-            KILN_CRAWLER_VERIFICATION
+            KILN_CRAWLER_VERIFICATION KILN_CRAWLER_RANGES KILN_CRAWLER_RANGES_CRON
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
@@ -1584,6 +1584,51 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "nothing is written in the test env, so an exported value cannot change the suite" do
       assert crawler_verification(%{"KILN_CRAWLER_VERIFICATION" => "false"}, :test) == nil
+    end
+  end
+
+  describe "KILN_CRAWLER_RANGES (#2586)" do
+    defp crawler_ranges(vars, env \\ :prod) do
+      vars
+      |> eval(env)
+      |> get_in([:kiln_cms, KilnCMS.CrawlerVerification.Ranges, :enabled])
+    end
+
+    test "unset or blank writes nothing, so the lists stay on" do
+      assert crawler_ranges(%{}) == nil
+      assert crawler_ranges(%{"KILN_CRAWLER_RANGES" => "  "}) == nil
+    end
+
+    test "an off-spelling turns them off" do
+      for value <- ["false", "False", "0", "no", "off"] do
+        assert crawler_ranges(%{"KILN_CRAWLER_RANGES" => value}) == false
+      end
+    end
+
+    test "an on-spelling writes on, which is how dev opts in" do
+      assert crawler_ranges(%{"KILN_CRAWLER_RANGES" => "true"}) == true
+      assert crawler_ranges(%{"KILN_CRAWLER_RANGES" => "true"}, :dev) == true
+    end
+
+    test "an unrecognized value keeps the default and warns" do
+      {config, stderr} = eval_io(%{"KILN_CRAWLER_RANGES" => "enabled"}, :prod)
+
+      assert get_in(config, [:kiln_cms, KilnCMS.CrawlerVerification.Ranges, :enabled]) == nil
+      assert stderr =~ "KILN_CRAWLER_RANGES"
+    end
+
+    test "nothing is written in the test env, so an exported value cannot change the suite" do
+      assert crawler_ranges(%{"KILN_CRAWLER_RANGES" => "false"}, :test) == nil
+    end
+
+    test "KILN_CRAWLER_RANGES_CRON sets the schedule, false included" do
+      assert eval(%{"KILN_CRAWLER_RANGES_CRON" => "5 */4 * * *"})[:kiln_cms][:crawler_ranges_cron] ==
+               "5 */4 * * *"
+
+      assert eval(%{"KILN_CRAWLER_RANGES_CRON" => "false"})[:kiln_cms][:crawler_ranges_cron] ==
+               "false"
+
+      assert eval(%{})[:kiln_cms][:crawler_ranges_cron] == nil
     end
   end
 end

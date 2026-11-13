@@ -74,7 +74,13 @@ config :kiln_cms,
   health_sweep_cron: false,
   security_log_prune_cron: false,
   backup_marker_sync_cron: false,
-  backup_scheduler_cron: false
+  backup_scheduler_cron: false,
+  crawler_ranges_cron: false
+
+# No journey checks a crawler against a published range list, and a browser
+# run must make no outbound request to a search engine (#2586): nothing
+# fetches the lists, at boot or on a schedule.
+config :kiln_cms, KilnCMS.CrawlerVerification.Ranges, enabled: false, bootstrap?: false
 
 # Same reasoning as config/test.exs: application boot is outside any journey,
 # and with queues now running a boot-time backfill enqueue would execute

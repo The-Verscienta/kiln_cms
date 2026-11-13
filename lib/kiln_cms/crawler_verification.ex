@@ -1,9 +1,18 @@
 defmodule KilnCMS.CrawlerVerification do
   @moduledoc """
-  Checks a search-engine claim against DNS (#2254): is a request whose
-  `User-Agent` names Googlebot really from Google?
+  Checks a search-engine claim against the engine's published IP ranges
+  (#2586) and DNS (#2254): is a request whose `User-Agent` names Googlebot
+  really from Google?
 
-  The check is the one every engine documents: the address's PTR name must
+  An address inside the claimed engine's fresh published list
+  (`KilnCMS.CrawlerVerification.Ranges`: Google, Bing, Apple, DuckDuckGo) is
+  verified at once, with no DNS lookup, no rate-cap charge and no cache
+  write. One outside it is still checked by DNS, so a list that lags behind
+  the vendor never turns a real Googlebot into a failure; only DuckDuckBot,
+  which publishes no reverse-DNS domain, is proven false by its list alone.
+  A missing or stale list decides nothing.
+
+  The DNS check is the one every engine documents: the address's PTR name must
   fall under the engine's domain (`KilnCMS.CrawlerVerification.Engines`), and
   that name's forward lookup must contain the address again. A PTR record is
   whatever the owner of the address's reverse zone wrote, so the forward
@@ -16,11 +25,13 @@ defmodule KilnCMS.CrawlerVerification do
   a crawler's first request from a new address is judged before its result is
   known and its later requests are judged by it.
 
-    * `:verified`: the claim is proven.
+    * `:verified`: the claim is proven, by the engine's fresh published list
+      or by DNS.
     * `:disabled`: verification is off (`enabled: false`); nothing is checked.
     * `{:unverified, :failed}`: the claim is proven false (no PTR record, a PTR
       name outside the engine's domain, or a forward lookup that does not
-      contain the address).
+      contain the address; for DuckDuckBot, an address outside DuckDuckGo's
+      fresh published list).
     * `{:unverified, :pending}`: a lookup is running, or was just started.
     * `{:unverified, :error}`: the last lookup's PTR query could not get an
       answer (a timeout, SERVFAIL, a refused query). Cached for a short while
@@ -36,11 +47,14 @@ defmodule KilnCMS.CrawlerVerification do
       at its concurrent-lookup limit or the address's network has used its
       lookup budget.
     * `{:unverified, :unverifiable}`: the engine publishes no reverse-DNS
-      domain (DuckDuckBot).
+      domain and has no fresh published list that could answer (DuckDuckBot
+      while its list is missing or stale, or over IPv6, which its list does
+      not cover), or is not an engine at all.
     * `{:unverified, :not_public}`: the address is loopback, private, shared,
       in `TRUSTED_PROXIES`, or the caller says it came through a forwarding
       header nothing trusts (`forwarded_untrusted?: true`). Its PTR record says
-      nothing about the client, so no lookup is made.
+      nothing about the client, so no lookup is made, and no range list is
+      read: an address inside a list proves nothing when it is a proxy's.
 
   What a caller does with each answer is the caller's policy; this module
   only answers.
@@ -114,6 +128,8 @@ defmodule KilnCMS.CrawlerVerification do
       `:max_concurrency` (16): read once, by
       `KilnCMS.CrawlerVerification.Supervisor`
 
+  The range lists have their own (`KilnCMS.CrawlerVerification.Ranges`).
+
   ## Telemetry
 
   No event carries an address, a hostname, a user agent or an org.
@@ -139,6 +155,7 @@ defmodule KilnCMS.CrawlerVerification do
   alias KilnCMS.CrawlerVerification.Engines
   alias KilnCMS.CrawlerVerification.InetResolver
   alias KilnCMS.CrawlerVerification.InFlight
+  alias KilnCMS.CrawlerVerification.Ranges
   alias KilnCMS.Security.Cidr
   alias KilnCMSWeb.RateLimit
 
@@ -220,6 +237,8 @@ defmodule KilnCMS.CrawlerVerification do
       no trusted proxy vouches for (`KilnCMSWeb.Plugs.ClientIp.untrusted_forwarding?/1`),
       so `ip` may be a proxy's. Answers `{:unverified, :not_public}`.
     * `:task_supervisor`: where lookups run (a test seam).
+    * `:ranges`: options for `KilnCMS.CrawlerVerification.Ranges.lookup/3`
+      (a test seam).
   """
   @spec check(atom(), :inet.ip_address() | nil, keyword()) :: status()
   def check(engine, ip, opts \\ []) do
@@ -227,7 +246,7 @@ defmodule KilnCMS.CrawlerVerification do
 
     cond do
       config[:enabled] != true -> :disabled
-      not Engines.verifiable?(engine) -> {:unverified, :unverifiable}
+      not Engines.known?(engine) -> {:unverified, :unverifiable}
       true -> guarded_check(engine, normalize_ip(ip), config)
     end
   end
@@ -328,14 +347,28 @@ defmodule KilnCMS.CrawlerVerification do
 
   # ---- check/3 --------------------------------------------------------------
 
+  # The address first: a range list says nothing about a proxy's address.
+  # Then the engine's published list (#2586), where only `:in` decides for an
+  # engine DNS can check; then DNS.
   defp check_address(engine, ip, config) do
     if worth_a_lookup?(ip, config) do
-      case cached(ip) do
-        {:ok, stored} when not is_nil(stored) -> engine |> judge(stored) |> status(engine, stored)
-        _miss -> request_lookup(engine, ip, config)
+      ranges = Ranges.lookup(engine, ip, Keyword.get(config, :ranges, []))
+
+      cond do
+        ranges == :in -> :verified
+        Engines.verifiable?(engine) -> check_dns(engine, ip, config)
+        ranges == :out -> {:unverified, :failed}
+        true -> {:unverified, :unverifiable}
       end
     else
       {:unverified, :not_public}
+    end
+  end
+
+  defp check_dns(engine, ip, config) do
+    case cached(ip) do
+      {:ok, stored} when not is_nil(stored) -> engine |> judge(stored) |> status(engine, stored)
+      _miss -> request_lookup(engine, ip, config)
     end
   end
 

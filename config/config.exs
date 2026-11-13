@@ -921,8 +921,9 @@ config :phoenix, :json_library, Jason
 # (`?preview_token=`, #1887) and a passphrase grant (`?unlock=`, #496).
 # `invite_token` (#2135): the site-invitation link's path parameter, which
 # accepts the invitation for whoever holds it. This filters the logged params
-# map only; Phoenix.Logger still logs the request path, token included, as it
-# does for `/magic_link` and `/password-reset` tokens.
+# map only; a token in the request path is redacted from the request line by
+# `KilnCMSWeb.RequestRedaction` (#2449), as for `/magic_link` and
+# `/password-reset` tokens.
 # Human verification (#2249). Off until the operator names a provider and its
 # keys (config/runtime/console.exs); the secret defaults to CHALLENGE_SECRET_KEY.
 config :kiln_cms, KilnCMS.Challenge, secret_key: {:env, %{"var" => "CHALLENGE_SECRET_KEY"}}
@@ -1008,6 +1009,19 @@ config :kiln_cms, :backup_marker_sync_cron, "*/15 * * * *"
 # (`*/5 * * * *`) only fires up to that much later. `false` disables it; the
 # schedules then never run. Down here for the same reason as the line above.
 config :kiln_cms, :backup_scheduler_cron, "* * * * *"
+
+# When one node fetches the search engines' published crawler IP ranges
+# (#2586, KilnCMS.CrawlerVerification.RangesWorker) and sends them to the
+# others. Every 6 hours; a list stays fresh for 24, so three runs in a row may
+# fail before a list stops answering. A node with a stale list also queues a
+# fetch of that list at boot and every 10 minutes (at most one job per 10
+# minutes cluster-wide). `false` stops every automatic fetch, those included:
+# nothing fetches a list unless the operator queues the job, so the lists go
+# stale within a day and claims fall back to DNS (DuckDuckBot's go
+# unverified). KILN_CRAWLER_RANGES=false turns the lists off altogether.
+# Down here so the line anchors
+# docs/environment-variables.md keeps into this file stay put.
+config :kiln_cms, :crawler_ranges_cron, "17 */6 * * *"
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

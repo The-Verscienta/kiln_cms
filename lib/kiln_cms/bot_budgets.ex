@@ -23,7 +23,8 @@ defmodule KilnCMS.BotBudgets do
     * **Built-in defaults**: search engines 200% (#2587), AI crawlers 100%,
       declared bots 50%, an empty user agent 20%. Browsers are always 100%.
       The search-engine 200% is spent only on addresses
-      `KilnCMS.CrawlerVerification` has proven to be the engine's: a claim not
+      `KilnCMS.CrawlerVerification` has proven to be the engine's (by DNS or
+      the engine's published IP range list): a claim not
       proven either way is held to the browser limit
       (`unverified_search_limit/0`), and one proven false is charged as
       `:empty`. With verification off nothing is proven, so the search-engine

@@ -165,6 +165,84 @@ carries the reasoning.
   old reading, but backups the new prune has already deleted are gone. The
   in-app backup already read the variable this way and is unchanged. (#2727)
 
+<a id="cron-killed-run-recovery-upgrade"></a>
+
+- **Replace `scripts/backup.sh` on every host with this release's copy. A cron run killed outright is now recorded as a failed "Interrupted" run after 3 hours, and `backup.sh prune` now deletes its `.partial` files after 12 hours.**
+  What changes on a deployed instance (the Fixed entry
+  [below](#cron-killed-run-recovery) has the whole mechanism):
+  - **Old leftovers show up once.** A `kiln-media-<stamp>.sha256.partial`
+    left by a run killed before the upgrade (the 1.9 known issue: a stamp
+    "pending" in History forever) is imported at the first import after the
+    deploy as a **Failed** run, "Interrupted: the backup stopped before it
+    finished and left .partial files behind". Its stamp is older than the
+    backups taken since, so the status panel's last attempt is unchanged.
+    You no longer need to delete the marker by hand.
+  - **`backup.sh prune` now deletes `.partial` files**, which the guide
+    used to say it never does: those of a stamp whose every file, in `db/`
+    and `media/`, is 12 hours old, unless `.work/<stamp>/` exists. A
+    recovery point (`.keep`) does not protect them. With the nightly cron
+    line that is the run after the kill; with an hourly cron, about the
+    twelfth. Deploy the app before replacing the script, so it reads old
+    leftovers first; if prune gets there first, the stamp still imports,
+    as what is left of it (parts with no sidecar import as failed).
+  - **An older `backup.sh` can be mislabeled.** This release's script
+    touches its `.partial` files every 5 minutes while it runs; an older
+    copy does not. Against this release's app, a live run on an older
+    script with a phase in which nothing is written for 3 hours (planning a
+    very large media tree on NFS, or `pg_dump` waiting for a lock) can be
+    recorded as Interrupted, and that row is never rewritten.
+  - **Rolling back** the app is safe: there is no migration. The
+    Interrupted rows stay as failed runs, and an older release's in-app
+    backup again removes any `.partial` older than an hour. Keep the new
+    `backup.sh` or put the old one back; both read the same files.
+  (#2478)
+
+<a id="crawler-ip-ranges-upgrade"></a>
+
+- **Kiln now fetches Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists over HTTPS every 6 hours, on by default: allow the four hosts, or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot claims from outside DuckDuckGo's list are now charged as no user agent.**
+  This is the first outbound call a default install makes **on a schedule**;
+  every other default call answers something a person did (#2586, see
+  [Added](#crawler-ip-ranges)).
+  - **Egress.** One node fetches
+    `https://developers.google.com/static/crawling/ipranges/common-crawlers.json`,
+    `https://www.bing.com/toolbox/bingbot.json`,
+    `https://search.developer.apple.com/applebot.json` and
+    `https://duckduckgo.com/duckduckbot.json` every 6 hours (Oban cron
+    `17 */6 * * *`, `KILN_CRAWLER_RANGES_CRON`), and shares them with the
+    other nodes over PubSub. A node with no fresh list also queues a fetch
+    about 20 seconds after it starts, and again at its 10-minute checks while
+    a list is stale; at most one fetch job runs per 10 minutes across the
+    cluster. Any node may be the one that fetches, so a firewall that lists
+    allowed hosts must allow all four on every node, port 443. The requests
+    carry a bare `KilnCMS` user agent and nothing about the instance or its
+    visitors. Add the four vendors to your DPA's list if you keep one
+    ([data-flows.md](../data-flows.md#optional-subprocessors)).
+  - **If you do nothing on a closed network**, nothing breaks: each list
+    stays missing, claims are checked by DNS as before, DuckDuckBot stays
+    unverified as before, and each node logs "Crawler verification:
+    <engine>'s published crawler IP ranges are missing or stale ..." once
+    per engine. Set `KILN_CRAWLER_RANGES=false` to stop the attempts and the
+    warnings.
+  - **DuckDuckBot changes.** An address in DuckDuckGo's list now gets the
+    verified search-engine ceiling (600 a minute with the defaults, was 300).
+    An IPv4 address outside it is proven false: charged as no user agent (60
+    a minute) and, with the smart 404 guard on (`KILN_SCANNER_BLOCKING`, off
+    by default), counted toward the miss threshold. **A real DuckDuckBot on an
+    address DuckDuckGo has just added can be throttled, and blocked by the
+    guard, until the next successful fetch**: normally within 6 hours, at most
+    24 if fetches keep failing, after which the list is stale and DuckDuckBot
+    claims are unproven again. Remove such a block on `/editor/ip-blocks`.
+    DuckDuckGo publishes IPv4 only, so DuckDuckBot over IPv6 is unchanged.
+  - **Google, Bing and Apple** gain: an address in their list is verified
+    with no DNS query. One outside it goes to DNS exactly as before.
+  - **Staging and dev.** Dev has the lists off (`KILN_CRAWLER_RANGES=true`
+    turns them on); a staging env built for production fetches them unless
+    you set `KILN_CRAWLER_RANGES=false`
+    ([staging-environments.md](../staging-environments.md)).
+  - **Rolling back** is safe: nothing is stored outside each node's memory
+    and there is no migration. In a cluster upgraded node by node, older
+    nodes ignore the lists the new ones send.
+
 <a id="second-factor-policy-upgrade"></a>
 
 - **Run `mix ash.migrate` (new table `site_second_factor_policy`, and a `users.inserted_at` column). Nothing is enforced; rolling back is safe.**
@@ -511,6 +589,54 @@ carries the reasoning.
   and `Passkey` `:register`. See
   [We email you when a second factor is added](../two-factor-auth.md#we-email-you-when-a-second-factor-is-added).
   (Part of #2247.)
+
+<a id="crawler-ip-ranges"></a>
+
+- **Search-engine claims are checked against the engines' published crawler IP lists before DNS: an address in Google's, Bing's, Apple's or DuckDuckGo's fresh list is verified with no DNS query, and DuckDuckBot can be verified at last.**
+  Until now every claim went to reverse and forward DNS (#2254), and
+  DuckDuckBot, which publishes addresses rather than a reverse-DNS domain,
+  could never be verified or proven false (#2586).
+  - **What a list decides.** An address inside the claimed engine's list is
+    verified, with no lookup charged against the per-network limits and
+    nothing cached. Outside it, Google, Bing and Apple fall back to DNS, so
+    a list that lags the vendor never fails a real crawler; DuckDuckBot,
+    with no DNS to fall back on, is proven false (see the
+    [upgrade note](#crawler-ip-ranges-upgrade)). A list is fresh for 24
+    hours after it was fetched; a missing or stale one decides nothing.
+    Yandex and Baidu publish no list and stay DNS-only.
+  - **What refuses a list.** A list is refused whole, keeping the one held
+    before, when it is not the expected JSON, has no usable range or more
+    than 5,000, holds a range wider than IPv4 `/20` or IPv6 `/48` or more
+    than 65,536 IPv4 or 2^80 IPv6 addresses in total, or overlaps private,
+    loopback, shared, link-local, multicast, documentation, benchmarking,
+    6to4, Teredo or NAT64 space (IPv6 must be inside `2000::/3`). A match is
+    only as good as the vendor's list: Bing's includes `/28`s in Microsoft
+    Azure space.
+  - **Operators.** New `KILN_CRAWLER_RANGES` (default on; `false` makes no
+    request and reads no list; off whenever `KILN_CRAWLER_VERIFICATION` is
+    `false`) and `KILN_CRAWLER_RANGES_CRON` (default `17 */6 * * *`; `false`
+    stops every automatic fetch, the boot and stale-list ones included). New
+    metric `kiln_cms.crawler_verification.ranges_fetch.count`, tagged
+    `engine` and `result` (`ok`, `http_error`, `transport_error`,
+    `too_large`, `blocked`, `invalid`, `no_prefixes`, `too_many`,
+    `too_broad`, `not_public`, `other`). For a health check,
+    `bin/kiln_cms rpc 'IO.inspect(KilnCMS.CrawlerVerification.Ranges.status())'`
+    prints each list's source, range count, age in milliseconds and
+    `fresh?`. Guide:
+    [Published IP ranges](../bot-budgets.md#published-ip-ranges).
+  - **Developers.** New `KilnCMS.CrawlerVerification.Ranges` (with
+    `lookup/3`, `fresh?/2`, `status/0`), `Ranges.Parser`, `RangesWorker`
+    and `RangesSync`; `KilnCMS.CrawlerVerification.Engines` gains
+    `known?/1`, `range_source/1`, `range_engines/0` and
+    `default_range_sources/0`; `KilnCMS.Security.Cidr` gains
+    `global_unicast_range?/1`. Code config
+    `config :kiln_cms, KilnCMS.CrawlerVerification.Ranges`: `:enabled`,
+    `:sources` (`%{engine => url | false}`, per engine), `:max_age_ms`,
+    `:max_bytes`, `:max_prefixes`, `:bootstrap?`, `:bootstrap_after_ms`,
+    `:req_options`. `KilnCMS.CrawlerVerification.check/3`'s answers are
+    unchanged in shape: `{:unverified, :failed}` now also means DuckDuckBot
+    outside its list, and `{:unverified, :unverifiable}` means DuckDuckBot
+    with no fresh list or over IPv6.
 
 <a id="second-factor-policy-groundwork"></a>
 
@@ -930,12 +1056,13 @@ carries the reasoning.
     unparseable value warns on stderr at boot and turns it off.
     `BACKUP_ENABLED=false` does not stop it: that switch is for the in-app
     backup path, and the marker is for the cron path.
-  - **Several hosts, each with its own `BACKUP_DIR`**: with no
-    `.kiln-dir-id` (only an in-app backup creates one), each slot syncs the
-    directory of the node that picked up the job. With ids, one sync per id
-    waits for a node that reads it, for up to about 10 minutes, then logs
-    "Backup last-good marker sync for backup directory `<id>` gave up: no
-    node with that directory picked it up".
+  - **Several hosts, each with its own `BACKUP_DIR`**: each node's
+    heartbeat gives its directory a `.kiln-dir-id` once it holds backups
+    (#2789, [below](#backup-marker-sync-every-host)). Each slot syncs the
+    directory of the node that picked up the job, and queues one sync for
+    every other directory id, which waits for a node that reads it, for up
+    to about 10 minutes, then logs "Backup last-good marker sync for backup
+    directory `<id>` gave up: no node with that directory picked it up".
   - **Watch it** with the new `[:kiln_cms, :backups, :last_good, :synced]`
     event (`%{count: 1}`; metadata `dir`, `db`, `media`). A failed run emits
     the existing `[:kiln_cms, :backups, :last_good, :failed]` and logs
@@ -951,6 +1078,114 @@ carries the reasoning.
   takes a new `import: false` option for a caller that already ran the
   importer. See [The last-good marker](../backups.md#the-last-good-marker).
   (#2554)
+
+<a id="backup-marker-sync-every-host"></a>
+
+- **On a cluster with a `BACKUP_DIR` per host and only cron taking backups, the last-good marker sync now reaches every host's directory, not just the node that picked up the job.**
+  The sync (`KilnCMS.Backups.MarkerSyncWorker`, #2554) routes by the
+  `.kiln-dir-id` each node's heartbeat reports, and until now only an
+  in-app backup created that file. A cron-only cluster reported no ids, so
+  each 15-minute slot synced one directory, whichever node fetched the job,
+  and a host could go any number of slots without a marker; its
+  `backup.sh prune` then kept only the newest complete set. Now:
+  - **The heartbeat creates the id.** While the sync is scheduled, each
+    node's heartbeat (every 30 seconds) gives its `BACKUP_DIR` a
+    `.kiln-dir-id` when it has none, but only when the directory already
+    holds backups (a `db/` or `media/` subdirectory), so the empty
+    `/var/backups/kiln` the image creates on every replica, or the
+    mountpoint of a failed mount, never gets one. With
+    `KILN_BACKUP_MARKER_SYNC_CRON=false` no id is created; only an in-app
+    backup creates one, as before.
+  - **Each slot covers every live directory.** The node that fetches the
+    job syncs its own directory in place, and queues one sync for every
+    other id reported by a beat of the last 10 minutes. Each of those waits
+    for a node that reads its id, putting itself back every 30 seconds up
+    to 20 times. So a host's directory is synced in a slot as long as its
+    node picks up one of the about 21 releases of its job in those
+    10 minutes, the same assumption every backup step makes; a host whose
+    node is down is synced again once its node beats.
+  - **Liveness is judged on the database's clock.** The 10-minute window
+    was computed from the node's own clock, so a node whose clock ran ahead
+    saw no live beats and fell back to syncing only itself.
+  - **The id is published whole.** It is written to a temporary file,
+    synced and hard-linked into place, so no reader sees an empty id and
+    nodes racing on a shared volume settle on one. A filesystem without
+    hard links falls back to an exclusive create. This applies to the id an
+    in-app backup creates too.
+
+  Operators:
+  - **The app must be able to write `BACKUP_DIR`.** If it can't, the server
+    log says, once per boot for each error, "Backup heartbeat: no id for the backup
+    directory `<dir>` (`<reason>`)…", and that directory is synced only in
+    the slots its own node fetches the job.
+  - **A cloned backup directory now always carries an id.** Copying one to
+    another host (`rsync`, a volume snapshot) copies `.kiln-dir-id`, and
+    the two then look like one directory: the copy is never routed to on its
+    own. Leave the file out (`rsync --exclude .kiln-dir-id`) or delete it on
+    the copy.
+  - **Rolling back** is safe: there is no migration, and an older release
+    reads the ids the heartbeat created as an in-app backup would have
+    written them.
+
+  Developers: `KilnCMS.Backups.DirId.ensure_existing/1` creates the id
+  only in a directory that holds backups;
+  `KilnCMS.Backups.MarkerSyncWorker.enabled?/0` says whether the sync is
+  scheduled; the `NodeBeat` read action `:live` (code interface
+  `Backups.list_live_node_beats/2`) returns the beats of the last
+  `within_s` seconds on the database's clock. See
+  [The last-good marker](../backups.md#the-last-good-marker). (#2789)
+
+<a id="cron-killed-run-recovery"></a>
+
+- **A cron backup killed outright (`kill -9`, the OOM killer, a power cut) now shows in History as a failed "Interrupted" run, and its `.partial` files are cleared, with no one stepping in.**
+  Such a run leaves its `.partial` files behind, among them the media
+  marker `kiln-media-<stamp>.sha256.partial`. Only the app's in-app backup
+  ever removed them, so on a host where only cron takes backups the stamp
+  stayed "pending" in History forever and the marker had to be deleted by
+  hand (a 1.9.0 known issue). Now:
+  - **A live run keeps its files fresh.** `backup.sh db`, `media` and `all`
+    start a background loop that touches every `.partial` of the run's
+    stamp every 5 minutes and stops when the script exits, so a slow run is
+    never taken for a dead one. A loop orphaned by a kill stops at its next
+    pass.
+  - **History records it after 3 quiet hours.** The importer
+    (`KilnCMS.Backups.Importer`) keeps a stamp with a `.partial` beside it
+    pending while any of its files, partial or finished, changed in the
+    last 3 hours (`Importer.interrupted_after_s/0`). After that it imports
+    a **Failed** run, "Interrupted: the backup stopped before it finished
+    and left .partial files behind", with the finished files as artifacts,
+    the kinds of all its files as components, and a log line naming up to
+    five leftover files. A stamp with only partials (killed in its first
+    file) is recorded too. A file dated more than 5 minutes in the future
+    keeps the stamp pending, with a warning naming it. The row is never
+    rewritten, which is why the wait is long.
+  - **`backup.sh prune` clears the partials after 12 quiet hours**, once
+    every file of the stamp in `db/` and `media/` is that old, unless
+    `.work/<stamp>/` exists; a recovery point does not keep them, since
+    `restore.sh` refuses a set with a `.partial` beside it anyway. With the
+    nightly cron that is within one prune cycle; with an hourly cron about
+    twelve. The stamp's finished files age under `BACKUP_KEEP_DAYS` as
+    before.
+  - **`backup.sh all` opens the media marker before the dump**, when
+    `MEDIA_DIR` is set, so a run killed in its database phase or the dump's
+    off-site copy is recognized as interrupted instead of imported as a
+    succeeded database-only backup, and `backup.sh verify` skips that
+    stamp's media while the dump runs.
+  - **The in-app backup reads the stamp before it sweeps.** Its start step
+    runs the importer first, then removes the `.partial` files only of a
+    stamp that has a History row once every file of the stamp is over an
+    hour old. A cron leftover with no row waits for the importer. A
+    `.partial` whose name carries no stamp is still removed after an hour.
+  - **If the stamp was never read** (the marker sync off and nobody opening
+    the Backups page, or the host's app down more than 12 hours after the
+    kill), prune removes the marker first and the leftovers import as what
+    they are: media parts with no sidecar as failed "incomplete media set:
+    parts but no sidecar", a single finished archive or a finished dump
+    alone as succeeded.
+  Read the [upgrade note](#cron-killed-run-recovery-upgrade): replace
+  `backup.sh` on every host. See
+  [When a cron run is killed outright](../backups.md#when-a-cron-run-is-killed-outright-2478).
+  (#2478)
 
 <a id="resume-behind-queued-resume-already-fixed"></a>
 
@@ -1323,3 +1558,51 @@ carries the reasoning.
     rented networks can still spend the node's 600 lookups a minute with
     real lookups; and published IP ranges are not read yet (#2586). See
     [the threat model](../threat-model.md#bot-budgets).
+
+<a id="token-paths-redacted-from-request-log"></a>
+
+- **Credential tokens in sign-in, invitation, preview and newsletter links are redacted from the request log and not recorded as missed paths.**
+  A magic sign-in link, password reset, account confirmation, site
+  invitation, sign-in unlock, preview link and newsletter confirm or
+  unsubscribe link each carry their secret in the URL path. Phoenix's
+  request line (`GET <path>`, at `:info`) wrote that path out whole, token
+  included, so anyone who could read the request log could follow the link
+  while it was still valid; `:filter_parameters` filters params maps, never a
+  path. A mangled link (`/magic_link/<token>/x`) also fell through to the 404
+  catch-all and was stored in the missed-path list on `/editor/redirects`.
+
+  Now the request line for such a path shows the token as `[FILTERED]`
+  (`GET /magic_link/[FILTERED]`, `GET /fr/preview/[FILTERED]/live`), and a
+  path that starts with one is never recorded as a missed path. Every other
+  request line is unchanged, and the `Sent <status> in <duration>` line is
+  still Phoenix's. The redacted start line is written by
+  `KilnCMSWeb.RequestLog` from the request process, so it carries the same
+  `request_id` metadata as before.
+
+  The set of credential routes is read off the router, not kept as a list: a
+  route whose parameter name contains `token` or `secret` is one, so a new
+  token route, in the core or a plugin, is covered without a change here. The
+  match over-redacts on purpose: it is tried at the first and second path
+  segment because the line is written before the locale prefix is stripped,
+  so a path that only resembles a token route one segment in
+  (`/products/magic_link/old-page`) is logged with its last segment as
+  `[FILTERED]`. If the router cannot be read, it fails closed: every request
+  line is `<METHOD> /[FILTERED]`, nothing is added to the missed-path list,
+  an error is logged, and it retries after 30 seconds. See
+  [Request log lines for token links](../observability.md#request-log-lines-for-token-links).
+
+  Operators: nothing to configure, no migration. Request logs written before
+  this release still hold the tokens of the links they recorded; most have
+  expired, but treat those logs as sensitive until they age out. Missed-path
+  rows already stored are not touched: an admin can remove one that holds a
+  token with its remove button (the x, "Remove … from the 404 list") on the
+  **404s** tab of `/editor/redirects`; otherwise it is purged 30 days (the
+  default `retention_days`) after its last hit.
+
+  Plugin authors: name a path parameter that carries a credential with
+  `token` or `secret` in it. Routes below a `forward` (a plugin's
+  `{:forward, …}` plug route included) are not seen, so a forwarded router
+  must keep credentials out of its paths; see "Credentials in the path" under
+  Plug routes in [Plugin extensibility](../plugin-extensibility.md).
+  New public functions: `KilnCMSWeb.RequestRedaction.redact/2`,
+  `redact_path/1`, `secret?/2`, `credential_param?/1`. (#2449)

@@ -21,7 +21,7 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
   llms.txt, sitemaps, feeds and the health probes are on `:probe` and never
   classified.
 
-  ## A search-engine claim is checked against DNS (#2254)
+  ## A search-engine claim is checked against DNS or a published list (#2254, #2586)
 
   A user agent that names a search engine is checked with
   `KilnCMS.CrawlerVerification.check/3`, which never waits on DNS, and the
@@ -29,8 +29,9 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
     * `:verified`, or `:disabled` (verification is off): a search engine, at
       the search-engine ceiling.
-    * `{:unverified, :failed}`, the claim is **proven** false: charged as
-      `:empty`, a client that will not say what it is.
+    * `{:unverified, :failed}`, the claim is **proven** false (by DNS, or for
+      DuckDuckBot by an address outside DuckDuckGo's fresh published list):
+      charged as `:empty`, a client that will not say what it is.
     * any other `{:unverified, reason}` (the lookup is pending, was skipped or
       got no answer to its PTR or forward query, the engine cannot be
       verified, or the address is not one

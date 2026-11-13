@@ -53,7 +53,8 @@ defmodule KilnCMS.BotClass do
   The lists are curated here, not configured: what an operator configures is
   each class's ceiling, never its membership. Adding a token is a code change
   with a test row in `test/kiln_cms/bot_class_test.exs`. A new search engine
-  also needs its reverse-DNS row in `KilnCMS.CrawlerVerification.Engines`.
+  also needs its row in `KilnCMS.CrawlerVerification.Engines`: its reverse-DNS
+  domains, its published IP range list, or both.
   """
 
   @type t :: :search_engine | :ai_crawler | :declared_bot | :empty | :browser

@@ -80,6 +80,12 @@ Every summary line below that was shortened links to its own entry there.
 - **`backup.sh` now refuses a `BACKUP_KEEP_DAYS` that is not a whole number of days from 1 to 2147483647, and keeps 14. A host that set `0` keeps 14 days of backups (check the disk); one that set `14d` on Linux, which pruned nothing, deletes backups older than 14 days at its next prune.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-keep-days-upgrade))
 
+- **Replace `scripts/backup.sh` on every host: an older copy doesn't keep a live run's `.partial` files fresh, so a run quiet for 3 h can be recorded as Interrupted. Old killed-run leftovers appear once as failed "Interrupted" runs, and `prune` now deletes abandoned `.partial` files.**
+  ([#2850](https://github.com/The-Verscienta/kiln_cms/pull/2850) · [long form](docs/changelog/unreleased.md#cron-killed-run-recovery-upgrade))
+
+- **New scheduled egress: one node fetches Google's, Bing's, Apple's and DuckDuckGo's crawler IP lists over HTTPS every 6 h; allow the four hosts or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot outside its list is now charged as no user agent and counted by the 404 guard. No migration; rollback safe.**
+  ([long form](docs/changelog/unreleased.md#crawler-ip-ranges-upgrade))
+
 - **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced, and rolling back is safe. Part of #2247.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
 
@@ -116,6 +122,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Account owners are emailed whenever an authenticator app is set up or replaced, or a passkey is added, with what to do if it wasn't them.**
   ([long form](docs/changelog/unreleased.md#second-factor-added-email))
+
+- **Search-engine claims are checked against Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists before DNS, so DuckDuckBot can be verified; new `KILN_CRAWLER_RANGES`, `KILN_CRAWLER_RANGES_CRON` and `ranges_fetch` metric.**
+  ([long form](docs/changelog/unreleased.md#crawler-ip-ranges))
 
 - **Groundwork for requiring two-step sign-in by role, not yet enforced (no page; part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
@@ -178,6 +187,12 @@ Every summary line below that was shortened links to its own entry there.
 - **Cron-only deployments now get the last-good backup marker: the app writes `kiln-<stamp>.good` every 15 minutes (`KILN_BACKUP_MARKER_SYNC_CRON`), so `backup.sh prune` keeps the newest verified backup.**
   ([long form](docs/changelog/unreleased.md#backup-marker-sync-cron-only))
 
+- **On a cluster with a `BACKUP_DIR` per host, the last-good marker sync now reaches every host's directory each slot: each node's heartbeat gives a directory that holds backups its `.kiln-dir-id`. Exclude that file when cloning a backup directory.**
+  ([#2850](https://github.com/The-Verscienta/kiln_cms/pull/2850) · [long form](docs/changelog/unreleased.md#backup-marker-sync-every-host))
+
+- **A cron backup killed outright now shows in History as a failed "Interrupted" run after 3 quiet hours, and `backup.sh prune` clears its `.partial` files after 12, with no one stepping in.**
+  ([#2850](https://github.com/The-Verscienta/kiln_cms/pull/2850) · [long form](docs/changelog/unreleased.md#cron-killed-run-recovery))
+
 - **The 1.9.0 known issue "Resume on a failed backup says it is queued but never runs" was fixed in 1.9.0 itself (#2688); the resume is refused with a message instead.**
   ([long form](docs/changelog/unreleased.md#resume-behind-queued-resume-already-fixed))
 
@@ -218,6 +233,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Crawler verification: a lookup turned away as busy no longer spends the network and node lookup budgets, and verified crawlers keep their cached result through a flood of rejected lookups (own 10,000-entry cache).**
   ([long form](docs/changelog/unreleased.md#crawler-verification-hardening))
+
+- **Credential tokens in sign-in, invitation, preview and newsletter links are redacted from the request log and not recorded as missed paths.**
+  ([long form](docs/changelog/unreleased.md#token-paths-redacted-from-request-log))
 
 ## [1.9.2] - 2026-11-12
 

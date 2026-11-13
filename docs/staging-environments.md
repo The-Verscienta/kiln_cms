@@ -242,6 +242,14 @@ the gaps the *data* carries — the *config* is already inert:
   default, so an admin opening `/editor/system` makes an anonymous request to
   api.github.com (no instance data, see [data-flows.md](data-flows.md)). Set
   `KILN_UPDATE_CHECK=false` on the staging env if that request is unwelcome.
+  A second exception runs on a schedule: crawler verification fetches Google's,
+  Bing's, Apple's and DuckDuckGo's published crawler IP lists every 6 hours
+  (#2586), sending nothing about the instance. A staging env that search
+  engines do not crawl gains nothing from them, so set
+  `KILN_CRAWLER_RANGES=false` there unless you are testing crawler
+  verification itself, or the staging firewall does not allow those hosts
+  (blocked, it only logs a warning per engine). See
+  [bot-budgets.md](bot-budgets.md#published-ip-ranges).
 - **Secrets come from the environment** (`SECRET_KEY_BASE`, `DATABASE_URL`, provider
   keys via `KilnCMS.Keys`), not the database — so a fresh set of staging env vars is a
   clean break from production. The DKIM private key is the one secret that lives in the
