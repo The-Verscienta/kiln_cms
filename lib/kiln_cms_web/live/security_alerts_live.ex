@@ -262,6 +262,29 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
     )
   end
 
+  # A `?` beside a platform kind whose behavior needs more than its one-line
+  # description. Only `api_key_rate_limited` has one: its alert depends on the
+  # refusing server having recently verified the key, which a cluster spreads
+  # thin (#2896, docs/security-alerts.md "Running more than one server").
+  attr :kind, :atom, required: true
+
+  defp platform_kind_help(%{kind: :api_key_rate_limited} = assigns) do
+    ~H"""
+    <.help_tip
+      id="api-key-rate-limit-servers-help"
+      label={gettext("About when a rate-limit alert is raised")}
+      title={gettext("When an alert is raised")}
+      learn_more={docs_url("security-alerts.md#running-more-than-one-server")}
+    >
+      {gettext(
+        "Some refusals raise no alert, especially when Kiln runs on more than one server: an alert is raised only by a server that recently verified the key."
+      )}
+    </.help_tip>
+    """
+  end
+
+  defp platform_kind_help(assigns), do: ~H""
+
   defp kind_description(:new_admin),
     do:
       gettext(
@@ -436,6 +459,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
             />
             <p class="-mt-1 ml-6 text-xs text-base-content/70">
               {platform_kind_description(kind)}
+              <.platform_kind_help kind={kind} />
             </p>
           </div>
           <.button phx-disable-with={gettext("Saving…")}>{gettext("Save platform alerts")}</.button>
