@@ -807,15 +807,16 @@ defmodule KilnCMSWeb.MediaLive do
         Derivatives.delete_blobs(derivatives, item)
         put_flash(socket, :info, gettext("Permanently deleted %{name}.", name: item.filename))
 
+      {:error, %Ash.Error.Forbidden{}} ->
+        put_flash(socket, :error, gettext("You don't have permission to delete media."))
+
       {:error, error} ->
-        if stale?(error),
-          do:
-            put_flash(
-              socket,
-              :error,
-              stale_media_message(socket, item, gettext("Couldn't delete that item."))
-            ),
-          else: put_flash(socket, :error, gettext("You don't have permission to delete media."))
+        failed = gettext("Couldn't delete that item.")
+
+        message =
+          if stale?(error), do: stale_media_message(socket, item, failed), else: failed
+
+        put_flash(socket, :error, message)
     end
   end
 

@@ -1027,7 +1027,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
       html =
         lv |> element(~s(button[phx-value-id="#{item.id}"][phx-click="purge"])) |> render_click()
 
-      assert html =~ "restored"
+      assert html =~ "Someone else already restored that item."
       refute html =~ "Permanently deleted"
       refute html =~ "permission to delete media"
       assert CMS.get_media_item!(item.id, actor: admin).id == item.id

@@ -277,7 +277,7 @@ defmodule KilnCMS.Media.SystemActorAuthorizationTest do
       end
     end
 
-    test "the system cannot soft-delete even a quarantined item — `purge` is its only delete" do
+    test "the system cannot soft-delete even a quarantined item — `purge_quarantined` is its only delete" do
       quarantined = quarantined!()
 
       assert {:error, %Ash.Error.Forbidden{}} =
