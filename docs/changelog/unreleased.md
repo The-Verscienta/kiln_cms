@@ -2209,6 +2209,81 @@ carries the reasoning.
   schedules entry under Added. Documentation and module docs only; no behavior
   change.
 
+<a id="gen-plugin-content-types-next-step"></a>
+
+- **`mix kiln.gen.plugin` no longer tells you to run `mix kiln.gen.content <Type> --domain …`, which fails as an unknown option; its notice now lists the steps to write a plugin's content types by hand (#2733).**
+  For plugin developers. After generating a `projects/` overlay plugin, the
+  notice and the task's module doc gave the next step for content types as
+  `mix kiln.gen.content <Type> --domain <Plugin>.Catalog`. `kiln.gen.content`
+  has no `--domain` switch (its options are `--excerpt`, `--published`,
+  `--plural`, `--from` and `--org`), so run through `mix` that command stops
+  with an unknown-option error. Even without the flag it could not have done
+  the job: `kiln.gen.content` registers every type on the core `KilnCMS.CMS`
+  domain, never on a plugin's.
+
+  No generator writes content types into a plugin's domain yet, so the notice
+  now gives the by-hand steps. For `mix kiln.gen.plugin Ratings` it reads:
+
+  ```text
+    * Content types: mix kiln.gen.content can't write them into a plugin's
+      domain yet (it registers every type on KilnCMS.CMS), so write them
+      by hand, using projects/example/catalog.ex and
+      projects/example/catalog/*.ex as the template:
+        - a Ratings.Catalog domain in projects/ratings/catalog.ex, and
+          each type in projects/ratings/catalog/ built with
+          use KilnCMS.CMS.Content, type: :<type>, domain: Ratings.Catalog
+        - uncomment domains/0 in projects/ratings/plugin.ex
+        - register Ratings.Catalog in :ash_domains and :content_domains
+          in projects/ratings/project.exs, with
+          projects/example/project.exs as the template. Its :plugins list
+          replaces the one this generator wrote to config/config.exs
+          rather than merging, so keep Ratings.Plugin in it.
+        - activate it: cp projects/ratings/project.exs config/project.exs
+          in dev; docker build --build-arg PROJECT=ratings for an image
+        - mix ash.codegen <migration_name>, then move what it wrote to
+          priv/ into projects/ratings/priv/repo/migrations/ and
+          projects/ratings/priv/resource_snapshots/repo/. Before the
+          next ash.codegen, copy them back with
+            cp -R projects/ratings/priv/. priv/
+          and remove them again after: without its snapshots, codegen
+          writes create-table migrations into the core priv/ again
+          (see projects/example/README.md)
+  ```
+
+  The registration goes in your overlay's `projects/<name>/project.exs`, not
+  in `config/project.exs`, which is git-ignored and is only where activation
+  copies it: by hand in dev, or by the image build when you pass
+  `--build-arg PROJECT=<name>`. Copy the shape of
+  `projects/example/project.exs` rather than writing one-item lists:
+  `:ash_domains` there replaces the core's list, so it has to be the core's
+  domains plus yours, and `:plugins` replaces the list `kiln.gen.plugin` wrote
+  to `config/config.exs`, so it has to name your plugin.
+
+  The Plugins section of [Extending content](../extending-content.md) now says
+  the same about migrations: `mix ash.codegen` writes them into the core's
+  `priv/`, you move them into `projects/<name>/priv/repo/migrations/` and
+  `projects/<name>/priv/resource_snapshots/repo/`, and the image build copies
+  `projects/<name>/priv/` back into `priv/` only with
+  `--build-arg PROJECT=<name>`. In a dev tree, copy them back before the next
+  `mix ash.codegen`, or it writes create-table migrations for your types into
+  the core's `priv/` again (see the
+  [example project's README](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/example/README.md)).
+  `--dep` plugins are unchanged: a dependency still can't ship content types.
+
+  If you dropped `--domain` to get past the error, the type was generated on
+  `KilnCMS.CMS` in the core rather than in your plugin; move it into your
+  plugin's domain by the steps above.
+
+  For contributors: the switch-contract test
+  (`test/mix/tasks/switch_contract_test.exs`) missed this for two reasons. It
+  read only moduledocs, not the notices a task prints, and it skipped any
+  `mix` command that ran a different task. It now reads every string literal
+  in each task under `lib/mix/tasks/`, and checks each `mix <task> --flag` it
+  finds against that task's own switches, so a notice that names a sibling
+  task's flag that doesn't exist fails the gate. Commands for tasks the repo
+  doesn't define (`mix ash.codegen`, `mix test`) are skipped. One test puts the
+  old `--domain` line back into `kiln.gen.plugin` and asserts the gate fails.
+
 ## Security
 
 <a id="backup-scripts-password-out-of-argv"></a>
