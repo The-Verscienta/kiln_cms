@@ -1,6 +1,7 @@
 defmodule KilnCMS.Backups.MediaArchiveTest do
-  # async: false: the bounded-memory tests sample VM-wide :erlang.memory/1, and
-  # the archiver shells out to tar, so concurrent heavy tests would skew both.
+  # async: false: the archiver shells out to tar, so concurrent heavy tests
+  # would slow it down. The bounded-memory tests measure only the archiving
+  # work's own processes (see peak_growth/1), not the whole VM.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -87,27 +88,112 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
 
   defp partials(dir), do: Path.wildcard(Path.join(dir, "**/*.partial"), match_dot: true)
 
-  # Peak growth of VM memory while `fun` runs, polling every 10 ms.
+  # Peak memory held by the archiving work while `fun` runs, polling every
+  # 10 ms. Only the work is measured, not the whole VM: `:erlang.memory/1`
+  # also counts whatever Oban, caches and other apps allocate meanwhile, which
+  # made this flaky under CI load (#2218).
+  #
+  # `fun` runs in a fresh worker whose group leader is a private forwarder.
+  # Every process the worker spawns, transitively, inherits that group leader
+  # unless something resets it, so "has our group leader" is the work's process
+  # family (Tasks, file io servers, port watchers). Its footprint is the
+  # processes' own memory plus each off-heap (refc) binary they reference,
+  # counted once by id, plus ports they own. A file read into memory is a
+  # binary some family member holds, so it still counts in full.
   defp peak_growth(fun) do
-    :erlang.garbage_collect()
-    base = :erlang.memory(:total)
-    sampler = Task.async(fn -> sample(base, 0) end)
+    caller_gl = Process.group_leader()
+    gl = spawn_link(fn -> forward_io(caller_gl) end)
+    parent = self()
+    ref = make_ref()
 
-    try do
-      fun.()
-    after
-      send(sampler.pid, :stop)
+    worker =
+      spawn_link(fn ->
+        Process.group_leader(self(), gl)
+        send(parent, {ref, :ready})
+
+        receive do
+          {^ref, :go} -> :ok
+        end
+
+        result =
+          try do
+            {:ok, fun.()}
+          rescue
+            e -> {:raise, e, __STACKTRACE__}
+          catch
+            kind, reason -> {kind, reason, __STACKTRACE__}
+          end
+
+        send(parent, {ref, :done, result})
+      end)
+
+    receive do
+      {^ref, :ready} -> :ok
     end
 
-    Task.await(sampler, 5_000)
+    sampler = Task.async(fn -> sample(gl, 0) end)
+    send(worker, {ref, :go})
+
+    result =
+      receive do
+        {^ref, :done, result} -> result
+      end
+
+    send(sampler.pid, :stop)
+    peak = Task.await(sampler, 5_000)
+    Process.unlink(gl)
+    Process.exit(gl, :kill)
+
+    case result do
+      {:ok, _} -> peak
+      {:raise, e, stack} -> reraise e, stack
+      {kind, reason, stack} -> :erlang.raise(kind, reason, stack)
+    end
   end
 
-  defp sample(base, peak) do
+  defp forward_io(target) do
     receive do
-      :stop -> peak
-    after
-      10 -> sample(base, max(peak, :erlang.memory(:total) - base))
+      msg ->
+        send(target, msg)
+        forward_io(target)
     end
+  end
+
+  defp sample(gl, peak) do
+    receive do
+      :stop -> max(peak, footprint(gl))
+    after
+      10 -> sample(gl, max(peak, footprint(gl)))
+    end
+  end
+
+  defp footprint(gl) do
+    family =
+      for pid <- Process.list(),
+          Process.info(pid, :group_leader) == {:group_leader, gl},
+          do: pid
+
+    {heaps, binaries} =
+      Enum.reduce(family, {0, %{}}, fn pid, {heaps, binaries} ->
+        case Process.info(pid, [:memory, :binary]) do
+          [memory: memory, binary: bins] ->
+            {heaps + memory,
+             Enum.reduce(bins, binaries, fn {id, size, _}, acc -> Map.put(acc, id, size) end)}
+
+          nil ->
+            {heaps, binaries}
+        end
+      end)
+
+    ports =
+      for port <- Port.list(),
+          {:connected, owner} <- [Port.info(port, :connected)],
+          owner in family,
+          {:memory, memory} <- [Port.info(port, :memory)],
+          reduce: 0,
+          do: (acc -> acc + memory)
+
+    heaps + (binaries |> Map.values() |> Enum.sum()) + ports
   end
 
   defp sparse!(path, bytes) do
