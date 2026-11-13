@@ -1519,7 +1519,7 @@ decision: [ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and
   factor used, after the deadline, for anything but setting one up: every
   door asks the site the request resolved to. The browser sign-in
   (`AuthController.success/4`, every strategy) lands a held account on
-  `/account/two-factor`, recording `second_factor_required` once; `:browser` redirects every later
+  the setup page, recording `second_factor_required` once; `:browser` redirects every later
   request there (`302`, `private, no-store`, no session or cookie written, so
   #699 holds); every signed-in LiveView halts on the disconnected and the live
   mount and follows the policy and the deadline while open; the headless
@@ -1528,6 +1528,23 @@ decision: [ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and
   each document, and at the `/ws/collab` connect and its 30-second re-check.
   A save that holds people at once evicts their sockets
   (`KilnCMS.Accounts.SecondFactorEviction`).
+- **The setup page is kept off site hosts.** `/account/two-factor` is served
+  only on the main host (`PHX_HOST`) and console hosts
+  (`SecondFactorGate.setup_host?/1`). On a tenant site host the
+  `live_session`'s first hook after the site is resolved
+  (`:second_factor_setup_host`) redirects it to the main host's page before
+  sign-in is checked, and every door that holds an account there (sign-in,
+  `:browser`, the LiveView gate) sends it to that URL, with no `return_to`.
+  Two reasons: a site host is the origin a site administrator's code
+  injection runs on ([residual risk 16](#residual-risks)), so a page that adds
+  and replaces a member's factors must not share it; and a passkey cannot be
+  registered there (`WebAuthn.ceremony_host?/1`). Cookies are host-only, so
+  the account signs in again on the main host. An account in its grace
+  period that signs in on a site host is not sent away; the grace banner and
+  `/account`'s **Two-step sign-in** card link to the main host's page. On the
+  main host the page judges the default site's requirement, so a reader held
+  by another site does not see that site's billing and export controls
+  there.
 - **A passkey-only account's password.** Past the deadline a passkey-only
   account's first factor stops at the passkey step-up on a host where WebAuthn
   runs and is refused (token revoked, `second_factor_required` recorded with
@@ -1581,6 +1598,12 @@ decision: [ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and
   7. **A held account can still reach** billing, the export of its own data,
      sign-out, the setup page and pages that read nothing of the account
      ([What a held account can still reach](two-factor-auth.md#what-a-held-account-can-still-reach)).
+  8. **`/editor/settings` still manages factors on site hosts.** It adds and
+     removes an authenticator app and passkeys for editors and admins, and
+     with no `KILN_CONSOLE_HOST` the console, `/editor/settings` included, is
+     served on every site host, the injection origin of residual risk 16.
+     Keeping `/account/two-factor` off site hosts does not close that; a
+     console host does.
 
 ### Site invitations (`/auth/invite/:invite_token`, #2135)
 

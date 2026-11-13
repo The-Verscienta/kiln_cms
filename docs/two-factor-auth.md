@@ -29,7 +29,7 @@ because an invitee took the account over is logged but raises no alert.
 
 - **Self-service enrolment** at `/editor/settings` → "Two-factor authentication"
   (editors and admins), or at `/account/two-factor` (any signed-in account,
-  readers included; see
+  readers included, on the main or console host only; see
   [Set up two-step sign-in when your site asks](#set-up-two-step-sign-in-when-your-site-asks)):
   1. *Enable* generates a fresh secret (`setup_totp`) into a **pending** slot
      (`totp_pending_secret`) and shows a setup key + an `otpauth://`
@@ -432,7 +432,7 @@ can hold people the moment you save.
 
 You need to be an administrator of the site, and to hold a second factor
 yourself (an authenticator app or a passkey). If you don't, set one up first
-at `/account/two-factor`.
+at `/account/two-factor` on the main host (`PHX_HOST`) or the console host.
 
 1. Open `/editor/two-factor` on the site's console. (The page has no entry in
    the console menu yet; go to it by its address.) You see **Two-step sign-in**
@@ -492,12 +492,18 @@ What can go wrong when saving:
 
 - **A banner** at the top of every console page and of `/account`: "This site
   requires two-step sign-in. N days left to set it up." with a **Set it up
-  now** link to `/account/two-factor`. The count is whole days rounded up, so
-  the last day reads "1 day left".
-- **A reminder after signing in.** Instead of landing where they were going,
-  they land on the setup page, which says "(site) requires two-step sign-in
-  for your role from (date)." and offers **Not now**, which continues to where
-  they were going.
+  now** link to the setup page. On `/account` the link names the main host's
+  page outright when you are on a site's own address; on a console page it is
+  `/account/two-factor`, which a site's own address redirects to the main
+  host's. The count is whole days rounded up, so the last day reads "1 day
+  left".
+- **A reminder after signing in,** on the main or console host. Instead of
+  landing where they were going, they land on the setup page, which says
+  "(site) requires two-step sign-in for your role from (date)." and offers
+  **Not now**, which continues to where they were going. A sign-in on a
+  site's own address goes where it was going, with no reminder: the setup
+  page is not served there, and the main host would ask them to sign in
+  again just to be reminded.
 - **Headless sign-ins** get a `second_factor` field in the token response
   (see [Headless clients, tokens and API keys](#headless-clients-tokens-and-api-keys)).
 
@@ -508,7 +514,18 @@ none of this.
 
 Anyone signed in can do this, readers included. You start on `/account/two-factor`:
 the site sends you there when it holds you, the banner and the post-sign-in
-reminder link to it, and you can open it yourself.
+reminder link to it, and on `/account` the **Two-step sign-in** card has a
+**Set up two-step sign-in** button.
+
+The page is served only on the main host (`PHX_HOST`) and on console hosts,
+never on a site's own address. On a site's own address, every link to it and
+every redirect that holds you goes to the main host's page instead, and
+`/account/two-factor` typed there redirects to it too. Your sign-in on the
+site does not carry over to the main host, so you **sign in once more there**.
+The `/account` card says so: "This opens on (main host), where you sign in
+again." Why: a passkey cannot be registered on a site's own address, and that
+address is where code a site administrator added to the site runs, which must
+not reach your second factors.
 
 1. Read the line under **Set up two-step sign-in**. Past your deadline it says
    "This site requires two-step sign-in for your role. Set it up to continue."
@@ -523,19 +540,30 @@ reminder link to it, and you can open it yourself.
    authentication is now on." and shows ten recovery codes once: save them,
    then click **I've saved them**.
 
-   Or, on the main or console host, add a passkey under **Passkey**: name it
+   Or add a passkey under **Passkey** (on the main host, and on a console
+   host when passkeys work there): name it
    if you like, click **Add a passkey** and confirm on your device. The page
    says "Passkey added — you can sign in with it now." A passkey has no
    recovery codes, so the page suggests adding an authenticator app as well.
 4. Click **Continue**. You go on to where you were going (only a path on the
    same site is followed), or to the console overview for an editor or admin
-   and `/account` for a reader.
+   and `/account` for a reader. Sent here from a site's own address, you have
+   no "where you were going": **Continue** stays on the main host. Open the
+   site's address again yourself; the factor you added counts there.
 
 The owner of the account is emailed for every factor added, as always
 ([We email you when a second factor is added](#we-email-you-when-a-second-factor-is-added)).
 The page also has **Sign out**. A reader held on a site that requires
 everyone also sees **Your membership and data**, with **Manage billing** (when
 they have a paid membership to manage) and **Export my data**.
+
+The page judges the site it is opened for. On the main host that is the
+default site: the line under **Set up two-step sign-in**, **Not now**, and
+**Your membership and data** follow the default site's requirement, not the
+one of the site that sent you. A reader held by another site therefore sees
+that site's **Manage billing** and **Export my data** only where the page is
+opened for that site (its console host, when one is configured). The emailed
+code below is asked for whichever site holds you.
 
 ### When the emailed code is asked for
 
@@ -563,7 +591,8 @@ It is **not** asked for when:
   covered);
 - the session signed in with a password before the deadline: the grace
   period let it add a factor then, and it still may;
-- the site has **no working mail relay**: no outgoing mail server is
+- the site the page is opened for (on the main host, the default site) has
+  **no working mail relay**: no outgoing mail server is
   configured for the deployment and the site has none of its own, or the
   site's relay password can no longer be decrypted. The step is skipped and
   the enrollment is recorded with `proof: "email_skipped_no_relay"`.
@@ -603,16 +632,20 @@ What can go wrong on the setup page:
 
 ### What a held account can still reach
 
-A held account is sent to `/account/two-factor` before anything else, by every
+A held account is sent to the setup page before anything else, by every
 door: the sign-in itself, every page of the site (public pages included), the
 console's LiveViews (also a page left open when the deadline passes or the
 policy changes), `/membership` and plugin pages. The redirect is a `302`
 marked `private, no-store` that writes no session and no cookie, so a shared
-cache can never store it for other visitors.
+cache can never store it for other visitors. On the main or console host it
+goes to `/account/two-factor` there, carrying the page it asked for as
+`return_to`. On a site's own address it goes to the main host's
+`/account/two-factor`, with no `return_to` (a path on the site means nothing
+on the main host), and the account signs in again there.
 
 It can still reach:
 
-- `/account/two-factor`, and **Sign out**;
+- the setup page (on the main or console host), and **Sign out**;
 - the sign-in pages, `/sign-in/verify`, `/auth/*`, invitations and unlock
   links;
 - `POST /billing/portal` and `GET /editor/account/export.json` (managing a paid
@@ -703,6 +736,12 @@ affected: those are how a lost or stolen factor is cleared.
   administrator saves the setting. The migration (`site_second_factor_policy`,
   `users.inserted_at`) is expand-only; existing accounts get the time it ran
   as their creation time, so none starts out overdue.
+- **Every member must be able to reach the main host.** The setup page is
+  served only on the main host (the endpoint URL built from `PHX_HOST`) and
+  on console hosts. A person held on a site's own address is redirected to
+  that URL's `/account/two-factor` and signs in again there, so the main host
+  has to answer the public, readers of a site that requires everyone included.
+  The headless `meta.setup_url` is the same URL.
 - **Headless clients of a held account get `403`.** A script or app that signs
   in as a person on a site that holds that person stops working at the
   deadline. Give it an API key instead.

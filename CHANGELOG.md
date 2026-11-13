@@ -89,7 +89,7 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced until a site requires it (next entry). Part of #2247.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
 
-- **Two-step sign-in can now be required per site: nothing changes until an admin saves it at `/editor/two-factor`. Then a held person's JWTs get `403 second_factor_required` (API keys are exempt); rolling back drops it silently.**
+- **Two-step sign-in can now be required per site: nothing changes until an admin saves it at `/editor/two-factor`. Then a held person's JWTs get `403 second_factor_required` (API keys are exempt), and held people set up on the main host (`PHX_HOST`), which they must reach; rolling back drops it silently.**
   ([long form](docs/changelog/unreleased.md#second-factor-enforcement-upgrade))
 
 ### Breaking
@@ -132,7 +132,7 @@ Every summary line below that was shortened links to its own entry there.
 - **Search-engine claims are checked against Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists before DNS, so DuckDuckBot can be verified; new `KILN_CRAWLER_RANGES`, `KILN_CRAWLER_RANGES_CRON` and `ranges_fetch` metric.**
   ([long form](docs/changelog/unreleased.md#crawler-ip-ranges))
 
-- **A site admin can require two-step sign-in of admins, editors or everyone at `/editor/two-factor`, with a grace period; held accounts set up at `/account/two-factor`, password sessions confirming an emailed code. Closes the #2247 series.**
+- **A site admin can require two-step sign-in of admins, editors or everyone at `/editor/two-factor`, with a grace period; held accounts set up at `/account/two-factor` on the main or console host, password sessions confirming an emailed code. Closes the #2247 series.**
   ([long form](docs/changelog/unreleased.md#second-factor-requirement))
 
 - **The setting and logic behind requiring two-step sign-in (part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**

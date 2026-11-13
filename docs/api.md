@@ -445,14 +445,16 @@ minted is revoked) and answers:
     "code": "second_factor_required",
     "detail": "This site requires two-step sign-in for your account. Set it up in a browser, then sign in again.",
     "meta": {
-      "setup_url": "https://acme.example.com/account/two-factor",
+      "setup_url": "https://cms.example.com/account/two-factor",
       "deadline": "2026-12-01T09:30:00Z"
     }
   }]
 }
 ```
 
-`meta.setup_url` is a browser page. An account whose only second factor is a
+`meta.setup_url` is a browser page on the main host (`PHX_HOST`), whichever
+site the request was for: the setup page is not served on a site's own
+address. The person signs in there in a browser. An account whose only second factor is a
 passkey gets the same `403` with `meta.reason: "passkey_only"` and no
 `deadline`: a passkey cannot be used outside a browser. An account with an
 authenticator app is unaffected here: it still gets the `200`

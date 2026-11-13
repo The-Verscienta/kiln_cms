@@ -283,8 +283,15 @@ carries the reasoning.
     the password alone: on a site's own host (not the main or console host)
     they are refused and told to sign in on the main host or add an
     authenticator app.
+  - **The main host must answer every member.** The setup page,
+    `/account/two-factor`, is served only on the main host (the endpoint URL
+    from `PHX_HOST`) and console hosts. A person a site holds on its own
+    address is redirected to the main host's page and signs in again there,
+    readers of a site that requires everyone included, and the headless
+    `meta.setup_url` names the same URL.
   - **Mail.** The email code a password-only session confirms before adding a
-    factor goes through the site's relay. With no outgoing mail server at all
+    factor goes through the relay of the site the setup page is opened for
+    (on the main host, the default site's). With no outgoing mail server at all
     (`:mailer_not_configured`), or a site relay whose password can no longer
     be decrypted, the step is skipped and recorded as
     `proof: "email_skipped_no_relay"`.
@@ -592,10 +599,12 @@ carries the reasoning.
   - **The grace period** runs per account from the latest of its creation,
     its joining the site and its role becoming covered; a promotion does not
     restart it. During it, console pages and `/account` show "This site
-    requires two-step sign-in. N days left to set it up.", each sign-in
-    first lands on the setup page with **Not now**, and the headless sign-in's
-    `201` carries `second_factor: {required: true, deadline}`.
-  - **Held accounts** are sent to `/account/two-factor` from every browser
+    requires two-step sign-in. N days left to set it up.", each sign-in on
+    the main or console host first lands on the setup page with **Not now**
+    (a sign-in on a site's own address goes where it was going; the banner
+    links to the main host's page), and the headless sign-in's `201` carries
+    `second_factor: {required: true, deadline}`.
+  - **Held accounts** are sent to the setup page from every browser
     page of the site (a `302`, `private, no-store`, writing no session or
     cookie), every console LiveView (also one left open across the deadline
     or a policy change), `/membership` and plugin pages, and every sign-in.
@@ -608,11 +617,20 @@ carries the reasoning.
     grace period closes at the deadline and refuses each document after it.
     **API keys are never held.**
   - **The setup page, `/account/two-factor`,** is open to every signed-in
-    account, readers included (`/editor/settings` is editors only). It adds
-    an authenticator app (with recovery codes) or, on the main or console
-    host, a passkey, and continues to where the person was going. A reader
-    held by a site that requires everyone also gets **Manage billing** and
-    **Export my data** there.
+    account, readers included (`/editor/settings` is editors only), and is
+    served only on the main host (`PHX_HOST`) and console hosts: a site's
+    own address is where a site administrator's injected code runs, and
+    cannot register a passkey. There, the page and every redirect that holds
+    an account go to the main host's page, with no `return_to`, and the
+    person signs in once more on the main host. `/account` gains a
+    **Two-step sign-in** card with **Set up two-step sign-in**, which says
+    "This opens on (main host), where you sign in again." on a site's own
+    address. The page adds an authenticator app (with recovery codes) or a
+    passkey, and continues to where the person was going. It judges the
+    site it is opened for (on the main host, the default site): a reader
+    held by a site that requires everyone gets **Manage billing** and
+    **Export my data** where the page is opened for that site, so not on the
+    main host when another site holds them.
   - **The email proof.** A session that signed in with only a password (or a
     remember-me cookie) at or after the deadline of any site holding the
     account must confirm a six-digit code mailed to the account before it can
@@ -648,7 +666,11 @@ carries the reasoning.
     (`surface`) and write no event.
   - **For developers:** `KilnCMSWeb.SecondFactorGate` (`held?/3`,
     `bearer_refused?/3`, `passkey_step_up_owed?/3`, `sign_in_destination/3`,
-    `attach/2`, `screen/2`), `KilnCMSWeb.Plugs.SecondFactorGate`,
+    `attach/2`, `screen/2`, and for the setup page's host `setup_host?/1`,
+    `setup_location/3`, `setup_href/1`, `main_setup_url/0`,
+    `redirect_opts/1`, `setup_host/1` and `socket_host/1`), the
+    `KilnCMSWeb.LiveUserAuth` hook `:second_factor_setup_host`, the
+    `setup_url` attribute of `Layouts.second_factor_banner/1`, `KilnCMSWeb.Plugs.SecondFactorGate`,
     `KilnCMSWeb.Plugs.SecondFactorBearer`, `KilnCMSWeb.Plugs.PasskeyStepUp`,
     `KilnCMSWeb.GraphqlLimits.SocketSecondFactor`,
     `KilnCMS.Accounts.EnrolmentProof`, `KilnCMS.Accounts.SecondFactorEviction`,
