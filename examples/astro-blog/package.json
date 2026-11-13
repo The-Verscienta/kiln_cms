@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@kiln-cms/client": "file:../../clients/js",
-    "astro": "^7.3.8"
+    "astro": "^7.4.7"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",
