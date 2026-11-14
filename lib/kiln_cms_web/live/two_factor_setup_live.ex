@@ -46,7 +46,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
   again. A forged event without the proof is refused there.
 
   The emailed code lives only in this process, as an HMAC
-  (`EnrolmentProof.send_code/3`); it is never assigned, rendered or logged.
+  (`EnrolmentProof.send_code/4`); it is never assigned, rendered or logged.
 
   ## Where "Continue" goes
 

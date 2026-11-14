@@ -35,12 +35,12 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
 
   ## The code
 
-  `send_code/3` mails six digits through the site's relay
-  (`KilnCMS.Mail.deliver_now/2`) and returns only an HMAC of them, keyed to
-  the account and the session's token, with an expiry ten minutes out. The
-  caller keeps that in its own state (a LiveView's assigns): there is no table
-  and no stored secret, and the code itself is never returned, logged or
-  rendered. At most three are sent to an address an hour
+  `send_code/4` mails six digits through a working relay
+  (`KilnCMS.Mail.deliver_now/2`; which one is below) and returns only an HMAC
+  of them, keyed to the account and the session's token, with an expiry ten
+  minutes out. The caller keeps that in its own state (a LiveView's assigns):
+  there is no table and no stored secret, and the code itself is never
+  returned, logged or rendered. At most three are sent to an address an hour
   (`AccountThrottle.allow_mail?(:enrolment_proof, email)`).
 
   `verify/4` charges the account's second-factor budget
@@ -54,9 +54,22 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
 
   ## No working relay
 
-  The proof is skipped when the site has no working mail relay (decision 1b):
-  `send_code/3` answers `{:skip, :no_relay}`, and the action records
-  `"email_skipped_no_relay"`. Only a relay that retrying will not fix counts
+  The proof is skipped when there is no working mail relay (decision 1b):
+  `send_code/4` answers `{:skip, :no_relay}`, and the action records
+  `"email_skipped_no_relay"`.
+
+  "No relay" is judged on every site the proof is for, not only the page's
+  (`relay_orgs/3`): the page's site and each site that holds the account
+  (`TwoFactorRequirement.holding_orgs/2`). The set-up page is served on the
+  main host, where the page's site is the default one, so a site that holds
+  the account and has a relay of its own would otherwise be skipped past
+  whenever the default site has none: someone with only the password would
+  add their own factor and lock the owner out. The code goes through the
+  page's site's relay when it works, else through the first holding site's
+  that does; the skip is taken, and accepted by the action, only when none of
+  them has one.
+
+  Only a relay that retrying will not fix counts
   (`KilnCMS.Mail.no_relay?/1`: no outgoing mail server at all, or a site relay
   whose password can no longer be decrypted). A relay that failed this time,
   including a site relay whose settings could not be read just now
@@ -71,7 +84,8 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
   action's context (`context/3`). It decides again, from the account and the
   session, and refuses without a valid proof, so a page that skipped its
   proof step, or a forged event, still cannot add a factor. A claimed skip is
-  re-checked against `KilnCMS.Mail.relay_available?/1`.
+  re-checked against `KilnCMS.Mail.relay_available?/1` for every site in
+  `relay_orgs/3`, and refused if any of them has a relay.
   """
   use KilnCMSWeb, :verified_routes
 
@@ -94,7 +108,7 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
           signed_in_at: DateTime.t() | nil
         }
 
-  @typedoc "What `send_code/3` hands the caller to keep: never the code."
+  @typedoc "What `send_code/4` hands the caller to keep: never the code."
   @type pending :: %{hash: binary(), expires_at: DateTime.t()}
 
   @typedoc "The `proof` metadata the enrolment event records."
@@ -169,25 +183,39 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
     do: decide(user, org_id, session, opts) == :required
 
   @doc """
-  Mail a new code to `user` for `session`, through the relay of `org_id`.
+  The sites whose mail relays the proof is judged on, in the order
+  `send_code/4` tries them: `org_id` (the page's site), then every site that
+  holds `user` (`TwoFactorRequirement.holding_orgs/2`). Option: `:now`.
+  """
+  @spec relay_orgs(KilnCMS.Accounts.User.t(), Ash.UUID.t() | nil, keyword()) ::
+          [Ash.UUID.t() | nil]
+  def relay_orgs(user, org_id, opts \\ []),
+    do: Enum.uniq([org_id | TwoFactorRequirement.holding_orgs(user, opts)])
+
+  @doc """
+  Mail a new code to `user` for `session`, through the relay of the first
+  site in `relay_orgs/3` that takes it: `org_id`'s, else a site that holds
+  the account. Options are `relay_orgs/3`'s.
 
     * `{:ok, pending}` — sent; keep `pending` for `verify/4`;
-    * `{:skip, :no_relay}` — the site has no working relay: the proof is
-      skipped (see the moduledoc);
+    * `{:skip, :no_relay}` — none of those sites has a working relay: the
+      proof is skipped (see the moduledoc);
     * `{:error, :throttled}` — the address's hourly budget is spent;
     * `{:error, :send_failed}` — the relay failed this time; try again;
     * `{:error, :no_session}` — the session has no token to bind the code to.
   """
-  @spec send_code(KilnCMS.Accounts.User.t(), Ash.UUID.t() | nil, session()) ::
+  @spec send_code(KilnCMS.Accounts.User.t(), Ash.UUID.t() | nil, session(), keyword()) ::
           {:ok, pending()}
           | {:skip, :no_relay}
           | {:error, :throttled | :send_failed | :no_session}
-  def send_code(user, org_id, %{jti: jti} = session) when is_binary(jti) do
+  def send_code(user, org_id, session, opts \\ [])
+
+  def send_code(user, org_id, %{jti: jti} = session, opts) when is_binary(jti) do
     if AccountThrottle.allow_mail?(:enrolment_proof, to_string(user.email)) do
       code = new_code()
 
-      case Mail.deliver_now(code_email(user, org_id, code), org_id: org_id) do
-        {:ok, _receipt} ->
+      case deliver(user, relay_orgs(user, org_id, opts), code) do
+        :ok ->
           {:ok,
            %{
              hash: digest(user, session, code),
@@ -202,7 +230,24 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
     end
   end
 
-  def send_code(_user, _org_id, _session), do: {:error, :no_session}
+  def send_code(_user, _org_id, _session, _opts), do: {:error, :no_session}
+
+  # The first site whose relay takes the code. When none does, a failure that
+  # may pass outranks "no relay": one site's relay failing this time must not
+  # turn into a skip because another site has none.
+  defp deliver(user, [_ | _] = org_ids, code) do
+    Enum.reduce_while(org_ids, nil, fn org_id, failure ->
+      case Mail.deliver_now(code_email(user, org_id, code), org_id: org_id) do
+        {:ok, _receipt} -> {:halt, :ok}
+        {:error, reason} -> {:cont, {:error, worse(failure, reason)}}
+      end
+    end)
+  end
+
+  defp worse(nil, reason), do: reason
+
+  defp worse({:error, earlier}, reason),
+    do: if(Mail.no_relay?(earlier), do: reason, else: earlier)
 
   # The reason is classified, never logged as is: a relay's reply can quote
   # the message, and the message holds the code.
@@ -257,7 +302,7 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
 
   @doc """
   The action context the enrolment actions read: the site, the session, and
-  the proof — `verify/4`'s, `:no_relay` after `send_code/3` skipped, or
+  the proof — `verify/4`'s, `:no_relay` after `send_code/4` skipped, or
   `nil`. `org` is the request's org (a struct or its id).
   """
   @spec context(struct() | Ash.UUID.t() | nil, session() | nil, String.t() | :no_relay | nil) ::
@@ -294,10 +339,16 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
   defp proven(user, org_id, session, proof) do
     cond do
       is_binary(proof) and valid_proof?(user, session, proof) -> {:ok, "email"}
-      proof == :no_relay and not Mail.relay_available?(org_id) -> {:ok, "email_skipped_no_relay"}
+      proof == :no_relay and no_relay_anywhere?(user, org_id) -> {:ok, "email_skipped_no_relay"}
       true -> {:error, :proof_required}
     end
   end
+
+  # Fails closed: `relay_available?/1` is `true` for anything but a relay
+  # retrying will not fix, so one site whose relay can't be judged just now
+  # keeps the proof.
+  defp no_relay_anywhere?(user, org_id),
+    do: not Enum.any?(relay_orgs(user, org_id), &Mail.relay_available?/1)
 
   defp sign_proof(user, jti),
     do: Phoenix.Token.sign(KilnCMSWeb.Endpoint, @proof_salt, %{"u" => user.id, "j" => jti})
@@ -335,7 +386,8 @@ defmodule KilnCMS.Accounts.EnrolmentProof do
   end
 
   # Account mail in English, like the other account mail, but sent for and
-  # through the site whose requirement asked for it.
+  # through the site whose relay carries it: the page's, or one that holds the
+  # account.
   defp code_email(user, org_id, code) do
     site = KilnCMS.Branding.for_org(org_id).site_name
 

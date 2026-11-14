@@ -689,11 +689,15 @@ It is **not** asked for when:
   covered);
 - the session signed in with a password before the deadline: the grace
   period let it add a factor then, and it still may;
-- the site the page is opened for (on the main host, the default site) has
-  **no working mail relay**: no outgoing mail server is
-  configured for the deployment and the site has none of its own, or the
-  site's relay password can no longer be decrypted. The step is skipped and
-  the enrollment is recorded with `proof: "email_skipped_no_relay"`.
+- **no working mail relay** is left to send the code through. That is judged
+  on every site the step is for: the site the page is opened for (on the main
+  host, the default site) **and** each site that holds the account. A site
+  has no working relay when no outgoing mail server is configured for the
+  deployment and the site has none of its own, or the site's relay password
+  can no longer be decrypted. If any of those sites has one, the code is sent
+  through it (the page's site first, then a holding site's) and the step is
+  not skipped. Only when none has one is the step skipped and the enrollment
+  recorded with `proof: "email_skipped_no_relay"`.
 
 A relay that fails this time (a refused connection, a site relay whose
 settings could not be read just now) does **not** skip the step: the page says

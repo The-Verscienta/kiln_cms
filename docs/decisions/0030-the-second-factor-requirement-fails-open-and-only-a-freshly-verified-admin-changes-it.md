@@ -118,8 +118,9 @@ says:
 - **The policy page is behind the gate it configures,** so an administrator
   the site holds sets up their own factor before reaching it.
 - **Enrolling past the deadline from a password-only session needs an
-  emailed code** (owner decision 1b), skipped only when the site has no
-  working relay, never on a transient send failure. The check is on the
+  emailed code** (owner decision 1b), skipped only when neither the page's
+  site nor any site that holds the account has a working relay (the code goes
+  out through whichever of them has one), never on a transient send failure. The check is on the
   enrollment actions, and fails closed when they are called without the
   page's context.
 - **The last required factor cannot be removed** by its owner while any site

@@ -153,6 +153,29 @@ defmodule KilnCMS.Accounts.RequireEnrolmentProofTest do
 
   defp reload(user), do: Ash.get!(Accounts.User, user.id, authorize?: false)
 
+  # A site relay whose password can no longer be decrypted: no relay, and
+  # retrying will not fix it.
+  defp unreadable_relay!(site) do
+    row =
+      KilnCMS.CMS.save_site_mail_relay!(
+        %{
+          host: "smtp.example.com",
+          port: 587,
+          username: "apikey",
+          password: "s3cret-pass",
+          from_email: "news@site.example"
+        },
+        tenant: site,
+        authorize?: false
+      )
+
+    {1, _} =
+      KilnCMS.Repo.update_all(
+        from(r in "site_mail_relays", where: r.id == type(^row.id, :binary_id)),
+        set: [password_encrypted: :crypto.strong_rand_bytes(48)]
+      )
+  end
+
   describe ":confirm_totp" do
     test "a held password session without the proof is refused", %{site: site} do
       user = held_viewer(site)
@@ -358,6 +381,35 @@ defmodule KilnCMS.Accounts.RequireEnrolmentProofTest do
       session = session("password")
       proof = prove(user, free, session)
       assert {:ok, _user} = confirm(user, EnrolmentProof.context(free, session, proof))
+    end
+
+    test "a claimed skip is refused while the holding site has mail, though the page's has none",
+         %{free: free, site: site, user: user} do
+      unreadable_relay!(free)
+      refute KilnCMS.Mail.relay_available?(free.id)
+      assert KilnCMS.Mail.relay_available?(site.id)
+
+      skip = EnrolmentProof.context(free, session("password"), :no_relay)
+      assert refused?(confirm(user, skip))
+      assert refused?(register_passkey(user, skip))
+      refute reload(user).totp_confirmed_at
+      assert WebAuthn.list(user) == []
+    end
+
+    test "with no relay on either site, the skip enrolls and records it", %{
+      free: free,
+      site: site,
+      user: user
+    } do
+      unreadable_relay!(free)
+      unreadable_relay!(site)
+
+      skip = EnrolmentProof.context(free, session("password"), :no_relay)
+      assert {:ok, _user} = confirm(user, skip)
+
+      assert proof_recorded(user, "second_factor_enrolled") == [
+               %{"kind" => "totp", "proof" => "email_skipped_no_relay"}
+             ]
     end
 
     test "a session from before the earliest deadline needs none", %{free: free, user: user} do

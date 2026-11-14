@@ -153,7 +153,7 @@ defmodule KilnCMS.Accounts.EnrolmentProofTest do
     end
   end
 
-  describe "send_code/3 and verify/4" do
+  describe "send_code/4 and verify/4" do
     test "the code is mailed to the account; only its HMAC comes back", %{
       site: site,
       user: user
@@ -276,6 +276,77 @@ defmodule KilnCMS.Accounts.EnrolmentProofTest do
                {:error, :proof_required}
     end
   end
+
+  describe "the page's site is not the one holding the account" do
+    # The set-up page is served on the main host, so the page's site is the
+    # default one, not the site that holds the account. The relay that
+    # decides the skip is every one of those sites', not only the page's.
+    setup %{site: site} do
+      page = org("ep-page")
+      page_relay = relay!(page)
+      force_relay_column!(page_relay, :password_encrypted, :crypto.strong_rand_bytes(48))
+      refute Mail.relay_available?(page.id)
+
+      %{page: page, holding_relay: relay!(site)}
+    end
+
+    test "the holding site is among the sites judged", %{page: page, site: site, user: user} do
+      assert EnrolmentProof.relay_orgs(user, page.id) == [page.id, site.id]
+    end
+
+    test "a claimed skip is refused while the holding site has a relay", %{
+      page: page,
+      site: site,
+      user: user
+    } do
+      assert Mail.relay_available?(site.id)
+
+      assert EnrolmentProof.accept(user, page.id, session(), :no_relay) ==
+               {:error, :proof_required}
+    end
+
+    test "the code goes out through the holding site's relay", %{
+      page: page,
+      site: site,
+      user: user
+    } do
+      session = session()
+      assert {:ok, pending} = EnrolmentProof.send_code(user, page.id, session)
+      assert_received {:site_relay_email, email, config}
+      assert config[:relay] == "smtp.example.com"
+
+      assert {:ok, proof} = EnrolmentProof.verify(user, session, code_in(email), pending)
+      assert EnrolmentProof.accept(user, page.id, session, proof) == {:ok, "email"}
+    end
+
+    test "a holding site whose relay failed this time keeps the proof", %{
+      page: page,
+      holding_relay: holding_relay,
+      user: user
+    } do
+      force_relay_column!(holding_relay, :host, "10.0.0.25")
+
+      assert EnrolmentProof.send_code(user, page.id, session()) == {:error, :send_failed}
+
+      assert EnrolmentProof.accept(user, page.id, session(), :no_relay) ==
+               {:error, :proof_required}
+    end
+
+    test "with no relay on any of them, the proof is still skipped", %{
+      page: page,
+      site: site,
+      holding_relay: holding_relay,
+      user: user
+    } do
+      force_relay_column!(holding_relay, :password_encrypted, :crypto.strong_rand_bytes(48))
+      refute Mail.relay_available?(site.id)
+
+      assert EnrolmentProof.send_code(user, page.id, session()) == {:skip, :no_relay}
+
+      assert EnrolmentProof.accept(user, page.id, session(), :no_relay) ==
+               {:ok, "email_skipped_no_relay"}
+    end
+  end
 end
 
 defmodule KilnCMS.Accounts.EnrolmentProofEnvTest do
@@ -357,5 +428,56 @@ defmodule KilnCMS.Accounts.EnrolmentProofEnvTest do
 
     assert EnrolmentProof.accept(user, site.id, Fixtures.session(), :no_relay) ==
              {:ok, "email_skipped_no_relay"}
+  end
+
+  describe "on the main host, with no outgoing mail server" do
+    # The set-up page's site there is the default one. Without an operator
+    # mailer it has no relay; the site that holds the account may have its own.
+    setup do
+      put_env(:kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Local)
+      put_env(:swoosh, :local, false)
+
+      default_org_id = KilnCMS.Accounts.default_org_id()
+      refute Mail.relay_available?(default_org_id)
+      %{page_id: default_org_id}
+    end
+
+    test "a holding site with its own relay refuses the skip and carries the code", %{
+      page_id: page_id,
+      site: site,
+      user: user
+    } do
+      KilnCMS.CMS.save_site_mail_relay!(
+        %{
+          host: "smtp.example.com",
+          port: 587,
+          username: "apikey",
+          password: "s3cret-pass",
+          from_email: "news@site.example"
+        },
+        tenant: site,
+        authorize?: false
+      )
+
+      assert Mail.relay_available?(site.id)
+
+      # The takeover: a password-only session claims there is no mail.
+      assert EnrolmentProof.accept(user, page_id, Fixtures.session(), :no_relay) ==
+               {:error, :proof_required}
+
+      # The owner's way through: the code goes out on the holding site's relay.
+      session = Fixtures.session()
+      assert {:ok, pending} = EnrolmentProof.send_code(user, page_id, session)
+      assert_received {:site_relay_email, email, _config}
+      assert {:ok, proof} = EnrolmentProof.verify(user, session, Fixtures.code_in(email), pending)
+      assert EnrolmentProof.accept(user, page_id, session, proof) == {:ok, "email"}
+    end
+
+    test "with no relay anywhere the proof is skipped", %{page_id: page_id, user: user} do
+      assert EnrolmentProof.send_code(user, page_id, Fixtures.session()) == {:skip, :no_relay}
+
+      assert EnrolmentProof.accept(user, page_id, Fixtures.session(), :no_relay) ==
+               {:ok, "email_skipped_no_relay"}
+    end
   end
 end

@@ -314,7 +314,21 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
   `[]` when no site holds the account. Option: `:now`.
   """
   @spec enforced_deadlines(Accounts.User.t(), keyword()) :: [DateTime.t()]
-  def enforced_deadlines(user, opts \\ []) do
+  def enforced_deadlines(user, opts \\ []),
+    do: for({_org_id, deadline} <- holding(user, opts), do: deadline)
+
+  @doc """
+  The sites that hold `user` now, the ones `enforced_deadlines/2` reads the
+  deadlines of. For a decision that must be judged on the sites requiring the
+  factor rather than on the page's: the email proof's mail relay
+  (`KilnCMS.Accounts.EnrolmentProof`). `[]` when no site holds the account.
+  Option: `:now`.
+  """
+  @spec holding_orgs(Accounts.User.t(), keyword()) :: [Ash.UUID.t()]
+  def holding_orgs(user, opts \\ []),
+    do: for({org_id, _deadline} <- holding(user, opts), do: org_id)
+
+  defp holding(user, opts) do
     if exempt?(user) do
       []
     else
@@ -322,7 +336,7 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
 
       for org_id <- candidate_orgs(user),
           {:enforced, deadline} <- [status(user, org_id, opts)],
-          do: deadline
+          do: {org_id, deadline}
     end
   end
 
