@@ -44,6 +44,7 @@ defmodule KilnCMSWeb.RegistrationsLive do
   alias KilnCMS.Accounts.Registrations.Erasure
   alias KilnCMS.CMS
   alias KilnCMS.Notifications
+  alias KilnCMSWeb.PromotionWarning
 
   @impl true
   def mount(_params, _session, socket) do
@@ -158,7 +159,10 @@ defmodule KilnCMSWeb.RegistrationsLive do
             {:reject, erase?} -> Accounts.reject_registration(membership, %{erase: erase?}, opts)
           end
 
-        {:noreply, settle(socket, key, membership.id, outcome, email, result)}
+        {:noreply,
+         socket
+         |> settle(key, membership.id, outcome, email, result)
+         |> approval_warning(outcome, result)}
     end
   end
 
@@ -179,6 +183,25 @@ defmodule KilnCMSWeb.RegistrationsLive do
       do: socket |> drop_entry(key, id) |> load_counts(),
       else: socket
   end
+
+  # An approval makes the applicant a viewer, and a registration may have
+  # waited longer than the grace period of a site that requires two-step
+  # sign-in of everyone: they are then held at their first page (#2247). Said
+  # with the confirmation, never in its way.
+  defp approval_warning(socket, :approve, {:ok, membership}) do
+    applicant = Registrations.approved_applicant(membership)
+
+    case PromotionWarning.message(applicant, membership.organization_id, membership.role) do
+      nil ->
+        socket
+
+      warning ->
+        confirmation = Phoenix.Flash.get(socket.assigns.flash, :info)
+        put_flash(socket, :info, PromotionWarning.with_confirmation(confirmation, warning))
+    end
+  end
+
+  defp approval_warning(socket, _outcome, _result), do: socket
 
   defp find_entry(socket, id) do
     Enum.find_value(socket.assigns.lists, fn {key, %{entries: entries}} ->

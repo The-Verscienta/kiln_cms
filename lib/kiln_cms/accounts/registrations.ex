@@ -148,6 +148,42 @@ defmodule KilnCMS.Accounts.Registrations do
     )
   end
 
+  @doc """
+  The applicant of a registration `membership` just approved, with only the
+  columns the two-step sign-in requirement reads (#2247), or `nil`. For the
+  warning the approval gives: a registration may have waited past the grace
+  period of a site that requires a second factor of everyone, which holds the
+  new member at their first page (`KilnCMSWeb.PromotionWarning`).
+
+  Call it only with the membership an authorized approval returned: it reads
+  the one applicant unauthorized, as `page/2` reads the queue's, and the queue
+  entries themselves stay as narrow as they are.
+  """
+  @spec approved_applicant(Accounts.OrgMembership.t()) :: Accounts.User.t() | nil
+  def approved_applicant(%{user_id: user_id}) do
+    case Accounts.list_users!(
+           # authorize?: false — one applicant of a registration an authorized
+           # approval just decided; `User` reads are self-only (see `applicants/1`)
+           authorize?: false,
+           query: [
+             filter: [id: user_id],
+             select: [
+               :id,
+               :email,
+               :inserted_at,
+               :anonymized_at,
+               :totp_confirmed_at,
+               :role,
+               :granted_role,
+               :granted_role_expires_at
+             ]
+           ]
+         ) do
+      [applicant] -> applicant
+      [] -> nil
+    end
+  end
+
   defp applicants([]), do: %{}
 
   defp applicants(user_ids) do

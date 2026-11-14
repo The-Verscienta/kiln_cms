@@ -43,6 +43,7 @@ defmodule KilnCMSWeb.TeamLive do
   alias KilnCMS.Accounts.Registrations
   alias KilnCMS.Accounts.Role
   alias KilnCMS.Accounts.RoleGrant
+  alias KilnCMSWeb.PromotionWarning
   alias KilnCMSWeb.RoleDisplay
   alias KilnCMSWeb.RoleGrantForm
   alias KilnCMSWeb.ScopeParams
@@ -101,25 +102,22 @@ defmodule KilnCMSWeb.TeamLive do
       )
 
     case result do
-      {:ok, %{outcome: :added}} ->
-        {:noreply,
-         socket |> load_data() |> put_flash(:info, gettext("Member added to this site."))}
+      {:ok, %{outcome: :added, membership: membership}} ->
+        {:noreply, added(socket, membership, gettext("Member added to this site."))}
 
-      {:ok, %{outcome: :approved}} ->
+      {:ok, %{outcome: :approved, membership: membership}} ->
         {:noreply,
-         socket
-         |> load_data()
-         |> put_flash(
-           :info,
+         added(
+           socket,
+           membership,
            gettext("Their registration on this site is approved, and they are now a member.")
          )}
 
-      {:ok, %{outcome: :approved_over_rejection}} ->
+      {:ok, %{outcome: :approved_over_rejection, membership: membership}} ->
         {:noreply,
-         socket
-         |> load_data()
-         |> put_flash(
-           :info,
+         added(
+           socket,
+           membership,
            gettext(
              "Their registration on this site had been rejected; it's now approved, and they are a member."
            )
@@ -254,6 +252,10 @@ defmodule KilnCMSWeb.TeamLive do
          assign(socket, :member_edit, %{
            id: id,
            form: form,
+           # The tier as stored, so a save that leaves it alone warns of nothing,
+           # and the note under the picker (#2247) speaks only of a change.
+           role: membership.role,
+           promotion: nil,
            stored: ScopeParams.stored(membership),
            scope: blank_scope(),
            inherited: %{role: membership.custom_role, user: membership.user}
@@ -281,7 +283,13 @@ defmodule KilnCMSWeb.TeamLive do
           else: edit.inherited
 
       {:noreply,
-       assign(socket, :member_edit, %{edit | form: form, scope: scope, inherited: inherited})}
+       assign(socket, :member_edit, %{
+         edit
+         | form: form,
+           scope: scope,
+           inherited: inherited,
+           promotion: promotion(socket, edit, params["role"])
+       })}
     else
       {:noreply, socket}
     end
@@ -292,9 +300,15 @@ defmodule KilnCMSWeb.TeamLive do
     edit = socket.assigns.member_edit
 
     case submit_scoped(edit, member_params(params)) do
-      {:ok, _membership} ->
+      {:ok, membership} ->
+        # Read before the reload: the warning is about the tier just given.
+        warning = promotion(socket, edit, membership.role)
+
         {:noreply,
-         socket |> assign(:member_edit, nil) |> load_data() |> put_flash(:info, gettext("Saved."))}
+         socket
+         |> assign(:member_edit, nil)
+         |> load_data()
+         |> put_flash(:info, PromotionWarning.with_confirmation(gettext("Saved."), warning))}
 
       {:error, form, scope} ->
         {:noreply, assign(socket, :member_edit, %{edit | form: form, scope: scope})}
@@ -315,7 +329,7 @@ defmodule KilnCMSWeb.TeamLive do
 
     with {:ok, membership} <- get_membership(socket, id),
          expires_at = RoleGrantForm.expiry(params),
-         {:ok, _} <-
+         {:ok, granted} <-
            Accounts.grant_membership_temporary_role(
              membership,
              %{granted_role: role, granted_role_expires_at: expires_at},
@@ -328,9 +342,17 @@ defmodule KilnCMSWeb.TeamLive do
        |> load_data()
        |> put_flash(
          :info,
-         gettext("%{role} on this site until %{when}.",
-           role: role_label(role),
-           when: RoleGrantForm.format(expires_at)
+         PromotionWarning.with_confirmation(
+           gettext("%{role} on this site until %{when}.",
+             role: role_label(role),
+             when: RoleGrantForm.format(expires_at)
+           ),
+           # A temporary tier counts while it lasts (decision 6 on #2247).
+           PromotionWarning.message(
+             membership.user,
+             membership.organization_id,
+             granted.granted_role
+           )
          )
        )}
     else
@@ -537,6 +559,34 @@ defmodule KilnCMSWeb.TeamLive do
   end
 
   defp site_admin?(user), do: RoleGrant.effective_role(user) == :admin
+
+  # A member added (or a registration approved) here: the confirmation, and
+  # the two-step sign-in warning when their new tier needs a factor they lack
+  # (#2247). Their membership is the one just created, so the warning is read
+  # from the reloaded list, which carries the account.
+  defp added(socket, membership, confirmation) do
+    socket = load_data(socket)
+
+    warning =
+      case Enum.find(socket.assigns.members, &(&1.id == membership.id)) do
+        %{user: %{} = user} ->
+          PromotionWarning.message(user, membership.organization_id, membership.role)
+
+        _missing ->
+          nil
+      end
+
+    put_flash(socket, :info, PromotionWarning.with_confirmation(confirmation, warning))
+  end
+
+  # What making the edited member a `tier` would mean under this site's
+  # two-step sign-in requirement (#2247), or nil — nil, too, when the tier is
+  # the one they already hold.
+  defp promotion(socket, edit, tier) do
+    if to_string(tier) == to_string(edit.role),
+      do: nil,
+      else: PromotionWarning.message(edit.inherited.user, socket.assigns.current_org.id, tier)
+  end
 
   defp get_membership(socket, id) do
     case Enum.find(socket.assigns.members, &(&1.id == id)) do
@@ -1038,6 +1088,15 @@ defmodule KilnCMSWeb.TeamLive do
                   />
                 </div>
                 <p class="text-xs text-base-content/60">{tier_hint()}</p>
+                <p
+                  :if={@member_edit.promotion}
+                  id={"edit-member-#{membership.id}-promotion"}
+                  role="status"
+                  class="flex items-start gap-2 rounded-md bg-warning/15 px-3 py-2 text-sm text-warning-ink"
+                >
+                  <.icon name="hero-shield-exclamation" class="mt-0.5 size-4 shrink-0" />
+                  <span>{@member_edit.promotion}</span>
+                </p>
                 <ScopePickers.scope_pickers
                   id={"edit-member-#{membership.id}"}
                   form={@member_edit.form}

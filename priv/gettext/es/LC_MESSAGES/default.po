@@ -444,6 +444,13 @@ msgid_plural "%{count} parts"
 msgstr[0] "%{count} parte"
 msgstr[1] "%{count} partes"
 
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} person hasn't set up two-step sign-in yet. It's enforced for them from %{date}."
+msgid_plural "%{count} people haven't set up two-step sign-in yet. The first deadline is %{date}."
+msgstr[0] "%{count} persona aún no ha configurado el inicio de sesión en dos pasos. Se le exige a partir del %{date}."
+msgstr[1] "%{count} personas aún no han configurado el inicio de sesión en dos pasos. El primer plazo vence el %{date}."
+
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} person will be asked to set it up;"
@@ -1028,6 +1035,16 @@ msgstr "%{name} no ha publicado ninguna versión en Hex desde %{date}."
 #, elixir-autogen, elixir-format
 msgid "%{name} has had this open for %{open_for} but hasn't typed for %{idle}."
 msgstr "%{name} lleva %{open_for} con esto abierto, pero no escribe desde hace %{idle}."
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has no second factor. This site requires one of %{tier}, and their grace period ended %{date}: they'll be asked to set one up before anything else."
+msgstr "%{name} no tiene segundo factor. Este sitio lo exige a los %{tier} y su periodo de gracia terminó el %{date}: se le pedirá que configure uno antes de nada."
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has no second factor. This site requires one of %{tier}: they have until %{date} to set it up, and will be asked to before anything else after that."
+msgstr "%{name} no tiene segundo factor. Este sitio lo exige a los %{tier}: tiene hasta el %{date} para configurarlo, y después se le pedirá antes de nada."
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
@@ -17864,6 +17881,11 @@ msgstr "Exige a las personas de este sitio que configuren un segundo factor (una
 msgid "Require two-step sign-in for"
 msgstr "Exigir el inicio de sesión en dos pasos a"
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Require two-step sign-in for administrators, editors or everyone."
+msgstr "Exige el inicio de sesión en dos pasos a administradores, editores o a todos."
+
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -22759,6 +22781,11 @@ msgstr "No se pudieron leer los ajustes de alertas de seguridad del sitio."
 msgid "The site's session settings could not be read."
 msgstr "No se pudieron leer los ajustes de sesión del sitio."
 
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "The site's two-step sign-in requirement could not be read."
+msgstr "No se pudo leer la exigencia de inicio de sesión en dos pasos del sitio."
+
 #: lib/kiln_cms/security/posture/checks/security_alerts.ex
 #, elixir-autogen, elixir-format
 msgid "The site's webhook endpoints could not be read."
@@ -23682,6 +23709,11 @@ msgstr "Este sitio pide %{site}%, por encima de lo que el servidor permite ahora
 msgid "This site does not publish a security.txt."
 msgstr "Este sitio no publica un security.txt."
 
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "This site doesn't require two-step sign-in."
+msgstr "Este sitio no exige el inicio de sesión en dos pasos."
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site doesn't use Meilisearch. Search uses the built-in search, which needs no setup."
@@ -24366,6 +24398,7 @@ msgstr "La autenticación de doble factor está activada."
 msgid "Two-factor authentication turned off"
 msgstr "Autenticación en dos pasos desactivada"
 
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
@@ -24392,6 +24425,26 @@ msgstr "El inicio de sesión en dos pasos está activado en tu cuenta."
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in is optional on this site."
 msgstr "El inicio de sesión en dos pasos es opcional en este sitio."
+
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in is required for administrators."
+msgstr "El inicio de sesión en dos pasos es obligatorio para los administradores."
+
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in is required for editors and administrators."
+msgstr "El inicio de sesión en dos pasos es obligatorio para editores y administradores."
+
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in is required for everyone on this site."
+msgstr "El inicio de sesión en dos pasos es obligatorio para todos en este sitio."
+
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in required"
+msgstr "Inicio de sesión en dos pasos obligatorio"
 
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
@@ -25716,6 +25769,11 @@ msgstr "Si el texto contiene part, sin distinguir mayúsculas."
 msgid "Whether the value is empty."
 msgstr "Si el valor está vacío."
 
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Whether this site makes people set up two-step sign-in, and who it covers that hasn't yet."
+msgstr "Si este sitio obliga a configurar el inicio de sesión en dos pasos, y quién de los afectados aún no lo ha hecho."
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Which fields need a severity when a published edit changes them."
@@ -26845,6 +26903,11 @@ msgstr "se añade justo antes de </head>"
 msgid "admin"
 msgstr "administrador"
 
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "administrators"
+msgstr "administradores"
+
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
 msgid "all confirmed subscribers"
@@ -27355,6 +27418,11 @@ msgstr "editado tras publicar"
 #, elixir-autogen, elixir-format
 msgid "editor"
 msgstr "editor"
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "editors"
+msgstr "editores"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -28728,6 +28796,11 @@ msgstr "ver"
 #, elixir-autogen, elixir-format
 msgid "viewer"
 msgstr "lector"
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "viewers"
+msgstr "lectores"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format

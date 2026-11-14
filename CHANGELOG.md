@@ -144,6 +144,12 @@ Every summary line below that was shortened links to its own entry there.
 - **A site admin can require two-step sign-in of admins, editors or everyone at `/editor/two-factor`, with a grace period; held accounts set up at `/account/two-factor` on the main or console host, password sessions confirming an emailed code. Closes the #2247 series.**
   ([long form](docs/changelog/unreleased.md#second-factor-requirement))
 
+- **Security posture gains a "Two-step sign-in required" line (`core.second_factor_required`): Review while someone the site's requirement covers is in their grace period; N/A when the site doesn't require it, so no existing site's result changes. Closes #2252.**
+  ([#2921](https://github.com/The-Verscienta/kiln_cms/pull/2921) · [long form](docs/changelog/unreleased.md#posture-second-factor-required))
+
+- **Giving someone a role a site's two-step sign-in requirement covers warns the admin when they have no second factor (on the Team page before and after saving, and on adding a member, a temporary tier or an approved registration); the policy page is in the console menu as Organization → Two-step sign-in.**
+  ([#2921](https://github.com/The-Verscienta/kiln_cms/pull/2921) · [long form](docs/changelog/unreleased.md#second-factor-promotion-warning))
+
 - **The setting and logic behind requiring two-step sign-in (part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
 

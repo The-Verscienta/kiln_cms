@@ -435,7 +435,8 @@ was created, when it joined the site, and when its role became covered by the
 setting. A promotion does not restart it, so a reader of long standing
 promoted to admin on a site that requires admins is held at once. Lengthening
 the grace moves every deadline later; shortening it, or setting it to none,
-can hold people the moment you save.
+can hold people the moment you save. The administrator giving the role is
+warned first ([below](#when-you-give-someone-a-covered-role)).
 
 ### Require two-step sign-in on your site
 
@@ -443,8 +444,11 @@ You need to be an administrator of the site, and to hold a second factor
 yourself (an authenticator app or a passkey). If you don't, set one up first
 at `/account/two-factor` on the main host (`PHX_HOST`) or the console host.
 
-1. Open `/editor/two-factor` on the site's console. (The page has no entry in
-   the console menu yet; go to it by its address.) You see **Two-step sign-in**
+1. In the console menu, open **Organization → Two-step sign-in**
+   (`/editor/two-factor`; searching the menu for "2fa" or "two-step" finds it
+   too, and the **Two-step sign-in required** line of the
+   [Security posture](security-posture.md#two-step-sign-in-required) page
+   links to it). You see **Two-step sign-in**
    with three parts: **Who it covers now**, **Requirement** and **If nobody can
    get in**. If you hold no second factor, a notice at the top says "Set up
    two-step sign-in on your own account first." with a **Set up two-step
@@ -506,6 +510,31 @@ What can go wrong when saving:
   seconds it names.
 - **"You don't have permission to change this site's two-step sign-in."** You
   are not an administrator of this site.
+
+### When you give someone a covered role
+
+If you give someone a role the site's requirement covers and they have no
+second factor, Kiln tells you what it means for them. It never stops the
+change.
+
+- **On the Team page** (`/editor/team`), when you click **Edit** on a member
+  and pick a covered **Site tier**, a note appears under the picker before you
+  save, for example: "sam@example.com has no second factor. This site
+  requires one of administrators, and their grace period ended 2026-01-15
+  09:00 UTC: they'll be asked to set one up before anything else." Click
+  **Save** and the same sentence follows "Saved.".
+- **A temporary tier** given on the Team page, **adding a member** at a covered
+  tier, and **approving a registration** on a site that requires it of
+  everyone end with the same sentence after their own confirmation.
+- Someone **new to the site** (added now, or whose account is new) gets the
+  grace period, and the sentence says so: "…they have until (date) to set it
+  up, and will be asked to before anything else after that."
+
+There is no warning when the person already has an authenticator app or a
+passkey, when the role is not covered, when the role is the one they already
+hold, or for a platform administrator (they are an administrator on every
+site whatever their membership says). Changing a platform administrator's own
+role on **Accounts** gives no warning either.
 
 ### What people see during the grace period
 

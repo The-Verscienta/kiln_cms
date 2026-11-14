@@ -797,6 +797,29 @@ defmodule KilnCMSWeb.ConsoleNav do
               "audit"
             ]
           },
+          # Who must set up two-step sign-in, and who hasn't (#2247): after the
+          # posture report whose `core.second_factor_required` check links here.
+          # Organization, not Sign-in & access, which is at the seven-item cap.
+          %{
+            key: :second_factor_policy,
+            label: gettext("Two-step sign-in"),
+            path: ~p"/editor/two-factor",
+            icon: "hero-device-phone-mobile",
+            description:
+              gettext("Require two-step sign-in for administrators, editors or everyone."),
+            keywords: [
+              "2fa",
+              "mfa",
+              "two-factor",
+              "two-step",
+              "totp",
+              "authenticator",
+              "passkey",
+              "require",
+              "enforce",
+              "security"
+            ]
+          },
           # Organization, not Delivery: who answers for the site's security is a
           # statement about the organization, served as a file (#1873).
           %{
