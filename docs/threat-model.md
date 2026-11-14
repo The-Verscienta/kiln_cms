@@ -1037,7 +1037,12 @@ see [bot-budgets.md](bot-budgets.md).
   mechanism for unpublished work; treat a leaked preview URL as a content leak.
   The request log line shows the token as `[FILTERED]`
   (`GET /preview/[FILTERED]`), and the missed-path list never records a path
-  that carries it (#2449). See residual risk 6.
+  that carries it (#2449). See residual risk 6. The same credentials are
+  kept out of the other places a URL or its params are written down: params
+  and socket-connect log lines (`:filter_parameters`, checked at boot), trace
+  URL attributes (`KilnCMSWeb.RedactingSpanProcessor`), and Sentry's request
+  URL, `Referer` header and crash-report process state (`KilnCMSWeb.UrlRedaction`).
+  See [Observability](observability.md#request-log-lines-for-token-links).
 - **Headless draft mode (#1887)** — the same token on `/api/json` and the
   fired-artifact read. It does *not* bypass authorization there:
   `KilnCMSWeb.Plugs.PreviewGrant` verifies it, pins it to the serving site and

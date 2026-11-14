@@ -40,6 +40,13 @@ defmodule KilnCMSWeb.SentryScrubber do
   scrubber for that field — masks the sensitive parameters with the same rule
   as the body.
 
+  ## The request URL and the referrer
+
+  `scrub_url/1` is `PlugContext`'s `:url_scrubber`: the URL it records keeps
+  its origin, but the secret path segments `KilnCMSWeb.RequestRedaction` finds
+  and the credential query parameters become `[FILTERED]`. `scrub_headers/1`
+  redacts a `Referer` the same way (`KilnCMSWeb.UrlRedaction`).
+
   ## The update feed carries no client address (#1877)
 
   Every Kiln instance's update check reads kilncms.dev's
@@ -111,6 +118,14 @@ defmodule KilnCMSWeb.SentryScrubber do
   defp scrub(value) when is_list(value), do: Enum.map(value, &scrub/1)
   defp scrub(value), do: value
 
+  @doc """
+  True when a body key, header name or query parameter named `key` carries a
+  credential, by the rule in the moduledoc. `KilnCMSWeb.UrlRedaction` masks a
+  query string with it too.
+  """
+  @spec sensitive_key?(term()) :: boolean()
+  def sensitive_key?(key), do: sensitive?(key)
+
   defp sensitive?(key) do
     downcased = key |> to_string() |> String.downcase()
 
@@ -167,10 +182,54 @@ defmodule KilnCMSWeb.SentryScrubber do
       conn
       |> Sentry.PlugContext.default_header_scrubber()
       |> Map.reject(fn {name, _} -> name in @credential_headers or sensitive?(name) end)
+      |> redact_referer()
 
     if update_feed_read?(conn),
       do: Map.drop(headers, @client_address_headers),
       else: headers
+  end
+
+  @doc """
+  `headers` with the URL of a `Referer` header redacted by
+  `KilnCMSWeb.UrlRedaction.url/1`. A `Referer` names the page a request came
+  from, which may be a link that carries a credential. Used by
+  `scrub_headers/1` and again by `KilnCMS.SentryFilter`.
+  """
+  @spec redact_referer(map()) :: map()
+  def redact_referer(%{} = headers) do
+    Map.new(headers, fn
+      {name, value} when is_binary(name) and is_binary(value) ->
+        if String.downcase(name) in ["referer", "referrer"],
+          do: {name, KilnCMSWeb.UrlRedaction.url(value)},
+          else: {name, value}
+
+      other ->
+        other
+    end)
+  end
+
+  def redact_referer(headers), do: headers
+
+  @doc """
+  `Sentry.PlugContext`'s `:url_scrubber`: the request URL with the secret
+  segments of its path (`KilnCMSWeb.RequestRedaction`, matched on the conn's
+  decoded `path_info`) and the credential parameters of its query replaced by
+  `[FILTERED]`. If the redaction cannot run, the URL keeps only its origin.
+  """
+  @spec scrub_url(Plug.Conn.t()) :: String.t()
+  def scrub_url(%Plug.Conn{} = conn) do
+    Plug.Conn.request_url(%{
+      conn
+      | request_path: KilnCMSWeb.RequestRedaction.redact_path(conn),
+        query_string: KilnCMSWeb.UrlRedaction.query_string(conn.query_string)
+    })
+  rescue
+    _error ->
+      Plug.Conn.request_url(%{
+        conn
+        | request_path: "/" <> KilnCMSWeb.UrlRedaction.filtered(),
+          query_string: ""
+      })
   end
 
   defp update_feed_read?(%Plug.Conn{method: method, path_info: path})

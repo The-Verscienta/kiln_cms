@@ -953,7 +953,17 @@ config :phoenix, :filter_parameters, [
   "cf-turnstile-response",
   "g-recaptcha-response",
   # The same token on a public form submission.
-  "_kiln_challenge"
+  "_kiln_challenge",
+  # Credentials a socket's connect params or a link's params carry: the
+  # collab and GraphQL sockets' `token` / `Authorization`, the bridge's
+  # `api_key`, and the `:token` of a sign-in, reset or preview link. Matching
+  # is by substring and case-sensitive, hence both spellings of
+  # `Authorization`. KilnCMS.Config.Redaction warns at boot if one is dropped.
+  "token",
+  "secret",
+  "authorization",
+  "Authorization",
+  "api_key"
 ]
 
 # The embedded form's human-verification mount (#2249): an esbuild profile of

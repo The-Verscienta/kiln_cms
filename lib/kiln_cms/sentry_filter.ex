@@ -67,9 +67,20 @@ defmodule KilnCMS.SentryFilter do
   The body keys are dropped from `extra.args`, and a message or exception
   value that quotes a rendered `%Swoosh.Email{}` (an adapter crash, before the
   delivery path stopped recording them) is replaced whole.
+
+  ## URLs and process dumps
+
+  The request URL and a `Referer` header have their credential path segments
+  and query parameters filtered (`KilnCMSWeb.UrlRedaction`), and so do the
+  `genserver_state` and `last_message` a crash report carries: every URL,
+  quoted path or query string in them, and every quoted value under a
+  credential-named key.
   """
   alias KilnCMS.Mail
   alias KilnCMS.Mail.TransientDeliveryError
+  alias KilnCMSWeb.UrlRedaction
+
+  @process_dumps [:genserver_state, :last_message, "genserver_state", "last_message"]
 
   @join_module Phoenix.LiveView.Route
   @join_function :live_link_info_without_checks
@@ -110,19 +121,47 @@ defmodule KilnCMS.SentryFilter do
   # no scrubber for it, so a credential presented as `?preview_token=` or
   # `?unlock=` (#1887) would reach Sentry verbatim. Masked here, with the body
   # scrubber's own rule.
-  defp scrub_request(%Sentry.Interfaces.Request{query_string: query} = request),
-    do: %{request | query_string: KilnCMSWeb.SentryScrubber.scrub_query_string(query)}
+  #
+  # The URL and a `Referer` are redacted here as well as in
+  # `KilnCMSWeb.SentryScrubber` (`url_scrubber`, `header_scrubber`): this is
+  # the last step before an event leaves, so a request context set by any
+  # other path is covered too.
+  defp scrub_request(%Sentry.Interfaces.Request{query_string: query} = request) do
+    %{
+      request
+      | query_string: KilnCMSWeb.SentryScrubber.scrub_query_string(query),
+        url: scrub_url(request.url),
+        headers: KilnCMSWeb.SentryScrubber.redact_referer(request.headers)
+    }
+  end
 
   defp scrub_request(request), do: request
+
+  defp scrub_url(url) when is_binary(url), do: UrlRedaction.url(url)
+  defp scrub_url(url), do: url
 
   defp scrub_extra(%{} = extra) do
     Map.new(extra, fn
       {key, %{} = args} when key in [:args, "args"] -> {key, Map.drop(args, Mail.body_keys())}
+      {key, value} when key in @process_dumps -> {key, scrub_dump(value)}
       other -> other
     end)
   end
 
   defp scrub_extra(extra), do: extra
+
+  # A crashed process's state and last message, inspected by Sentry's logger
+  # handler. A LiveView's state holds the URL it joined with and its assigns,
+  # and either may carry a credential from a token link.
+  defp scrub_dump(value) when is_binary(value), do: UrlRedaction.text(value)
+
+  defp scrub_dump(value) when is_list(value) do
+    value |> IO.chardata_to_string() |> UrlRedaction.text()
+  rescue
+    _error -> UrlRedaction.filtered()
+  end
+
+  defp scrub_dump(value), do: value
 
   defp scrub_message(%Sentry.Interfaces.Message{} = message) do
     if dump?(message.formatted) or dump?(message.message) or
