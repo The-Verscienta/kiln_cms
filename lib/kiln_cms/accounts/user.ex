@@ -1228,7 +1228,13 @@ defmodule KilnCMS.Accounts.User do
       # attacker-held session on the same account could otherwise grind the
       # 6-digit space for that same pending secret and confirm it out from
       # under them. It also budgets grinding of `current_code` below.
-      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
+      #
+      # Every step from here to the code checks runs only on a changeset still
+      # valid (GHSA-4854-24jg-q7j5): a refusal above spends no attempt, and a
+      # spent budget compares neither code. Without that, both validations
+      # still ran past the throttle's refusal and their errors told a right
+      # code from a wrong one — an oracle with no budget at all.
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor, only_when_valid?: true
       # Re-read the staged secret from the DB before the validation and the
       # promotion below both read it off `changeset.data` — a second settings
       # tab may have staged a newer one, leaving this caller's `current_user`
@@ -1236,11 +1242,19 @@ defmodule KilnCMS.Accounts.User do
       # `ValidTotpCode`: changes and validations run in declaration order at
       # build time.
       change KilnCMS.Accounts.Changes.ReloadPendingTotpSecret
-      validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret}
+
+      validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret},
+        only_when_valid?: true
+
       # Replacing a live factor needs the outgoing code (or a recovery-code
       # session) — a bare setup_totp+confirm_totp can no longer swap the secret
-      # silently out from under the owner (#786).
-      validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement
+      # silently out from under the owner (#786). It compares `current_code`
+      # against the LIVE secret, so it too waits on a still-valid changeset;
+      # after a wrong pending code it is skipped as well, which only shortens
+      # the error list of an attempt the budget has already charged.
+      validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement,
+        only_when_valid?: true
+
       change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
 
@@ -1283,9 +1297,14 @@ defmodule KilnCMS.Accounts.User do
 
       # Above the validation on purpose — see the change's moduledoc. A wrong
       # code is the only one worth charging, and by the time the validation has
-      # rejected it there is no hook left to charge from.
-      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
-      validate KilnCMS.Accounts.Validations.ValidTotpCode
+      # rejected it there is no hook left to charge from. Both run only on a
+      # changeset still valid, as on `:disable_totp`: a refusal spends no
+      # attempt, and a spent budget compares no code (GHSA-4854-24jg-q7j5) —
+      # otherwise the errors past the throttle told the account's CURRENT code
+      # from a wrong one, and a stolen session could recover it and mint
+      # itself recovery codes.
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor, only_when_valid?: true
+      validate KilnCMS.Accounts.Validations.ValidTotpCode, only_when_valid?: true
 
       # `ValidTotpCode` checks the code against the struct the request loaded,
       # which may hold a factor an invitation's takeover has since removed
