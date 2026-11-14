@@ -59,6 +59,10 @@ defmodule KilnCMS.CMS.JoinGraduation do
     * `max_sources` becomes `KilnCMS.CMS.JoinGraduation.SourceCap` on the
       resource's create: the same count, under the same advisory lock, as
       `KilnCMS.CMS.ContentLinks.reconcile/1`.
+    * `selection` (which records the field may add, #2285) is **not** carried.
+      It is a filter over what an editor may pick, enforced when the field is
+      written; the graduated join resource is written through its own create
+      action, so the filter is dropped with the field.
 
   A generated resource says what it graduated from in `__kiln_join__/0`,
   which is how `join_resources/0` finds it.

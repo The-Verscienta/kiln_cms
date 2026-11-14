@@ -1440,6 +1440,13 @@
                 "null"
               ],
               "x-kiln-graphql-kind": "reference",
+              "x-kiln-selection": {
+                "owner": "self",
+                "sort": "title",
+                "states": [
+                  "published"
+                ]
+              },
               "x-kiln-target-types": [
                 "post"
               ]

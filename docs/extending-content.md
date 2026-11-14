@@ -340,6 +340,10 @@ UI" workflow, scoped to fields.
   reverse field shows "3 of 3" beside the heading and offers no add while
   it is full. The schema export reports it as
   `x-kiln-max-sources`.
+- **Which records can be added (`selection`, #2285)**: a filter on what a
+  write may add to the field. It has its own section,
+  [Limit what can be picked](#limit-what-can-be-picked); there is no admin
+  screen for it yet.
 - **When a target is deleted for good (`on_target_delete`)**: what purging a
   connected record does to this field's connections to it. `:keep` (the
   default, and the behaviour before 1.5) leaves the connection as a broken
@@ -1658,6 +1662,87 @@ What to know before relying on it:
 | `checkboxes can't take terms of their own: use tags, or turn off new terms` | `checkboxes` on a select with `allow_custom: true`. |
 
 Why the input is an editor-only setting apart from **Editing**, and why a named input is refused rather than reset: [ADR 0048](decisions/0048-a-fields-editor-input-is-an-editor-only-string-separate-from-its-text-format.md) and [ADR 0049](decisions/0049-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md).
+
+### Limit what can be picked
+
+Starting point: a top-level reference field, and a reason to keep some records
+out of it (only published ones, only the writer's own, only pages tagged
+"recipes"). **Until the picker change ships (#2285, part 2) there is no admin
+screen and the picker does not apply the filter, so set it only through the
+API or a seed, and configure it only together with that picker change:** until
+then the picker offers targets a save refuses.
+
+1. Update the field definition's `selection` as an admin. In a seed or the
+   console:
+
+   ```elixir
+   CMS.update_field_definition!(
+     field,
+     %{
+       selection: %{
+         "states" => ["published"],
+         "owner" => "self",
+         "sort" => "title",
+         "by_type" => %{
+           "page" => %{
+             "tags_any" => [tag_id],
+             "category" => category_id,
+             "fields" => %{"level" => %{"in" => ["basic", "advanced"]}}
+           }
+         }
+       }
+     },
+     actor: admin
+   )
+   ```
+
+   `states` is a subset of `draft`, `in_review`, `published`, `archived`;
+   `owner` can only be `"self"`; `sort` is `recent` or `title`. Under
+   `by_type`, each key must be one of the field's target types. `tags_any`
+   takes tag ids, `category` one category id, and `fields` maps a custom field
+   name to a value, `{"in": [...]}` or `{"not_eq": value}` (only non-private
+   plain fields, not media, reference, group, geolocation or link). Conditions
+   AND together.
+2. Write a reference as usual (editor, reverse field, JSON:API, GraphQL, MCP,
+   import). A target the filter rejects fails the save on that field, for
+   example `“Only a draft” isn't one of the records this field accepts.`
+   (or `… aren't among the records this field accepts.` for several).
+3. Read it back: `GET /api/schema` reports the live selection as
+   `x-kiln-selection` on the field, tag and category as ids.
+
+What to know before relying on it:
+
+- **It governs who can be connected, not what is connected.** It is checked
+  when a write **adds** a target; a target already connected is never
+  re-judged, so changing the filter or editing a connected record later does
+  not make the field invalid. Removing and reordering are never refused.
+  Copies, translations, version restores and *Publish changes* do not
+  re-judge it, and a system actor or `authorize?: false` write skips it (the
+  target must still resolve). It is not an invariant over everything the
+  field holds.
+- **It is not an access-control mechanism.** It is field configuration, it
+  binds admins too, and it only narrows what the writer can already read; it
+  never lets anyone connect what they could not read. Use policies and read
+  grants for access.
+- **Drift is inert.** A condition naming a deleted tag, category or custom
+  field, or a type that left the registry, is dropped rather than turned into
+  "match nothing". Making a named field private, or retyping it to a type
+  without equality, is refused while a selection names it.
+- **`owner: "self"` needs a user actor.** With no user actor (an anonymous caller) it matches nothing. Through an
+  API key it is the key's user.
+- **`create` is not accepted yet.** A selection with a `create` key is
+  refused until a later change.
+- **`FieldSync` and `JoinGraduation` do not carry it.** Tag and category ids
+  are per site, so field-definition sync leaves it out; `mix kiln.gen.join`
+  drops it with the field.
+
+Errors you can hit when writing the setting: `is only for a reference field`
+(a link or group sub-field, or another type), `is not valid: it …` (unknown
+key or bad value), `names <type>, which is not one of this field's target
+types`, and `can't let editors create records yet`. A selection that can no
+longer be evaluated (a stored value its field can't cast) fails a save with
+`could not be checked against which records it accepts — an admin should
+review the field's selection`.
 
 ### Delete a field of an unknown type
 

@@ -592,6 +592,11 @@ delete rule — with the sentence the field list will show under it. Part 2
 of #2025 put related content (`related_<type>s`) through the same picker;
 see "Related content" below.
 
+Limiting which records may be picked into a reference field (`selection`) is
+planned and built in stages in [reference-selection-plan.md](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/reference-selection-plan.md)
+([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)); the first
+stage is the stored setting and its enforcement on write, with no picker yet.
+
 - Replace the reference `<select>` with a picker component: search-as-you-type
   across the allowed target types (server-side, no 500 cap), type badges,
   drag-to-reorder (the gallery's sortable), inline link-field inputs per row,

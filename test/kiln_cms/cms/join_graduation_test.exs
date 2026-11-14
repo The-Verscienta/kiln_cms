@@ -166,6 +166,28 @@ defmodule KilnCMS.CMS.JoinGraduationTest do
 
   defp report(spec), do: JoinGraduation.verify(spec, KilnCMS.Accounts.default_org_id())
 
+  describe "what a graduation carries" do
+    test "a field's selection is not part of the plan: the filter is dropped with the field" do
+      admin = admin!()
+      name = "picked#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{
+          content_type: :post,
+          name: name,
+          label: "Picked",
+          field_type: :reference,
+          target_type: "page",
+          selection: %{"states" => ["published"]}
+        },
+        actor: admin
+      )
+
+      assert {:ok, spec} = JoinGraduation.resolve("post.#{name}")
+      refute Enum.any?(Map.keys(spec), &(&1 |> to_string() |> String.contains?("selection")))
+    end
+  end
+
   describe "the copy" do
     test "moves every edge with its position and typed link values", ctx do
       assert copy!(ctx.spec) == 2

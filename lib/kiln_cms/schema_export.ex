@@ -44,6 +44,7 @@ defmodule KilnCMS.SchemaExport do
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldTypes
   alias KilnCMS.CMS.FieldWidgets
+  alias KilnCMS.CMS.ReferenceSelection
   alias KilnCMS.CMS.ReverseFields
   alias KilnCMS.CMS.ScalarLists
   alias KilnCMS.Media
@@ -317,11 +318,13 @@ defmodule KilnCMS.SchemaExport do
     ct
     |> Map.put(
       :field_definitions,
-      CMS.field_definitions_for_definition!(definition.id,
+      definition.id
+      |> CMS.field_definitions_for_definition!(
         actor: system(),
         authorize_with: :error,
         tenant: org_id
       )
+      |> put_live_selection(org_id)
     )
     |> put_section_displays(
       CMS.field_sections_for_definition!(definition.id,
@@ -337,12 +340,28 @@ defmodule KilnCMS.SchemaExport do
     ct
     |> Map.put(
       :field_definitions,
-      CMS.field_definitions_for!(type, actor: system(), authorize_with: :error, tenant: org_id)
+      type
+      |> CMS.field_definitions_for!(actor: system(), authorize_with: :error, tenant: org_id)
+      |> put_live_selection(org_id)
     )
     |> put_section_displays(
       CMS.field_sections_for!(type, actor: system(), authorize_with: :error, tenant: org_id)
     )
     |> put_reverse(org_id)
+  end
+
+  # A reference's `selection` is reported as it would still be evaluated:
+  # without the conditions whose type, field, tag or category is gone
+  # (`ReferenceSelection.live/3`). Nothing is read for a field without one.
+  defp put_live_selection(definitions, org_id) do
+    Enum.map(definitions, fn
+      %{field_type: :reference, selection: %{} = selection} = definition ->
+        targets = FieldDefinition.reference_targets(definition)
+        %{definition | selection: ReferenceSelection.live(selection, targets, org_id)}
+
+      definition ->
+        definition
+    end)
   end
 
   # How each section of the type is laid out (#2280), by name — only the ones
@@ -688,14 +707,17 @@ defmodule KilnCMS.SchemaExport do
   defp put_target_types(schema, _definition), do: schema
 
   # A reference's target-side options: `max_sources` (R1b), how many records
-  # may connect to one target through the field, and a non-default
-  # `on_target_delete` (R5), what purging a target does to its connections.
+  # may connect to one target through the field, a non-default
+  # `on_target_delete` (R5), what purging a target does to its connections, and
+  # its `selection` (#2285), which records a write may add — the live part
+  # only (`put_live_selection/2`), tag and category as ids.
   # Annotations for the reason the item bounds are: they govern writes and
   # purges, and tightening the cap leaves stored connections alone.
   defp put_target_rules(schema, %{field_type: :reference} = definition) do
     schema
     |> put_bound("x-kiln-max-sources", Map.get(definition, :max_sources))
     |> put_bound("x-kiln-on-target-delete", delete_rule(Map.get(definition, :on_target_delete)))
+    |> put_bound("x-kiln-selection", Map.get(definition, :selection))
   end
 
   defp put_target_rules(schema, _definition), do: schema

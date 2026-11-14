@@ -1,6 +1,6 @@
 # Reference selection: filtered pickers and create-on-type — plan
 
-Status: proposed. Tracking issue: #2285. Nothing is built.
+Status: in progress. Tracking issue: #2285. PR 1 of 4 (foundation + server filter) is built; PRs 2-4 are not.
 Builds on the relationship workstreams in
 [relationships-plan.md](../relationships-plan.md) (R1b `max_sources`, R2
 `target_types`, R9 picker and "Add new"), the dropdown widget (#2284) and

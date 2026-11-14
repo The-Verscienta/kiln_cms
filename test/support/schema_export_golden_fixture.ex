@@ -53,7 +53,11 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
     {"hero", :media, %{}},
     {"gallery", :media, %{multiple: true}},
     {"related", :reference, %{target_type: "post", multiple: true}},
-    {"parent", :reference, %{target_type: "post"}},
+    {"parent", :reference,
+     %{
+       target_type: "post",
+       selection: %{"states" => ["published"], "owner" => "self", "sort" => "title"}
+     }},
     {"where", :geolocation, %{}},
     {"contact_email", :email, %{}},
     {"phone", :telephone, %{}},

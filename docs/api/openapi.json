@@ -4277,6 +4277,18 @@
                 ],
                 "description": "Field included by default."
               },
+              "selection": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
               "target_type": {
                 "anyOf": [
                   {
@@ -4654,6 +4666,9 @@
           },
           "section": {
             "$ref": "#/components/schemas/field_definition-filter-section"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/field_definition-filter-selection"
           },
           "target_type": {
             "$ref": "#/components/schemas/field_definition-filter-target_type"
@@ -6295,6 +6310,45 @@
           },
           "string_starts_with": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-selection": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "object"
+          },
+          "greater_than": {
+            "type": "object"
+          },
+          "greater_than_or_equal": {
+            "type": "object"
+          },
+          "in": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "object"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "object"
+          },
+          "less_than": {
+            "type": "object"
+          },
+          "less_than_or_equal": {
+            "type": "object"
+          },
+          "not_eq": {
+            "type": "object"
           }
         },
         "type": "object"
