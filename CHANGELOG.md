@@ -151,7 +151,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#2921](https://github.com/The-Verscienta/kiln_cms/pull/2921) · [long form](docs/changelog/unreleased.md#second-factor-promotion-warning))
 
 - **Making an account a platform admin on Accounts (standing or temporary) warns when it has no second factor, naming the sites that would hold it at once and those that give a grace period, with the earliest deadline.**
-  ([long form](docs/changelog/unreleased.md#platform-promotion-warning))
+  ([#2922](https://github.com/The-Verscienta/kiln_cms/pull/2922) · [long form](docs/changelog/unreleased.md#platform-promotion-warning))
 
 - **The setting and logic behind requiring two-step sign-in (part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
