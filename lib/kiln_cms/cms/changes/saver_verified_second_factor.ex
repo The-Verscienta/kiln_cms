@@ -2,7 +2,11 @@ defmodule KilnCMS.CMS.Changes.SaverVerifiedSecondFactor do
   @moduledoc """
   The person writing a site's two-step sign-in requirement must hold a second
   factor and prove it now (#2247). On `KilnCMS.CMS.SiteSecondFactorPolicy`'s
-  `:save` and `:update`, every write, strengthening included.
+  `:save` and `:update`, every write, strengthening included. And on
+  `KilnCMS.Accounts.Passkey`'s `:destroy`: whoever removes a passkey (its
+  owner, or a platform admin) proves their own factor first, so a stolen or
+  unattended session can't strip an account's passkeys
+  (`KilnCMSWeb.TotpEnrolment.remove_passkey/4` passes the page's mark).
 
   The actor is re-read (a struct loaded before a factor was removed must not
   speak for the account now), and must:

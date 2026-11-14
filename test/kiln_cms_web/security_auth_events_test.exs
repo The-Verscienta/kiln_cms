@@ -580,7 +580,11 @@ defmodule KilnCMSWeb.SecurityAuthEventsTest do
       assert added.user_agent == @ua
       assert added.metadata == %{"name" => "Work laptop"}
 
-      assert :ok = Accounts.remove_passkey(passkey, actor: user, context: ctx(ip))
+      assert :ok =
+               Accounts.remove_passkey(passkey,
+                 actor: user,
+                 context: KilnCMS.TwoFactorFixtures.verified_now(ctx(ip))
+               )
 
       assert [removed] = events(:passkey_removed, ip)
       assert removed.actor_id == user.id
@@ -591,7 +595,13 @@ defmodule KilnCMSWeb.SecurityAuthEventsTest do
     test "a passkey changed with no request context records nothing" do
       user = seed_user()
       {:ok, passkey} = enroll(user, "quiet-cred")
-      assert :ok = Accounts.remove_passkey(passkey, actor: user)
+
+      assert :ok =
+               Accounts.remove_passkey(passkey,
+                 actor: user,
+                 context: KilnCMS.TwoFactorFixtures.verified_now()
+               )
+
       assert events_for(user) == []
     end
   end

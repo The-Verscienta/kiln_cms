@@ -319,6 +319,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#second-factors-managed-on-setup-hosts))
 
 - **Removing a passkey emails the account's owner and raises a `two_factor_disabled` alert, like turning off the authenticator app; turning the app off now emails the owner too.**
+- **Removing a passkey asks for a second factor (a fresh sign-in or an authenticator code), emails the account's owner and raises a `two_factor_disabled` alert, like turning off the authenticator app; turning the app off now emails the owner too.**
   ([long form](docs/changelog/unreleased.md#second-factor-removed-notice))
 
 ## [1.9.2] - 2026-11-12

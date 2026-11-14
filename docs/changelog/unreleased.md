@@ -2662,7 +2662,7 @@ carries the reasoning.
 
 <a id="second-factor-removed-notice"></a>
 
-- **Removing a passkey now emails the account's owner and raises a `two_factor_disabled` alert, as turning off the authenticator app does; turning the app off emails the owner too.**
+- **Removing a passkey now asks for a second factor, emails the account's owner and raises a `two_factor_disabled` alert, as turning off the authenticator app does; turning the app off emails the owner too.**
   Before, only turning off the authenticator app raised the site's
   `two_factor_disabled` alert, and the owner was emailed only when a factor
   was added. A passkey removed (by its owner, or by a platform admin) was
@@ -2670,7 +2670,17 @@ carries the reasoning.
   Removing a passkey needs only a signed-in session, so the owner had no way
   to learn that one of their ways back in was gone.
 
-  Now any second factor removed sends the owner an email, "A second factor
+  Removing a passkey now asks whoever removes it (the owner, or a platform
+  admin, for their own account) to prove a second factor first, as turning
+  off the authenticator app asks for a code: a session that verified one in
+  the last 15 minutes, or a current code from the authenticator app, which
+  counts against the shared five-per-15-minutes second-factor budget. On
+  `/editor/settings` and `/account/two-factor`, a session without a fresh
+  one gets a "Confirm it's you" box under the passkey list instead of a
+  removal; an account with passkeys only is told to sign in again with a
+  passkey. See [Remove a passkey](../passkeys.md#remove-a-passkey).
+
+  Any second factor removed now sends the owner an email, "A second factor
   was removed from your (name) account", after the removal is saved. It says
   what was removed, when, and from which browser and site. When a platform
   admin removed it, it names that admin's email address. A refused removal,
@@ -2681,7 +2691,13 @@ carries the reasoning.
   factor removed" on the Security alerts page, since it now covers passkeys.
   See [We email you when a second factor is removed](../two-factor-auth.md#we-email-you-when-a-second-factor-is-removed).
 
-  Developers: `KilnCMS.Accounts.SecondFactorNotice.factor_removed/4` and
+  Developers: `Passkey.:destroy` (`Accounts.remove_passkey`) takes a `code`
+  argument and runs `KilnCMS.CMS.Changes.SaverVerifiedSecondFactor`; pass
+  `second_factor_verified_at` in the context for a session that verified a
+  factor, or the call is refused. Erasure removes passkeys with the new
+  system-only `Passkey.:erase` (no step-up, no mail).
+  `KilnCMSWeb.TotpEnrolment.remove_passkey/4` returns `{:confirm, reason}`
+  when a code is needed. `KilnCMS.Accounts.SecondFactorNotice.factor_removed/4` and
   `KilnCMS.Accounts.Changes.NotifyFactorRemoved` are new; a site summary of
   `two_factor_disabled` now also counts `passkey_removed` events
   (`KilnCMS.Security.Alerts.event_types/1`).

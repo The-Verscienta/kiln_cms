@@ -22,23 +22,14 @@ defmodule KilnCMS.Accounts.Changes.NotifyFactorRemoved do
 
   Not on `Passkey`'s `:forget_on_takeover` or the factor columns an invitee's
   takeover clears (`Changes.ForgetPriorCredentials`): those are the previous
-  holder's, not the owner's. Erasure (`Changes.AnonymizeUser`) destroys
-  passkeys through `:destroy` with `skip_context/0` set, since the address
-  it would mail is no longer the owner's.
+  holder's, not the owner's. Nor on `Passkey`'s `:erase`
+  (`Changes.AnonymizeUser`): the address it would mail is no longer the
+  owner's.
   """
   use Ash.Resource.Change
 
   alias KilnCMS.Accounts.SecondFactorNotice
   alias KilnCMS.AfterCommit
-
-  @skip_key :skip_factor_removed_notice
-
-  @doc """
-  The action context that sends no mail: erasure removing every passkey of
-  the account it erases.
-  """
-  @spec skip_context() :: map()
-  def skip_context, do: %{@skip_key => true}
 
   @impl true
   def init(opts) do
@@ -50,15 +41,11 @@ defmodule KilnCMS.Accounts.Changes.NotifyFactorRemoved do
 
   @impl true
   def change(changeset, opts, context) do
-    if changeset.context[@skip_key] do
-      changeset
-    else
-      kind = Keyword.fetch!(opts, :kind)
+    kind = Keyword.fetch!(opts, :kind)
 
-      Ash.Changeset.after_transaction(changeset, fn changeset, result ->
-        notify(changeset, result, kind, context.actor)
-      end)
-    end
+    Ash.Changeset.after_transaction(changeset, fn changeset, result ->
+      notify(changeset, result, kind, context.actor)
+    end)
   end
 
   defp notify(changeset, {:ok, record} = result, kind, actor) do

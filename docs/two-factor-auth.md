@@ -354,10 +354,12 @@ account:
 - a passkey is removed, on `/editor/settings` or `/account/two-factor`, by the
   owner or by a platform admin.
 
-Why: removing a passkey needs only a signed-in session. Someone with a stolen
-or unattended session could remove your passkeys, keep one of their own, and
-leave you fewer ways back in. The site's admins get a `two_factor_disabled`
-alert for the same removal.
+Why: someone with a stolen or unattended session could remove your passkeys,
+keep one of their own, and leave you fewer ways back in. Removing a passkey
+also asks for a second factor first: a session that verified one in the
+last 15 minutes, or a current code from the authenticator app
+([Remove a passkey](passkeys.md#remove-a-passkey)). The site's admins get a
+`two_factor_disabled` alert for the same removal.
 
 The email is titled "A second factor was removed from your (name) account".
 It says what was removed ("The authenticator app was turned off… Its codes

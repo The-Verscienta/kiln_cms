@@ -82,10 +82,29 @@ admins can use either page below; a reader uses `/account/two-factor`, since
    row of the passkey to remove.
 3. Confirm the browser's prompt, "Remove this passkey? You can no longer sign
    in with it."
+4. If you didn't sign in with a second factor in the last 15 minutes, the page
+   asks you to confirm it's you first, under the list: "Confirm it's you to
+   remove (name)".
+   - **With an authenticator app:** type a current code under **Code from
+     your authenticator app** and click **Remove passkey**. A wrong code
+     says "That code isn't valid. Check your authenticator app." and counts
+     against the same five attempts per 15 minutes as the sign-in prompt.
+   - **With passkeys only:** the page says "Sign out, then sign in again with
+     a passkey. For 15 minutes after that, you can remove a passkey without a
+     code." Do that, and remove it within 15 minutes.
+
+   **Cancel** closes the box and keeps the passkey.
 
 The row disappears and the page says "Passkey removed." On
 `/account/two-factor`, the count above the list goes down, and at the limit
 the add form comes back (see [Limits on adding passkeys](#limits-on-adding-passkeys)).
+
+Why the extra step: removing a passkey used to need only a signed-in
+session, so someone at an unattended or stolen session could remove yours.
+Turning off the authenticator app already asks for a code. A platform admin
+removing someone else's passkey proves a second factor of their own the same
+way, and is refused with "Set up two-step sign-in on your own account first."
+if they hold none.
 
 The account's owner is emailed that a passkey was removed, and the site's
 admins get a "Second factor removed" security alert (see

@@ -360,9 +360,16 @@ defmodule KilnCMS.Accounts.WebAuthnTest do
       assert [] = Accounts.list_passkeys!(owner.id, actor: other)
 
       assert {:error, %Ash.Error.Forbidden{}} =
-               Accounts.remove_passkey(passkey, actor: other)
+               Accounts.remove_passkey(passkey,
+                 actor: other,
+                 context: KilnCMS.TwoFactorFixtures.verified_now()
+               )
 
-      assert :ok = Accounts.remove_passkey(passkey, actor: owner)
+      assert :ok =
+               Accounts.remove_passkey(passkey,
+                 actor: owner,
+                 context: KilnCMS.TwoFactorFixtures.verified_now()
+               )
     end
 
     test "sign_in_with_passkey never mints for an actor-carrying call" do

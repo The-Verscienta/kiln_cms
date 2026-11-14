@@ -5653,6 +5653,7 @@ msgstr "Los grupos se forman a partir de documentos publicados e indexados."
 msgid "Code from the email"
 msgstr "Código del correo"
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Code from your authenticator app"
@@ -5900,6 +5901,11 @@ msgstr "Confirmar"
 #, elixir-autogen, elixir-format
 msgid "Confirm date"
 msgstr "Confirmar fecha"
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm it's you to remove “%{name}”"
+msgstr "Confirma que eres tú para eliminar «%{name}»"
 
 #: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #, elixir-autogen, elixir-format
@@ -17567,6 +17573,7 @@ msgid "Remove item %{position}"
 msgstr "Quitar el elemento %{position}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove passkey"
@@ -17771,6 +17778,11 @@ msgstr "Quitado. El correo de este sitio vuelve a usar el relé del despliegue."
 #, elixir-autogen, elixir-format
 msgid "Removed. This site's sign-in page no longer offers it."
 msgstr "Eliminado. La página de inicio de sesión de este sitio ya no lo ofrece."
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Removing…"
+msgstr "Eliminando…"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -19764,6 +19776,7 @@ msgstr "Configurar mi cuenta"
 msgid "Set up two-step sign-in"
 msgstr "Configurar el inicio de sesión en dos pasos"
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up two-step sign-in on your own account first."
@@ -20162,6 +20175,11 @@ msgstr "Cerrar todas las demás sesiones"
 #, elixir-autogen, elixir-format
 msgid "Sign out when idle"
 msgstr "Cerrar sesión por inactividad"
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out, then sign in again with a passkey. For 15 minutes after that, you can remove a passkey without a code."
+msgstr "Cierra sesión y vuelve a iniciarla con una clave de acceso. Durante los 15 minutos siguientes, podrás eliminar una clave de acceso sin código."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -21685,6 +21703,7 @@ msgstr "Ese código no es válido: la autenticación de doble factor sigue activ
 msgid "That code isn't valid — try again."
 msgstr "Ese código no es válido: inténtelo de nuevo."
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Check your authenticator app."
@@ -28684,6 +28703,11 @@ msgstr "este tipo de archivo no se puede usar aquí"
 #, elixir-autogen, elixir-format
 msgid "this is you"
 msgstr "esta es tu cuenta"
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "this passkey"
+msgstr "esta clave de acceso"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

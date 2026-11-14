@@ -275,23 +275,24 @@ defmodule KilnCMSWeb.SettingsLive do
   def handle_event("passkey_cancel", _params, socket),
     do: {:noreply, socket |> assign(:passkey_challenge, nil) |> assign(:passkey_status, nil)}
 
-  def handle_event("remove_passkey", %{"id" => id}, socket) when is_binary(id) do
-    user = socket.assigns.current_user
+  # The action decides, and asks for a second factor first when this
+  # session's is not fresh (`TotpEnrolment.handle_remove_passkey/2`).
+  def handle_event("remove_passkey", params, socket) do
+    case TotpEnrolment.handle_remove_passkey(socket, params) do
+      {:removed, socket, message} ->
+        {:noreply,
+         socket
+         |> assign(:passkeys, WebAuthn.list(socket.assigns.current_user))
+         |> assign(:passkey_status, {:ok, message})
+         |> put_flash(:info, message)}
 
-    socket =
-      case TotpEnrolment.remove_passkey(user, id, socket.assigns.security_context) do
-        {:ok, message} ->
-          socket
-          |> assign(:passkeys, WebAuthn.list(user))
-          |> assign(:passkey_status, {:ok, message})
-          |> put_flash(:info, message)
-
-        {:error, message} ->
-          put_flash(socket, :error, message)
-      end
-
-    {:noreply, socket}
+      {:not_removed, socket} ->
+        {:noreply, socket}
+    end
   end
+
+  def handle_event("cancel_remove_passkey", _params, socket),
+    do: {:noreply, assign(socket, :passkey_removal, nil)}
 
   # --- active sessions (#1823) ------------------------------------------------
   #
@@ -1085,6 +1086,11 @@ defmodule KilnCMSWeb.SettingsLive do
                   </li>
                 </ul>
 
+                <TotpEnrolment.passkey_removal_confirm
+                  removal={@passkey_removal}
+                  passkeys={@passkeys}
+                  totp?={@totp_enabled?}
+                />
                 <.demo_locked_note :if={@credentials_locked?} />
                 <.last_factor_note :if={
                   last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)

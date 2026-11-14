@@ -82,7 +82,11 @@ defmodule KilnCMS.Accounts.FactorRemovedNoticeTest do
       user = passkey_user()
       passkey = fresh_passkey(user, "cred-removed-self")
 
-      assert :ok = Accounts.remove_passkey(passkey, actor: user, context: ctx(org))
+      assert :ok =
+               Accounts.remove_passkey(passkey,
+                 actor: user,
+                 context: TwoFactorFixtures.verified_now(ctx(org))
+               )
 
       assert [mail] = mails_to(user)
       assert mail.subject =~ @subject
@@ -113,7 +117,11 @@ defmodule KilnCMS.Accounts.FactorRemovedNoticeTest do
 
       on_exit(fn -> :telemetry.detach(handler) end)
 
-      assert :ok = Accounts.remove_passkey(passkey, actor: user)
+      assert :ok =
+               Accounts.remove_passkey(passkey,
+                 actor: user,
+                 context: TwoFactorFixtures.verified_now()
+               )
 
       assert_received {:mail_queued, false}
       refute_received {:mail_queued, true}
@@ -125,9 +133,16 @@ defmodule KilnCMS.Accounts.FactorRemovedNoticeTest do
       owner = passkey_user()
       admin = passkey_user(:admin)
       passkey = fresh_passkey(owner, "cred-removed-admin")
+      # The admin proves a second factor of their own (the step-up).
+      _admins_own = passkey_of(admin, "cred-removed-admin-own")
 
       {:ok, passkey} = Accounts.get_passkey(passkey.id, actor: admin)
-      assert :ok = Accounts.remove_passkey(passkey, actor: admin, context: ctx(org))
+
+      assert :ok =
+               Accounts.remove_passkey(passkey,
+                 actor: admin,
+                 context: TwoFactorFixtures.verified_now(ctx(org))
+               )
 
       assert [mail] = mails_to(owner)
       assert mail.html_body =~ "A passkey was removed"
@@ -145,7 +160,11 @@ defmodule KilnCMS.Accounts.FactorRemovedNoticeTest do
       stranger = passkey_user()
       passkey = fresh_passkey(owner, "cred-removed-refused")
 
-      assert {:error, _} = Accounts.remove_passkey(passkey, actor: stranger, context: ctx(org))
+      assert {:error, _} =
+               Accounts.remove_passkey(passkey,
+                 actor: stranger,
+                 context: TwoFactorFixtures.verified_now(ctx(org))
+               )
 
       assert [_still_there] = WebAuthn.list(owner)
       assert mails_to(owner) == []
@@ -205,10 +224,82 @@ defmodule KilnCMS.Accounts.FactorRemovedNoticeTest do
       {:ok, _} = enroll(user, "cred-removed-unmailable")
       [passkey] = WebAuthn.list(user)
 
-      log = capture_log(fn -> assert :ok = Accounts.remove_passkey(passkey, actor: user) end)
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   Accounts.remove_passkey(passkey,
+                     actor: user,
+                     context: TwoFactorFixtures.verified_now()
+                   )
+        end)
 
       assert WebAuthn.list(user) == []
       assert log =~ "Second-factor removal notice for user #{user.id} not sent"
+    end
+  end
+
+  describe "the step-up before a passkey is removed" do
+    test "no fresh second factor and no code: refused, nothing mailed or alerted", %{org: org} do
+      user = passkey_user()
+      passkey = fresh_passkey(user, "cred-step-up-none")
+
+      assert {:error, error} = Accounts.remove_passkey(passkey, actor: user, context: ctx(org))
+      assert Exception.message(error) =~ "sign in again with your passkey"
+
+      assert [_still_there] = WebAuthn.list(user)
+      assert mails_to(user) == []
+      assert alert_kinds(org) == []
+    end
+
+    test "a mark older than 15 minutes does not count", %{org: org} do
+      user = passkey_user()
+      passkey = fresh_passkey(user, "cred-step-up-stale")
+      stale = DateTime.add(DateTime.utc_now(), -16 * 60, :second)
+
+      assert {:error, _} =
+               Accounts.remove_passkey(passkey,
+                 actor: user,
+                 context: Map.put(ctx(org), :second_factor_verified_at, stale)
+               )
+
+      assert [_still_there] = WebAuthn.list(user)
+    end
+
+    test "a current authenticator code removes it; a wrong one doesn't", %{org: org} do
+      {user, secret} = TwoFactorFixtures.enabled_user(role: :editor)
+      passkey = fresh_passkey(user, "cred-step-up-code")
+
+      assert {:error, error} =
+               Accounts.remove_passkey(passkey, %{code: "000000"}, actor: user, context: ctx(org))
+
+      assert Exception.message(error) =~ "That code isn't valid"
+      assert [_still_there] = WebAuthn.list(user)
+
+      assert :ok =
+               Accounts.remove_passkey(
+                 passkey,
+                 %{code: TwoFactorFixtures.current_code(secret)},
+                 actor: user,
+                 context: ctx(org)
+               )
+
+      assert WebAuthn.list(user) == []
+      assert [_mail] = mails_to(user)
+    end
+
+    test "a platform admin with no second factor of their own is refused", %{org: org} do
+      owner = passkey_user()
+      admin = passkey_user(:admin)
+      passkey = fresh_passkey(owner, "cred-step-up-admin")
+
+      assert {:error, error} =
+               Accounts.remove_passkey(passkey,
+                 actor: admin,
+                 context: TwoFactorFixtures.verified_now(ctx(org))
+               )
+
+      assert Exception.message(error) =~ "Set up two-step sign-in on your own account first"
+      assert [_still_there] = WebAuthn.list(owner)
     end
   end
 end
