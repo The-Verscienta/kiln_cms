@@ -7,9 +7,11 @@ defmodule KilnCMSWeb.SettingsLastFactorTest do
   event here proves the page does not stand in for them.
 
   Each test signs in on a site of its own: the policy is cached per site on
-  the whole node.
+  the whole node. On that site's console host, where the page manages second
+  factors (GHSA-mq8x-2p99-6q8c); `async: false`, since the console host is
+  `Application.put_env`, VM-global.
   """
-  use KilnCMSWeb.ConnCase, async: true
+  use KilnCMSWeb.ConnCase, async: false
 
   import KilnCMS.OrgFixtures, only: [org: 1]
   import KilnCMS.SecondFactorFixtures
@@ -20,6 +22,10 @@ defmodule KilnCMSWeb.SettingsLastFactorTest do
   alias KilnCMS.TwoFactorFixtures
 
   @moduletag :capture_log
+
+  setup do
+    with_console_host()
+  end
 
   defp requiring_site(slug) do
     site = org(slug)
@@ -46,7 +52,8 @@ defmodule KilnCMSWeb.SettingsLastFactorTest do
     site = requiring_site("slf-app")
     {user, secret} = app_editor(site)
 
-    {:ok, view, _html} = conn |> signed_in(user, site) |> live(~p"/editor/settings")
+    {:ok, view, _html} =
+      conn |> signed_in(user, site) |> console_conn(site) |> live(~p"/editor/settings")
 
     refute has_element?(view, "#disable-totp-form")
     assert has_element?(view, "#last-factor-note", "requires two-step sign-in")
@@ -66,7 +73,8 @@ defmodule KilnCMSWeb.SettingsLastFactorTest do
     user = seed_user() |> member!(site, :editor)
     passkey = passkey!(user)
 
-    {:ok, view, _html} = conn |> signed_in(user, site) |> live(~p"/editor/settings")
+    {:ok, view, _html} =
+      conn |> signed_in(user, site) |> console_conn(site) |> live(~p"/editor/settings")
 
     refute has_element?(view, ~s(button[phx-click="remove_passkey"]))
     assert has_element?(view, "#last-factor-note")
@@ -81,7 +89,8 @@ defmodule KilnCMSWeb.SettingsLastFactorTest do
     {user, _secret} = app_editor(site)
     passkey!(user)
 
-    {:ok, view, _html} = conn |> signed_in(user, site) |> live(~p"/editor/settings")
+    {:ok, view, _html} =
+      conn |> signed_in(user, site) |> console_conn(site) |> live(~p"/editor/settings")
 
     assert has_element?(view, "#disable-totp-form")
     assert has_element?(view, ~s(button[phx-click="remove_passkey"]))
@@ -92,7 +101,8 @@ defmodule KilnCMSWeb.SettingsLastFactorTest do
     site = org("slf-none")
     {user, _secret} = app_editor(site)
 
-    {:ok, view, _html} = conn |> signed_in(user, site) |> live(~p"/editor/settings")
+    {:ok, view, _html} =
+      conn |> signed_in(user, site) |> console_conn(site) |> live(~p"/editor/settings")
 
     assert has_element?(view, "#disable-totp-form")
     refute has_element?(view, "#last-factor-note")

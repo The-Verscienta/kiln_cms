@@ -315,6 +315,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Credential tokens in sign-in, invitation, preview and newsletter links are redacted from the request log and not recorded as missed paths.**
   ([long form](docs/changelog/unreleased.md#token-paths-redacted-from-request-log))
 
+- **Passkeys and the authenticator app are managed only on the main host and console hosts; `/editor/settings` on a site's own address links there instead, and passkey registration is pinned to the host that served it.**
+  ([long form](docs/changelog/unreleased.md#second-factors-managed-on-setup-hosts))
+
 ## [1.9.2] - 2026-11-12
 
 Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —

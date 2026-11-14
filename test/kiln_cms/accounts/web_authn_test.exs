@@ -31,10 +31,55 @@ defmodule KilnCMS.Accounts.WebAuthnTest do
       challenge = WebAuthn.registration_challenge()
 
       assert {:error, :invalid_encoding} =
-               WebAuthn.register_passkey(user, challenge, %{
-                 "attestation_object" => "not!!base64url",
-                 "client_data_json" => "x"
-               })
+               WebAuthn.register_passkey(
+                 user,
+                 challenge,
+                 %{"attestation_object" => "not!!base64url", "client_data_json" => "x"},
+                 host: main_host()
+               )
+    end
+
+    test "is pinned to the host the ceremony was served on (GHSA-mq8x-2p99-6q8c)" do
+      user = passkey_user()
+      site_host = "acme.#{KilnCMSWeb.Tenant.base_host()}"
+
+      register = fn bytes, origin, opts ->
+        WebAuthn.register_passkey(
+          user,
+          WebAuthn.registration_challenge(),
+          %{
+            "attestation_object" => b64(bytes),
+            "client_data_json" => b64(client_data_create(origin))
+          },
+          opts
+        )
+      end
+
+      # Served on a tenant site host, or on no known host: refused before Wax.
+      assert {:error, :not_ceremony_host} = register.("pin-1", main_origin(), host: site_host)
+      assert {:error, :not_ceremony_host} = register.("pin-2", main_origin(), [])
+
+      # On the main host, a client-reported origin on another host is refused.
+      assert {:error, :origin_mismatch} =
+               register.("pin-3", "http://#{site_host}", host: main_host())
+
+      # No origin at all, or not JSON, is a mismatch too.
+      assert {:error, :origin_mismatch} =
+               WebAuthn.register_passkey(
+                 user,
+                 WebAuthn.registration_challenge(),
+                 %{
+                   "attestation_object" => b64("pin-4"),
+                   "client_data_json" => b64(~s({"type":"webauthn.create"}))
+                 },
+                 host: main_host()
+               )
+
+      assert WebAuthn.list(user) == []
+
+      # The same host, spelled with a different case and a trailing dot.
+      assert {:ok, _passkey} =
+               register.("pin-5", main_origin(), host: String.upcase(main_host()) <> ".")
     end
 
     test "a credential id registers once (WebAuthn uniqueness)" do

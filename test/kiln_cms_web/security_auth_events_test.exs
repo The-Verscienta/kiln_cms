@@ -621,8 +621,10 @@ defmodule KilnCMSWeb.SecurityAuthEventsTest do
       {conn, _key} = KilnCMS.RateLimitHelpers.client_conn(conn)
       ip = ip_of(conn)
 
+      # On the main host, where the page manages second factors.
       conn =
         conn
+        |> main_host_conn()
         |> init_test_session(%{})
         |> AshAuthentication.Plug.Helpers.store_in_session(signed_in)
 

@@ -1612,12 +1612,30 @@ decision: [ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and
   7. **A held account can still reach** billing, the export of its own data,
      sign-out, the setup page and pages that read nothing of the account
      ([What a held account can still reach](two-factor-auth.md#what-a-held-account-can-still-reach)).
-  8. **`/editor/settings` still manages factors on site hosts.** It adds and
-     removes an authenticator app and passkeys for editors and admins, and
-     with no `KILN_CONSOLE_HOST` the console, `/editor/settings` included, is
+  8. **Second factors are managed only on the main host and console hosts.**
+     With no `KILN_CONSOLE_HOST` the console, `/editor/settings` included, is
      served on every site host, the injection origin of residual risk 16.
-     Keeping `/account/two-factor` off site hosts does not close that; a
-     console host does.
+     There, `/editor/settings` draws no factor controls and refuses every
+     factor event server-side (adding, confirming or removing a passkey or
+     the authenticator app, regenerating recovery codes), because an injected
+     script sends the page's events itself; it links to the main host's
+     `/account/two-factor` instead (`KilnCMSWeb.SecondFactorGate.setup_host?/1`,
+     the same rule as that page). A passkey registration is also pinned to
+     the host the page was served on: with `attestation: "none"` the
+     `clientDataJSON` origin is whatever the client writes, so
+     `KilnCMS.Accounts.WebAuthn.register_passkey/4` refuses a ceremony served
+     on a host passkeys are not registered on, and one whose reported origin
+     names another host. What is left:
+     - **The main host is the default org's site.** With no console host,
+       `PHX_HOST` also serves the default org's public pages, so its
+       code injection is same-origin with factor management there. On a
+       single-org deployment that is the operator's own script; on a
+       multi-org one, a console host closes it.
+     - **A site-only editor has fewer controls without a console host.** The
+       main host resolves to the default org, so an editor of another site
+       cannot open `/editor/settings` there. `/account/two-factor` adds an
+       authenticator app or a passkey and removes passkeys, but turning the
+       app off and regenerating recovery codes need a console host.
 
 ### Site invitations (`/auth/invite/:invite_token`, #2135)
 

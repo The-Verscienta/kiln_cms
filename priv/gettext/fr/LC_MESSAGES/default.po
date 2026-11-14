@@ -12626,6 +12626,11 @@ msgstr "Gérer les champs"
 msgid "Manage membership"
 msgstr "Gérer l'abonnement"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manage sign-in security"
+msgstr "Gérer la sécurité de connexion"
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -15860,6 +15865,11 @@ msgstr "La connexion par clé d'accès a échoué. Utilisez une autre méthode."
 #, elixir-autogen, elixir-format
 msgid "Passkeys"
 msgstr "Clés d'accès"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Passkeys and two-factor authentication are managed on the main sign-in host, not on this site's address."
+msgstr "Les clés d'accès et l'authentification à deux facteurs se gèrent sur l'hôte de connexion principal, pas à l'adresse de ce site."
 
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex

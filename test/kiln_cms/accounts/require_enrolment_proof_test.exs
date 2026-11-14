@@ -105,9 +105,10 @@ defmodule KilnCMS.Accounts.RequireEnrolmentProofTest do
       WebAuthn.registration_challenge(),
       %{
         "attestation_object" => b64("rep-cred-#{System.unique_integer([:positive])}"),
-        "client_data_json" => b64(~s({"type":"webauthn.create"}))
+        "client_data_json" => b64(KilnCMS.PasskeyFixtures.client_data_create())
       },
-      context: on_site(context, user)
+      context: on_site(context, user),
+      host: KilnCMS.PasskeyFixtures.main_host()
     )
   end
 

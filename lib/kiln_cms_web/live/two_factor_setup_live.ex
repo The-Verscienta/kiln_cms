@@ -203,7 +203,10 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
         context = Map.merge(socket.assigns.security_context, enrolment_context(socket))
 
         socket =
-          case WebAuthn.register_passkey(user, challenge, payload, context: context) do
+          case WebAuthn.register_passkey(user, challenge, payload,
+                 context: context,
+                 host: KilnCMSWeb.SecondFactorGate.socket_host(socket)
+               ) do
             {:ok, _passkey} ->
               put_flash(socket, :info, gettext("Passkey added — you can sign in with it now."))
 

@@ -29,7 +29,8 @@ because an invitee took the account over is logged but raises no alert.
 
 - **Self-service enrolment** at `/editor/settings` → "Two-factor authentication"
   (editors and admins), or at `/account/two-factor` (any signed-in account,
-  readers included, on the main or console host only; see
+  readers included); both on the main or console host only (see
+  [Where second factors are managed](#where-second-factors-are-managed) and
   [Set up two-step sign-in when your site asks](#set-up-two-step-sign-in-when-your-site-asks)):
   1. *Enable* generates a fresh secret (`setup_totp`) into a **pending** slot
      (`totp_pending_secret`) and shows a setup key + an `otpauth://`
@@ -241,6 +242,42 @@ an earlier token reads as nothing. The policy page reads it to decide whether
 a save needs a code, the email step reads how the session signed in, and the
 gates read it to tell a passkey-only account's password session from one that
 passed the passkey.
+
+## Where second factors are managed
+
+You add, change and remove passkeys and the authenticator app only on the
+main host (`PHX_HOST`) or a console host (`KILN_CONSOLE_HOST`), never on a
+site's own address. A site's own address is where that site's code injection
+runs, and a script there could act on the settings page for anyone signed in.
+
+- With **`KILN_CONSOLE_HOST` set**, the console is served only on console
+  hosts, so `/editor/settings` always shows the full **Two-factor
+  authentication** and **Passkeys** sections. Nothing changes for you.
+- With **no console host**, `/editor/settings` on a site's own address shows,
+  in place of both sections, "Passkeys and two-factor authentication are
+  managed on the main sign-in host, not on this site's address.", "This
+  opens on *main host*, where you sign in again." and a **Manage sign-in
+  security** button to `/account/two-factor` on the main host. The rest of the
+  page (profile, password, sessions, notifications) works as before. A forged
+  request from the page is refused with the same sentence.
+
+To manage factors on a single-host install with no console host:
+
+1. Open `/account/two-factor` on the main host (the address in `PHX_HOST`),
+   and sign in there if asked.
+2. Add an authenticator app or a passkey, or remove a passkey, as described
+   in [Set up two-step sign-in when your site asks](#set-up-two-step-sign-in-when-your-site-asks).
+3. To turn the authenticator app off or regenerate recovery codes, use
+   `/editor/settings` on the main host. That page is open to editors and
+   admins of the main host's site (the default organization). An editor of
+   another site cannot open it there; on a multi-site deployment, set
+   `KILN_CONSOLE_HOST` so every site's editors manage everything from their
+   console host.
+
+A passkey is registered only from a page served on the main host or a console
+host, and only when the browser's reported origin names that same host; any
+other registration is refused with "Couldn't verify that passkey — try
+again."
 
 ## We email you when a second factor is added
 
@@ -678,9 +715,9 @@ that owes one, it says so beside **Enable two-factor authentication**, beside
 **Set up a new authenticator** after a recovery-code sign-in, and beside the
 passkey form: "You need to confirm your email address before you add a second
 factor. Do that on the two-step sign-in page, and add it there." with
-a **Set up two-step sign-in** button to `/account/two-factor` (on a site's own
-address, the main host's page, and it says so). Adding there anyway is
-refused with "Confirm your email address before adding a second factor."
+a **Set up two-step sign-in** button to `/account/two-factor`. Adding there
+anyway is refused with "Confirm your email address before adding a second
+factor."
 
 What can go wrong on the setup page:
 

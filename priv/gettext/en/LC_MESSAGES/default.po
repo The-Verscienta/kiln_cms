@@ -12626,6 +12626,11 @@ msgstr ""
 msgid "Manage membership"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manage sign-in security"
+msgstr ""
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -15859,6 +15864,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Passkeys"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Passkeys and two-factor authentication are managed on the main sign-in host, not on this site's address."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex

@@ -2634,3 +2634,28 @@ carries the reasoning.
   Plug routes in [Plugin extensibility](../plugin-extensibility.md).
   New public functions: `KilnCMSWeb.RequestRedaction.redact/2`,
   `redact_path/1`, `secret?/2`, `credential_param?/1`. (#2449)
+
+<a id="second-factors-managed-on-setup-hosts"></a>
+
+- **Second factors are managed only on the main host and console hosts.**
+  `/account/two-factor` was already served only there. `/editor/settings`
+  now follows the same rule (`KilnCMSWeb.SecondFactorGate.setup_host?/1`):
+  on a site's own address, which is possible only with no
+  `KILN_CONSOLE_HOST`, it draws no **Two-factor authentication** or
+  **Passkeys** controls and links to `/account/two-factor` on the main host,
+  and it refuses adding, confirming or removing a passkey or the
+  authenticator app, and regenerating recovery codes, server-side. The rest
+  of the page is unchanged. Deployments with `KILN_CONSOLE_HOST` set see no
+  difference.
+
+  `KilnCMS.Accounts.WebAuthn.register_passkey/4` now requires `host:`, the
+  host the page was served on, and refuses a registration served on any
+  host but the main host or a passkey-capable console host
+  (`{:error, :not_ceremony_host}`), or whose `clientDataJSON` origin names
+  another host (`{:error, :origin_mismatch}`).
+
+  Without a console host, an editor of a site other than the default one
+  can add an authenticator app or a passkey and remove passkeys on the main
+  host's `/account/two-factor`, but turning the app off and regenerating
+  recovery codes need `/editor/settings` on a console host. See
+  [Where second factors are managed](../two-factor-auth.md#where-second-factors-are-managed).
