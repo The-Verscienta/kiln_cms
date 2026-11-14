@@ -276,13 +276,23 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
   administrator's answer reads every site's (cached) policy.
   """
   @spec required_somewhere?(Accounts.User.t()) :: boolean()
-  def required_somewhere?(user) do
+  def required_somewhere?(user), do: requiring_orgs(user) != []
+
+  @doc """
+  The sites `required_somewhere?/1` finds: each one whose policy covers
+  `user`'s tier there, held or not, enrolled or not. `[]` for an exempt
+  account. For mail about the account's factors that must reach its owner
+  through a site's relay when the instance has none
+  (`KilnCMS.Accounts.SecondFactorNotice`).
+  """
+  @spec requiring_orgs(Accounts.User.t()) :: [Ash.UUID.t()]
+  def requiring_orgs(user) do
     if exempt?(user) do
-      false
+      []
     else
       user
       |> candidate_orgs()
-      |> Enum.any?(fn org_id ->
+      |> Enum.filter(fn org_id ->
         {tier, _source, _record} = Scoping.tier_source(user, org_id)
         covers?(policy(org_id), tier)
       end)

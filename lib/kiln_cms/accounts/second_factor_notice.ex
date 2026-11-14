@@ -38,7 +38,12 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
 
   Account mail, so it goes through the instance relay (`Mail.enqueue!/1` with
   no `org_id`), in the operator's branding, in English, like the other account
-  mail. Anything that goes wrong is logged and swallowed: the factor is already
+  mail. When the instance has no relay (`Mail.relay_available?(nil)` is
+  false), it goes through the relay of the first site that requires the
+  account to hold a second factor and has one
+  (`TwoFactorRequirement.requiring_orgs/1`): the setup that lets a site skip
+  the enrollment's email proof for want of mail is the one where the owner
+  would otherwise never hear of a factor someone else added. Anything that goes wrong is logged and swallowed: the factor is already
   committed, and a mail that cannot be queued must not read as a failed
   enrollment.
 
@@ -52,6 +57,7 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMS.Accounts.User
   alias KilnCMS.Mail
   alias KilnCMS.Security.Recorder
@@ -111,7 +117,19 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
     |> to(to_string(user.email))
     |> subject("A second factor was added to your #{site} account")
     |> html_body(body(escape(site), factor, details))
-    |> Mail.enqueue!()
+    |> Mail.enqueue!(org_id: relay_org(user))
+  end
+
+  # `nil` (the instance relay) when the instance has one, or when no site
+  # that requires a factor of this account has one either; else that site.
+  defp relay_org(user) do
+    if Mail.relay_available?(nil) do
+      nil
+    else
+      user
+      |> TwoFactorRequirement.requiring_orgs()
+      |> Enum.find(&Mail.relay_available?/1)
+    end
   end
 
   defp body(site, factor, details) do

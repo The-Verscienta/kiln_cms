@@ -303,7 +303,10 @@ settings list the owner has no reason to open, so the email is how they find
 out.
 
 The email is titled "A second factor was added to your (name) account", with
-the instance's name. It says:
+the instance's name. It goes out through the deployment's outgoing mail
+server. When the deployment has none, it goes through the mail relay of a
+site that requires the account to hold a second factor, if one has its own
+relay. It says:
 
 - what was added: "An authenticator app was set up…", "A new authenticator app
   replaced the one your account used… Codes from the old one no longer work."
@@ -855,10 +858,11 @@ affected: those are how a lost or stolen factor is cleared.
 - **Headless clients of a held account get `403`.** A script or app that signs
   in as a person on a site that holds that person stops working at the
   deadline. Give it an API key instead.
-- **Mail.** The email step goes through the site's relay. A deployment with no
-  outgoing mail server skips it, which leaves the enrollment protected only by
-  the "a second factor was added" email to the owner (which also needs a
-  relay). The three-codes-an-hour cap per address is code config:
+- **Mail.** The email step goes through the relay of the site the page is
+  opened for, or else of a site that holds the account. It is skipped only
+  when none of them has a working relay, which leaves the enrollment
+  protected only by the "a second factor was added" email to the owner (which
+  also needs a relay, and then has none either). The three-codes-an-hour cap per address is code config:
   `config :kiln_cms, KilnCMS.Accounts.AccountThrottle, enrolment_proof_mail_budget: 3`.
 - **Rolling back** to a release before this one drops the enforcement without
   a warning: the table stays and an older release ignores it. Nobody is held,

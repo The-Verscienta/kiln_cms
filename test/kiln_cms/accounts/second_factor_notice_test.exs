@@ -293,3 +293,134 @@ defmodule KilnCMS.Accounts.SecondFactorNoticeTest do
     end
   end
 end
+
+defmodule KilnCMS.Accounts.SecondFactorNoticeRelayTest do
+  @moduledoc """
+  Which relay the added-factor notice goes through when the deployment has no
+  outgoing mail server: the instance relay is gone, so a site that requires
+  the account's factor and has a relay of its own carries it. That is the
+  setup in which the enrollment's email proof may be skipped, so the notice is
+  the owner's only word of a factor someone else added.
+
+  `async: false`: it changes the mailer with `Application.put_env`.
+  """
+  use KilnCMS.DataCase, async: false
+  use Oban.Testing, repo: KilnCMS.Repo
+
+  import KilnCMS.OrgFixtures, only: [org: 1]
+
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.SecondFactorNotice
+  alias KilnCMS.Mail
+  alias KilnCMS.Mail.DeliveryWorker
+
+  @moduletag :capture_log
+
+  @long_ago ~U[2026-01-01 00:00:00.000000Z]
+
+  # A site that requires everyone to hold a second factor, and a viewer of it
+  # with none, long past the deadline.
+  setup do
+    site = org("sfn-relay")
+
+    Ash.Seed.seed!(KilnCMS.CMS.SiteSecondFactorPolicy, %{
+      org_id: site.id,
+      required_for: :everyone,
+      grace_days: 0,
+      admin_required_since: @long_ago,
+      editor_required_since: @long_ago,
+      viewer_required_since: @long_ago,
+      policy_changed_at: @long_ago
+    })
+
+    KilnCMS.Cache.bust_second_factor_policy(site.id)
+
+    user =
+      Ash.Seed.seed!(Accounts.User, %{
+        email: "sfn-relay-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :viewer,
+        inserted_at: @long_ago
+      })
+
+    Ash.Seed.seed!(Accounts.OrgMembership, %{
+      organization_id: site.id,
+      user_id: user.id,
+      role: :viewer,
+      inserted_at: @long_ago
+    })
+
+    %{site: site, user: user}
+  end
+
+  defp put_env(app, key, value) do
+    previous = Application.get_env(app, key)
+    Application.put_env(app, key, value)
+
+    on_exit(fn ->
+      if is_nil(previous),
+        do: Application.delete_env(app, key),
+        else: Application.put_env(app, key, previous)
+    end)
+  end
+
+  defp no_operator_mailer! do
+    put_env(:kiln_cms, KilnCMS.Mailer, adapter: Swoosh.Adapters.Local)
+    put_env(:swoosh, :local, false)
+    refute Mail.relay_available?(nil)
+  end
+
+  defp site_relay!(site) do
+    KilnCMS.CMS.save_site_mail_relay!(
+      %{
+        host: "smtp.example.com",
+        port: 587,
+        username: "apikey",
+        password: "s3cret-pass",
+        from_email: "news@site.example"
+      },
+      tenant: site,
+      authorize?: false
+    )
+  end
+
+  defp notice_jobs(user) do
+    address = to_string(user.email)
+
+    for %{args: %{"to" => [_name, ^address]} = args} <- all_enqueued(worker: DeliveryWorker),
+        do: args
+  end
+
+  test "with the instance relay, the notice goes through it", %{site: site, user: user} do
+    site_relay!(site)
+    assert Mail.relay_available?(nil)
+
+    :ok = SecondFactorNotice.factor_added(user.id, :passkey, %{})
+
+    assert [args] = notice_jobs(user)
+    refute Map.get(args, "org_id")
+  end
+
+  test "with no instance relay, a requiring site's own relay carries it", %{
+    site: site,
+    user: user
+  } do
+    no_operator_mailer!()
+    site_relay!(site)
+
+    :ok = SecondFactorNotice.factor_added(user.id, :passkey, %{})
+
+    assert [args] = notice_jobs(user)
+    assert args["org_id"] == site.id
+  end
+
+  test "with no relay anywhere, it is queued as account mail as before", %{user: user} do
+    no_operator_mailer!()
+
+    :ok = SecondFactorNotice.factor_added(user.id, :passkey, %{})
+
+    assert [args] = notice_jobs(user)
+    refute Map.get(args, "org_id")
+  end
+end
