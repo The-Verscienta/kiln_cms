@@ -9,6 +9,7 @@ defmodule KilnCMS.Backups.Schedule.Validations.IntervalAvailable do
   paused or deleted.
   """
   use Ash.Resource.Validation
+  use Gettext, backend: KilnCMSWeb.Gettext
 
   alias KilnCMS.Backups.Schedule
 
@@ -21,10 +22,15 @@ defmodule KilnCMS.Backups.Schedule.Validations.IntervalAvailable do
 
     if Ash.Changeset.changing_attribute?(changeset, :interval) and
          interval in Schedule.sub_daily_intervals(),
-       do:
-         {:error,
-          field: :interval,
-          message: "sub-daily schedules arrive with keep-N retention; choose daily or longer"},
+       do: {:error, field: :interval, message: message()},
        else: :ok
   end
+
+  # Translated where the form shows it (`translate_error/1`).
+  defp message,
+    do:
+      dgettext_noop(
+        "errors",
+        "sub-daily schedules arrive with keep-N retention; choose daily or longer"
+      )
 end

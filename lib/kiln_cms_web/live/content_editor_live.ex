@@ -134,7 +134,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # comments, tasks, releases and history are all keyed on a record id, so
   # they start there rather than being faked with a nil one here.
   @impl true
-  def mount(params, _session, %{assigns: %{live_action: :new}} = socket) do
+  def mount(params, session, %{assigns: %{live_action: :new}} = socket) do
+    socket = assign_second_factor_verified(socket, session)
     actor = socket.assigns.current_user
     org = socket.assigns.current_org
 
@@ -162,7 +163,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  def mount(%{"id" => id} = params, _session, socket) do
+  def mount(%{"id" => id} = params, session, socket) do
+    socket = assign_second_factor_verified(socket, session)
+
     case content_kind(params, socket) do
       nil ->
         {:ok, push_navigate(socket, to: ~p"/editor")}
@@ -172,6 +175,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:ok, mount_record(socket, kind, record, params)}
     end
   end
+
+  # Whether this session passed a second factor at sign-in, for the collab
+  # token (#2247): a passkey-only account past its site's deadline needs it.
+  defp assign_second_factor_verified(socket, session),
+    do:
+      assign(
+        socket,
+        :second_factor_verified?,
+        KilnCMSWeb.SecondFactorGate.session_verified?(session)
+      )
 
   # No URL state of its own: the one patch this view makes is the unsaved
   # editor becoming the saved one (`materialize_draft/1`), which has already
@@ -666,7 +679,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:select_terms, KilnCMS.CMS.SelectTerms.used(field_definitions))
     # CRDT collab prototype: when enabled, rich-text blocks sync live
     # between editors over the collab channel (see KilnCMS.Collab.Crdt).
-    |> assign(:collab_token, collab_token(actor))
+    |> assign(:collab_token, collab_token(actor, socket.assigns[:second_factor_verified?]))
     # From `record.id`, not the route param: the channel rebuilds the doc
     # key from the record it resolves, and a differently-cased id in the
     # URL would otherwise name the same document under a different key
@@ -1790,9 +1803,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Socket token for the CRDT collab prototype; nil (and thus no data-collab
   # attributes, no channel) when the flag is off. Mount is editor/admin-gated,
   # so a token only ever reaches an authorized editor.
-  defp collab_token(actor) do
+  defp collab_token(actor, second_factor_verified?) do
     if KilnCMS.Collab.Crdt.enabled?() do
-      Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", actor.id)
+      KilnCMSWeb.CollabSocket.token(actor, second_factor_verified? == true)
     end
   end
 

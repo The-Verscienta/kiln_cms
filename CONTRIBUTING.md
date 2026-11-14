@@ -214,6 +214,12 @@ between extras renders as a link to a different file than the one it names; the
 fix is the full URL, never reordering `extras:`, which only moves which of the
 colliding links is wrong.
 
+**Link a source file relatively** (from a guide in `docs/`,
+`[search.ex](../lib/kiln_cms/search.ex#L56)`):
+GitHub resolves it at the tag or branch being viewed and the kilncms.dev
+publisher rewrites it to `blob/main`, and the same test fails when the file it
+names does not exist (the `extras/0` comment in `mix.exs` has the details).
+
 **A `#fragment` link must land in both renderings.** ExDoc and github.com
 slug headings differently: GitHub keeps a hyphen for each space around dropped
 punctuation (`## Storage & CDN` → `storage--cdn`) where ExDoc collapses the run
@@ -234,7 +240,7 @@ document also has a phase table, the header summarizes the table and changes in
 the same commit as it. A header that says "design only" above a table of
 "done" rows is the drift this rule exists to stop.
 
-**A screenshot in a guide is a WebP file under `docs/images/`.** Link it
+**A screenshot in a guide is a WebP file under `docs/images/<guide>/`.** Link it
 relative to `docs/` (`![alt](images/editorial-workflow/2-draft.webp)`), on a
 paragraph of its own, with alt text that describes the whole screen. That one
 path works on GitHub, in ExDoc (which copies `docs/images/` as `images/`), and
@@ -383,16 +389,18 @@ To recapture its eight images after a console change:
    editor and admin, checks that the editor sees **Submit for review** and no
    **Publish** (Team → Publishing off), and fails rather than photograph a
    site set up differently. The JPEGs land in
-   `e2e/screenshots/raw/workflow-*.jpg` (gitignored), and the spec deletes
-   its draft, from the trash too, when it ends.
-2. Derive: `scripts/optimize_home_images.sh docs` from the repo root writes
-   `docs/images/editorial-workflow/<n>-<name>.webp`, at most 1440 pixels
-   wide, at `WEBP_QUALITY` (default 80). It needs `cwebp` and either `sips`
-   or ImageMagick, as for the home page.
-3. Check: `mix test test/kiln_cms/docs/editorial_workflow_test.exs` fails
-   when an image is over 90 KB, the guide's images total over 600 KB, there
-   are more than eight, one has no alt text or is not a WebP, or a file in
-   the folder is not referenced by the guide.
+   `e2e/screenshots/raw/editorial-workflow/<n>-<name>.jpg` (gitignored), and
+   the spec deletes its draft, from the trash too, when it ends.
+2. Derive: `scripts/optimize_home_images.sh docs editorial-workflow` from the
+   repo root writes `docs/images/editorial-workflow/<n>-<name>.webp`, at most
+   1440 pixels wide, at `WEBP_QUALITY` (default 80). Bare `docs` derives
+   every folder under `raw/`. It needs `cwebp` and either `sips` or
+   ImageMagick, as for the home page.
+3. Check: `mix test test/kiln_cms/docs/guide_images_test.exs` fails when an
+   image is over 90 KB or 1600 pixels wide, a guide's images total over
+   600 KB, there are more than eight, one has no alt text, is not a WebP or
+   is not on a paragraph of its own, or a file in the folder is not shown by
+   the guide.
 4. Commit the WebP files. Never commit the raw captures.
 
 To add screenshots to another guide:
@@ -401,17 +409,21 @@ To add screenshots to another guide:
   `editorial-workflow.spec.js`. Sign in with the fixtures from
   `e2e/tests/fixtures.js`, assert the starting state you mean to photograph,
   and wait on what the page renders, never on a timeout (see
-  `e2e/README.md`). Name the raw files with a prefix of the guide's own.
+  `e2e/README.md`). Write the raw files to `e2e/screenshots/raw/<guide>/`,
+  where `<guide>` is the guide's basename (`docs/<guide>.md`), named
+  `<n>-<name>.jpg`.
 - **Number what the reader should look at** with
   `annotate(page, markers, shot)` from `e2e/screenshots/annotate.js`. It
   draws a ring and a numbered badge on each marked element (at most three
   per shot), takes the screenshot, and removes the overlay. Under each image
   in the guide, write a numbered list whose items match the badges; the
   picture itself carries no text.
-- **Derive and budget the files.** The `docs` target of
-  `scripts/optimize_home_images.sh` only knows `raw/workflow-*.jpg`, so add
-  a target for the new prefix, and copy the screenshot checks from
-  `editorial_workflow_test.exs` into a test for your guide.
+- **Derive and budget the files.** Nothing to add:
+  `scripts/optimize_home_images.sh docs <guide>` writes
+  `docs/images/<guide>/`, and `test/kiln_cms/docs/guide_images_test.exs`
+  holds every guide in `mix.exs` extras to the same budget the moment it
+  links an image. Only a guide directly under `docs/` may have screenshots,
+  and a folder under `docs/images/` with no guide of its name fails the test.
 - **Publishing.** Nothing to set up. The publisher uploads each image as
   `<basename>-<first 12 hex of its sha256>.<ext>` and reuses an upload with
   that name on later runs, and a changed image republishes every guide that

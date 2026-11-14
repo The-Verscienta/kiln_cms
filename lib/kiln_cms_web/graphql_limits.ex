@@ -120,12 +120,18 @@ defmodule KilnCMSWeb.GraphqlLimits do
     # The same pipeline `Absinthe.Phoenix.Channel.default_pipeline/2` builds,
     # charged to the rate limit first. The budget goes before `Phase.Init` so a
     # subscription's pushes, which re-run the phases Init recorded, never pay it.
-    budget = {SocketDocumentBudget, context: Keyword.get(pipeline_opts, :context, %{})}
+    #
+    # After the budget, an account its site now holds for a second factor is
+    # refused (`SocketSecondFactor`, #2247): the actor was fixed at connect.
+    context = Keyword.get(pipeline_opts, :context, %{})
 
     schema
     |> Absinthe.Pipeline.for_document(pin(pipeline_opts))
     |> add_phases()
-    |> Absinthe.Pipeline.insert_before(Phase.Init, budget)
+    |> Absinthe.Pipeline.insert_before(Phase.Init, [
+      {SocketDocumentBudget, context: context},
+      {KilnCMSWeb.GraphqlLimits.SocketSecondFactor, context: context}
+    ])
   end
 
   defp pin(pipeline_opts), do: Keyword.merge(pipeline_opts, options())

@@ -11,18 +11,20 @@ defmodule KilnCMSWeb.SettingsLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.EnrolmentProof
   alias KilnCMS.Accounts.Errors.DemoAccountLocked
+  alias KilnCMS.Accounts.Errors.LastSecondFactorRequired
   alias KilnCMS.Accounts.Errors.PasskeyLimitReached
   alias KilnCMS.Accounts.Errors.PasskeyRegistrationThrottled
-  alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.Passkey
   alias KilnCMS.Accounts.Sessions
-  alias KilnCMS.Accounts.Totp
   alias KilnCMS.Accounts.WebAuthn
   alias KilnCMS.Push
   alias KilnCMSWeb.RoleDisplay
+  alias KilnCMSWeb.TotpEnrolment
 
   import KilnCMSWeb.RoleDisplay, only: [role_summary: 1]
+  import KilnCMSWeb.TotpEnrolment, only: [last_factor?: 4, last_factor_note: 1]
 
   @status_marks %{"words" => :words, "trigrams" => :trigrams}
 
@@ -58,19 +60,25 @@ defmodule KilnCMSWeb.SettingsLive do
      # passkeys are fixed, so their forms give way to a note saying why. The
      # actions refuse regardless — this only spares a visitor the attempt.
      |> assign(:credentials_locked?, KilnCMS.Demo.locks_credentials?(user))
-     |> assign(:totp_enabled?, Accounts.totp_enabled?(user))
-     # Whether THIS session signed in with a recovery code (#786). Set by the
-     # 2FA gate; read here so re-enrolling over a live secret can waive the
-     # current-code proof for someone who lost their authenticator.
-     |> assign(:recovery_login?, session["totp_recovery_login"] == true)
-     # Transient enrolment state (secret + provisioning URI + QR) while confirming.
-     |> assign(:enrolling, nil)
-     # Freshly minted recovery codes, shown exactly once (#331 phase 2).
-     |> assign(:recovery_codes, nil)
+     # The authenticator-app flow (#331), shared with `/account/two-factor`.
+     |> TotpEnrolment.init(session)
+     # What the enrolment actions are told about this session, for the email
+     # proof a site's requirement may ask for (#2247).
+     |> assign(:enrolment_session, KilnCMSWeb.SignInMarker.enrolment_session(session))
+     # Whether that proof is owed (#2872): this page has no step to give it,
+     # so the add controls say where to go instead of only refusing.
+     |> assign_proof_elsewhere()
      # Passkeys (#331): registered credentials + the in-flight enrolment
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
      |> assign(:passkey_challenge, nil)
+     # Whether a site this account uses requires a second factor (#2247): if
+     # so, the last one left has no "Disable" or "Remove", and a note says
+     # why. The actions refuse regardless.
+     |> assign(
+       :second_factor_required?,
+       KilnCMS.Accounts.TwoFactorRequirement.required_somewhere?(user)
+     )
      # The most an account may hold (#2247): at it, the add form gives way to
      # a note, and the registration refuses regardless.
      |> assign(:passkey_limit, Passkey.max_per_account())
@@ -95,6 +103,37 @@ defmodule KilnCMSWeb.SettingsLive do
   end
 
   defp push_devices(user), do: Push.list(user)
+
+  # The enrolment actions' email-proof context (#2247): this site, this
+  # session, and no proof. This page has no proof step (that is
+  # `/account/two-factor`'s), so where the site asks for one the action
+  # refuses.
+  defp enrolment_context(socket),
+    do:
+      EnrolmentProof.context(
+        socket.assigns.current_org,
+        socket.assigns.enrolment_session,
+        nil
+      )
+
+  # The email proof is `EnrolmentProof.decide/4`'s, the same call the actions
+  # make: when it is owed, this page's adds are refused (it passes no proof),
+  # and the setup page is where the code is emailed and entered. That page is
+  # not served on a tenant site host, so the link there goes to the main
+  # host's and says so (as `/account` does).
+  defp assign_proof_elsewhere(socket) do
+    %{current_user: user, current_org: org, enrolment_session: session} = socket.assigns
+    host = KilnCMSWeb.SecondFactorGate.socket_host(socket)
+    url = KilnCMSWeb.SecondFactorGate.setup_href(host)
+
+    socket
+    |> assign(:proof_elsewhere?, EnrolmentProof.required?(user, org && org.id, session))
+    |> assign(:setup_url, url)
+    |> assign(
+      :setup_host,
+      if(KilnCMSWeb.SecondFactorGate.setup_host?(host), do: nil, else: URI.parse(url).host)
+    )
+  end
 
   # "Your access" (#2142): the tier this page was reached with, as the policies
   # resolve it on this site, and when a temporary one changes. Read-only, and
@@ -157,7 +196,7 @@ defmodule KilnCMSWeb.SettingsLive do
         socket = assign(socket, :passkey_challenge, nil)
 
         case WebAuthn.register_passkey(user, challenge, payload,
-               context: socket.assigns.security_context
+               context: Map.merge(socket.assigns.security_context, enrolment_context(socket))
              ) do
           {:ok, _passkey} ->
             message = gettext("Passkey added — you can sign in with it now.")
@@ -171,7 +210,10 @@ defmodule KilnCMSWeb.SettingsLive do
           {:error, reason} ->
             message =
               passkey_refusal(reason) ||
-                refusal_or(reason, gettext("Couldn't verify that passkey — try again."))
+                TotpEnrolment.error_message(
+                  reason,
+                  gettext("Couldn't verify that passkey — try again.")
+                )
 
             {:noreply,
              socket
@@ -203,19 +245,15 @@ defmodule KilnCMSWeb.SettingsLive do
     user = socket.assigns.current_user
 
     socket =
-      with {:ok, passkey} <- Accounts.get_passkey(id, actor: user),
-           :ok <-
-             Accounts.remove_passkey(passkey,
-               actor: user,
-               context: socket.assigns.security_context
-             ) do
-        socket
-        |> assign(:passkeys, WebAuthn.list(user))
-        |> assign(:passkey_status, {:ok, gettext("Passkey removed.")})
-        |> put_flash(:info, gettext("Passkey removed."))
-      else
-        error ->
-          put_flash(socket, :error, refusal_or(error, gettext("Couldn't remove that passkey.")))
+      case TotpEnrolment.remove_passkey(user, id, socket.assigns.security_context) do
+        {:ok, message} ->
+          socket
+          |> assign(:passkeys, WebAuthn.list(user))
+          |> assign(:passkey_status, {:ok, message})
+          |> put_flash(:info, message)
+
+        {:error, message} ->
+          put_flash(socket, :error, message)
       end
 
     {:noreply, socket}
@@ -291,69 +329,19 @@ defmodule KilnCMSWeb.SettingsLive do
   # --- two-factor authentication (#331) --------------------------------------
 
   @impl true
-  def handle_event("start_totp", _params, socket) do
-    user = socket.assigns.current_user
-
-    case Accounts.setup_totp(user, %{}, actor: user) do
-      {:ok, user} ->
-        uri = Totp.otpauth_uri(user.totp_pending_secret, to_string(user.email))
-
-        {:noreply,
-         socket
-         |> assign(:current_user, user)
-         |> assign(:enrolling, %{
-           secret: Totp.base32_encode(user.totp_pending_secret),
-           uri: uri,
-           qr_svg: qr_svg(uri)
-         })}
-
-      {:error, error} ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           refusal_or(error, gettext("Couldn't start two-factor setup."))
-         )}
-    end
-  end
+  def handle_event("start_totp", _params, socket),
+    do: {:noreply, TotpEnrolment.start(socket)}
 
   def handle_event("cancel_totp", _params, socket),
-    do: {:noreply, assign(socket, :enrolling, nil)}
+    do: {:noreply, TotpEnrolment.cancel(socket)}
 
+  # The action asks for the email proof when the site requires a second factor
+  # and this session signed in with only a password after the deadline
+  # (#2247). This page offers no proof step, so then it is refused, and says
+  # why.
   def handle_event("confirm_totp", %{"code" => code} = params, socket) when is_binary(code) do
-    user = socket.assigns.current_user
-
-    args = %{
-      code: code,
-      # Only meaningful when replacing an already-confirmed secret (#786); the
-      # action ignores both on a first enrolment. `recovery_login?` comes from
-      # the session, not this payload — the current-code field is the only thing
-      # the form contributes.
-      current_code: params["current_code"],
-      recovery_login?: socket.assigns.recovery_login?
-    }
-
-    case Accounts.confirm_totp(user, args,
-           actor: user,
-           context: socket.assigns.security_context
-         ) do
-      {:ok, user} ->
-        {:noreply,
-         socket
-         |> assign(:current_user, user)
-         |> assign(:totp_enabled?, true)
-         |> assign(:enrolling, nil)
-         |> assign(:recovery_codes, Ash.Resource.get_metadata(user, :recovery_codes))
-         |> put_flash(:info, gettext("Two-factor authentication is now on."))}
-
-      {:error, error} ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           second_factor_error(error, gettext("That code isn't valid — try again."))
-         )}
-    end
+    {_result, socket} = TotpEnrolment.confirm(socket, params, enrolment_context(socket))
+    {:noreply, socket}
   end
 
   def handle_event("regenerate_recovery_codes", %{"code" => code}, socket) when is_binary(code) do
@@ -627,25 +615,6 @@ defmodule KilnCMSWeb.SettingsLive do
     {:noreply, socket}
   end
 
-  defp qr_svg(uri) do
-    uri |> EQRCode.encode() |> EQRCode.svg(width: 176)
-  rescue
-    _ -> nil
-  end
-
-  attr :svg, :string, required: true
-
-  # The SVG is generated locally by EQRCode from the otpauth URI we built —
-  # never from user input — so rendering it raw is safe.
-  # sobelow_skip ["XSS.Raw"]
-  defp totp_qr(assigns) do
-    ~H"""
-    <div class="w-fit rounded-lg bg-white p-2" data-role="totp-qr">
-      {Phoenix.HTML.raw(@svg)}
-    </div>
-    """
-  end
-
   defp nav_preset_value(user), do: Atom.to_string(KilnCMSWeb.ConsoleNav.preset(user))
 
   defp prefs_form(user) do
@@ -893,30 +862,7 @@ defmodule KilnCMSWeb.SettingsLive do
                 )}
               </p>
 
-              <div
-                :if={@recovery_codes}
-                class="mb-4 space-y-2 rounded-lg border border-warning/50 bg-warning/10 p-4"
-              >
-                <p class="text-sm font-medium">
-                  {gettext("Your recovery codes — save them now, they won't be shown again.")}
-                </p>
-                <p class="text-xs text-base-content/70">
-                  {gettext("Each code signs you in once if you lose your authenticator.")}
-                </p>
-                <ul
-                  class="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm"
-                  data-role="recovery-codes"
-                >
-                  <li :for={code <- @recovery_codes}>{code}</li>
-                </ul>
-                <button
-                  type="button"
-                  phx-click="dismiss_recovery_codes"
-                  class="btn btn-sm btn-default"
-                >
-                  {gettext("I've saved them")}
-                </button>
-              </div>
+              <TotpEnrolment.recovery_codes :if={@recovery_codes} codes={@recovery_codes} />
 
               <.demo_locked_note :if={@credentials_locked?} />
 
@@ -946,9 +892,17 @@ defmodule KilnCMSWeb.SettingsLive do
                       "Set up a new authenticator app so you can keep signing in without using another recovery code."
                     )}
                   </p>
+                  <.proof_elsewhere_note
+                    :if={@proof_elsewhere?}
+                    id="totp-proof-elsewhere"
+                    setup_url={@setup_url}
+                    setup_host={@setup_host}
+                    class="mt-3"
+                  />
                   <.button phx-click="start_totp" variant="primary" class="mt-3">
                     {gettext("Set up a new authenticator")}
                   </.button>
+                  <TotpEnrolment.added_mail_note />
                 </div>
                 <form
                   id="regenerate-recovery-form"
@@ -965,7 +919,15 @@ defmodule KilnCMSWeb.SettingsLive do
                   />
                   <.button type="submit" variant="ghost">{gettext("Regenerate")}</.button>
                 </form>
-                <form id="disable-totp-form" phx-submit="disable_totp" class="flex items-end gap-2">
+                <.last_factor_note :if={
+                  last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :totp)
+                } />
+                <form
+                  :if={!last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :totp)}
+                  id="disable-totp-form"
+                  phx-submit="disable_totp"
+                  class="flex items-end gap-2"
+                >
                   <.input
                     name="code"
                     value=""
@@ -978,41 +940,23 @@ defmodule KilnCMSWeb.SettingsLive do
                 </form>
               </div>
 
-              <div :if={@enrolling && !@credentials_locked?} class="space-y-3">
-                <p class="text-sm text-base-content/70">
-                  {gettext(
-                    "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."
-                  )}
-                </p>
-                <.totp_qr :if={@enrolling.qr_svg} svg={@enrolling.qr_svg} />
-                <p class="text-sm">
-                  {gettext("Setup key")}:
-                  <code class="rounded bg-base-200 px-1.5 py-0.5 font-mono text-sm break-all">{@enrolling.secret}</code>
-                </p>
-                <details class="text-xs text-base-content/60">
-                  <summary class="cursor-pointer">{gettext("Provisioning URI")}</summary>
-                  <code class="break-all">{@enrolling.uri}</code>
-                </details>
-                <form id="confirm-totp-form" phx-submit="confirm_totp" class="flex items-end gap-2">
-                  <.input
-                    name="code"
-                    value=""
-                    type="text"
-                    inputmode="numeric"
-                    autocomplete="one-time-code"
-                    label={gettext("6-digit code")}
-                  />
-                  <.button type="submit" variant="primary">{gettext("Confirm")}</.button>
-                  <button type="button" phx-click="cancel_totp" class="btn btn-default">
-                    {gettext("Cancel")}
-                  </button>
-                </form>
+              <div :if={@enrolling && !@credentials_locked?}>
+                <TotpEnrolment.setup enrolling={@enrolling} />
+                <TotpEnrolment.added_mail_note />
               </div>
 
               <div :if={!@totp_enabled? && !@enrolling && !@credentials_locked?}>
+                <.proof_elsewhere_note
+                  :if={@proof_elsewhere?}
+                  id="totp-proof-elsewhere"
+                  setup_url={@setup_url}
+                  setup_host={@setup_host}
+                  class="mb-3"
+                />
                 <.button phx-click="start_totp" variant="primary">
                   {gettext("Enable two-factor authentication")}
                 </.button>
+                <TotpEnrolment.added_mail_note />
               </div>
             </section>
 
@@ -1072,7 +1016,10 @@ defmodule KilnCMSWeb.SettingsLive do
                     </p>
                   </div>
                   <button
-                    :if={!@credentials_locked?}
+                    :if={
+                      !@credentials_locked? &&
+                        !last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
+                    }
                     type="button"
                     phx-click="remove_passkey"
                     phx-value-id={passkey.id}
@@ -1086,6 +1033,9 @@ defmodule KilnCMSWeb.SettingsLive do
               </ul>
 
               <.demo_locked_note :if={@credentials_locked?} />
+              <.last_factor_note :if={
+                last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
+              } />
               <p
                 :if={!@credentials_locked? && length(@passkeys) >= @passkey_limit}
                 id="passkeys-at-limit"
@@ -1094,6 +1044,16 @@ defmodule KilnCMSWeb.SettingsLive do
                 <.icon name="hero-information-circle" class="size-4 shrink-0" />
                 {passkey_limit_message()}
               </p>
+              <.proof_elsewhere_note
+                :if={
+                  @proof_elsewhere? && !@credentials_locked? && !@passkey_challenge &&
+                    length(@passkeys) < @passkey_limit
+                }
+                id="passkey-proof-elsewhere"
+                setup_url={@setup_url}
+                setup_host={@setup_host}
+                class="mb-3"
+              />
               <form
                 :if={
                   !@credentials_locked? && !@passkey_challenge &&
@@ -1132,9 +1092,14 @@ defmodule KilnCMSWeb.SettingsLive do
               </div>
               <p
                 :if={!@credentials_locked? && length(@passkeys) < @passkey_limit}
-                class="mt-2 text-xs text-base-content/60"
+                class="mt-2 text-xs text-base-content/70"
               >
                 {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
+                <%!-- `Passkey.:register` mails the owner every time
+                      (`NotifyFactorAdded`, `SecondFactorNotice`). --%>
+                <span id="passkey-added-mail">
+                  {gettext("We'll email you each time a passkey is added to your account.")}
+                </span>
               </p>
               <p
                 :if={@passkey_status}
@@ -1492,25 +1457,21 @@ defmodule KilnCMSWeb.SettingsLive do
   # "check your authenticator" sends someone to type five more codes into a
   # budget that has nothing left. Telling them apart discloses nothing — whoever
   # is here is already signed in as this account.
-  defp second_factor_error(%{errors: errors} = error, wrong_code_message) do
-    case Enum.find(List.wrap(errors), &match?(%SecondFactorThrottled{}, &1)) do
-      %SecondFactorThrottled{retry_after_seconds: seconds} ->
-        gettext("Too many attempts — try again in %{seconds} seconds.", seconds: seconds)
+  # A spent second-factor budget, a demo-mode refusal, or the handler's own
+  # message — the same wording the authenticator-app flow uses.
+  defp second_factor_error(error, wrong_code_message),
+    do: TotpEnrolment.error_message(error, wrong_code_message)
 
-      nil ->
-        refusal_or(error, wrong_code_message)
-    end
-  end
-
-  defp second_factor_error(_error, wrong_code_message), do: wrong_code_message
-
-  # A demo-mode refusal (`DemoAccountLocked`) says so; anything else keeps the
+  # A demo-mode refusal (`DemoAccountLocked`) or the last factor a site
+  # requires (`LastSecondFactorRequired`) says so; anything else keeps the
   # handler's own message. Takes an Ash error or a changeset (both carry
   # `errors`), or whatever an `{:error, _}` held.
   defp refusal_or(%{errors: errors}, fallback) do
-    if Enum.any?(List.wrap(errors), &match?(%DemoAccountLocked{}, &1)),
-      do: demo_locked_message(),
-      else: fallback
+    Enum.find_value(List.wrap(errors), fallback, fn
+      %DemoAccountLocked{} -> demo_locked_message()
+      %LastSecondFactorRequired{} -> TotpEnrolment.last_factor_message()
+      _other -> nil
+    end)
   end
 
   defp refusal_or({:error, error}, fallback), do: refusal_or(error, fallback)
@@ -1536,16 +1497,38 @@ defmodule KilnCMSWeb.SettingsLive do
 
   defp passkey_refusal(_reason), do: nil
 
-  defp passkey_limit_message do
-    gettext("You have %{max} passkeys, the most an account can hold. Remove one to add another.",
-      max: Passkey.max_per_account()
-    )
-  end
+  defp passkey_limit_message, do: TotpEnrolment.passkey_limit_message()
 
-  defp demo_locked_message do
-    gettext(
-      "This is a shared demo account, so its password and sign-in methods can't be changed."
-    )
+  defp demo_locked_message, do: TotpEnrolment.demo_locked_message()
+
+  attr :id, :string, required: true
+  attr :setup_url, :string, required: true
+  attr :setup_host, :string, default: nil, doc: "set when the setup page is on another host"
+  attr :class, :any, default: nil
+
+  # Up front, where `RequireEnrolmentProof` would refuse this page's add: the
+  # refusal flash ("Confirm your email address before adding a second
+  # factor.") stays as the backstop.
+  defp proof_elsewhere_note(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class={["rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm", @class]}
+    >
+      <p class="flex items-start gap-1.5">
+        <.icon name="hero-envelope" class="mt-0.5 size-4 shrink-0" />
+        {gettext(
+          "You need to confirm your email address before you add a second factor. Do that on the two-step sign-in page, and add it there."
+        )}
+      </p>
+      <p :if={@setup_host} class="mt-1 text-base-content/70">
+        {gettext("This opens on %{host}, where you sign in again.", host: @setup_host)}
+      </p>
+      <.link href={@setup_url} class="btn btn-sm btn-default mt-2">
+        {gettext("Set up two-step sign-in")}
+      </.link>
+    </div>
+    """
   end
 
   defp demo_locked_note(assigns) do

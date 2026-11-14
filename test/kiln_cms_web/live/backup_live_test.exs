@@ -1389,15 +1389,19 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute render(lv) =~ "No backup has ever been recorded"
     end
 
-    # #1772: the Backups panel has no schedule controls — the schedule is the
-    # operator's cron job. The strip must not promise one there, and must point
-    # at the guide that does explain it.
-    test "neither strip promises a schedule control the Backups page does not have",
+    # #1772: without an in-app schedule (part of #2219), the schedule is the
+    # operator's cron job. The strip must not promise a schedule that doesn't
+    # exist, nor link to the Schedule tab as though one did, and must point at
+    # the guide that explains cron. With one, see "the overview strips with
+    # in-app schedules" below.
+    test "without an in-app schedule, neither strip promises one or links to the Schedule tab",
          %{conn: conn, dir: dir} do
       {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
       refute html =~ "set a schedule"
       assert has_element?(lv, "#overview-backup-setup", "set up by whoever runs this server")
+      refute has_element?(lv, "#overview-backup-setup a[data-role=open-schedule]")
+      refute has_element?(lv, "#overview-backup-setup [data-role=backup-next]")
 
       assert has_element?(
                lv,
@@ -1409,6 +1413,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       refute html =~ "check the schedule"
       assert has_element?(lv, "#overview-backup-warning", "the server's cron job")
+      refute has_element?(lv, "#overview-backup-warning a[data-role=open-schedule]")
       assert has_element?(lv, "#overview-backup-warning a[data-role=backup-guide]")
       assert has_element?(lv, "#overview-backup-warning a[data-role=open-backups]")
     end
@@ -1497,10 +1502,14 @@ defmodule KilnCMSWeb.BackupLiveTest do
     # An in-app run in `status` whose state file is kept, so it is resumable.
     defp resumable_run!(dir, stamp, status) do
       run = Ash.Seed.seed!(KilnCMS.Backups.Run, %{stamp: stamp, status: status})
+      put_state!(dir, stamp)
+      run
+    end
+
+    defp put_state!(dir, stamp) do
       work = WorkState.path(dir, stamp)
       File.mkdir_p!(work)
       :ok = WorkState.write(work, WorkState.new(stamp))
-      run
     end
 
     test "Back up now explains queuing, in the words of the refusal", %{conn: conn} do
@@ -1530,6 +1539,144 @@ defmodule KilnCMSWeb.BackupLiveTest do
                lv,
                ~s|#backup-run-#{failed.id} button[data-role="resume"][title="Continue this failed backup from the files it already wrote."]|
              )
+    end
+
+    test "a resumable row explains Resume in a ? tip; other rows have none (#2425)", %{
+      conn: conn,
+      dir: dir
+    } do
+      failed = resumable_run!(dir, "20261107-101010", :failed)
+      canceled = resumable_run!(dir, "20261106-101010", :canceled)
+
+      # Quiet for a day: the stale `running` run the page reads as Interrupted.
+      day_ago = DateTime.add(DateTime.utc_now(), -1, :day)
+
+      interrupted =
+        Ash.Seed.seed!(KilnCMS.Backups.Run, %{
+          stamp: "20261105-101010",
+          status: :running,
+          started_at: day_ago,
+          updated_at: day_ago
+        })
+
+      put_state!(dir, interrupted.stamp)
+
+      # Kept state files, so only the status keeps these from being resumable.
+      succeeded = resumable_run!(dir, "20261104-101010", :succeeded)
+      imported = seed_run!(dir, 3)
+      put_state!(dir, imported.stamp)
+
+      lv = mount_admin(conn)
+
+      for run <- [failed, canceled, interrupted] do
+        assert has_element?(lv, ~s|#backup-run-#{run.id} button[data-role="resume"]|)
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-run-#{run.id} #resume-help-#{run.id}|,
+                 "each is reused only if its checksum still matches"
+               )
+
+        assert has_element?(
+                 lv,
+                 ~s|#resume-help-#{run.id}|,
+                 "so its files can be from different times"
+               )
+
+        assert has_element?(
+                 lv,
+                 ~s|#resume-help-#{run.id} a[href$="/docs/backups.md#media-backups-in-parts-2218"]|
+               )
+      end
+
+      for run <- [succeeded, imported] do
+        assert has_element?(lv, "#backup-run-#{run.id}")
+        refute has_element?(lv, "#resume-help-#{run.id}")
+      end
+    end
+
+    test "a media set in parts links to the multi-part restore; a single archive does not (#2425)",
+         %{conn: conn} do
+      media = fn stamp, parts ->
+        Backups.import_run!(
+          %{
+            stamp: stamp,
+            trigger: "cron",
+            status: :succeeded,
+            components: [:media],
+            started_at: ~U[2026-01-05 03:00:00.000000Z],
+            finished_at: ~U[2026-01-05 03:05:00.000000Z],
+            artifacts: [
+              %{
+                kind: :media,
+                name: "kiln-media-#{stamp}",
+                bytes: 1024 * max(length(parts), 1),
+                verified: true,
+                parts: parts,
+                destinations: %{"local" => %{"status" => "ok"}}
+              }
+            ]
+          },
+          actor: Backups.system()
+        )
+      end
+
+      part = &%{"name" => "kiln-media-20260105-030000.part0#{&1}.tar.gz", "bytes" => 1024}
+      split = media.("20260105-030000", Enum.map(1..2, part))
+      single = media.("20260106-030000", [])
+
+      lv = mount_admin(conn)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{split.id} a[data-role="parts"][target="_blank"][href$="/docs/backups.md#restore-a-media-set-that-has-several-parts"]|,
+               "2 parts"
+             )
+
+      assert has_element?(lv, "#backup-run-#{single.id}")
+      refute has_element?(lv, ~s|#backup-run-#{single.id} [data-role="parts"]|)
+    end
+
+    test "the docs anchors the page links to are headings of docs/backups.md (#2425)" do
+      doc = File.read!(Path.expand("../../../docs/backups.md", __DIR__))
+
+      # GitHub's heading slug: lowercased, punctuation other than `-` dropped,
+      # spaces to `-`.
+      slugs =
+        for [heading] <- Regex.scan(~r/^\#{1,6} +(.+?) *$/m, doc, capture: :all_but_first),
+            into: MapSet.new() do
+          heading
+          |> String.downcase()
+          |> String.replace(~r/[^\p{L}\p{N}\s_-]/u, "")
+          |> String.replace(" ", "-")
+        end
+
+      for fragment <- [
+            "restore-a-media-set-that-has-several-parts",
+            "media-backups-in-parts-2218",
+            "the-app-path-and-the-shell-path-share-one-format"
+          ] do
+        assert fragment in slugs, "docs/backups.md has no heading whose anchor is ##{fragment}"
+      end
+    end
+
+    # Shown whatever the off-site row says: the built-in copy already ships
+    # the .sha256 files, so the hint is for operators who copy backups
+    # themselves (#2890).
+    test "Where backups go says to copy the .sha256 files, with or without an off-site copy",
+         %{conn: conn, dir: dir} do
+      lv = mount_admin(conn)
+      assert has_element?(lv, "#offsite-sidecars-help", "in parts won't restore")
+
+      assert has_element?(
+               lv,
+               ~s|#offsite-sidecars-help a[href$="/docs/backups.md#the-app-path-and-the-shell-path-share-one-format"]|
+             )
+
+      seed_manifest!(dir, offsite: "r2:kiln-backups")
+      lv = mount_admin(conn)
+      assert render(lv) =~ "r2:kiln-backups"
+      assert has_element?(lv, "#offsite-sidecars-help", "in parts won't restore")
     end
 
     test "manual, cron, console and schedule read as labels; anything else as recorded", %{
@@ -1717,17 +1864,17 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
   end
 
-  # Part of #2219 (2a): the schedules are listed read-only, from
-  # `Backups.status/0`; they are managed from a release console for now.
-  describe "the Schedules list" do
+  # Part of #2219: the schedules themselves are on the Schedule tab
+  # (`BackupScheduleLiveTest`); this page keeps the next scheduled backup, the
+  # warnings that say they can't run, and each component's alarm threshold,
+  # all from `Backups.status/0`.
+  describe "schedules on the Backups tab" do
     import KilnCMS.Test.BackupSchedules, only: [schedule!: 2, force!: 2]
 
     @baseline ~U[2026-01-01 00:00:00.000000Z]
 
-    defp mount_backups(conn, admin, locale \\ nil) do
-      conn = log_in(conn, admin)
-      conn = if locale, do: Plug.Conn.put_session(conn, "locale", locale), else: conn
-      {:ok, lv, _html} = live(conn, ~p"/editor/backups")
+    defp mount_backups(conn, admin) do
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/backups")
       lv
     end
 
@@ -1743,10 +1890,24 @@ defmodule KilnCMSWeb.BackupLiveTest do
       end)
     end
 
-    test "no schedules: says how backups run instead", %{conn: conn} do
+    test "the tabs mark Backups current and link to Schedule", %{conn: conn} do
       lv = mount_backups(conn, authed_user(:admin))
 
-      assert has_element?(lv, "#backup-schedules", "No schedules yet")
+      assert has_element?(lv, "#backup-tab-history[aria-current=page]", "Backups")
+
+      assert has_element?(
+               lv,
+               "#backup-tab-schedule[href='/editor/backups/schedules']",
+               "Schedule"
+             )
+
+      refute has_element?(lv, "#backup-tab-schedule[aria-current]")
+    end
+
+    test "no schedules: the environment's threshold, and no next scheduled backup", %{conn: conn} do
+      lv = mount_backups(conn, authed_user(:admin))
+
+      refute has_element?(lv, "#backup-next-scheduled")
       refute has_element?(lv, "#backup-schedules-off")
 
       assert has_element?(
@@ -1757,42 +1918,18 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     @tag :pg_tools
-    test "each schedule shows its cadence, its next run, its last outcome, and the threshold it sets",
+    test "a schedule that runs here: the next scheduled backup and the threshold it sets",
          %{conn: conn} do
       admin = authed_user(:admin)
-
-      # 2026-01-01 is a Thursday.
-      weekly =
-        force!(schedule!(%{interval: :weekly, time_of_day: ~T[02:30:00]}, admin),
-          baseline_at: @baseline
-        )
-
-      paused = schedule!(%{enabled: false, time_of_day: ~T[05:00:00]}, admin)
-
-      refused =
-        force!(schedule!(%{time_of_day: ~T[06:00:00]}, admin),
-          last_outcome: "refused",
-          last_error: "disabled",
-          baseline_at: @baseline
-        )
+      force!(schedule!(%{interval: :weekly}, admin), baseline_at: @baseline)
 
       lv = mount_backups(conn, admin)
 
+      # Its latest window (since the 2026 baseline) is due and unclaimed.
       assert has_element?(
                lv,
-               "#backup-schedule-#{weekly.id} [data-role=cadence]",
-               "Every week on Thursday at 02:30 (Etc/UTC)"
-             )
-
-      assert has_element?(lv, "#backup-schedule-#{weekly.id} [data-role=components]", "Database")
-      assert has_element?(lv, "#backup-schedule-#{weekly.id} [data-role=next]", "Next run:")
-      assert has_element?(lv, "#backup-schedule-#{paused.id} [data-role=paused]", "Paused")
-      refute has_element?(lv, "#backup-schedule-#{paused.id} [data-role=next]")
-
-      assert has_element?(
-               lv,
-               "#backup-schedule-#{refused.id} [data-role=last-outcome]",
-               "Last window refused: disabled"
+               "#backup-next-scheduled a[href='/editor/backups/schedules']",
+               "Next scheduled backup: due now"
              )
 
       assert has_element?(
@@ -1800,55 +1937,21 @@ defmodule KilnCMSWeb.BackupLiveTest do
                "#backup-threshold-db",
                "Alarm after 252 hours without a good backup (its schedule)"
              )
+
+      # The list itself is the Schedule tab's.
+      refute has_element?(lv, "[data-role=cadence]")
     end
 
-    test "a deferred window says why it waits", %{conn: conn} do
+    test "a paused schedule shows no next scheduled backup", %{conn: conn} do
       admin = authed_user(:admin)
+      schedule!(%{enabled: false}, admin)
 
-      queued =
-        force!(schedule!(%{time_of_day: ~T[01:00:00]}, admin),
-          last_outcome: "deferred",
-          last_error: "queue_busy: a resume of 20260101-000000 is queued"
-        )
-
-      no_tools =
-        force!(schedule!(%{time_of_day: ~T[02:00:00]}, admin),
-          last_outcome: "deferred",
-          last_error: "no_pg_dump"
-        )
-
-      lv = mount_backups(conn, admin)
-
-      assert has_element?(
-               lv,
-               "#backup-schedule-#{queued.id} [data-role=last-outcome]",
-               "another kind of backup is queued"
-             )
-
-      assert has_element?(
-               lv,
-               "#backup-schedule-#{no_tools.id} [data-role=last-outcome]",
-               "the server that checked can't run backups (no_pg_dump)"
-             )
-
-      refute has_element?(
-               lv,
-               "#backup-schedule-#{no_tools.id} [data-role=last-outcome]",
-               "queue"
-             )
+      refute has_element?(mount_backups(conn, admin), "#backup-next-scheduled")
     end
 
-    test "the weekday is translated", %{conn: conn} do
+    test "with the scheduler off, it says so and shows no next scheduled backup", %{conn: conn} do
       admin = authed_user(:admin)
-      weekly = schedule!(%{interval: :weekly}, admin)
-
-      lv = mount_backups(conn, admin, "fr")
-      assert has_element?(lv, "#backup-schedule-#{weekly.id} [data-role=cadence]", "jeudi")
-    end
-
-    test "with the scheduler off, the list says so and shows no next run", %{conn: conn} do
-      admin = authed_user(:admin)
-      s = force!(schedule!(%{}, admin), baseline_at: @baseline)
+      force!(schedule!(%{}, admin), baseline_at: @baseline)
       put_cron("false")
 
       lv = mount_backups(conn, admin)
@@ -1859,12 +1962,13 @@ defmodule KilnCMSWeb.BackupLiveTest do
                "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
              )
 
-      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=next]")
+      refute has_element?(lv, "#backup-next-scheduled")
     end
 
-    test "when backups can't run here, the list says why and shows no next run", %{conn: conn} do
+    test "when backups can't run here, it says why and shows no next scheduled backup",
+         %{conn: conn} do
       admin = authed_user(:admin)
-      s = force!(schedule!(%{}, admin), baseline_at: @baseline)
+      force!(schedule!(%{}, admin), baseline_at: @baseline)
 
       Application.put_env(
         :kiln_cms,
@@ -1880,12 +1984,28 @@ defmodule KilnCMSWeb.BackupLiveTest do
                "Scheduled backups can't run here:"
              )
 
-      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=next]")
+      refute has_element?(lv, "#backup-next-scheduled")
+    end
+  end
+
+  # Step 9 of #2219 part 2: the home strips with in-app schedules. Here, not
+  # in `OverviewLiveTest`, because they change the VM-wide backup config.
+  describe "the overview strips with in-app schedules" do
+    import KilnCMS.Test.BackupSchedules, only: [schedule!: 2, force!: 2]
+
+    defp headlines(html),
+      do: Regex.scan(~r/data-role="backup-headline"/, html)
+
+    defp put_backups_enabled(value) do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :enabled, value)
+      )
     end
 
-    # D9: the home strip no longer says scheduled backups are only cron's
-    # once an enabled in-app schedule exists.
-    test "the overview set-up notice names the schedule once one is enabled", %{conn: conn} do
+    @tag :pg_tools
+    test "never backed up, with a schedule that runs here: when the first one is", %{conn: conn} do
       admin = authed_user(:admin)
       schedule!(%{}, admin)
 
@@ -1893,14 +2013,22 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       assert has_element?(
                lv,
-               "#overview-backup-setup",
-               "in-app schedules listed on the Backups page"
+               "#overview-backup-setup [data-role=backup-next]",
+               "First scheduled backup: in "
+             )
+
+      assert has_element?(
+               lv,
+               "#overview-backup-setup a[data-role=open-schedule][href='/editor/backups/schedules']",
+               "Open the schedule"
              )
 
       refute has_element?(lv, "#overview-backup-setup", "are a cron job set up by")
     end
 
-    test "the overview alarm names the schedule once one is enabled", %{conn: conn, dir: dir} do
+    @tag :pg_tools
+    test "a failed backup, with a schedule that runs here: when the next one is",
+         %{conn: conn, dir: dir} do
       admin = authed_user(:admin)
       schedule!(%{}, admin)
       seed_manifest!(dir, ok: false)
@@ -1909,11 +2037,165 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       assert has_element?(
                lv,
-               "#overview-backup-warning",
-               "in-app schedules listed on the Backups page"
+               "#overview-backup-warning [data-role=backup-next]",
+               "Next scheduled backup: in "
              )
 
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-next]", "in in")
+      assert has_element?(lv, "#overview-backup-warning a[data-role=open-schedule]")
       refute has_element?(lv, "#overview-backup-warning", "ask whoever runs this server")
+    end
+
+    # A window that is due and waiting reads "due now", not "in 0 minutes".
+    @tag :pg_tools
+    test "a window that is due reads due now", %{conn: conn} do
+      admin = authed_user(:admin)
+      force!(schedule!(%{}, admin), baseline_at: ~U[2026-01-01 00:00:00.000000Z])
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-setup [data-role=backup-next]",
+               "First scheduled backup: due now."
+             )
+    end
+
+    # E2: a schedule of the healthy component says nothing about the one in
+    # alarm.
+    @tag :pg_tools
+    test "the next window of a component in alarm, not of a healthy one", %{conn: conn, dir: dir} do
+      admin = authed_user(:admin)
+      media = Path.join(dir, "media-src")
+      File.mkdir_p!(media)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :media_dir, media)
+      )
+
+      # The media schedule only; the database backed up just now, media never.
+      schedule!(%{components: [:media]}, admin)
+
+      now = DateTime.utc_now()
+      write_artifact!(dir, "kiln-db-20260101-030000.dump")
+
+      Backups.import_run!(
+        %{
+          stamp: "20260101-030000",
+          trigger: "cron",
+          status: :succeeded,
+          components: [:db],
+          started_at: now,
+          finished_at: now,
+          artifacts: [
+            %{kind: :db, name: "kiln-db-20260101-030000.dump", bytes: 2048, verified: true}
+          ]
+        },
+        actor: Backups.system()
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+      assert [_media_only] = lv |> element("#overview-backup-warning") |> render() |> headlines()
+      assert has_element?(lv, "#overview-backup-warning [data-role=backup-headline]", "media")
+      assert has_element?(lv, "#overview-backup-warning [data-role=backup-next]")
+
+      # Now the schedule covers the healthy database only: no next for media.
+      [s] = Backups.list_backup_schedules!(actor: admin)
+      Backups.update_backup_schedule!(s, %{components: [:db]}, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-next]")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning",
+               "in-app schedules on the Schedule tab of Backups"
+             )
+    end
+
+    # Two components in alarm, a schedule for one of them: no time for "the
+    # next scheduled backup", which would leave the other in alarm after it.
+    @tag :pg_tools
+    test "a schedule for only some of the components in alarm shows no next time",
+         %{conn: conn, dir: dir} do
+      admin = authed_user(:admin)
+      media = Path.join(dir, "media-src")
+      File.mkdir_p!(media)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :media_dir, media)
+      )
+
+      at = DateTime.add(DateTime.utc_now(), -5 * 24 * 3600, :second)
+      stamp = KilnCMS.Backups.Artifact.stamp(at)
+
+      Backups.import_run!(
+        %{
+          stamp: stamp,
+          trigger: "cron",
+          status: :succeeded,
+          components: [:db, :media],
+          started_at: at,
+          finished_at: at,
+          artifacts: [
+            %{kind: :db, name: "kiln-db-#{stamp}", bytes: 10, verified: true},
+            %{kind: :media, name: "kiln-media-#{stamp}", bytes: 10, verified: true}
+          ]
+        },
+        actor: Backups.system()
+      )
+
+      s = schedule!(%{components: [:db]}, admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+      assert [_, _] = lv |> element("#overview-backup-warning") |> render() |> headlines()
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-next]")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning",
+               "in-app schedules on the Schedule tab of Backups"
+             )
+
+      # Both scheduled: the next time is shown.
+      Backups.update_backup_schedule!(s, %{components: [:db, :media]}, actor: admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+      assert has_element?(lv, "#overview-backup-warning [data-role=backup-next]")
+    end
+
+    # D9: schedules that exist but can't run here keep the sentence that
+    # names both the tab and cron, and still link to the tab.
+    test "with a schedule that can't run here, the strip names the tab and cron", %{conn: conn} do
+      admin = authed_user(:admin)
+      schedule!(%{}, admin)
+      put_backups_enabled(false)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      strip =
+        if has_element?(lv, "#overview-backup-setup"),
+          do: "#overview-backup-setup",
+          else: "#overview-backup-warning"
+
+      assert has_element?(lv, strip, "in-app schedules on the Schedule tab of Backups")
+      refute has_element?(lv, "#{strip} [data-role=backup-next]")
+      assert has_element?(lv, "#{strip} a[data-role=open-schedule]")
+    end
+
+    @tag :pg_tools
+    test "healthy with a schedule: no strip", %{conn: conn, dir: dir} do
+      admin = authed_user(:admin)
+      schedule!(%{}, admin)
+      seed_manifest!(dir, %{})
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/overview")
+
+      refute has_element?(lv, "#overview-backup-setup")
+      refute has_element?(lv, "#overview-backup-warning")
     end
   end
 end

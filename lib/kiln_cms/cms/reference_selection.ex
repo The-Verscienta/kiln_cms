@@ -144,7 +144,6 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     case normalize(selection) do
       nil -> {:error, "is empty"}
       %{} = map -> shape(map)
-      _other -> {:error, "must be an object"}
     end
   end
 

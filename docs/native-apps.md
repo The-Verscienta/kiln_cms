@@ -555,7 +555,9 @@ which is all a native renderer needs. See
 [Rich text without a web view](#rich-text-without-a-web-view).
 
 [`examples/swiftui-reader`](https://github.com/The-Verscienta/kiln_cms/tree/main/examples/swiftui-reader) checks in
-a generated file and the script that regenerates it.
+a generated file and the script that regenerates it. Kiln's own test suite
+fails when that file no longer matches the export, so it can't fall behind
+the server.
 
 Decode a delivery with `JSONDecoder`:
 

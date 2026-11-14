@@ -752,6 +752,45 @@ defmodule KilnCMS.Mail do
   end
 
   @doc """
+  Whether mail for the site `org_id` (`nil` for account mail) has a relay
+  that could take it, asked without sending (#2247).
+
+  `false` only when the answer will not change by retrying: the site has no
+  relay of its own and the deployment has no outgoing mail server, or the
+  site's relay is set but its password can no longer be decrypted (it must
+  be re-entered). Everything else is `true`, including a relay whose settings
+  could not be read just now or whose host did not resolve: those are the
+  transient failures `deliver_for_worker/2` holds and retries, and a caller
+  that skips a step when mail is unavailable must not skip it for one.
+
+  The same decisions `deliver_now/2` makes before it connects, so the two
+  agree: see `no_relay?/1` for the failures it maps them to.
+  """
+  @spec relay_available?(Ash.UUID.t() | nil) :: boolean()
+  def relay_available?(org_id) do
+    case resolve_relay(org_id) do
+      :operator -> not operator_unconfigured?([])
+      {:site, _config, _from} -> true
+      {:error, reason} -> not no_relay?({:site_relay, reason})
+    end
+  end
+
+  defp resolve_relay(org_id) when is_binary(org_id), do: SiteRelay.resolve(org_id)
+  defp resolve_relay(_account_mail), do: :operator
+
+  @doc """
+  Whether a `deliver_now/2` failure means there is no working relay at all,
+  rather than one that failed this time (#2247): `:mailer_not_configured`, or
+  a site relay whose password cannot be decrypted. A site relay that could not
+  be read (`{:site_relay, :unavailable}`), a refused host, a refused
+  connection or a 4xx are not: retrying may succeed.
+  """
+  @spec no_relay?(term()) :: boolean()
+  def no_relay?(:mailer_not_configured), do: true
+  def no_relay?({:site_relay, :credentials_unreadable}), do: true
+  def no_relay?(_reason), do: false
+
+  @doc """
   What a `deliver_now/2` failure was about, for a person rather than a log
   (#1779): the admin "send test email" panel maps this to a sentence and keeps
   the raw term (see `redact_failure/1`) for the log only.

@@ -47,6 +47,12 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   revoked, deleted-user and bad-signature tokens are all `:invalid`). No token,
   user or address is in the event.
 
+  `KilnCMSWeb.Telemetry.metrics/0` counts it as `kiln_cms.api.invalid_bearer.count`
+  (#2635), exported as `kiln_cms_api_invalid_bearer_count` when
+  `KILN_METRICS_ENABLED` is on. Its labels are `enforced`, `surface`, `read` and
+  `reason`: `read?` is exported as `read`, because a `?` is not valid in a
+  Prometheus label name. The event's metadata keeps `read?`.
+
   Keeping the two apart matters: the API-key plug treats a present-but-unrecognised
   `Bearer` value as an *invalid key* (401), so it must never see a JWT.
   """
@@ -138,6 +144,27 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
 
   defp classify_claims({:ok, _claims}), do: :invalid
   defp classify_claims(_error), do: :malformed
+
+  @doc """
+  For a transport with no conn (`KilnCMSWeb.GraphqlSocket`, #2634): emits the
+  same `[:kiln_cms, :api, :invalid_bearer]` event for `token`, a bearer that
+  did not verify, and answers whether it is refused
+  (`reject_invalid_bearer?/0`).
+  """
+  @spec note_invalid_bearer(String.t(), :json_api | :graphql | :media | :other, boolean()) ::
+          boolean()
+  def note_invalid_bearer(token, surface, read?) do
+    enforced? = reject_invalid_bearer?()
+
+    :telemetry.execute([:kiln_cms, :api, :invalid_bearer], %{count: 1}, %{
+      enforced: enforced?,
+      surface: surface,
+      read?: read?,
+      reason: classify_token(token)
+    })
+
+    enforced?
+  end
 
   @doc "Whether an unverifiable bearer token is a `401` (`KILN_API_REJECT_INVALID_BEARER`)."
   @spec reject_invalid_bearer?() :: boolean()

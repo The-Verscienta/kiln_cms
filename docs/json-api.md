@@ -472,6 +472,37 @@ snake_case); `customWhere` has no groups.
 Custom sorts are always **nulls last**, ascending or descending. A native
 `sort=-x` is plain `desc`, which in Postgres puts nulls first.
 
+### Typed conditions (`custom_where`)
+
+`custom_where` is the typed form of `custom_filter`. It's here for parity with
+GraphQL's `customWhere` and the [MCP read tools](mcp.md#tools). A condition
+names a field and gives exactly one kind key (`string`, `int`, `float`,
+`boolean`, `date`, `date_time`), which must be the field's kind. The kinds,
+their operators and the limits are in
+[headless-graphql-api.md](headless-graphql-api.md#typed-filters-customwhere);
+spell them snake_case here (`date_time`, `not_eq`, `starts_with`, `is_null`).
+
+A query string carries **one condition**, with as many operators as you like:
+
+```
+GET /api/json/posts?custom_where[][name]=price&custom_where[][int][gt]=10
+GET /api/json/posts?custom_where[][name]=price&custom_where[][int][gt]=10&custom_where[][int][lte]=50
+GET /api/json/posts?custom_where[][name]=price&custom_where[][int][in][]=10&custom_where[][int][in][]=20
+```
+
+- Every `custom_where[][…]` pair lands in the same list item, so a second
+  `[name]` replaces the first and its operators join the first condition. For
+  conditions on several fields, use `custom_filter`: it takes the same
+  operators (there the null test is `null`, not `is_null`), and groups too.
+  This is how the query-string decoder (Plug) reads repeated `[]` keys, which
+  Plug itself calls unspecified; a test pins it, but prefer `custom_filter`.
+- The indexed form (`custom_where[0][name]=price`) is a `400`
+  `invalid_query`. The query string decodes it to a map, and the parameter is
+  a list.
+- A wrong kind, an unknown operator or a bad operand is a `400`
+  `invalid_argument`, as in `custom_filter`. A wrong kind's `detail` names the
+  field's own kind.
+
 ### Lists of values
 
 A custom field with `multiple: true` of a scalar type holds a JSON array: a

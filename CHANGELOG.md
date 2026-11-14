@@ -86,13 +86,22 @@ Every summary line below that was shortened links to its own entry there.
 - **New scheduled egress: one node fetches Google's, Bing's, Apple's and DuckDuckGo's crawler IP lists over HTTPS every 6 h; allow the four hosts or set `KILN_CRAWLER_RANGES=false`. DuckDuckBot outside its list is now charged as no user agent and counted by the 404 guard. No migration; rollback safe.**
   ([long form](docs/changelog/unreleased.md#crawler-ip-ranges-upgrade))
 
-- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced, and rolling back is safe. Part of #2247.**
+- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and `users.inserted_at`, which existing accounts get as the migration time). Nothing is enforced until a site requires it (next entry). Part of #2247.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-upgrade))
+
+- **Two-step sign-in can now be required per site: nothing changes until an admin saves it at `/editor/two-factor`. Then a held person's JWTs get `403 second_factor_required` (API keys are exempt), and held people set up on the main host (`PHX_HOST`), which they must reach; rolling back drops it silently.**
+  ([long form](docs/changelog/unreleased.md#second-factor-enforcement-upgrade))
 
 - **Yearly rules with BYMONTH, BYMONTHDAY or BYDAY, monthly BYDAY with BYMONTHDAY, BYMONTH on daily and weekly rules, and a repeated weekly BYDAY now expand per RFC 5545, as subscribed calendars showed them (`FREQ=YEARLY;BYDAY=2TU` is January's). Next dates are recomputed ~10 min after boot on the new `occurrence_backfill` queue; a hand-built Oban `queues:` must add `occurrence_backfill: 1`. Rollback safe.**
   ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#event-recurrence-rfc-upgrade))
 
+- **Check your own rclone, monitoring or retention filters over backups: `kiln-media-*.tar.gz` already matched media parts (1.9.0's note was wrong), but it and `kiln-db-*.dump` drop the `.sha256` sidecars, and a part set without one won't restore by default. Add `--include "kiln-media-*.sha256"` and `"kiln-db-*.sha256"`; don't widen to `kiln-media-*`.**
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-offsite-filter-sidecar-upgrade))
+
 ### Breaking
+
+- **`/ws/gql` refuses a connect whose token does not verify (expired, revoked, garbled JWT, or a `kiln_` API key), with a `403` handshake, where it connected as anonymous; `KILN_API_REJECT_INVALID_BEARER=false` restores that.**
+  ([long form](docs/changelog/unreleased.md#ws-gql-refuses-unverified-bearer))
 
 - **Overlay code: `purge_media_item` takes only a trashed item; the media system actor must use the new `purge_quarantined_media_item` (system-only); `restore_media_item` refuses an item no longer in the trash (`StaleRecord`).**
   ([#2836](https://github.com/The-Verscienta/kiln_cms/pull/2836) · [long form](docs/changelog/unreleased.md#media-purge-quarantined))
@@ -105,7 +114,7 @@ Every summary line below that was shortened links to its own entry there.
 - **A reference field can limit which records may be added to it (`selection` on its definition: states, "only mine", and per target type tags, category and custom-field values), enforced on every write path and reported by `GET /api/schema`; groundwork for the filtered picker, no editor yet ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)). Run `mix ash.migrate`.**
   ([long form](docs/changelog/unreleased.md#reference-selection-foundation))
 
-- **In-app backup schedules (part of #2219): daily, weekly, fortnightly or monthly at a local time, created from a release console as a platform admin and listed read-only on the Backups page. Sub-daily intervals wait for keep-N retention.**
+- **In-app backup schedules (part of #2219): daily, weekly, every 2 weeks or monthly at a local time, managed by platform admins on the new Schedule tab of Backups (or from a release console). Sub-daily intervals wait for keep-N retention.**
   ([long form](docs/changelog/unreleased.md#backup-schedules))
 
 - **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
@@ -132,8 +141,14 @@ Every summary line below that was shortened links to its own entry there.
 - **Search-engine claims are checked against Google's, Bing's, Apple's and DuckDuckGo's published crawler IP lists before DNS, so DuckDuckBot can be verified; new `KILN_CRAWLER_RANGES`, `KILN_CRAWLER_RANGES_CRON` and `ranges_fetch` metric.**
   ([long form](docs/changelog/unreleased.md#crawler-ip-ranges))
 
-- **Groundwork for requiring two-step sign-in by role, not yet enforced (no page; part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
+- **A site admin can require two-step sign-in of admins, editors or everyone at `/editor/two-factor`, with a grace period; held accounts set up at `/account/two-factor` on the main or console host, password sessions confirming an emailed code. Closes the #2247 series.**
+  ([long form](docs/changelog/unreleased.md#second-factor-requirement))
+
+- **The setting and logic behind requiring two-step sign-in (part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
+
+- **New Prometheus counter `kiln_cms_api_invalid_bearer_count` (labels `enforced`, `surface`, `read`, `reason`; needs `KILN_METRICS_ENABLED`): the stale-token count that gates removing `KILN_API_REJECT_INVALID_BEARER` (ADR 0017).**
+  ([#2907](https://github.com/The-Verscienta/kiln_cms/pull/2907) · [long form](docs/changelog/unreleased.md#invalid-bearer-metric))
 
 ### Changed
 
@@ -151,6 +166,33 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Contributors: the required `Compile, lint, scan & test` check also waits on docs, strict-tenancy, overlay drift, both clients and the ML job; every required job has a time limit.**
   ([#2801](https://github.com/The-Verscienta/kiln_cms/pull/2801) · [long form](docs/changelog/unreleased.md#ci-required-check-covers-more-jobs))
+
+- **The fields admin says under Editor input that the choice changes only how editors fill a field in; the field's type and text format stay as they are.**
+  ([#2880](https://github.com/The-Verscienta/kiln_cms/pull/2880) · [long form](docs/changelog/unreleased.md#editor-input-help-line))
+
+- **Team says how long an invitation link lasts and links its guide, Settings says adding a passkey or authenticator app emails you, and `/sign-in/verify` says a passkey works too when one can.**
+  ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#account-screens-help-text))
+
+- **Backups → History: a resumable run has a `?` tip beside Resume explaining what a resume reuses, and a media backup's "N parts" label links to how to restore a part set.**
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-history-resume-tip-parts-link))
+
+- **Backups → Where backups go has a `?` saying that a backup copied off the host by hand needs its `.sha256` files with it; the built-in off-site copy already includes them.**
+  ([#2915](https://github.com/The-Verscienta/kiln_cms/pull/2915) · [long form](docs/changelog/unreleased.md#backup-offsite-sha256-hint))
+
+- **New guide "Take content down": unpublishing and archiving from the editor, the content list, a date, the calendar or a release, who may use each, and what each refusal message means.**
+  ([#2893](https://github.com/The-Verscienta/kiln_cms/pull/2893) · [long form](docs/changelog/unreleased.md#take-content-down-guide))
+
+- **Second-factor help matches the address: `/editor/two-factor` links to the main host's setup page from a site's own address and tells a passkey-only admin what works there, Settings says up front when the email code is owed, and "we'll email you" sits beside each add control on both setup pages.**
+  ([#2899](https://github.com/The-Verscienta/kiln_cms/pull/2899) · [long form](docs/changelog/unreleased.md#second-factor-help-follows-the-host))
+
+- **Calendar chips offer the drag and arrow keys only to someone who may move that date; the content list's bulk bar now says why it skipped rows.**
+  ([#2916](https://github.com/The-Verscienta/kiln_cms/pull/2916) · [long form](docs/changelog/unreleased.md#calendar-drag-and-bulk-skip-reason))
+
+- **MCP read tools' `custom_filter`, `custom_where` and `custom_sort` are documented (snake_case input, though some errors spell `notEq`/`dateTime`); JSON:API's `custom_where` takes one condition per query string, and the indexed form is a `400`.**
+  ([#2914](https://github.com/The-Verscienta/kiln_cms/pull/2914) · [long form](docs/changelog/unreleased.md#mcp-custom-field-filters-documented))
+
+- **`/account/two-factor` lists your passkeys with a trash button to remove one, so a reader, who can't open Settings, can remove a passkey and get past the 20-passkey limit.**
+  ([#2920](https://github.com/The-Verscienta/kiln_cms/pull/2920) · [long form](docs/changelog/unreleased.md#setup-page-passkey-removal))
 
 ### Fixed
 
@@ -240,6 +282,18 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Calendar clients no longer drop or add the last occurrence of a timed repeating event with an end date: the `.ics` `UNTIL` is now the end of that day in the event's time zone.**
   ([#2864](https://github.com/The-Verscienta/kiln_cms/pull/2864) · [long form](docs/changelog/unreleased.md#ics-until-end-of-local-day))
+
+- **Docs: the data-flows subprocessor table now lists the default-on breached-password check (Have I Been Pwned), and every "no third-party requests" checklist names `BREACHED_PASSWORD_CHECK=false`, which `KILN_UPDATE_CHECK=false` does not cover.**
+  ([#2865](https://github.com/The-Verscienta/kiln_cms/pull/2865) · [long form](docs/changelog/unreleased.md#data-flows-breached-password-egress))
+
+- **Password policy no longer describes Off as "not looked up at all": it covers this site only, and only `BREACHED_PASSWORD_CHECK=false` stops the check server-wide. Docs: the staging scrub table lists all its purges.**
+  ([#2885](https://github.com/The-Verscienta/kiln_cms/pull/2885) · [long form](docs/changelog/unreleased.md#password-policy-off-description))
+
+- **Backup docs: the History import command for cron's backups now works (`bin/kiln_cms rpc`, not `bin/kiln eval`), and the manual multi-part media restore extracts only after a `--strict` checksum check passes.**
+  ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-docs-import-and-manual-restore))
+
+- **`mix kiln.gen.plugin` no longer tells you to run `mix kiln.gen.content <Type> --domain …`, which fails as an unknown option; its notice now lists the steps to write a plugin's content types by hand.**
+  ([#2911](https://github.com/The-Verscienta/kiln_cms/pull/2911) · [long form](docs/changelog/unreleased.md#gen-plugin-content-types-next-step))
 
 ### Security
 

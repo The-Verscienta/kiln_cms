@@ -157,7 +157,9 @@ path alias under `/access-denied`, made before the upgrade that added this
 page is shadowed by it. Operators list such records with
 `mix kiln.reserved_paths` (in a release,
 `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) and give each a new
-slug or alias.
+slug or alias. When a built-in page reserves its address and when it waits
+behind your content instead:
+[ADR 0059](decisions/0059-a-generated-page-is-served-only-as-the-last-fallback-of-the-404-funnel-not-as-a-route-or-a-reserved-segment.md).
 
 Paging is `limit`/`offset` with one extra row read to decide whether "Next"
 exists — the authentication resource's primary read carries no `pagination`, and
@@ -295,16 +297,23 @@ resend, because an accepted invitation would outlast the grant.
 Invitations work on an invite-only site (`:registration_enabled` false) too:
 that is what they are for there.
 
+Why an invitation is not an account until it is accepted: [ADR 0050](decisions/0050-a-site-invitation-is-its-own-row-not-an-account-written-up-front.md).
+
 1. Open the console on the host of the site you are inviting them to, then
    **Team** under **Operations** in the sidebar (`/editor/team`). Team acts on
    the site the console is showing.
 2. Under **Members**, enter the address in **Email**. Pick a **Site tier**
    (*Viewer* is the default) and, if the site has custom roles, a **Custom
-   role**.
+   role**. The note under the fields ends in **Learn more**, which opens this
+   section in a new tab.
 3. Click **Add or invite**. You see one of these results:
    - "Invitation sent to (address)." The address now appears under **Pending
      invitations (n)** with its tier, its custom role, "Invited by (you)." and
-     "Expires (date and time, UTC)".
+     "Expires (date and time, UTC)". The line under that heading sums up the
+     rules in [Resend or revoke an invitation](#resend-or-revoke-an-invitation):
+     "Links work for 7 days. Resending mails a new link and restarts the
+     clock; the old link stops working. Expired invitations stay listed for
+     30 days, and inviting the address again resends it."
    - "Member added to this site." The address already had a confirmed account,
      so it is in the member list now. Its owner is mailed "You were added to
      (site)" with a sign-in link. There is nothing more to do.
@@ -385,7 +394,10 @@ can submit again.
 
 The invitee signs in with the new password alone. An editor or admin sets up
 **Two-factor authentication** and **Passkeys** again under **Settings**
-(`/editor/settings`); a viewer cannot reach that page. An
+(`/editor/settings`). A viewer cannot reach that page, and sets up an
+authenticator app or a passkey on `/account/two-factor` instead, where they
+can also remove a passkey later
+([Remove a passkey](passkeys.md#remove-a-passkey)). An
 admin who minted an API key for the account mints a new one under **API keys**
 if it is still wanted; the old key stays listed as revoked.
 
@@ -1305,7 +1317,12 @@ Requires the admin role.
 1. Open **Password policy** under **Sign-in & access** in the console sidebar (or go to
    `/editor/password-policy`).
 2. In **When a new password is in a known breach**, pick one of the three options:
-   - **Off - don't warn.** The check result is ignored.
+   - **Off - don't warn.** Passwords set on this site are not checked, and
+     nothing about them is sent to Have I Been Pwned. The description under
+     the menu adds the two limits: if the saved policy can't be read, Warn
+     applies instead, and only the operator's `BREACHED_PASSWORD_CHECK=false`
+     stops the check for every site
+     ([When the check does nothing](#when-the-check-does-nothing)).
    - **Warn - allow it, with a warning.** The default. The password is
      accepted; the person sees a notice asking them to consider another.
    - **Block - refuse it for administrators.** An administrator's new password
@@ -1332,6 +1349,9 @@ counts) and its membership tier on this site.
 ### When the check does nothing
 
 - The operator set `BREACHED_PASSWORD_CHECK=false` (the page says so).
+- The site's policy is **Off**: nothing is sent. (If the saved policy can't
+  be read, the site is treated as **Warn**; only the operator's
+  `BREACHED_PASSWORD_CHECK=false` guarantees no request.)
 - The lookup service is slow or unreachable: the password is accepted. Operators
   can watch for this in [observability](observability.md#breached-password-checks).
 - Passwords an admin does not type: the admin-sent reset *mail* is checked when
@@ -1340,7 +1360,9 @@ counts) and its membership tier on this site.
 
 See the [threat model](threat-model.md#breached-passwords) for the limits and
 [environment variables](environment-variables.md#breached-password-check-2240)
-for the two operator settings.
+for the two operator settings. Why the check is on by default and accepts the
+password when the lookup fails is in
+[ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md).
 
 ## Signing an account out
 

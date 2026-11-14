@@ -38,10 +38,25 @@ if Code.ensure_loaded?(Igniter) do
     needs content types, Ash domains or `KilnCMSWeb` stays an overlay (see
     `Kiln.Plugin`, "As a Mix dependency, or as a `projects/` overlay").
 
-    Content types come next: generate them with
-    `mix kiln.gen.content <Type> --domain <Plugin>.Catalog` and register the
-    domain in `:ash_domains`/`:content_domains` — then verify the install
-    with `mix kiln.plugins.doctor` (it runs in precommit too).
+    Content types come next, and no generator writes them into a plugin's
+    domain yet: `mix kiln.gen.content` registers every type on the core
+    `KilnCMS.CMS`. Write them by hand on `KilnCMS.CMS.Content` with
+    `domain: <Plugin>.Catalog`, using `projects/example` (`catalog.ex` and
+    `catalog/`) as the template; uncomment `domains/0` in the generated
+    plugin; register the domain in `:ash_domains` and `:content_domains` in
+    `projects/<name>/project.exs`, with `projects/example/project.exs` as the
+    template (its `:plugins` list replaces the one this task writes to
+    `config/config.exs`, so keep the plugin in it); activate it by copying
+    that file to `config/project.exs` in dev, or with
+    `docker build --build-arg PROJECT=<name>` for an image; then run
+    `mix ash.codegen <migration_name>` and move what it writes into
+    `projects/<name>/priv/repo/migrations/` and
+    `projects/<name>/priv/resource_snapshots/repo/`. Copy those back into
+    `priv/` before the next `mix ash.codegen`: without its snapshots, codegen
+    writes create-table migrations into the core `priv/` again. The notice
+    lists these steps, and `docs/extending-content.md` ("Plugins") and
+    `projects/example/README.md` explain them. Then verify the install with
+    `mix kiln.plugins.doctor` (it runs in precommit too).
     """
     @shortdoc "Generate a KilnCMS plugin skeleton"
     use Igniter.Mix.Task
@@ -406,8 +421,29 @@ if Code.ensure_loaded?(Igniter) do
       config :kiln_cms, :plugins.
       #{if block, do: "\nIts #{block} block is live: it appears in the editor's block palette,\nstores through the block union, and renders in firing/search.\n", else: ""}#{if field, do: "\nIts #{field} field type is live: admins can pick it at /editor/fields,\nand its cast/2 gates content writes.\n", else: ""}
       Next:
-        * Content types: mix kiln.gen.content <Type> --domain #{camel}.Catalog,
-          then add #{camel}.Catalog to :ash_domains and :content_domains.
+        * Content types: mix kiln.gen.content can't write them into a plugin's
+          domain yet (it registers every type on KilnCMS.CMS), so write them
+          by hand, using projects/example/catalog.ex and
+          projects/example/catalog/*.ex as the template:
+            - a #{camel}.Catalog domain in projects/#{snake}/catalog.ex, and
+              each type in projects/#{snake}/catalog/ built with
+              use KilnCMS.CMS.Content, type: :<type>, domain: #{camel}.Catalog
+            - uncomment domains/0 in projects/#{snake}/plugin.ex
+            - register #{camel}.Catalog in :ash_domains and :content_domains
+              in projects/#{snake}/project.exs, with
+              projects/example/project.exs as the template. Its :plugins list
+              replaces the one this generator wrote to config/config.exs
+              rather than merging, so keep #{camel}.Plugin in it.
+            - activate it: cp projects/#{snake}/project.exs config/project.exs
+              in dev; docker build --build-arg PROJECT=#{snake} for an image
+            - mix ash.codegen <migration_name>, then move what it wrote to
+              priv/ into projects/#{snake}/priv/repo/migrations/ and
+              projects/#{snake}/priv/resource_snapshots/repo/. Before the
+              next ash.codegen, copy them back with
+                cp -R projects/#{snake}/priv/. priv/
+              and remove them again after: without its snapshots, codegen
+              writes create-table migrations into the core priv/ again
+              (see projects/example/README.md)
         * Verify the install: mix kiln.plugins.doctor (also runs in precommit).
       """
     end

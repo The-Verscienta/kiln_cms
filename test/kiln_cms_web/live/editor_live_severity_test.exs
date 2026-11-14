@@ -114,5 +114,8 @@ defmodule KilnCMSWeb.EditorLiveSeverityTest do
     assert CMS.get_post!(post.id, authorize?: false).state == :published
     assert html =~ "1 updated, 1 skipped"
     assert html =~ "open each in the editor"
+    # Skipped only for the safety field: that sentence is the whole explanation,
+    # not followed by the generic reason line (#2894).
+    refute html =~ "A row is skipped when"
   end
 end

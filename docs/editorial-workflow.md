@@ -139,11 +139,8 @@ along with discarding changes and restoring earlier versions.
 away. Both need publish rights, and Archive does even on a draft. Any editor
 may **Unarchive**, which brings a page back as a draft.
 
-**Unpublish** is on the page's editor (under **More actions** on a
-**Live · draft** page) and in a published row's menu. Tick rows in the
-content list to **Unpublish** or **Archive** them together. On a live or
-scheduled page, **Scheduled unpublish at** in **Settings** is an unpublish
-too, so it is locked for anyone who may not publish.
+[Take content down](take-content-down.md) walks through each way to do it:
+the editor, the content list, a date, the calendar and a release.
 
 Deleting moves a page to the trash, and only an admin can delete it or restore
 it from there ([Trash and restore](trash.md)).
@@ -152,8 +149,8 @@ it from there ([Trash and restore](trash.md)).
 
 ![The Team page's Publishing card, where an admin lets editors publish.](images/editorial-workflow/8-team-publishing.webp)
 
-1. **Let editors publish** gives editors the publish, schedule and unpublish
-   rights in the table above. **Require admin approval** takes them away
+1. **Let editors publish** gives editors the publish, schedule, unpublish and
+   archive rights in the table above. **Require admin approval** takes them away
    again. Editors can still submit for review either way.
 
 Team is platform-admin only; site admins choose once, in **Home**'s **How do

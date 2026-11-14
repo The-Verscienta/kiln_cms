@@ -25,8 +25,9 @@ defmodule KilnCMS.Backups.Retention do
        a `.partial` of that unit is younger than `partial_grace_s/0`.
     3. **Newest verified.** The newest unit of its kind that is complete on
        disk and belongs to a `succeeded` Run whose artifact of that kind is
-       verified (an app run) or present (an imported run, which is never
-       verified). Never deleted.
+       verified (an app run) or present (an imported run, whose `verified`
+       is only what a covering `manifest.json` said, so it is not consulted).
+       Never deleted.
     4. **Newest complete.** The newest unit of its kind that is complete on
        disk, whatever its Run says (`complete?/1`). `backup.sh prune` keeps the
        same one, so the two prunes together can never empty a component.
@@ -761,7 +762,8 @@ defmodule KilnCMS.Backups.Retention do
   defp solid?(file), do: file.type == :regular and file.size > 0
 
   # A succeeded run whose artifact of this kind is verified (the app's own) or
-  # merely present (imported: nothing hashed it). The unit must be complete.
+  # merely present (imported: its `verified` is copied from a covering
+  # manifest, if any, so it is not consulted). The unit must be complete.
   defp good?(_unit, nil), do: false
 
   defp good?(%{kind: kind}, %{status: :succeeded, origin: origin, artifacts: artifacts}) do

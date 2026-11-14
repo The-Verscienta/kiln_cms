@@ -60,8 +60,9 @@ Meilisearch/embedding reindex) if stale.
 | Secrets/env snapshot | on change | — | password manager |
 | **Restore drill** | **quarterly** | — | recorded below |
 
-The cadence above is host cron's. An in-app schedule, created from a release
-console, can take the database and media backups instead
+The cadence above is host cron's. An in-app schedule, set up on the
+**Schedule** tab of the Backups page, can take the database and media backups
+instead
 ([Schedule backups in the app](#schedule-backups-in-the-app), part of #2219);
 run one or the other on each component, not both, or each window takes two
 backups.
@@ -344,7 +345,7 @@ The new marker is written first, and the component's other `.good` markers are
 removed only once it is there, so a cron prune that runs in between keeps both
 units, never neither. The app itself does not read `.good` markers: it works out
 the newest verified backup from History every time, so a stale marker pins
-nothing in the app, and its unit ages there like any other.
+nothing in the app, and its unit ages there like any other. The reasoning is in [ADR 0041](decisions/0041-the-app-and-backup-sh-agree-on-what-to-keep-only-through-presence-only-marker-files.md).
 
 **Turn it on.** Nothing to configure; you only need the new script on the host,
 and the app able to see the backup directory.
@@ -582,8 +583,8 @@ Platform admins only, like the rest of the page.
      `BACKUP_STALE_AFTER_HOURS`, or than the threshold an in-app schedule
      sets for it
      ([How a schedule sets the alarm threshold](#how-a-schedule-sets-the-alarm-threshold)).
-     The **Schedules** section shows each component's threshold and where it
-     came from.
+     The **Alarm thresholds** section shows each component's threshold and
+     where it came from.
    - "Last backup was 2 days ago": its last good backup is older than that.
    - "The last backup failed": the newest attempt that covered it failed.
    - "No backup has ever been recorded": neither History nor the manifest has
@@ -655,9 +656,24 @@ app write a set of independent `tar.gz` parts,
 the single `kiln-media-<stamp>.tar.gz` name. Given the same media directory and
 settings, both put the same files in the same parts under the same names. Every
 part is a complete archive, so `tar -tzf` works on each and `restore.sh media`
-accepts either shape. Anything of yours that globs `kiln-media-*.tar.gz` (a
-rclone filter, a monitoring script, a retention job) must accept the `.partNN`
-names too.
+accepts either shape. A glob such as `kiln-media-*.tar.gz` already matches the
+`.partNN.tar.gz` names. What it leaves out is the checksum sidecar,
+`kiln-media-<stamp>.sha256` (and `kiln-db-*.dump` leaves out
+`kiln-db-<stamp>.sha256`). Without its sidecar a part set does not restore by
+default ([below](#restore-a-media-set-that-has-several-parts)), and a dump
+cannot be checked. So an rclone filter, a monitoring script or a retention job
+of yours must take the sidecars too:
+
+```bash
+rclone copy /var/backups/kiln/media r2:kiln-backups/media \
+  --include "kiln-media-*.tar.gz" --include "kiln-media-*.sha256"
+rclone copy /var/backups/kiln/db r2:kiln-backups/db \
+  --include "kiln-db-*.dump" --include "kiln-db-*.sha256"
+```
+
+Don't widen it to `kiln-media-*`: that also copies a running backup's
+`.partial` files (and a killed one's), and `restore.sh` refuses a set with one
+beside it. Why the two writers split media the same way is in [ADR 0042](decisions/0042-backup-sh-re-implements-the-media-planner-in-bash-and-both-change-in-the-same-pull-request.md).
 
 The one difference is recovery. A failed in-app backup keeps its finished parts
 so it can be [resumed](#media-backups-in-parts-2218); a failed cron run removes
@@ -856,7 +872,7 @@ fresh backup folded into it would never be taken, and a resume folded into a
 fresh backup would never resume. In-app schedules (part of #2219) get the same
 answer: a scheduled backup is never folded into a queued Resume. Its window
 stays due and is asked for again every minute until the queue clears
-([When a schedule fires](#when-a-schedule-fires)).
+([When a schedule fires](#when-a-schedule-fires)). The reasoning is in [ADR 0038](decisions/0038-a-backup-asked-for-while-one-runs-queues-and-only-like-folds-into-like.md).
 
 **What the queued backup covers after a fold.** A request that folds into a
 queued backup never leaves it covering less than either asked for:
@@ -941,7 +957,7 @@ depend on the window ([below](#what-a-step-that-outlives-its-cancel-can-write)).
 
 The lock is held by a step job on some node. If that node stops, its step must
 not hold every later backup for ever, and two nodes must never write the same
-backup's files at once. Three things keep both true.
+backup's files at once. Three things keep both true. The reasoning is in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md).
 
 **A heartbeat on every node.** Every 30 seconds each node writes a beat to
 `backup_node_beats`, timed by the database's clock, never the node's. It also
@@ -1008,6 +1024,8 @@ step after `start` runs only on a node that reads the same id:
   resume follows the files, not the id, so a backup whose `.work/<stamp>/`
   came along with the copy can still be resumed there.
 
+Why each step runs where its backup directory is, and the bounded wait, is argued in [ADR 0040](decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md).
+
 **A resume runs on the host with the files (#2539).** The Resume button shows
 only on a node that can see the backup's `.work/<stamp>/`. Each run records
 the id of the directory its files are in (its `dir_id`, set when it starts and
@@ -1059,7 +1077,7 @@ its node stops it ([above](#several-nodes-and-the-backup-lock)). Until then:
   else.
 - **The History row**: it can't write it. A step's progress, success and
   failure land only on a `Running` run that is still on that step's chain,
-  so it can't overwrite a Cancel or the progress of a resume of the same run.
+  so it can't overwrite a Cancel or the progress of a resume of the same run. The fence is argued in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md), and why History writes stay out of the lock transaction in [ADR 0045](decisions/0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md).
 - **Its own temporary files** (`kiln-db-<stamp>.dump.partial`, a media part's
   `.partial`): these are not fenced. A resume of the same backup could share
   them, and only the wait after a Cancel
@@ -1198,14 +1216,128 @@ partial requests are kept as asked.
 An in-app schedule takes backups from inside the application, as an
 alternative to the host's cron job (part of #2219). It runs the same backup as
 **Back up now**, through the same lock and queue, and writes the same files.
-In this release a schedule is **created, changed and deleted from a release
-console only**; the **Backups** page lists the schedules read-only. Only a
-platform admin may manage them: the actor must be an account whose effective
-platform role is admin.
+Schedules are managed on the **Schedule** tab of the Backups page
+(`/editor/backups/schedules`), or from a release console when you script it
+([Manage schedules from a release console](#manage-schedules-from-a-release-console)).
+Only a platform admin may manage them, as on the Backups page: a schedule
+backs up every site on the deployment, so a site admin who opens the tab is
+turned away.
 
 **Before you start:** a running release with the `add_backup_schedules`
 migration applied, in-app backups working on at least one node (**Back up
-now** succeeds), and the email address of a platform admin account.
+now** succeeds), the scheduler job on (`KILN_BACKUP_SCHEDULER_CRON` not set to
+`false`; [The scheduler job](#the-scheduler-job)), and a platform admin
+account.
+
+1. Open **Backups** (`/editor/backups`) and click the **Schedule** tab. The
+   page is headed **Backup schedule**. With no schedules yet, the
+   **Schedules** list reads "No schedules yet. Backups run when you click
+   Back up now, or from the host's cron job." Any reason a schedule couldn't
+   run here is a warning above the list
+   ([What the Schedule tab shows](#what-the-schedule-tab-shows)).
+2. Click **Add a schedule**. The **Add a schedule** form opens, filled in
+   with a daily backup at 03:00 of everything this deployment backs up,
+   starting today, in the deployment's default time zone (`Etc/UTC` unless
+   `config :kiln_cms, KilnCMS.Events, time_zone: …` sets another), enabled.
+3. Fill it in:
+
+   | Field | What it takes |
+   |---|---|
+   | **What to back up** | **Database**, **Media**, or both. **Media** is greyed out, with "Media isn't archived on this deployment, so a schedule can't include it.", when the media are in S3 or there is no `MEDIA_DIR`. |
+   | **How often** | **Every day**, **Every week**, **Every 2 weeks** or **Every month**. More often than daily [waits for keep-N retention](#sub-daily-schedules-wait-for-keep-n-retention). |
+   | **At** | The local time, `HH:MM`, in the schedule's time zone. |
+   | **Starting on** | The first local date it may fire. Every week and every 2 weeks take their weekday from it (every 2 weeks also its week), every month its day of the month (the 31st becomes the month's last day). |
+   | **Time zone** | An IANA name such as `Europe/Paris`. The box suggests about thirty common zones as you type, and takes any zone the time zone database knows. |
+   | **Enabled** | Ticked, it runs; unticked, it is saved paused. |
+
+   As you change it, a preview under the fields shows the cadence in words
+   ("Every week on Tuesday at 04:15 (Europe/Paris)") and when it would first
+   back up: "Next backup: in 3 days (2026-11-17 04:15)", in the schedule's
+   own zone. When it wouldn't run, the preview says why instead: "It won't
+   run while it's paused." with **Enabled** unticked, or "It won't run on
+   this deployment until the warning above is resolved." when the scheduler
+   is off or backups can't run here. A time zone the database doesn't know
+   shows no preview, and "is not a known time zone" under the box.
+4. Click **Save schedule**. The page flashes "Schedule saved.", the form
+   closes, and the schedule is a card in the **Schedules** list: its cadence,
+   what it backs up ("Database", "Database + Media"), "Next run: in 16 hours"
+   and "No scheduled run yet". The create is recorded in the instance
+   security log as **Backup schedule created**
+   ([security-events.md](security-events.md#the-instance-log)).
+5. After its window has passed, the card reads "Last window: started" and
+   "Last scheduled run: Succeeded (2026-11-13 02:00 UTC)", which links to
+   **Backups**, where **History** has a row whose trigger reads
+   **Scheduled**.
+
+The **Backups** tab then shows "Next scheduled backup: in 16 hours" under its
+heading, linking back to the Schedule tab.
+
+**Change, pause or delete a schedule** from its card:
+
+- **Edit** opens the **Edit schedule** form with the stored values. Change
+  them and click **Save schedule**, or **Cancel**. One form is open at a
+  time: while one is, **Add a schedule** and every **Edit** are hidden.
+  Changing the interval, time, start date, time zone or components means no
+  window from before the edit fires
+  ([When a schedule fires](#when-a-schedule-fires)).
+- **Pause** flashes "Schedule paused.": the card reads "Paused" and shows no
+  next run. **Resume** flashes "Schedule resumed." and, like an edit, fires
+  no window it missed while paused.
+- **Delete** asks first, "Delete this schedule? Backups it already took stay,
+  and age out after 14 days (BACKUP_KEEP_DAYS).", then flashes "Schedule
+  deleted."
+
+Each change that alters a value is recorded as **Backup schedule changed**,
+and a delete as **Backup schedule deleted**. Retention is the same for every
+backup, scheduled or not: the line under the list reads "Retention is
+BACKUP_KEEP_DAYS (14 days) for every backup." A schedule has no keep setting
+of its own yet (keep-N retention, a later part of #2219).
+
+**When someone else changes the schedule you are editing.** The values the
+form edits (what to back up, how often, the time, start date, time zone and
+**Enabled**) are noted when you click **Edit**. If another admin, or a
+console, changes any of them before you save, the save is refused with "This
+schedule changed since you opened it. Reopen it to see the current values."
+and the form closes, so a form opened earlier never undoes their change (a
+pause, say). The scheduler's own writes on the schedule, such as claiming a
+window, don't count as a change.
+
+**What can go wrong:**
+
+| Message | Meaning |
+|---|---|
+| "is not a known time zone" under **Time zone** | The zone isn't in the time zone database. Use an IANA name (`Europe/Paris`, `America/New_York`), not an abbreviation (`CET`). |
+| "must have 1 or more items" under **What to back up** | Every box is unticked. Tick **Database**, **Media** or both. |
+| "This schedule changed since you opened it. Reopen it to see the current values." | Someone changed the schedule since you clicked **Edit** (above). Nothing you entered was saved. |
+| "That schedule no longer exists." | It was deleted in another tab or by another admin. |
+| "This schedule can't be edited here: it can only be paused, resumed or deleted." | The schedule holds a value the form can't offer ([A schedule the tab can only pause, resume or delete](#a-schedule-the-tab-can-only-pause-resume-or-delete)). |
+| "Only a platform admin can change backup schedules." | The schedule's policy refused the write: the account is not a platform admin. |
+| "Couldn't change the backup schedule." | The write failed for another reason, usually the database; try again. |
+
+### A schedule the tab can only pause, resume or delete
+
+The form offers what this release and this deployment can run: daily to
+monthly, the database, and the media when there is a media directory. A
+schedule that stores anything else has no **Edit** button, only **Pause** or
+**Resume** and **Delete**, and its card says why:
+
+- "A newer release saved this schedule with a value this release doesn't
+  know, …": an interval or component written by a newer release, seen after
+  rolling back. Its cadence reads "An interval this release doesn't know
+  (`<value>`)" when the interval is the unknown value.
+- "Schedules more often than daily arrive with keep-N retention, …": an
+  `every_2h` to `every_12h` interval written from a console.
+- "This schedule backs up media, which isn't archived on this deployment,
+  …": the media directory was removed after the schedule was made.
+
+Editing one would mean changing a value the form can't show, so the tab
+doesn't. Pause it, or delete it and add a new one.
+
+### Manage schedules from a release console
+
+For scripts and automation, the same code interfaces the tab uses work from a
+release console. The actor must be an account whose effective platform role
+is admin.
 
 1. Create the schedule on a running node with `rpc`. This one backs up the
    database every day at 03:00 Paris time, starting today:
@@ -1239,16 +1371,8 @@ now** succeeds), and the email address of a platform admin account.
    | `time_zone` | an IANA zone such as `"Europe/Paris"` | `"Etc/UTC"` |
    | `enabled` | `true` or `false` | `true` |
 
-   The create is recorded in the instance security log as **Backup schedule
-   created** ([security-events.md](security-events.md#the-instance-log)).
-2. Open **Backups** (`/editor/backups`) as a platform admin. The **Schedules**
-   section, above **History**, has one line per schedule: its cadence ("Every
-   day at 03:00 (Europe/Paris)", "Every week on Thursday at 02:30 (Etc/UTC)",
-   "Every 2 weeks on Thursday at 02:30 (Etc/UTC), from 2026-01-01", "Every
-   month on day 15 at 03:00 (Etc/UTC)"), what it backs up ("Database",
-   "Database + Media") and "Next run: in 16 hours".
-3. After the window has passed, the schedule's line reads "Last window:
-   started", and **History** has a new row whose trigger reads **Scheduled**.
+2. Open the **Schedule** tab (`/editor/backups/schedules`): the schedule is
+   a card there, as in the steps above.
 
 **Other calls**, each with `actor: admin` as above:
 
@@ -1256,16 +1380,16 @@ now** succeeds), and the email address of a platform admin account.
 - **Fetch one:** `KilnCMS.Backups.get_backup_schedule(id, actor: admin)`
   (`{:ok, nil}` when there is none).
 - **Change one:** `KilnCMS.Backups.update_backup_schedule(s, %{time_of_day: ~T[02:00:00]}, actor: admin)`.
-  It accepts the same six fields; anything else is refused.
+  It accepts the same six fields; anything else is refused. A console change
+  to a schedule someone has open in the tab makes their save refused, as
+  above.
 - **Pause and resume:** `update_backup_schedule(s, %{enabled: false}, actor: admin)`,
-  then `%{enabled: true}`. A paused schedule keeps its settings and its line
-  reads "Paused".
+  then `%{enabled: true}`.
 - **Delete one:** `KilnCMS.Backups.destroy_backup_schedule(s, actor: admin)`
   returns `:ok`.
 
-Every change that alters a field is recorded as **Backup schedule changed**,
-and a delete as **Backup schedule deleted**. A change that resubmits the same
-values records nothing.
+The security log records console changes as it records the tab's. A change
+that resubmits the same values records nothing.
 
 **What can go wrong:**
 
@@ -1278,11 +1402,15 @@ values records nothing.
 | `Ash.Error.Forbidden` | The actor is not a platform admin (a site admin is not enough), or you passed `KilnCMS.Backups.system()`, which may not manage schedules. |
 | `** (Ash.Error.Query.NotFound)` from `get_user_by_email!` | No account has that email address. |
 
-### What the Schedules list shows
+### What the Schedule tab shows
 
-Everything in the section comes from the same status the alarm uses, so a
-"Next run" shown there is one the scheduler will act on:
+Everything on the tab comes from the same status the alarm uses, so a "Next
+run" shown there is one the scheduler will act on. Each schedule's card shows:
 
+- **Its cadence**, such as "Every day at 03:00 (Europe/Paris)", "Every week
+  on Thursday at 02:30 (Etc/UTC)", "Every 2 weeks on Thursday at 02:30
+  (Etc/UTC), from 2026-01-01" or "Every month on day 15 at 03:00 (Etc/UTC)",
+  and what it backs up ("Database", "Database + Media").
 - **"Next run: in 16 hours"** (or "due now") only when the schedule can fire
   here: it is enabled, the scheduler is on, this node can run backups, and it
   covers a component this deployment has. Otherwise there is no next run.
@@ -1293,25 +1421,58 @@ Everything in the section comes from the same status the alarm uses, so a
   "Waiting: the server that checked can't run backups (`<reason>`); another
   server can take it." (`no_pg_dump`, `no_pg_restore` or `no_database_url` on
   the node that ticked), or "Last window refused: `<reason>`" (`disabled` or
-  `no_media_dir`).
-- **One alarm line per component**, with its threshold and where it came from:
-  "Alarm after 36 hours without a good backup (BACKUP_STALE_AFTER_HOURS)",
-  "Alarm after 252 hours without a good backup (its schedule)", or "Alarm after
-  36 hours without a good backup (BACKUP_STALE_AFTER_HOURS; host cron backs it
-  up too)" ([below](#how-a-schedule-sets-the-alarm-threshold)).
-- **Warnings:** "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
-  when the scheduler job is off, and "Scheduled backups can't run here:
-  `<reason>`" when this node can't run backups (`BACKUP_ENABLED=false`, no
-  database connection, or no PostgreSQL client tools).
-- "No schedules yet. Backups run when you click Back up now, or from the
-  host's cron job." when there are none, and "Couldn't load the backup
-  schedules." when they can't be read (the thresholds are then the
-  environment's).
+  `no_media_dir`). This says what the window asked for, not how the backup
+  went.
+- **The last scheduled run:** "Last scheduled run: Failed (2026-11-13 02:00
+  UTC)", the newest backup run that this schedule took part in and how it
+  ended (Succeeded, Failed, Running, Skipped or Canceled), linking to
+  **Backups**; or "No scheduled run yet".
 
-Once an enabled schedule exists, the **Overview** page's backup strips for
-platform admins say that scheduled backups run "from the in-app schedules
-listed on the Backups page or from" the host's cron job, rather than from cron
-alone.
+Above the list, a warning box appears when any of these holds:
+
+| Warning | When |
+|---|---|
+| "The scheduler is turned off on this deployment (KILN_BACKUP_SCHEDULER_CRON), so these schedules don't run." | `KILN_BACKUP_SCHEDULER_CRON` is `false` or unparseable ([The scheduler job](#the-scheduler-job)). |
+| "In-app backups can't run here, so schedules are skipped: `<reason>`" | This node can't run backups: `BACKUP_ENABLED=false`, no database connection, or no PostgreSQL client tools. |
+| "The scheduler hasn't run since 2026-11-13 09:12 UTC. Check that background jobs are running." (or "… hasn't run yet.") | The scheduler is on, an enabled schedule was created, edited or resumed longer ago than the tick threshold, and no scheduler job has started within it. The threshold is five minutes, or the longest gap between two runs of `KILN_BACKUP_SCHEDULER_CRON` plus a minute when that is longer (61 minutes at `0 * * * *`). It reads Oban's `oban_jobs` table, so a job queue that has stopped shows here. |
+| "Couldn't check when the scheduler last ran." | Reading `oban_jobs` for that check failed. |
+| "Media isn't archived on this deployment, so a schedule can't include it." | A schedule names media and this deployment has no media directory. |
+
+In the list, "Couldn't load the backup schedules." means the schedules
+couldn't be read (the alarm thresholds are then the environment's), and
+"Couldn't load the last runs." appears once, instead of every card claiming
+there was no run, when the runs couldn't be read. While the tab is open it
+reads all of this again every minute, and leaves an open form as it is.
+
+**On the Backups tab**, the schedules show as:
+
+- "Next scheduled backup: in 16 hours" under the heading, the soonest window
+  of any schedule that can run here, linking to the Schedule tab;
+- the **Alarm thresholds** section, one line per component with its
+  threshold and where it came from: "Alarm after 36 hours without a good
+  backup (BACKUP_STALE_AFTER_HOURS)", "Alarm after 252 hours without a good
+  backup (its schedule)", or "Alarm after 36 hours without a good backup
+  (BACKUP_STALE_AFTER_HOURS; host cron backs it up too)"
+  ([below](#how-a-schedule-sets-the-alarm-threshold)). When schedules exist,
+  it warns "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
+  or "Scheduled backups can't run here: `<reason>`".
+
+**On the Overview page**, once an enabled schedule exists, the platform
+admins' backup strips (the neutral "Backups aren't set up yet" one and the red
+one) gain an **Open the schedule** link beside **Open Backups**, and say:
+
+- "First scheduled backup: in 3 hours. You can take one now from Backups."
+  (neutral strip) or "Next scheduled backup: in 3 hours. You can also take
+  one now from Backups." (red strip), when every component the strip is about
+  (never backed up, failed, or stale) has an enabled schedule that can run
+  here; the time is the soonest of theirs;
+- otherwise, that scheduled backups run "from the in-app schedules on the
+  Schedule tab of Backups or from" the host's cron job: a schedule that covers
+  only some of those components, or can't run here, is no promise for the
+  rest.
+
+Without an enabled schedule, the strips say scheduled backups are the host's
+cron job, as before.
 
 ### When a schedule fires
 
@@ -1340,7 +1501,10 @@ window fires once however many nodes tick.
 - **No retry within a window.** A window is claimed when its backup is asked
   for. If that backup then fails (after its steps' own retries), the schedule
   waits for its next window; take one with **Back up now** or **Resume** in
-  the meantime.
+  the meantime. Only a window whose backup was never asked for (a queued
+  Resume, a node without the client tools, below) is asked for again each
+  minute. Why it is this way, and why the claim shares the backup lock's
+  transaction: [ADR 0044](decisions/0044-a-schedule-sets-the-alarm-threshold-only-while-it-can-run-and-a-claimed-window-is-never-retried.md).
 - **Editing rebaselines it.** Changing the interval, time, time zone, start
   date or components, or resuming a paused schedule, means no window from
   before the change fires: moving a 03:00 schedule to 02:00 at 02:30 doesn't
@@ -1377,8 +1541,9 @@ window fires once however many nodes tick.
 `:every_2h`, `:every_4h`, `:every_8h` and `:every_12h` exist in the schema but
 are refused when a schedule is created or its interval changed, until keep-N
 retention (a later part of #2219) can cap how many backups a schedule keeps.
-Retention today is by age alone, and every run is a full set, so the sets on
-disk for each component are about:
+Retention today caps backups by age, not by count (beyond the recovery points
+and newest backups it keeps), and every run is a full set, so the sets on disk
+for each component are about:
 
 > runs per day × `BACKUP_KEEP_DAYS`
 
@@ -1412,7 +1577,9 @@ A weekly schedule therefore **raises** the threshold from the default 36 h:
 weekly backups are not an alarm on day two. When host cron has also backed the
 component up in the last eight days (an imported run with trigger `cron`), the
 threshold is the lower of the schedule's and `BACKUP_STALE_AFTER_HOURS`, and
-the Backups page says "host cron backs it up too".
+the Backups page says "host cron backs it up too". Why a schedule that can't
+run never sets the threshold:
+[ADR 0044](decisions/0044-a-schedule-sets-the-alarm-threshold-only-while-it-can-run-and-a-claimed-window-is-never-retried.md).
 
 ### Restoring the database brings back the schedules
 
@@ -1422,7 +1589,8 @@ they were then, with the last window they had claimed. On the first tick after
 the restore, each enabled schedule whose latest window is newer than that fires
 within a minute (one extra backup). To avoid it, pause the schedules before
 anything ticks: start the restored release with `KILN_BACKUP_SCHEDULER_CRON=false`,
-pause or delete them from a console, then unset the variable and restart.
+pause or delete them on the **Schedule** tab (it works with the scheduler
+off) or from a console, then unset the variable and restart.
 
 A staging clone made with the [staging scrub](staging-environments.md#the-scrub)
 pauses every schedule (`backup_schedules_disabled` in the scrub's summary), so
@@ -1474,7 +1642,7 @@ verify, upload and, after a failure, rebuild from nothing. The app and
 `backup.sh` split the **set of files** instead. Each part is an ordinary `tar.gz` holding a disjoint
 share of the files, so it can be listed, hashed, copied off-site and restored
 on its own. (A byte-split of one gzip stream would give pieces that are none of
-those.)
+those.) The reasoning is in [ADR 0034](decisions/0034-media-backups-are-split-by-file-set-into-independent-archives-not-by-bytes.md).
 
 **Settings** (read by the app and by `backup.sh`, by the same names; both are
 optional, see [environment-variables.md](environment-variables.md)):
@@ -1591,7 +1759,7 @@ converges over repeated resumes. From a release console, pass `resume:` to
 console](#start-a-backup-from-a-release-console)). A stamp with no failed,
 canceled or stale-running run, or whose work files are gone, is refused; a
 resume never turns into a fresh backup. Re-running the whole backup remains
-the fallback.
+the fallback. The reasoning is in [ADR 0037](decisions/0037-a-resume-reuses-a-file-only-on-a-recorded-hash-match-and-the-run-row-decides-whether-it-may-run.md).
 
 > **Operators who copy the backup directory with `rclone sync $BACKUP_DIR`:**
 > exclude `.work/**`. It holds lists of media file names (and is removed on
@@ -1668,7 +1836,7 @@ once, verified it and recorded its SHA-256, and then something else wrote to
 it: a disk fault, a second process with access to `BACKUP_DIR`, a person. The
 file is not uploaded, not retried, and not rebuilt in that run, because a
 changed backup file is the operator's to look at, not the backup's to paper
-over.
+over. The reasoning is in [ADR 0043](decisions/0043-a-file-that-changed-before-its-off-site-copy-is-refused-and-only-a-resume-rebuilds-it.md).
 
 **Where it shows (in-app backup).** The run is `Failed`. The error appears in
 the **Last run failed** box on `/editor/backups` and on the History row. The
@@ -1960,7 +2128,7 @@ The files column reads:
 | `missing` | Gone with no recorded reason: deleted by hand, or recorded by another node. |
 
 "Missing" is worked out when the page is shown, for the 25 rows in view only; it
-is never stored, so a restored file turns back to `on disk`.
+is never stored, so a restored file turns back to `on disk`. The reasoning is in [ADR 0033](decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md).
 
 **Multi-node.** `BACKUP_DIR` belongs to one host. A run recorded by another node
 reads `missing` on this one. That is the node's view, not data loss.
@@ -1988,9 +2156,15 @@ run of the [last-good marker](#the-last-good-marker) sync (every 15 minutes by
 default), and on demand:
 
 ```bash
-bin/kiln eval "KilnCMS.Backups.Importer.run()"
-# {:ok, %{imported: 2, pending: 0, skipped: 0, failed: 0}}
+bin/kiln_cms rpc '{:ok, r} = KilnCMS.Backups.Importer.run(); IO.inspect(r)'
+# %{failed: 0, imported: 2, pending: 0, skipped: 0}
 ```
+
+It runs on the serving node, as the other commands on this page do; `eval`
+starts no Repo, so the read fails and nothing is imported. When the directory
+cannot be listed or the history cannot be read, the match fails and `rpc` exits
+non-zero. A row that could not be written does not: it is counted in `failed`
+and the call still returns `{:ok, _}`, so read `failed` as well.
 
 It scans `$BACKUP_DIR/db` and `$BACKUP_DIR/media` for `kiln-db-<stamp>` and
 `kiln-media-<stamp>` files and creates one row per stamp. The parts of one
@@ -2028,8 +2202,12 @@ Everything stored in a row (errors, log lines, off-site remote) is passed
 through `KilnCMS.Backups.Redact`: URL userinfo, `key=value` credentials and
 rclone connection-string remotes are replaced with `***`. The status panel's
 off-site remote and `manifest.json`'s `offsite` are redacted the same way. Read
-access is the platform admin only; the table is written only by the `:backups`
-system actor and is purged by the staging scrub (`backup_runs_purged`).
+access is the platform admin only. The table is written by the `:backups`
+system actor, and by one person's action: a platform admin's `:cancel` of a
+running backup, which sets its status, finish time and error ("Canceled by a
+platform admin") and appends a log line naming that admin by email. It is
+purged by
+the staging scrub (`backup_runs_purged`).
 
 ### It needs the client tools in the image
 
@@ -2185,7 +2363,7 @@ What the script checks **before it extracts anything** (a failure stops with
 - every part lists cleanly with `tar -tzf`, and no member has an absolute path
   or a `..` component, nor is a symlink or hardlink whose target is absolute or
   contains `..`. That last rule also refuses a harmless `d/x -> ../y` link:
-  extract such a set by hand once you have looked at it.
+  extract such a set by hand once you have looked at it. The reasoning is in [ADR 0036](decisions/0036-restore-refuses-absolute-and-dot-dot-members-and-links-even-harmless-ones.md).
 
 It also refuses a set with a `kiln-media-<stamp>.*.partial` file beside it: a
 backup is still writing that stamp, or was killed while writing it.
@@ -2198,20 +2376,29 @@ so one without is most likely what a killed run left behind and would restore
 with files missing. If you know the set is whole (you removed the sidecar
 yourself, say), set `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` to restore it
 anyway. It never falls back to the hashes in `manifest.json`; the sidecar is the
-supported record.
+supported record. The reasoning is in [ADR 0035](decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
 
-**By hand** (no script): check the sidecar, then extract in numeric order.
+**By hand** (no script): check the sidecar, and extract only if it passed.
 
 ```bash
-cd /backups/media && sha256sum -c kiln-media-20260805-031700.sha256
-for p in kiln-media-20260805-031700.part*.tar.gz; do
-  tar -xzf "$p" -C /data/kiln/uploads
-done
+cd /backups/media &&
+  sha256sum --strict -c kiln-media-20260805-031700.sha256 &&
+  for p in kiln-media-20260805-031700.part*.tar.gz; do
+    tar -xzf "$p" -C /data/kiln/uploads
+  done
 ```
 
-Plain `tar -xzf` per part is the supported manual form (the shell glob sorts
-two-digit names correctly up to part99). `cat parts | tar -xzi` works only with
-GNU tar and is not supported.
+On macOS, use `shasum -a 256 --strict -c` in place of `sha256sum --strict -c`.
+The `&&` is the point: without it a failed check still extracts, and `--strict`
+fails on a sidecar line it cannot parse instead of skipping it. Unlike
+`restore.sh`, the check only covers the parts the sidecar lists: a stray
+`.partNN` file that it doesn't list passes the check and the glob extracts it
+anyway, so first make sure the directory holds only the parts the sidecar
+names (`restore.sh` refuses such a set). The order
+of the parts does not matter, past `part99` too: each file is in exactly one
+part, and directories are not archived, so no part overwrites another. Plain
+`tar -xzf` per part is the supported manual form. `cat parts | tar -xzi` works
+only with GNU tar and is not supported.
 
 What can go wrong:
 

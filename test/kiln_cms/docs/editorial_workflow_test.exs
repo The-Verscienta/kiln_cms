@@ -7,8 +7,8 @@ defmodule KilnCMS.Docs.EditorialWorkflowTest do
   "editors can publish" switch off and then on. A table that drifts from the
   code fails, and so does a row nobody has mapped to a check.
 
-  The guide's screenshots are checked too: present, described, small, and
-  none left over.
+  The guide's screenshots are budgeted with every other guide's, in
+  `KilnCMS.Docs.GuideImagesTest` (#2460).
 
   Every actor is an org member with the tier on that membership, as in
   `KilnCMS.CMS.EditorsCanPublishTest`: a membership-less account resolves to
@@ -21,15 +21,10 @@ defmodule KilnCMS.Docs.EditorialWorkflowTest do
   alias KilnCMS.CMS.{EditorialSettings, PreviewToken}
 
   @guide "docs/editorial-workflow.md"
-  @images "docs/images/editorial-workflow"
   @tiers [:viewer, :editor, :admin]
 
-  # Budgets: a guide read in five minutes, whose pictures load quickly.
+  # A guide read in five minutes.
   @max_words 1_300
-  @max_images 8
-  @max_image_bytes 90_000
-  @max_guide_bytes 600_000
-  @max_width 1600
 
   # Row label → the check that proves it. Explicit on purpose: a new row needs
   # a check before the table may claim it.
@@ -93,47 +88,6 @@ defmodule KilnCMS.Docs.EditorialWorkflowTest do
         """)
 
       refute Map.has_key?(@checks, rows |> hd() |> elem(0))
-    end
-  end
-
-  describe "the screenshots" do
-    setup do
-      markdown = File.read!(@guide)
-
-      images =
-        for [_, alt, src] <- Regex.scan(~r/!\[([^\]]*)\]\(([^)\s]+)/, markdown),
-            do: %{alt: alt, src: src, path: Path.join("docs", src)}
-
-      %{images: images}
-    end
-
-    test "every image is a described WebP under #{@images}", %{images: images} do
-      assert images != []
-
-      for image <- images do
-        assert String.starts_with?(image.path, @images <> "/"), "#{image.src} is elsewhere"
-        assert String.trim(image.alt) != "", "#{image.src} has no alt text"
-        assert <<"RIFF", _size::binary-size(4), "WEBP", _::binary>> = File.read!(image.path)
-        assert Image.width(Image.open!(image.path)) <= @max_width, "#{image.src} is too wide"
-      end
-    end
-
-    test "fit their budgets", %{images: images} do
-      sizes = Map.new(images, &{&1.src, File.stat!(&1.path).size})
-
-      assert length(images) <= @max_images
-
-      for {src, bytes} <- sizes do
-        assert bytes <= @max_image_bytes, "#{src} is #{bytes} bytes"
-      end
-
-      assert sizes |> Map.values() |> Enum.sum() <= @max_guide_bytes
-    end
-
-    test "leave nothing unreferenced in #{@images}", %{images: images} do
-      on_disk = @images |> File.ls!() |> Enum.map(&Path.join(@images, &1)) |> Enum.sort()
-
-      assert on_disk == images |> Enum.map(& &1.path) |> Enum.uniq() |> Enum.sort()
     end
   end
 

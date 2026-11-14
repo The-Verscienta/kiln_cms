@@ -63,19 +63,24 @@ sends mail, fires a webhook, or contacts a subprocessor.
 
 | What | Action | Why |
 |------|--------|-----|
-| **User accounts** | `:anonymize` (per user) — the GDPR-erasure action | Emails → non-routable tombstones, names cleared, passwords scrambled, roles reset to `:viewer`, auth-event actors nulled. The exact production erasure path (`data-flows.md`). |
-| **API keys** | purged | Live `kiln_*` credentials would otherwise grant API access to the staging copy (and are secrets in their own right). |
-| **Auth tokens** | purged | Session / reset / magic-link tokens are stale in a clone and are pseudonymous PII. |
-| **Webhook endpoints** | de-activated | A clone must **never** fire deliveries at production consumers' URLs on the next publish. De-activation is data-only (no SSRF DNS re-check). |
-| **Mail settings** | purged (singleton row) | Drops the **encrypted DKIM private key** and server IP so staging can't sign mail as your production domain. Recreated blank on next read (`KilnCMS.Mail.ensure_settings!/0`). |
-| **Site invitations** | purged | Each names a production address, and its link would set up an account on the clone for whoever holds the mail. |
-| **Recorded search queries** | purged | Query text can contain names, emails, or confidential titles ([#213/#220](data-flows.md)). |
-| **Payment credentials** | purged (singleton row) | Live provider API and webhook-signing keys. Removed **first**, before anything else touches billing rows, so a clone can never act on a real payment account. |
-| **Recorded payment webhooks** | purged | The provider's raw event payloads carry customer emails and amounts. |
-| **Paid memberships** | scrubbed | Provider customer/subscription ids nulled and the status set to cancelled. **Scrubbed, not deleted**: `billing_membership_events` references them, and the entitlement trail should stay referentially intact — the same audit-retention decision as content history. What must go is the live external reference. |
-| **In-app backup schedules** | paused (`backup_schedules_disabled`) | A clone must not run production's [backup schedules](backups.md#schedule-backups-in-the-app) against the staging host's backup directory. Paused rather than deleted, so whoever runs staging can see them and resume one from a console (part of #2219). |
-| **Membership tiers** | deactivated | The catalogue shape keeps staging useful; the price pointer is replaced with a per-row tombstone so nothing in the clone can bill a real account. (Per-row because `provider_price_id` is `NOT NULL` with a per-org unique index.) |
-| **A fresh staging admin** | provisioned (opt-in) | Because every real account is anonymized (nobody can sign in), the scrub can seed **one** known admin from `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` so the environment is usable. |
+| **User accounts** | `:anonymize` (per user) — the GDPR-erasure action (`users_anonymized`) | Emails → non-routable tombstones, names cleared, passwords scrambled, roles reset to `:viewer`, auth-event actors nulled. The exact production erasure path (`data-flows.md`). |
+| **API keys** | purged (`api_keys_purged`) | Live `kiln_*` credentials would otherwise grant API access to the staging copy (and are secrets in their own right). |
+| **Auth tokens** | purged (`tokens_purged`) | Session / reset / magic-link tokens are stale in a clone and are pseudonymous PII. |
+| **Webhook endpoints** | de-activated (`webhooks_deactivated`) | A clone must **never** fire deliveries at production consumers' URLs on the next publish. De-activation is data-only (no SSRF DNS re-check). |
+| **Mail settings** | purged, singleton row (`mail_settings_purged`) | Drops the **encrypted DKIM private key** and server IP so staging can't sign mail as your production domain. Recreated blank on next read (`KilnCMS.Mail.ensure_settings!/0`). |
+| **Site invitations** | purged (`invitations_purged`) | Each names a production address, and its link would set up an account on the clone for whoever holds the mail. |
+| **Recorded search queries** | purged (`search_queries_purged`) | Query text can contain names, emails, or confidential titles ([#213/#220](data-flows.md)). |
+| **Recorded 404 paths** | purged (`missed_paths_purged`) | Traffic data about the *production* site, and a path can be incidentally identifying (`/invoices/jane-doe`). See [404 capture](data-flows.md#404-capture-472). |
+| **Payment credentials** | purged, singleton row (`billing_settings_purged`) | Live provider API and webhook-signing keys. Removed **first**, before anything else touches billing rows, so a clone can never act on a real payment account. |
+| **Recorded payment webhooks** | purged (`billing_events_purged`) | The provider's raw event payloads carry customer emails and amounts. |
+| **Backup history** | purged (`backup_runs_purged`) | Records where production's backups go (rclone destinations), who started them, and their errors. The staging host's own backups start a [history](backups.md#backup-history-2217) of their own. |
+| **In-app backup schedules** | paused (`backup_schedules_disabled`) | A clone must not run production's [backup schedules](backups.md#schedule-backups-in-the-app) against the staging host's backup directory. Paused rather than deleted, so whoever runs staging can see them and resume one on the Backups page's Schedule tab or from a console (part of #2219). |
+| **Security log** | purged (`security_events_purged`) | Raw IP addresses, user agents and email snapshots of production's sign-ins: personal data a clone must not carry. See [the security log](security-events.md#privacy-ip-addresses-erasure-and-staging). |
+| **Instance security log** | purged (`instance_security_events_purged`) | The same columns for events about the installation: platform admins' addresses and IPs. See [the instance log](security-events.md#the-instance-log). |
+| **Security alert dispatches** | purged (`security_alert_dispatches_purged`) | A [security alert](security-alerts.md) still to be sent would mail and notify production's admins from the clone, about production events. |
+| **Paid memberships** | scrubbed (`memberships_scrubbed`) | Provider customer/subscription ids nulled and the status set to canceled. **Scrubbed, not deleted**: `billing_membership_events` references them, and the entitlement trail should stay referentially intact — the same audit-retention decision as content history. What must go is the live external reference. |
+| **Membership tiers** | deactivated (`tiers_deactivated`) | The catalogue shape keeps staging useful; the price pointer is replaced with a per-row tombstone so nothing in the clone can bill a real account. (Per-row because `provider_price_id` is `NOT NULL` with a per-org unique index.) |
+| **A fresh staging admin** | provisioned, opt-in (`admin_provisioned`) | Because every real account is anonymized (nobody can sign in), the scrub can seed **one** known admin from `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` so the environment is usable. |
 
 The scrub is **idempotent** — re-running it anonymizes only accounts that aren't already
 anonymized and re-purges empty tables cheaply.
@@ -238,9 +243,10 @@ the gaps the *data* carries — the *config* is already inert:
 - **No third-party scripts** on delivered pages — nothing to point away from prod.
 - **Mail is off unless `MAIL_MODE` is set**; Meilisearch and S3 are opt-in and default
   to `enabled: false` / local storage. A staging env that simply doesn't set them talks
-  to no subprocessor — with one exception: the upstream **update check** is on by
-  default, so an admin opening `/editor/system` makes an anonymous request to
-  api.github.com (no instance data, see [data-flows.md](data-flows.md)). Set
+  to no subprocessor — except for the checks Kiln makes by default. The upstream
+  **update check** is on by default, so an admin opening `/editor/system` makes
+  an anonymous request to kilncms.dev, or to api.github.com if that fails (no
+  instance data, see [data-flows.md](data-flows.md)). Set
   `KILN_UPDATE_CHECK=false` on the staging env if that request is unwelcome.
   A second exception runs on a schedule: crawler verification fetches Google's,
   Bing's, Apple's and DuckDuckGo's published crawler IP lists every 6 hours
@@ -250,10 +256,30 @@ the gaps the *data* carries — the *config* is already inert:
   verification itself, or the staging firewall does not allow those hosts
   (blocked, it only logs a warning per engine). See
   [bot-budgets.md](bot-budgets.md#published-ip-ranges).
-- **Secrets come from the environment** (`SECRET_KEY_BASE`, `DATABASE_URL`, provider
-  keys via `KilnCMS.Keys`), not the database — so a fresh set of staging env vars is a
-  clean break from production. The DKIM private key is the one secret that lives in the
-  DB; the scrub purges it.
+  The others are on by default too. Registering, changing or resetting a
+  password on the clone sends a five-character fragment of its hash to Have I
+  Been Pwned; the scrub's own staging admin is not checked, and
+  `BREACHED_PASSWORD_CHECK=false` stops it. With a plugin from Hex, an admin
+  opening `/editor/system` asks hex.pm about it, which `KILN_UPDATE_CHECK=false`
+  stops while `KILN_PLUGIN_HEALTH_CHECK` is unset. Crawler verification asks
+  the node's DNS resolver about clients claiming to be search engines
+  (`KILN_CRAWLER_VERIFICATION=false` stops it and the list fetches).
+  [data-flows.md](data-flows.md#optional-subprocessors) lists every call a
+  default install makes and the variable that stops each.
+- **Keys and credentials kept in the database are sealed with `SECRET_KEY_BASE`.**
+  `SECRET_KEY_BASE`, `DATABASE_URL`, and any key `KilnCMS.Keys` reads from an
+  environment variable or a file come from the environment, so a fresh set of staging
+  env vars is a clean break from production. These, when kept in the database, are
+  encrypted by `KilnCMS.Keys.Vault` under a key derived from `SECRET_KEY_BASE`: the DKIM
+  private key and the payment provider's API and webhook keys, each site's mail relay
+  password, SSO client secret, storage secret key, AI provider and Meilisearch API keys,
+  and push (VAPID) private key, webhook signing secrets, each site's ActivityPub key,
+  the instance's content-signing key (provenance), and social account credentials. A
+  clone with its own `SECRET_KEY_BASE` cannot decrypt any of them, as long as
+  `PREVIOUS_SECRET_KEY_BASE` is not production's: leave it unset on staging. The scrub
+  also deletes the DKIM key and the billing keys outright, the billing keys before
+  anything else, and clears every account's authenticator app, recovery codes and
+  passkeys as it anonymizes the account (`KilnCMS.Accounts.Changes.AnonymizeUser`).
 - **A distinct `SECRET_KEY_BASE`** invalidates every cloned session cookie and every
   production-signed preview token automatically.
 

@@ -141,6 +141,34 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Security.Event, :count) == 0
     end
 
+    test "purges the instance security log (platform admins' addresses and IPs)" do
+      KilnCMS.Security.record_instance_event!(%{type: :backup_canceled},
+        actor: KilnCMS.Security.system()
+      )
+
+      assert Repo.aggregate(KilnCMS.Security.InstanceEvent, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.instance_security_events_purged >= 1
+      assert Repo.aggregate(KilnCMS.Security.InstanceEvent, :count) == 0
+    end
+
+    test "purges recorded 404 paths (production traffic data)" do
+      # authorize?: false: the 404 recorder runs with no actor, as a request does.
+      CMS.record_missed_path!(%{path: "/scrub-missed", locale: "en"},
+        authorize?: false,
+        tenant: KilnCMS.Accounts.default_org_id()
+      )
+
+      assert Repo.aggregate(KilnCMS.CMS.MissedPath, :count) >= 1
+
+      summary = Scrub.run([])
+
+      assert summary.missed_paths_purged >= 1
+      assert Repo.aggregate(KilnCMS.CMS.MissedPath, :count) == 0
+    end
+
     test "purges pending security alerts (they would notify production admins)" do
       KilnCMS.Repo.transaction(fn ->
         KilnCMS.Security.AlertGate.insert_notice!(KilnCMS.Accounts.default_org_id(), %{
@@ -201,6 +229,55 @@ defmodule KilnCMS.Staging.ScrubTest do
 
       second = Scrub.run([])
       assert second.users_anonymized == 0
+    end
+  end
+
+  describe "the scrub table in docs/staging-environments.md" do
+    # The table drifted once (#2454): five purges were added to the scrub with
+    # no row. Every row now names its summary key, so the keys a real run
+    # returns are the list the table must cover.
+    @guide "docs/staging-environments.md"
+
+    test "names every key of the scrub's summary" do
+      keys = Scrub.run([]) |> Map.keys() |> Enum.sort()
+      table = scrub_table!()
+
+      missing = Enum.reject(keys, &String.contains?(table, "(`#{&1}`)"))
+
+      assert missing == [], """
+      The scrub table in #{@guide} ("## The scrub") has no row for:
+
+        #{Enum.map_join(missing, "\n  ", &inspect/1)}
+
+      Add a row for each that says what is purged or de-activated and why,
+      with its summary key in the Action column, e.g. "purged (`#{List.first(missing)}`)".
+      """
+    end
+
+    test "names no key the scrub no longer returns" do
+      keys = Scrub.run([]) |> Map.keys() |> Enum.map(&to_string/1)
+
+      named =
+        ~r/\(`([a-z_]+)`\)/
+        |> Regex.scan(scrub_table!(), capture: :all_but_first)
+        |> List.flatten()
+
+      stale = Enum.uniq(named) -- keys
+
+      assert stale == [], """
+      The scrub table in #{@guide} ("## The scrub") names keys Scrub.run/1 no
+      longer returns: #{inspect(stale)}. Remove or rename those rows.
+      """
+    end
+
+    defp scrub_table! do
+      [_, section] = @guide |> File.read!() |> String.split("\n## The scrub\n", parts: 2)
+      [section | _] = String.split(section, "\n## ", parts: 2)
+
+      section
+      |> String.split("\n")
+      |> Enum.filter(&String.starts_with?(&1, "| "))
+      |> Enum.join("\n")
     end
   end
 

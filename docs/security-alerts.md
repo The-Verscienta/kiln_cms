@@ -209,7 +209,8 @@ before anything reaches the database:
   refused (rule 203.0.113.0/24)". The rule is masked like an address (see
   [IP addresses in alerts](#ip-addresses-in-alerts)).
 - The summary counts the client networks recorded in the window, at most 20
-  per server, not the requests refused. For the number of refusals, see the
+  per server ([Running more than one server](#running-more-than-one-server)),
+  not the requests refused. For the number of refusals, see the
   `kiln_cms.ip_block.refused.count` counter
   ([Observability](observability.md#blocked-addresses)).
 
@@ -242,22 +243,31 @@ API key that this server has verified goes over one of these rate limits:
 No other limit raises it: sign-in, forms, page delivery and the rest are
 about addresses, not keys.
 
-**"Verified" means used successfully on this server in the last 5 minutes.**
+**"Verified" means used successfully on this server recently.**
 A rate limit refuses a request before the key in it is checked, and checking
 it there would cost a database read on every refused request. So each server
-remembers, in memory, the keys that authenticated on it in the last 5
-minutes, as a SHA-256 of the key and the key's id. A refused request whose
-key is not remembered (forged, unknown, revoked, expired, never used on this
+remembers, in memory, the keys that authenticated on it, as a SHA-256 of the
+key and the key's id. An entry lasts 5 minutes from when it was written, and
+a successful request rewrites it only once it is more than 2.5 minutes old (so
+an authenticated request costs one hash and one memory read, not a write). A
+key in steady use therefore stays remembered, and is forgotten between 2.5 and
+5 minutes after its last successful request on that server. A refused
+request whose key is not remembered (forged, unknown, revoked, expired, never used on this
 server, or a JWT from the headless sign-in rather than a key) is counted on the
-`kiln_cms.security.api_key_trip.count` counter and nothing else. That means:
+`kiln_cms.security.api_key_trip.count` counter and nothing else. Why the key
+is not checked at the refusal, and why servers do not share what they
+remember, is argued in [ADR 0053](decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md). That means:
 
 - On image transforms and plugin routes, which never check a key, a refusal
   alerts only if the same key was used on an authenticated API on the same
-  server within 5 minutes. Behind a load balancer, the earlier use and the
-  refusal have to land on the same server.
+  server recently enough to still be remembered (2.5 to 5 minutes, as
+  above). Behind a load balancer, the earlier use and the refusal have to
+  land on the same server (see
+  [Running more than one server](#running-more-than-one-server)).
 - `/ws/gql` cannot carry an API key (the socket accepts only a JWT), so a
   refusal there never alerts.
-- A key revoked in those 5 minutes records nothing.
+- A key revoked while it is still remembered records nothing: the key is
+  reloaded before the event is written, and must still be valid.
 
 **One per key and limit per window.** Each server notes a key once per limit
 per 15-minute window. The security log gets one `api_key_rate_limited` event
@@ -332,7 +342,12 @@ the whole installation, not one site.
    Site admins who are not platform admins don't see this part.
 2. Untick **API keys over a rate limit**. The line under it reads "A verified
    API key goes over a rate limit. One alert every 15 minutes, then a
-   summary, to every platform admin."
+   summary, to every platform admin." The **?** at the end of that line
+   ("About when a rate-limit alert is raised") opens **When an alert is
+   raised**: "Some refusals raise no alert, especially when Kiln runs on more
+   than one server: an alert is raised only by a server that recently
+   verified the key." Its **Learn more** link opens
+   [Running more than one server](#running-more-than-one-server).
 3. Select **Save platform alerts**. You see "Platform alert settings saved.
    Turning an alert off is recorded in the instance security log." (Saving
    with nothing turned off says "Platform alert settings saved.")
@@ -749,6 +764,48 @@ What can go wrong:
   never mails production's admins about production's events.
 - **Data.** [data-flows.md](data-flows.md) lists what each part stores.
 
+### Running more than one server
+
+The gates in front of blocked-address and rate-limit alerts are kept in each
+server's memory, so a cluster behaves differently from one server in three
+ways.
+
+- **Most request-rate limits are per server.** Every request-rate limit
+  (`KilnCMSWeb.RateLimit`) except sign-in (`auth`), registration (`register`)
+  and unlock (`unlock`) is counted in each server's memory, the five limits
+  that raise `api_key_rate_limited` included. (The per-account budgets, such as
+  sign-in lockout and invitations, are shared through the database and don't
+  multiply.) Behind a load balancer an address can make up to N times the
+  configured number of requests on N servers before it is refused, so a key goes over a limit, and
+  alerts, less often than the numbers suggest.
+- **A rate-limit alert needs the refusing server to know the key.** It is
+  raised only when that server [verified the key](#api-keys-over-a-rate-limit)
+  recently: it forgets a key between 2.5 and 5 minutes after the key's last
+  successful request there. On `/api`, `/gql` and `/mcp` it normally has, with
+  or without session affinity: the server that refuses an address is the one
+  that let the address's earlier requests through, and it checked the key on
+  each of them that carried it. No alert is raised when:
+  - the refusal is on an image transform or a plugin route (neither checks a
+    key) or the ActivityPub inbox (which counts against the `api` limit
+    without checking a key), and the key's earlier API use landed on another
+    server;
+  - the address's limit was used up by requests that did not carry the key,
+    such as other clients behind the same egress address;
+  - the server's key cache restarted on its own while its rate-limit counts
+    did not, or the server runs a release that does not remember keys (see
+    the rolling-deploy note above).
+
+  On a server running this release, these refusals show up as `unverified`
+  on `kiln_cms.security.api_key_trip.count`. Why the servers do not share what
+  they remember is argued in [ADR 0053](decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md).
+- **A blocked-address summary can count more than 20.** Each server lets at
+  most 20 client networks per site through per 15-minute window, and a
+  network is recorded once per window across all servers. When the blocked
+  clients are spread over the servers, the window's summary can count up to
+  about 20 times the number of servers. It is "about" because each server
+  starts its window by its own clock, and the summary's window starts by the
+  database's.
+
 ## For developers
 
 - `KilnCMS.Security.Alerts`: the kinds, `classify/2` (an event to the alerts
@@ -830,7 +887,7 @@ What can go wrong:
 | Several events, one alert | They fell in one 15-minute window. The summary follows about a minute after the window closes. |
 | A blocked-address alert every 15 minutes | A blocked client keeps trying. Untick **Blocked addresses** on Security alerts to stop the alerts, or remove the rule on `/editor/ip-blocks` if it is no longer wanted. |
 | A blocked-address summary counts far fewer than the refusals | The summary counts client networks (at most 20 per server per window), not requests. `kiln_cms.ip_block.refused.count` counts every refusal. |
-| An API key went over a rate limit and no alert came | The key had not been used successfully on that server in the last 5 minutes, the route was `/ws/gql`, the limit is not one of the [five covered](#api-keys-over-a-rate-limit), the key was revoked in the meantime, or a platform admin turned the kind off. |
+| An API key went over a rate limit and no alert came | That server no longer remembered the key (it forgets one between 2.5 and 5 minutes after the key's last successful request there; see [API keys over a rate limit](#api-keys-over-a-rate-limit)), the route was `/ws/gql`, the limit is not one of the [five covered](#api-keys-over-a-rate-limit), the key was revoked in the meantime, or a platform admin turned the kind off. |
 | An API key alert for a client that did nothing wrong | Limits are per address: someone else behind the same NAT or proxy used up the limit. |
 | "Security alerts reach someone" says some alerts reach nobody after an upgrade | Alerts go only by webhook on this site, and no endpoint has `security.blocked_ip` ticked. Tick it, or untick **Blocked addresses**. |
 | "You don't have permission to change this site's security alerts." | Your role on the site was lowered while the page was open. Reload. |

@@ -32,8 +32,9 @@ defmodule KilnCMSWeb.GraphqlLimits.SocketDocumentBudget do
 
   A refusal here is never noted as an API key over a rate limit
   (`KilnCMS.Security.ApiKeyTrip`): the socket accepts only a JWT
-  (`KilnCMSWeb.BearerAuth`), and a `kiln_` token connects as anonymous, so no
-  verified key is ever behind a document.
+  (`KilnCMSWeb.BearerAuth`), and a `kiln_` token is refused at connect like
+  any other bearer that does not verify (#2634), so no verified key is ever
+  behind a document.
 
   ## Only what the client sends is charged
 

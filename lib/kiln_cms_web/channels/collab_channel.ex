@@ -460,7 +460,16 @@ defmodule KilnCMSWeb.CollabChannel do
          # The admin allowlist (#2248), against the address the socket
          # connected from: a list saved since then closes the room.
          :allowed <-
-           KilnCMS.Security.AdminAllowlist.check(org.id, socket.assigns[:client_ip]) do
+           KilnCMS.Security.AdminAllowlist.check(org.id, socket.assigns[:client_ip]),
+         # A site that requires a second factor, past the deadline of an
+         # account that has not set one up (#2247). The actor was just
+         # reloaded, so an enrolment since the connect counts.
+         false <-
+           KilnCMSWeb.CollabSocket.refused?(
+             actor,
+             org.id,
+             socket.assigns[:second_factor_verified?] == true
+           ) do
       {:ok, assign(socket, :actor, actor)}
     else
       _refused ->

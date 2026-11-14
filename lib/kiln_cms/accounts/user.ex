@@ -1215,6 +1215,10 @@ defmodule KilnCMS.Accounts.User do
 
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
+      # Past the site's deadline, a password-only session proves the account's
+      # email first (#2247, decision 1b). Decided here, not only on the page.
+      change KilnCMS.Accounts.Changes.RequireEnrolmentProof
+
       # Budgeted like the other two (#727). Not because a stolen-session
       # attacker can grind this into a bypass — they would have to have called
       # `:setup_totp` themselves first, in which case they already know the
@@ -1253,7 +1257,11 @@ defmodule KilnCMS.Accounts.User do
       change {KilnCMS.Security.Changes.Record,
               type: :second_factor_enrolled,
               target: fn record, _changeset -> {"user", record.id} end,
-              metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
+              metadata: fn _record, changeset ->
+                KilnCMS.Accounts.Changes.RequireEnrolmentProof.metadata(changeset, %{
+                  "kind" => "totp"
+                })
+              end}
 
       # Tell the owner (#2247, decision 1a), after the commit: a first
       # enrollment and a replacement alike.
@@ -1329,8 +1337,13 @@ defmodule KilnCMS.Accounts.User do
       argument :code, :string, allow_nil?: false, sensitive?: true
 
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
-      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
-      validate KilnCMS.Accounts.Validations.ValidTotpCode
+
+      # Not the last factor while a site requires one (#2247). Ahead of the
+      # budget, which (like the code check) runs only on a changeset still
+      # valid here: a refusal spends no attempt and compares no code.
+      validate KilnCMS.Accounts.Validations.KeepsRequiredSecondFactor
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor, only_when_valid?: true
+      validate KilnCMS.Accounts.Validations.ValidTotpCode, only_when_valid?: true
 
       # Not guarded against an invitation's takeover (#2453): from a stale
       # session it can only clear the factor columns, which the takeover has

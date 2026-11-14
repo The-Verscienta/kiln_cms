@@ -31,6 +31,9 @@ defmodule KilnCMS.Security.ApiKeyTripTest do
 
   @trip [:kiln_cms, :security, :api_key_trip]
 
+  # `ApiKeyTrip`'s named table, owned by its process.
+  @cache :kiln_cms_verified_api_keys
+
   setup do
     SecurityAlerts.enable()
     restore_limits_on_exit()
@@ -529,11 +532,52 @@ defmodule KilnCMS.Security.ApiKeyTripTest do
       assert trip_events() == []
     end
 
-    test "/ws/gql cannot carry a key: a kiln_ token connects as anonymous", ctx do
+    # The socket verifies JWTs only, so a key is a bearer that does not
+    # verify: refused at connect (#2634), never an actor. With the escape
+    # hatch off it is anonymous again, still with no actor, so no document on
+    # the socket can ever be a verified key's (`SocketDocumentBudget`).
+    test "/ws/gql cannot carry a key: a kiln_ token is refused, never a verified key", ctx do
+      assert :error = GraphqlSocket.connect(%{"token" => ctx.secret}, %Phoenix.Socket{}, %{})
+      assert trip_events() == []
+
+      previous = Application.get_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth)
+      Application.put_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, reject_invalid_bearer: false)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth, previous),
+          else: Application.delete_env(:kiln_cms, KilnCMSWeb.Plugs.ApiKeyAuth)
+      end)
+
       assert {:ok, socket} =
                GraphqlSocket.connect(%{"token" => ctx.secret}, %Phoenix.Socket{}, %{})
 
       assert socket.assigns.absinthe.opts[:context].actor == nil
+    end
+  end
+
+  describe "the cache while its owner restarts" do
+    setup ctx do
+      {_key, secret} = mint(ctx, user(:editor))
+      %{secret: secret}
+    end
+
+    # #2813: `remember/2` runs on every authenticated API request. While the
+    # cache's owner restarts its table is gone, and the request must still
+    # be served rather than raise into a 500.
+    test "remember/2 while the cache's table is gone is :ok, and caches again after", ctx do
+      supervisor = KilnCMS.Supervisor
+      :ok = Supervisor.terminate_child(supervisor, ApiKeyTrip)
+      on_exit(fn -> Supervisor.restart_child(supervisor, ApiKeyTrip) end)
+
+      assert :ets.whereis(@cache) == :undefined
+      {:ok, actor} = Accounts.actor_from_api_key(ctx.secret)
+      assert ApiKeyTrip.remember(ctx.secret, actor) == :ok
+      assert json_api(client_address(), ctx.secret).status == 200
+
+      {:ok, _pid} = Supervisor.restart_child(supervisor, ApiKeyTrip)
+      assert ApiKeyTrip.remember(ctx.secret, actor) == :ok
+      assert :ets.member(@cache, :crypto.hash(:sha256, ctx.secret))
     end
   end
 end

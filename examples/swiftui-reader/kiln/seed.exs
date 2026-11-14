@@ -3,8 +3,8 @@
 #
 #     mix run examples/swiftui-reader/kiln/seed.exs
 #
-# It adds an admin-defined `recipe` type with one field of each kind the app
-# shows natively:
+# It adds an admin-defined `recipe` type (defined in kiln/recipe_type.exs)
+# with one field of each kind the app shows natively:
 #
 #   * `ingredients`, a repeating `:group` (item, amount, unit);
 #   * `method`, a rich `:text` delivered as plain text (with paragraph
@@ -42,67 +42,43 @@ opts = [actor: admin, tenant: org]
 
 # --- The type and its fields ------------------------------------------------
 
+# The definition is shared with the test that generates Kiln.swift, so the
+# checked-in models describe exactly what this creates.
+{recipe_type, _binding} = Code.eval_file("recipe_type.exs", __DIR__)
+
 recipe =
-  case CMS.get_type_definition_by_name("recipe", opts) do
+  case CMS.get_type_definition_by_name(recipe_type.type.name, opts) do
     {:ok, definition} ->
       IO.puts("  type recipe already exists")
       definition
 
     {:error, _not_found} ->
       IO.puts("  created type recipe")
-
-      CMS.create_type_definition!(
-        %{name: "recipe", label: "Recipe", plural_label: "Recipes"},
-        opts
-      )
+      CMS.create_type_definition!(recipe_type.type, opts)
   end
 
 existing = fn ->
   recipe.id |> CMS.field_definitions_for_definition!(opts) |> Map.new(&{&1.name, &1})
 end
 
-ensure_field = fn attrs ->
-  case existing.()[attrs.name] do
-    nil ->
-      IO.puts("  created field recipe.#{attrs.name}")
-      CMS.create_field_definition!(Map.put(attrs, :type_definition_id, recipe.id), opts)
+for field <- recipe_type.fields do
+  {sub_fields, attrs} = Map.pop(field, :fields, [])
 
-    field ->
-      field
+  if is_nil(existing.()[attrs.name]) do
+    IO.puts("  created field recipe.#{attrs.name}")
+    CMS.create_field_definition!(Map.put(attrs, :type_definition_id, recipe.id), opts)
   end
-end
 
-ensure_field.(%{name: "serves", label: "Serves", field_type: :integer})
-ensure_field.(%{name: "minutes", label: "Minutes", field_type: :integer})
-ensure_field.(%{name: "hero", label: "Hero image", field_type: :media})
+  if sub_fields != [] do
+    # Re-read: `for_definition` is what loads a group's sub-fields.
+    group = existing.()[attrs.name]
+    have = Map.new(FieldDefinition.group_fields(group), &{&1.name, &1})
 
-ensure_field.(%{
-  name: "method",
-  label: "Method",
-  field_type: :text,
-  deliver_plain: true,
-  plain_breaks: true,
-  deliver_portable: true
-})
-
-ensure_field.(%{name: "ingredients", label: "Ingredients", field_type: :group, multiple: true})
-
-# Re-read: `for_definition` is what loads a group's sub-fields.
-ingredients = existing.()["ingredients"]
-sub_fields = Map.new(FieldDefinition.group_fields(ingredients), &{&1.name, &1})
-
-for {name, extra} <- [
-      {"item", %{field_type: :string, required: true}},
-      {"amount", %{field_type: :float}},
-      {"unit", %{field_type: :select, options: ["g", "ml", "tsp", "tbsp", "pcs"]}}
-    ],
-    not Map.has_key?(sub_fields, name) do
-  IO.puts("  created field recipe.ingredients.#{name}")
-
-  CMS.create_field_definition!(
-    Map.merge(%{name: name, label: String.capitalize(name), group_of_id: ingredients.id}, extra),
-    opts
-  )
+    for sub <- sub_fields, not Map.has_key?(have, sub.name) do
+      IO.puts("  created field recipe.#{group.name}.#{sub.name}")
+      CMS.create_field_definition!(Map.put(sub, :group_of_id, group.id), opts)
+    end
+  end
 end
 
 # --- Hero images ------------------------------------------------------------

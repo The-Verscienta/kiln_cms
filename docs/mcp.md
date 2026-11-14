@@ -20,8 +20,11 @@ draft-only by design.
 ## Authentication: write-scoped API keys
 
 `/mcp` accepts **API keys only** (`Authorization: Bearer kiln_…`) — no JWT or
-anonymous access; anything else is a `401`. Mint keys at `/editor/api-keys`
-(admin-only). A key acts as its owning user, bounded by its `access` scope:
+anonymous access; anything else, a valid, expired or garbled JWT included, is a
+`401`. Mint keys at `/editor/api-keys` (admin-only). A key acts as its owning
+user, bounded by its `access` scope. A site's
+[two-step sign-in requirement](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)
+never applies to a key: it keeps working for an owner the site holds.
 
 | Key `access`  | Owner role | What the LLM can do over `/mcp`                          |
 | ------------- | ---------- | -------------------------------------------------------- |
@@ -60,6 +63,41 @@ Enforcement is layered, all before the admin policy bypass:
 Reads (all policy-scoped — drafts are visible only if the owner is an editor):
 `read_pages`, `read_posts`, `read_entries`, `read_type_definitions`,
 `read_field_definitions`, `read_tags`, `read_tag_groups`, `read_categories`.
+
+> **Custom fields: `custom_filter`, `custom_where`, `custom_sort`.**
+> `read_pages`, `read_posts` and `read_entries` take these under `input`.
+> They're JSON:API's parameters as JSON, snake_case throughout. The tool's own
+> `filter` and `sort` reach built-in columns only: a custom field's name in
+> `filter` is a `no such field` error (or, if it matches a built-in column
+> such as `title`, filters that column).
+>
+> ```json
+> {"name": "read_posts", "arguments": {"input": {
+>   "custom_filter": {"price": {"gt": 10}, "color": "red"},
+>   "custom_sort": "-price,_native:title"}}}
+> ```
+>
+> ```json
+> {"name": "read_posts", "arguments": {"input": {
+>   "custom_where": [
+>     {"name": "price", "int": {"gte": 10, "lt": 50}},
+>     {"name": "color", "string": {"in": ["red", "green"]}}]}}}
+> ```
+>
+> - `custom_filter` maps field names to a value (equality) or to an object of
+>   operators, and takes the `_or`, `_and` and `_not` groups and `_native` (built-in
+>   columns). The
+>   operators, value shapes, equality matching and private fields are in
+>   [json-api.md](json-api.md) → "Custom fields".
+> - `custom_where` is a list of typed conditions, `{"name": …, <kind>:
+>   {operators}}` with exactly one kind. See
+>   [Typed conditions](json-api.md#typed-conditions-custom_where). Unlike a
+>   JSON:API query string, it takes several conditions: at most 10, and 50
+>   values in an `in`.
+> - A bad name, kind, operator or operand comes back with `isError: true` and
+>   the API's error text, prefixed by the argument (`custom_where: unknown
+>   operator "notEq" …`). Some messages spell operators and kinds the GraphQL
+>   way (`notEq`, `isNull`, `dateTime`). Send the snake_case form.
 
 Search: `search_content` (`query`, optional `limit` 1–25 and `locale`) runs the
 same hybrid search as `/api/search` and `/api/ask` — keyword, title, alias and

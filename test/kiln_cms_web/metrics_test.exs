@@ -88,6 +88,30 @@ defmodule KilnCMSWeb.MetricsTest do
       assert body =~ ~s|kiln_cms_delivery_render_duration_count{status="200",type="dynamic"} 1|
       refute body =~ "acme_recipe"
     end
+
+    # The removal gate for KILN_API_REJECT_INVALID_BEARER (ADR 0017, #2635),
+    # from the plug and from the GraphQL socket's path. The event's `read?`
+    # is exported as `read`, and the token never reaches the scrape.
+    test "a bearer that does not verify is counted, without the token", %{conn: conn} do
+      conn
+      |> put_req_header("accept", "application/vnd.api+json")
+      |> put_req_header("authorization", "Bearer garbage")
+      |> get("/api/json/posts")
+
+      KilnCMSWeb.Plugs.ApiKeyAuth.note_invalid_bearer("garbage", :graphql, true)
+
+      body = scrape()
+
+      assert body =~
+               ~r/^kiln_cms_api_invalid_bearer_count\{enforced="true",read="true",reason="malformed",surface="json_api"\} 1$/m
+
+      assert body =~
+               ~r/^kiln_cms_api_invalid_bearer_count\{enforced="true",read="true",reason="malformed",surface="graphql"\} 1$/m
+
+      refute body =~ "garbage"
+      refute body =~ "read?"
+      refute body =~ "?="
+    end
   end
 
   describe "KilnCMSWeb.Telemetry.metrics/0" do
@@ -105,6 +129,20 @@ defmodule KilnCMSWeb.MetricsTest do
         for metric <- KilnCMSWeb.Telemetry.metrics(),
             tag <- metric.tags,
             tag in unbounded,
+            do: {metric.name, tag}
+
+      assert offenders == []
+    end
+
+    # Peep writes a tag's name into the scrape unsanitized, and one invalid
+    # label name (`read?`, say) makes Prometheus reject the whole scrape.
+    test "every tag is a valid Prometheus label name" do
+      offenders =
+        for metric <- KilnCMSWeb.Telemetry.metrics(),
+            tag <- metric.tags,
+            name = Atom.to_string(tag),
+            not Regex.match?(~r/^[a-zA-Z_][a-zA-Z0-9_]*$/, name) or
+              String.starts_with?(name, "__"),
             do: {metric.name, tag}
 
       assert offenders == []

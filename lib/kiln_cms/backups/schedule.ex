@@ -56,7 +56,8 @@ defmodule KilnCMS.Backups.Schedule do
   Every 2, 4, 8 or 12 hours, daily, weekly, fortnightly or monthly. Until keep
   N retention exists (#2219, part 3), sub-daily intervals are refused when a
   schedule is created or its interval changed: every run is a full set, and
-  with age-only retention a two-hourly schedule would keep
+  retention caps by age, not by count (beyond the recovery points and newest
+  backups it keeps), so a two-hourly schedule would keep about
   `12 × BACKUP_KEEP_DAYS` sets of each component.
 
   ## Keep fields

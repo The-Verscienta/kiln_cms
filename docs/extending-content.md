@@ -1549,6 +1549,8 @@ What to know before relying on it:
   change, then deletes layouts no field names any more, reading both fresh,
   so a section another admin has just added keeps its layout.
 
+Why a layout is its own row, keyed by the section name: [ADR 0046](decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md).
+
 If something does not save, the page shows one of these:
 
 | Message | Meaning |
@@ -1658,6 +1660,8 @@ What to know before relying on it:
 | `<name> is not an editor input for this field (use one of: …)` | The field's type and settings don't offer that input. |
 | `this field has no choice of editor input` | The field takes no widget at all (rich text, a list of references, a link field or group sub-field, most types). Send `nil`. |
 | `checkboxes can't take terms of their own: use tags, or turn off new terms` | `checkboxes` on a select with `allow_custom: true`. |
+
+Why the input is an editor-only setting apart from **Editing**, and why a named input is refused rather than reset: [ADR 0048](decisions/0048-a-fields-editor-input-is-an-editor-only-string-separate-from-its-text-format.md) and [ADR 0049](decisions/0049-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md).
 
 ### Limit what can be picked
 
@@ -2064,7 +2068,15 @@ routes** (role-gated, mounted in the admin live session), **supervision
 children**, and **Oban queues** (merged at boot). Content types need no
 callback: build them on `KilnCMS.CMS.Content` in the plugin's own Ash domain
 and register that domain in `:ash_domains`/`:content_domains` — admin CRUD,
-webhooks, delivery and workers follow automatically.
+webhooks, delivery and workers follow automatically. `mix ash.codegen` writes
+their migrations and snapshots into the core's `priv/`; move them into
+`projects/<name>/priv/repo/migrations/` and
+`projects/<name>/priv/resource_snapshots/repo/`. The image build copies
+`projects/<name>/priv/` back into `priv/` only when built with
+`--build-arg PROJECT=<name>` and a `projects/<name>/project.exs` exists. In a
+dev tree, copy them back before the next `mix ash.codegen`: without the
+snapshots it writes create-table migrations into the core `priv/` again (see
+`projects/example/README.md`).
 
 **Filters on a plugin field type compare text.** `cast/2` runs on writes
 only. A `custom_filter` or `customWhere` operand on a plugin type's field is

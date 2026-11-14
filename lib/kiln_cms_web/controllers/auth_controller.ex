@@ -31,28 +31,83 @@ defmodule KilnCMSWeb.AuthController do
     # auth token, already minted + stored) and divert to the prompt. Who owes
     # one is `SecondFactorStepUp`'s decision, shared with the headless door.
     # Everything else completes the sign-in immediately.
-    if SecondFactorStepUp.decide(conn, user) == :prompt do
-      # Read before withholding: deleting a cookie *adds* a `resp_cookies` entry,
-      # so the check has to happen first.
-      remember_me? = remember_me_pending?(conn)
+    case SecondFactorStepUp.decide(conn, user) do
+      :prompt ->
+        # Read before withholding: deleting a cookie *adds* a `resp_cookies`
+        # entry, so the check has to happen first.
+        remember_me? = remember_me_pending?(conn)
 
-      conn
-      |> withhold_remember_me()
-      |> put_session(
-        :pending_2fa,
-        PendingSignIn.mint_and_hold(:session, conn, user,
-          token: token,
-          remember_me?: remember_me?
+        conn
+        |> withhold_remember_me()
+        |> put_session(
+          :pending_2fa,
+          PendingSignIn.mint_and_hold(:session, conn, user,
+            token: token,
+            remember_me?: remember_me?
+          )
         )
-      )
-      # How the first factor was passed, for the sign-in event the code prompt
-      # completes (#2241).
-      |> put_session(:sign_in_method, AuthEvents.method(activity))
-      |> redirect(to: ~p"/sign-in/verify")
-    else
-      complete_sign_in(conn, user, message_for(activity), AuthEvents.method(activity))
+        # How the first factor was passed, for the sign-in event the code
+        # prompt completes (#2241).
+        |> put_session(:sign_in_method, AuthEvents.method(activity))
+        |> redirect(to: ~p"/sign-in/verify")
+
+      {:refuse, reason} ->
+        refuse_first_factor(conn, user, token, reason)
+
+      :none ->
+        complete_sign_in(conn, user, message_for(activity), AuthEvents.method(activity))
     end
   end
+
+  # A passkey-only account its site holds (#2247), on a host where the
+  # passkey cannot run: the password alone must not sign it in, and there is
+  # no prompt here it could pass. So the first factor is worth nothing on this
+  # host. The token it minted is revoked rather than left stored and unheld,
+  # the remember-me cookie the dispatcher already wrote is withdrawn, and the
+  # session is not touched. Revocation failing is logged and refused anyway:
+  # the token was never handed to anyone.
+  defp refuse_first_factor(conn, user, token, :passkey_host) do
+    revoke_first_factor(token)
+
+    AuthEvents.second_factor_required(
+      AuthEvents.context(conn),
+      user,
+      "browser",
+      "passkey_host"
+    )
+
+    conn
+    |> withhold_remember_me()
+    |> put_flash(
+      :error,
+      gettext(
+        "Your account's second factor is a passkey, which works at %{host}. " <>
+          "Sign in there, or add an authenticator app.",
+        host: URI.parse(KilnCMSWeb.Endpoint.url()).host
+      )
+    )
+    |> redirect(to: ~p"/sign-in")
+  end
+
+  @doc false
+  # Shared with `KilnCMSWeb.ApiAuthController`, whose refusals revoke the same
+  # way.
+  @spec revoke_first_factor(String.t() | nil) :: :ok
+  def revoke_first_factor(token) when is_binary(token) do
+    case AshAuthentication.TokenResource.Actions.revoke(Accounts.Token, token,
+           store_all_tokens?: true
+         ) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Could not revoke a refused first-factor token: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  def revoke_first_factor(_no_token), do: :ok
 
   # The "breached password" note left by a register or reset (#2240) is taken
   # only at a *password* sign-in (register, reset, sign-in, sign-in with token),
@@ -155,7 +210,9 @@ defmodule KilnCMSWeb.AuthController do
   """
   def complete_sign_in(conn, user, message, method, opts \\ []) do
     {conn, return_to} = establish_session(conn, user, message, method, opts)
-    redirect(conn, to: return_to)
+    # A local path, or the main host's setup page for an account a site host
+    # holds (`KilnCMSWeb.SecondFactorGate.setup_location/3`).
+    redirect(conn, KilnCMSWeb.SecondFactorGate.redirect_opts(return_to))
   end
 
   @doc """
@@ -219,6 +276,11 @@ defmodule KilnCMSWeb.AuthController do
   completion — the redirecting flows here and the JSON passkey ceremony
   (`PasskeyController`) — so the landing rules can't drift per method.
   """
+  #
+  # An account its site holds for a second factor it has not set up goes to
+  # set one up first, with this destination as where to continue (#2247):
+  # `KilnCMSWeb.SecondFactorGate.sign_in_destination/3`, which also records
+  # the hold, once per sign-in, because this runs once per sign-in.
   def sign_in_destination(conn, user) do
     # A reader lands on their own account page (#337 Phase 2), not the site root
     # — `/` is a dead end for someone who just signed in to manage a membership.
@@ -227,7 +289,8 @@ defmodule KilnCMSWeb.AuthController do
         do: ~p"/editor/overview",
         else: ~p"/account"
 
-    SafeRedirect.local_path(get_session(conn, :return_to), default)
+    destination = SafeRedirect.local_path(get_session(conn, :return_to), default)
+    KilnCMSWeb.SecondFactorGate.sign_in_destination(conn, user, destination)
   end
 
   @doc """

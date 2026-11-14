@@ -4,8 +4,8 @@ defmodule KilnCMS.Backups.Run do
 
   `manifest.json` answers "what was the last backup"; a `Run` answers "what
   happened every time". The in-app worker writes one per attempt, and the
-  importer (a later step) turns cron-made backups into `origin: :imported` rows,
-  so the history shows both.
+  importer (`KilnCMS.Backups.Importer`) turns cron-made backups into
+  `origin: :imported` rows, so the history shows both.
 
   ## Instance-wide, and read-only to people
 
@@ -16,8 +16,9 @@ defmodule KilnCMS.Backups.Run do
   exception: a platform admin may `:cancel` a running backup (#2218). The
   worker, the importer, retention and the stale-run sweep write as
   `KilnCMS.Backups.system/0` (subsystem `:backups`), through exactly the actions
-  named in the write policy. There is no `destroy` yet; retention arrives with
-  #2225.
+  named in the write policy. There is no `destroy`: retention (#2219) deletes
+  files, not rows, and marks the deleted artifacts of a run `pruned`
+  (`:mark_pruned`). Deleting a run is #2225.
 
   ## Idempotency
 

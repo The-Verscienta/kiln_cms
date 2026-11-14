@@ -3,7 +3,9 @@ defmodule KilnCMS.CMS.Changes.SecondFactorPolicyChanged do
   After a `KilnCMS.CMS.SiteSecondFactorPolicy` write commits (#2247): drops the
   cached policy on every node, then tells the site's open pages on
   `KilnCMS.Accounts.TwoFactorRequirement.topic/1` with
-  `{:second_factor_policy_changed, policy}`.
+  `{:second_factor_policy_changed, policy}`, and drops the open connections
+  of every account the new policy holds at once
+  (`KilnCMS.Accounts.SecondFactorEviction`, in a supervised task).
 
   After COMMIT, through `KilnCMS.AfterCommit`: a page that re-read before the
   write committed would find the old policy. A write that failed or rolled
@@ -30,6 +32,8 @@ defmodule KilnCMS.CMS.Changes.SecondFactorPolicyChanged do
         TwoFactorRequirement.topic(org_id),
         {:second_factor_policy_changed, policy}
       )
+
+      KilnCMS.Accounts.SecondFactorEviction.dispatch(org_id, policy)
     end)
 
     result

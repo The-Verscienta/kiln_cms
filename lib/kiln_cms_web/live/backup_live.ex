@@ -74,6 +74,15 @@ defmodule KilnCMSWeb.BackupLive do
   resumable (a succeeded or still-running run, a forged id, a run whose files
   are gone). The page never sends or trusts a stamp.
 
+  ## Tabs (part of #2219)
+
+  This is the Backups tab; the in-app schedules and their forms are the
+  Schedule tab (`KilnCMSWeb.BackupScheduleLive`), with the tabs and the words
+  both pages use in `KilnCMSWeb.BackupComponents`. This page keeps what the
+  schedules mean for it: the next scheduled backup (`Backups.status/0`'s
+  `next_at`), the warnings when they can't run, and each component's alarm
+  threshold.
+
   ## Restore is not here
 
   Deliberately, and the page says so rather than leaving an admin hunting for
@@ -84,6 +93,16 @@ defmodule KilnCMSWeb.BackupLive do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Importer, Manifest, Markers, Presence}
   alias KilnCMSWeb.Params
+
+  import KilnCMSWeb.BackupComponents,
+    only: [
+      tabs: 1,
+      component_label: 1,
+      run_status_label: 1,
+      threshold_label: 1,
+      unavailable_message: 1,
+      until: 1
+    ]
 
   # The page polls while the backup lock is held (`Backups.in_flight/0`). A
   # multi-GB backup takes a while: 1 200 polls at 3 s is an hour, and the tab
@@ -475,20 +494,6 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
-  defp unavailable_message(:disabled),
-    do: gettext("In-app backups are turned off (BACKUP_ENABLED).")
-
-  defp unavailable_message(:no_database_url),
-    do: gettext("No database connection is configured for backups.")
-
-  defp unavailable_message(reason) when reason in [:no_pg_dump, :no_pg_restore],
-    do:
-      gettext(
-        "PostgreSQL client tools aren't installed in this image, so a backup can't run here. Cron backups on the host are unaffected."
-      )
-
-  defp unavailable_message(_reason), do: gettext("A backup can't run on this deployment.")
-
   @impl true
   def render(assigns) do
     ~H"""
@@ -503,6 +508,8 @@ defmodule KilnCMSWeb.BackupLive do
       active={:backups}
     >
       <div class="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
+        <.tabs active={:history} />
+
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 class="text-2xl font-semibold">{gettext("Backups")}</h1>
@@ -516,6 +523,18 @@ defmodule KilnCMSWeb.BackupLive do
                 class="underline hover:no-underline"
               >
                 {gettext("Canceled backups are recorded in the instance security log.")}
+              </.link>
+            </p>
+            <%!-- The soonest window of any schedule that can run here
+                  (`Backups.status/0`'s `next_at`); the schedules themselves
+                  are on the Schedule tab. --%>
+            <p
+              :if={@status.next_at}
+              id="backup-next-scheduled"
+              class="mt-1 text-sm text-base-content/70"
+            >
+              <.link navigate={~p"/editor/backups/schedules"} class="underline hover:no-underline">
+                {gettext("Next scheduled backup: %{when}", when: until(@status.next_at))}
               </.link>
             </p>
           </div>
@@ -632,9 +651,25 @@ defmodule KilnCMSWeb.BackupLive do
         </section>
 
         <section class="rounded-lg border border-base-content/10 p-4 text-sm">
-          <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
-            {gettext("Where backups go")}
-          </h2>
+          <%!-- Shown whatever the off-site row says: the built-in copy already
+                ships the .sha256 files, so the hint is for operators who copy
+                backups off the host themselves (#2890). The "?" sits beside the
+                heading, not inside it, so it doesn't join the heading's name. --%>
+          <div class="flex items-center gap-1">
+            <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
+              {gettext("Where backups go")}
+            </h2>
+            <.help_tip
+              id="offsite-sidecars-help"
+              label={gettext("About copying backups")}
+              title={gettext("Copying backups elsewhere")}
+              learn_more={docs_url("backups.md#the-app-path-and-the-shell-path-share-one-format")}
+            >
+              {gettext(
+                "If you copy backups off this host yourself, copy each backup's .sha256 files with it: without them a media backup in parts won't restore, and nothing can check the others. The built-in off-site copy already includes them."
+              )}
+            </.help_tip>
+          </div>
           <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
             <dt class="text-base-content/60">{gettext("Directory")}</dt>
             <dd class="font-mono text-xs">{backup_dir()}</dd>
@@ -678,7 +713,7 @@ defmodule KilnCMSWeb.BackupLive do
           </p>
         </section>
 
-        <.schedules status={@status} />
+        <.schedule_summary status={@status} />
 
         <.history
           runs={@runs}
@@ -695,16 +730,16 @@ defmodule KilnCMSWeb.BackupLive do
 
   attr :status, :map, required: true
 
-  # The in-app schedules (part of #2219), read-only: they are managed from a
-  # release console until the Schedule tab lands. Everything comes from
-  # `Backups.status/0`, so the next run shown is the one the staleness
-  # threshold and the scheduler agree on, and is absent when the schedule
-  # can't fire here.
-  defp schedules(assigns) do
+  # What the schedules (part of #2219) mean for this page: whether they can
+  # run here, and the alarm threshold of each component. The schedules
+  # themselves are on the Schedule tab (`KilnCMSWeb.BackupScheduleLive`).
+  # Everything comes from `Backups.status/0`, so the threshold shown is the one
+  # the headline and the home strips judge by.
+  defp schedule_summary(assigns) do
     ~H"""
     <section id="backup-schedules" class="rounded-lg border border-base-content/10 p-4 text-sm">
       <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">
-        {gettext("Schedules")}
+        {gettext("Alarm thresholds")}
       </h2>
 
       <p
@@ -723,39 +758,9 @@ defmodule KilnCMSWeb.BackupLive do
           reason: unavailable_message(@status.reason)
         )}
       </p>
-
-      <p :if={@status.schedules == :none} class="mt-2 text-base-content/70">
-        {gettext(
-          "No schedules yet. Backups run when you click Back up now, or from the host's cron job."
-        )}
-      </p>
-      <p :if={@status.schedules == :unreadable} class="mt-2 text-warning-ink">
+      <p :if={@status.schedules == :unreadable} class="mt-2 text-xs text-warning-ink">
         {gettext("Couldn't load the backup schedules.")}
       </p>
-
-      <ul :if={is_list(@status.schedules)} class="mt-3 divide-y divide-base-content/10">
-        <li
-          :for={entry <- @status.schedules}
-          id={"backup-schedule-#{entry.schedule.id}"}
-          class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2"
-        >
-          <div class="min-w-0">
-            <p class="font-medium" data-role="cadence">{cadence(entry.schedule)}</p>
-            <p class="text-xs text-base-content/70" data-role="components">
-              {components_label(entry.schedule.components)}
-            </p>
-          </div>
-          <div class="text-xs text-base-content/70 sm:text-right">
-            <p :if={not entry.schedule.enabled} data-role="paused">{gettext("Paused")}</p>
-            <p :if={entry.next_at} data-role="next">
-              {gettext("Next run: %{when}", when: until(entry.next_at))}
-            </p>
-            <p :if={entry.schedule.last_outcome} data-role="last-outcome">
-              {outcome_label(entry.schedule)}
-            </p>
-          </div>
-        </li>
-      </ul>
 
       <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
         <%= for component <- @status.expected do %>
@@ -767,148 +772,6 @@ defmodule KilnCMSWeb.BackupLive do
       </dl>
     </section>
     """
-  end
-
-  @sub_daily_hours %{every_2h: 2, every_4h: 4, every_8h: 8, every_12h: 12}
-
-  # The weekday through gettext, never `Calendar.strftime/2` (not translated).
-  defp weekday(1), do: gettext("Monday")
-  defp weekday(2), do: gettext("Tuesday")
-  defp weekday(3), do: gettext("Wednesday")
-  defp weekday(4), do: gettext("Thursday")
-  defp weekday(5), do: gettext("Friday")
-  defp weekday(6), do: gettext("Saturday")
-  defp weekday(7), do: gettext("Sunday")
-
-  defp cadence(%{interval: interval, time_of_day: time, time_zone: zone, starts_on: start}) do
-    time = time |> Time.to_string() |> String.slice(0, 5)
-
-    case interval do
-      :daily ->
-        gettext("Every day at %{time} (%{zone})", time: time, zone: zone)
-
-      :weekly ->
-        gettext("Every week on %{weekday} at %{time} (%{zone})",
-          weekday: weekday(Date.day_of_week(start)),
-          time: time,
-          zone: zone
-        )
-
-      :fortnightly ->
-        gettext("Every 2 weeks on %{weekday} at %{time} (%{zone}), from %{date}",
-          weekday: weekday(Date.day_of_week(start)),
-          time: time,
-          zone: zone,
-          date: Date.to_iso8601(start)
-        )
-
-      :monthly ->
-        gettext("Every month on day %{day} at %{time} (%{zone})",
-          day: start.day,
-          time: time,
-          zone: zone
-        )
-
-      every when is_map_key(@sub_daily_hours, every) ->
-        gettext("Every %{hours} hours from %{time} (%{zone})",
-          hours: Map.fetch!(@sub_daily_hours, every),
-          time: time,
-          zone: zone
-        )
-
-      %KilnCMS.Types.UnknownAtom{value: value} ->
-        gettext("An interval this release doesn't know (%{value})", value: value)
-    end
-  end
-
-  # A window in the past is one that is due and waiting (a queued resume).
-  defp until(%DateTime{} = at) do
-    seconds = DateTime.diff(at, DateTime.utc_now(), :second)
-
-    cond do
-      seconds <= 0 ->
-        gettext("due now")
-
-      seconds < 3600 ->
-        minutes = max(div(seconds, 60), 1)
-
-        gettext("in %{duration}",
-          duration: ngettext("%{count} minute", "%{count} minutes", minutes, count: minutes)
-        )
-
-      seconds < 86_400 ->
-        hours = div(seconds, 3600)
-
-        gettext("in %{duration}",
-          duration: ngettext("%{count} hour", "%{count} hours", hours, count: hours)
-        )
-
-      true ->
-        days = div(seconds, 86_400)
-
-        gettext("in %{duration}",
-          duration: ngettext("%{count} day", "%{count} days", days, count: days)
-        )
-    end
-  end
-
-  defp outcome_label(%{last_outcome: :started}), do: gettext("Last window: started")
-
-  defp outcome_label(%{last_outcome: :queued}),
-    do: gettext("Last window: queued behind another backup")
-
-  defp outcome_label(%{last_outcome: :folded}), do: gettext("Last window: joined a queued backup")
-
-  # A deferred window waits either behind a queued backup of another kind
-  # (#2540) or for a node that can run backups (the one that checked lacked
-  # pg_dump, pg_restore or a database URL).
-  defp outcome_label(%{last_outcome: :deferred, last_error: "queue_busy" <> _}),
-    do:
-      gettext("Waiting: another kind of backup is queued; this one starts once the queue clears.")
-
-  defp outcome_label(%{last_outcome: :deferred, last_error: error})
-       when error in ["no_pg_dump", "no_pg_restore", "no_database_url"],
-       do:
-         gettext(
-           "Waiting: the server that checked can't run backups (%{reason}); another server can take it.",
-           reason: error
-         )
-
-  defp outcome_label(%{last_outcome: :deferred}),
-    do: gettext("Waiting: this window is asked for again each minute.")
-
-  defp outcome_label(%{last_outcome: :refused, last_error: error}),
-    do: gettext("Last window refused: %{reason}", reason: error || "—")
-
-  defp outcome_label(_other), do: nil
-
-  defp threshold_label(%{stale_after_hours: hours, stale_source: {:schedule, _id}}) do
-    ngettext(
-      "Alarm after %{count} hour without a good backup (its schedule)",
-      "Alarm after %{count} hours without a good backup (its schedule)",
-      hours,
-      count: hours
-    )
-  end
-
-  defp threshold_label(%{stale_after_hours: hours, stale_source: {:cron, var}}) do
-    ngettext(
-      "Alarm after %{count} hour without a good backup (%{var}; host cron backs it up too)",
-      "Alarm after %{count} hours without a good backup (%{var}; host cron backs it up too)",
-      hours,
-      count: hours,
-      var: var
-    )
-  end
-
-  defp threshold_label(%{stale_after_hours: hours, stale_source: {:env, var}}) do
-    ngettext(
-      "Alarm after %{count} hour without a good backup (%{var})",
-      "Alarm after %{count} hours without a good backup (%{var})",
-      hours,
-      count: hours,
-      var: var
-    )
   end
 
   attr :in_flight, :map, required: true
@@ -1065,7 +928,7 @@ defmodule KilnCMSWeb.BackupLive do
                 status_class(run.status)
               ]}
             >
-              {status_label(run.status)}
+              {run_status_label(run.status)}
             </span>
             <span
               :for={component <- run.components}
@@ -1098,9 +961,22 @@ defmodule KilnCMSWeb.BackupLive do
 
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/70">
             <span data-role="verified">{verified_label(run)}</span>
-            <span :for={count <- part_counts(run)} data-role="parts">
+            <a
+              :for={count <- part_counts(run)}
+              data-role="parts"
+              href={docs_url("backups.md#restore-a-media-set-that-has-several-parts")}
+              target="_blank"
+              rel="noopener"
+              title={gettext("How to restore a media backup written in several parts")}
+              class="link inline-flex items-center gap-1 text-primary-ink"
+            >
               {ngettext("%{count} part", "%{count} parts", count)}
-            </span>
+              <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+              <span class="sr-only">
+                {gettext("How to restore a media backup written in several parts")}
+                {gettext("(opens in a new tab)")}
+              </span>
+            </a>
             <span
               :for={{label, status} <- destination_chips(run)}
               data-role="destination"
@@ -1140,6 +1016,17 @@ defmodule KilnCMSWeb.BackupLive do
               <.icon name="hero-arrow-path" class="mr-1 size-4" />
               {gettext("Resume")}
             </button>
+            <.help_tip
+              :if={resumable?}
+              id={"resume-help-#{run.id}"}
+              label={gettext("About Resume")}
+              title={gettext("Resume")}
+              learn_more={docs_url("backups.md#media-backups-in-parts-2218")}
+            >
+              {gettext(
+                "Continues from the files already written; each is reused only if its checksum still matches. It backs up the files listed when the backup first started, so its files can be from different times."
+              )}
+            </.help_tip>
           </div>
 
           <pre
@@ -1216,17 +1103,6 @@ defmodule KilnCMSWeb.BackupLive do
   defp status_class(:running), do: "bg-info/15 text-info-ink"
   defp status_class(:skipped), do: "bg-warning/15 text-warning-ink"
   defp status_class(:canceled), do: "bg-base-content/10 text-base-content/70"
-
-  defp status_label(:succeeded), do: gettext("Succeeded")
-  defp status_label(:failed), do: gettext("Failed")
-  defp status_label(:running), do: gettext("Running")
-  defp status_label(:skipped), do: gettext("Skipped")
-  defp status_label(:canceled), do: gettext("Canceled")
-
-  defp component_label(:db), do: gettext("Database")
-  defp component_label(:media), do: gettext("Media")
-  # A component a newer release wrote on a schedule (part of #2219).
-  defp component_label(%KilnCMS.Types.UnknownAtom{value: value}), do: value
 
   defp verified_label(%{artifacts: []}), do: "—"
 

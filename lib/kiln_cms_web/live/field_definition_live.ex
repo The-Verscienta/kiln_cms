@@ -3164,8 +3164,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # posting `""`. Shown only when there is a choice, so it follows the type,
   # `multiple` and `format` above it. Checkboxes stay listed, disabled, while
   # editors may add terms of their own; a card drawing one input per option
-  # says when the field lists too many for it.
-  defp widget_field(assigns) do
+  # says when the field lists too many for it. A line under the legend says
+  # the choice is editor-only (#2674). Public for its test: the page itself
+  # drops a widget the posted settings don't offer (`unpack_widget/2`), so
+  # the state with an error and no cards has no ordinary path through it.
+  @doc false
+  def widget_field(assigns) do
     subject = form_widget_subject(assigns.form)
     allowed = FieldWidgets.allowed(subject)
     # The cards a choice of `allow_custom` would offer: checkboxes stay on
@@ -3190,8 +3194,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       )
 
     ~H"""
-    <fieldset :if={length(@choices) > 1 or @errors != []} id={@id} class="sm:col-span-2">
+    <fieldset
+      :if={length(@choices) > 1 or @errors != []}
+      id={@id}
+      class="sm:col-span-2"
+      aria-describedby={if length(@choices) > 1, do: "#{@id}-help"}
+    >
       <legend class="mb-1 block text-sm font-medium">{gettext("Editor input")}</legend>
+      <p :if={length(@choices) > 1} id={"#{@id}-help"} class="mb-2 text-xs text-base-content/70">
+        {gettext("How editors fill this in. The type and text format of the field stay as they are.")}
+      </p>
       <div :if={length(@choices) > 1} class="grid gap-2 sm:grid-cols-3">
         <label
           :for={{name, title, hint, icon, disabled?} <- @choices}
@@ -3904,7 +3916,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 <legend class="mb-1 block text-sm font-medium">
                   {gettext("Content types")}
                 </legend>
-                <p class="mb-2 text-xs text-base-content/60">
+                <p class="mb-2 text-xs text-base-content/70">
                   {gettext(
                     "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
                   )}

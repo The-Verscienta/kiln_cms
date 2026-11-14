@@ -337,6 +337,24 @@ defmodule KilnCMSWeb.SettingsLiveTest do
       refute render(lv) =~ "recovery-codes"
     end
 
+    # `User.:confirm_totp` mails the owner on a first setup and a replacement
+    # alike (#2828). The line sits beside what adds one (#2886): the Enable
+    # button and the setup form, not the app once it is on.
+    test "says that adding or replacing the authenticator app sends a mail", %{conn: conn} do
+      user = authed_user(:editor)
+      {:ok, lv, _html} = live(log_in(conn, user), ~p"/editor/settings")
+
+      line = "We'll email you when an authenticator app is added or replaced."
+      assert has_element?(lv, "#settings-two-factor #totp-added-mail", line)
+
+      lv |> element("button", "Enable two-factor authentication") |> render_click()
+      assert has_element?(lv, "#settings-two-factor #totp-added-mail", line)
+
+      lv |> form("#confirm-totp-form", %{"code" => current_code(user)}) |> render_submit()
+      assert has_element?(lv, "#settings-two-factor", "Two-factor authentication is on.")
+      refute has_element?(lv, "#totp-added-mail")
+    end
+
     test "regenerating replaces the set; disabling clears it", %{conn: conn} do
       user = authed_user(:editor)
       {:ok, user} = Accounts.setup_totp(user, %{}, actor: user)

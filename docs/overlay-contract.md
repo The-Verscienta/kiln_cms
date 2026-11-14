@@ -345,7 +345,8 @@ Stated rather than discovered later.
   trash fails with `Ash.Error.Changes.StaleRecord`. Only the actions in
   `KilnCMS.CMS.Changes.RefuseTrashed.exempt_actions/0` (`:restore`,
   `:clear_reference_target`, `:convert_custom_field`, `:resnapshot_media`)
-  may write one, and an overlay cannot add to that list today. The last two
+  may write one, and an overlay cannot add to that list today
+  ([ADR 0052](decisions/0052-a-trashed-content-row-refuses-every-update-by-default-through-a-row-filter.md)). The last two
   mean `mix kiln.fields.convert` and `mix kiln.media.resnapshot` also write
   your content types' trashed records (#2533).
 

@@ -11,7 +11,10 @@ defmodule KilnCMSWeb.AccountLive do
   `KilnCMS.Accounts.User`, so this is a member-appropriate front end for actions a
   viewer may already run. `/editor/settings` stays editor-gated; opening it would
   mean auditing its 2FA, recovery-code and passkey cards for a reader account,
-  which is a separate decision.
+  which is a separate decision. A reader sets up a second factor, and lists and
+  removes their own passkeys, on `/account/two-factor`
+  (`KilnCMSWeb.TwoFactorSetupLive`, #2247, #2900), which is served on the main
+  and console hosts only.
 
   ## Closing the return-from-checkout race
 
@@ -65,8 +68,24 @@ defmodule KilnCMSWeb.AccountLive do
      |> assign(:editorial_tier, tier)
      |> assign(:registrations, registrations)
      |> assign(:confirm_first?, confirm_first?(socket.assigns.current_user, registrations))
+     |> assign_two_factor_setup()
      |> load_memberships()
      |> load_subscriber()}
+  end
+
+  # Where two-step sign-in is set up (#2247): this host's page on the main
+  # host or a console host, the main host's anywhere else — the page is not
+  # served on a tenant site host, so the link says which host it opens on.
+  defp assign_two_factor_setup(socket) do
+    host = KilnCMSWeb.SecondFactorGate.socket_host(socket)
+    url = KilnCMSWeb.SecondFactorGate.setup_href(host)
+
+    socket
+    |> assign(:two_factor_setup_url, url)
+    |> assign(
+      :two_factor_setup_host,
+      if(KilnCMSWeb.SecondFactorGate.setup_host?(host), do: nil, else: URI.parse(url).host)
+    )
   end
 
   @impl true
@@ -292,6 +311,12 @@ defmodule KilnCMSWeb.AccountLive do
     ~H"""
     <Layouts.public current_org={@current_org} locale={@locale} current_user={@current_user}>
       <Layouts.flash_group flash={@flash} />
+      <%!-- A reminder during the grace period of this site's two-step sign-in
+            requirement (#2247), from the status the gate assigned on mount. --%>
+      <Layouts.second_factor_banner
+        status={@second_factor_status}
+        setup_url={@two_factor_setup_url}
+      />
 
       <div class="space-y-8">
         <header class="space-y-1">
@@ -433,6 +458,29 @@ defmodule KilnCMSWeb.AccountLive do
             >
               {gettext("Unsubscribe")}
             </button>
+          </div>
+        </section>
+
+        <section id="two-factor-setup" class="card card-pad space-y-2">
+          <h2 class="text-lg font-medium">{gettext("Two-step sign-in")}</h2>
+          <p class="text-sm text-base-content/70">
+            {gettext(
+              "Add an authenticator app or a passkey, so your password alone can't open your account."
+            )}
+          </p>
+          <p :if={@two_factor_setup_host} class="text-sm text-base-content/70">
+            {gettext("This opens on %{host}, where you sign in again.",
+              host: @two_factor_setup_host
+            )}
+          </p>
+          <div>
+            <.link
+              id="two-factor-setup-link"
+              href={@two_factor_setup_url}
+              class="btn btn-default btn-sm"
+            >
+              {gettext("Set up two-step sign-in")}
+            </.link>
           </div>
         </section>
 

@@ -46,7 +46,9 @@ defmodule KilnCMS.Backups.Heartbeat do
 
   A job row that is missing is NOT a reason to kill: a failover to a lagging
   standby or a database restore can lose a row whose step is legitimately
-  running. Such a step is left to the self-fence and the lock's lease.
+  running. Such a step is left to the self-fence and to the lock's epoch and
+  job-id fence (`KilnCMS.Backups.Chain`, ADR 0039), which discards its results
+  once its job has been reclaimed or superseded.
 
   A node that reconnects stops the step on its first successful beat, at
   most one interval later. A beat that hangs on a half-open connection

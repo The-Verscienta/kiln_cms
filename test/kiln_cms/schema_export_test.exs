@@ -527,6 +527,27 @@ defmodule KilnCMS.SchemaExportTest do
       assert Map.has_key?(document["$defs"], "block")
       refute Enum.any?(Map.keys(document["$defs"]), &String.starts_with?(&1, "content_"))
     end
+
+    test "blocks restricts the block union to those modules", %{org: org} do
+      core = KilnCMS.Blocks.core_modules()
+      document = SchemaExport.json_schema(org_id: org.id, types: ["post"], blocks: core)
+
+      names = Enum.map(core, &to_string(Kiln.Block.Info.name(&1)))
+      assert Enum.sort(document["x-kiln"]["blocks"]) == Enum.sort(names)
+      # The test env compiles the dependency fixture plugin's block in.
+      refute "dep_badge" in document["x-kiln"]["blocks"]
+      refute Map.has_key?(document["$defs"], "block_dep_badge")
+
+      union = Enum.map(document["$defs"]["block"]["oneOf"], & &1["$ref"])
+      assert Enum.sort(union) == Enum.sort(Enum.map(names, &"#/$defs/block_#{&1}"))
+    end
+
+    test "without blocks, every registered block is described", %{org: org} do
+      document = SchemaExport.json_schema(org_id: org.id, types: ["post"])
+
+      assert "dep_badge" in document["x-kiln"]["blocks"]
+      assert Map.has_key?(document["$defs"], "block_dep_badge")
+    end
   end
 
   test "the whole document is JSON-encodable", %{org: org} do

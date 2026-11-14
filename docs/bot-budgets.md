@@ -264,7 +264,8 @@ rather than one per request.
 
 A user agent is easy to fake, so since #2254 Kiln checks a claim to be a search
 engine before it trusts it with that class's ceiling
-(`KilnCMS.CrawlerVerification`). Since #2586 the first check is the engine's
+(`KilnCMS.CrawlerVerification`). The DNS check sends the client's address to the
+node's DNS resolver; [ADR 0058](decisions/0058-crawler-verification-sends-a-visitors-address-to-the-dns-resolver-by-default.md) records why that is on by default. Since #2586 the first check is the engine's
 own published list of its crawlers' addresses, where it has one (see
 [Published IP ranges](#published-ip-ranges)): an address inside a fresh list is
 verified at once, with no DNS query. Every other claim gets the DNS check each
@@ -326,6 +327,8 @@ What a list decides:
   never proves a claim false: Google, Bing and Apple fall back to DNS, and
   DuckDuckBot stays "not proven", as before #2586.
 
+Why a list decides this much and no more: [ADR 0055](decisions/0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md).
+
 **When the lists are fetched.** One node in the cluster fetches all four every
 6 hours (an Oban cron job, `17 */6 * * *`, `KILN_CRAWLER_RANGES_CRON`), and
 sends each list it accepted to the other nodes over Phoenix PubSub. A node
@@ -334,6 +337,8 @@ missing ones, and so does a node whose check every 10 minutes finds a list
 stale. However many nodes ask, at most one fetch job runs per 10 minutes
 across the cluster. A node that starts or reconnects also asks its peers for
 the lists they hold. Each list is a few kilobytes to a few tens of kilobytes.
+Why one node fetches and the others check what it sends again:
+[ADR 0057](decisions/0057-one-node-fetches-the-crawler-ip-lists-and-the-others-re-check-what-it-sends.md).
 
 **This is the first call a default install makes on a schedule.** Every other
 default outbound call happens because someone did something (opened a page,
@@ -342,7 +347,8 @@ of the fixed URL above, through `KilnCMS.SafeFetch`, with a bare `KilnCMS`
 user agent, no redirect followed and at most 512 KB read. It carries nothing
 about the instance or its visitors; each vendor sees the fetching node's IP
 address. Allow it out of your firewall, or turn it off (see
-[Turn the published lists off](#turn-the-published-lists-off)).
+[Turn the published lists off](#turn-the-published-lists-off)). Why a
+schedule is allowed for this call by default: [ADR 0056](decisions/0056-the-crawler-ip-lists-are-fetched-on-a-schedule-by-default-because-the-fetch-discloses-nothing-about-the-installation.md).
 
 **What makes Kiln refuse a list.** A list is a claim that every address in it
 is the vendor's crawler, so a list that would verify too much is refused
@@ -382,6 +388,12 @@ never triggers a lookup.
 
 So only a verified address gets more than a browser, whatever the
 search-engine percentage. A site's lower value applies in every row.
+
+The smart 404 guard reads a claim DNS could not answer differently: a silent
+reverse zone counts against the claim while the resolver works, and a silent
+engine zone, given its full lookup budget, does not (see
+[What counts, and what never does](ip-blocking.md#what-counts-and-what-never-does)
+and [ADR 0054](decisions/0054-in-crawler-verification-a-silence-the-claimant-controls-counts-against-it-and-one-the-vendor-controls-does-not.md)).
 
 **A request never waits for DNS.** The first request from a new address is
 judged as "not proven" while a lookup starts in the background, and later

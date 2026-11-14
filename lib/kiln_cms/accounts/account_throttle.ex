@@ -181,7 +181,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
 
   # Every bucket this module charges, for `forget_all/0`.
   @buckets ~w(signin challenge:free_signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice
-               mail:invitation mail:membership_notice mail:sign_in_unlock passkey:register)
+               mail:invitation mail:membership_notice mail:sign_in_unlock mail:enrolment_proof
+               passkey:register)
 
   @mail_budget 5
   @mail_window :timer.hours(1)
@@ -192,13 +193,19 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   # lifts the pause too.
   @unlock_mail_budget 3
 
+  # Email-proof codes for setting up a second factor (#2247,
+  # `KilnCMS.Accounts.EnrolmentProof`): asked for from a signed-in session, so
+  # a smaller share again. Three codes an hour is a typo and two resends.
+  @enrolment_proof_mail_budget 3
+
   @mail_purposes [
     :password_reset,
     :magic_link,
     :registration_notice,
     :invitation,
     :membership_notice,
-    :sign_in_unlock
+    :sign_in_unlock,
+    :enrolment_proof
   ]
 
   # One "someone is guessing at your password" mail per address per window,
@@ -212,6 +219,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
           | :invitation
           | :membership_notice
           | :sign_in_unlock
+          | :enrolment_proof
 
   @doc """
   Charges one sign-in attempt against this identifier.
@@ -492,6 +500,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
       mail_budget: @mail_budget,
       mail_window: @mail_window,
       unlock_mail_budget: @unlock_mail_budget,
+      enrolment_proof_mail_budget: @enrolment_proof_mail_budget,
       passkey_registration_budget: @passkey_registration_budget,
       passkey_registration_window: @passkey_registration_window
     ]
@@ -543,6 +552,10 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   defp budget, do: config(:budget, @budget)
   defp window, do: config(:window, @window)
   defp mail_budget(:sign_in_unlock), do: config(:unlock_mail_budget, @unlock_mail_budget)
+
+  defp mail_budget(:enrolment_proof),
+    do: config(:enrolment_proof_mail_budget, @enrolment_proof_mail_budget)
+
   defp mail_budget(_purpose), do: config(:mail_budget, @mail_budget)
   defp mail_window, do: config(:mail_window, @mail_window)
   defp second_factor_budget, do: config(:second_factor_budget, @second_factor_budget)

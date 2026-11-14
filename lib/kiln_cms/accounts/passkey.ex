@@ -8,7 +8,8 @@ defmodule KilnCMS.Accounts.Passkey do
   key). The ceremony itself — challenge minting, attestation and assertion
   verification — lives in `KilnCMS.Accounts.WebAuthn`; this resource is the
   storage + self-service management surface (list/rename/remove in
-  `/editor/settings`).
+  `/editor/settings`; list and remove on `/account/two-factor`, the page a
+  reader can reach, #2900).
 
   Writes happen only from the ceremony code after cryptographic verification
   (`authorize?: false` system calls); the policies expose reads and destroys to
@@ -47,7 +48,7 @@ defmodule KilnCMS.Accounts.Passkey do
     defaults [:read]
 
     read :for_user do
-      description "A user's registered passkeys (backs /editor/settings)."
+      description "A user's registered passkeys (backs /editor/settings and /account/two-factor)."
       argument :user_id, :uuid, allow_nil?: false
       filter expr(user_id == ^arg(:user_id))
     end
@@ -59,6 +60,10 @@ defmodule KilnCMS.Accounts.Passkey do
       # The audit change below reads the destroyed record.
       require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
+
+      # The owner can't remove their last second factor while a site requires
+      # one (#2247). A platform admin removing it for them is unaffected.
+      validate KilnCMS.Accounts.Validations.KeepsRequiredSecondFactor
 
       # Audit log (#2241), in the transaction. Whoever removes it is the actor
       # (the owner, or a platform admin); the owner is the target.
@@ -96,6 +101,10 @@ defmodule KilnCMS.Accounts.Passkey do
       accept [:user_id, :name, :credential_id, :public_key, :sign_count]
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
+      # Past the site's deadline, a password-only session proves the account's
+      # email first (#2247, decision 1b). Decided here, not only on the page.
+      change KilnCMS.Accounts.Changes.RequireEnrolmentProof
+
       # Every passkey added mails the owner (below), so the total and the rate
       # are both bounded (#2247): a stolen session must not be able to turn
       # "an email for every factor added" into a flood.
@@ -112,7 +121,11 @@ defmodule KilnCMS.Accounts.Passkey do
       change {KilnCMS.Security.Changes.Record,
               type: :passkey_added,
               target: fn record, _changeset -> {"user", record.user_id} end,
-              metadata: fn record, _changeset -> %{"name" => record.name} end}
+              metadata: fn record, changeset ->
+                KilnCMS.Accounts.Changes.RequireEnrolmentProof.metadata(changeset, %{
+                  "name" => record.name
+                })
+              end}
 
       # Tell the owner (#2247, decision 1a), after the commit.
       change {KilnCMS.Accounts.Changes.NotifyFactorAdded, kind: :passkey}

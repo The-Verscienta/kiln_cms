@@ -158,7 +158,7 @@ email table and submissions view must render lists.
   nullable → no destructive migration; existing forms unaffected.
 - `Form` gains: `submit_label`, `confirmation_type`, `redirect_url`, autoresponder
   fields (`autoresponder_enabled/subject/body`), `progress_indicator`.
-- `GET /forms/:slug` JSON schema endpoint grows the new metadata (headless consumers
+- `GET /api/forms/:slug` JSON schema endpoint grows the new metadata (headless consumers
   can implement the same logic client-side); additive, non-breaking.
 
 ## Sequencing note

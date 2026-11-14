@@ -245,17 +245,62 @@ carries the reasoning.
 
 <a id="second-factor-policy-upgrade"></a>
 
-- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and a `users.inserted_at` column). Nothing is enforced; rolling back is safe.**
+- **Run `mix ash.migrate` (new table `site_second_factor_policy`, and a `users.inserted_at` column). Nothing is enforced until a site requires it.**
   The `require_second_factor` migration is expand-only. It creates
   `site_second_factor_policy`, one row per site that saves a two-step sign-in
-  requirement (none do yet: there is no page for it), and adds
+  requirement (none does until an administrator saves one at
+  `/editor/two-factor`; see the [next note](#second-factor-enforcement-upgrade)), and adds
   `users.inserted_at` (`NOT NULL`, default `now()`), so every existing
   account gets the time the migration ran. An account's grace period never
   starts before its `inserted_at`, so when a site later turns the requirement
   on, no account from before this upgrade starts out overdue. Run the release
-  migration as usual. **Rolling back is safe:** an older release ignores the
-  table and the column, and reads the two new security log types as
-  unrecognized events ("Unrecognized event (…)"). (Part of #2247.)
+  migration as usual. **Rolling back** is safe for the schema: an older release
+  ignores the table and the column, and reads the two new security log types as
+  unrecognized events ("Unrecognized event (…)"). It also drops any
+  requirement a site has turned on, without a warning (next note). (Part of
+  #2247.)
+
+<a id="second-factor-enforcement-upgrade"></a>
+
+- **Sites can now require two-step sign-in. Nothing changes for any site until an administrator saves a requirement; from then on, the JWTs and headless sign-ins of the people it holds are refused with `403`. Rolling back drops the requirement silently.**
+  What an operator should know before a site turns it on (guide:
+  [Requiring two-step sign-in on a site](../two-factor-auth.md#requiring-two-step-sign-in-on-a-site)):
+  - **On upgrade, nothing is enforced.** No site has a requirement until an
+    administrator saves one at `/editor/two-factor`, and accounts that
+    existed before the upgrade start their grace period no earlier than the
+    migration.
+  - **Headless clients that sign in as a person.** Once a site holds a
+    person (past the grace period, no second factor),
+    `POST /api/auth/sign_in` answers them `403` `second_factor_required` and
+    issues no token, and a JWT they already hold is refused with the same
+    `403` on every `/api/*`, `/gql` and `/api/feed` request, public reads
+    included, and at the `/ws/gql` and `/ws/collab` connect. During the grace
+    period the sign-in's `201` carries `second_factor.deadline`. Move scripts
+    and apps that sign in with a person's password to an API key: **API keys
+    are never held.** Count the refusals with the
+    `[:kiln_cms, :api, :second_factor_required]` telemetry event.
+  - **Passkey-only accounts** past their deadline can no longer sign in with
+    the password alone: on a site's own host (not the main or console host)
+    they are refused and told to sign in on the main host or add an
+    authenticator app.
+  - **The main host must answer every member.** The setup page,
+    `/account/two-factor`, is served only on the main host (the endpoint URL
+    from `PHX_HOST`) and console hosts. A person a site holds on its own
+    address is redirected to the main host's page and signs in again there,
+    readers of a site that requires everyone included, and the headless
+    `meta.setup_url` names the same URL.
+  - **Mail.** The email code a password-only session confirms before adding a
+    factor goes through the relay of the site the setup page is opened for
+    (on the main host, the default site's). With no outgoing mail server at all
+    (`:mailer_not_configured`), or a site relay whose password can no longer
+    be decrypted, the step is skipped and recorded as
+    `proof: "email_skipped_no_relay"`.
+  - **Rolling back** to a release without this drops every site's
+    requirement silently: nobody is held and refused tokens work again. The
+    table stays; upgrading again restores it as it was.
+  - **Locked out:** if no administrator of a site can pass its requirement,
+    `bin/kiln_cms rpc 'KilnCMS.Release.second_factor_requirement_off(org: "<slug>")'`
+    turns it off.
 
 <a id="event-recurrence-rfc-upgrade"></a>
 
@@ -323,7 +368,74 @@ carries the reasoning.
   recomputes an event's date the old way whenever it next saves or sweeps
   it.
 
+<a id="backup-offsite-filter-sidecar-upgrade"></a>
+
+- **Check any filter of yours that copies or watches backups: it must take the `.sha256` sidecars. 1.9.0's notes were wrong that `kiln-media-*.tar.gz` had to be widened for the parts.**
+  For anyone with their own rclone filter, monitoring script or retention
+  job over `$BACKUP_DIR`. No migration and no setting; rolling the pin back
+  changes nothing here, because this corrects advice, not code. (#2425)
+
+  1.9.0's upgrade notes for media parts, both
+  [for the app](v1.9.0.md#backup-media-parts-upgrade) and
+  [for `backup.sh`](v1.9.0.md#backup-sh-media-parts-upgrade), said that
+  anything which globs `kiln-media-*.tar.gz` must accept the
+  `kiln-media-<stamp>.partNN.tar.gz` names. A glob already does: the `*`
+  covers `<stamp>.part01`. (A pattern that spells the stamp out, such as a
+  regex ending in `-[0-9]{6}\.tar\.gz`, still needs the `.partNN`.) What
+  such a filter loses is the checksum sidecar next to each set:
+  - **Media.** `kiln-media-*.tar.gz` leaves out `kiln-media-<stamp>.sha256`.
+    Since 1.9, `restore.sh media` refuses a part set without its sidecar
+    unless you set `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1`, so an off-site
+    copy made through that filter does not restore by default once the
+    library is bigger than one part (`BACKUP_MEDIA_PART_MB`, default 400).
+  - **Database.** `kiln-db-*.dump` leaves out `kiln-db-<stamp>.sha256`, so
+    a copied dump can't be checked against the digest written with it.
+
+  Add the sidecars to each filter:
+
+  ```bash
+  rclone copy /var/backups/kiln/media r2:kiln-backups/media \
+    --include "kiln-media-*.tar.gz" --include "kiln-media-*.sha256"
+  rclone copy /var/backups/kiln/db r2:kiln-backups/db \
+    --include "kiln-db-*.dump" --include "kiln-db-*.sha256"
+  ```
+
+  Don't widen the media filter to `kiln-media-*`. That also copies a running
+  backup's `.partial` files, and a killed run's, and `rclone copy` keeps them
+  off-site after the local ones are gone; `restore.sh` refuses a set with a
+  `kiln-media-<stamp>.*.partial` beside it. Copies already made without the
+  sidecars can be completed by running the corrected filter again while the
+  local sets still exist.
+  [Media backups in parts](../backups.md#media-backups-in-parts-2218) now
+  says this; why media is split into independent archives at all is in
+  [ADR 0034](../decisions/0034-media-backups-are-split-by-file-set-into-independent-archives-not-by-bytes.md),
+  and why the sidecar is the only checksum a restore trusts is in
+  [ADR 0035](../decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
+
 ## Breaking
+
+<a id="ws-gql-refuses-unverified-bearer"></a>
+
+- **`/ws/gql` refuses a connect whose token does not verify, where it used to connect as anonymous (#2634).**
+  The GraphQL websocket reads a user JWT from its `token` connect param (or
+  `Authorization: "Bearer …"`). A token that failed verification (expired,
+  revoked, malformed, from another instance) connected as anonymous and read
+  published content, so a client with a broken credential could not tell; so
+  did a `kiln_` API key, which this socket has never accepted. `/api/*` and
+  `/gql` have answered such a token `401` since #2161. The socket now refuses
+  the connect, and the websocket handshake answers `403` with an empty body.
+  **Who breaks:** a client that keeps a stored token and opens the socket with
+  it after it expires, or that passes an API key to `/ws/gql`. **What to do:**
+  connect with no `token` to read as the public, sign in again for a fresh
+  JWT, or use `POST /gql` with the API key. A connect with no token is
+  unchanged. Each refused connect emits `[:kiln_cms, :api, :invalid_bearer]`
+  (`surface: :graphql`, `read?: true`), and `KILN_API_REJECT_INVALID_BEARER=false`
+  restores the anonymous connect, as it does over HTTP, for as long as that
+  escape hatch lasts. `/mcp`, the other surface #2634 audited, accepts API keys
+  only and already answered any JWT or garbage bearer `401`; it is unchanged.
+  Why this is a minor:
+  [ADR 0017, amendment of 2026-11-13](../decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md#amendment-2026-11-13-the-graphql-socket-refuses-too-and-mcp-is-key-only).
+  Closes #2634.
 
 <a id="media-purge-quarantined"></a>
 
@@ -419,9 +531,33 @@ carries the reasoning.
 
 <a id="backup-schedules"></a>
 
-- **In-app backup schedules: a platform admin can schedule database and media backups daily, weekly, fortnightly or monthly at a local time in a time zone, from a release console; the Backups page lists them.**
-  The alternative to the host's cron job (part of #2219). Created, changed
-  and deleted from a release console in this release, as a platform admin:
+- **In-app backup schedules: a platform admin can schedule database and media backups daily, weekly, every 2 weeks or monthly at a local time in a time zone, on the new Schedule tab of the Backups page.**
+  The alternative to the host's cron job (part of #2219). Open **Backups** →
+  **Schedule** (`/editor/backups/schedules`, platform admins only) and click
+  **Add a schedule**: what to back up, how often, the time (`HH:MM`), the
+  start date and the time zone (a text box that suggests common zones). A
+  preview shows the cadence and the first backup as you type, or says why it
+  won't run (paused, the scheduler off, backups unavailable here). Each
+  schedule's card has **Edit**, **Pause**/**Resume** and **Delete**, its next
+  run, its last window and how its newest scheduled run ended, and the tab
+  warns when the scheduler is off, backups can't run here, the scheduler job
+  hasn't run lately, or a schedule names media the deployment doesn't
+  archive. A save is refused, "This schedule changed since you opened it…",
+  when another admin changed the schedule since the form opened, so a stale
+  form never undoes a pause. A schedule the form can't offer (a value from a
+  newer release, a sub-daily interval, media with no media directory) can
+  only be paused, resumed or deleted. There is no keep setting per schedule
+  yet: scheduled backups are pruned by the same retention rules as every
+  other backup.
+
+  The **Backups** tab says "Next scheduled backup: in …" (linking to the
+  tab) and shows each component's alarm threshold and where it came from.
+  On the Overview, the platform admins' backup strips say when the next
+  scheduled backup is once every component they warn about has a schedule
+  that can run here, otherwise that backups run from the Schedule tab or
+  cron, and link to the tab.
+
+  The same code interfaces work from a release console, for scripts:
 
   ```bash
   bin/kiln_cms rpc '
@@ -432,15 +568,10 @@ carries the reasoning.
   ```
 
   `update_backup_schedule/3` edits, pauses (`enabled: false`) and resumes
-  one, `destroy_backup_schedule/2` deletes it, and each is recorded in the
-  instance security log (`backup_schedule_created`, `_changed`, `_deleted`).
-  The **Backups** page gains a read-only **Schedules** section: each
-  schedule's cadence and components, "Paused", "Next run" (only when it can
-  fire here), the last window's outcome, and each component's alarm threshold
-  and where it came from, with a warning when `KILN_BACKUP_SCHEDULER_CRON` is
-  off or this node can't run backups. Scheduled runs read **Scheduled** in
-  History, and the Overview's backup strips mention the in-app schedules once
-  one is enabled.
+  one, `destroy_backup_schedule/2` deletes it, and each change, from the tab
+  or a console, is recorded in the instance security log
+  (`backup_schedule_created`, `_changed`, `_deleted`). Scheduled runs read
+  **Scheduled** in History.
 
   How it behaves:
   - A window fires once across every node: it is claimed in the transaction
@@ -457,14 +588,16 @@ carries the reasoning.
     database and media schedule ticked on a node with no media directory backs
     up the database only, with a warning; a media-only one is refused.
   - **Sub-daily intervals are refused** until keep-N retention ships (a later
-    part of #2219). Retention is unchanged and age-only, and every run is a
-    full set, so the sets on disk per component are about runs per day ×
+    part of #2219). Retention caps backups by age, not by count (beyond the
+    recovery points and newest backups it keeps), and every run is a full
+    set, so the sets on disk per component are about runs per day ×
     `BACKUP_KEEP_DAYS`: a two-hourly schedule would keep 168 with the default
     14 days.
   - A schedule sets the alarm threshold of the components it covers
     (interval plus half, at least 6 h: daily 36 h, weekly 252 h) only while it
-    can actually run here and has fired at least once since its baseline;
-    otherwise `BACKUP_STALE_AFTER_HOURS` applies. If host cron also backed the
+    can actually run here and one of its windows has come since its baseline
+    (creation, last timing edit or resume) and its start date; otherwise
+    `BACKUP_STALE_AFTER_HOURS` applies. If host cron also backed the
     component up in the last eight days, the lower of the two wins.
   - Restoring a database dump brings back the schedules as they were,
     deleted ones included, and each enabled one fires its latest window
@@ -474,7 +607,11 @@ carries the reasoning.
     :refused | :narrowed | :missed | :invalid | :unreadable]` and
     `[:kiln_cms, :backups, :status, :schedules_unreadable]`.
 
-  See [Schedule backups in the app](../backups.md#schedule-backups-in-the-app).
+  See [Schedule backups in the app](../backups.md#schedule-backups-in-the-app),
+  and [ADR 0044](../decisions/0044-a-schedule-sets-the-alarm-threshold-only-while-it-can-run-and-a-claimed-window-is-never-retried.md)
+  for why a schedule sets the threshold only while it can run, why a claimed
+  window is never retried, and why the claim shares the backup lock's
+  transaction.
 
 <a id="slack-webhook-format"></a>
 
@@ -569,7 +706,10 @@ carries the reasoning.
   `blocked?/2` stays side-effect-free) and
   `KilnCMS.Security.Cidr.truncate_range/1`. See
   [Blocked addresses raise one alert per window](../security-alerts.md#blocked-addresses-raise-one-alert-per-window).
-  (Part of #2245.)
+  The cap of 20 networks is per server: on a cluster the window's summary
+  can count up to about 20 times the number of servers (see
+  [Running more than one server](../security-alerts.md#running-more-than-one-server);
+  #2813). (Part of #2245.)
 
 <a id="api-key-rate-limited-alerts"></a>
 
@@ -580,7 +720,8 @@ carries the reasoning.
   (`/gql`, its batch limit included), `media_upload`, `media_transform` and
   `plugin_endpoint`. A limit refuses before the key is checked, so each
   server remembers, in memory, the SHA-256 of every key that authenticated
-  on it in the last 5 minutes; only a refusal carrying one of those keys
+  on it recently (a key is forgotten 2.5 to 5 minutes after its last
+  successful request there); only a refusal carrying one of those keys
   counts, which costs no database read and lets no forged key use up the
   real key's alert. It is recorded as `api_key_rate_limited` (no person;
   target the key; metadata `name`, `bucket`), once per key and limit per
@@ -589,8 +730,8 @@ carries the reasoning.
   admin by bell and email (no mute, no webhook), with its own alert window,
   so it never delays a stolen-key `api_key_abuse` alert. Known gaps: `/ws/gql`
   can't carry an API key; image transforms and plugin routes never check a
-  key, so they alert only for a key used on an authenticated API on the
-  same server within 5 minutes; and limits are per address, so a
+  key, so they alert only for a key the same server still remembers from
+  an authenticated API; and limits are per address, so a
   legitimate key behind a NAT someone else floods alerts too. It is the one
   platform kind that can be turned off: platform admins see a new
   **Platform alerts** part on `/editor/security-alerts` with **API keys over
@@ -601,7 +742,128 @@ carries the reasoning.
   New telemetry: `kiln_cms.security.api_key_trip.count`, tagged `result`
   (`unverified`, `debounced`, `noted`) and `bucket`. See
   [API keys over a rate limit](../security-alerts.md#api-keys-over-a-rate-limit).
+  On more than one server, the limits that raise this alert are counted per
+  server, so a key trips them less often than the configured numbers
+  suggest, and a refusal alerts only if the refusing server verified the key
+  recently; [Running more than one server](../security-alerts.md#running-more-than-one-server)
+  lists when it doesn't, and
+  [ADR 0053](../decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md)
+  argues why servers don't share what they remember (#2812, #2813). A **?**
+  at the end of the kind's line on **Platform alerts** says so on the page
+  ("Some refusals raise no alert, especially when Kiln runs on more than one
+  server: an alert is raised only by a server that recently verified the
+  key.") and links that section (#2896).
   (The last part of #2245.)
+
+<a id="second-factor-requirement"></a>
+
+- **A site can require two-step sign-in of its administrators, its editors and administrators, or everyone, with a grace period; past it, an account with no second factor is held until it sets one up. Closes the #2247 series.**
+  The last of three parts of #2247 (the passkey at the code prompt and the
+  "factor added" email were the first; the setting itself the second).
+  - **The setting, `/editor/two-factor`.** A site administrator chooses
+    **Require two-step sign-in for** (Off, Administrators, Editors and
+    administrators, Everyone) and a **Grace period** (none, 7, 14, 30 or 90
+    days). Before saving, the page previews how many people would be asked to
+    set it up and how many at once; after, it shows per role how many people
+    are covered, have a factor, are still in grace (with the first deadline)
+    and are held, and who changed it last, from what. Counts only, no names.
+    Every save needs the administrator's own second factor, verified at
+    sign-in in the last 15 minutes or a code typed on the page. The page has
+    no console menu entry yet (it comes with the posture check of #2252):
+    open it by its address. A save that holds people at once sends their open
+    pages to the setup page and drops their GraphQL and collaboration sockets.
+  - **The grace period** runs per account from the latest of its creation,
+    its joining the site and its role becoming covered; a promotion does not
+    restart it. During it, console pages and `/account` show "This site
+    requires two-step sign-in. N days left to set it up.", each sign-in on
+    the main or console host first lands on the setup page with **Not now**
+    (a sign-in on a site's own address goes where it was going; the banner
+    links to the main host's page), and the headless sign-in's `201` carries
+    `second_factor: {required: true, deadline}`.
+  - **Held accounts** are sent to the setup page from every browser
+    page of the site (a `302`, `private, no-store`, writing no session or
+    cookie), every console LiveView (also one left open across the deadline
+    or a policy change), `/membership` and plugin pages, and every sign-in.
+    They keep the setup page, sign-out, the sign-in pages, billing
+    (`POST /billing/portal`), the export of their own data, `/locale`,
+    `/developers`, preview and newsletter links; images are served to them as
+    to an anonymous visitor. Their JWTs get `403 second_factor_required` on
+    `/api/*`, `/gql` and `/api/feed` (public reads included), and at the
+    `/ws/gql` and `/ws/collab` connect; a `/ws/gql` socket opened in the
+    grace period closes at the deadline and refuses each document after it.
+    **API keys are never held.**
+  - **The setup page, `/account/two-factor`,** is open to every signed-in
+    account, readers included (`/editor/settings` is editors only), and is
+    served only on the main host (`PHX_HOST`) and console hosts: a site's
+    own address is where a site administrator's injected code runs, and
+    cannot register a passkey. There, the page and every redirect that holds
+    an account go to the main host's page, with no `return_to`, and the
+    person signs in once more on the main host. `/account` gains a
+    **Two-step sign-in** card with **Set up two-step sign-in**, which says
+    "This opens on (main host), where you sign in again." on a site's own
+    address. The page adds an authenticator app (with recovery codes) or a
+    passkey, and continues to where the person was going. It judges the
+    site it is opened for (on the main host, the default site): a reader
+    held by a site that requires everyone gets **Manage billing** and
+    **Export my data** where the page is opened for that site, so not on the
+    main host when another site holds them.
+  - **The email proof.** A session that signed in with only a password (or a
+    remember-me cookie) at or after the deadline of any site holding the
+    account must confirm a six-digit code mailed to the account before it can
+    add a factor, so someone with only the password cannot enroll their own.
+    Skipped for magic-link, password-reset, account-confirmation, single
+    sign-on and passkey sessions, for accounts no site holds, for a password
+    session from before the deadline, and when the site has no working mail
+    relay (`proof: "email_skipped_no_relay"`); a relay that fails this time
+    never skips it. The code lasts 10 minutes, works only in the session that
+    asked, is never stored, and each try uses the account's shared
+    second-factor attempts (five per 15 minutes); at most three codes an hour
+    go to an address (code config `config :kiln_cms,
+    KilnCMS.Accounts.AccountThrottle, enrolment_proof_mail_budget: 3`).
+    The check is on the enrollment actions (`User :confirm_totp`,
+    `Passkey :register`, `KilnCMS.Accounts.Changes.RequireEnrolmentProof`),
+    which fail closed when called without the page's context.
+  - **Passkey-only accounts** satisfy the requirement, but past the deadline
+    their password alone is not enough: it stops at the passkey prompt on the
+    main or console host and is refused on a site's own host; a password
+    session from before the deadline and a remember-me restore go through
+    the same prompt; their headless sign-in is `403` with
+    `meta.reason: "passkey_only"`, and their JWTs are refused.
+  - **The last factor stays.** While any site the account uses requires a
+    second factor, its owner cannot disable its authenticator app with no
+    passkey left, or remove its only passkey with no app; `/editor/settings`
+    says why. Replacing the app still works.
+  - **Recorded:** `second_factor_required` ("Held for two-step sign-in
+    setup"), once per sign-in held or refused (`surface` `browser` or `api`,
+    `reason` `not_enrolled`, `passkey_host` or `headless_passkey`), and
+    `proof` (`email`, `email_skipped_no_relay`, `magic_link_session`,
+    `not_required`) on `second_factor_enrolled` and `passkey_added`. Refused
+    API requests emit `[:kiln_cms, :api, :second_factor_required]`
+    (`surface`) and write no event.
+  - **For developers:** `KilnCMSWeb.SecondFactorGate` (`held?/3`,
+    `bearer_refused?/3`, `passkey_step_up_owed?/3`, `sign_in_destination/3`,
+    `attach/2`, `screen/2`, and for the setup page's host `setup_host?/1`,
+    `setup_location/3`, `setup_href/1`, `main_setup_url/0`,
+    `redirect_opts/1`, `setup_host/1` and `socket_host/1`), the
+    `KilnCMSWeb.LiveUserAuth` hook `:second_factor_setup_host`, the
+    `setup_url` attribute of `Layouts.second_factor_banner/1`, `KilnCMSWeb.Plugs.SecondFactorGate`,
+    `KilnCMSWeb.Plugs.SecondFactorBearer`, `KilnCMSWeb.Plugs.PasskeyStepUp`,
+    `KilnCMSWeb.GraphqlLimits.SocketSecondFactor`,
+    `KilnCMS.Accounts.EnrolmentProof`, `KilnCMS.Accounts.SecondFactorEviction`,
+    `KilnCMS.Accounts.Validations.KeepsRequiredSecondFactor`, the errors
+    `EnrolmentProofRequired` and `LastSecondFactorRequired`,
+    `KilnCMS.Mail.relay_available?/1` and `no_relay?/1`, and
+    `TwoFactorRequirement.enforced_somewhere?/1`, `enforced_deadlines/2` and
+    `overdue_user_ids/3`. `KilnCMSWeb.SecondFactorStepUp.decide/3` (was
+    `decide/2`) can also answer `{:refuse, :passkey_host | :headless_passkey}`,
+    and the sign-in budget follows it. The collab token now carries whether
+    its session passed a second factor (`KilnCMSWeb.CollabSocket.token/2`); a
+    token from before the upgrade reads as not. The OpenAPI document gains
+    the sign-in's `403` and `second_factor` field.
+  No migration beyond the one in the [upgrade note](#second-factor-policy-upgrade).
+  Guide: [Requiring two-step sign-in on a site](../two-factor-auth.md#requiring-two-step-sign-in-on-a-site);
+  operators, read the [upgrade note](#second-factor-enforcement-upgrade).
+  Closes #2247.
 
 <a id="passkey-at-code-prompt"></a>
 
@@ -614,9 +876,11 @@ carries the reasoning.
   code would. The button appears only in a browser with WebAuthn, and only
   where a passkey ceremony can run: the main host (`PHX_HOST`) or a console
   host that sits under it (`KILN_CONSOLE_HOST`), never a site's own host.
-  **Who is asked for a second factor is unchanged:** only accounts with an
-  authenticator app reach the prompt, and a passkey sign-in from `/sign-in`
-  is still a complete sign-in on its own. A passkey refused at the prompt
+  This entry did not change who is asked for a second factor: accounts with
+  an authenticator app reach the prompt, and a passkey sign-in from `/sign-in`
+  is still a complete sign-in on its own. (A site that requires two-step
+  sign-in also sends a passkey-only account there past its deadline; see
+  [the third part](#second-factor-requirement).) A passkey refused at the prompt
   counts against the same per-account budget as a wrong code (5 per 15
   minutes), is recorded the same way (`sign_in_failed`, `method:
   "second_factor"`, `reason: "invalid_code"`), and at the limit gets the
@@ -647,7 +911,9 @@ carries the reasoning.
   the method and, when one was verified, when the second factor was. It is
   keyed to the session token's `jti`, so a marker left over from an earlier
   token (after an idle timeout, say) reads as `nil` and is never inherited;
-  a remember-me sign-in writes `method` `"remember_me"`. Nothing reads it yet. No migration, no
+  a remember-me sign-in writes `method` `"remember_me"`. The third part of
+  #2247 reads it (the policy page, the email proof and the passkey-only
+  gates). No migration, no
   API change and no new setting; rolling back removes the button, and an
   older release ignores the session key. See
   [Using a passkey at the code prompt](../two-factor-auth.md#using-a-passkey-at-the-code-prompt).
@@ -732,13 +998,12 @@ carries the reasoning.
 
 <a id="second-factor-policy-groundwork"></a>
 
-- **Groundwork for requiring two-step sign-in by role, not yet enforced, and an operator command to turn a site's requirement off.**
-  A site will be able to require a second factor (an authenticator app or a
-  passkey) of its administrators, of its editors and administrators, or of
-  everyone, with a grace period of 0 to 90 days (default 14). This release
-  adds the setting and the logic that answers who it covers and by when, but
-  **no page, no reminder and no enforcement**: a site with no saved
-  setting, which is every site, requires nothing, and nobody is held.
+- **The setting and logic behind requiring two-step sign-in by role, and an operator command to turn a site's requirement off.**
+  The second part of #2247: the setting (who must hold a second factor, and
+  a grace period of 0 to 90 days, default 14) and the logic that answers who
+  it covers and by when. The page, the reminders and the enforcement are the
+  [third part](#second-factor-requirement); a site with no saved setting
+  requires nothing, and nobody is held.
   For operators: `bin/kiln_cms rpc
   'KilnCMS.Release.second_factor_requirement_off(org: "acme")'` turns a
   site's requirement off (and nothing else) as the server's `:operator`
@@ -752,8 +1017,8 @@ carries the reasoning.
   `grace_days`, `previous_required_for`, `change`, `via`; it replaces
   `org_setting_changed` for this setting) and `second_factor_required`
   (`tier`, `surface`, `reason`), and a `proof` key on
-  `second_factor_enrolled` and `passkey_added`. Only the first is recorded
-  in this release. For developers: `KilnCMS.CMS.SiteSecondFactorPolicy`
+  `second_factor_enrolled` and `passkey_added`, the last two written by the
+  third part. For developers: `KilnCMS.CMS.SiteSecondFactorPolicy`
   (not on JSON:API, GraphQL or MCP) and
   `KilnCMS.Accounts.TwoFactorRequirement`: `policy/1` (cached for a
   minute; an unreadable row is logged and read as off, uncached),
@@ -767,6 +1032,50 @@ carries the reasoning.
   needs a fresh factor:
   [ADR 0030](../decisions/0030-the-second-factor-requirement-fails-open-and-only-a-freshly-verified-admin-changes-it.md).
   (Part of #2247.)
+
+<a id="invalid-bearer-metric"></a>
+
+- **Stale bearer tokens on the API are now a Prometheus counter, `kiln_cms_api_invalid_bearer_count`, so the count that gates removing `KILN_API_REJECT_INVALID_BEARER` can be read from a scrape.**
+  [ADR 0017](../decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md)
+  removes the `KILN_API_REJECT_INVALID_BEARER=false` escape hatch only when
+  stale tokens have stopped arriving. That count came from the
+  `[:kiln_cms, :api, :invalid_bearer]` event, which core emitted but did not
+  count, so each site had to attach its own `:telemetry` handler to read it.
+  `KilnCMSWeb.Telemetry.metrics/0` now counts the event, and the Prometheus
+  exporter serves it with no handler of your own.
+  **The metric.** One series per combination of four labels:
+  - `enforced`: `"true"` when the request got a `401` (or the `/ws/gql`
+    connect got a `403`), `"false"` when it was served as anonymous because
+    the instance set `KILN_API_REJECT_INVALID_BEARER=false`.
+  - `surface`: `json_api`, `graphql`, `media` or `other`.
+  - `read`: the event's `read?`, renamed because a `?` is not valid in a
+    Prometheus label name (one invalid label name makes Prometheus reject the
+    whole scrape). `"true"` for a `GET` or `HEAD`, and for anything on GraphQL.
+    The event's own metadata still says `read?`, so a handler you attached
+    keeps working.
+  - `reason`: `expired`, `malformed` or `invalid` (revoked, deleted-user and
+    bad-signature tokens are all `invalid`).
+
+  No token, user or address is a label.
+  **The gate query.** Over the release window, whether any series exists:
+  `max_over_time(kiln_cms_api_invalid_bearer_count{enforced="false",read="true"}[<release window>]) > 0`
+  (not `increase()`, which misses the first event of each label set after a
+  restart). The removal signal is `enforced="false", read="true"`: stale tokens still
+  reaching public reads through the hatch. It is nonzero only on an instance
+  that set the variable to `false`, so read `enforced="true"` beside it: those
+  are the refusals actually served, and they say whether removal would hurt
+  anyone.
+  **For operators.** The counter exists only with the exporter on
+  (`KILN_METRICS_ENABLED`, off by default; scraped from `GET /metrics` on
+  `KILN_METRICS_PORT`, default `9568`). A site expected to report the count
+  before the removal release must turn the exporter on and scrape it for the
+  whole window. The counter lives in the node's memory and starts again from
+  zero on every restart or deploy: `increase()` allows for the reset, but
+  whatever was counted after the last scrape before a restart is lost. No
+  migration; rolling back only removes the series.
+  See [Refused API credentials](../observability.md#refused-api-credentials)
+  and the [ADR 0017 amendment of 2026-11-13](../decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md#amendment-2026-11-13-the-count-is-exported-2635).
+  Closes #2635.
 
 ## Changed
 
@@ -877,6 +1186,305 @@ carries the reasoning.
   (forbidden class, `max`) and
   `KilnCMS.Accounts.Errors.PasskeyRegistrationThrottled` (invalid class,
   `retry_after_seconds`). (Part of #2247.)
+
+<a id="editor-input-help-line"></a>
+
+- **The fields admin now says, under Editor input, that the choice changes only how editors fill a field in.**
+  At `/editor/fields`, the **Editor input** cards (radio buttons or a
+  dropdown for a select, tags or checkboxes, one line or several) sit next
+  to settings such as the field's type and, for text, its **Editing**
+  format, and they read alike: both look like "how this field is edited".
+  They are not the same kind of setting. The type and the format decide
+  what a record stores and how it is delivered; the editor input decides
+  neither, so an admin can switch it on a field that already holds data,
+  and switch back, without converting a record. A line under the legend now
+  says so: "How editors fill this in. The type and text format of the field
+  stay as they are." It shows whenever the cards do, that is, whenever the
+  field offers more than one input, and the fieldset names it as its
+  description for screen readers. Translated into Spanish and French. The
+  one input that touches stored data is unchanged and still documented in
+  [Choose how editors fill in a field](../extending-content.md#choose-how-editors-fill-in-a-field):
+  checkboxes store a record's terms in the field's option order the next
+  time it is saved.
+  For developers, two new decision records explain the design this line
+  describes: [ADR 0048](../decisions/0048-a-fields-editor-input-is-an-editor-only-string-separate-from-its-text-format.md)
+  (why `widget` is its own editor-only string attribute rather than a value
+  of `format`) and [ADR 0049](../decisions/0049-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md)
+  (why a code interface call or field sync import that names an input the
+  field doesn't offer is refused, while the fields admin resets it to the
+  default). Two more record decisions behind section layouts and the field
+  sync file: [ADR 0046](../decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md)
+  and [ADR 0047](../decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md).
+  No behavior changes. (#2674, #2656)
+
+<a id="account-screens-help-text"></a>
+
+- **Team, Settings and the second-step sign-in page now say what happens next: how long an invitation link lasts, that adding a second factor emails you, and that a passkey can answer the code prompt.**
+  Each of these was in the guides but not on the screen (#2454, #2828):
+  - **Team** (`/editor/team`): under **Pending invitations**, "Links work
+    for 7 days. Resending mails a new link and restarts the clock; the old
+    link stops working. Expired invitations stay listed for 30 days, and
+    inviting the address again resends it." The numbers come from
+    `KilnCMS.Accounts.Invitations.ttl_days/0` and `prune_after_days/0`. The
+    note under the **Add or invite** form ends in a **Learn more** link to
+    [Invite someone to a site](../account-administration.md#invite-someone-to-a-site).
+  - **Settings** (`/editor/settings`): the **Passkeys** section adds "We'll
+    email you each time a passkey is added to your account." beside the
+    screen-lock line, and **Two-factor authentication** adds "We'll email you
+    when an authenticator app is added or replaced." Both mails have been
+    sent since the second-factor notice shipped
+    ([We email you when a second factor is added](../two-factor-auth.md#we-email-you-when-a-second-factor-is-added));
+    an owner who knows to expect them is likelier to notice one they did not
+    cause.
+  - **`/sign-in/verify`**: for an account with an authenticator app and a
+    passkey, on a host where the passkey can run, the prompt now reads
+    "Enter the 6-digit code from your authenticator app. You can also use a
+    passkey." The second sentence is sent hidden and shown by the same script
+    that shows **Use a passkey** (`initPasskeyStepUp` in
+    `assets/js/passkeys.js`), so a browser without passkey support never sees
+    it. The code field's `aria-describedby` still points at the one
+    `#two-factor-help` paragraph, so a screen reader hears the hint too once
+    it is shown.
+
+  Why an invitation is a row of its own and not an account created up front
+  is now [ADR 0050](../decisions/0050-a-site-invitation-is-its-own-row-not-an-account-written-up-front.md),
+  linked from the invitation guide. No migration or config change.
+
+<a id="backup-history-resume-tip-parts-link"></a>
+
+- **Backups → History: a resumable run has a `?` beside Resume saying what a resume does, and a media backup's "N parts" label links to how to restore one.**
+  For platform admins. Both are on the History rows of **Backups**.
+  - **About Resume.** On a row that can be resumed (a failed, canceled or
+    stale running in-app backup whose work files are still on disk), a
+    `?` next to **Resume** opens: "Continues from the files already written;
+    each is reused only if its checksum still matches. It backs up the files
+    listed when the backup first started, so its files can be from different
+    times." Its **Learn more** opens
+    [Media backups in parts](../backups.md#media-backups-in-parts-2218).
+    Succeeded and imported rows have no tip, as they have no Resume.
+  - **"N parts" is a link.** The label on a run whose media was written in
+    several parts now opens
+    [Restore a media set that has several parts](../backups.md#restore-a-media-set-that-has-several-parts)
+    in a new tab. A single-archive run shows no label, as before. (#2425)
+
+<a id="backup-offsite-sha256-hint"></a>
+
+- **Backups → Where backups go: a `?` beside the heading says to copy each backup's `.sha256` files when you copy backups off the host yourself.**
+  For platform admins, on **Backups**. It reads: "If you copy backups off this
+  host yourself, copy each backup's .sha256 files with it: without them a
+  media backup in parts won't restore, and nothing can check the others. The
+  built-in off-site copy already includes them." Its **Learn more** opens
+  [The app path and the shell path share one format](../backups.md#the-app-path-and-the-shell-path-share-one-format),
+  which gives the rclone filters that keep them. It shows whether or not an
+  off-site copy is configured: the operators it is for copy backups with their
+  own tools, so the page has no off-site row for them. (#2890)
+
+<a id="take-content-down-guide"></a>
+
+- **A new guide, [Take content down](../take-content-down.md), walks through every way to unpublish or archive a page, who may use each, and what each refusal means.**
+  Since 1.9.0, taking content down needs the same permission as putting it
+  up: an admin, or an editor on a site where **Team → Publishing** lets
+  editors publish
+  ([the 1.9.0 Breaking entry](v1.9.0.md#takedown-needs-publish-rights)).
+  The editorial workflow guide stated the rule in a paragraph, but not the
+  steps, and the five routes behave differently for someone who may not
+  publish. The guide has a section for each:
+  - **The page's editor**: **Unpublish**, under **More actions** on a
+    **Live · draft** page. The editor has no Archive button.
+  - **The content list**: a row's **Unpublish**, and **Unpublish**,
+    **Archive** and **Unarchive** in the bar for ticked rows, with refused
+    or ineligible rows counted as skipped.
+  - **A date**: **Scheduled unpublish at** in **Settings**, which is locked
+    on a live or scheduled page for anyone who may not publish, and open on
+    a draft nobody has scheduled.
+  - **The calendar**: anyone may drag an unpublish chip; a move they may
+    not make is refused when it is dropped, and the chip snaps back.
+  - **A release**: any editor may add an Unpublish item, and only an admin
+    ships the release, whatever **Team → Publishing** says.
+
+  It ends with the four refusal messages the editor and a row's
+  **Unpublish** show, quoted exactly so a reader can match the screen;
+  `test/kiln_cms/docs/take_content_down_test.exs` fails if one stops being
+  a msgid in `priv/gettext/default.pot`. It also says what happens when a
+  page was trashed by someone else after the list loaded: the action fails
+  without a message until #2781 is fixed.
+
+  Section 7 of [The editorial workflow](../editorial-workflow.md) now links
+  to the guide instead of repeating it, and says that **Let editors
+  publish** gives editors archive rights too, which it always did. The
+  guide sits under Authoring & editorial in the docs, after The working
+  copy. Two decision records explain the rules it describes, and are linked
+  from the policy matrix, the trash guide and the overlay contract:
+  [ADR 0051](../decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md)
+  (why the dates, the scheduled transitions and archive are gated as well
+  as unpublish) and
+  [ADR 0052](../decisions/0052-a-trashed-content-row-refuses-every-update-by-default-through-a-row-filter.md)
+  (why a trashed page refuses updates through a row filter, and how an
+  action earns an exemption). No behavior changes. (#2475, #2534)
+
+<a id="second-factor-help-follows-the-host"></a>
+
+- **The second-factor pages now say what works at the address you are on, and say before you click when adding a factor needs the email code first.**
+  The setup page (`/account/two-factor`) is served only on the main host
+  (`PHX_HOST`) and console hosts, and a passkey can only be used where its
+  ceremony runs (the main host, or a console host under it). The pages
+  around it gave the same help everywhere. Now:
+  - **`/editor/two-factor`, Set up two-step sign-in.** For an admin with no
+    second factor, the button goes to the setup page on this host, or, where
+    the console is served on a site's own address (no console host is
+    configured), straight to the main host's page, with the line "This opens
+    on (main host), where you sign in again." Before, the link went to
+    `/account/two-factor` on the site's address, which redirected to the
+    main host without saying so.
+  - **`/editor/two-factor`, the line under Code from your authenticator
+    app.** It depends on the admin's factors and the host. With an
+    authenticator app and a passkey, where a passkey works: "Use a code, or
+    sign in again with your passkey." (as before). With a passkey only,
+    where a passkey works: "No authenticator app? Sign out and sign in
+    again with your passkey, then save within 15 minutes." With a passkey
+    only, where it does not (a site's own address, or a console host outside
+    `PHX_HOST`): "A passkey can't confirm it at this address: add an
+    authenticator app, then enter its code here.", with a **Set up an
+    authenticator app** link to the setup page (the main host's, on a site's
+    own address, and it says so). Otherwise: "Enter a current code from
+    your authenticator app." Each starts "Changing this setting needs a
+    second factor from the last 15 minutes." Before, every admin was told
+    to use a code or sign in again with a passkey, including where a
+    passkey cannot be used.
+  - **`/editor/settings`.** That page has no step for the emailed
+    confirmation code some sites ask for before a factor is added, so it
+    refused the add afterwards with "Confirm your email address before
+    adding a second factor." When the code is owed, the page now says so
+    beside **Enable two-factor authentication**, **Set up a new
+    authenticator** (after a recovery-code sign-in) and the passkey form:
+    "You need to confirm your email address before you add a second
+    factor. Do that on the two-step sign-in page, and add it there.", with
+    a **Set up two-step sign-in** button to `/account/two-factor` (the main
+    host's, on a site's own address, and it says so). The refusal still
+    backs it up.
+  - **"We'll email you" lines.** "We'll email you when an authenticator
+    app is added or replaced." now sits beside the controls that set one
+    up (the enable button, the setup form, and the button for a new one
+    after a recovery-code sign-in) on both `/editor/settings` and
+    `/account/two-factor`, and nowhere else: Settings used to show it under
+    an app already set up, with nothing to add. `/account/two-factor` now
+    also shows "We'll email you each time a passkey is added to your
+    account." beside its passkey form.
+  - **`/account/two-factor` at the passkey limit.** An account holding the
+    most passkeys it may (20) sees "You have 20 passkeys, the most an
+    account can hold. Remove one to add another." in place of the add form,
+    as on Settings. Before, the form stayed and the registration was refused
+    only after the browser's passkey prompt.
+
+  All new text is translated into Spanish and French. The guide's
+  [Require two-step sign-in on your site](../two-factor-auth.md#require-two-step-sign-in-on-your-site)
+  steps and [When the emailed code is asked for](../two-factor-auth.md#when-the-emailed-code-is-asked-for)
+  are updated to match. Also corrected: the staging guide's list of the keys
+  and credentials kept in the database and how a staging copy with its own
+  `SECRET_KEY_BASE` treats them
+  ([Staging environments](../staging-environments.md), "What's already safe by default"), and the
+  `KilnCMS.Accounts.Invitations` moduledoc. No migration, API or config
+  change; rolling back restores the earlier wording. (Part of #2872;
+  #2886, #2888)
+
+<a id="calendar-drag-and-bulk-skip-reason"></a>
+
+- **The calendar offers a chip's drag only to someone who may move it, and the content list's bulk bar says why it skipped rows.**
+  For editors and admins in the console. Both places used to offer a move
+  and then refuse it without much of a reason.
+  - **Calendar** (`/editor/calendar`). On the month and week grids, a
+    publish, unpublish, archive or expired chip now has the grab cursor, the
+    drag and the arrow-key nudge only for an admin, or for an editor on a
+    site where **Team → Publishing** lets editors publish and whose role may
+    edit that content type. A release go-live chip moves for an admin only.
+    For anyone else the chip is a plain link, and its tooltip no longer ends
+    with "arrow keys move it". Before, every editor could drag every
+    reschedulable chip, and a move they could not make was refused on drop.
+    The calendar works the handle out when it loads its dates, so a page
+    loaded before the switch or a role changed can still offer a drag; the
+    policy refuses that move as before, with the same messages. This is
+    #2474 item 1; that issue's other two items are unchanged.
+  - **Bulk bar** (content list). When an Unpublish, Archive, Unarchive,
+    Publish or Submit for review run skips a row for any reason other than a
+    safety field, the message adds "A row is skipped when it can't take this
+    step: it isn't in a state that allows it, you may not change it on this
+    site, or something on it needs fixing first (open it to see what)."
+    Before, it only counted the skipped rows. The sentence covers every
+    cause the count lumps together, as the bar does not record which cause
+    applied to which row. A run skipped only for a safety field keeps its
+    own sentence and does not get this one, and Delete leaves it off.
+
+  The new sentence is translated into Spanish and French.
+  [Take content down](../take-content-down.md) and
+  [Rescheduling from the grid](../content-lifecycles.md#rescheduling-from-the-grid)
+  are updated to match, and
+  [ADR 0051](../decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md)
+  has a dated amendment. No migration, API or config change; rolling back
+  restores the earlier behavior. (#2894)
+
+<a id="mcp-custom-field-filters-documented"></a>
+
+- **API consumers: the MCP read tools' `custom_filter`, `custom_where` and `custom_sort` are now documented, and so is JSON:API's `custom_where`, which takes one condition per query string.**
+  `read_pages`, `read_posts` and `read_entries` already take all three under
+  `input`, but
+  [the MCP guide](../mcp.md#tools) didn't say so, and a custom field's name
+  in the tool's own `filter` is a `no such field` error. The guide now has
+  both forms as JSON tool calls. They are JSON:API's parameters as JSON,
+  snake_case throughout: `custom_filter` with its `_or`, `_and`, `_not` and
+  `_native` groups, `custom_sort` as a comma-separated string, and
+  `custom_where` as a list of typed conditions, up to 10, with at most 50
+  values in an `in`. A bad condition comes back with `isError: true` and
+  the error text prefixed by the argument (`custom_where: …`). Some of
+  those messages spell kinds and operators the GraphQL way (`dateTime`,
+  `notEq`, `isNull`, `customWhere`); the MCP tools only accept the
+  snake_case form (`date_time`, `not_eq`, `is_null`).
+
+  [JSON:API](../json-api.md#typed-conditions-custom_where) gains a
+  "Typed conditions" section. A query string carries **one** condition:
+  every `custom_where[][…]` pair lands in the same list item, so a second
+  `[name]` replaces the first and its operators join the first condition.
+  The indexed form, `custom_where[0][name]=price`, is a `400`
+  `invalid_query`, because it decodes to a map and the parameter is a list.
+  To filter on several fields over JSON:API, use `custom_filter`, which
+  takes the same operators and groups too. A test now pins both the
+  one-condition form and the `400`. No behavior changes. (#2856)
+
+<a id="setup-page-passkey-removal"></a>
+
+- **The two-step sign-in setup page, `/account/two-factor`, now lists the account's passkeys and removes one, as Settings does.**
+  At 20 passkeys the page said "Remove one to add another", but the only
+  page with a remove button was `/editor/settings`, which a reader (viewer)
+  can't open, and no admin screen removes another person's passkey. The
+  **Passkey** section of `/account/two-factor` now lists each passkey with
+  its name, "Added (date)" and "last used (date)", and a trash button
+  ("Remove passkey") that asks "Remove this passkey? You can no longer sign
+  in with it." and then says "Passkey removed." Below the limit again, the
+  add form comes back (on a host where a passkey can be added). Anyone signed in can use it for their own passkeys;
+  the page is still served only on the main host and console hosts.
+
+  It behaves as Settings does. While a site the account belongs to requires
+  a second factor and the passkey is the account's last one (no
+  authenticator app), the trash button is replaced by "A site you use
+  requires two-step sign-in, so you can't remove your last second factor.
+  Add another one first." The shared demo account sees no list. Another
+  person's passkey id, or one that no longer exists, is refused with
+  "Couldn't remove that passkey." The `Passkey` `:destroy` action still
+  decides all three, whatever the page shows. Removing asks for no emailed
+  code (that step gates adding a factor), and the removal is recorded in the
+  site's security log as `passkey_removed`, as on Settings.
+
+  The list is shown on any host that serves the page, since removing needs
+  no browser ceremony. On a console host where a passkey can't be
+  registered, the section has the list and the trash buttons but no add
+  form, no limit note and no "We'll email you each time a passkey is added
+  to your account." line.
+
+  Both pages now remove through `KilnCMSWeb.TotpEnrolment.remove_passkey/3`,
+  and share `last_factor?/4` and `last_factor_note/1`; Settings' behavior is
+  unchanged. The new screen text reuses Settings' strings, already
+  translated into Spanish and French. [Passkeys](../passkeys.md#remove-a-passkey)
+  has a "Remove a passkey" walk-through. No migration, API or config change;
+  rolling back removes the list from the setup page. (#2900)
 
 ## Fixed
 
@@ -1646,6 +2254,177 @@ carries the reasoning.
   the exported rule changes; stored rules and Kiln's own dates don't.
   Subscribers see the fix at their next refresh. Guide:
   [Events](../events.md#calendars).
+
+<a id="data-flows-breached-password-egress"></a>
+
+- **The data-flows guide and the "no third-party requests" checklists now include the breached-password check.**
+  Since 1.9.0, setting a password (registration, a change, a reset by token,
+  first-run setup, accepting an invitation with a password) sends the first
+  five hex characters of the password's SHA-1 to Have I Been Pwned
+  (`api.pwnedpasswords.com`), on by default. The
+  [subprocessor table](../data-flows.md#optional-subprocessors) in
+  `docs/data-flows.md` had no row for it, and its closing advice for a
+  deployment that must make no third-party requests named only
+  `KILN_UPDATE_CHECK=false` and the crawler-verification switches. The same
+  gap was in [environment-variables.md](../environment-variables.md#upstream-update-check)
+  and in the staging guides ([staging-environments.md](../staging-environments.md),
+  [deploy-staging.md](../deploy-staging.md)), so a DPA subprocessor list or a
+  staging clone built from them missed one call.
+
+  If you followed that advice, add Have I Been Pwned to your subprocessor
+  list, or set `BREACHED_PASSWORD_CHECK=false` to stop the call for the whole
+  deployment. Nothing else is a guarantee: `KILN_UPDATE_CHECK=false` does not
+  cover it, `BREACHED_PASSWORD_POLICY=off` is only the default for sites that
+  saved no choice, and a site's policy **Off** stops the call for that site
+  only while its saved policy can be read (an unreadable one is treated as
+  **Warn**). The call is never made at sign-in.
+
+  Two decision records now argue the defaults:
+  [ADR 0031](../decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
+  (why the breached-password check is on by default and accepts the password
+  when the lookup fails, #2409) and
+  [ADR 0032](../decisions/0032-a-default-on-check-that-tells-a-third-party-about-the-installation-follows-the-update-check-switch.md)
+  (the terms on which the plugin health check tells hex.pm which plugins a
+  server runs, #2568). Documentation only: no code, migration or config
+  change.
+
+<a id="password-policy-off-description"></a>
+
+- **Password policy: the description of Off no longer says passwords are "not looked up at all".**
+  It said so while the server-wide check was still on, and that was only
+  ever true of one site, and only while its saved policy can be read (an
+  unreadable one is treated as **Warn** and the lookup is made). The page now
+  reads: "Passwords set on this site are not checked, and nothing about them
+  is sent to Have I Been Pwned. If this setting can't be read, Warn applies
+  instead; only the server's operator can stop the check for every site
+  (BREACHED_PASSWORD_CHECK=false)." This matches
+  [Breached passwords](../account-administration.md#when-the-check-does-nothing)
+  and [ADR 0031](../decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md);
+  a deployment that must make no request to Have I Been Pwned needs
+  `BREACHED_PASSWORD_CHECK=false` (#2868).
+
+  Also corrected in the docs: the table of what the staging scrub removes
+  ([staging-environments.md](../staging-environments.md)) now lists every
+  purge `KilnCMS.Staging.Scrub` makes, adding recorded 404 paths, backup
+  history, the security log, the instance security log and pending security
+  alert dispatches, and names each row's key in the scrub's summary. A test
+  now fails when the scrub reports a key the table does not name, or the
+  table names a key the scrub no longer reports (#2454).
+
+<a id="backup-docs-import-and-manual-restore"></a>
+
+- **Backup docs: the command that imports cron's backups into History now imports them, and the manual restore of a media part set extracts nothing when its checksum check fails.**
+  Two commands in [Backups](../backups.md) did not do what they said.
+  - **Importing cron's backups (#2488).** The documented
+    `bin/kiln eval "KilnCMS.Backups.Importer.run()"` named a binary the
+    release doesn't have (it is `bin/kiln_cms`), and `eval` starts no Repo,
+    so the history read failed and nothing was imported. The command is now
+
+    ```bash
+    bin/kiln_cms rpc '{:ok, r} = KilnCMS.Backups.Importer.run(); IO.inspect(r)'
+    # %{failed: 0, imported: 2, pending: 0, skipped: 0}
+    ```
+
+    run against the serving node. When the backup directory can't be listed
+    or the history can't be read, the match fails and `rpc` exits non-zero.
+    A row that couldn't be written is only counted in `failed`, and the call
+    still returns `{:ok, _}`, so read `failed` too. The importer also runs
+    on its own with the last-good marker sync, so this only matters when you
+    want cron's backups in History now. A doc test runs the documented
+    expression.
+  - **Restoring a media part set by hand (#2425).** The example checked the
+    sidecar and then extracted on the next line whatever the check said. It
+    now chains `sha256sum --strict -c … && for p in …; do tar -xzf …; done`
+    (`shasum -a 256 --strict -c` on macOS), so a failed check extracts
+    nothing, and `--strict` fails on a sidecar line it can't parse instead
+    of skipping it. Unlike `restore.sh`, the check covers only the parts the
+    sidecar lists: a stray `.partNN` the sidecar doesn't name passes and the
+    glob extracts it, so make sure the directory holds only the listed
+    parts first. The order of the parts doesn't matter (each file is in
+    exactly one part, and folders aren't archived), past `part99` too; the
+    old text's "extract in numeric order" is gone. See
+    [Restore a media set that has several parts](../backups.md#restore-a-media-set-that-has-several-parts).
+
+  Also corrected in the same pass: who writes backup history (the
+  `:backups` system actor, and a platform admin's Cancel, which records the
+  admin's email in the run's log), and the retention wording in the backup
+  schedules entry under Added. Documentation and module docs only; no behavior
+  change.
+
+<a id="gen-plugin-content-types-next-step"></a>
+
+- **`mix kiln.gen.plugin` no longer tells you to run `mix kiln.gen.content <Type> --domain …`, which fails as an unknown option; its notice now lists the steps to write a plugin's content types by hand (#2733).**
+  For plugin developers. After generating a `projects/` overlay plugin, the
+  notice and the task's module doc gave the next step for content types as
+  `mix kiln.gen.content <Type> --domain <Plugin>.Catalog`. `kiln.gen.content`
+  has no `--domain` switch (its options are `--excerpt`, `--published`,
+  `--plural`, `--from` and `--org`), so run through `mix` that command stops
+  with an unknown-option error. Even without the flag it could not have done
+  the job: `kiln.gen.content` registers every type on the core `KilnCMS.CMS`
+  domain, never on a plugin's.
+
+  No generator writes content types into a plugin's domain yet, so the notice
+  now gives the by-hand steps. For `mix kiln.gen.plugin Ratings` it reads:
+
+  ```text
+    * Content types: mix kiln.gen.content can't write them into a plugin's
+      domain yet (it registers every type on KilnCMS.CMS), so write them
+      by hand, using projects/example/catalog.ex and
+      projects/example/catalog/*.ex as the template:
+        - a Ratings.Catalog domain in projects/ratings/catalog.ex, and
+          each type in projects/ratings/catalog/ built with
+          use KilnCMS.CMS.Content, type: :<type>, domain: Ratings.Catalog
+        - uncomment domains/0 in projects/ratings/plugin.ex
+        - register Ratings.Catalog in :ash_domains and :content_domains
+          in projects/ratings/project.exs, with
+          projects/example/project.exs as the template. Its :plugins list
+          replaces the one this generator wrote to config/config.exs
+          rather than merging, so keep Ratings.Plugin in it.
+        - activate it: cp projects/ratings/project.exs config/project.exs
+          in dev; docker build --build-arg PROJECT=ratings for an image
+        - mix ash.codegen <migration_name>, then move what it wrote to
+          priv/ into projects/ratings/priv/repo/migrations/ and
+          projects/ratings/priv/resource_snapshots/repo/. Before the
+          next ash.codegen, copy them back with
+            cp -R projects/ratings/priv/. priv/
+          and remove them again after: without its snapshots, codegen
+          writes create-table migrations into the core priv/ again
+          (see projects/example/README.md)
+  ```
+
+  The registration goes in your overlay's `projects/<name>/project.exs`, not
+  in `config/project.exs`, which is git-ignored and is only where activation
+  copies it: by hand in dev, or by the image build when you pass
+  `--build-arg PROJECT=<name>`. Copy the shape of
+  `projects/example/project.exs` rather than writing one-item lists:
+  `:ash_domains` there replaces the core's list, so it has to be the core's
+  domains plus yours, and `:plugins` replaces the list `kiln.gen.plugin` wrote
+  to `config/config.exs`, so it has to name your plugin.
+
+  The Plugins section of [Extending content](../extending-content.md) now says
+  the same about migrations: `mix ash.codegen` writes them into the core's
+  `priv/`, you move them into `projects/<name>/priv/repo/migrations/` and
+  `projects/<name>/priv/resource_snapshots/repo/`, and the image build copies
+  `projects/<name>/priv/` back into `priv/` only with
+  `--build-arg PROJECT=<name>`. In a dev tree, copy them back before the next
+  `mix ash.codegen`, or it writes create-table migrations for your types into
+  the core's `priv/` again (see the
+  [example project's README](https://github.com/The-Verscienta/kiln_cms/blob/main/projects/example/README.md)).
+  `--dep` plugins are unchanged: a dependency still can't ship content types.
+
+  If you dropped `--domain` to get past the error, the type was generated on
+  `KilnCMS.CMS` in the core rather than in your plugin; move it into your
+  plugin's domain by the steps above.
+
+  For contributors: the switch-contract test
+  (`test/mix/tasks/switch_contract_test.exs`) missed this for two reasons. It
+  read only moduledocs, not the notices a task prints, and it skipped any
+  `mix` command that ran a different task. It now reads every string literal
+  in each task under `lib/mix/tasks/`, and checks each `mix <task> --flag` it
+  finds against that task's own switches, so a notice that names a sibling
+  task's flag that doesn't exist fails the gate. Commands for tasks the repo
+  doesn't define (`mix ash.codegen`, `mix test`) are skipped. One test puts the
+  old `--domain` line back into `kiln.gen.plugin` and asserts the gate fails.
 
 ## Security
 

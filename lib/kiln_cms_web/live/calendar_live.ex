@@ -73,6 +73,7 @@ defmodule KilnCMSWeb.CalendarLive do
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS.Changes.BroadcastCalendar
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.ContentEditor.NewDraft
@@ -551,6 +552,7 @@ defmodule KilnCMSWeb.CalendarLive do
 
     socket
     |> assign(:events, events)
+    |> assign(:movable, movable(socket.assigns))
     |> assign(:by_day, Enum.group_by(events, &DateTime.to_date(&1.at)))
     |> assign(:days, days(view, at))
   end
@@ -746,13 +748,48 @@ defmodule KilnCMSWeb.CalendarLive do
 
   defp reschedulable?(event), do: to_string(event.kind) in @reschedulable
 
+  # What this viewer may move, worked out once per window load rather than per
+  # chip (#2894, #2474 item 1). A content chip's date is a publish or a takedown,
+  # so it moves for someone who may publish (`NewDraft.may_schedule?/2`) and may
+  # edit that type (`NewDraft.may_author?/3`: the same `editable_types` check the
+  # update policy makes). A release go-live is admin-only (`ContentRelease`'s
+  # `:schedule` policy). Re-run on every `load_events/1`, so the next requery or
+  # navigation picks up a changed Publishing switch or role; until then the drop
+  # refusal covers the difference.
+  defp movable(%{current_user: actor, current_org: org, content_types: content_types}) do
+    types =
+      if NewDraft.may_schedule?(actor, org.id),
+        do:
+          for(
+            ct <- content_types,
+            NewDraft.may_author?(actor, org.id, ct),
+            into: MapSet.new(),
+            do: to_string(ct.type)
+          ),
+        else: MapSet.new()
+
+    %{types: types, releases?: Scoping.effective_tier(actor, org.id) == :admin}
+  end
+
+  # Whether the chip offers a drag handle and the arrow-key nudge to THIS viewer.
+  # Render-only: `data-reschedulable` is what both the Sortable hook and the
+  # keyboard path look for, so leaving it off is the whole client-side change.
+  # `reschedulable?/1` and `refuse_undraggable/1` stay actor-independent, and the
+  # drop is still refused by policy for anything offered here that has since
+  # stopped being allowed (a stale page, a switch turned off mid-session).
+  defp offer_drag?(%{kind: :release_scheduled} = event, movable),
+    do: reschedulable?(event) and movable.releases?
+
+  defp offer_drag?(event, movable),
+    do: reschedulable?(event) and to_string(event.type) in movable.types
+
   # The chip's tooltip doubles as its accessible description, so it is also
   # where the keyboard affordance is stated — a `cursor-grab` says nothing to
   # someone who is tabbing.
-  defp chip_title(event) do
+  defp chip_title(event, movable) do
     base = "#{event.title} — #{event.label} #{kind_label(event.kind)}"
 
-    if reschedulable?(event) do
+    if offer_drag?(event, movable) do
       base <> " · " <> gettext("arrow keys move it")
     else
       base
@@ -863,6 +900,7 @@ defmodule KilnCMSWeb.CalendarLive do
             at={@at}
             filters={@filters}
             can_create?={@new_types != []}
+            movable={@movable}
           />
         </div>
         <div :if={@view in ["month", "week"] and @events != []} class="md:hidden">
@@ -1036,6 +1074,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :at, :any, required: true
   attr :filters, :map, required: true
   attr :can_create?, :boolean, default: false
+  attr :movable, :map, required: true
 
   defp grid(assigns) do
     ~H"""
@@ -1097,6 +1136,7 @@ defmodule KilnCMSWeb.CalendarLive do
                 view={@view}
                 day={day}
                 filters={@filters}
+                movable={@movable}
               />
             </td>
           </tr>
@@ -1110,6 +1150,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :view, :string, required: true
   attr :day, :any, required: true
   attr :filters, :map, required: true
+  attr :movable, :map, required: true
 
   defp day_chips(assigns) do
     # Week columns are tall enough to show the day in full; month cells are not,
@@ -1134,7 +1175,7 @@ defmodule KilnCMSWeb.CalendarLive do
             up with `closest`, kept working and hid it). --%>
       <li
         :for={ev <- @shown}
-        data-reschedulable={reschedulable?(ev) && "true"}
+        data-reschedulable={offer_drag?(ev, @movable) && "true"}
         data-event-id={ev.id}
         data-event-type={ev.type}
         data-event-kind={ev.kind}
@@ -1145,9 +1186,9 @@ defmodule KilnCMSWeb.CalendarLive do
           class={[
             "block truncate rounded border px-1.5 py-0.5 text-xs hover:opacity-80",
             kind_class(ev.kind),
-            reschedulable?(ev) && "cursor-grab active:cursor-grabbing"
+            offer_drag?(ev, @movable) && "cursor-grab active:cursor-grabbing"
           ]}
-          title={chip_title(ev)}
+          title={chip_title(ev, @movable)}
         >
           <span :if={@view == "week"} class="mr-1 tabular-nums opacity-70">
             {Calendar.strftime(ev.at, "%H:%M")}

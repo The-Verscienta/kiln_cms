@@ -2,10 +2,11 @@ defmodule KilnCMSWeb.SecondFactorStepUpTest do
   @moduledoc """
   Who stops at the second-factor prompt (#2247), through both sign-in doors.
 
-  Characterization: this release changes nothing about who is diverted. Only
-  an account with the authenticator app is; a passkey-only account's password
-  still completes its sign-in, because nothing requires a second factor of it
-  yet (owner decision 2: "once enforced").
+  On a site that requires nothing (the default org here, which no test gives
+  a policy): only an account with the authenticator app is diverted; a
+  passkey-only account's password still completes its sign-in (owner decision
+  2: "once enforced"). What a site's requirement changes is
+  `KilnCMSWeb.SecondFactorEnforcementTest`'s.
   """
   use KilnCMSWeb.ConnCase, async: true
 

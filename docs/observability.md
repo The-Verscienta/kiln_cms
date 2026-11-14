@@ -437,8 +437,10 @@ that carried a credential, on the limits an API key reaches (`api`, `gql`,
 `media_upload`, `media_transform`, `plugin_endpoint`), tagged `bucket` and
 `result`:
 
-- `unverified`: the credential was not a key this server verified in the last
-  5 minutes (forged, unknown, revoked, expired, never used here, or a JWT).
+- `unverified`: the credential was not a key this server still remembers
+  verifying (it forgets a key 2.5 to 5 minutes after the key's last
+  successful request there): forged, unknown, revoked, expired, not used here
+  recently, or a JWT.
   Nothing is recorded.
 - `debounced`: a verified key already noted for this limit in this
   15-minute window, on this server.
@@ -451,6 +453,33 @@ something presenting keys this server has not seen authenticate; `noted`
 tells you which limits real clients run into.
 
 Useful Grafana panel: `sum(rate(kiln_cms_security_api_key_trip_count[5m])) by (result, bucket)`.
+
+### Refused API credentials
+
+Two events count user tokens the API refused. Neither writes a security event
+(a client retrying in a loop must not become a write per request), and neither
+carries a token, user or address.
+
+- `[:kiln_cms, :api, :invalid_bearer]` is in `KilnCMSWeb.Telemetry.metrics/0`
+  (#2635). With the [Prometheus exporter](#prometheus-and-grafana) on, it is
+  `kiln_cms_api_invalid_bearer_count`, labeled `enforced`, `surface`, `read`
+  (the event's `read?`: a `?` is not valid in a Prometheus label name) and
+  `reason`. This is the count that gates removing
+  `KILN_API_REJECT_INVALID_BEARER`
+  ([ADR 0017](decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md));
+  the query is under [Useful panels](#useful-panels).
+- `[:kiln_cms, :api, :second_factor_required]` is not in the metrics list:
+  attach a `:telemetry` handler to count it.
+
+| Event | Emitted when | Measurements | Metadata |
+|-------|--------------|--------------|----------|
+| `[:kiln_cms, :api, :invalid_bearer]` | A `Bearer` token that does not verify reached `/api/*` or `/gql`, or a `token` connect param that does not verify reached `/ws/gql` (#2161, #2634). Emitted whether or not it is refused (`KILN_API_REJECT_INVALID_BEARER`) | `count` (always `1`) | `enforced` (refused or not), `surface` (`:json_api`, `:graphql`, `:media`, `:other`; `/ws/gql` is `:graphql`), `read?`, `reason` (`:expired`, `:malformed`, `:invalid`) |
+| `[:kiln_cms, :api, :second_factor_required]` | A verified user JWT on `/api/*`, `/gql` or `/api/feed` was refused `403` because the site requires a second factor of its account and the deadline has passed (#2247). Not emitted for `/ws/gql` or `/ws/collab` refusals | `count` (always `1`) | `surface` (`:json_api`, `:graphql`, `:feed`, `:other`) |
+
+A steady `second_factor_required` rate after a site turns on a requirement is
+a script or app signing in as a person who has not set up a second factor:
+move it to an API key. The sign-ins themselves are in the security log as
+`second_factor_required` ([Security log](security-events.md#what-is-recorded)).
 
 ## Where the metrics go
 
@@ -544,13 +573,16 @@ Every label is bounded:
 - **`route`** is the router pattern (`/api/content/:type/:slug`), never the
   request path.
 - **`queue` and `worker`** are Oban's.
-- **`result`, `status`, `surface`, `mode`, `action`, `event` and `class`** are small
-  enumerations.
+- **`result`, `status`, `surface`, `mode`, `action`, `event`, `class` and
+  `reason`** are small enumerations.
+- **`enforced` and `read`** are booleans, exported as `"true"` or `"false"`.
 - **The content-type label (`type`, `kind`)** keeps a compiled type's name but
   folds every admin-defined type into `dynamic`. Admin-defined types are
   per-org, so on a multi-tenant host they have no ceiling.
 
-`test/kiln_cms_web/metrics_test.exs` rejects an unbounded tag.
+`test/kiln_cms_web/metrics_test.exs` rejects an unbounded tag, and a tag that
+is not a valid Prometheus label name: the exporter writes a tag's name into the
+scrape as is, and one invalid name makes Prometheus reject the whole scrape.
 
 ### Useful panels
 
@@ -566,6 +598,20 @@ Every label is bounded:
 - **Pool pressure:** p95 of `kiln_cms_repo_query_queue_time`. When it rises,
   `POOL_SIZE` is too small (see "Oban queues & pool sizing" in [`performance.md`](performance.md)).
 - **Oban failures:** `sum by (queue, worker) (rate(oban_job_exception_count[5m]))`.
+- **Stale bearer tokens, the `KILN_API_REJECT_INVALID_BEARER` removal gate:**
+  `max_over_time(kiln_cms_api_invalid_bearer_count{enforced="false",read="true"}[<release window>]) > 0`
+  (any result means stale tokens still reached public reads; no result means none
+  did), with
+  `sum by (enforced, read, reason, surface) (max_over_time(kiln_cms_api_invalid_bearer_count[<release window>]))`
+  for sizing. Gate on whether a series exists, not on `increase()`: a series is
+  created by its first event and the first scrape already reads `1`, so
+  `increase()` misses the first event of every label set after each restart.
+  `enforced="true"` counts the `401`s (and `/ws/gql` refusals) actually served.
+  `enforced="false"` comes only from an instance that set the variable to
+  `false`, so it is zero by construction everywhere else. The counter lives in
+  the node's memory and starts again from zero on every deploy or restart.
+  Whatever was counted after the last scrape before a restart is lost, and nothing is counted at all unless
+  `KILN_METRICS_ENABLED` is on.
 
 The same definitions feed LiveDashboard in development, so adding a metric needs
 no change to the exporter.

@@ -3,7 +3,13 @@
 - **Status** — accepted (2026-11-07). Refines the "#2161 commitment" in
   [ADR 0012](0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md).
   The default has already flipped (it ships on); this records why that is a
-  minor and what was added so operators can see it coming.
+  minor and what was added so operators can see it coming. Amended 2026-11-10
+  by [#2318](https://github.com/The-Verscienta/kiln_cms/issues/2318) (the
+  escape hatch's removal is gated on the count), 2026-11-13 by
+  [#2634](https://github.com/The-Verscienta/kiln_cms/issues/2634) (the GraphQL
+  socket refuses too) and 2026-11-13 by
+  [#2635](https://github.com/The-Verscienta/kiln_cms/issues/2635) (the count is
+  exported); see the "Amendment" sections.
 - **References** — [#2161](https://github.com/The-Verscienta/kiln_cms/issues/2161),
   [#2273](https://github.com/The-Verscienta/kiln_cms/issues/2273).
 - **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md).
@@ -112,3 +118,68 @@ This changes the "removed in the next release" wording in the release note
 above and in ADR 0012's table: removal is *planned* for the next release and
 happens only when the count is zero.
 
+## Amendment (2026-11-13): the GraphQL socket refuses too, and MCP is key-only
+
+[#2634](https://github.com/The-Verscienta/kiln_cms/issues/2634). The decision
+above covered only the pipelines that run `KilnCMSWeb.Plugs.ApiKeyAuth`
+(`/api/*`, `/gql`). Two surfaces sit outside it, and each was checked:
+
+- **`/ws/gql` now refuses a connect whose bearer does not verify.** The socket
+  takes a JWT as its `token` connect param (or `Authorization: "Bearer …"`),
+  and one that failed verification (expired, revoked, garbled) used to connect
+  as anonymous: the same silent downgrade this record removed over HTTP. So
+  did a `kiln_` API key, which the socket has never verified. `connect/3`
+  now answers `:error` for all of them, and Phoenix answers the handshake
+  `403`. No token still connects anonymously. It follows the HTTP rule in
+  every respect: the same `KILN_API_REJECT_INVALID_BEARER=false` escape hatch
+  restores the anonymous connect, and every such connect emits
+  `[:kiln_cms, :api, :invalid_bearer]` (`surface: :graphql`, `read?: true`),
+  so the count that gates the hatch's removal includes it.
+- **`/mcp` needs no change.** It accepts API keys only
+  (`AshAuthentication.Strategy.ApiKey.Plug`, `required?: true`), so a JWT, a
+  stale or expired one, or garbage is a `401` already, and is now pinned by a
+  test. It never had an anonymous fallback to remove.
+
+Consistency won over leaving the socket lenient, for the reason the record
+gives: a client with a broken credential should learn it rather than read
+public content as if signed in. It goes under **Breaking** in the release
+note, as the HTTP flip did, because a client that connected with a stale
+token, or that passed an API key to the socket, used to get published content
+and now gets no socket:
+
+> **Breaking: `/ws/gql` refuses a token that does not verify.** A GraphQL
+> websocket connect whose `token` param is an expired, revoked or malformed
+> JWT, or a `kiln_` API key (which this socket never accepted), used to
+> connect as anonymous. It is now refused (`403` at the handshake). Connect
+> with no token to read as the public, or sign in again; use `POST /gql` with
+> an API key. `KILN_API_REJECT_INVALID_BEARER=false` restores the old
+> behavior for now.
+
+`/ws/bridge` was outside #2634 and is unchanged: it takes no JWT, refuses a
+bad `preview_token`, and still connects an `api_key` that does not verify as
+anonymous (published-only), as its moduledoc says.
+
+## Amendment (2026-11-13): the count is exported (#2635)
+
+[#2635](https://github.com/The-Verscienta/kiln_cms/issues/2635). This
+supersedes the 2026-11-10 amendment's "Core attaches no handler or metric to
+the event": `KilnCMSWeb.Telemetry.metrics/0` now counts it, so the reporting
+sites need no handler of their own.
+
+- **Metric.** `kiln_cms_api_invalid_bearer_count` in the Prometheus exporter,
+  labeled `enforced`, `surface`, `read` and `reason`. `read` is the event's
+  `read?`, renamed because a `?` is not valid in a Prometheus label name; the
+  event itself is unchanged. No token, user or address is a label.
+- **Query.** The signal the removal is gated on is whether any
+  `enforced="false", read="true"` series exists in the release window:
+  `max_over_time(kiln_cms_api_invalid_bearer_count{enforced="false",read="true"}[<release window>]) > 0`,
+  with `enforced="true"` beside it, as above. Not `increase()`: a series is
+  created by its first event and first scraped at `1`, so `increase()` misses
+  the first event of every label set after a restart.
+- **Limits.** The count exists only where the exporter is on
+  (`KILN_METRICS_ENABLED`), which is off by default, so each reporting site
+  turns it on and scrapes it. The counter is in memory and starts again from
+  zero when the node restarts, so a deploy inside the window drops whatever
+  was counted after its last scrape.
+
+See [observability.md](../observability.md#refused-api-credentials).
