@@ -162,6 +162,8 @@ defmodule KilnCMS.Accounts.Registrations do
   @spec approved_applicant(Accounts.OrgMembership.t()) :: Accounts.User.t() | nil
   def approved_applicant(%{user_id: user_id}) do
     case Accounts.list_users!(
+           # authorize?: false — one applicant of a registration an authorized
+           # approval just decided; `User` reads are self-only (see `applicants/1`)
            authorize?: false,
            query: [
              filter: [id: user_id],
