@@ -185,7 +185,9 @@ benchmark for how finished that product feels.
 - **Adobe AEM / Sitecore / Optimizely** — the enterprise DXP ceiling
   (personalization, experimentation, DAM) — where the market's high end sits.
   Kiln ships cookie-free [content experiments](content-experiments-plan.md) and
-  [funnels](advanced-analytics-plan.md), a small slice of that ceiling.
+  [funnels](advanced-analytics-plan.md), a small slice of that ceiling. Kiln
+  does not compete for that ceiling; see
+  [Kiln in a composable DXP](#kiln-in-a-composable-dxp).
 
 ## The core differentiator: the typed, declarative firing model
 
@@ -234,6 +236,66 @@ for Kiln but expensive for others.
 - **BEAM concurrency + fault tolerance** — native real-time (PubSub, presence,
   subscriptions) with no external broker, and supervision that isolates failures
   — the foundation under the reliability and collaboration differentiators.
+
+## Kiln in a composable DXP
+
+*Added 2026-11-12.* A digital experience platform (DXP) joins content with
+customer context: profiles, segments, personalization, journeys, marketing
+automation, analytics. Kiln does not claim to be one, and the plan is not to
+become one by building those layers itself. Identity resolution, journey
+orchestration and marketing automation are whole product categories with
+their own specialists, and several CMSs that rebranded as suites ended up
+bloated. Kiln's comparative advantage is the **content plane**.
+
+**The label.** Use "provable content plane" or "content foundation": *KilnCMS
+is the content core a digital experience platform can be built on.* Do not use
+"DXP" or "DXP-ready". A buyer who searches for a DXP expects a customer
+profile and personalization out of the box, and the comparison then runs on
+exactly the features [path-forward.md](path-forward.md#frozen-and-deprecated)
+froze.
+
+**What Kiln supplies to the rest of the stack**
+
+| Kiln provides | So the other tools can |
+|---|---|
+| The [change feed](api.md#change-feed-sse) with `/api/sync` cursors, and signed [webhooks](webhooks.md) that list the affected pages | Re-index, re-segment or re-send when content changes, without polling |
+| A guarantee that retractions get through, plus [propagation records](right-everywhere-provably.md) | Trust that a withdrawn offer, claim or notice is withdrawn in every channel |
+| [Provenance](provenance.md) manifests and `?as_of=` [point-in-time](point-in-time.md) reads | Show what a customer was sent or shown, and prove it |
+| JSON:API, GraphQL and `/api/content` for every type, plus the [draft-write API key scope](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md) | Read content, and let a personalization or messaging service write drafts back for review |
+| The [overlay model](overlay-contract.md) | Ship an integration as project code against a stated contract, not as a fork |
+
+**What Kiln leaves to specialists**: customer profiles and identity
+resolution (CDPs), journey orchestration and marketing automation, and
+cross-channel attribution. The integration surface is the product here: the
+feed, webhooks and APIs above should make wiring Kiln into one of those tools
+easy, and documented connectors are where any DXP work starts.
+
+**What Kiln may add later, inside the content plane.** A small audience or
+segment API, content variants keyed to it, and a deterministic fallback when no
+segment matches. That is enough for useful personalization, and it builds on
+the [content experiments](content-experiments-plan.md) and
+[referrer analytics](advanced-analytics-plan.md) that already ship (off by
+default). The segment comes from the caller or an external CDP, never from
+Kiln tracking visitors, so the no-tracking story stays intact. None of this is
+scheduled; experiments and analytics are frozen until the 2.0 gate passes.
+
+**Who it suits.** The same readers as the wedge: regulated or high-stakes
+content (health, finance, government, legal, safety-critical documentation);
+multi-channel or multi-property setups where "we published the correction but
+the app still shows the old version" is a real problem; and teams that want
+to own their stack with a small operational footprint.
+
+**Naming.** If Kiln ever ships an experience layer, it gets its own product
+or suite name ("Kiln Platform", for example), with KilnCMS as its content
+core. The kiln metaphor (content fired into a durable, correct, permanent
+state) fits a content core and does not stretch to a marketing suite.
+
+The name is already crowded. Kiln's site is **kilncms.dev**; **kilncms.com**
+is not Kiln's. As of 2026-11-12 it belongs to an unrelated product, also
+called Kiln: a git-based, click-to-edit CMS that publishes static HTML
+through the site owner's GitHub repository (AGPL-3.0, with a paid hosted
+tier). Always write "KilnCMS" in full on its own, link kilncms.dev, and
+check any new suite name against that product first.
 
 ## Positioning summary
 

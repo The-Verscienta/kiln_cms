@@ -1,6 +1,13 @@
 # KilnCMS: A World-Class CMS on the Elixir/Ash Ecosystem
 
-**Project Goal:** Build a modern, high-performance, developer- and editor-friendly Content Management System (headless + traditional) that rivals or exceeds Strapi, Sanity, and even parts of enterprise DXPs like Sitecore/AEM — but built natively on **Phoenix + Ash + LiveView + Tailwind + Elixir**. Client-side interactivity is LiveView + colocated JS hooks throughout; neither Surface nor Alpine.js is used.
+**Project Goal:** Build a modern, high-performance, developer- and editor-friendly Content Management System (headless + traditional) that rivals or exceeds Strapi and Sanity — but built natively on **Phoenix + Ash + LiveView + Tailwind + Elixir**. Client-side interactivity is LiveView + colocated JS hooks throughout; neither Surface nor Alpine.js is used.
+
+> *Amended 2026-11-12.* The original goal also named "parts of enterprise
+> DXPs like Sitecore/AEM". Kiln no longer aims at DXP parity. It is the
+> content core a digital experience platform can be built on, and it works
+> alongside customer-data, messaging and analytics tools rather than
+> replacing them. See [path-forward.md](docs/path-forward.md#toward-a-dxp-composable-not-owned)
+> and [Kiln in a composable DXP](docs/cms-comparison.md#kiln-in-a-composable-dxp).
 
 **Why this exists:** Strapi is flexible but Node.js-based and limited in real-time/typing/performance. Beacon is great but lighter on modeling. Sitecore/AEM are bloated and expensive. KilnCMS leverages Ash's declarative power for the best content models, LiveView for instant real-time editing/preview, PostgreSQL + Ecto (via Ash) for reliability, and a deliberately minimal ops footprint — **native BEAM `Phoenix.PubSub`** for real-time, **Oban** (Postgres) for jobs, and in-process caching/rate-limiting — with **DragonflyDB** available as an *optional* multi-node shared cache rather than a hard dependency (see **Architectural Decisions** below).
 
