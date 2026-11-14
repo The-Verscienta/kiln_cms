@@ -32,7 +32,7 @@ Site alerts (each one can be turned off on the site's
 | `role_elevation` | Role raised | A member's role is raised below admin (viewer to editor), or a member is given a temporary role below admin | Yes |
 | `failed_sign_ins` | Failed sign-ins | The site reaches **10 failed sign-ins in one 15-minute window** (see [Failed sign-ins](#failed-sign-ins-are-counted-per-site)) | **No** |
 | `lockout` | Account locked out | A sign-in throttle locks an account or an address out: too many wrong passwords or second-factor codes | Yes |
-| `two_factor_disabled` | Two-factor authentication turned off | Someone removes the second factor from their account | Yes |
+| `two_factor_disabled` | Second factor removed | A second factor is removed from an account: the authenticator app turned off, or a passkey removed, by the owner or a platform admin | Yes |
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a single sign-on domain is saved, verified or removed | Yes |
 | `blocked_ip` | Blocked addresses | A request or socket connect from an address on the site's [block list](ip-blocking.md) is refused (see [Blocked addresses](#blocked-addresses-raise-one-alert-per-window)) | Yes |
 
@@ -53,8 +53,9 @@ Platform alerts:
 - **An invitee taking over an unconfirmed account.** Accepting an invitation
   over an account someone registered but never confirmed removes that first
   registrant's second factor (#2453). It is recorded in the security log as
-  `second_factor_removed` with `via` `invitation`, but it is not the owner
-  turning their protection off, so it raises no `two_factor_disabled`.
+  `second_factor_removed` (and `passkey_removed`) with `via` `invitation`, but
+  it is not the owner turning their protection off, so it raises no
+  `two_factor_disabled`.
 - **A legacy account keeping its tier.** When an account from before
   multi-site memberships gets its first membership, its standing role is
   copied onto it (`via` `legacy_carry`). It gains nothing, so it is not a new

@@ -20,10 +20,13 @@ prompt there.
 
 Turning a second factor on or off is recorded in the site's
 [security log](security-events.md) (`second_factor_enrolled`,
-`second_factor_removed`), and removing one alerts the site's admins by bell and
-email unless they turned off "Two-factor authentication turned off"
-([Security alerts](security-alerts.md#what-raises-an-alert)). A factor removed
-because an invitee took the account over is logged but raises no alert.
+`second_factor_removed`, `passkey_removed`). Removing one, whether the
+authenticator app is turned off or a passkey is removed, alerts the site's
+admins by bell and email unless they turned off "Second factor removed"
+([Security alerts](security-alerts.md#what-raises-an-alert)), and emails the
+account's owner ([We email you when a second factor is removed](#we-email-you-when-a-second-factor-is-removed)).
+A factor removed because an invitee took the account over is logged but raises
+no alert and sends no email.
 
 ## How it works
 
@@ -341,6 +344,41 @@ user (id) not sent" and does not undo the new factor.
 
 Because every passkey added sends an email, an account can hold at most 20
 passkeys and add at most 5 an hour (see [Limits on adding passkeys](passkeys.md#limits-on-adding-passkeys)).
+
+## We email you when a second factor is removed
+
+The owner is also emailed whenever a second factor is removed from their
+account:
+
+- the authenticator app is turned off;
+- a passkey is removed, on `/editor/settings` or `/account/two-factor`, by the
+  owner or by a platform admin.
+
+Why: removing a passkey needs only a signed-in session. Someone with a stolen
+or unattended session could remove your passkeys, keep one of their own, and
+leave you fewer ways back in. The site's admins get a `two_factor_disabled`
+alert for the same removal.
+
+The email is titled "A second factor was removed from your (name) account".
+It says what was removed ("The authenticator app was turned off… Its codes
+and recovery codes no longer work." or "A passkey was removed… It can no
+longer be used to sign in."), with the same **When**, **Browser** and **Site**
+lines as the email for a factor added, and never the passkey's name.
+
+- **When you removed it yourself**, there is nothing to do. If it wasn't you,
+  the email gives the same two steps: reset your password, then ask an
+  administrator of your site to check your account's sign-in methods.
+- **When a platform admin removed it**, the email says "It was removed by an
+  administrator," followed by that admin's email address, and suggests asking
+  an administrator of your site why.
+
+No email is sent when the removal is refused (the last factor a site
+requires, the shared demo account, another person's passkey, a wrong code),
+when an account is erased, or when an invitee takes over an unconfirmed
+account. Like the email for a factor added, it goes through the instance mail
+relay in English, is queued only after the removal is saved, and a mail that
+cannot be queued is logged as "Second-factor removal notice for user (id) not
+sent" without undoing the removal.
 
 ## "Remember me" and the second factor
 

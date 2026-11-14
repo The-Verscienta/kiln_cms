@@ -87,6 +87,10 @@ The row disappears and the page says "Passkey removed." On
 `/account/two-factor`, the count above the list goes down, and at the limit
 the add form comes back (see [Limits on adding passkeys](#limits-on-adding-passkeys)).
 
+The account's owner is emailed that a passkey was removed, and the site's
+admins get a "Second factor removed" security alert (see
+[We email you when a second factor is removed](two-factor-auth.md#we-email-you-when-a-second-factor-is-removed)).
+
 The list and the trash buttons are on `/account/two-factor` on every host
 that serves the page, since removing a passkey needs no ceremony. On a host
 where a passkey can't be registered (a console host where the ceremony can't

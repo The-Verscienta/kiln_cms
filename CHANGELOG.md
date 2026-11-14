@@ -318,6 +318,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Passkeys and the authenticator app are managed only on the main host and console hosts; `/editor/settings` on a site's own address links there instead, and passkey registration is pinned to the host that served it.**
   ([long form](docs/changelog/unreleased.md#second-factors-managed-on-setup-hosts))
 
+- **Removing a passkey emails the account's owner and raises a `two_factor_disabled` alert, like turning off the authenticator app; turning the app off now emails the owner too.**
+  ([long form](docs/changelog/unreleased.md#second-factor-removed-notice))
+
 ## [1.9.2] - 2026-11-12
 
 Long form: [docs/changelog/v1.9.2.md](docs/changelog/v1.9.2.md) —

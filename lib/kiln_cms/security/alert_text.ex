@@ -97,7 +97,7 @@ defmodule KilnCMS.Security.AlertText do
   def kind_label("role_elevation"), do: gettext("A role was raised")
   def kind_label("failed_sign_ins"), do: gettext("Failed sign-ins reached the alert threshold")
   def kind_label("lockout"), do: gettext("An account was locked out")
-  def kind_label("two_factor_disabled"), do: gettext("Two-step verification was turned off")
+  def kind_label("two_factor_disabled"), do: gettext("A second factor was removed")
   def kind_label("sso_config_changed"), do: gettext("Single sign-on settings changed")
   def kind_label("platform_role_changed"), do: gettext("A platform administrator lost the role")
   def kind_label("new_api_key"), do: gettext("An API key was created")

@@ -320,10 +320,12 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     # (or the staging scrub). The person being erased owns these rows, so no
     # admin actor would be admitted to them, and the filter pins every row to
     # this user's id.
+    # No "a passkey was removed" mail: the address is no longer the owner's.
     KilnCMS.Accounts.Passkey
     |> Ash.Query.filter(user_id == ^user.id)
     |> Ash.bulk_destroy!(:destroy, %{},
       authorize?: false,
+      context: KilnCMS.Accounts.Changes.NotifyFactorRemoved.skip_context(),
       strategy: [:atomic, :atomic_batches, :stream],
       return_records?: false,
       return_errors?: true

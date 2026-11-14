@@ -2659,3 +2659,29 @@ carries the reasoning.
   host's `/account/two-factor`, but turning the app off and regenerating
   recovery codes need `/editor/settings` on a console host. See
   [Where second factors are managed](../two-factor-auth.md#where-second-factors-are-managed).
+
+<a id="second-factor-removed-notice"></a>
+
+- **Removing a passkey now emails the account's owner and raises a `two_factor_disabled` alert, as turning off the authenticator app does; turning the app off emails the owner too.**
+  Before, only turning off the authenticator app raised the site's
+  `two_factor_disabled` alert, and the owner was emailed only when a factor
+  was added. A passkey removed (by its owner, or by a platform admin) was
+  recorded in the security log as `passkey_removed` and nothing else.
+  Removing a passkey needs only a signed-in session, so the owner had no way
+  to learn that one of their ways back in was gone.
+
+  Now any second factor removed sends the owner an email, "A second factor
+  was removed from your (name) account", after the removal is saved. It says
+  what was removed, when, and from which browser and site. When a platform
+  admin removed it, it names that admin's email address. A refused removal,
+  an erased account and an invitee's takeover of an unconfirmed account send
+  nothing. `passkey_removed` now raises `two_factor_disabled` like
+  `second_factor_removed` (not with `via` `invitation`). The alert's label
+  reads "A second factor was removed" in the bell and email, and "Second
+  factor removed" on the Security alerts page, since it now covers passkeys.
+  See [We email you when a second factor is removed](../two-factor-auth.md#we-email-you-when-a-second-factor-is-removed).
+
+  Developers: `KilnCMS.Accounts.SecondFactorNotice.factor_removed/4` and
+  `KilnCMS.Accounts.Changes.NotifyFactorRemoved` are new; a site summary of
+  `two_factor_disabled` now also counts `passkey_removed` events
+  (`KilnCMS.Security.Alerts.event_types/1`).

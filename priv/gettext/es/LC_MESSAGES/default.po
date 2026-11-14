@@ -2115,6 +2115,11 @@ msgstr "Un cuadro de búsqueda que encuentra el registro por su título."
 msgid "A second factor keeps your account safe even if someone learns your password."
 msgstr "Un segundo factor protege tu cuenta aunque alguien conozca tu contraseña."
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A second factor was removed"
+msgstr "Se eliminó un segundo factor"
+
 #: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #, elixir-autogen, elixir-format
 msgid "A security notice covers Kiln %{version}."
@@ -19180,6 +19185,7 @@ msgstr "Buscando…"
 msgid "Second factor added"
 msgstr "Segundo factor añadido"
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Second factor removed"
@@ -24439,11 +24445,6 @@ msgstr "La autenticación de doble factor está ahora activada."
 msgid "Two-factor authentication is on."
 msgstr "La autenticación de doble factor está activada."
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
-#, elixir-autogen, elixir-format
-msgid "Two-factor authentication turned off"
-msgstr "Autenticación en dos pasos desactivada"
-
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
@@ -24501,11 +24502,6 @@ msgstr "Cambió el requisito de inicio de sesión en dos pasos"
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in settings saved."
 msgstr "Ajustes del inicio de sesión en dos pasos guardados."
-
-#: lib/kiln_cms/security/alert_text.ex
-#, elixir-autogen, elixir-format
-msgid "Two-step verification was turned off"
-msgstr "Se desactivó la verificación en dos pasos"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/calendar_live.ex

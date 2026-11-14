@@ -71,6 +71,11 @@ defmodule KilnCMS.Accounts.Passkey do
               type: :passkey_removed,
               target: fn record, _changeset -> {"user", record.user_id} end,
               metadata: fn record, _changeset -> %{"name" => record.name} end}
+
+      # Tell the owner, after the commit; it names the admin when one removed
+      # it. The `passkey_removed` event above raises a `two_factor_disabled`
+      # alert (`KilnCMS.Security.Alerts`).
+      change {KilnCMS.Accounts.Changes.NotifyFactorRemoved, kind: :passkey}
     end
 
     # Accepting a site invitation over an unconfirmed account (#2453): a

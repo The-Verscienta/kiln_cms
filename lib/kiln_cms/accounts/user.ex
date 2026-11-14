@@ -1411,6 +1411,9 @@ defmodule KilnCMS.Accounts.User do
               type: :second_factor_removed,
               target: fn record, _changeset -> {"user", record.id} end,
               metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
+
+      # Tell the owner, after the commit.
+      change {KilnCMS.Accounts.Changes.NotifyFactorRemoved, kind: :totp}
     end
   end
 
