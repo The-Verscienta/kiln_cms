@@ -529,12 +529,23 @@ change.
 - Someone **new to the site** (added now, or whose account is new) gets the
   grace period, and the sentence says so: "…they have until (date) to set it
   up, and will be asked to before anything else after that."
+- **On the Accounts page** (`/editor/accounts`, platform admins only), saving
+  a new **Platform role** or granting a **Temporary role** warns after "Access
+  updated." (or the temporary role's confirmation). A platform administrator
+  is an administrator on every site, so the warning covers every site whose
+  requirement would hold them, for example: "sam@example.com has no second
+  factor, and a platform administrator is an administrator on every site.
+  Main requires one of them now: they'll be asked to set one up before
+  anything else. Docs and Shop require one of them, with a grace period: the
+  earliest ends 2026-12-01 09:00 UTC." Up to three sites are named; more are
+  counted ("5 sites require…"). The grace is counted from when the account
+  was created or the site began requiring administrators, whichever is
+  later, so a long-standing account is usually held at once.
 
 There is no warning when the person already has an authenticator app or a
 passkey, when the role is not covered, when the role is the one they already
-hold, or for a platform administrator (they are an administrator on every
-site whatever their membership says). Changing a platform administrator's own
-role on **Accounts** gives no warning either.
+hold, or, on the Team page, for a platform administrator (they are an
+administrator on every site whatever their membership says).
 
 ### What people see during the grace period
 

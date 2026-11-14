@@ -15,9 +15,17 @@ defmodule KilnCMSWeb.PromotionWarning do
   `nil` when there is nothing to say: the tier is not covered, the person
   holds a factor, or they are a platform administrator (a membership here does
   not change what they are on this site).
+
+  `platform_message/3` is the Accounts page's version, for a change to an
+  account's platform role (standing or temporary): a platform administrator
+  is an administrator on every site, so it names the sites that would hold
+  them at once and those that give a grace period, with the earliest deadline
+  (`TwoFactorRequirement.platform_promotion_warning/3`).
   """
   use Gettext, backend: KilnCMSWeb.Gettext
 
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.RoleGrant
   alias KilnCMS.Accounts.TwoFactorRequirement
 
   @tiers [:admin, :editor, :viewer]
@@ -43,6 +51,89 @@ defmodule KilnCMSWeb.PromotionWarning do
   end
 
   def message(_user, _org_id, _tier, _opts), do: nil
+
+  @doc """
+  The warning for a change to `before`'s platform role that leaves it as
+  `changed` (the saved record), or `nil`. Names up to three sites, and counts
+  them beyond that. Options are
+  `TwoFactorRequirement.platform_promotion_warning/3`'s (`:now`, `:policies`).
+  """
+  @spec platform_message(Accounts.User.t(), Accounts.User.t(), keyword()) :: String.t() | nil
+  def platform_message(before, changed, opts \\ []) do
+    case TwoFactorRequirement.platform_promotion_warning(before, changed, opts) do
+      nil -> nil
+      warning -> platform_text(warning, changed)
+    end
+  end
+
+  defp platform_text(%{enforced_now: now, grace: grace}, user) do
+    names = site_names(Enum.map(now ++ grace, &elem(&1, 0)))
+
+    [platform_lead(user), held_now(now, names), held_later(grace, names)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" ")
+  end
+
+  defp platform_lead(user) do
+    if RoleGrant.effective_role(user) == :admin do
+      gettext(
+        "%{name} has no second factor, and a platform administrator is an administrator on every site.",
+        name: to_string(user.email)
+      )
+    else
+      gettext("%{name} has no second factor.", name: to_string(user.email))
+    end
+  end
+
+  defp held_now([], _names), do: nil
+
+  defp held_now(sites, names) do
+    ngettext(
+      "%{sites} requires one of them now: they'll be asked to set one up before anything else.",
+      "%{sites} require one of them now: they'll be asked to set one up before anything else.",
+      length(sites),
+      sites: describe_sites(sites, names)
+    )
+  end
+
+  defp held_later([], _names), do: nil
+
+  defp held_later([{_org_id, earliest} | _] = sites, names) do
+    ngettext(
+      "%{sites} requires one of them, and gives them until %{date} to set it up.",
+      "%{sites} require one of them, with a grace period: the earliest ends %{date}.",
+      length(sites),
+      sites: describe_sites(sites, names),
+      date: on_date(earliest)
+    )
+  end
+
+  # Up to three sites by name; more, or a site whose name could not be read,
+  # by count.
+  defp describe_sites(sites, names) do
+    labels = Enum.map(sites, fn {org_id, _at} -> Map.get(names, org_id) end)
+
+    if length(labels) <= 3 and Enum.all?(labels, &is_binary/1),
+      do: join_names(labels),
+      else: ngettext("%{count} site", "%{count} sites", length(labels))
+  end
+
+  defp join_names([only]), do: only
+
+  defp join_names(names) do
+    {init, [last]} = Enum.split(names, -1)
+    gettext("%{list} and %{last}", list: Enum.join(init, ", "), last: last)
+  end
+
+  defp site_names(org_ids) do
+    case Accounts.list_organizations(
+           actor: Accounts.system(),
+           query: [filter: [id: [in: org_ids]], select: [:id, :name]]
+         ) do
+      {:ok, orgs} -> Map.new(orgs, &{&1.id, &1.name})
+      {:error, _error} -> %{}
+    end
+  end
 
   @doc """
   `message` appended to `confirmation` (the save's own flash), or the

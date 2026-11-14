@@ -339,6 +339,95 @@ defmodule KilnCMS.Accounts.TwoFactorRequirementTest do
     end
   end
 
+  describe "platform_promotion_warning/3" do
+    # Every site but the ones a test names is read from the (cached) policy,
+    # which no test sets on a site it does not own: off.
+    defp policies(pairs), do: Map.new(pairs, fn {site, policy} -> {site.id, policy} end)
+
+    test "a platform admin is held on every site that covers admins, by that site's grace",
+         %{site: site} do
+      other = org("tfr-other")
+      long_standing = user()
+
+      opts = [
+        policies: policies([{site, policy(:admins)}, {other, policy(:admins, 60)}]),
+        now: at(30)
+      ]
+
+      assert TwoFactorRequirement.platform_promotion_warning(
+               long_standing,
+               %{long_standing | role: :admin},
+               opts
+             ) == %{enforced_now: [{site.id, at(14)}], grace: [{other.id, at(60)}]}
+    end
+
+    test "a promotion does not restart the grace: the account's age, not the change, counts",
+         %{site: site} do
+      newcomer = user(%{inserted_at: at(20)})
+      opts = [policies: policies([{site, policy(:admins)}]), now: at(30)]
+
+      assert TwoFactorRequirement.platform_promotion_warning(
+               newcomer,
+               %{newcomer | role: :admin},
+               opts
+             ) == %{enforced_now: [], grace: [{site.id, at(34)}]}
+    end
+
+    test "a temporary platform admin is warned of too", %{site: site} do
+      account = user()
+      opts = [policies: policies([{site, policy(:admins)}]), now: at(30)]
+      until = DateTime.add(DateTime.utc_now(), 3600, :second)
+      granted = %{account | granted_role: :admin, granted_role_expires_at: until}
+
+      assert %{enforced_now: [{site_id, _deadline}]} =
+               TwoFactorRequirement.platform_promotion_warning(account, granted, opts)
+
+      assert site_id == site.id
+    end
+
+    test "a site whose membership gave a later grace is listed: the platform tier has none",
+         %{site: site} do
+      recent_admin = member!(user(), site, :admin, %{inserted_at: at(25)})
+      opts = [policies: policies([{site, policy(:admins)}]), now: at(30)]
+
+      assert TwoFactorRequirement.status(recent_admin, site.id,
+               policy: policy(:admins),
+               now: at(30)
+             ) ==
+               {:grace, at(39)}
+
+      assert TwoFactorRequirement.platform_promotion_warning(
+               recent_admin,
+               %{recent_admin | role: :admin},
+               opts
+             ) == %{enforced_now: [{site.id, at(14)}], grace: []}
+    end
+
+    test "nothing to say", %{site: site} do
+      account = member!(user(), site, :viewer)
+      admins = [policies: policies([{site, policy(:admins)}]), now: at(30)]
+      admin = %{account | role: :admin}
+
+      # A factor, a site with the requirement off, a demotion, no change at all,
+      # a site already holding them as an editor with the same deadline.
+      enrolled = site |> then(&member!(user(), &1, :viewer)) |> passkey!()
+
+      assert TwoFactorRequirement.platform_promotion_warning(
+               enrolled,
+               %{enrolled | role: :admin},
+               admins
+             ) == nil
+
+      off = [policies: policies([{site, policy(:off)}]), now: at(30)]
+      assert TwoFactorRequirement.platform_promotion_warning(account, admin, off) == nil
+      assert TwoFactorRequirement.platform_promotion_warning(admin, account, admins) == nil
+      assert TwoFactorRequirement.platform_promotion_warning(admin, admin, admins) == nil
+
+      everyone = [policies: policies([{site, policy(:everyone)}]), now: at(30)]
+      assert TwoFactorRequirement.platform_promotion_warning(account, admin, everyone) == nil
+    end
+  end
+
   describe "roster/3" do
     test "per covered tier: total, enrolled, in grace, overdue, earliest deadline", %{site: site} do
       member!(totp_user(), site, :admin)

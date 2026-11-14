@@ -45,6 +45,7 @@ defmodule KilnCMSWeb.AccountsLive do
   alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.Accounts.SiteAudiences
   alias KilnCMSWeb.Params
+  alias KilnCMSWeb.PromotionWarning
   alias KilnCMSWeb.RoleDisplay
   alias KilnCMSWeb.RoleGrantForm
 
@@ -159,8 +160,15 @@ defmodule KilnCMSWeb.AccountsLive do
            actor: actor,
            context: socket.assigns.security_context
          ) do
-      {:ok, _user} ->
-        {:noreply, reload_account(socket, gettext("Access updated."))}
+      {:ok, user} ->
+        {:noreply,
+         reload_account(
+           socket,
+           PromotionWarning.with_confirmation(
+             gettext("Access updated."),
+             PromotionWarning.platform_message(account, user)
+           )
+         )}
 
       {:error, error} ->
         {:noreply, put_flash(socket, :error, ash_error_message(error))}
@@ -213,9 +221,12 @@ defmodule KilnCMSWeb.AccountsLive do
         {:noreply,
          reload_account(
            socket,
-           gettext("%{role} until %{when}.",
-             role: role_label(user.granted_role),
-             when: format_datetime(user.granted_role_expires_at)
+           PromotionWarning.with_confirmation(
+             gettext("%{role} until %{when}.",
+               role: role_label(user.granted_role),
+               when: format_datetime(user.granted_role_expires_at)
+             ),
+             PromotionWarning.platform_message(account, user)
            )
          )}
 

@@ -381,6 +381,82 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
     end
   end
 
+  @typedoc """
+  What a platform role change means for an account, site by site: the sites
+  that hold it at once, and the ones that give it a grace period, each with
+  its deadline, earliest first.
+  """
+  @type platform_warning :: %{
+          enforced_now: [{Ash.UUID.t(), DateTime.t()}],
+          grace: [{Ash.UUID.t(), DateTime.t()}]
+        }
+
+  @doc """
+  What changing `before`'s platform role — the standing one, or a temporary
+  grant — so that it reads as `changed` would mean for them, for a warning to
+  the platform administrator doing it on the Accounts page: `nil` (they hold a
+  factor or are exempt, or no site's requirement newly covers them), or the
+  sites that would hold them and when.
+
+  A platform administrator is an administrator on every site, so every site is
+  read (its cached `policy/1`), not one. A site is listed when its policy
+  covers the account's tier there after the change and the change brings the
+  deadline forward: the tier was not covered before, or was covered with a
+  later deadline (a membership created last week gave a grace the platform
+  tier does not, since a platform tier has no membership to start from).
+
+  The deadline is `deadline/3`'s: a promotion does not restart the grace
+  (decision 6 on #2247), so for a platform tier it is the later of the
+  account's creation and the tier's `since` on that site, plus the grace.
+  Neither account is written; `changed` is the record the change returned, or
+  one with the new role set on it.
+
+  Options: `:now`, and `:policies` (a map of org id to `Policy`, read instead
+  of the cache for the sites it names).
+  """
+  @spec platform_promotion_warning(Accounts.User.t(), Accounts.User.t(), keyword()) ::
+          platform_warning() | nil
+  def platform_promotion_warning(before, changed, opts \\ []) do
+    cond do
+      exempt?(changed) -> nil
+      Accounts.has_second_factor?(changed) -> nil
+      true -> platform_sites(before, changed, opts)
+    end
+  end
+
+  defp platform_sites(before, changed, opts) do
+    now = now(opts)
+    policies = Keyword.get(opts, :policies, %{})
+
+    sites =
+      for org_id <- candidate_orgs(changed),
+          policy = Map.get_lazy(policies, org_id, fn -> policy(org_id) end),
+          policy.required_for != :off,
+          deadline = deadline(changed, Scoping.tier_source(changed, org_id), policy),
+          not is_nil(deadline),
+          brought_forward?(
+            deadline(before, Scoping.tier_source(before, org_id), policy),
+            deadline
+          ),
+          do: {org_id, timed(deadline, now)}
+
+    case sites do
+      [] ->
+        nil
+
+      sites ->
+        %{
+          enforced_now: for({org_id, {:enforced, at}} <- sites, do: {org_id, at}) |> by_date(),
+          grace: for({org_id, {:grace, at}} <- sites, do: {org_id, at}) |> by_date()
+        }
+    end
+  end
+
+  defp brought_forward?(nil, _deadline), do: true
+  defp brought_forward?(before, deadline), do: DateTime.compare(deadline, before) == :lt
+
+  defp by_date(sites), do: Enum.sort_by(sites, &elem(&1, 1), DateTime)
+
   @doc """
   The site's covered accounts, per covered tier: how many, how many hold a
   factor, how many are in their grace and how many are past it, and the
