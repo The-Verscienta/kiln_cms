@@ -1246,15 +1246,6 @@ defmodule KilnCMS.Accounts.User do
       validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret},
         only_when_valid?: true
 
-      # Replacing a live factor needs the outgoing code (or a recovery-code
-      # session) — a bare setup_totp+confirm_totp can no longer swap the secret
-      # silently out from under the owner (#786). It compares `current_code`
-      # against the LIVE secret, so it too waits on a still-valid changeset;
-      # after a wrong pending code it is skipped as well, which only shortens
-      # the error list of an attempt the budget has already charged.
-      validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement,
-        only_when_valid?: true
-
       change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
 
@@ -1264,6 +1255,17 @@ defmodule KilnCMS.Accounts.User do
       # waits for it, then finds the staged secret cleared and is refused.
       change {KilnCMS.Accounts.Changes.GuardAccountTakeover,
               user_id: :id, lock: :no_key_update, pending_secret?: true}
+
+      # Replacing a live factor needs the outgoing code (or a recovery-code
+      # session) — a bare setup_totp+confirm_totp can no longer swap the secret
+      # silently out from under the owner (#786). Whether there IS a live factor
+      # is read from the row, after the lock above, never from the struct the
+      # caller passed in: a settings tab mounted before the account enrolled
+      # elsewhere holds `totp_confirmed_at: nil` and would otherwise skip the
+      # check (GHSA-5g35-j8qr-j475). Must stay a `before_action?` validation
+      # declared below `GuardAccountTakeover`.
+      validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement,
+        before_action?: true
 
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
 
@@ -1292,6 +1294,10 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
 
       argument :code, :string, allow_nil?: false, sensitive?: true
+
+      # The code is checked against the stored secret, not the caller's
+      # possibly-stale struct (GHSA-5g35-j8qr-j475). First, above every read.
+      change KilnCMS.Accounts.Changes.ReloadTotpFactor
 
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
@@ -1354,6 +1360,11 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
 
       argument :code, :string, allow_nil?: false, sensitive?: true
+
+      # The code is checked against the stored secret, and the columns below
+      # are cleared from what is stored, not from the caller's possibly-stale
+      # struct (GHSA-5g35-j8qr-j475). First, above every read.
+      change KilnCMS.Accounts.Changes.ReloadTotpFactor
 
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
