@@ -212,6 +212,7 @@ Each check has an id, used in logs, telemetry and by plugins. A check with no
 | Check (id) | Shown in | Reads | Fix now | Review | Unknown, Not applicable | Fix |
 | --- | --- | --- | --- | --- | --- | --- |
 | Two-step sign-in for administrators and editors (`core.second_factor`) | This site | The site's administrators and editors, not counting platform administrators, and whether each has an authenticator app | An administrator has none | Only editors have none | N/A: the site has no administrators or editors of its own | **Your settings** (`/editor/settings`), by each person |
+| Two-step sign-in required (`core.second_factor_required`) | This site | The site's two-step sign-in requirement, and the people it covers: how many have a second factor, how many are still in their grace period, and how many are past it | | Someone covered is still in their grace period | Unknown: the requirement can't be read. N/A: the site doesn't require it | **Organization → Two-step sign-in** (`/editor/two-factor`) |
 | Idle sign-out (`core.idle_timeout`) | This site | The site's session policy | | Neither timeout is set | Unknown: the policy can't be read | **Sign-in & access → Sessions** (`/editor/sessions`) |
 | Admin allowlist (`core.admin_allowlist`) | This site | The site's allowlist, and `KILN_ADMIN_ALLOWLIST_DISABLED` | A list is saved, but the switch turns it off | | N/A: no list. Unknown: the list can't be read | **Sign-in & access → Admin allowlist** (`/editor/admin-allowlist`) |
 | Breached passwords (`core.breached_passwords`) | This site | The policy for administrators: the site's choice, else `BREACHED_PASSWORD_POLICY`, and `BREACHED_PASSWORD_CHECK` | Off, or `BREACHED_PASSWORD_CHECK=false` | Warn | Unknown: the site's policy can't be read | **Sign-in & access → Password policy** (`/editor/password-policy`) |
@@ -226,7 +227,7 @@ Each check has an id, used in logs, telemetry and by plugins. A check with no
 | Installed plugins (`core.plugin_health`) | This installation | The cached answer of the plugin health check: each plugin against hex.pm and the security notices feed | A plugin's package changed on Hex since this build, a high, critical or unrated security notice covers it, or Hex retired it for security | A low or medium notice, not on Hex, retired for another reason, no release on Hex for 24 months, or a `kiln_plugin` requirement this Kiln doesn't meet | Unknown: no answer yet, or Hex or the notices feed didn't answer. N/A: no plugin from Hex, git or a path, or plugin checks are off | **Operations → System** (`/editor/system`) |
 
 Every check is **OK** when none of its other conditions hold. A check that
-reads people or keys from the database (the two two-step sign-in checks and
+reads people or keys from the database (the three two-step sign-in checks and
 API keys) shows **Could not run** rather than **Unknown** if that read fails.
 
 <!-- The headings below are linked from each check's "Learn more"
@@ -254,6 +255,37 @@ still sign in without the passkey. The fix is for each person to turn on
 **Two-factor authentication** under **Your settings**
 ([how it works](two-factor-auth.md)). Open **Details** to see who is missing
 it, by email address.
+
+### Two-step sign-in required
+
+Whether the site requires two-step sign-in (**Organization → Two-step
+sign-in**, [guide](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)),
+and where the people it covers stand.
+
+- **Not applicable** when the site doesn't require it. A site that never
+  turned it on is not warned about it: the **Two-step sign-in for
+  administrators and editors** line already says who has no authenticator
+  app.
+- **Review** when someone covered has no second factor and is still in their
+  grace period, for example "2 people haven't set up two-step sign-in yet.
+  The first deadline is 2026-12-01." Until their deadline they can still sign
+  in with a password alone.
+- **OK** otherwise. People past their deadline are held at sign-in until they
+  set one up, so they are not exposed; they are counted in the facts
+  (`overdue`), not warned about.
+- **Unknown** when the requirement can't be read. It is never reported as off.
+
+The counts are the ones the policy page shows (**Who it covers now**): a
+passkey counts as a second factor here, because once the requirement is
+enforced a passkey-only account must use its passkey to sign in. Platform
+administrators are counted with the administrators, as the requirement holds
+them. The line names nobody; the policy page does not either.
+
+Its facts, for monitoring: `required_for` (`off`, `admins`, `editors` or
+`everyone`), `grace_days`, `covered`, `enrolled`, `in_grace`, `overdue`,
+`earliest_deadline` (ISO 8601, or `null`), and `admin_*`, `editor_*` and
+`viewer_*` (`enrolled`, `in_grace`, `overdue`), `null` for a role the
+requirement does not cover.
 
 ### Idle sign-out
 
@@ -678,7 +710,6 @@ the same requests ([what is sent](data-flows.md)).
 
 ## What it does not check yet
 
-- Whether two-factor sign-in is *required* for administrators.
 - Security notices for `kiln_plugin`, the plugin SDK built into Kiln:
   neither notices line reads its version.
 - When an API key was last used.

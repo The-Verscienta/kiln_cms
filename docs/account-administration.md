@@ -326,6 +326,13 @@ Why an invitation is not an account until it is accepted: [ADR 0050](decisions/0
      and they are a member." The same, for a registration an admin had
      rejected: adding the address reverses that rejection
      ([Invitations and registrations](#invitations-and-registrations)).
+
+   If the site [requires two-step sign-in](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)
+   of the tier you picked and the person has no second factor, the message
+   goes on to say when they must set one up
+   ([When you give someone a covered role](two-factor-auth.md#when-you-give-someone-a-covered-role)).
+   Changing a member's tier, a temporary tier and approving a registration
+   warn the same way.
 4. The invitee receives "You've been invited to (site)". The mail names you,
    the site and the tier, and carries an **Accept the invitation** link that
    works once and expires in 7 days.

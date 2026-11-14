@@ -444,6 +444,13 @@ msgid_plural "%{count} parts"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} person hasn't set up two-step sign-in yet. It's enforced for them from %{date}."
+msgid_plural "%{count} people haven't set up two-step sign-in yet. The first deadline is %{date}."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} person will be asked to set it up;"
@@ -1027,6 +1034,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} has had this open for %{open_for} but hasn't typed for %{idle}."
+msgstr ""
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has no second factor. This site requires one of %{tier}, and their grace period ended %{date}: they'll be asked to set one up before anything else."
+msgstr ""
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has no second factor. This site requires one of %{tier}: they have until %{date} to set it up, and will be asked to before anything else after that."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/shared.ex
@@ -17864,6 +17881,11 @@ msgstr ""
 msgid "Require two-step sign-in for"
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
+#, elixir-autogen, elixir-format
+msgid "Require two-step sign-in for administrators, editors or everyone."
+msgstr ""
+
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -22759,6 +22781,11 @@ msgstr ""
 msgid "The site's session settings could not be read."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "The site's two-step sign-in requirement could not be read."
+msgstr ""
+
 #: lib/kiln_cms/security/posture/checks/security_alerts.ex
 #, elixir-autogen, elixir-format
 msgid "The site's webhook endpoints could not be read."
@@ -23682,6 +23709,11 @@ msgstr ""
 msgid "This site does not publish a security.txt."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "This site doesn't require two-step sign-in."
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "This site doesn't use Meilisearch. Search uses the built-in search, which needs no setup."
@@ -24366,6 +24398,7 @@ msgstr ""
 msgid "Two-factor authentication turned off"
 msgstr ""
 
+#: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
@@ -24391,6 +24424,26 @@ msgstr ""
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in is optional on this site."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in is required for administrators."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in is required for editors and administrators."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in is required for everyone on this site."
+msgstr ""
+
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step sign-in required"
 msgstr ""
 
 #: lib/kiln_cms_web/security_log.ex
@@ -25716,6 +25769,11 @@ msgstr ""
 msgid "Whether the value is empty."
 msgstr ""
 
+#: lib/kiln_cms/security/posture/checks/second_factor_required.ex
+#, elixir-autogen, elixir-format
+msgid "Whether this site makes people set up two-step sign-in, and who it covers that hasn't yet."
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "Which fields need a severity when a published edit changes them."
@@ -26845,6 +26903,11 @@ msgstr ""
 msgid "admin"
 msgstr ""
 
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "administrators"
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
 msgid "all confirmed subscribers"
@@ -27354,6 +27417,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "editor"
+msgstr ""
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "editors"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
@@ -28727,6 +28795,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "viewer"
+msgstr ""
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "viewers"
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex

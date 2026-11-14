@@ -658,6 +658,53 @@ carries the reasoning.
   edit the document see the upload area. The Branding page's image drawer is
   unchanged. (#2791)
 
+<a id="posture-second-factor-required"></a>
+
+- **Security posture has a new site line, "Two-step sign-in required" (`core.second_factor_required`).**
+  It reads the site's two-step sign-in requirement uncached
+  (`TwoFactorRequirement.read_policy/1`) and the people it covers
+  (`TwoFactorRequirement.roster/3`, the counts the policy page shows). It is
+  **Review** while someone covered has no second factor and is still in
+  their grace period ("2 people haven't set up two-step sign-in yet. The
+  first deadline is …"), since until then a password alone still signs
+  them in; **OK** once nobody is, people past their deadline included (they
+  are held at sign-in, and counted as `overdue`); **N/A** when the site
+  doesn't require it; and **Unknown** when the requirement can't be read,
+  never "off". A failed roster read is "Could not run", never zeros. Off is
+  N/A rather than Review on purpose: the existing **Two-step sign-in for
+  administrators and editors** line already reports who has no
+  authenticator app, and a site that never turned the requirement on must
+  not have its overall result, or a `GET /api/security/posture` monitor,
+  turn on upgrade. Its `facts` are scalars only: `required_for`,
+  `grace_days`, `covered`, `enrolled`, `in_grace`, `overdue`,
+  `earliest_deadline`, and per role `admin_*`, `editor_*`, `viewer_*`
+  (`enrolled`, `in_grace`, `overdue`; `null` for a role not covered). The
+  JSON gains the entry, and `counts.n_a` one more, on every site. **Fix**
+  goes to `/editor/two-factor`. See
+  [Two-step sign-in required](../security-posture.md#two-step-sign-in-required).
+  Closes #2252.
+
+<a id="second-factor-promotion-warning"></a>
+
+- **Giving someone a covered role without a second factor warns the admin doing it; the policy page is in the console menu.**
+  A promotion does not restart the grace period (decision 6 on #2247), so
+  making a long-standing reader an administrator on a site that requires
+  administrators to hold a factor holds them at their next page. The Team
+  page now says so where the tier is picked, before saving, and again after
+  "Saved.": "(email) has no second factor. This site requires one of
+  administrators, and their grace period ended (date): they'll be asked to
+  set one up before anything else." Someone new to the site is told their
+  deadline instead. The same sentence follows a temporary tier, adding a
+  member at a covered tier, and approving a registration on a site that
+  requires it of everyone (a registration may have waited past the grace
+  period). It never blocks the change, and says nothing for someone who
+  holds a factor, a role not covered, an unchanged role, or a platform
+  administrator. New `KilnCMSWeb.PromotionWarning` and
+  `KilnCMS.Accounts.Registrations.approved_applicant/1`. The policy
+  page, `/editor/two-factor`, is now **Organization → Two-step sign-in** in
+  the console menu and its search ("2fa", "mfa", "two-step"). Guide:
+  [When you give someone a covered role](../two-factor-auth.md#when-you-give-someone-a-covered-role).
+
 <a id="posture-security-alerts-reach-someone"></a>
 
 - **Security posture has a new site line, "Security alerts reach someone" (`core.security_alerts_reach_someone`).**

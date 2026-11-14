@@ -108,6 +108,7 @@ defmodule KilnCMSWeb.ConsoleNavTest do
       assert keys == [
                :governance,
                :security_posture,
+               :second_factor_policy,
                :security_txt,
                :security_log,
                :security_alerts,
@@ -116,6 +117,13 @@ defmodule KilnCMSWeb.ConsoleNavTest do
 
       assert :security_alerts in found("alert", authed_user(:admin))
       refute :security_alerts in found("alert", authed_user(:editor))
+
+      # The policy page (#2247), found the ways an admin would look for it.
+      for term <- ["two-step", "2fa", "mfa", "authenticator"] do
+        assert :second_factor_policy in found(term, authed_user(:admin)), term
+      end
+
+      refute :second_factor_policy in found("2fa", authed_user(:editor))
     end
 
     test "every path is a route the router actually serves" do
