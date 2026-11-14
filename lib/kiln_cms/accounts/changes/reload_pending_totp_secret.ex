@@ -59,7 +59,16 @@ defmodule KilnCMS.Accounts.Changes.ReloadPendingTotpSecret do
            not_found_error?: false
          ) do
       {:ok, %{} = fresh} ->
-        %{changeset | data: %{changeset.data | totp_pending_secret: fresh.totp_pending_secret}}
+        # Both columns of the staged secret: the
+        # encrypted one and the plaintext one a row from before may still have.
+        %{
+          changeset
+          | data: %{
+              changeset.data
+              | totp_pending_secret: fresh.totp_pending_secret,
+                legacy_totp_pending_secret: fresh.legacy_totp_pending_secret
+            }
+        }
 
       _ ->
         changeset

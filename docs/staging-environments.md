@@ -274,7 +274,8 @@ the gaps the *data* carries — the *config* is already inert:
   private key and the payment provider's API and webhook keys, each site's mail relay
   password, SSO client secret, storage secret key, AI provider and Meilisearch API keys,
   and push (VAPID) private key, webhook signing secrets, each site's ActivityPub key,
-  the instance's content-signing key (provenance), and social account credentials. A
+  the instance's content-signing key (provenance), social account credentials, and
+  every account's authenticator-app (TOTP) secret. A
   clone with its own `SECRET_KEY_BASE` cannot decrypt any of them, as long as
   `PREVIOUS_SECRET_KEY_BASE` is not production's: leave it unset on staging. The scrub
   also deletes the DKIM key and the billing keys outright, the billing keys before

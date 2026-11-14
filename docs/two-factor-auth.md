@@ -987,14 +987,25 @@ with **no external dependency**. Correctness is pinned to the RFC 6238 published
 test vectors (`KilnCMS.Accounts.TotpTest`). Defaults: 6 digits, 30-second period,
 ±1 step of clock-drift tolerance, constant-time code comparison.
 
-The raw secret is stored as `users.totp_secret` (`bytea`, `sensitive?`,
-`public? false`); it is never exposed on any API surface and is read only by the
-sign-in gate and the owner's enrolment UI. 2FA is "enabled" iff
-`totp_confirmed_at` is set. `users.totp_pending_secret` holds an in-progress,
-not-yet-proven enrolment in the same shape — `setup_totp` writes only this
-one, `confirm_totp` is the only action that ever copies it into `totp_secret`,
-and it is what a code is checked against while an enrolment is in progress
-(#754).
+The secret is stored encrypted by `KilnCMS.Keys.Vault` in
+`users.totp_secret_encrypted` (`bytea`, `sensitive?`, `public? false`), under a
+key derived from `SECRET_KEY_BASE`, so a database dump, backup or staging clone
+without that secret carries no working authenticator seed. The `User` attribute `totp_secret` holds it decrypted.
+It is never exposed on any API surface and is read only by the sign-in gate and
+the owner's enrolment UI, through `KilnCMS.Accounts.TotpSecrets`. 2FA is
+"enabled" iff `totp_confirmed_at` is set. `users.totp_pending_secret_encrypted`
+holds an in-progress, not-yet-proven enrolment in the same shape — `setup_totp`
+writes only this one, `confirm_totp` is the only action that ever copies it
+into the live secret, and it is what a code is checked against while an
+enrolment is in progress (#754).
+
+Releases before the encryption stored both secrets in plaintext, in
+`users.totp_secret` and `users.totp_pending_secret`. They are still read for a
+row nothing has written since the upgrade, and every write clears them;
+`KilnCMS.Accounts.TotpSecretBackfill` moves what is left about ten minutes after
+boot. A later release drops the two columns. The secrets are part of
+`mix kiln.vault.reencrypt`'s walk like every other vault column (see
+[`secrets-rotation.md`](secrets-rotation.md)).
 
 ## Recovery codes & QR (Phase 2, shipped)
 

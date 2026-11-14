@@ -41,6 +41,7 @@ defmodule KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Accounts.TotpSecrets
 
   @impl true
   def validate(changeset, _opts, _context) do
@@ -62,7 +63,10 @@ defmodule KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement do
       Ash.Changeset.get_argument(changeset, :recovery_login?) == true ->
         :ok
 
-      valid_current?(stored.totp_secret, Ash.Changeset.get_argument(changeset, :current_code)) ->
+      valid_current?(
+        TotpSecrets.live(stored),
+        Ash.Changeset.get_argument(changeset, :current_code)
+      ) ->
         :ok
 
       true ->

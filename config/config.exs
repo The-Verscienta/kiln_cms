@@ -665,6 +665,12 @@ config :kiln_cms, :occurrence_backfill_on_boot, true
 # withdrawn. Deduplicated for a day; a redundant run writes nothing new.
 config :kiln_cms, :sync_exposure_backfill_on_boot, true
 
+# Whether booting enqueues the TOTP secret backfill
+# (`KilnCMS.Accounts.TotpSecretBackfill`): secrets still stored in plaintext
+# move to their encrypted columns. Ten minutes after boot, deduplicated for a
+# day; a redundant run writes nothing.
+config :kiln_cms, :totp_secret_backfill_on_boot, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero

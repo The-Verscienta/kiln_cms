@@ -287,6 +287,7 @@ defmodule KilnCMS.Application do
       enqueue_occurrence_backfill()
       enqueue_legacy_audiences_migration()
       enqueue_sync_exposure_backfill()
+      enqueue_totp_secret_backfill()
       {:ok, pid}
     end
   end
@@ -335,6 +336,15 @@ defmodule KilnCMS.Application do
   defp enqueue_sync_exposure_backfill do
     if Application.get_env(:kiln_cms, :sync_exposure_backfill_on_boot, true) do
       KilnCMS.Firing.SyncExposureBackfill.enqueue()
+    end
+  end
+
+  # TOTP secrets still stored in plaintext move to their encrypted columns
+  # at rest: see `KilnCMS.Accounts.TotpSecretBackfill`. Off in
+  # `:test` and `:e2e` for the committed-`oban_jobs` reason above.
+  defp enqueue_totp_secret_backfill do
+    if Application.get_env(:kiln_cms, :totp_secret_backfill_on_boot, true) do
+      KilnCMS.Accounts.TotpSecretBackfill.enqueue()
     end
   end
 

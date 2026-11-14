@@ -412,6 +412,40 @@ carries the reasoning.
   and why the sidecar is the only checksum a restore trusts is in
   [ADR 0035](../decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
 
+<a id="totp-secrets-encrypted-upgrade"></a>
+
+- **Run `mix ash.migrate` (new nullable `users.totp_secret_encrypted` and `users.totp_pending_secret_encrypted`); to roll back after the backfill, run `revert()` first.**
+  One additive migration adds the two `bytea` columns. The plaintext
+  `users.totp_secret` and `users.totp_pending_secret` stay, and are dropped
+  in a later release. This release writes the encrypted columns only and
+  clears the plaintext ones on every write; a row nothing has written since
+  the upgrade keeps working from its plaintext column until the backfill
+  moves it. The backfill (`KilnCMS.Accounts.TotpSecretBackfill`) is queued
+  on boot to run about 10 minutes later, once per day at most, on the
+  `default` queue; a second run writes nothing.
+  `config :kiln_cms, :totp_secret_backfill_on_boot, false` turns the boot
+  enqueue off, and `bin/kiln_cms rpc "KilnCMS.Accounts.TotpSecretBackfill.run()"`
+  runs it by hand.
+  - **During a rolling deploy**, a node of the previous release reads only
+    the plaintext columns. An account that enrolls or re-enrolls on a new
+    node, or that the backfill has reached, gets no authenticator codes
+    accepted by an old node (recovery codes and passkeys still work). The
+    10-minute delay is there so the old nodes are normally gone first.
+  - **To roll back** after the backfill has run, first run
+    `bin/kiln_cms rpc "KilnCMS.Accounts.TotpSecretBackfill.revert()"` on a
+    node of this release. It copies every secret back to its plaintext
+    column, and the previous release then works as before. Without it,
+    every account with an authenticator app signs in on the previous
+    release with a recovery code or a passkey only. Rolling forward again
+    needs nothing: the plaintext copy wins until the backfill moves it.
+  - **`SECRET_KEY_BASE` now protects the second factor too.** A deployment
+    that loses its `SECRET_KEY_BASE` or rotates it without
+    `PREVIOUS_SECRET_KEY_BASE` loses its authenticator-app secrets with the
+    other vault columns: those accounts sign in with a recovery code or a
+    passkey and set the app up again. `mix kiln.vault.reencrypt` walks the
+    two new columns (see
+    [secrets-rotation.md](../secrets-rotation.md#data-at-rest-re-encrypt-before-you-retire-the-old-value)).
+
 ## Breaking
 
 <a id="ws-gql-refuses-unverified-bearer"></a>
@@ -2534,6 +2568,28 @@ carries the reasoning.
   `pg_conn_split`, tested against the same table of URLs as
   `KilnCMS.Backups.PgUrl.split/1`; the run under macOS's `/bin/bash` 3.2 is
   skipped on Linux CI. (#2726)
+
+<a id="totp-secrets-encrypted"></a>
+
+- **Authenticator-app (TOTP) secrets are stored encrypted.**
+  Kiln's other stored secrets (DKIM key, payment keys, webhook signing
+  secrets, storage keys and more) were already encrypted with a key derived
+  from `SECRET_KEY_BASE`; the TOTP secret and the one staged during
+  enrollment were stored as they are. A copy of the database, such as a
+  backup, a `pg_dump`, a replica or a staging clone, therefore carried every
+  enrolled account's working authenticator secret. Both are now stored by
+  `KilnCMS.Keys.Vault`, so a copy without `SECRET_KEY_BASE` carries none,
+  and existing secrets are moved by a background job after the upgrade (see
+  the upgrade note). Nothing changes for people signing in or enrolling.
+
+  Developers: the `User` attributes `totp_secret` and `totp_pending_secret`
+  still hold the plaintext secret in memory; they are now of type
+  `KilnCMS.Keys.Vault.EncryptedBinary`, stored in the `*_encrypted` columns.
+  Read a secret through `KilnCMS.Accounts.TotpSecrets.live/1` and
+  `pending/1`, which fall back to the plaintext columns (now the attributes
+  `legacy_totp_secret` and `legacy_totp_pending_secret`) for a row the
+  backfill has not reached. `KilnCMS.Keys.Vault.encrypted_attributes/0`
+  lists both vault types.
 
 <a id="crawler-verification-hardening"></a>
 

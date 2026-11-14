@@ -1,7 +1,8 @@
 defmodule KilnCMS.Accounts.Changes.ReloadTotpFactor do
   @moduledoc """
   Refreshes the account's authenticator-app columns (`totp_secret`,
-  `totp_confirmed_at`, `totp_pending_secret`, `totp_recovery_hashes`) on the
+  `totp_confirmed_at`, `totp_pending_secret`, `totp_recovery_hashes`, and the
+  `legacy_` plaintext columns of both secrets) on the
   changeset's data from the database at build time, on `User`'s
   `:disable_totp` and `:regenerate_totp_recovery_codes`
   (GHSA-5g35-j8qr-j475).
@@ -29,7 +30,16 @@ defmodule KilnCMS.Accounts.Changes.ReloadTotpFactor do
 
   alias KilnCMS.Accounts
 
-  @fields [:totp_secret, :totp_confirmed_at, :totp_pending_secret, :totp_recovery_hashes]
+  # Both columns of each secret: the encrypted one and the plaintext one a
+  # row from before may still have, which `TotpSecrets` reads first.
+  @fields [
+    :totp_secret,
+    :legacy_totp_secret,
+    :totp_confirmed_at,
+    :totp_pending_secret,
+    :legacy_totp_pending_secret,
+    :totp_recovery_hashes
+  ]
 
   @impl true
   def change(changeset, _opts, _context) do

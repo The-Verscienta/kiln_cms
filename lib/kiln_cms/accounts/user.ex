@@ -1210,6 +1210,9 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
       change set_attribute(:totp_pending_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
+      # The staged secret is now the encrypted one; a plaintext one left over
+      # from before the encryption would otherwise win the read.
+      change set_attribute(:legacy_totp_pending_secret, nil)
 
       # Not guarded against an invitation's takeover (#2453): a secret staged
       # from a stale session is enforced by nothing until `:confirm_totp`
@@ -1402,9 +1405,11 @@ defmodule KilnCMS.Accounts.User do
       # session it can only clear the factor columns, which the takeover has
       # already cleared; it signs no one in and grants nothing.
       change set_attribute(:totp_secret, nil)
+      change set_attribute(:legacy_totp_secret, nil)
       change set_attribute(:totp_confirmed_at, nil)
       change set_attribute(:totp_recovery_hashes, [])
       change set_attribute(:totp_pending_secret, nil)
+      change set_attribute(:legacy_totp_pending_secret, nil)
 
       # Audit log (#2241), in the transaction.
       change {KilnCMS.Security.Changes.Record,
@@ -1823,12 +1828,30 @@ defmodule KilnCMS.Accounts.User do
       public? true
     end
 
-    # Two-factor (TOTP) secret and enrolment timestamp (issue #331). The raw
-    # secret is stored as bytea; `sensitive?` keeps it out of inspect/logs and
-    # `public? false` keeps both off every API surface — they're read only
-    # internally (by the sign-in gate and the owner's enrolment UI). 2FA is
-    # "enabled" iff `totp_confirmed_at` is set.
-    attribute :totp_secret, :binary do
+    # Two-factor (TOTP) secret and enrolment timestamp (issue #331).
+    # `sensitive?` keeps the secret out of inspect/logs and `public? false`
+    # keeps both off every API surface — they're read only internally (by the
+    # sign-in gate and the owner's enrolment UI). 2FA is "enabled" iff
+    # `totp_confirmed_at` is set.
+    #
+    # Stored as vault ciphertext in `totp_secret_encrypted`, so a dump or backup of the database without
+    # `SECRET_KEY_BASE` carries no working authenticator seed. The struct holds
+    # the plaintext (`Vault.EncryptedBinary`). Read it through
+    # `KilnCMS.Accounts.TotpSecrets.live/1`, which falls back to the legacy
+    # plaintext column below for a row the backfill has not reached.
+    attribute :totp_secret, KilnCMS.Keys.Vault.EncryptedBinary do
+      source :totp_secret_encrypted
+      sensitive? true
+      public? false
+    end
+
+    # The plaintext column the secret lived in before it was encrypted
+    # at rest. Expand/contract: every write of this release
+    # clears it, `KilnCMS.Accounts.TotpSecretBackfill` moves what is left into
+    # `totp_secret_encrypted`, and a later release drops the column. Never set
+    # it to anything but `nil`.
+    attribute :legacy_totp_secret, :binary do
+      source :totp_secret
       sensitive? true
       public? false
     end
@@ -1841,8 +1864,17 @@ defmodule KilnCMS.Accounts.User do
     # enrolment run without touching `totp_secret`/`totp_confirmed_at` until
     # `:confirm_totp` proves the caller holds it and promotes it — so
     # generating one can never by itself weaken or disable an existing,
-    # confirmed factor.
-    attribute :totp_pending_secret, :binary do
+    # confirmed factor. Encrypted like `totp_secret`; read it through
+    # `KilnCMS.Accounts.TotpSecrets.pending/1`.
+    attribute :totp_pending_secret, KilnCMS.Keys.Vault.EncryptedBinary do
+      source :totp_pending_secret_encrypted
+      sensitive? true
+      public? false
+    end
+
+    # The plaintext column the staged secret lived in, as `legacy_totp_secret`.
+    attribute :legacy_totp_pending_secret, :binary do
+      source :totp_pending_secret
       sensitive? true
       public? false
     end

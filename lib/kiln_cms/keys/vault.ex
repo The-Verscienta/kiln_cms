@@ -23,7 +23,8 @@ defmodule KilnCMS.Keys.Vault do
 
   ## Which columns hold vault ciphertext
 
-  Every attribute of type `KilnCMS.Keys.Vault.Ciphertext`, discovered by
+  Every attribute of type `KilnCMS.Keys.Vault.Ciphertext` (ciphertext in memory)
+  or `KilnCMS.Keys.Vault.EncryptedBinary` (plaintext in memory), discovered by
   `encrypted_attributes/0` rather than listed, so the re-encryption walk cannot
   miss a column somebody adds later.
   """
@@ -122,7 +123,8 @@ defmodule KilnCMS.Keys.Vault do
 
   @doc """
   Every `{resource, attribute}` stored as vault ciphertext — each attribute of
-  type `KilnCMS.Keys.Vault.Ciphertext`, across every domain in `:ash_domains`.
+  type `KilnCMS.Keys.Vault.Ciphertext` or `KilnCMS.Keys.Vault.EncryptedBinary`,
+  across every domain in `:ash_domains`.
   """
   @spec encrypted_attributes() :: [{module(), atom()}]
   def encrypted_attributes do
@@ -131,8 +133,8 @@ defmodule KilnCMS.Keys.Vault do
     |> Enum.flat_map(&Ash.Domain.Info.resources/1)
     |> Enum.uniq()
     |> Enum.flat_map(fn resource ->
-      for %{type: KilnCMS.Keys.Vault.Ciphertext, name: name} <-
-            Ash.Resource.Info.attributes(resource),
+      for %{type: type, name: name} <- Ash.Resource.Info.attributes(resource),
+          type in [KilnCMS.Keys.Vault.Ciphertext, KilnCMS.Keys.Vault.EncryptedBinary],
           do: {resource, name}
     end)
     |> Enum.sort()

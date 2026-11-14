@@ -21,7 +21,9 @@ defmodule KilnCMS.Keys.Reencrypt do
   ## How it walks
 
   The columns come from `KilnCMS.Keys.Vault.encrypted_attributes/0` — every
-  attribute of type `KilnCMS.Keys.Vault.Ciphertext` — never from a list here.
+  attribute of type `KilnCMS.Keys.Vault.Ciphertext` or
+  `KilnCMS.Keys.Vault.EncryptedBinary` — never from a list here. The walk
+  reads and writes the raw column, so the two types are the same to it.
 
   One transaction per resource, reading its rows `FOR UPDATE`, so a write the
   application makes to the same row mid-walk waits for this transaction rather

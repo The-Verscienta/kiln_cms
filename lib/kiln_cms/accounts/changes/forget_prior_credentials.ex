@@ -114,10 +114,14 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
   alias KilnCMS.AfterCommit
   alias KilnCMS.Security.Recorder
 
+  # The plaintext columns too: a row the backfill has
+  # not reached keeps its secrets there.
   @totp_cleared [
     totp_secret: nil,
+    legacy_totp_secret: nil,
     totp_confirmed_at: nil,
     totp_pending_secret: nil,
+    legacy_totp_pending_secret: nil,
     totp_recovery_hashes: []
   ]
 
