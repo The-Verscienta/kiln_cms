@@ -150,6 +150,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Giving someone a role a site's two-step sign-in requirement covers warns the admin when they have no second factor (on the Team page before and after saving, and on adding a member, a temporary tier or an approved registration); the policy page is in the console menu as Organization → Two-step sign-in.**
   ([#2921](https://github.com/The-Verscienta/kiln_cms/pull/2921) · [long form](docs/changelog/unreleased.md#second-factor-promotion-warning))
 
+- **Making an account a platform admin on Accounts (standing or temporary) warns when it has no second factor, naming the sites that would hold it at once and those that give a grace period, with the earliest deadline.**
+  ([long form](docs/changelog/unreleased.md#platform-promotion-warning))
+
 - **The setting and logic behind requiring two-step sign-in (part of #2247), and an operator command to turn a site's requirement off: `KilnCMS.Release.second_factor_requirement_off/1`.**
   ([long form](docs/changelog/unreleased.md#second-factor-policy-groundwork))
 

@@ -705,6 +705,27 @@ carries the reasoning.
   the console menu and its search ("2fa", "mfa", "two-step"). Guide:
   [When you give someone a covered role](../two-factor-auth.md#when-you-give-someone-a-covered-role).
 
+<a id="platform-promotion-warning"></a>
+
+- **Changing an account's platform role on Accounts warns when the change brings a two-step sign-in requirement on it.**
+  The Team page's warning (above) left out `/editor/accounts`, where a
+  platform admin changes an account's platform role or gives it a temporary
+  one. A platform administrator is an administrator on every site, so the
+  warning there reads every site's requirement, not one: after "Access
+  updated." (or the temporary role's confirmation) it says the account has
+  no second factor, which sites require one of them now, and which give a
+  grace period, with the earliest deadline. Up to three sites are named;
+  more are counted. The deadline follows the existing rule: the later of the
+  account's creation and the day the site began covering administrators,
+  plus the grace, so a promotion does not restart the grace (decision 6 on
+  #2247). A site is listed only when the change brings its deadline
+  forward, including one where a recent membership had given a later one.
+  It never blocks the change, and says nothing for an account with a second
+  factor or when no site covers the new role. New
+  `KilnCMS.Accounts.TwoFactorRequirement.platform_promotion_warning/3` and
+  `KilnCMSWeb.PromotionWarning.platform_message/3`. Guide:
+  [When you give someone a covered role](../two-factor-auth.md#when-you-give-someone-a-covered-role).
+
 <a id="posture-security-alerts-reach-someone"></a>
 
 - **Security posture has a new site line, "Security alerts reach someone" (`core.security_alerts_reach_someone`).**

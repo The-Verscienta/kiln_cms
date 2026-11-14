@@ -604,6 +604,13 @@ msgid_plural "%{count} settings match “%{query}”."
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} site"
+msgid_plural "%{count} sites"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} slugs would change (%{pinned} hand-picked skipped)"
@@ -955,6 +962,11 @@ msgstr ""
 msgid "%{label}: %{message}"
 msgstr ""
 
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{list} and %{last}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{locale} is not a configured locale"
@@ -1034,6 +1046,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} has had this open for %{open_for} but hasn't typed for %{idle}."
+msgstr ""
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has no second factor, and a platform administrator is an administrator on every site."
+msgstr ""
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has no second factor."
 msgstr ""
 
 #: lib/kiln_cms_web/promotion_warning.ex
@@ -1246,6 +1268,20 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "%{sentence} Each %{type} lists them as “%{label}”."
 msgstr ""
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{sites} requires one of them now: they'll be asked to set one up before anything else."
+msgid_plural "%{sites} require one of them now: they'll be asked to set one up before anything else."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{sites} requires one of them, and gives them until %{date} to set it up."
+msgid_plural "%{sites} require one of them, with a grace period: the earliest ends %{date}."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
 #, elixir-autogen, elixir-format

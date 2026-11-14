@@ -604,6 +604,13 @@ msgid_plural "%{count} settings match “%{query}”."
 msgstr[0] "%{count} paramètre correspond à « %{query} »."
 msgstr[1] "%{count} paramètres correspondent à « %{query} »."
 
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} site"
+msgid_plural "%{count} sites"
+msgstr[0] "%{count} site"
+msgstr[1] "%{count} sites"
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} slugs would change (%{pinned} hand-picked skipped)"
@@ -955,6 +962,11 @@ msgstr "%{label} : %{count} dans cet intervalle d'alerte"
 msgid "%{label}: %{message}"
 msgstr "%{label} : %{message}"
 
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{list} and %{last}"
+msgstr "%{list} et %{last}"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{locale} is not a configured locale"
@@ -1035,6 +1047,16 @@ msgstr "%{name} n’a publié aucune version sur Hex depuis le %{date}."
 #, elixir-autogen, elixir-format
 msgid "%{name} has had this open for %{open_for} but hasn't typed for %{idle}."
 msgstr "%{name} a ceci ouvert depuis %{open_for} mais n'a rien tapé depuis %{idle}."
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has no second factor, and a platform administrator is an administrator on every site."
+msgstr "%{name} n'a pas de second facteur, et un administrateur de la plateforme est administrateur sur tous les sites."
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has no second factor."
+msgstr "%{name} n'a pas de second facteur."
 
 #: lib/kiln_cms_web/promotion_warning.ex
 #, elixir-autogen, elixir-format
@@ -1246,6 +1268,20 @@ msgstr "%{selected} sur %{total}"
 #, elixir-autogen, elixir-format
 msgid "%{sentence} Each %{type} lists them as “%{label}”."
 msgstr "%{sentence} Chaque %{type} les liste sous « %{label} »."
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{sites} requires one of them now: they'll be asked to set one up before anything else."
+msgid_plural "%{sites} require one of them now: they'll be asked to set one up before anything else."
+msgstr[0] "%{sites} lui en exige un dès maintenant : il lui sera demandé d'en configurer un avant toute autre chose."
+msgstr[1] "%{sites} lui en exigent un dès maintenant : il lui sera demandé d'en configurer un avant toute autre chose."
+
+#: lib/kiln_cms_web/promotion_warning.ex
+#, elixir-autogen, elixir-format
+msgid "%{sites} requires one of them, and gives them until %{date} to set it up."
+msgid_plural "%{sites} require one of them, with a grace period: the earliest ends %{date}."
+msgstr[0] "%{sites} lui en exige un et lui laisse jusqu'au %{date} pour le configurer."
+msgstr[1] "%{sites} lui en exigent un, avec un délai de grâce : le premier prend fin le %{date}."
 
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
 #, elixir-autogen, elixir-format

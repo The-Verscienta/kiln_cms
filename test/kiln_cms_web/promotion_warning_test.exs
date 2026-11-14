@@ -5,7 +5,8 @@ defmodule KilnCMSWeb.PromotionWarningTest do
   (decision 6 on #2247): `KilnCMSWeb.PromotionWarning` on its own, then on
   each surface that gives a tier — the Team page's tier picker (an inline
   note, then the save's confirmation), its temporary grant, adding a member,
-  and approving a registration. Never blocking; nothing for an enrolled
+  approving a registration, and the Accounts page's platform role and
+  temporary platform role, which name every site that would hold them. Never blocking; nothing for an enrolled
   person, an uncovered tier, or a site with the requirement off.
 
   Each test has a site of its own: the policy is cached per site on the whole
@@ -213,6 +214,63 @@ defmodule KilnCMSWeb.PromotionWarningTest do
 
     assert html =~ "Saved."
     refute html =~ "no second factor"
+  end
+
+  describe "the Accounts page" do
+    setup %{site: site} do
+      policy_row!(site, :admins, grace_days: 14)
+      :ok
+    end
+
+    test "making an account a platform admin names the sites that hold them",
+         %{conn: conn, site: site} do
+      subject = seed_user()
+      {:ok, view, _html} = page(conn, site, ~p"/editor/accounts/#{subject.id}")
+
+      html =
+        view |> form("#access-form", %{"access" => %{"role" => "admin"}}) |> render_submit()
+
+      assert html =~ "Access updated."
+      assert html =~ "#{subject.email} has no second factor, and a platform administrator"
+      assert html =~ "#{site.name} requires one of them now"
+      # Not blocking.
+      assert Accounts.get_user!(subject.id, authorize?: false).role == :admin
+    end
+
+    test "a temporary platform admin role warns too, of a grace period when there is one",
+         %{conn: conn, site: site} do
+      subject = seed_user(%{inserted_at: DateTime.utc_now()})
+      {:ok, view, _html} = page(conn, site, ~p"/editor/accounts/#{subject.id}")
+
+      html =
+        view
+        |> form("#grant-form", %{"grant" => %{"role" => "admin", "hours" => "24"}})
+        |> render_submit()
+
+      assert html =~ "#{subject.email} has no second factor"
+      assert html =~ "#{site.name} requires one of them, and gives them until"
+    end
+
+    test "nothing for an account that holds a factor, or a role no site covers",
+         %{conn: conn, site: site} do
+      enrolled = seed_user() |> with_app()
+      {:ok, view, _html} = page(conn, site, ~p"/editor/accounts/#{enrolled.id}")
+
+      html =
+        view |> form("#access-form", %{"access" => %{"role" => "admin"}}) |> render_submit()
+
+      assert html =~ "Access updated."
+      refute html =~ "no second factor"
+
+      plain = seed_user()
+      {:ok, view, _html} = page(conn, site, ~p"/editor/accounts/#{plain.id}")
+
+      html =
+        view |> form("#access-form", %{"access" => %{"role" => "editor"}}) |> render_submit()
+
+      assert html =~ "Access updated."
+      refute html =~ "no second factor"
+    end
   end
 
   test "approving a registration that waited past the grace period warns",
