@@ -110,7 +110,7 @@ defmodule KilnCMS.Backups.Importer do
   number, the redacted cause and the next try, and emits
   `[:kiln_cms, :backups, :import, :failed]`. A success, a row appearing for
   the stamp, or its files going clears its entry; `retry_failed/0` clears
-  every entry and imports at once (through `bin/kiln rpc`). The table lives
+  every entry and imports at once (through `bin/kiln_cms rpc`). The table lives
   in `:persistent_term`, written at most once per call and only when it
   changed, and holds at most #{500} entries (the soonest due are dropped
   first). It is per node and lost on a restart; two concurrent calls may
@@ -183,7 +183,7 @@ defmodule KilnCMS.Backups.Importer do
   @doc """
   Forget every stamp's import backoff on this node and import at once, as
   `run/0`. For an operator who fixed what made a write fail:
-  `bin/kiln rpc "KilnCMS.Backups.Importer.retry_failed()"`.
+  `bin/kiln_cms rpc 'IO.inspect(KilnCMS.Backups.Importer.retry_failed())'`.
   """
   @spec retry_failed() :: {:ok, summary()} | {:error, term()}
   def retry_failed do

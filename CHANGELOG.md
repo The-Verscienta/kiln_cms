@@ -225,6 +225,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Backup Resume is safe: the re-open is atomic, Resume waits ~2.5 min after a Cancel, a step that outlived its Cancel can't overwrite state or history, a resume runs on the node with its files, and a refused one says why on its row.**
   ([#2815](https://github.com/The-Verscienta/kiln_cms/pull/2815) · [long form](docs/changelog/unreleased.md#backup-resume-safety))
 
+- **Backups History judges each artifact and media part on its own, says "couldn't read" instead of "none yet" for an unlistable directory, reads the disk off the page with a 5 s timeout, and backs off a cron stamp whose import keeps failing.**
+  ([long form](docs/changelog/unreleased.md#backup-history-presence))
+
 - **Security alerts: the inbox says each alert in the reader's language, a delivery that exhausts its attempts emits `alert_failed`, other sites' consoles show "N unread platform alerts", and the full-IP help text covers IPv6.**
   ([long form](docs/changelog/unreleased.md#security-alert-gaps-2642))
 
