@@ -1843,6 +1843,66 @@ carries the reasoning.
     stack. A `failed` or `canceled` run keeps its status and its **Resume**
     button; a stale `running` one is marked `failed`.
 
+<a id="backup-history-presence"></a>
+
+- **Backups History says what is on this server's disk artifact by artifact, never mistakes an unreadable directory for an empty one, can't be frozen by a hanging backup directory, and stops retrying (and warning about) a cron backup it can't record on every call.**
+  Four gaps on the History tab (#2416, #2417, #2799). See
+  [Backup history](../backups.md#backup-history-2217) and
+  [When an import keeps failing](../backups.md#when-an-import-keeps-failing).
+  - **Presence per artifact (#2416).** A backup's dump and media set are
+    judged separately, and each part of a media set on its own. When they
+    differ, the row shows one chip each (`Database: pruned (retention)`
+    `Media: on disk`) where it used to read `missing` or
+    `partly pruned (retention)` for the whole run. A media set with some
+    parts gone reads `missing` with "N parts missing: 02, 05".
+    `partly pruned (retention)` now means some files of one artifact were
+    pruned by the app's retention while the rest are still here.
+  - **`expired` follows cron's rules.** It used to be any imported run older
+    than the app's `BACKUP_KEEP_DAYS` plus a day. Now a gone file of an
+    imported run is `expired` only if `backup.sh prune` would have removed
+    it: older than the `keep_days` that `backup.sh all` writes into
+    `manifest.json` plus a day, with a newer complete backup of the same kind
+    on disk, and no `.keep` for its stamp nor `.good`/`.hold` for it in its
+    own directory. Without cron's `keep_days` (the manifest is the app's, or
+    there is none) the app's `BACKUP_KEEP_DAYS` stands in and the row reads
+    `probably expired`. Anything else that is gone reads `missing`, including
+    app-made files cron's prune removed from a shared `BACKUP_DIR`. Rows
+    reading `missing`, `expired` or `probably expired` have a **?** tip
+    saying why, and an unverified imported row has one saying cron made it.
+  - **An unreadable directory is said to be one (#2799).** A `db/` or
+    `media/` that exists but can't be listed (permissions, an I/O error)
+    used to read "none yet" in the last-good summary. It now reads "couldn't
+    read this server's backup directory", its rows' files read
+    `couldn't check`, and no file is called expired while a marker in it
+    can't be ruled out. A file `lstat` refuses for a reason other than its
+    absence is `couldn't check` too, not gone. A missing directory still
+    reads "none yet".
+  - **The disk is read off the page (#2417).** The markers, presence,
+    Resume and the status panel's `manifest.json` used to be read in the
+    LiveView process on mount, paging, every action and every 3-second tick,
+    so a hanging network mount froze the page. They are now read in the
+    background after the page connects, one read at a time per tab, with a
+    5-second budget (`config :kiln_cms, KilnCMSWeb.BackupLive,
+    disk_timeout_ms:`). Rows say `checking…` until the first read answers;
+    one that doesn't answer reads `couldn't check in time` and the page
+    asks for a reload. The timeout fixes what the page shows, not the stuck
+    read: a blocked file system call holds a dirty I/O scheduler thread until
+    the mount answers, and each open tab adds at most one.
+  - **The importer backs off a stamp it can't write (#2417).** A stamp whose
+    row write fails is retried after 15 minutes, doubling up to 6 hours, per
+    backup directory and stamp, on each node; in between it is counted in
+    the summary's new `deferred` key and not logged. Each failed attempt
+    logs one warning ("Couldn't import backup <stamp> (attempt N): <cause>.
+    Next try after …") and emits `[:kiln_cms, :backups, :import, :failed]`.
+    `bin/kiln_cms rpc 'IO.inspect(KilnCMS.Backups.Importer.retry_failed())'`
+    retries at once. A deferred stamp is kept by retention as Unrecorded and
+    never makes `Importer.run/0` return an error. Scripts that match the
+    summary map exactly need to allow the `deferred` key.
+  - The empty History now says cron's backups appear there about ten minutes
+    after they finish.
+
+  No migration; rolling back is safe (the backoff is in memory only).
+
 <a id="security-alert-gaps-2642"></a>
 
 - **Four gaps in security alerts after 1.9: the inbox's language, exhausted deliveries, platform alerts outside the default console, and IPv6 in the help text.**
