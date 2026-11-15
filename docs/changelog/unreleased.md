@@ -1173,7 +1173,7 @@ carries the reasoning.
   the assets and is not in the running release. A Docker deploy needs
   nothing; a downstream project that builds
   Kiln from source should move its own `.tool-versions` to the same
-  version.
+  version. (#2927)
 
 <a id="form-field-name-website-reserved"></a>
 
