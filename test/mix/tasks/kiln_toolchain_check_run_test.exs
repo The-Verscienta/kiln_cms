@@ -42,7 +42,7 @@ defmodule Mix.Tasks.Kiln.Toolchain.CheckRunTest do
 
   # Node is not a parameter: only the Node cases vary it, and they write their
   # own lines rather than threading a third argument through every fixture.
-  @node "22.23.3"
+  @node "22.23.5"
 
   defp dockerfile(elixir, erlang, node \\ @node) do
     """

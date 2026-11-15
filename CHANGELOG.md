@@ -166,6 +166,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Node moves from 22.23.3 to 22.23.5 for building assets, in CI and in the release image (`.tool-versions`, Dockerfile `NODE_VERSION`). A project that builds Kiln from source should move its own `.tool-versions` to match.**
+  ([#2927](https://github.com/The-Verscienta/kiln_cms/pull/2927) · [long form](docs/changelog/unreleased.md#node-22-23-5))
+
 - **An account can hold at most 20 passkeys and add at most 5 an hour; the Passkeys section of the settings page says which limit refused.**
   ([long form](docs/changelog/unreleased.md#passkey-limits))
 

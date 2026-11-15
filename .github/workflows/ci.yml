@@ -1015,18 +1015,19 @@ jobs:
 
       - name: Compile the fixture plugin against only the SDK
         working-directory: sdk/fixtures/dep_plugin
-        # `deps.compile` first: Mix checks a path dependency's version against
-        # the requirement using the copy already in _build, so a cache restored
-        # from before an SDK version bump fails "does not match the requirement"
-        # until the SDK is rebuilt. The cache key can't prevent it: restore-keys
-        # falls back to that cache. Every dependency, not just `kiln_plugin`:
-        # `deps.compile kiln_plugin` builds the SDK alone, without Spark, so on
-        # a cold cache (any `.tool-versions` change) it fails "module
-        # Spark.Dsl.Transformer is not loaded".
+        # `deps.compile kiln_plugin` first: Mix checks a path dependency's
+        # version against the requirement using the copy already in _build, so
+        # a cache restored from before an SDK version bump fails "does not
+        # match the requirement" until the SDK is rebuilt. The cache key can't
+        # prevent it: restore-keys falls back to that cache.
+        # `--include-children` builds the SDK's own deps first: on a cold
+        # cache (any `.tool-versions` change misses it) a bare
+        # `deps.compile kiln_plugin` compiles the SDK before Spark exists and
+        # fails "module Spark.Dsl.Verifier is not loaded" (#2927).
         run: |
           mix deps.get
           mix format --check-formatted
-          mix deps.compile
+          mix deps.compile kiln_plugin --include-children
           mix compile --warnings-as-errors
 
   client-js:
