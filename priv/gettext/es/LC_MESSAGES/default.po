@@ -825,6 +825,11 @@ msgstr "%{failed} fallidos en 24 h · %{disabled} desactivados automáticamente"
 msgid "%{fields} reads this field in a condition: remove that condition first."
 msgstr "%{fields} lee este campo en una condición: quita primero esa condición."
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} %{condition}"
+msgstr "%{field} %{condition}"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{field} %{op} %{value}"
@@ -1323,6 +1328,16 @@ msgstr "%{size} · %{count} archivo(s) · %{trigger}"
 msgid "%{source} links to %{type}."
 msgstr "%{source} enlaza con %{type}."
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{states} %{type} records"
+msgstr "Registros de %{type} %{states}"
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{states} records"
+msgstr "Registros %{states}"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{tasks} on this block"
@@ -1456,6 +1471,12 @@ msgstr "(excluido de la entrega)"
 #, elixir-autogen, elixir-format
 msgid "(no link)"
 msgstr "(sin enlace)"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "(not found)"
+msgstr "(no encontrado)"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
@@ -3737,6 +3758,7 @@ msgstr "Respuestas en /api/ask"
 msgid "Any"
 msgstr "Cualquiera"
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Any category"
@@ -3976,6 +3998,8 @@ msgstr "¿Archivar este lanzamiento? Sus elementos pendientes quedarán libres p
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#: lib/kiln_cms_web/field_selection.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
@@ -4821,6 +4845,11 @@ msgstr "Por"
 #, elixir-autogen, elixir-format
 msgid "By %{author}"
 msgstr "Por %{author}"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "By title"
+msgstr "Por título"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -8145,6 +8174,8 @@ msgstr "Documento descargable, p. ej. un PDF"
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#: lib/kiln_cms_web/field_selection.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/experiment_live.ex
@@ -8588,6 +8619,11 @@ msgstr "Editores y administradores"
 #, elixir-autogen, elixir-format
 msgid "Editors and admins of this site can open it. Your account has a different role."
 msgstr "Los editores y administradores de este sitio pueden abrirla. Tu cuenta tiene otro rol."
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Editors are offered: %{sentence}"
+msgstr "Se ofrece a los editores: %{sentence}"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -10934,6 +10970,11 @@ msgstr "Formulario alojado"
 msgid "Hover a block and click Edit, or Tab to it, to change it on the page."
 msgstr "Pase el cursor sobre un bloque y haga clic en Editar, o llegue con Tab, para cambiarlo en la página."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "How %{field} is compared"
+msgstr "Cómo se compara %{field}"
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "How URLs are built, and bulk regeneration."
@@ -11317,6 +11358,11 @@ msgstr "Mejorar"
 msgid "In a release"
 msgstr "En un lanzamiento"
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "In category"
+msgstr "En la categoría"
+
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "In feeds"
@@ -11329,6 +11375,8 @@ msgstr "En una frase:"
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#: lib/kiln_cms_web/field_selection.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -12197,6 +12245,11 @@ msgstr "Deja un campo en blanco para usar el valor del servidor. Un sitio puede 
 #, elixir-autogen, elixir-format
 msgid "Leave a note on the content"
 msgstr "Dejar una nota en el contenido"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Leave a value empty to not filter on that field. For “is one of”, separate the values with commas."
+msgstr "Deje un valor vacío para no filtrar por ese campo. Para «es uno de», separe los valores con comas."
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -13333,6 +13386,11 @@ msgstr "Da nombre al registro (la búsqueda lo encuentra por este valor)"
 msgid "Narrow fields of the same section sit side by side in the editor; on a small screen each takes the full row."
 msgstr "Los campos estrechos de una misma sección se colocan uno al lado del otro en el editor; en una pantalla pequeña cada uno ocupa la fila completa."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Narrow what editors are offered and what a save may add. It never shows a record someone cannot already read, and it binds admins too. Leave everything empty to allow any record."
+msgstr "Limita lo que se ofrece a los editores y lo que un guardado puede añadir. Nunca muestra un registro que la persona no pueda leer ya, y también obliga a los administradores. Deje todo vacío para permitir cualquier registro."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nav items"
@@ -13575,6 +13633,11 @@ msgstr "Las nuevas subidas van al bucket %{bucket}, servido desde %{url}."
 #, elixir-autogen, elixir-format
 msgid "New uploads go to the deployment's storage."
 msgstr "Las nuevas subidas van al almacenamiento del despliegue."
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Newest first"
+msgstr "Más recientes primero"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/account_live.ex
@@ -15214,6 +15277,11 @@ msgstr[1] "Solo %{count} redes de la lista pueden acceder a la consola. El inici
 msgid "Only %{count} words — pages under %{min} rarely rank well."
 msgstr "Solo %{count} palabras — las páginas de menos de %{min} rara vez posicionan bien."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Only %{type} records that match"
+msgstr "Solo los registros de %{type} que coinciden"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only .xlf, .xliff and .xml files can be imported."
@@ -15333,6 +15401,16 @@ msgstr "Solo el contenido publicado se puede leer sin clave"
 #, elixir-autogen, elixir-format
 msgid "Only published posts can be sent."
 msgstr "Solo se pueden enviar entradas publicadas."
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Only records that are"
+msgstr "Solo los registros que están"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Only records the editor created"
+msgstr "Solo los registros creados por el editor"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -15594,6 +15672,11 @@ msgstr "O hasta el (UTC)"
 #, elixir-autogen, elixir-format
 msgid "Or use the link in the confirmation email we sent, if it's still valid."
 msgstr "O usa el enlace del correo de confirmación que te enviamos, si aún es válido."
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Order a blank search"
+msgstr "Orden de una búsqueda vacía"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
@@ -16738,6 +16821,8 @@ msgstr "¿Publicar este lanzamiento ahora? Todos los elementos se publican junto
 #: lib/kiln_cms/notifications.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#: lib/kiln_cms_web/field_selection.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -20008,6 +20093,11 @@ msgstr "Mostrando los primeros %{cap} de %{total} cambios de nombre: al aplicar 
 msgid "Showing the first %{count} occurrences — fix some and re-check for the rest."
 msgstr "Mostrando las primeras %{count} apariciones: corrige algunas y vuelve a comprobar para ver el resto."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{count} tags and categories by name."
+msgstr "Se muestran las primeras %{count} etiquetas y categorías por nombre."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Showing the first %{limit} tags. Filter to find others."
@@ -21287,6 +21377,11 @@ msgstr "Se etiquetaron %{ok}; %{failed} no se pudieron actualizar."
 #, elixir-autogen, elixir-format
 msgid "Tagged %{tags}"
 msgstr "Con la etiqueta %{tags}"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Tagged with any of"
+msgstr "Con alguna de las etiquetas"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -23814,6 +23909,11 @@ msgstr "Este sitio no tiene administradores ni editores propios."
 msgid "This site has no admins of its own."
 msgstr "Este sitio no tiene administradores propios."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "This site has no tags yet."
+msgstr "Este sitio aún no tiene etiquetas."
+
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/feed_settings_live.ex
 #: lib/kiln_cms_web/live/locale_settings_live.ex
@@ -24048,6 +24148,11 @@ msgstr "Marque al menos una etiqueta para aplicar."
 #, elixir-autogen, elixir-format
 msgid "Tick every type that should carry this field. Each gets its own copy under the same machine name, which you can then change on its own."
 msgstr "Marque cada tipo que deba llevar este campo. Cada uno recibe su propia copia con el mismo nombre interno, que luego puede cambiar por separado."
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Tick none to offer records in any state the editor can read."
+msgstr "No marque ninguno para ofrecer registros en cualquier estado que el editor pueda leer."
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #, elixir-autogen, elixir-format
@@ -25864,6 +25969,11 @@ msgstr "Qué campos necesitan una gravedad cuando una edición publicada los cam
 msgid "Which of this site's content types appear in its Atom and JSON feeds, and how much of each entry they carry."
 msgstr "Qué tipos de contenido de este sitio aparecen en sus feeds Atom y JSON, y cuánto de cada entrada llevan."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Which records can be picked"
+msgstr "Qué registros se pueden elegir"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Which records connect"
@@ -27117,6 +27227,11 @@ msgstr "difundir en «%{topic}»"
 msgid "by"
 msgstr "por"
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "by title"
+msgstr "por título"
+
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
 msgid "can read: %{grants}"
@@ -27347,6 +27462,11 @@ msgstr "no se pudo escribir un archivo de prueba en el bucket privado (%{detail}
 msgid "create a task for the author"
 msgstr "crear una tarea para el autor"
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "created by the editor"
+msgstr "creados por el editor"
+
 #: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
@@ -27529,6 +27649,11 @@ msgstr "en cola"
 msgid "enqueued, not yet answered"
 msgstr "en cola, aún sin respuesta"
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "equals"
+msgstr "es igual a"
+
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "equivalent"
@@ -27660,6 +27785,11 @@ msgstr "búsqueda híbrida por palabras clave y semántica en todos los tipos de
 msgid "image dimensions are too large"
 msgstr "las dimensiones de la imagen son demasiado grandes"
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "in %{category}"
+msgstr "en %{category}"
+
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
 msgid "in %{duration}"
@@ -27712,6 +27842,16 @@ msgstr "no válido"
 msgid "is"
 msgstr "es"
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "is %{values}"
+msgstr "es %{values}"
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "is %{value}"
+msgstr "es %{value}"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "is already a field on %{types}"
@@ -27745,9 +27885,15 @@ msgid "is more than"
 msgstr "es mayor que"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
 #, elixir-autogen, elixir-format
 msgid "is not"
 msgstr "no es"
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "is not %{value}"
+msgstr "no es %{value}"
 
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
@@ -27775,6 +27921,7 @@ msgid "is not valid: it %{reason}"
 msgstr "no es válido: %{reason}"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
 #, elixir-autogen, elixir-format
 msgid "is one of"
 msgstr "es uno de"
@@ -28053,6 +28200,11 @@ msgstr "nunca"
 msgid "never enabled"
 msgstr "nunca activada"
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "newest first"
+msgstr "más recientes primero"
+
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
 msgid "no fields"
@@ -28245,6 +28397,7 @@ msgstr "las opciones deben ser únicas"
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/layouts.ex
+#: lib/kiln_cms_web/field_selection.ex
 #, elixir-autogen, elixir-format
 msgid "or"
 msgstr "o"
@@ -28618,6 +28771,11 @@ msgstr "etiqueta"
 #, elixir-autogen, elixir-format
 msgid "tag group"
 msgstr "grupo de etiquetas"
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "tagged %{tags}"
+msgstr "con la etiqueta %{tags}"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format

@@ -541,7 +541,19 @@ carries the reasoning.
   its add control when the field would refuse that record; reverse writes
   still refuse it with the same message. The selection's tags, categories and
   field labels are resolved once when the picker opens, not per keystroke.
-  Still to come: the fields-admin editor for `selection` and create-on-type.
+  Still to come: create-on-type.
+
+<a id="reference-selection-editor"></a>
+
+- **The fields admin can set a reference field's `selection` ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285), third of four changes).**
+  Relationship fields, new or edited, get a step **Which records can be
+  picked**: states, "only records the editor created", the order of a blank
+  search and, per target type, tags, a category and conditions on plain custom
+  fields (equals, is one of, is not). A sentence reads the setting back, a
+  refusal from the server shows under the step, and a stored selection saves
+  back unchanged. Nothing about what is enforced changes; this is the editor
+  for the setting parts 1 and 2 added. See "Limit what can be picked" in
+  `docs/extending-content.md`.
 
 <a id="backup-schedules"></a>
 

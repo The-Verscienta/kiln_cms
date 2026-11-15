@@ -1667,11 +1667,31 @@ Why the input is an editor-only setting apart from **Editing**, and why a named 
 
 Starting point: a top-level reference field, and a reason to keep some records
 out of it (only published ones, only the writer's own, only pages tagged
-"recipes"). The editor's picker, the dropdown widget and the reverse field
-apply it (#2285, part 2). There is no admin screen for it yet (part 3), so set
-it through the API or a seed.
+"recipes"). Set it in the fields admin, or through the API or a seed. The
+editor's picker, the dropdown widget and the reverse field apply it (#2285).
 
-1. Update the field definition's `selection` as an admin. In a seed or the
+**In the fields admin.** Open a relationship field (new or **Edit**) and use
+step 6, **Which records can be picked**:
+
+1. Tick the states editors may pick (none ticked means any state they can
+   read) and, optionally, **Only records the editor created**.
+2. Choose how a blank search is ordered: newest first or by title.
+3. For each target type the field links to, optionally pick tags (any of),
+   a category, and a condition per custom field: *equals*, *is one of*
+   (values separated by commas) or *is not*, then a value. Only plain,
+   non-private fields are offered; a number or yes/no field is stored as a
+   number or boolean. Leave a value empty to not filter on that field.
+4. Read the sentence under the step ("Editors are offered: Published Page
+   records, tagged vegan, newest first.") and save. A condition the server
+   refuses shows under the step and nothing is saved. A condition naming a
+   deleted tag or category stays listed as "(not found)" so saving does not
+   drop it silently; remove it to clean up.
+
+Untick a target type and its conditions go with it. The step lists the first
+200 tags and categories by name; a field can name up to 50 tags. Changing a
+relationship back to a plain value clears the selection.
+
+**By API or seed.** 1. Update the field definition's `selection` as an admin. In a seed or the
    console:
 
    ```elixir
