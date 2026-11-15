@@ -44,6 +44,8 @@ defmodule KilnCMSWeb.BackupLive do
   `start_async` - never on the disconnected render, where it would run twice and
   for whoever the request was. The page param is parsed as `AccountsLive` does;
   the rows themselves page with the `:history` read's own offset pagination.
+  `?run=<id>` (the Schedule tab's "Last scheduled run" link, #2875) opens the
+  page that holds that run (`Backups.history_page_of/3`) and marks its row.
   Whether each run's files are still on disk is computed for the visible page
   only (`Backups.Presence`).
 
@@ -120,6 +122,7 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:poll_timer, nil)
        |> assign(:polls_left, @max_polls)
        |> assign(:page, 1)
+       |> assign(:focus_run, nil)
        |> assign(:runs, [])
        |> assign(:run_count, 0)
        |> assign(:markers, Markers.empty())
@@ -139,13 +142,15 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
-  # The route's `?page=`. Re-checked here because `handle_params/3` runs on
-  # every patch, long after the mount guard was evaluated.
+  # The route's `?page=`, or `?run=<id>` (#2875): the page that holds that
+  # run, which wins over `?page=`, with its row marked and brought into view.
+  # Re-checked here because `handle_params/3` runs on every patch, long after
+  # the mount guard was evaluated.
   @impl true
   def handle_params(params, _uri, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
-      page = Params.integer(params, "page", 1, 1..100_000)
-      socket = socket |> assign(:page, page) |> load_history()
+      {page, focus, socket} = history_target(params, socket)
+      socket = socket |> assign(:page, page) |> assign(:focus_run, focus) |> load_history()
 
       # Past the last page: land on the last one rather than an empty table.
       case last_page(socket.assigns.run_count) do
@@ -153,30 +158,56 @@ defmodule KilnCMSWeb.BackupLive do
           {:noreply, push_patch(socket, to: history_path(last))}
 
         _ ->
-          {:noreply, socket}
+          {:noreply, reveal_run(socket, focus)}
       end
     else
-      {:noreply, push_navigate(socket, to: KilnCMSWeb.AccessDenied.path(:platform))}
+      deny(socket)
     end
   end
+
+  # The run's id is only looked up, never trusted: an id that isn't a UUID, a
+  # run that doesn't exist and a read that fails all land on page 1 with a
+  # flash. Paging (`history_path/1`) drops the `?run=`.
+  defp history_target(%{"run" => id}, socket) when is_binary(id) do
+    with {:ok, id} <- Ecto.UUID.cast(id),
+         {:ok, page} <- Backups.history_page_of(id, socket.assigns.current_user, @per_page) do
+      {page, id, socket}
+    else
+      _ -> {1, nil, put_flash(socket, :error, gettext("That backup isn't in the history."))}
+    end
+  end
+
+  defp history_target(params, socket),
+    do: {Params.integer(params, "page", 1, 1..100_000), nil, socket}
+
+  # Scrolled to and focused by `revealWhenReady/1` (assets/js/app.js).
+  defp reveal_run(socket, nil), do: socket
+  defp reveal_run(socket, id), do: push_event(socket, "kiln:reveal", %{id: "backup-run-#{id}"})
+
+  # A user who stopped being a platform admin mid-session (demoted, or their
+  # grant expired) is sent where the mount would have sent them, rather than
+  # left clicking buttons that silently do nothing (#2875). Nothing is read,
+  # requested or written first.
+  defp deny(socket),
+    do: {:noreply, push_navigate(socket, to: KilnCMSWeb.AccessDenied.path(:platform))}
 
   @impl true
   def handle_event("backup_now", _params, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       start_backup(socket)
     else
-      {:noreply, socket}
+      deny(socket)
     end
   end
 
-  # A pushed payload is client-chosen: a non-admin gets nothing, and a mangled
+  # A pushed payload is client-chosen: a non-admin is sent away, and a mangled
   # one is a no-op (#764).
   def handle_event("page", %{"to" => to}, socket) when is_binary(to) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       page = Params.integer(%{"page" => to}, "page", 1, 1..100_000)
       {:noreply, push_patch(socket, to: history_path(page))}
     else
-      {:noreply, socket}
+      deny(socket)
     end
   end
 
@@ -184,12 +215,13 @@ defmodule KilnCMSWeb.BackupLive do
 
   # Resume: the client names a run by id; the stamp is read from the server's
   # own record of that run, and `Backups.enqueue/1` decides whether it may be
-  # resumed. A non-admin, a mangled payload or an unknown id gets nothing.
+  # resumed. A non-admin is sent away; a mangled payload or an unknown id gets
+  # nothing.
   def handle_event("resume_run", %{"id" => id}, socket) when is_binary(id) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       resume_backup(socket, id)
     else
-      {:noreply, socket}
+      deny(socket)
     end
   end
 
@@ -201,7 +233,7 @@ defmodule KilnCMSWeb.BackupLive do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       cancel_backup(socket, id)
     else
-      {:noreply, socket}
+      deny(socket)
     end
   end
 
@@ -718,6 +750,7 @@ defmodule KilnCMSWeb.BackupLive do
         <.history
           runs={@runs}
           page={@page}
+          focus_run={@focus_run}
           run_count={@run_count}
           in_flight={@in_flight}
           markers={@markers}
@@ -870,6 +903,7 @@ defmodule KilnCMSWeb.BackupLive do
 
   attr :runs, :list, required: true
   attr :page, :integer, required: true
+  attr :focus_run, :string, default: nil, doc: "the id of the run `?run=` linked to"
   attr :run_count, :integer, required: true
   attr :in_flight, :map, default: nil
   attr :markers, :map, required: true
@@ -912,7 +946,11 @@ defmodule KilnCMSWeb.BackupLive do
         <li
           :for={{run, presence, resumable?, cancelable?} <- @runs}
           id={"backup-run-#{run.id}"}
-          class="space-y-1.5 py-3 text-sm"
+          aria-current={@focus_run == run.id && "true"}
+          class={[
+            "space-y-1.5 py-3 text-sm",
+            @focus_run == run.id && "-mx-2 rounded-md bg-primary/5 px-2"
+          ]}
         >
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span class="font-medium tabular-nums">

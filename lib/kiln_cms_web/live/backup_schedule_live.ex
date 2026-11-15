@@ -9,7 +9,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   A schedule backs up the whole instance, so, as on `KilnCMSWeb.BackupLive`,
   the route's per-org admin gate is not the question: `mount/3`,
   `handle_params/3`, every `handle_event/3` and the refresh ask
-  `KilnCMSWeb.LiveUserAuth.platform_admin?/1` again, and every read and write
+  `KilnCMSWeb.LiveUserAuth.platform_admin?/1` again (a user demoted, or whose
+  grant expired, since the mount is sent to the access-denied page, #2875),
+  and every read and write
   goes through the `KilnCMS.Backups` code interfaces as the admin, so the
   schedule's policies decide as well.
 
@@ -63,11 +65,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   # The least an enabled schedule may wait for the scheduler's first tick, and
   # how old the last tick may be, before the page says it hasn't run; a
-  # coarser KILN_BACKUP_SCHEDULER_CRON stretches it (`stale_after_s/1`).
+  # KILN_BACKUP_SCHEDULER_CRON slot further back stretches it
+  # (`tick_expected_since/1`).
   @stale_tick_floor_s 300
-
-  # Added to the cron's gap: a tick starts a little after its minute.
-  @stale_tick_slack_s 60
 
   @impl true
   def mount(_params, _session, socket) do
@@ -92,7 +92,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   def handle_params(_params, _uri, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: {:noreply, socket},
-      else: {:noreply, push_navigate(socket, to: KilnCMSWeb.AccessDenied.path(:platform))}
+      else: deny(socket)
   end
 
   @events ~w(new edit cancel validate save toggle delete)
@@ -104,8 +104,15 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   def handle_event(event, params, socket) when event in @events do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: event(event, params, socket),
-      else: {:noreply, socket}
+      else: deny(socket)
   end
+
+  # A user who stopped being a platform admin mid-session (demoted, or their
+  # grant expired) is sent where the mount would have sent them, rather than
+  # left clicking buttons that silently do nothing (#2875). Nothing is read or
+  # written first.
+  defp deny(socket),
+    do: {:noreply, push_navigate(socket, to: KilnCMSWeb.AccessDenied.path(:platform))}
 
   # Add and Edit are hidden while a form is open; a click that was already on
   # its way doesn't discard the open one.
@@ -204,7 +211,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   def handle_info(:refresh, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: {:noreply, socket |> load() |> schedule_refresh()},
-      else: {:noreply, socket}
+      else: deny(socket)
   end
 
   defp schedule_refresh(socket) do
@@ -440,17 +447,20 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     |> assign(:entries, entries)
     |> assign(:runs, runs)
     |> assign(:media_dir?, Backups.media_dir() != nil)
-    |> assign(:stale_tick, stale_tick(status, entries))
+    |> assign(:stale_tick, stale_tick(status, entries, DateTime.utc_now()))
   end
 
+  @doc false
   # `{:stale, last_tick_at | nil}` when the scheduler should have ticked and
   # hasn't: it is on, an enabled schedule has existed (since its baseline)
-  # for longer than `stale_after_s/1`, and no tick started within it.
+  # since before `tick_expected_since/1`, and no tick started after it.
   # `:unknown` when that couldn't be read. The `oban_jobs` read
   # (`Scheduler.last_tick_at/0`) is made only when a tick is expected.
-  defp stale_tick(%{scheduler_enabled?: true}, entries) do
-    now = DateTime.utc_now()
-    expected_since = DateTime.add(now, -stale_after_s(now), :second)
+  # Public, with `now`, for the tests: a weekday-only cron is checked on a
+  # Saturday (#2875).
+  @spec stale_tick(map(), [map()], DateTime.t()) :: {:stale, DateTime.t() | nil} | :unknown | nil
+  def stale_tick(%{scheduler_enabled?: true}, entries, %DateTime{} = now) do
+    expected_since = tick_expected_since(now)
 
     waiting? =
       Enum.any?(entries, fn %{schedule: s} ->
@@ -467,15 +477,16 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     end
   end
 
-  defp stale_tick(_status, _entries), do: nil
+  def stale_tick(_status, _entries, _now), do: nil
 
-  # The cron's longest gap between ticks plus a minute's slack, never under
-  # five minutes: at `*/10` a seven-minute-old tick is on time.
-  defp stale_after_s(now) do
-    case Scheduler.tick_gap_s(now) do
-      gap when is_integer(gap) -> max(@stale_tick_floor_s, gap + @stale_tick_slack_s)
-      nil -> @stale_tick_floor_s
-    end
+  # The time a healthy scheduler has ticked since: the cron's newest slot at
+  # least five minutes ago, so every slot gets the same five minutes before
+  # it is late. At `* * * * 1-5` on a Saturday, and on Monday until 00:05,
+  # that is Friday 23:59, so a weekend is not "hasn't run". When the cron has
+  # no slot (`@reboot`), five minutes ago.
+  defp tick_expected_since(now) do
+    Scheduler.expected_tick_at(now, @stale_tick_floor_s) ||
+      DateTime.add(now, -@stale_tick_floor_s, :second)
   end
 
   @doc false
@@ -708,7 +719,12 @@ defmodule KilnCMSWeb.BackupScheduleLive do
             {outcome_label(@schedule)}
           </p>
           <p :if={is_struct(@run)} data-role="last-run">
-            <.link navigate={~p"/editor/backups"} class="underline hover:no-underline">
+            <%!-- The run's own row in the History, on whichever page holds
+                  it (`?run=`, #2875). --%>
+            <.link
+              navigate={~p"/editor/backups?#{%{run: @run.id}}"}
+              class="underline hover:no-underline"
+            >
               {gettext("Last scheduled run: %{status} (%{stamp})",
                 status: run_status_label(@run.status),
                 stamp: stamp(@run.started_at)

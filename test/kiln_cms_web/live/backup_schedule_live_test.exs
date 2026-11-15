@@ -151,53 +151,108 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
   # Called directly: a refused mount leaves no socket to push events down, so
   # the question is what each handler does on its own with a socket whose
   # user is not a platform admin.
+  # A user who stopped being a platform admin mid-session (#2875) is sent to
+  # the access-denied page by every handler, as the mount would have, and
+  # nothing is written first: an editor, and a former admin whose grant has
+  # expired.
   describe "each handler refuses a socket that isn't a platform admin's" do
     setup do
       schedule = schedule!(%{}, platform_admin())
 
-      socket = %Phoenix.LiveView.Socket{
-        assigns: %{
-          __changed__: %{},
-          flash: %{},
-          current_user: %{role: :editor},
-          form: nil,
-          editing: nil
-        }
+      expired = %{
+        role: :editor,
+        granted_role: :admin,
+        granted_role_expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
       }
 
-      %{schedule: schedule, socket: socket}
+      # The premise: the same grant, still live, would pass.
+      assert KilnCMSWeb.LiveUserAuth.platform_admin_user?(%{
+               expired
+               | granted_role_expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)
+             })
+
+      sockets =
+        for user <- [%{role: :editor}, expired] do
+          %Phoenix.LiveView.Socket{
+            assigns: %{
+              __changed__: %{},
+              flash: %{},
+              current_user: user,
+              form: nil,
+              editing: nil
+            }
+          }
+        end
+
+      %{schedule: schedule, sockets: sockets}
+    end
+
+    defp assert_denied({:noreply, socket}) do
+      assert {:live, :redirect, %{to: "/access-denied?needs=platform"}} = socket.redirected
+      assert socket.assigns.flash == %{}
     end
 
     # The form was opened while they were a platform admin, so it carries
     # that actor: the handler's own check is what stands in front of it.
-    test "save and validate create nothing, even with a form opened earlier", %{socket: socket} do
+    test "save and validate create nothing, even with a form opened earlier", %{sockets: sockets} do
       form =
         KilnCMS.Backups.Schedule
         |> AshPhoenix.Form.for_create(:create, actor: platform_admin(), as: "schedule")
         |> Phoenix.Component.to_form()
 
-      socket = %{socket | assigns: %{socket.assigns | form: form, editing: :new}}
       params = %{"schedule" => form_params(%{})}
 
-      assert {:noreply, ^socket} = BackupScheduleLive.handle_event("validate", params, socket)
-      assert {:noreply, ^socket} = BackupScheduleLive.handle_event("save", params, socket)
+      for socket <- sockets do
+        socket = %{socket | assigns: %{socket.assigns | form: form, editing: :new}}
+
+        for event <- ["validate", "save", "new", "cancel"] do
+          assert_denied(BackupScheduleLive.handle_event(event, params, socket))
+        end
+      end
+
       assert length(all_schedules()) == 1
     end
 
-    test "toggle and delete leave the schedule as it was", %{schedule: s, socket: socket} do
-      for event <- ["toggle", "delete", "edit"] do
-        assert {:noreply, ^socket} =
-                 BackupScheduleLive.handle_event(event, %{"id" => s.id}, socket)
+    test "toggle, delete and edit leave the schedule as it was", %{
+      schedule: s,
+      sockets: sockets
+    } do
+      for socket <- sockets, event <- ["toggle", "delete", "edit"] do
+        assert_denied(BackupScheduleLive.handle_event(event, %{"id" => s.id}, socket))
       end
 
       assert stored(s).enabled
     end
 
-    test "handle_params sends them away, and the refresh reads nothing", %{socket: socket} do
-      assert {:noreply, %{redirected: {:live, :redirect, %{to: "/access-denied?needs=platform"}}}} =
-               BackupScheduleLive.handle_params(%{}, "/editor/backups/schedules", socket)
+    test "handle_params and the refresh send them away", %{sockets: sockets} do
+      for socket <- sockets do
+        assert_denied(BackupScheduleLive.handle_params(%{}, "/editor/backups/schedules", socket))
 
-      assert {:noreply, ^socket} = BackupScheduleLive.handle_info(:refresh, socket)
+        # Sent away rather than re-armed: no `load/1` (it would need assigns
+        # this socket doesn't have) and no next refresh.
+        assert_denied(BackupScheduleLive.handle_info(:refresh, socket))
+        refute_received :refresh
+      end
+    end
+
+    test "a connected page whose admin lost the role is sent away on the next click", %{
+      conn: conn,
+      schedule: s
+    } do
+      admin = platform_admin()
+      lv = mount(conn, admin)
+
+      :sys.replace_state(lv.pid, fn state ->
+        update_in(
+          state.socket,
+          &Phoenix.Component.assign(&1, :current_user, %{admin | role: :editor})
+        )
+      end)
+
+      assert {:error, {:live_redirect, %{to: "/access-denied?needs=platform"}}} =
+               lv |> element("#backup-schedule-#{s.id} [data-role=toggle]") |> render_click()
+
+      assert stored(s).enabled
     end
   end
 
@@ -725,11 +780,18 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       s = force!(schedule!(%{}, admin), last_outcome: "started")
       other = schedule!(%{time_of_day: ~T[05:00:00]}, admin)
 
-      %{stamp: "20260102-030000", trigger: "schedule", schedule_ids: [s.id]}
-      |> Backups.start_run!(actor: Backups.system())
-      |> Backups.fail_run!(%{error: "boom"}, actor: Backups.system())
+      run =
+        %{stamp: "20260102-030000", trigger: "schedule", schedule_ids: [s.id]}
+        |> Backups.start_run!(actor: Backups.system())
+        |> Backups.fail_run!(%{error: "boom"}, actor: Backups.system())
 
       lv = mount(conn, admin)
+
+      # #2875: the run's own History row, not just the Backups tab.
+      assert has_element?(
+               lv,
+               ~s|#backup-schedule-#{s.id} [data-role=last-run] a[href="/editor/backups?run=#{run.id}"]|
+             )
 
       assert has_element?(lv, "#backup-schedule-#{s.id} [data-role=last-outcome]", "started")
 
@@ -831,21 +893,68 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       refute has_element?(mount(conn, admin), "#schedule-stale-tick")
     end
 
-    # The threshold follows KILN_BACKUP_SCHEDULER_CRON: at */10 a tick seven
-    # minutes old is on time, one 25 minutes old is not.
+    # The threshold follows KILN_BACKUP_SCHEDULER_CRON: a tick is late only
+    # once the cron's slot (five minutes after it) has passed without
+    # one. At */10, 10:08 expects the 10:00 tick, and a 25-minute-old one is
+    # late whenever the page looks.
     test "a coarser scheduler cron stretches the threshold", %{conn: conn} do
       put_cron("*/10 * * * *")
       admin = platform_admin()
+      s = force!(schedule!(%{}, admin), baseline_at: @baseline)
+      entries = [%{schedule: s}]
+      on = %{scheduler_enabled?: true}
 
-      force!(schedule!(%{}, admin),
-        baseline_at: DateTime.add(DateTime.utc_now(), -3600, :second)
-      )
+      tick_at!(~U[2026-03-02 09:50:10.000000Z])
+
+      assert BackupScheduleLive.stale_tick(on, entries, ~U[2026-03-02 09:58:00Z]) == nil
+
+      assert BackupScheduleLive.stale_tick(on, entries, ~U[2026-03-02 10:08:00Z]) ==
+               {:stale, ~U[2026-03-02 09:50:10.000000Z]}
+
+      tick_at!(~U[2026-03-02 10:00:20.000000Z])
+      assert BackupScheduleLive.stale_tick(on, entries, ~U[2026-03-02 10:08:00Z]) == nil
 
       tick_at!(DateTime.add(DateTime.utc_now(), -25 * 60, :second))
       assert has_element?(mount(conn, admin), "#schedule-stale-tick", "hasn't run since")
+    end
 
-      tick_at!(DateTime.add(DateTime.utc_now(), -7 * 60, :second))
-      refute has_element?(mount(conn, admin), "#schedule-stale-tick")
+    # #2875: the threshold used to come from the next few gaps of the cron,
+    # which at `* * * * 1-5` never include the weekend, so a healthy
+    # scheduler read as stale from Saturday on. 2026-03-06 is a Friday.
+    test "a weekday-only scheduler cron is not stale over the weekend" do
+      put_cron("* * * * 1-5")
+      s = force!(schedule!(%{}, platform_admin()), baseline_at: @baseline)
+      entries = [%{schedule: s}]
+      on = %{scheduler_enabled?: true}
+      friday = ~U[2026-03-06 23:59:04.000000Z]
+      tick_at!(friday)
+
+      # Saturday noon and Sunday night: Friday's last tick is the latest due.
+      assert BackupScheduleLive.stale_tick(on, entries, ~U[2026-03-07 12:00:00Z]) == nil
+      assert BackupScheduleLive.stale_tick(on, entries, ~U[2026-03-08 23:59:00Z]) == nil
+
+      # Monday: like any slot, the 00:00 tick has five minutes, then it is due.
+      assert BackupScheduleLive.stale_tick(on, entries, ~U[2026-03-09 00:00:30Z]) == nil
+      assert BackupScheduleLive.stale_tick(on, entries, ~U[2026-03-09 00:04:30Z]) == nil
+
+      assert BackupScheduleLive.stale_tick(on, entries, ~U[2026-03-09 00:06:00Z]) ==
+               {:stale, friday}
+    end
+
+    test "with the scheduler off, or at @reboot, no slot stretches the five minutes" do
+      s = force!(schedule!(%{}, platform_admin()), baseline_at: @baseline)
+      entries = [%{schedule: s}]
+      now = ~U[2026-03-07 12:00:00Z]
+      tick_at!(~U[2026-03-07 11:56:00.000000Z])
+
+      assert BackupScheduleLive.stale_tick(%{scheduler_enabled?: false}, entries, now) == nil
+
+      put_cron("@reboot")
+      on = %{scheduler_enabled?: true}
+      assert BackupScheduleLive.stale_tick(on, entries, now) == nil
+
+      assert BackupScheduleLive.stale_tick(on, entries, DateTime.add(now, 300, :second)) ==
+               {:stale, ~U[2026-03-07 11:56:00.000000Z]}
     end
 
     test "a tick that couldn't be read says so instead of crashing", %{conn: conn} do

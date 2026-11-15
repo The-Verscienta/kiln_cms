@@ -359,22 +359,53 @@ defmodule KilnCMS.Backups.SchedulerTest do
       assert {"*/5 * * * *", Scheduler} = List.keyfind(crontab(), Scheduler, 1)
     end
 
-    test "tick_gap_s: the cron's longest gap between runs, nil when off" do
+    # The newest slot at least `slack_s` before now (#2875). 2026-03-01 is a
+    # Sunday, so 2026-03-06 is a Friday, 03-07 a Saturday, 03-09 a Monday.
+    test "expected_tick_at: the cron's newest slot the slack ago" do
       now = ~U[2026-03-01 10:03:30Z]
-      assert Scheduler.tick_gap_s(now) == 60
+      assert Scheduler.expected_tick_at(now, 60) == ~U[2026-03-01 10:02:00Z]
+      # The slot itself counts.
+      assert Scheduler.expected_tick_at(~U[2026-03-01 10:03:00Z], 0) == ~U[2026-03-01 10:03:00Z]
 
       put_cron("*/10 * * * *")
-      assert Scheduler.tick_gap_s(now) == 600
+      assert Scheduler.expected_tick_at(now, 60) == ~U[2026-03-01 10:00:00Z]
+      # 10:00 is less than the slack ago: the slot before it.
+      assert Scheduler.expected_tick_at(~U[2026-03-01 10:00:30Z], 60) == ~U[2026-03-01 09:50:00Z]
 
       put_cron("0 * * * *")
-      assert Scheduler.tick_gap_s(now) == 3600
+      assert Scheduler.expected_tick_at(now, 60) == ~U[2026-03-01 10:00:00Z]
 
-      # Uneven gaps: the longer one (17:00 to 09:00).
+      # Uneven gaps: the evening slot the day before, until 09:00.
       put_cron("0 9,17 * * *")
-      assert Scheduler.tick_gap_s(now) == 16 * 3600
+      assert Scheduler.expected_tick_at(now, 60) == ~U[2026-03-01 09:00:00Z]
+      assert Scheduler.expected_tick_at(~U[2026-03-01 08:00:00Z], 60) == ~U[2026-02-28 17:00:00Z]
 
-      put_cron("false")
-      assert Scheduler.tick_gap_s(now) == nil
+      put_cron("0 0 1 * *")
+      assert Scheduler.expected_tick_at(~U[2026-03-15 12:00:00Z], 60) == ~U[2026-03-01 00:00:00Z]
+    end
+
+    # The regression: looking at the next few gaps never saw the weekend, so a
+    # healthy weekday-only scheduler read as stale from Saturday on.
+    test "expected_tick_at: a weekday-only cron expects nothing over the weekend" do
+      put_cron("* * * * 1-5")
+
+      assert Scheduler.expected_tick_at(~U[2026-03-07 12:00:00Z], 60) ==
+               ~U[2026-03-06 23:59:00Z]
+
+      assert Scheduler.expected_tick_at(~U[2026-03-09 00:00:30Z], 60) ==
+               ~U[2026-03-06 23:59:00Z]
+
+      assert Scheduler.expected_tick_at(~U[2026-03-09 00:10:00Z], 60) ==
+               ~U[2026-03-09 00:09:00Z]
+    end
+
+    test "expected_tick_at: nil when the scheduler is off or runs only at boot" do
+      now = ~U[2026-03-01 10:03:30Z]
+
+      for off <- ["false", "@reboot"] do
+        put_cron(off)
+        assert Scheduler.expected_tick_at(now, 60) == nil
+      end
     end
 
     test "one attempt on the scheduling queue" do

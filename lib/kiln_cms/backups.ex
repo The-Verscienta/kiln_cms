@@ -1079,6 +1079,53 @@ defmodule KilnCMS.Backups do
     end)
   end
 
+  @doc """
+  The page of the history (`run_history/1`, `per_page` rows a page) that
+  holds the run `run_id` (#2875): what the Schedule tab's "Last scheduled
+  run" link opens. `{:ok, page}`, or `{:error, error}` for a run that doesn't
+  exist (`:not_found`), an id that isn't one, or an actor who may not read the
+  history.
+
+  Read as `actor` through the history's own read, in two steps: the run
+  itself, then how many rows come before it in the history's order
+  (`started_at` newest first, then `id`). The first is the probe: it refuses
+  rather than filters (`authorize_with: :error`), and only an actor it lets
+  through is counted for, since a count of a refused read is 0, which would
+  answer page 1 for any run.
+  """
+  @spec history_page_of(String.t(), term(), pos_integer()) ::
+          {:ok, pos_integer()} | {:error, term()}
+  def history_page_of(run_id, actor, per_page) when is_integer(per_page) and per_page > 0 do
+    with {:ok, run} <- history_run(run_id, actor),
+         {:ok, %{count: before}} when is_integer(before) <-
+           run_history(
+             query: before_in_history(run),
+             actor: actor,
+             authorize_with: :error,
+             page: [limit: 1, count: true]
+           ) do
+      {:ok, div(before, per_page) + 1}
+    end
+  end
+
+  defp history_run(run_id, actor) do
+    query = Run |> Ash.Query.filter(id == ^run_id) |> Ash.Query.limit(1)
+
+    case run_history(query: query, actor: actor, authorize_with: :error) do
+      {:ok, [%Run{} = run]} -> {:ok, run}
+      {:ok, []} -> {:error, :not_found}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  # The rows `run_history`'s sort puts ahead of `run`.
+  defp before_in_history(%Run{started_at: started_at, id: id}) do
+    Ash.Query.filter(
+      Run,
+      started_at > ^started_at or (started_at == ^started_at and id > ^id)
+    )
+  end
+
   defp put_resume(input, opts) do
     if Keyword.has_key?(opts, :resume) do
       resume = Keyword.get(opts, :resume)
