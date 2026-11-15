@@ -99,6 +99,36 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       refute File.exists?(DirId.path(dir))
     end
 
+    test "gets the hold markers a schedule's keep count asks for (#2219)", %{dir: dir} do
+      cron_backup!(dir, @cron)
+      stale = Path.join([dir, "db", Artifact.hold_name(@old)])
+      File.write!(stale, "")
+      KilnCMS.Test.BackupSchedules.schedule!(%{keep_count: 1})
+      ref = attach([[:kiln_cms, :backups, :last_good, :synced]])
+
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+
+      assert File.exists?(Path.join([dir, "db", Artifact.hold_name(@cron)]))
+      refute File.exists?(stale)
+      # The schedule backs up the database only.
+      refute File.exists?(Path.join([dir, "media", Artifact.hold_name(@cron)]))
+
+      assert_received {[:kiln_cms, :backups, :last_good, :synced], ^ref, %{count: 1},
+                       %{db: @cron, held: 1}}
+    end
+
+    test "while a chain holds the lock no hold moves either (#2219)", %{dir: dir} do
+      cron_backup!(dir, @cron)
+      stale = Path.join([dir, "db", Artifact.hold_name(@old)])
+      File.write!(stale, "")
+      KilnCMS.Test.BackupSchedules.schedule!(%{keep_count: 1})
+      held_lock!()
+
+      assert :busy = Chain.sync_last_good(dir)
+      assert File.exists?(stale)
+      refute File.exists?(Path.join([dir, "db", Artifact.hold_name(@cron)]))
+    end
+
     test "BACKUP_ENABLED=false (the in-app path off) does not stop it", %{dir: dir} do
       config = Application.get_env(:kiln_cms, KilnCMS.Backups)
       Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(config, :enabled, false))

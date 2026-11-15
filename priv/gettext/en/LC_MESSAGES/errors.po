@@ -129,6 +129,11 @@ msgstr ""
 msgid "must be accepted"
 msgstr ""
 
+#: lib/kiln_cms/backups/schedule/validations/keep_covers_interval.ex
+#, elixir-autogen, elixir-format
+msgid "must be at least as long as the schedule's interval, unless a number of backups to keep is set"
+msgstr ""
+
 msgid "must be equal to %{number}"
 msgstr ""
 
@@ -143,6 +148,11 @@ msgid "must be less than %{number}"
 msgstr ""
 
 msgid "must be less than or equal to %{number}"
+msgstr ""
+
+#: lib/kiln_cms/backups/schedule/validations/interval_available.ex
+#, elixir-autogen, elixir-format
+msgid "schedules more often than daily aren't available yet; choose daily or longer"
 msgstr ""
 
 msgid "should be %{count} byte(s)"
@@ -190,8 +200,3 @@ msgid "should have at most %{count} item(s)"
 msgid_plural "should have at most %{count} item(s)"
 msgstr[0] ""
 msgstr[1] ""
-
-#: lib/kiln_cms/backups/schedule/validations/interval_available.ex
-#, elixir-autogen, elixir-format
-msgid "sub-daily schedules arrive with keep-N retention; choose daily or longer"
-msgstr ""

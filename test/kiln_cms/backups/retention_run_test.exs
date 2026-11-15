@@ -10,6 +10,7 @@ defmodule KilnCMS.Backups.RetentionRunTest do
   use KilnCMS.DataCase, async: false
 
   import ExUnit.CaptureLog
+  import KilnCMS.Test.BackupSchedules, only: [schedule!: 1, platform_admin: 0]
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Importer, Presence, Recorder, Retention}
@@ -76,6 +77,14 @@ defmodule KilnCMS.Backups.RetentionRunTest do
     for sub <- ["db", "media"],
         name <- File.ls!(Path.join(dir, sub)),
         Artifact.parse_good_name(name) == :error,
+        Artifact.parse_hold_name(name) == :error,
+        do: "#{sub}/#{name}"
+  end
+
+  defp holds(dir) do
+    for sub <- ["db", "media"],
+        name <- Enum.sort(File.ls!(Path.join(dir, sub))),
+        String.ends_with?(name, ".hold"),
         do: "#{sub}/#{name}"
   end
 
@@ -463,6 +472,173 @@ defmodule KilnCMS.Backups.RetentionRunTest do
     end
   end
 
+  describe "the schedules' keep rules and hold markers (#2219)" do
+    setup %{dir: dir} do
+      test_pid = self()
+      handler = "hold-failed-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler,
+        [[:kiln_cms, :backups, :hold, :failed], [:kiln_cms, :backups, :retention, :skipped]],
+        fn event, measurements, metadata, _ ->
+          send(test_pid, {event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      # Three imported (cron-made) database backups; the newest is also
+      # verified, so it holds rules 3 and 4.
+      dump(dir, @older, 400)
+      dump(dir, @old, 400)
+      newest(dir)
+      :ok
+    end
+
+    test "the default policy reads the schedules: a keep count holds and writes .hold",
+         %{dir: dir} do
+      schedule!(%{keep_count: 2})
+
+      assert {:ok, %{deleted: deleted, plan: plan}} = Retention.run(dir)
+
+      # Imported backups fill a schedule's keep count ("keep more").
+      assert Enum.sort(deleted) == ["kiln-db-#{@older}.dump", Artifact.sidecar_name(:db, @older)]
+      assert %{reason: {:keep_count, [_id]}} = Enum.find(plan.keep, &(&1.stamp == @old))
+      assert plan.holds == %{db: [@old, @new], media: []}
+      assert holds(dir) == ["db/kiln-#{@old}.hold", "db/kiln-#{@new}.hold"]
+
+      for name <- holds(dir) do
+        path = Path.join(dir, name)
+        assert File.read!(path) == ""
+        assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
+      end
+    end
+
+    test "a paused schedule still holds" do
+      admin = platform_admin()
+      s = schedule!(%{keep_count: 2})
+      Backups.update_backup_schedule!(s, %{enabled: false}, actor: admin)
+
+      assert {:ok, %Policy{schedules: [%{id: id, keep_count: 2, keep_days: 14}]}} =
+               Policy.current()
+
+      assert id == s.id
+    end
+
+    test "a stale hold is removed; a .hold is never a stray, never imported", %{dir: dir} do
+      put(dir, "db", Artifact.hold_name(@older), 1, "")
+      put(dir, "media", Artifact.hold_name(@old), 400, "")
+
+      assert {:ok, %{plan: plan}} = Retention.run(dir)
+
+      refute Enum.any?(plan.delete ++ plan.keep, &(&1.kind == :stray))
+      assert plan.holds == %{db: [], media: []}
+      assert holds(dir) == []
+      # Only the backups were imported, one row per stamp, none for a hold.
+      runs = Backups.list_runs!(actor: Backups.system())
+      assert runs |> Enum.map(& &1.stamp) |> Enum.sort() == [@older, @old, @new]
+    end
+
+    test "a dry run writes and removes no hold", %{dir: dir} do
+      schedule!(%{keep_count: 2})
+      put(dir, "db", Artifact.hold_name(@older), 1, "")
+
+      assert {:ok, %{plan: %{holds: %{db: [@old, @new]}}}} = Retention.run(dir, dry_run: true)
+      assert holds(dir) == ["db/kiln-#{@older}.hold"]
+    end
+
+    test "unreadable schedules: nothing is deleted, no marker moves", %{dir: dir} do
+      schedule!(%{keep_count: 2})
+      put(dir, "db", Artifact.hold_name(@older), 1, "")
+      before = Enum.sort(left(dir))
+
+      assert {:error, {:read_schedules, Ash.Error.Forbidden}} =
+               Backups.with_actor(nil, fn -> Policy.current() end)
+
+      unreadable = fn -> Backups.with_actor(nil, fn -> Policy.current() end) end
+
+      log =
+        capture_log([level: :error], fn ->
+          assert {:error, {:policy, {:read_schedules, Ash.Error.Forbidden}}} =
+                   Retention.run(dir, policy: unreadable)
+        end)
+
+      assert log =~ "Backup retention skipped: couldn't read the backup schedules"
+      assert_received {[:kiln_cms, :backups, :retention, :skipped], _, %{reason: {:policy, _}}}
+      assert Enum.sort(left(dir)) == before
+      assert holds(dir) == ["db/kiln-#{@older}.hold"]
+    end
+
+    test "sync_last_good/2 syncs the holds too, and deletes no backup", %{dir: dir} do
+      schedule!(%{keep_count: 1})
+      put(dir, "db", Artifact.hold_name(@older), 1, "")
+      before = Enum.sort(left(dir))
+
+      assert {:ok, %{db: @new, media: @new}} = Retention.sync_last_good(dir)
+      assert Enum.sort(left(dir)) == before
+      assert holds(dir) == ["db/kiln-#{@new}.hold"]
+    end
+
+    test "sync_last_good/2 with unreadable schedules: .good still moves, every hold stays",
+         %{dir: dir} do
+      put(dir, "db", Artifact.hold_name(@older), 1, "")
+      put(dir, "db", Artifact.good_name(@old), 1, "")
+      unreadable = fn -> Backups.with_actor(nil, fn -> Policy.current() end) end
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:ok, %{db: @new}} = Retention.sync_last_good(dir, policy: unreadable)
+        end)
+
+      assert log =~ "Backup hold markers not updated: couldn't read the backup schedules"
+
+      assert_received {[:kiln_cms, :backups, :hold, :failed], %{count: 1},
+                       %{reason: {:policy, _}}}
+
+      assert goods(dir) == ["db/kiln-#{@new}.good", "media/kiln-#{@new}.good"]
+      assert holds(dir) == ["db/kiln-#{@older}.hold"]
+    end
+
+    test "a hold that can't be written warns and reports; pruning and the other holds go on",
+         %{dir: dir} do
+      schedule!(%{keep_count: 2})
+      failing = Path.join([dir, "db", Artifact.hold_name(@old)])
+
+      create = fn
+        ^failing -> {:error, :enospc}
+        path -> File.write(path, "")
+      end
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:ok, %{deleted: [_ | _]}} = Retention.run(dir, create_marker: create)
+        end)
+
+      assert log =~ "Backup hold marker db/kiln-#{@old}.hold couldn't be written"
+
+      assert_received {[:kiln_cms, :backups, :hold, :failed], %{count: 1},
+                       %{kind: :db, stamp: @old, reason: :enospc}}
+
+      assert holds(dir) == ["db/kiln-#{@new}.hold"]
+    end
+
+    test "a stale hold that is not a regular file is never removed", %{dir: dir} do
+      File.mkdir_p!(Path.join([dir, "db", Artifact.hold_name(@older)]))
+      File.ln_s!("/nonexistent", Path.join([dir, "media", Artifact.hold_name(@older)]))
+
+      assert {:ok, _} = Retention.run(dir)
+
+      assert_received {[:kiln_cms, :backups, :hold, :failed], _,
+                       %{reason: {:not_regular, :directory}}}
+
+      assert_received {[:kiln_cms, :backups, :hold, :failed], _,
+                       %{reason: {:not_regular, :symlink}}}
+
+      assert holds(dir) == ["db/kiln-#{@older}.hold", "media/kiln-#{@older}.hold"]
+    end
+  end
+
   describe "fails closed, loudly" do
     setup %{dir: dir} do
       newest(dir)
@@ -548,6 +724,10 @@ defmodule KilnCMS.Backups.RetentionRunTest do
 
       assert Retention.describe({:policy, :invalid_policy}) =~ "the retention policy is invalid"
       assert Retention.describe({:policy, :down}) =~ "couldn't resolve the retention policy"
+
+      assert Retention.describe({:policy, {:read_schedules, Ash.Error.Forbidden}}) =~
+               "couldn't read the backup schedules"
+
       assert Retention.describe({:ls, "media", :eacces}) =~ "couldn't list media/"
 
       assert Retention.describe({:lstat, "kiln-db-x.dump", :eio}) =~

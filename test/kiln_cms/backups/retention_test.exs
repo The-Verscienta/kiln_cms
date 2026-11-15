@@ -453,7 +453,13 @@ defmodule KilnCMS.Backups.RetentionTest do
 
     test "a unit of nothing but symlinks is not in the plan at all" do
       only_links = media(@a, 400, part_opts: %{1 => [type: :symlink]}, sidecar?: false)
-      assert plan([only_links]) == %{delete: [], keep: [], last_good: %{db: nil, media: nil}}
+
+      assert plan([only_links]) == %{
+               delete: [],
+               keep: [],
+               last_good: %{db: nil, media: nil},
+               holds: %{db: [], media: []}
+             }
     end
 
     test "a stray ages alone under keep_days" do
@@ -479,6 +485,316 @@ defmodule KilnCMS.Backups.RetentionTest do
       assert {:error, :invalid_policy} = Policy.validate(Policy.legacy("14"))
       assert {:error, :invalid_policy} = Policy.validate(%{keep_days: 14})
       assert {:error, :invalid_policy} = Policy.validate(nil)
+    end
+  end
+
+  describe "keep N (#2219)" do
+    # Stamp `i` days after 2026-01-01: a larger `i` is a newer backup.
+    defp st(i),
+      do: ~D[2026-01-01] |> Date.add(i) |> Calendar.strftime("%Y%m%d") |> Kernel.<>("-000000")
+
+    defp sched(kinds, ids, opts \\ []) do
+      %{
+        status: Keyword.get(opts, :status, :succeeded),
+        origin: :app,
+        trigger: Keyword.get(opts, :trigger, "schedule"),
+        scheduled_components: Keyword.get(opts, :scheduled, kinds),
+        schedule_ids: ids,
+        artifacts: Enum.map(kinds, &%{kind: &1, verified: Keyword.get(opts, :verified, true)})
+      }
+    end
+
+    defp manual(kinds), do: Map.put(ok_run(kinds), :trigger, "manual")
+    defp imported(kinds), do: Map.put(ok_run(kinds, :imported, nil), :trigger, "cron")
+
+    defp rule(id, kinds, count, days \\ @k),
+      do: %{id: id, kinds: kinds, keep_count: count, keep_days: days}
+
+    defp policy(rules), do: %Policy{keep_days: @k, schedules: rules}
+
+    # The newest unit (`st(100)`, a manual one) holds rules 3 and 4, so the
+    # units under test are decided by the rules after them.
+    defp newest_db, do: {db(st(100), 0), %{st(100) => manual([:db])}}
+
+    defp keep_plan(units_runs, rules, opts \\ []) do
+      {newest, newest_runs} = newest_db()
+      units = [newest | Enum.map(units_runs, &elem(&1, 0))]
+      runs = Enum.reduce(units_runs, newest_runs, fn {u, r}, acc -> Map.put(acc, u.stamp, r) end)
+      plan(units, runs, Keyword.put(opts, :policy, policy(rules)))
+    end
+
+    defp kept_by_count(plan),
+      do: for(%{reason: {:keep_count, ids}} = e <- plan.keep, into: %{}, do: {e.stamp, ids})
+
+    test "a schedule keeps its newest N, however old" do
+      units = for i <- 1..5, do: {db(st(i), 400), sched([:db], ["s"])}
+      plan = keep_plan(units, [rule("s", [:db], 3)])
+
+      assert kept_by_count(plan) == %{st(3) => ["s"], st(4) => ["s"], st(5) => ["s"]}
+      assert reasons(plan).delete |> Map.keys() |> Enum.sort() == [{st(1), :db}, {st(2), :db}]
+    end
+
+    test "without keep fields the plan is the legacy plan" do
+      units = [
+        {db(st(1), 400), sched([:db], ["s"])},
+        {db(st(2), 3), sched([:db], ["s"])},
+        {db(st(3), 400), imported([:db])},
+        {db(st(4), 400), nil}
+      ]
+
+      with_schedule = keep_plan(units, [rule("s", [:db], nil)])
+      legacy = keep_plan(units, [])
+
+      assert with_schedule == legacy
+      assert legacy.holds == %{db: [], media: []}
+    end
+
+    test "keep more: the schedule's own and the cron-made backups together" do
+      units = [
+        {db(st(1), 400), sched([:db], ["s"])},
+        {db(st(2), 400), sched([:db], ["s"])},
+        {db(st(3), 400), imported([:db])},
+        {db(st(4), 400), imported([:db])}
+      ]
+
+      # Own newest 2: st(1), st(2). Own and cron newest 2: st(3), st(4).
+      plan = keep_plan(units, [rule("s", [:db], 2)])
+      assert Map.keys(kept_by_count(plan)) |> Enum.sort() == [st(1), st(2), st(3), st(4)]
+    end
+
+    test "a failed or unverified backup doesn't take a slot" do
+      units = [
+        {db(st(1), 400), sched([:db], ["s"])},
+        {db(st(2), 400), sched([:db], ["s"], status: :failed)},
+        {db(st(3), 400), sched([:db], ["s"], verified: false)}
+      ]
+
+      plan = keep_plan(units, [rule("s", [:db], 1)])
+      assert kept_by_count(plan) == %{st(1) => ["s"]}
+      assert {:expired, :keep_days, @k} = reasons(plan).delete[{st(2), :db}]
+      assert {:expired, :keep_days, @k} = reasons(plan).delete[{st(3), :db}]
+    end
+
+    test "a recovery point doesn't take a slot, and stays one" do
+      units = [{db(st(1), 400), sched([:db], ["s"])}, {db(st(2), 400), sched([:db], ["s"])}]
+      plan = keep_plan(units, [rule("s", [:db], 1)], markers: [st(2)])
+
+      assert kept_by_count(plan) == %{st(1) => ["s"]}
+      assert reasons(plan).keep[{st(2), :db}] == :recovery_point
+    end
+
+    test "a unit in flight or of an implausible stamp doesn't take a slot" do
+      future = "29991231-000000"
+
+      units = [
+        {db(st(1), 400), sched([:db], ["s"])},
+        {db(st(2), 400), sched([:db], ["s"])},
+        {db(future, 400), sched([:db], ["s"])}
+      ]
+
+      plan = keep_plan(units, [rule("s", [:db], 1)], work: [st(2)])
+      assert kept_by_count(plan) == %{st(1) => ["s"]}
+      assert reasons(plan).keep[{st(2), :db}] == :in_flight
+      assert {:expired, :keep_days, @k} = reasons(plan).delete[{future, :db}]
+    end
+
+    test "manual and console backups are never counted" do
+      units = [
+        {db(st(1), 400), sched([:db], ["s"])},
+        {db(st(2), 400), manual([:db])},
+        {db(st(3), 400), Map.put(ok_run([:db]), :trigger, "console")}
+      ]
+
+      plan = keep_plan(units, [rule("s", [:db], 2)])
+      assert kept_by_count(plan) == %{st(1) => ["s"]}
+    end
+
+    test "a fold with a manual request, in either order, is not the schedule's own" do
+      # B1: the manual request wins the trigger, so the run is never counted
+      # and never ages out sooner than BACKUP_KEEP_DAYS, whatever the schedule.
+      folded = sched([:db], ["s"], trigger: "manual")
+
+      plan =
+        keep_plan(
+          [{db(st(1), 400), folded}, {db(st(2), 10), folded}, {db(st(3), 40), folded}],
+          [rule("s", [:db], 5, 3)]
+        )
+
+      assert kept_by_count(plan) == %{}
+      assert reasons(plan).keep[{st(2), :db}] == :keep_days
+      assert {:expired, :keep_days, @k} = reasons(plan).delete[{st(1), :db}]
+
+      # A schedule keeping longer still lifts it: max(BACKUP_KEEP_DAYS, D).
+      plan = keep_plan([{db(st(3), 40), folded}], [rule("s", [:db], nil, 60)])
+      assert reasons(plan).keep[{st(3), :db}] == :schedule_floor
+      assert plan.holds.db == [st(3)]
+    end
+
+    test "only the scheduled components of a run count" do
+      # The schedule asked for the database; a manual request folded media in.
+      run = sched([:db, :media], ["s"], scheduled: [:db])
+
+      units = [
+        {db(st(1), 400), run},
+        {media(st(1), 400), run},
+        {media(st(2), 0), manual([:media])}
+      ]
+
+      plan = keep_plan(units, [rule("s", [:db, :media], 1)])
+      assert reasons(plan).keep[{st(1), :db}] == {:keep_count, ["s"]}
+      assert {:expired, :keep_days, @k} = reasons(plan).delete[{st(1), :media}]
+    end
+
+    test "two schedules: the union of what each keeps" do
+      units = [
+        {db(st(1), 400), sched([:db], ["a"])},
+        {db(st(2), 400), sched([:db], ["b"])},
+        {db(st(3), 400), sched([:db], ["a", "b"])}
+      ]
+
+      plan = keep_plan(units, [rule("a", [:db], 2), rule("b", [:db], 1)])
+
+      assert kept_by_count(plan) == %{st(1) => ["a"], st(3) => ["a", "b"]}
+      assert {:expired, :keep_days, @k} = reasons(plan).delete[{st(2), :db}]
+    end
+
+    test "each kind is counted on its own" do
+      units = [
+        {db(st(1), 400), sched([:db, :media], ["s"])},
+        {media(st(1), 400), sched([:db, :media], ["s"])},
+        {media(st(2), 400), sched([:media], ["s"])},
+        {media(st(3), 0), sched([:media], ["s"])}
+      ]
+
+      plan = keep_plan(units, [rule("s", [:db, :media], 1)])
+      # db: st(1) is its only own one. media: st(3), the newest, takes the slot.
+      assert reasons(plan).keep[{st(1), :db}] == {:keep_count, ["s"]}
+      assert reasons(plan).keep[{st(3), :media}] == :newest_verified
+      assert Map.has_key?(reasons(plan).delete, {st(1), :media})
+      assert Map.has_key?(reasons(plan).delete, {st(2), :media})
+    end
+
+    test "a deleted schedule's backups count like cron-made ones and age at the floor" do
+      gone = sched([:db], ["deleted"])
+
+      units = [
+        {db(st(1), 400), sched([:db], ["s"])},
+        {db(st(2), 400), gone},
+        {db(st(3), 50), gone}
+      ]
+
+      # Keep more over own and cron-like: st(3) and st(2).
+      plan = keep_plan(units, [rule("s", [:db], 2, 60)])
+      assert Map.keys(kept_by_count(plan)) |> Enum.sort() == [st(1), st(2), st(3)]
+
+      # No live schedule covering the kind: plain BACKUP_KEEP_DAYS, never less.
+      plan =
+        keep_plan([{db(st(2), 10), gone}, {db(st(3), 400), gone}], [rule("x", [:media], 1, 2)])
+
+      assert reasons(plan).keep[{st(2), :db}] == :keep_days
+      assert {:expired, :keep_days, @k} = reasons(plan).delete[{st(3), :db}]
+    end
+
+    test "a schedule's keep_days below BACKUP_KEEP_DAYS ages its own backups sooner" do
+      units = [{db(st(1), 4), sched([:db], ["s"])}, {db(st(2), 2), sched([:db], ["s"])}]
+      plan = keep_plan(units, [rule("s", [:db], nil, 2)])
+
+      assert {:expired, :schedule, 2} = reasons(plan).delete[{st(1), :db}]
+      assert reasons(plan).keep[{st(2), :db}] == :schedule
+      assert plan.holds.db == [st(2)]
+    end
+
+    test "a schedule's keep_days above BACKUP_KEEP_DAYS keeps its own backups longer" do
+      units = [{db(st(1), 50), sched([:db], ["s"])}, {db(st(2), 70), sched([:db], ["s"])}]
+      plan = keep_plan(units, [rule("s", [:db], nil, 60)])
+
+      assert reasons(plan).keep[{st(1), :db}] == :schedule
+      assert {:expired, :schedule, 60} = reasons(plan).delete[{st(2), :db}]
+    end
+
+    test "unrecorded and imported backups never age out sooner than a covering schedule's" do
+      units = [
+        {db(st(1), 50), nil},
+        {db(st(2), 50), imported([:db])},
+        {media(st(3), 50), imported([:media])},
+        {media(st(4), 0), imported([:media])}
+      ]
+
+      plan = keep_plan(units, [rule("s", [:db], nil, 60), rule("t", [:media], nil, 2)])
+
+      assert reasons(plan).keep[{st(1), :db}] == :unrecorded
+      assert reasons(plan).keep[{st(2), :db}] == :schedule_floor
+      # A schedule keeping less never lowers the floor.
+      assert {:expired, :keep_days, @k} = reasons(plan).delete[{st(3), :media}]
+      assert plan.holds.db == [st(1), st(2)]
+    end
+
+    test "rules 1 to 4 still decide first" do
+      units = for i <- 1..3, do: {db(st(i), 400), sched([:db], ["s"])}
+      plan = keep_plan(units, [rule("s", [:db], 5)], markers: [st(1)], work: [st(2)])
+
+      assert reasons(plan).keep[{st(1), :db}] == :recovery_point
+      assert reasons(plan).keep[{st(2), :db}] == :in_flight
+      assert reasons(plan).keep[{st(3), :db}] == {:keep_count, ["s"]}
+      assert reasons(plan).keep[{st(100), :db}] == :newest_verified
+    end
+
+    test "holds: every unit a keep count or a schedule's age rule keeps, recovery points included" do
+      units = [
+        {db(st(1), 400), sched([:db], ["s"])},
+        {db(st(2), 400), sched([:db], ["s"])},
+        {db(st(3), 30), sched([:db], ["s"])},
+        {db(st(4), 400), manual([:db])}
+      ]
+
+      # st(1) is a recovery point, never counted, and too old for the age
+      # rule; st(2) and st(3) are the newest two (st(3) young enough to be
+      # held by its age too); st(4) is a manual backup.
+      plan = keep_plan(units, [rule("s", [:db], 2, 60)], markers: [st(1)])
+
+      assert plan.holds.db == [st(2), st(3)]
+      assert plan.holds.media == []
+
+      units = [{db(st(1), 30), sched([:db], ["s"])}]
+      plan = keep_plan(units, [rule("s", [:db], nil, 60)], markers: [st(1)])
+      assert reasons(plan).keep[{st(1), :db}] == :recovery_point
+      assert plan.holds.db == [st(1)]
+    end
+  end
+
+  describe "Policy from schedules (#2219)" do
+    test "from_schedules/2 resolves keep_days and drops a component it doesn't know" do
+      schedules = [
+        %{
+          id: "a",
+          components: [:db, %KilnCMS.Types.UnknownAtom{value: "x"}],
+          keep_count: 3,
+          keep_days: nil
+        },
+        %{id: "b", components: [:media], keep_count: nil, keep_days: 30}
+      ]
+
+      assert %Policy{keep_days: 14, schedules: [a, b]} = Policy.from_schedules(14, schedules)
+      assert a == %{id: "a", kinds: [:db], keep_count: 3, keep_days: 14}
+      assert b == %{id: "b", kinds: [:media], keep_count: nil, keep_days: 30}
+    end
+
+    test "validate/1 refuses a rule that isn't positive or well formed" do
+      ok = rule("a", [:db], 3)
+      assert {:ok, _} = Policy.validate(policy([ok, rule("b", [:media], nil, 1)]))
+
+      for bad <- [
+            %{ok | keep_count: 0},
+            %{ok | keep_days: 0},
+            %{ok | keep_days: nil},
+            %{ok | kinds: [:other]},
+            %{ok | id: nil},
+            Map.delete(ok, :keep_count)
+          ] do
+        assert {:error, :invalid_policy} = Policy.validate(policy([bad])), inspect(bad)
+      end
+
+      assert {:error, :invalid_policy} = Policy.validate(%Policy{keep_days: 14, schedules: nil})
     end
   end
 

@@ -31,9 +31,34 @@ defmodule KilnCMS.Backups.Retention do
     4. **Newest complete.** The newest unit of its kind that is complete on
        disk, whatever its Run says (`complete?/1`). `backup.sh prune` keeps the
        same one, so the two prunes together can never empty a component.
-    5. **Unrecorded.** No Run row, a `skipped` one, or one with no artifact of
-       this kind: kept until older than `keep_days`.
-    6. **Age.** Everything else is kept until older than `keep_days`.
+    5. **Keep count.** A schedule with a `keep_count` of N holds, per kind it
+       backs up, its own newest N, and the newest N of its own and the
+       cron-made ones together ("keep more"), however old
+       (`{:keep_count, schedule_ids}`). Only good units count: complete, of a
+       run as in rule 3, not in flight, of a plausible stamp and not a
+       recovery point.
+    6. **Unrecorded.** No Run row, a `skipped` one, or one with no artifact of
+       this kind: kept until older than the floor (below).
+    7. **A schedule's own age.** A schedule's own unit is kept until older
+       than the longest `keep_days` of the live schedules it was made for
+       (`:schedule`), which may be shorter than `BACKUP_KEEP_DAYS`.
+    8. **Imported and orphaned.** A cron-made unit, or a schedule's own unit
+       whose schedules no longer back that kind up (deleted or edited), is
+       kept until older than the floor (`:schedule_floor` when the floor is
+       above `keep_days`).
+    9. **Age.** Everything else is kept until older than `keep_days`.
+
+  The **floor** of a kind is the longest of `keep_days` and the `keep_days`
+  of every schedule backing that kind up: no backup a schedule did not make
+  ages out sooner than one it did. A schedule's own unit is one whose Run is
+  an app run of trigger `"schedule"` that backed this kind up
+  (`scheduled_components`) for a live schedule covering it (`schedule_ids`).
+  A run that also carried a manual or console request (its trigger is then
+  not `"schedule"`, `KilnCMS.Backups.Chain`'s fold) is never counted and ages
+  at no less than `keep_days`, or the longest `keep_days` of its schedules
+  if that is longer. A rule that gives `keep_days` itself is plain age, so
+  without keep fields the plan is the one `Policy.legacy/1` gives. The
+  schedules come from `Policy.current/0`, paused ones included.
 
   Rules 3 and 4 choose among units that are not in flight (so the run doing
   the pruning never takes the slot from the last finished backup) and whose
@@ -42,8 +67,8 @@ defmodule KilnCMS.Backups.Retention do
 
   "Older than `keep_days`" is `find -mtime +keep_days`: an age of at least
   `keep_days + 1` whole days. A `kiln-*` file in `db/` or `media/` that is no
-  unit's member (a "stray") ages alone under the same rule; markers (`.keep`
-  and `.good`) and `.partial` files are never strays.
+  unit's member (a "stray") ages alone under `keep_days`; markers (`.keep`,
+  `.good` and `.hold`) and `.partial` files are never strays.
 
   ## The last-good marker
 
@@ -66,11 +91,31 @@ defmodule KilnCMS.Backups.Retention do
   The app never reads a `.good` as a keep rule: it works out rule 3 itself,
   so a stale marker pins nothing here, and its unit ages like any other.
 
+  ## The hold markers
+
+  `kiln-<stamp>.hold` (`Artifact.hold_name/1`) in `db/` or `media/` names a
+  unit the schedules' keep rules hold: every unit a keep count holds (rule 5)
+  and every unit kept by rules 6 to 8 on a `keep_days` other than
+  `BACKUP_KEEP_DAYS`, whatever rules 1 to 4 say of it today (a recovery
+  point included). `backup.sh prune` keeps a unit with a `.hold` in its own
+  directory, as it does one with a `.good`; it has no schedules to work them
+  out from. The holds are synced wherever the `.good` markers are, in the
+  same order: every hold the plan names is written first, and only then is a
+  `.hold` it no longer names removed (regular files only; a failure is a
+  warning and a `[:kiln_cms, :backups, :hold, :failed]` event). In
+  `sync_last_good/2` the `.good` markers don't depend on the policy: when the
+  schedules can't be read the `.good` markers still move and every hold is
+  left as it is, with the same warning and event. Like `.good`, the app never
+  reads a `.hold` as a keep rule.
+
   ## Fail closed, loudly
 
   Nothing is deleted unless the importer ran (`Importer.run/1`, first, so a
   cron-made backup is classified from its row), the policy resolved and
-  validated, `db/`, `media/` and `.work/` were listed, and the Run rows were
+  validated (the schedules read as the `:backups` system actor with
+  `authorize_with: :error`; a refused read is
+  `{:policy, {:read_schedules, _}}`, never "no schedules"),
+  `db/`, `media/` and `.work/` were listed, and the Run rows were
   read with `authorize_with: :error`. Any of these failing returns
   `{:error, reason}` after a `Logger.error` and a
   `[:kiln_cms, :backups, :retention, :skipped]` telemetry event. Right before
@@ -81,11 +126,13 @@ defmodule KilnCMS.Backups.Retention do
   ## What cron can't see
 
   `backup.sh prune` has no database: rules 1, 2 (except a running Run), 4 and
-  6 apply there, and rule 3 only through the last-good marker: a unit with a
+  9 apply there, and rule 3 only through the last-good marker: a unit with a
   `.good` in its own directory is kept, so cron keeps the newest verified
-  backup even when a newer complete set from a failed run exists. That holds
-  as long as the app keeps the marker in step; a host whose copy of
-  `backup.sh` predates the marker ignores it. Cron never deletes strays or
+  backup even when a newer complete set from a failed run exists. Rules 5 to
+  8 apply there only through the hold markers. That holds as long as the app
+  keeps the markers in step; a host whose copy of `backup.sh` predates a
+  marker ignores it. Where a schedule keeps less than `BACKUP_KEEP_DAYS`,
+  cron keeps more than the app, never less. Cron never deletes strays or
   markers. Unlike this module, it does delete `.partial` files: those of a run
   killed outright, once every file of the stamp is 12 hours old (#2478). Here
   a `.partial` is only ever a reason to keep; the start step's sweep removes
@@ -135,12 +182,15 @@ defmodule KilnCMS.Backups.Retention do
 
   @typedoc """
   The plan. `last_good` is the newest verified stamp of each kind (rule 3),
-  or `nil`: what the `.good` markers should name.
+  or `nil`: what the `.good` markers should name. `holds` are the stamps of
+  each kind the schedules' keep rules hold (see "The hold markers"): what the
+  `.hold` markers should name.
   """
   @type plan :: %{
           delete: [entry()],
           keep: [entry()],
-          last_good: %{db: String.t() | nil, media: String.t() | nil}
+          last_good: %{db: String.t() | nil, media: String.t() | nil},
+          holds: %{db: [String.t()], media: [String.t()]}
         }
 
   @doc """
@@ -152,7 +202,7 @@ defmodule KilnCMS.Backups.Retention do
   def partial_grace_s, do: @partial_grace_s
 
   @doc """
-  Import, plan, sync the last-good markers and delete. Returns `{:ok, %{deleted: names, units: count,
+  Import, plan, sync the last-good and hold markers and delete. Returns `{:ok, %{deleted: names, units: count,
   plan: plan, stopped: nil | reason}}` — `names` are the file names removed,
   already marked `pruned` on their runs; `stopped` is set when the deleting
   itself broke off part-way (what was removed by then is still in `names`) —
@@ -161,8 +211,8 @@ defmodule KilnCMS.Backups.Retention do
   Options:
 
     * `:policy` - a `Policy` struct, or a 0-arity function returning
-      `{:ok, policy} | {:error, reason}`. Defaults to
-      `Policy.legacy(Backups.keep_days())`.
+      `{:ok, policy} | {:error, reason}`. Defaults to `&Policy.current/0`:
+      `BACKUP_KEEP_DAYS` and every schedule's keep rules, read fail-closed.
     * `:now` - posix seconds (default: now).
     * `:dry_run` - plan only; delete nothing and write no marker (default
       `false`).
@@ -208,6 +258,7 @@ defmodule KilnCMS.Backups.Retention do
   # verified unit, and a cron prune that runs meanwhile sees the new one.
   defp execute(dir, plan, opts) do
     _ = sync(dir, plan.last_good, opts)
+    _ = sync_holds(dir, plan.holds, opts)
     {deleted, units, stopped} = apply_plan(dir, plan, Keyword.take(opts, [:before_unit]))
     Recorder.mark_pruned(deleted)
     if stopped, do: stopped(deleted, stopped)
@@ -246,6 +297,9 @@ defmodule KilnCMS.Backups.Retention do
     do:
       "the retention policy is invalid (BACKUP_KEEP_DAYS must be a whole number of days, 1 or more)"
 
+  def describe({:policy, {:read_schedules, reason}}),
+    do: "couldn't read the backup schedules (#{inspect(reason)})"
+
   def describe({:policy, reason}),
     do: "couldn't resolve the retention policy (#{inspect(reason)})"
 
@@ -265,7 +319,7 @@ defmodule KilnCMS.Backups.Retention do
 
   defp policy(opts) do
     resolved =
-      case Keyword.get_lazy(opts, :policy, fn -> Policy.legacy(Backups.keep_days()) end) do
+      case Keyword.get(opts, :policy, &Policy.current/0) do
         fun when is_function(fun, 0) -> fun.()
         policy -> {:ok, policy}
       end
@@ -283,7 +337,8 @@ defmodule KilnCMS.Backups.Retention do
 
   @doc """
   Bring the `.good` markers in `dir` in step with the newest verified unit of
-  each kind, deleting no backup: the importer, the scan and the Run read of
+  each kind, and the `.hold` markers with what the schedules hold (see "The
+  hold markers"), deleting no backup: the importer, the scan and the Run read of
   `run/2`, then the marker sync it does before its deletes. Called right
   after a run succeeds, so the marker names that run before any later run can
   fail and leave a newer complete set behind.
@@ -299,6 +354,7 @@ defmodule KilnCMS.Backups.Retention do
 
   Options:
 
+    * `:policy` - as for `run/2`; only the holds use it.
     * `:import` - run the importer first (default `true`). `false` is for a
       caller that already ran it outside a transaction
       (`Chain.sync_last_good/2`), since the importer writes Run rows.
@@ -317,6 +373,7 @@ defmodule KilnCMS.Backups.Retention do
           {_units, newest} = newest_slots(inventory, runs, now)
           last_good = last_good(newest)
           _ = sync(dir, last_good, opts)
+          _ = sync_holds_with_policy(dir, inventory, runs, now, opts)
           {:ok, last_good}
         end
       rescue
@@ -339,6 +396,22 @@ defmodule KilnCMS.Backups.Retention do
     Logger.warning("Backup last-good marker not updated: #{describe(reason)}")
     marker_failed(%{reason: reason})
     {:error, reason}
+  end
+
+  # The holds need the policy; the `.good` markers don't, and were synced
+  # already. A policy that can't be resolved leaves every hold where it is
+  # (a hold too many keeps a backup a while longer; one too few lets cron
+  # delete what a schedule keeps).
+  defp sync_holds_with_policy(dir, inventory, runs, now, opts) do
+    case policy(opts) do
+      {:ok, policy} ->
+        sync_holds(dir, plan(inventory, runs, policy, now).holds, opts)
+
+      {:error, reason} ->
+        Logger.warning("Backup hold markers not updated: #{describe(reason)}")
+        hold_failed(%{reason: reason})
+        {:error, reason}
+    end
   end
 
   defp maybe_import(dir, true), do: import_first(dir)
@@ -379,6 +452,60 @@ defmodule KilnCMS.Backups.Retention do
   defp marker_failed(metadata),
     do: :telemetry.execute([:kiln_cms, :backups, :last_good, :failed], %{count: 1}, metadata)
 
+  defp hold_failed(metadata),
+    do: :telemetry.execute([:kiln_cms, :backups, :hold, :failed], %{count: 1}, metadata)
+
+  ## The hold markers
+
+  # Every hold the plan names is written first, in both directories; only
+  # then is a `.hold` it doesn't name removed. A failed write is logged and
+  # reported (`[:kiln_cms, :backups, :hold, :failed]`) and stops nothing else.
+  defp sync_holds(dir, holds, opts) do
+    create = Keyword.get(opts, :create_marker, &create_marker/1)
+
+    for kind <- [:db, :media], stamp <- Map.get(holds, kind, []) do
+      sub = Artifact.subdir(kind)
+      name = Artifact.hold_name(stamp)
+
+      with {:error, reason} <- ensure_marker(dir, sub, name, create) do
+        Logger.warning(
+          "Backup hold marker #{sub}/#{name} couldn't be written (#{inspect(reason)}); " <>
+            "backup.sh prune may delete that backup"
+        )
+
+        hold_failed(%{kind: kind, stamp: stamp, reason: reason})
+      end
+    end
+
+    for kind <- [:db, :media] do
+      keep = holds |> Map.get(kind, []) |> MapSet.new(&Artifact.hold_name/1)
+      remove_stale_holds(dir, Artifact.subdir(kind), keep)
+    end
+
+    :ok
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp remove_stale_holds(dir, sub, keep) do
+    case File.ls(Path.join(dir, sub)) do
+      {:ok, names} ->
+        for name <- names,
+            not MapSet.member?(keep, name),
+            match?({:ok, _}, Artifact.parse_hold_name(name)) do
+          remove_marker(Path.join([dir, sub, name]), "#{sub}/#{name}", :hold)
+        end
+
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Couldn't list #{sub}/ to remove old hold markers (#{inspect(reason)})")
+        :ok
+    end
+  end
+
   # An entry of that name already there, whatever it is, counts: `backup.sh`
   # reads the listing, not the entry.
   # sobelow_skip ["Traversal.FileModule"]
@@ -412,7 +539,7 @@ defmodule KilnCMS.Backups.Retention do
     case File.ls(Path.join(dir, sub)) do
       {:ok, names} ->
         for name <- names, name != keep, match?({:ok, _}, Artifact.parse_good_name(name)) do
-          remove_marker(Path.join([dir, sub, name]), "#{sub}/#{name}")
+          remove_marker(Path.join([dir, sub, name]), "#{sub}/#{name}", :last_good)
         end
 
         :ok
@@ -427,7 +554,7 @@ defmodule KilnCMS.Backups.Retention do
   end
 
   # sobelow_skip ["Traversal.FileModule"]
-  defp remove_marker(path, label) do
+  defp remove_marker(path, label, which) do
     case File.lstat(path) do
       {:ok, %{type: :regular}} ->
         case File.rm(path) do
@@ -437,18 +564,27 @@ defmodule KilnCMS.Backups.Retention do
           {:error, reason} ->
             # A marker left behind pins its unit for `backup.sh prune` for
             # good, so it surfaces in telemetry, not only in the log.
-            Logger.warning("Couldn't remove old last-good marker #{label} (#{inspect(reason)})")
-            marker_failed(%{marker: label, reason: {:remove, reason}})
+            Logger.warning(
+              "Couldn't remove old #{marker_label(which)} #{label} (#{inspect(reason)})"
+            )
+
+            removal_failed(which, %{marker: label, reason: {:remove, reason}})
         end
 
       {:ok, %{type: type}} ->
         Logger.warning("Left #{label} in place: a #{type}, not a regular file")
-        marker_failed(%{marker: label, reason: {:not_regular, type}})
+        removal_failed(which, %{marker: label, reason: {:not_regular, type}})
 
       {:error, _gone_or_unreadable} ->
         :ok
     end
   end
+
+  defp marker_label(:last_good), do: "last-good marker"
+  defp marker_label(:hold), do: "hold marker"
+
+  defp removal_failed(:last_good, metadata), do: marker_failed(metadata)
+  defp removal_failed(:hold, metadata), do: hold_failed(metadata)
 
   ## Scan
 
@@ -499,9 +635,11 @@ defmodule KilnCMS.Backups.Retention do
       String.ends_with?(name, ".keep") ->
         :ignore
 
-      # A last-good marker is never a keep rule here (the plan works out the
-      # newest verified unit itself) and never a stray; `sync/2` manages it.
-      String.ends_with?(name, ".good") and String.starts_with?(name, "kiln-") ->
+      # A last-good or hold marker is never a keep rule here (the plan works
+      # out the newest verified unit and the schedules' holds itself) and
+      # never a stray; the marker sync manages both.
+      String.starts_with?(name, "kiln-") and
+          (String.ends_with?(name, ".good") or String.ends_with?(name, ".hold")) ->
         :ignore
 
       true ->
@@ -646,19 +784,29 @@ defmodule KilnCMS.Backups.Retention do
   The plan for an inventory, pure: `%{delete: entries, keep: entries,
   last_good: %{db: stamp | nil, media: stamp | nil}}`, each entry naming its
   unit (or stray), its regular files in deletion order and the reason;
-  `last_good` is the newest verified stamp of each kind (rule 3). `runs` maps stamp to Run (or anything with `status`, `origin`
-  and `artifacts`); `now` is posix seconds.
+  `last_good` is the newest verified stamp of each kind (rule 3); `holds`
+  the stamps of each kind the `.hold` markers should name. `runs` maps stamp
+  to Run (or anything with `status`, `origin` and `artifacts`, and
+  `trigger`, `scheduled_components` and `schedule_ids` for the schedules'
+  rules); `now` is posix seconds.
   """
   @spec plan(inventory(), %{String.t() => map()}, Policy.t(), integer()) :: plan()
   def plan(inventory, runs, %Policy{} = policy, now) do
     {units, newest} = newest_slots(inventory, runs, now)
+    counted = keep_count_holds(units, runs, inventory, policy, now)
 
     entries =
-      Enum.map(units, &decide(&1, runs[&1.stamp], newest, inventory, policy, now)) ++
+      Enum.map(units, &decide(&1, runs[&1.stamp], newest, inventory, policy, counted, now)) ++
         Enum.map(inventory.strays, &decide_stray(&1, policy, now))
 
     {delete, keep} = Enum.split_with(entries, &(elem(&1, 0) == :delete))
-    %{delete: entries(delete), keep: entries(keep), last_good: last_good(newest)}
+
+    %{
+      delete: entries(delete),
+      keep: entries(keep),
+      last_good: last_good(newest),
+      holds: holds(units, runs, policy, counted, now)
+    }
   end
 
   defp newest_slots(inventory, runs, now) do
@@ -774,10 +922,9 @@ defmodule KilnCMS.Backups.Retention do
 
   defp good?(_unit, _run), do: false
 
-  defp decide(unit, run, newest, inventory, policy, now) do
+  defp decide(unit, run, newest, inventory, policy, counted, now) do
     %{stamp: stamp, kind: kind} = unit
     newest = Map.fetch!(newest, kind)
-    keep_days = policy.keep_days
 
     cond do
       MapSet.member?(inventory.markers, stamp) ->
@@ -792,24 +939,159 @@ defmodule KilnCMS.Backups.Retention do
       stamp == newest.complete ->
         {:keep, entry(unit, :newest_complete)}
 
-      # The Schedule PR's per-component minimum age (D) raises this floor to
-      # max(keep_days, D): a unit with no history must never age out sooner
-      # than one with.
-      unrecorded?(run, kind) ->
-        age(unit, keep_days, now, :unrecorded)
+      Map.has_key?(counted, {stamp, kind}) ->
+        {:keep, entry(unit, {:keep_count, Map.fetch!(counted, {stamp, kind})})}
 
       true ->
-        age(unit, keep_days, now, :keep_days)
+        {rule, days, _held?} = age_rule(unit, run, policy)
+        age(unit, days, now, rule)
     end
   end
 
-  defp age(unit, days, now, rule) do
-    mtime = unit |> regular() |> Enum.map(& &1.mtime) |> Enum.max()
+  ## Schedules (#2219)
 
-    if expired?(mtime, days, now),
+  # Whose unit this is, for the schedules' keep rules:
+  #
+  #   * `:unrecorded` - no Run row, a skipped one, or none of this kind.
+  #   * `:cron` - imported (whatever its trigger), or a schedule's own run
+  #     whose schedules no longer back this kind up (deleted, or edited). Such
+  #     units fill every covering schedule's keep count ("keep more") and age
+  #     at the floor.
+  #   * `{:own, rules}` - an app run of trigger `"schedule"` that backed this
+  #     kind up for these live schedules. Counted toward their keep count, and
+  #     aged at their longest `keep_days`, which may be below `keep_days`.
+  #   * `{:linked, rules}` - an app run that backed this kind up for these
+  #     schedules but whose trigger is not theirs (a manual request folded in):
+  #     never counted, aged at no less than `keep_days`.
+  #   * `:plain` - anything else (manual, console, a kind no schedule asked
+  #     for): `keep_days`, never counted.
+  defp category(run, kind, policy) do
+    cond do
+      unrecorded?(run, kind) -> :unrecorded
+      Map.get(run, :origin) == :imported -> :cron
+      kind not in (Map.get(run, :scheduled_components) || []) -> :plain
+      Map.get(run, :trigger) == "schedule" -> owned(run, kind, policy, {:own, :cron})
+      true -> owned(run, kind, policy, {:linked, :plain})
+    end
+  end
+
+  defp owned(run, kind, policy, {tag, none}) do
+    ids = Map.get(run, :schedule_ids) || []
+
+    case Enum.filter(policy.schedules, &(&1.id in ids and kind in &1.kinds)) do
+      [] -> none
+      rules -> {tag, rules}
+    end
+  end
+
+  # `{reason, days, held?}`: the age rule a unit falls to once rules 1 to 5
+  # pass it by, and whether a `.hold` should name it while it is kept. A rule
+  # that gives `keep_days` itself is plain age, so a policy whose schedules
+  # set no keep field plans exactly as `Policy.legacy/1` does.
+  defp age_rule(unit, run, policy) do
+    keep_days = policy.keep_days
+
+    case category(run, unit.kind, policy) do
+      :unrecorded ->
+        days = floor_days(policy, unit.kind)
+        {:unrecorded, days, days > keep_days}
+
+      :plain ->
+        {:keep_days, keep_days, false}
+
+      {:own, rules} ->
+        case rules |> Enum.map(& &1.keep_days) |> Enum.max() do
+          ^keep_days -> {:keep_days, keep_days, false}
+          days -> {:schedule, days, true}
+        end
+
+      {:linked, rules} ->
+        raised([keep_days | Enum.map(rules, & &1.keep_days)], keep_days)
+
+      :cron ->
+        raised([floor_days(policy, unit.kind)], keep_days)
+    end
+  end
+
+  defp raised(days, keep_days) do
+    case Enum.max(days) do
+      ^keep_days -> {:keep_days, keep_days, false}
+      days -> {:schedule_floor, days, true}
+    end
+  end
+
+  # No unit of a kind a schedule backs up ages out sooner than that
+  # schedule's own backups, unless it is one of them.
+  defp floor_days(policy, kind) do
+    Enum.max([policy.keep_days | for(r <- policy.schedules, kind in r.kinds, do: r.keep_days)])
+  end
+
+  # `%{{stamp, kind} => [schedule_id]}`: every unit some schedule's keep count
+  # holds. For a schedule keeping N of a kind: its own newest N, and the
+  # newest N of its own and the cron-made ones together ("keep more"). Only
+  # good units count (complete, from a succeeded run, verified or imported),
+  # not in flight, of a plausible stamp, and not a recovery point.
+  defp keep_count_holds(units, runs, inventory, policy, now) do
+    eligible =
+      units
+      |> Enum.filter(fn unit ->
+        run = runs[unit.stamp]
+
+        not MapSet.member?(inventory.markers, unit.stamp) and
+          plausible_stamp?(unit.stamp, now) and not in_flight?(unit, run, inventory, now) and
+          complete?(unit) and good?(unit, run)
+      end)
+      |> Enum.map(&{&1, category(runs[&1.stamp], &1.kind, policy)})
+
+    for %{keep_count: n, id: id} = rule <- policy.schedules,
+        is_integer(n),
+        kind <- rule.kinds,
+        unit <- counted(eligible, id, kind, n),
+        reduce: %{} do
+      acc -> Map.update(acc, {unit.stamp, kind}, [id], &Enum.uniq([id | &1]))
+    end
+    |> Map.new(fn {key, ids} -> {key, Enum.sort(ids)} end)
+  end
+
+  defp counted(eligible, id, kind, n) do
+    of_kind = for {%{kind: ^kind} = unit, category} <- eligible, do: {unit, category}
+
+    own = for {unit, {:own, rules}} <- of_kind, Enum.any?(rules, &(&1.id == id)), do: unit
+    cron = for {unit, :cron} <- of_kind, do: unit
+
+    Enum.uniq(newest_n(own, n) ++ newest_n(own ++ cron, n))
+  end
+
+  defp newest_n(units, n), do: units |> Enum.sort_by(& &1.stamp, :desc) |> Enum.take(n)
+
+  # The `.hold` set: every unit a keep count holds, and every unit kept by a
+  # schedule's age rule (its own `keep_days`, or a floor raised above
+  # `keep_days`), whatever rules 1 to 4 say of it today and whatever the
+  # host's `BACKUP_KEEP_DAYS` is.
+  defp holds(units, runs, policy, counted, now) do
+    held =
+      for unit <- units, held?(unit, runs[unit.stamp], policy, counted, now), do: unit
+
+    Map.new([:db, :media], fn kind ->
+      {kind, for(%{kind: ^kind, stamp: stamp} <- held, do: stamp) |> Enum.uniq() |> Enum.sort()}
+    end)
+  end
+
+  defp held?(unit, run, policy, counted, now) do
+    Map.has_key?(counted, {unit.stamp, unit.kind}) or
+      case age_rule(unit, run, policy) do
+        {_rule, days, true} -> not expired?(newest_mtime(unit), days, now)
+        {_rule, _days, false} -> false
+      end
+  end
+
+  defp age(unit, days, now, rule) do
+    if expired?(newest_mtime(unit), days, now),
       do: {:delete, entry(unit, {:expired, rule, days})},
       else: {:keep, entry(unit, rule)}
   end
+
+  defp newest_mtime(unit), do: unit |> regular() |> Enum.map(& &1.mtime) |> Enum.max()
 
   defp in_flight?(unit, run, inventory, now) do
     match?(%{status: :running}, run) or MapSet.member?(inventory.work, unit.stamp) or
@@ -956,6 +1238,9 @@ defmodule KilnCMS.Backups.Retention do
 
   defp reason_text({:expired, :unrecorded, days}),
     do: "older than #{days} days, with no recorded run"
+
+  defp reason_text({:expired, :schedule, days}),
+    do: "older than #{days} days, the keep days of the schedule that made it"
 
   defp reason_text({:expired, _rule, days}), do: "older than #{days} days"
 end

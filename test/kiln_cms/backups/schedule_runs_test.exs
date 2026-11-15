@@ -69,6 +69,41 @@ defmodule KilnCMS.Backups.ScheduleRunsTest do
     end
   end
 
+  # The page of the history a "Last scheduled run" link opens (#2875).
+  describe "history_page_of/3" do
+    test "the page that holds the run, newest first" do
+      admin = platform_admin()
+
+      [oldest, middle, newest] =
+        for n <- 1..3, do: run!(n, [], DateTime.add(~U[2026-01-01 00:00:00.000000Z], n, :hour))
+
+      assert Backups.history_page_of(newest.id, admin, 1) == {:ok, 1}
+      assert Backups.history_page_of(middle.id, admin, 1) == {:ok, 2}
+      assert Backups.history_page_of(oldest.id, admin, 1) == {:ok, 3}
+      assert Backups.history_page_of(oldest.id, admin, 2) == {:ok, 2}
+      assert Backups.history_page_of(oldest.id, admin, 25) == {:ok, 1}
+    end
+
+    test "a run that doesn't exist, or an id that isn't one, is an error" do
+      admin = platform_admin()
+
+      assert {:error, _} = Backups.history_page_of(Ecto.UUID.generate(), admin, 25)
+      assert {:error, _} = Backups.history_page_of("not-a-uuid", admin, 25)
+    end
+
+    # The probe: a refused count is 0, which would answer page 1 for any run.
+    # The `:backups` system actor reads runs but not the history page, so it
+    # is the case where only the count is refused.
+    test "an actor who may not read the history is refused, never answered page 1" do
+      run = run!(1, [], ~U[2026-01-01 00:00:00.000000Z])
+      run!(2, [], ~U[2026-01-01 01:00:00.000000Z])
+
+      for actor <- [user(:editor), site_admin(), Backups.system()] do
+        assert {:error, %Ash.Error.Forbidden{}} = Backups.history_page_of(run.id, actor, 1)
+      end
+    end
+  end
+
   describe "Scheduler.last_tick_at/0" do
     test "nil before any tick" do
       assert Scheduler.last_tick_at() == {:ok, nil}

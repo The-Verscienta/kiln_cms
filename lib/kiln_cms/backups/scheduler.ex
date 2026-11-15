@@ -70,9 +70,6 @@ defmodule KilnCMS.Backups.Scheduler do
   # The job states of a tick that was picked up (an `attempted_at` is set).
   @ticked_states ~w(executing completed retryable discarded cancelled)
 
-  # How many successive gaps `tick_gap_s/1` looks at.
-  @gap_runs 4
-
   @doc """
   When a scheduler job last started, on any node: `{:ok, at}`, `{:ok, nil}`
   when none is on record, or `:error` when `oban_jobs` couldn't be read. What
@@ -104,25 +101,25 @@ defmodule KilnCMS.Backups.Scheduler do
   end
 
   @doc """
-  The longest gap, in seconds, between successive runs of the scheduler's
-  cron expression (`KILN_BACKUP_SCHEDULER_CRON`) over its next few runs after
-  `now`, or nil when the scheduler is off. How long a healthy scheduler may go
-  without a tick: 60 at the default `* * * * *`, 3600 at `0 * * * *`.
+  The newest run of the scheduler's cron expression
+  (`KILN_BACKUP_SCHEDULER_CRON`, read in UTC as Oban's crontab is) at least
+  `slack_s` seconds before `now`, or nil when the scheduler is off or runs
+  only at boot (`@reboot`, which has no slot to be late for). A healthy
+  scheduler has started a tick since then; what the Schedule tab's "the
+  scheduler hasn't run" warning compares the last tick with.
+
+  Looking back at the slot that should have run, not ahead at the gaps to
+  come (#2875): a weekday-only `* * * * 1-5` read on a Saturday expects
+  nothing after Friday 23:59, and a monthly cron expects the 1st.
   """
-  @spec tick_gap_s(DateTime.t()) :: pos_integer() | nil
-  def tick_gap_s(%DateTime{} = now) do
+  @spec expected_tick_at(DateTime.t(), non_neg_integer()) :: DateTime.t() | nil
+  def expected_tick_at(%DateTime{} = now, slack_s) when is_integer(slack_s) and slack_s >= 0 do
     with cron when is_binary(cron) <-
            KilnCMS.Application.cron_expression(:backup_scheduler_cron),
-         {:ok, expression} <- Oban.Cron.Expression.parse(cron),
-         %DateTime{} = first <- Oban.Cron.Expression.next_at(expression, now) do
-      # Several gaps, not one: an expression like `0 9,17 * * *` alternates.
-      {_last, gaps} =
-        Enum.reduce(1..@gap_runs, {first, []}, fn _, {at, gaps} ->
-          next = Oban.Cron.Expression.next_at(expression, at)
-          {next, [DateTime.diff(next, at) | gaps]}
-        end)
-
-      Enum.max(gaps)
+         {:ok, %{reboot?: false} = expression} <- Oban.Cron.Expression.parse(cron) do
+      # `last_at/2` answers the newest slot at or before the minute *before*
+      # the time it is given; a minute later makes that `now - slack_s`.
+      Oban.Cron.Expression.last_at(expression, DateTime.add(now, 60 - slack_s, :second))
     else
       _ -> nil
     end

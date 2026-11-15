@@ -446,6 +446,35 @@ carries the reasoning.
     two new columns (see
     [secrets-rotation.md](../secrets-rotation.md#data-at-rest-re-encrypt-before-you-retire-the-old-value)).
 
+<a id="backup-schedule-keep-upgrade"></a>
+
+- **Replace `scripts/backup.sh` on every host where cron prunes the backup directory before any schedule keeps backups past `BACKUP_KEEP_DAYS`; set keep values only once a rolling deploy has finished. No migration; rolling back is safe.**
+  A schedule's **Keep the newest** and **Keep for (days)**
+  ([Added](#backup-schedule-keep)) reach `backup.sh prune` through a new
+  presence-only marker, `kiln-<stamp>.hold`, which the app writes in `db/`
+  and `media/` beside every backup the schedules hold, wherever it already
+  writes the `.good` markers. This release's `backup.sh prune` keeps a unit
+  with a `.hold` in its own directory and never deletes one. An older copy
+  ignores the marker and deletes what a schedule keeps once it is older than
+  `BACKUP_KEEP_DAYS`, without a warning; the Schedule tab's preview asks you
+  to replace it when host cron backed a component up in the last eight days.
+  Nothing changes until a platform admin sets a keep value: with none,
+  retention is `BACKUP_KEEP_DAYS` for every backup and no `.hold` is written.
+  - **During a rolling deploy**, a node of the previous release prunes by
+    `BACKUP_KEEP_DAYS` alone. Set keep values once every node runs this
+    release.
+  - **With `KILN_BACKUP_MARKER_SYNC_CRON=false`**, the holds move only when
+    an in-app backup succeeds or prunes; a cron-only deployment then gets
+    none.
+  - **Rolling back to 1.9.x** ignores the keep settings: its in-app prune
+    deletes by `BACKUP_KEEP_DAYS` alone (so backups kept past it go at its
+    next prune), and deletes `.hold` files as strays once they are older than
+    `BACKUP_KEEP_DAYS`. 1.9.x has no scheduled marker sync, so on a
+    deployment that takes no in-app backups the holds stay, and this
+    release's `backup.sh` keeps those backups until you delete them:
+    `rm "$BACKUP_DIR"/db/kiln-*.hold "$BACKUP_DIR"/media/kiln-*.hold`.
+  See [The hold markers](../backups.md#the-hold-markers). (Part of #2219.)
+
 ## Breaking
 
 <a id="ws-gql-refuses-unverified-bearer"></a>
@@ -594,9 +623,8 @@ carries the reasoning.
   when another admin changed the schedule since the form opened, so a stale
   form never undoes a pause. A schedule the form can't offer (a value from a
   newer release, a sub-daily interval, media with no media directory) can
-  only be paused, resumed or deleted. There is no keep setting per schedule
-  yet: scheduled backups are pruned by the same retention rules as every
-  other backup.
+  only be paused, resumed or deleted. Each schedule can keep its own
+  backups by count or by age ([next entry](#backup-schedule-keep)).
 
   The **Backups** tab says "Next scheduled backup: in …" (linking to the
   tab) and shows each component's alarm threshold and where it came from.
@@ -635,12 +663,13 @@ carries the reasoning.
     `BACKUP_ENABLED=false` refuses the window (claimed, not retried). A
     database and media schedule ticked on a node with no media directory backs
     up the database only, with a warning; a media-only one is refused.
-  - **Sub-daily intervals are refused** until keep-N retention ships (a later
-    part of #2219). Retention caps backups by age, not by count (beyond the
-    recovery points and newest backups it keeps), and every run is a full
-    set, so the sets on disk per component are about runs per day ×
-    `BACKUP_KEEP_DAYS`: a two-hourly schedule would keep 168 with the default
-    14 days.
+  - **Sub-daily intervals are refused** ("schedules more often than daily
+    aren't available yet; choose daily or longer"). Every run is a full set
+    and a keep count is a minimum, not a cap, so a schedule kept by age
+    alone keeps about runs per day × `BACKUP_KEEP_DAYS` sets per component:
+    a two-hourly schedule would keep 168 with the default 14 days. Whether
+    they open once they must set their own keep days waits for a decision
+    on #2219.
   - A schedule sets the alarm threshold of the components it covers
     (interval plus half, at least 6 h: daily 36 h, weekly 252 h) only while it
     can actually run here and one of its windows has come since its baseline
@@ -660,6 +689,73 @@ carries the reasoning.
   for why a schedule sets the threshold only while it can run, why a claimed
   window is never retried, and why the claim shares the backup lock's
   transaction.
+
+<a id="backup-schedule-keep"></a>
+
+- **A backup schedule can keep its newest N backups however old, and keep its own backups for a number of days, longer or shorter than `BACKUP_KEEP_DAYS`.**
+  Part 3 of #2219, except sub-daily intervals, which stay refused pending an
+  owner decision. On the **Schedule** tab, the add and edit form has **How
+  long to keep its backups**, with two optional fields: **Keep the newest**
+  (1 to 1000 backups of each component) and **Keep for (days)** (1 to 3650;
+  empty is `BACKUP_KEEP_DAYS`). The preview estimates how many backups of
+  each component that keeps at a time ("Keeps about 31 backups at a time of
+  each of: Database."), counting the one being made, since the prune runs
+  while it is in flight (N + 1). It warns when the schedule's own backups
+  age out sooner than `BACKUP_KEEP_DAYS`, and when it keeps some past
+  `BACKUP_KEEP_DAYS` while host cron also backs that component up here
+  (replace the host's `backup.sh`, [upgrade note](#backup-schedule-keep-upgrade)).
+  Each card says what it keeps ("Keeps its newest 7 backups, and every one
+  from the last 30 days"), and **Delete** says the schedule's backups then
+  age out under `BACKUP_KEEP_DAYS`, never sooner. **Keep for (days)** shorter
+  than one interval with no **Keep the newest** is refused ("must be at
+  least as long as the schedule's interval, unless a number of backups to
+  keep is set"). From a console, `update_backup_schedule/3` takes
+  `keep_count` and `keep_days` (`nil` clears them); a change to them alone
+  never rebaselines the schedule, and the security log records it
+  (`changed=keep_days`, before and after values).
+
+  How retention applies them, per component (rules 5 to 8 in
+  [What retention deletes and what it keeps](../backups.md#what-retention-deletes-and-what-it-keeps)):
+  - **Keep count.** A schedule's own newest N, and the newest N of its own
+    and cron's together, however old. Only good backups count: complete,
+    from a succeeded run that verified them or imported from cron, not in
+    flight, not a recovery point. Manual and console backups never count.
+  - **Keep days.** A schedule's own backups age at its keep days, even below
+    `BACKUP_KEEP_DAYS`. Everything else of that component (cron's, backups
+    with no History row, a deleted schedule's) ages at the component's
+    floor, the longest of `BACKUP_KEEP_DAYS` and every covering schedule's
+    keep days, so deleting a schedule never shortens anything below
+    `BACKUP_KEEP_DAYS`.
+  - A backup is a schedule's own only when its run's trigger is `schedule`
+    and a live schedule covering that component asked for it. A **Back up
+    now** or console request that folds into a queued scheduled request now
+    takes over the queued request's trigger (`KilnCMS.Backups.Chain`'s fold;
+    `Lock`'s `:fold` accepts `waiting_trigger`), so a manual backup never
+    ages out on a schedule's shorter keep days.
+  - Paused schedules still keep. The newest verified and newest complete
+    backups are kept first, as before.
+  - The schedules are read as the `:backups` system actor with
+    `authorize_with: :error`: a refused read deletes nothing ("couldn't read
+    the backup schedules (…)"), and the marker sync then moves the `.good`
+    markers but leaves the holds as they are, with
+    `[:kiln_cms, :backups, :hold, :failed]`.
+
+  For `backup.sh prune`, the app keeps a `kiln-<stamp>.hold` beside every
+  unit the schedules hold, written and removed wherever `.good` is synced
+  (after a backup, before a prune, every 15 minutes from
+  `MarkerSyncWorker`) and in a sync queued after every schedule create,
+  change or delete (`Schedule.Changes.SyncHolds`). Cron keeps at least what
+  the app keeps. `Retention.plan/4` returns `holds`, new keep reasons
+  `{:keep_count, schedule_ids}`, `:schedule` and `:schedule_floor`, and
+  `[:kiln_cms, :backups, :last_good, :synced]` gains `held`.
+  `Retention.run/2` and `sync_last_good/2` default to
+  `Retention.Policy.current/0`; `Policy` gains `schedules`. History has no
+  badge for a held backup yet.
+
+  See [Set how long a schedule keeps its backups](../backups.md#set-how-long-a-schedule-keeps-its-backups)
+  and [The hold markers](../backups.md#the-hold-markers); why a third marker
+  is in
+  [ADR 0062](../decisions/0062-a-schedules-keep-holds-reach-backup-sh-through-a-third-presence-only-marker.md).
 
 <a id="slack-webhook-format"></a>
 
@@ -1615,6 +1711,38 @@ carries the reasoning.
   translated into Spanish and French. [Passkeys](../passkeys.md#remove-a-passkey)
   has a "Remove a passkey" walk-through. No migration, API or config change;
   rolling back removes the list from the setup page. (#2900)
+
+<a id="backup-schedule-tab-2875"></a>
+
+- **Backups: the Schedule tab keeps what you typed when a save is refused, its "Last scheduled run" opens that run's History row, the scheduler warning respects a weekday-only cron, and a demoted admin is sent to the access-denied page.**
+  Follow-ups to the Schedule tab (#2875):
+  - **A refused save keeps the form open.** When another admin changed the
+    schedule since the form opened, the save is still refused, but the form
+    now stays open on the stored values, with **Not saved: another admin
+    changed this schedule** above it listing each field's **You entered**
+    and **Stored now** values, the differing ones marked "(differs)". The
+    flash says to re-enter the changes you still want and save. **Cancel**
+    or a successful save clears it. A schedule deleted meanwhile, or one the
+    form can no longer offer, still closes the form.
+  - **"Last scheduled run" opens the run's row.** The link goes to
+    `/editor/backups?run=<id>`, which opens the History page that holds the
+    run (`Backups.history_page_of/3`), scrolls to the row and highlights it
+    (`aria-current="true"`). An unknown or malformed id opens page 1 with
+    "That backup isn't in the history."
+  - **The "scheduler hasn't run" warning looks back at the slot that should
+    have run.** The threshold was the longest gap among the cron's next few
+    runs, so `* * * * 1-5` warned all weekend. It is now the newest
+    `KILN_BACKUP_SCHEDULER_CRON` run at least five minutes old
+    (`Scheduler.expected_tick_at/2`, replacing `tick_gap_s/1`): no warning
+    over a weekend, a monthly cron expects the 1st, and `@reboot` gives five
+    minutes.
+  - **A user who stops being a platform admin while a Backups tab is open**
+    (demoted, or a time-limited grant expired) is sent to the access-denied
+    page on their next action, on both tabs and on the Schedule tab's
+    refresh, instead of their clicks silently doing nothing. Nothing is
+    read or written first.
+
+  See [Schedule backups in the app](../backups.md#schedule-backups-in-the-app).
 
 ## Fixed
 

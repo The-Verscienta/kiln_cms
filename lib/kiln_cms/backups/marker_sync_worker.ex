@@ -1,7 +1,11 @@
 defmodule KilnCMS.Backups.MarkerSyncWorker do
   @moduledoc """
   Keeps the last-good markers (`kiln-<stamp>.good`) in step for deployments
-  whose backups come from host cron (#2554).
+  whose backups come from host cron (#2554), and the hold markers
+  (`kiln-<stamp>.hold`) that tell `backup.sh prune` what the in-app
+  schedules keep (#2219). A schedule's create, update or destroy also queues
+  one run of this job (`KilnCMS.Backups.Schedule.Changes.SyncHolds`), so the
+  holds catch up at once.
 
   The app writes a marker after its own backup succeeds or prunes. A
   deployment that backs up only with `scripts/backup.sh` runs neither, so

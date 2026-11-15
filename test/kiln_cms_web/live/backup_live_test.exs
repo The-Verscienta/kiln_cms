@@ -73,6 +73,23 @@ defmodule KilnCMSWeb.BackupLiveTest do
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
 
+  # A former platform admin whose grant has expired (#2875): `role` is what
+  # they hold without it.
+  defp expired_grant_user do
+    %{
+      role: :editor,
+      granted_role: :admin,
+      granted_role_expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
+    }
+  end
+
+  # A handler's answer to a socket that isn't a platform admin's (#2875): sent
+  # to the access-denied page, as the mount would have, with no flash.
+  defp assert_denied({:noreply, socket}) do
+    assert {:live, :redirect, %{to: "/access-denied?needs=platform"}} = socket.redirected
+    refute socket.assigns[:flash]
+  end
+
   defp seed_manifest!(dir, overrides) do
     :ok =
       Manifest.write(
@@ -157,12 +174,10 @@ defmodule KilnCMSWeb.BackupLiveTest do
     # once. Called directly because a refused mount leaves no socket to push an
     # event down: the question here is what the handler does on its own.
     test "the handler refuses on its own, without the mount guard in front of it" do
-      socket = %Phoenix.LiveView.Socket{
-        assigns: %{__changed__: %{}, current_user: %{role: :editor}}
-      }
-
-      assert {:noreply, ^socket} =
-               KilnCMSWeb.BackupLive.handle_event("backup_now", %{}, socket)
+      for user <- [%{role: :editor}, expired_grant_user()] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+        assert_denied(KilnCMSWeb.BackupLive.handle_event("backup_now", %{}, socket))
+      end
 
       # Scoped to the worker this handler would have enqueued (#1354).
       refute Enum.any?(
@@ -526,6 +541,94 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
     end
 
+    # #2875: the Schedule tab's "Last scheduled run" links here with `?run=`.
+    defp hourly_runs!(dir, count) do
+      for n <- 1..count do
+        seed_run!(dir, n,
+          stamp: "20260101-00#{String.pad_leading(Integer.to_string(n), 2, "0")}00",
+          started_at: DateTime.add(~U[2026-01-01 00:00:00.000000Z], n * 3600, :second)
+        )
+      end
+    end
+
+    test "?run= opens the page that holds the run, marks its row and asks to reveal it", %{
+      conn: conn,
+      dir: dir
+    } do
+      [oldest | _] = runs = hourly_runs!(dir, 27)
+      newest = List.last(runs)
+
+      # Newest first: the oldest two are on page 2. `?run=` wins over `?page=`.
+      {:ok, lv, _html} =
+        conn |> admin_conn() |> live(~p"/editor/backups?#{%{page: 1, run: oldest.id}}")
+
+      assert lv |> element("#backup-history") |> render() =~ "Page 2 of 2"
+      assert has_element?(lv, ~s|#backup-run-#{oldest.id}[aria-current="true"]|)
+      assert_push_event(lv, "kiln:reveal", %{id: "backup-run-" <> id})
+      assert id == oldest.id
+
+      assert lv
+             |> element("#backup-history")
+             |> render()
+             |> String.split("aria-current")
+             |> length() ==
+               2
+
+      # The id as typed in another case is the same run.
+      upper = String.upcase(newest.id)
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups?#{%{run: upper}}")
+      assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
+      assert has_element?(lv, ~s|#backup-run-#{newest.id}[aria-current="true"]|)
+
+      # Paging away drops the mark.
+      lv
+      |> element(~s|#backup-history button[phx-click="page"]:not([disabled])|)
+      |> render_click()
+
+      assert_patch(lv, ~p"/editor/backups?page=2")
+      refute has_element?(lv, "#backup-history [aria-current]")
+    end
+
+    test "?run= ties on started_at are broken by id, as the history sorts them", %{dir: dir} do
+      at = ~U[2026-01-01 03:00:00.000000Z]
+
+      ids =
+        for n <- 1..26 do
+          stamp = "20260101-03#{String.pad_leading(Integer.to_string(n), 2, "0")}00"
+          seed_run!(dir, n, stamp: stamp, started_at: at).id
+        end
+
+      admin = authed_user(:admin)
+
+      %{results: page_two} =
+        Backups.run_history!(actor: admin, page: [limit: 25, offset: 25, count: true])
+
+      assert [%{id: last}] = page_two
+      assert last == Enum.min(ids)
+
+      for id <- ids do
+        expected = if id == last, do: 2, else: 1
+        assert Backups.history_page_of(id, admin, 25) == {:ok, expected}
+      end
+    end
+
+    test "?run= that isn't a run says so and opens page 1", %{conn: conn, dir: dir} do
+      hourly_runs!(dir, 27)
+
+      for bad <- ["not-a-uuid", Ecto.UUID.generate(), "", "1 OR 1=1"] do
+        {:ok, lv, html} = conn |> admin_conn() |> live(~p"/editor/backups?#{%{run: bad}}")
+
+        assert html =~ "That backup isn&#39;t in the history."
+        assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
+        refute has_element?(lv, "#backup-history [aria-current]")
+      end
+
+      # A list where an id belongs is not a run either; it reads as no `?run=`.
+      {:ok, lv, html} = conn |> admin_conn() |> live("/editor/backups?run[]=x")
+      refute html =~ "isn&#39;t in the history"
+      assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
+    end
+
     test "the import runs on the connected mount, not the disconnected render", %{
       conn: conn,
       dir: dir
@@ -570,16 +673,18 @@ defmodule KilnCMSWeb.BackupLiveTest do
       user
     end
 
-    test "handle_params and the page event refuse a non-admin on their own" do
-      socket = %Phoenix.LiveView.Socket{
-        assigns: %{__changed__: %{}, current_user: %{role: :editor}}
-      }
+    test "handle_params and the page event refuse a non-admin on their own", %{dir: dir} do
+      run = seed_run!(dir, 1)
 
-      assert {:noreply, ^socket} =
-               KilnCMSWeb.BackupLive.handle_event("page", %{"to" => "2"}, socket)
+      for user <- [%{role: :editor}, expired_grant_user()] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
 
-      assert {:noreply, refused} = KilnCMSWeb.BackupLive.handle_params(%{}, "/", socket)
-      assert {:live, :redirect, %{to: "/access-denied?needs=platform"}} = refused.redirected
+        assert_denied(KilnCMSWeb.BackupLive.handle_event("page", %{"to" => "2"}, socket))
+        assert_denied(KilnCMSWeb.BackupLive.handle_params(%{}, "/", socket))
+
+        # `?run=` is never looked up for them: no flash says whether it exists.
+        assert_denied(KilnCMSWeb.BackupLive.handle_params(%{"run" => run.id}, "/", socket))
+      end
     end
 
     test "the history refreshes when a manual backup finishes", %{conn: conn, dir: dir} do
@@ -713,9 +818,8 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     @tag :pg_tools
-    test "the handler re-checks platform admin: editor, org admin and anonymous get nothing", %{
-      dir: dir
-    } do
+    test "the handler re-checks platform admin: editor, org admin, expired grant and anonymous are sent away",
+         %{dir: dir} do
       run = app_run!(dir, 1, :failed)
 
       org_admin = authed_user(:editor)
@@ -726,11 +830,16 @@ defmodule KilnCMSWeb.BackupLiveTest do
         role: :admin
       })
 
-      for user <- [authed_user(:editor), org_admin, authed_user(:viewer), nil] do
+      for user <- [
+            authed_user(:editor),
+            org_admin,
+            authed_user(:viewer),
+            expired_grant_user(),
+            nil
+          ] do
         socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
 
-        assert {:noreply, ^socket} =
-                 KilnCMSWeb.BackupLive.handle_event("resume_run", %{"id" => run.id}, socket)
+        assert_denied(KilnCMSWeb.BackupLive.handle_event("resume_run", %{"id" => run.id}, socket))
       end
 
       assert backup_jobs() == []
@@ -1153,7 +1262,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     @tag :pg_tools
-    test "the handler re-checks platform admin: editor, org admin, viewer and anonymous get nothing" do
+    test "the handler re-checks platform admin: editor, org admin, viewer, expired grant and anonymous are sent away" do
       %{run: run} = started!()
 
       org_admin = authed_user(:editor)
@@ -1164,11 +1273,16 @@ defmodule KilnCMSWeb.BackupLiveTest do
         role: :admin
       })
 
-      for user <- [authed_user(:editor), org_admin, authed_user(:viewer), nil] do
+      for user <- [
+            authed_user(:editor),
+            org_admin,
+            authed_user(:viewer),
+            expired_grant_user(),
+            nil
+          ] do
         socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
 
-        assert {:noreply, ^socket} =
-                 KilnCMSWeb.BackupLive.handle_event("cancel_run", %{"id" => run.id}, socket)
+        assert_denied(KilnCMSWeb.BackupLive.handle_event("cancel_run", %{"id" => run.id}, socket))
       end
 
       assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
