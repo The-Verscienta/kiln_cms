@@ -707,10 +707,14 @@ defmodule KilnCMS.Backups do
 
   @cron_evidence_days 8
 
-  # Host cron backed `component` up recently as well (an imported run with
-  # the cron trigger). A read that fails counts as yes: the lower threshold
-  # alarms sooner, never later.
-  defp cron_backs_up?(component) do
+  @doc """
+  Whether host cron backed `component` up here in the last eight days (an
+  imported run with the cron trigger). A read that fails counts as yes: the
+  staleness threshold then alarms sooner, never later, and the Schedule tab
+  asks the admin to check the host's `scripts/backup.sh` rather than not.
+  """
+  @spec cron_backs_up?(component()) :: boolean()
+  def cron_backs_up?(component) do
     name = Atom.to_string(component)
     since = DateTime.add(DateTime.utc_now(), -@cron_evidence_days * 86_400, :second)
 

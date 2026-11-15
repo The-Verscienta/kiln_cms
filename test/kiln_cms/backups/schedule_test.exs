@@ -80,7 +80,7 @@ defmodule KilnCMS.Backups.ScheduleTest do
     test "sub-daily intervals are refused until keep-N retention exists" do
       for interval <- [:every_2h, :every_4h, :every_8h, :every_12h] do
         assert {:error, error} = create(%{interval: interval})
-        assert Exception.message(error) =~ "sub-daily schedules arrive with keep-N retention"
+        assert Exception.message(error) =~ "schedules more often than daily aren't available yet"
       end
 
       for interval <- [:daily, :weekly, :fortnightly, :monthly] do

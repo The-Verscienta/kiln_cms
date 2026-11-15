@@ -1,10 +1,11 @@
 defmodule KilnCMS.Backups.Schedule.Validations.IntervalAvailable do
   @moduledoc """
   Refuses a sub-daily interval (every 2, 4, 8 or 12 hours) when a schedule is
-  created or its interval changed, until keep N retention exists (#2219,
-  part 3). Every run is a full set and retention is age-only
-  (`BACKUP_KEEP_DAYS`), so a two-hourly schedule would keep twelve sets of
-  each component per day of retention. Checked only when the interval is set
+  created or its interval changed (#2219). Every run is a full set, and a
+  schedule's keep N is a minimum, not a cap: without its own `keep_days`, a
+  two-hourly schedule would keep twelve sets of each component per day of
+  `BACKUP_KEEP_DAYS`. Whether sub-daily schedules must set `keep_days` waits
+  for an owner decision on #2219. Checked only when the interval is set
   or changed, so a schedule a later release saved with one can still be
   paused or deleted.
   """
@@ -31,6 +32,6 @@ defmodule KilnCMS.Backups.Schedule.Validations.IntervalAvailable do
     do:
       dgettext_noop(
         "errors",
-        "sub-daily schedules arrive with keep-N retention; choose daily or longer"
+        "schedules more often than daily aren't available yet; choose daily or longer"
       )
 end

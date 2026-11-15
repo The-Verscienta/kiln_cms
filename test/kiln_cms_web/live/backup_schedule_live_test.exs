@@ -92,6 +92,38 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
 
   defp stored(schedule), do: Backups.get_backup_schedule!(schedule.id, actor: Backups.system())
 
+  defp events(type) do
+    KilnCMS.Security.list_instance_events!(actor: platform_admin(), page: [limit: 100])
+    |> then(fn
+      %{results: results} -> results
+      list -> list
+    end)
+    |> Enum.filter(&(&1.type == type))
+  end
+
+  # A backup host cron made here `hours` ago, as the importer records one.
+  defp cron_import!(components, hours) do
+    at = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+    stamp = KilnCMS.Backups.Artifact.stamp(at)
+
+    Backups.import_run!(
+      %{
+        stamp: stamp,
+        trigger: "cron",
+        status: :succeeded,
+        components: components,
+        started_at: at,
+        finished_at: at,
+        artifacts:
+          for(
+            c <- components,
+            do: %{kind: c, name: "kiln-#{c}-#{stamp}", bytes: 10, verified: true}
+          )
+      },
+      actor: Backups.system()
+    )
+  end
+
   defp all_schedules, do: Backups.list_backup_schedules!(actor: Backups.system())
 
   defp form_params(overrides) do
@@ -353,11 +385,209 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       refute has_element?(lv, "#backup-schedule-#{s.id}")
     end
 
-    test "no keep fields are offered", %{conn: conn} do
+    test "delete says the backups then age out under BACKUP_KEEP_DAYS, never sooner",
+         %{conn: conn} do
+      admin = platform_admin()
+      plain = schedule!(%{}, admin)
+      keeping = schedule!(%{keep_count: 3, keep_days: 3}, admin)
+      lv = mount(conn, admin)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-schedule-#{plain.id} [data-role=delete][data-confirm*="age out after 14 days (BACKUP_KEEP_DAYS), never sooner"]|
+             )
+
+      refute has_element?(
+               lv,
+               ~s|#backup-schedule-#{plain.id} [data-role=delete][data-confirm*="keep settings"]|
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-schedule-#{keeping.id} [data-role=delete][data-confirm*="Its keep settings stop applying"]|
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-schedule-#{keeping.id} [data-role=delete][data-confirm*="never sooner"]|
+             )
+    end
+  end
+
+  describe "keep fields" do
+    test "are offered, optional, and empty by default", %{conn: conn} do
       lv = mount(conn, platform_admin())
       lv |> element("#schedule-new") |> render_click()
 
-      refute has_element?(lv, "#schedule-form [name*=keep]")
+      assert has_element?(lv, "#schedule-keep input[name='schedule[keep_count]'][type=number]")
+      assert has_element?(lv, "#schedule-keep input[name='schedule[keep_days]'][type=number]")
+      refute has_element?(lv, "#schedule-keep input[name='schedule[keep_count]'][value]")
+      assert has_element?(lv, "#schedule-keep", "BACKUP_KEEP_DAYS, 14 days on this deployment")
+    end
+
+    test "are saved, audited, shown on the card, and cleared by emptying them", %{conn: conn} do
+      admin = platform_admin()
+      lv = mount(conn, admin)
+      lv |> element("#schedule-new") |> render_click()
+
+      lv
+      |> form("#schedule-form",
+        schedule: form_params(%{"keep_count" => "7", "keep_days" => "30"})
+      )
+      |> render_submit()
+
+      assert render(lv) =~ "Schedule saved."
+      assert [s] = all_schedules()
+      assert {s.keep_count, s.keep_days} == {7, 30}
+      assert [created] = events(:backup_schedule_created)
+      assert created.metadata["keep_count"] == 7
+      assert created.metadata["keep_days"] == 30
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{s.id} [data-role=keep]",
+               "Keeps its newest 7 backups, and every one from the last 30 days"
+             )
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+      assert has_element?(lv, "#schedule-form input[name='schedule[keep_count]'][value='7']")
+
+      lv
+      |> form("#schedule-form", schedule: form_params(%{"keep_count" => "", "keep_days" => ""}))
+      |> render_submit()
+
+      assert render(lv) =~ "Schedule saved."
+      assert {nil, nil} == {stored(s).keep_count, stored(s).keep_days}
+
+      assert [changed] = events(:backup_schedule_changed)
+      assert changed.metadata["changed"] =~ "keep_count"
+      assert changed.metadata["keep_count_before"] == 7
+      assert changed.metadata["keep_count_after"] == nil
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{s.id} [data-role=keep]",
+               "Keeps its backups for 14 days (BACKUP_KEEP_DAYS)"
+             )
+    end
+
+    test "keep days shorter than the interval, with no count, is refused under the field",
+         %{conn: conn} do
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      lv
+      |> form("#schedule-form",
+        schedule: form_params(%{"interval" => "weekly", "keep_days" => "3"})
+      )
+      |> render_submit()
+
+      assert has_element?(
+               lv,
+               "#schedule-form #schedule_keep_days-error",
+               "at least as long as the schedule's interval"
+             )
+
+      assert all_schedules() == []
+    end
+
+    test "the preview estimates what is kept at a time, counting the run in flight",
+         %{conn: conn} do
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      # Daily under BACKUP_KEEP_DAYS (14): 14 days back, plus the new one.
+      preview_of(lv, %{})
+      assert has_element?(lv, "#schedule-preview [data-role=estimate]", "about 15 backups")
+      assert has_element?(lv, "#schedule-preview [data-role=estimate]", "Database")
+
+      # Keep the newest 30: N + 1.
+      preview_of(lv, %{"keep_count" => "30"})
+      assert has_element?(lv, "#schedule-preview [data-role=estimate]", "about 31 backups")
+
+      # Weekly, 28 days: four weeks back, plus the new one.
+      preview_of(lv, %{"interval" => "weekly", "keep_count" => "", "keep_days" => "28"})
+      assert has_element?(lv, "#schedule-preview [data-role=estimate]", "about 5 backups")
+    end
+
+    test "estimate/3 never says fewer than two" do
+      assert BackupScheduleLive.estimate(:monthly, nil, 14) == 2
+      assert BackupScheduleLive.estimate(:monthly, 1, 31) == 2
+      assert BackupScheduleLive.estimate(:daily, 3, 2) == 4
+      assert BackupScheduleLive.estimate(:fortnightly, nil, 60) == 5
+    end
+
+    test "keep days shorter than BACKUP_KEEP_DAYS says so; equal or longer doesn't",
+         %{conn: conn} do
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      preview_of(lv, %{"keep_days" => "5"})
+
+      assert has_element?(
+               lv,
+               "#schedule-preview [data-role=keep-shorter]",
+               "age out after 5 days, sooner than BACKUP_KEEP_DAYS (14)"
+             )
+
+      for days <- ["", "14", "30"] do
+        preview_of(lv, %{"keep_days" => days})
+        refute has_element?(lv, "#schedule-preview [data-role=keep-shorter]")
+      end
+    end
+
+    test "keeping past BACKUP_KEEP_DAYS while host cron backs up here asks for the new backup.sh",
+         %{conn: conn} do
+      cron_import!([:db], 30)
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      # Within BACKUP_KEEP_DAYS: nothing for cron to delete.
+      # Both keys every time: the form keeps whatever the last change left.
+      for {count, days} <- [{"", ""}, {"", "10"}, {"14", ""}, {"14", "14"}] do
+        preview_of(lv, %{"keep_count" => count, "keep_days" => days})
+        refute has_element?(lv, "#schedule-preview [data-role=keep-cron]")
+      end
+
+      for {count, days} <- [{"", "30"}, {"15", ""}] do
+        preview_of(lv, %{"keep_count" => count, "keep_days" => days})
+
+        assert has_element?(
+                 lv,
+                 "#schedule-preview [data-role=keep-cron]",
+                 "Replace the host's scripts/backup.sh"
+               )
+
+        assert has_element?(lv, "#schedule-preview [data-role=keep-cron]", "Database")
+      end
+    end
+
+    test "without host cron backing up here, a long keep needs no backup.sh notice",
+         %{conn: conn} do
+      # Older than the eight days that count as "backs up here".
+      cron_import!([:db], 24 * 20)
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      preview_of(lv, %{"keep_days" => "60", "keep_count" => "100"})
+      assert has_element?(lv, "#schedule-preview [data-role=estimate]")
+      refute has_element?(lv, "#schedule-preview [data-role=keep-cron]")
+    end
+
+    test "the keep notice is translated", %{conn: conn} do
+      lv = mount(conn, platform_admin(), "fr")
+      lv |> element("#schedule-new") |> render_click()
+
+      preview_of(lv, %{"keep_days" => "5"})
+
+      assert has_element?(
+               lv,
+               "#schedule-preview [data-role=keep-shorter]",
+               "BACKUP_KEEP_DAYS (14)"
+             )
+
+      refute has_element?(lv, "#schedule-preview [data-role=keep-shorter]", "sooner than")
+      assert has_element?(lv, "#schedule-preview [data-role=keep-shorter]", "5 jours")
     end
   end
 
@@ -443,22 +673,106 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
 
     # A form opened before another admin's change would overwrite it with
     # what it still shows: the save is refused instead.
-    test "an edit whose schedule another admin changed meanwhile is refused", %{conn: conn} do
+    # The refused form stays open on the stored values, with what was typed
+    # shown beside them (#2875).
+    test "an edit whose schedule another admin changed meanwhile is refused, keeping what was typed",
+         %{conn: conn} do
       admin = platform_admin()
       s = schedule!(%{}, admin)
       lv = mount(conn, admin)
 
       lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
-      Backups.update_backup_schedule!(s, %{time_of_day: ~T[05:00:00]}, actor: platform_admin())
+
+      Backups.update_backup_schedule!(s, %{time_of_day: ~T[05:00:00], keep_count: 4},
+        actor: platform_admin()
+      )
 
       html =
         lv
-        |> form("#schedule-form", schedule: form_params(%{"time_of_day" => "03:00"}))
+        |> form("#schedule-form",
+          schedule: form_params(%{"time_of_day" => "03:30", "keep_days" => "20"})
+        )
         |> render_submit()
 
-      assert html =~ "This schedule changed since you opened it."
-      refute has_element?(lv, "#schedule-form")
+      assert html =~ "This schedule changed since you opened it"
       assert stored(s).time_of_day == ~T[05:00:00]
+      assert stored(s).keep_days == nil
+
+      # The form stays, on the stored values.
+      assert has_element?(lv, "#schedule-form input[type=time][value='05:00']")
+      assert has_element?(lv, "#schedule-form input[name='schedule[keep_count]'][value='4']")
+
+      # What was typed, beside what is stored, differences marked.
+      panel = "#schedule-refused-values"
+      assert has_element?(lv, "#{panel} tr[data-field=time_of_day] [data-role=yours]", "03:30")
+      assert has_element?(lv, "#{panel} tr[data-field=time_of_day] [data-role=stored]", "05:00")
+      assert has_element?(lv, "#{panel} tr[data-field=time_of_day][data-differs]")
+      assert has_element?(lv, "#{panel} tr[data-field=keep_days] [data-role=yours]", "20")
+      assert has_element?(lv, "#{panel} tr[data-field=keep_days] [data-role=stored]", "Not set")
+      assert has_element?(lv, "#{panel} tr[data-field=keep_count] [data-role=yours]", "Not set")
+      assert has_element?(lv, "#{panel} tr[data-field=keep_count] [data-role=stored]", "4")
+      assert has_element?(lv, "#{panel} tr[data-field=keep_count][data-differs]")
+      refute has_element?(lv, "#{panel} tr[data-field=interval][data-differs]")
+
+      # Saving again is now compared with what the form was rebuilt on, and
+      # goes through; the panel goes with it.
+      lv
+      |> form("#schedule-form",
+        schedule: form_params(%{"time_of_day" => "03:30", "keep_days" => "20"})
+      )
+      |> render_submit()
+
+      assert render(lv) =~ "Schedule saved."
+      refute has_element?(lv, panel)
+      refute has_element?(lv, "#schedule-form")
+      assert stored(s).time_of_day == ~T[03:30:00]
+      assert stored(s).keep_days == 20
+    end
+
+    test "Cancel clears a refused save's typed values", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+      Backups.update_backup_schedule!(s, %{keep_days: 9}, actor: platform_admin())
+      lv |> form("#schedule-form", schedule: form_params(%{})) |> render_submit()
+      assert has_element?(lv, "#schedule-refused-values")
+
+      lv |> element("#schedule-form button", "Cancel") |> render_click()
+      refute has_element?(lv, "#schedule-refused-values")
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+      refute has_element?(lv, "#schedule-refused-values")
+    end
+
+    # Rendered as text, never as markup.
+    test "the typed values are escaped", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+      Backups.update_backup_schedule!(s, %{keep_days: 9}, actor: platform_admin())
+
+      html =
+        render_submit(lv, "save", %{
+          "schedule" =>
+            form_params(%{
+              "time_zone" => "<script>alert(1)</script>",
+              "components" => ["", "<b>x</b>"]
+            })
+        })
+
+      refute html =~ "<script>alert(1)</script>"
+      refute html =~ "<b>x</b>"
+      assert html =~ "&lt;script&gt;alert(1)&lt;/script&gt;"
+
+      assert has_element?(
+               lv,
+               "#schedule-refused-values tr[data-field=time_zone] [data-role=yours]",
+               "<script>"
+             )
     end
 
     test "a save does not resume a schedule another admin paused meanwhile", %{conn: conn} do
@@ -474,10 +788,25 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
         |> form("#schedule-form", schedule: form_params(%{"interval" => "weekly"}))
         |> render_submit()
 
-      assert html =~ "Reopen it to see the current values."
+      assert html =~ "This schedule changed since you opened it"
       after_save = stored(s)
       refute after_save.enabled
       assert after_save.interval == :daily
+
+      # The form shows it paused, and what was typed says enabled.
+      refute has_element?(lv, "#schedule-form input[name='schedule[enabled]'][checked]")
+
+      assert has_element?(
+               lv,
+               "#schedule-refused-values tr[data-field=enabled][data-differs] [data-role=stored]",
+               "Paused"
+             )
+
+      assert has_element?(
+               lv,
+               "#schedule-refused-values tr[data-field=interval] [data-role=yours]",
+               "Every week"
+             )
     end
 
     # The scheduler writes the window's claim on the row while the form is

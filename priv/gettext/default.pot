@@ -152,10 +152,18 @@ msgstr[1] ""
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} day"
 msgid_plural "%{count} days"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} day (BACKUP_KEEP_DAYS)"
+msgid_plural "%{count} days (BACKUP_KEEP_DAYS)"
 msgstr[0] ""
 msgstr[1] ""
 
@@ -1447,6 +1455,11 @@ msgstr ""
 msgid "(default)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "(differs)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "(dropped from delivery)"
@@ -1948,6 +1961,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "A note in your inbox each time content goes live."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "A number of backups of each component, or empty for none."
 msgstr ""
 
 #: lib/kiln_cms/cms/field_types/range.ex
@@ -4448,6 +4466,13 @@ msgstr ""
 msgid "Backups"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backups are kept for BACKUP_KEEP_DAYS (%{count} day) unless a schedule keeps its own longer or shorter; the newest finished backup of each component is always kept."
+msgid_plural "Backups are kept for BACKUP_KEEP_DAYS (%{count} days) unless a schedule keeps its own longer or shorter; the newest finished backup of each component is always kept."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Backups aren't set up yet — turn them on before you go live."
@@ -4649,6 +4674,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "Bot budgets saved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Both are optional. The newest backups are kept however old; the days apply to this schedule's own backups. Whichever keeps more wins."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
@@ -7682,8 +7712,15 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
-msgid "Delete this schedule? Backups it already took stay, and age out after %{count} day (BACKUP_KEEP_DAYS)."
-msgid_plural "Delete this schedule? Backups it already took stay, and age out after %{count} days (BACKUP_KEEP_DAYS)."
+msgid "Delete this schedule? Backups it already took stay, and age out after %{count} day (BACKUP_KEEP_DAYS), never sooner."
+msgid_plural "Delete this schedule? Backups it already took stay, and age out after %{count} days (BACKUP_KEEP_DAYS), never sooner."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete this schedule? Its keep settings stop applying. Backups it already took stay, and age out after %{count} day (BACKUP_KEEP_DAYS), never sooner."
+msgid_plural "Delete this schedule? Its keep settings stop applying. Backups it already took stay, and age out after %{count} days (BACKUP_KEEP_DAYS), never sooner."
 msgstr[0] ""
 msgstr[1] ""
 
@@ -8835,6 +8872,13 @@ msgstr ""
 msgid "Empty here, so readers get the %{locale} value."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Empty keeps them for BACKUP_KEEP_DAYS, %{count} day on this deployment."
+msgid_plural "Empty keeps them for BACKUP_KEEP_DAYS, %{count} days on this deployment."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Empty or not"
@@ -9703,6 +9747,7 @@ msgid "Feeds"
 msgstr ""
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Field"
@@ -10920,6 +10965,11 @@ msgstr ""
 msgid "Home"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host cron also backs up %{components} here, and this schedule keeps backups past BACKUP_KEEP_DAYS. Replace the host's scripts/backup.sh with this release's copy first: an older copy deletes them after BACKUP_KEEP_DAYS."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Host matching is off, and this deployment has more than one organization"
@@ -10978,6 +11028,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "How long a browser can sit unused on this site before it is signed out, and a way to sign everyone out at once."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "How long to keep its backups"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -11834,6 +11889,11 @@ msgstr ""
 msgid "Keep events for (days)"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep for (days)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Keep me signed in on this browser"
@@ -11859,10 +11919,34 @@ msgstr ""
 msgid "Keep the live version"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep the newest"
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "Keep the site fresh"
 msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keeps about %{count} backup at a time of each of: %{components}."
+msgid_plural "Keeps about %{count} backups at a time of each of: %{components}."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keeps its backups for %{days}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keeps its newest backup, and every one from the last %{days}"
+msgid_plural "Keeps its newest %{count} backups, and every one from the last %{days}"
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -14612,6 +14696,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not saved yet. The draft is created as soon as you give it a title."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not saved: another admin changed this schedule"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not set"
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
@@ -18138,13 +18232,6 @@ msgstr ""
 msgid "Retention"
 msgstr ""
 
-#: lib/kiln_cms_web/live/backup_schedule_live.ex
-#, elixir-autogen, elixir-format
-msgid "Retention is BACKUP_KEEP_DAYS (%{count} day) for every backup."
-msgid_plural "Retention is BACKUP_KEEP_DAYS (%{count} days) for every backup."
-msgstr[0] ""
-msgstr[1] ""
-
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Retention saved."
@@ -19062,7 +19149,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
-msgid "Schedules more often than daily arrive with keep-N retention, so this one can't be edited here. You can pause, resume or delete it."
+msgid "Schedules more often than daily can't be edited here yet. You can pause, resume or delete it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_live.ex
@@ -21000,6 +21087,11 @@ msgstr ""
 msgid "Stored for this type, but not a private field here, so they allow nothing. Untick one to remove it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stored now"
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
@@ -21701,6 +21793,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "That backup is running right now."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup isn't in the history."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -22409,6 +22506,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The focus keyphrase doesn't appear in the title or SEO title."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "The form now holds the stored values. What you entered is below; changed fields are marked."
 msgstr ""
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
@@ -23749,8 +23851,15 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
-msgid "This schedule changed since you opened it. Reopen it to see the current values."
+msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: save again to apply yours."
 msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule's own backups age out after %{count} day, sooner than BACKUP_KEEP_DAYS (%{default}). Backups made by hand or by the host's cron still keep BACKUP_KEEP_DAYS."
+msgid_plural "This schedule's own backups age out after %{count} days, sooner than BACKUP_KEEP_DAYS (%{default}). Backups made by hand or by the host's cron still keep BACKUP_KEEP_DAYS."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
@@ -26483,6 +26592,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/error_html/403.html.heex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to view this page."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "You entered"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
