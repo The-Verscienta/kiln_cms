@@ -840,6 +840,11 @@ msgstr "%{field} a une valeur"
 msgid "%{field} has no simple value to copy"
 msgstr "%{field} n'a pas de valeur simple à copier"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is %{values}"
+msgstr "%{field} : %{values}"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{field} is empty"
@@ -3969,6 +3974,7 @@ msgstr "Archiver ce lancement publié ? Il ne pourra plus être annulé en tant 
 msgid "Archive this release? Its pending items are freed for other releases."
 msgstr "Archiver ce lancement ? Ses éléments en attente seront libérés pour d'autres lancements."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -5011,6 +5017,11 @@ msgstr "Catégories"
 #, elixir-autogen, elixir-format
 msgid "Category"
 msgstr "Catégorie"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Category %{name}"
+msgstr "Catégorie %{name}"
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -7100,6 +7111,11 @@ msgstr "Créez votre compte administrateur"
 msgid "Create your first page or post to get started."
 msgstr "Créez votre première page ou votre premier article pour commencer."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Created by you"
+msgstr "Créés par vous"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Created via API key %{name}"
@@ -8127,6 +8143,7 @@ msgid "Downloadable document, e.g. a PDF"
 msgstr "Document téléchargeable, p. ex. un PDF"
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -11310,6 +11327,7 @@ msgstr "Dans les flux"
 msgid "In one sentence:"
 msgstr "En une phrase :"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -15276,6 +15294,11 @@ msgstr "Seuls les éditeurs et les administrateurs voient la valeur. Elle est ex
 msgid "Only editors and admins see this"
 msgstr "Seuls les éditeurs et les administrateurs voient ceci"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Only offering: %{conditions}"
+msgstr "Propose uniquement : %{conditions}"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only one %{source}"
@@ -16713,6 +16736,7 @@ msgid "Publish this release now? Every item goes live together — or, if any on
 msgstr "Publier ce lancement maintenant ? Tous les éléments passent en ligne ensemble — et si l'un échoue, aucun ne passe."
 
 #: lib/kiln_cms/notifications.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -20810,6 +20834,11 @@ msgstr "État"
 msgid "State:"
 msgstr "État :"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "State: %{states}"
+msgstr "État : %{states}"
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -21253,6 +21282,11 @@ msgstr[1] "%{count} éléments étiquetés."
 #, elixir-autogen, elixir-format
 msgid "Tagged %{ok}; %{failed} couldn't be updated."
 msgstr "%{ok} étiquetés ; %{failed} n'ont pas pu être mis à jour."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Tagged %{tags}"
+msgstr "Étiquetés %{tags}"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -23404,6 +23438,11 @@ msgid_plural "This field needs at least %{count} rows."
 msgstr[0] "Ce champ demande au moins une ligne."
 msgstr[1] "Ce champ demande au moins %{count} lignes."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "This field only accepts records that match: %{conditions}."
+msgstr "Ce champ n'accepte que les enregistrements qui correspondent : %{conditions}."
+
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format
 msgid "This form doesn't exist or no longer takes submissions."
@@ -23602,6 +23641,11 @@ msgstr "Ce plugin ne se décrit pas. Son auteur peut ajouter une ligne %{callbac
 #, elixir-autogen, elixir-format
 msgid "This preview link has expired"
 msgstr "Ce lien d'aperçu a expiré"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "This record isn't one %{field} accepts, so %{type} records can't connect to it."
+msgstr "Cet enregistrement n'est pas accepté par %{field} ; les enregistrements %{type} ne peuvent donc pas s'y connecter."
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
@@ -28199,6 +28243,7 @@ msgstr "les options ne peuvent pas être vides"
 msgid "options must be unique"
 msgstr "les options doivent être uniques"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "or"

@@ -379,6 +379,111 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     |> Keyword.update(:arguments, arguments, &Map.merge(&1, arguments))
   end
 
+  @doc """
+  The ids among `ids` (records of `type`) that `selection` accepts for the
+  writer in `read_opts` (`:actor`, `:tenant`, `:authorize?`), by the same read
+  the picker lists with: one read, restricted to `ids`, plus the selection's
+  filter. An unfiltered selection (none, or a caller it does not bind) accepts
+  them all; an id the actor cannot read, or that fails the filter, is left
+  out. Save-time enforcement and the reverse field's "may this record be
+  connected here" both call it.
+  """
+  @spec accepted_ids(term(), String.t() | atom(), [String.t()], keyword()) :: [String.t()]
+  def accepted_ids(selection, type, ids, read_opts) do
+    tenant = Keyword.get(read_opts, :tenant)
+
+    case query_for(selection, type, Keyword.get(read_opts, :actor), tenant, read_opts: read_opts) do
+      {:ok, :unfiltered} ->
+        ids
+
+      {:ok, plan} ->
+        type
+        |> ContentTypes.list!(
+          read_opts
+          |> read_opts(plan)
+          |> Keyword.update(:query, [filter: [id: [in: ids]], select: [:id]], fn query ->
+            query ++ [filter: [id: [in: ids]], select: [:id]]
+          end)
+        )
+        |> Enum.map(& &1.id)
+    end
+  end
+
+  @doc "The picker's order for a blank search: `recent` (default) or `title`."
+  @spec sort(term()) :: String.t()
+  def sort(selection) do
+    case normalize(selection) do
+      %{"sort" => "title"} -> "title"
+      _other -> "recent"
+    end
+  end
+
+  @doc """
+  What a selection reads as, for the picker's empty state and footer: the live
+  part (`live/3`) with tag and category ids resolved to names and field names
+  to labels. `nil` when no condition is left. Reads the org's taxonomy and
+  field definitions, so callers compute it once per picker.
+
+      %{states: ["published"], owner: :self,
+        by_type: %{"ingredient" => %{tags: ["vegan"], category: "Soup",
+                                      fields: [{"Diet", ["vegan"]}]}}}
+  """
+  @spec describe(term(), [String.t()], term()) :: map() | nil
+  def describe(selection, targets, tenant) do
+    org_id = KilnCMS.Accounts.org_id(tenant)
+
+    with %{} = live <- live(selection, targets, org_id) do
+      by_type =
+        live
+        |> Map.get("by_type", %{})
+        |> Map.new(fn {type, entry} -> {type, describe_entry(type, entry, org_id)} end)
+
+      %{
+        states: Map.get(live, "states", []),
+        owner: if(Map.get(live, "owner") == "self", do: :self),
+        by_type: by_type
+      }
+    end
+  end
+
+  defp describe_entry(type, entry, org_id) do
+    labels =
+      case ContentTypes.get(type, org_id) do
+        %{} = descriptor ->
+          descriptor |> field_definitions(org_id) |> Map.new(&{&1.name, &1.label || &1.name})
+
+        _gone ->
+          %{}
+      end
+
+    %{
+      tags: names(:tag, Map.get(entry, "tags_any", []), org_id),
+      category: :category |> names(List.wrap(Map.get(entry, "category")), org_id) |> List.first(),
+      fields:
+        for {name, condition} <- Map.get(entry, "fields", %{}) |> Enum.sort() do
+          {Map.get(labels, name, name), condition_values(condition)}
+        end
+    }
+  end
+
+  defp condition_values(%{"in" => values}), do: Enum.map(values, &to_string/1)
+  defp condition_values(%{"not_eq" => value}), do: ["≠ " <> to_string(value)]
+  defp condition_values(value), do: [to_string(value)]
+
+  defp names(_kind, [], _org_id), do: []
+
+  defp names(:tag, ids, org_id) do
+    [query: [filter: [id: [in: ids]], select: [:id, :name], sort: [name: :asc]], tenant: org_id]
+    |> CMS.list_tags!()
+    |> Enum.map(& &1.name)
+  end
+
+  defp names(:category, ids, org_id) do
+    [query: [filter: [id: [in: ids]], select: [:id, :name], sort: [name: :asc]], tenant: org_id]
+    |> CMS.list_categories!()
+    |> Enum.map(& &1.name)
+  end
+
   # --- what still exists -----------------------------------------------------
 
   # The ids of `kind` (`:tag` or `:category`) that still exist in the org; the

@@ -952,28 +952,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   defp missing_from_selection(type, items, selection, read_opts) do
-    tenant = Keyword.get(read_opts, :tenant)
-
-    case ReferenceSelection.query_for(selection, type, Keyword.get(read_opts, :actor), tenant,
-           read_opts: read_opts
-         ) do
-      {:ok, :unfiltered} ->
-        []
-
-      {:ok, plan} ->
-        ids = Enum.map(items, & &1["id"])
-
-        found =
-          type
-          |> KilnCMS.CMS.ContentTypes.list!(
-            read_opts
-            |> ReferenceSelection.read_opts(plan)
-            |> Keyword.update!(:query, &(&1 ++ [filter: [id: [in: ids]], select: [:id]]))
-          )
-          |> MapSet.new(& &1.id)
-
-        Enum.reject(items, &MapSet.member?(found, &1["id"]))
-    end
+    ids = Enum.map(items, & &1["id"])
+    accepted = MapSet.new(ReferenceSelection.accepted_ids(selection, type, ids, read_opts))
+    Enum.reject(items, &MapSet.member?(accepted, &1["id"]))
   end
 
   defp not_accepted([only]),

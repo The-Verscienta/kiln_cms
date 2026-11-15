@@ -525,9 +525,23 @@ carries the reasoning.
   later change. `GET /api/schema` reports the live selection as
   `x-kiln-selection` (tag and category as ids); field-definition sync
   (`FieldSync`) leaves it out because those ids are per site; `mix
-  kiln.gen.join` does not carry it. There is no picker or admin UI for it yet:
-  configure it only together with the filtered picker, because until then the
-  picker offers targets a save refuses.
+  kiln.gen.join` does not carry it. There is no admin UI for it yet (see
+  [the picker follow-up](#reference-selection-picker)).
+
+<a id="reference-selection-picker"></a>
+
+- **The reference picker honors a field's `selection` ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285), second of four changes).**
+  Search and the dropdown widget list only the records the field accepts, read
+  as the editor (so the filter only narrows what they can already read), by
+  the same evaluator and read the save uses, so the picker cannot offer what a
+  save refuses. `sort: "title"` lists a blank search by title instead of
+  newest first. A footer in the open list names the active conditions, and an
+  empty list under a filter says it only accepts records matching them. On a
+  record's own page, the reverse field shows a short explanation instead of
+  its add control when the field would refuse that record; reverse writes
+  still refuse it with the same message. The selection's tags, categories and
+  field labels are resolved once when the picker opens, not per keystroke.
+  Still to come: the fields-admin editor for `selection` and create-on-type.
 
 <a id="backup-schedules"></a>
 
