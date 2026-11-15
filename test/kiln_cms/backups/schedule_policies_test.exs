@@ -90,8 +90,7 @@ defmodule KilnCMS.Backups.SchedulePoliciesTest do
 
     test "a changed event carries keep_count and keep_days before and after" do
       admin = platform_admin()
-      # No action accepts the keep fields yet (part 3); seeded in the table.
-      s = force!(schedule!(%{}, admin), keep_count: 7, keep_days: 30)
+      s = schedule!(%{keep_count: 7, keep_days: 30}, admin)
 
       {:ok, _} = Backups.update_backup_schedule(s, %{enabled: false}, actor: admin)
       assert [changed] = events(:backup_schedule_changed)
@@ -147,6 +146,75 @@ defmodule KilnCMS.Backups.SchedulePoliciesTest do
 
       assert %{last_window_at: nil, last_deferred_window_at: nil} =
                Backups.get_backup_schedule!(s.id, actor: admin)
+    end
+  end
+
+  describe "the keep fields (#2219)" do
+    test "a platform admin sets and clears them, recorded as a keep-only change" do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+
+      assert {:ok, s} =
+               Backups.update_backup_schedule(s, %{keep_count: 5, keep_days: 30}, actor: admin)
+
+      assert %{keep_count: 5, keep_days: 30} = s
+
+      {:ok, s} = Backups.update_backup_schedule(s, %{keep_days: 45}, actor: admin)
+
+      changed =
+        events(:backup_schedule_changed) |> Enum.find(&(&1.metadata["changed"] == "keep_days"))
+
+      assert %{"keep_days_before" => 30, "keep_days_after" => 45, "keep_count_after" => 5} =
+               changed.metadata
+
+      assert {:ok, %{keep_count: nil, keep_days: nil}} =
+               Backups.update_backup_schedule(s, %{keep_count: nil, keep_days: nil}, actor: admin)
+    end
+
+    test "a keep-only change doesn't rebaseline the schedule" do
+      admin = platform_admin()
+      s = past_baseline(schedule!(%{}, admin))
+
+      {:ok, updated} = Backups.update_backup_schedule(s, %{keep_count: 3}, actor: admin)
+      assert updated.baseline_at == s.baseline_at
+    end
+
+    test "everyone but a platform admin is refused, an expired grant and the pipeline included" do
+      s = schedule!(%{keep_count: 3})
+
+      expired_grant = %{
+        user(:editor)
+        | granted_role: :admin,
+          granted_role_expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
+      }
+
+      for actor <- refused_people() ++ [Backups.system(), expired_grant] do
+        label = inspect(actor && Map.get(actor, :role, actor))
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.update_backup_schedule(s, %{keep_count: 1000, keep_days: 3650},
+                   actor: actor
+                 ),
+               "update must refuse #{label}"
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.create_backup_schedule(
+                   %{
+                     components: [:db],
+                     interval: :daily,
+                     time_of_day: ~T[03:00:00],
+                     starts_on: ~D[2026-01-01],
+                     keep_count: 1000
+                   },
+                   actor: actor
+                 ),
+               "create must refuse #{label}"
+      end
+
+      assert %{keep_count: 3, keep_days: nil} =
+               Backups.get_backup_schedule!(s.id, actor: Backups.system())
+
+      assert events(:backup_schedule_changed) == []
     end
   end
 
@@ -237,9 +305,7 @@ defmodule KilnCMS.Backups.SchedulePoliciesTest do
       last_deferred_window_at: ~U[2030-01-01 00:00:00.000000Z],
       last_outcome: :started,
       last_outcome_at: ~U[2030-01-01 00:00:00.000000Z],
-      last_error: "forged",
-      keep_count: 5,
-      keep_days: 10
+      last_error: "forged"
     }
 
     test "create refuses each of them as input" do

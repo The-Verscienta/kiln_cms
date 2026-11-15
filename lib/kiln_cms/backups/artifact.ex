@@ -18,7 +18,8 @@ defmodule KilnCMS.Backups.Artifact do
 
   File names are built and parsed here and nowhere else: `parse_file/1`,
   `part_name/2`, `set_names/2`, `sidecar_name/2`, `parse_sidecar_name/1`,
-  `keep_name/1`, `parse_keep_name/1`, `good_name/1`, `parse_good_name/1`.
+  `keep_name/1`, `parse_keep_name/1`, `good_name/1`, `parse_good_name/1`,
+  `hold_name/1`, `parse_hold_name/1`.
   """
   use Ash.Resource, data_layer: :embedded
 
@@ -245,6 +246,30 @@ defmodule KilnCMS.Backups.Artifact do
   end
 
   def parse_good_name(_other), do: :error
+
+  @doc """
+  The hold marker for a stamp (#2219): `kiln-<stamp>.hold`. Like the last-good
+  marker it lives in ONE component's directory and pins only that component
+  of that stamp, for `scripts/backup.sh prune`: the app keeps one on every
+  unit a schedule's keep rules hold (`Retention.sync_last_good/2`), since cron
+  has no schedules to work them out from. Only its presence counts; its
+  contents are never read, and the app never reads one as a keep rule.
+  """
+  @spec hold_name(String.t()) :: String.t()
+  def hold_name(stamp) when is_binary(stamp), do: "kiln-#{stamp}.hold"
+
+  @hold_name ~r/\Akiln-(\d{8}-\d{6})\.hold\z/
+
+  @doc "The stamp a `hold_name/1` marker names, as `{:ok, stamp}`, or `:error`."
+  @spec parse_hold_name(String.t()) :: {:ok, String.t()} | :error
+  def parse_hold_name(name) when is_binary(name) do
+    case Regex.run(@hold_name, name) do
+      [_, stamp] -> {:ok, stamp}
+      nil -> :error
+    end
+  end
+
+  def parse_hold_name(_other), do: :error
 
   @doc """
   The file names an artifact occupies in its kind's subdirectory, in order:

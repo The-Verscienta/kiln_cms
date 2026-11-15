@@ -39,8 +39,8 @@ defmodule KilnCMS.Backups.Schedule do
   reads, creates, updates and destroys schedules (audited in the instance
   security log). The window writes are the `:backups` system actor's alone:
   no person can claim, refuse or defer a window, and `:create`/`:update`
-  accept none of `baseline_at`, the `last_*` fields or the keep fields. Not
-  exposed through JSON:API, GraphQL or MCP.
+  accept neither `baseline_at` nor the `last_*` fields. Not exposed through
+  JSON:API, GraphQL or MCP.
 
   ## Atoms
 
@@ -53,18 +53,25 @@ defmodule KilnCMS.Backups.Schedule do
 
   ## Intervals
 
-  Every 2, 4, 8 or 12 hours, daily, weekly, fortnightly or monthly. Until keep
-  N retention exists (#2219, part 3), sub-daily intervals are refused when a
-  schedule is created or its interval changed: every run is a full set, and
-  retention caps by age, not by count (beyond the recovery points and newest
-  backups it keeps), so a two-hourly schedule would keep about
-  `12 × BACKUP_KEEP_DAYS` sets of each component.
+  Every 2, 4, 8 or 12 hours, daily, weekly, fortnightly or monthly.
+  Sub-daily intervals are still refused when a schedule is created or its
+  interval changed (`Validations.IntervalAvailable`): every run is a full
+  set, so a two-hourly schedule kept by age alone would keep about
+  `12 × BACKUP_KEEP_DAYS` sets of each component. Whether they open once a
+  schedule's own `keep_days` bounds them is still to be decided (#2219).
 
   ## Keep fields
 
-  `keep_count` and `keep_days` are stored for #2219 part 3 and not used yet:
-  no action accepts them, and retention is `BACKUP_KEEP_DAYS` for every
-  backup.
+  `keep_count` (1 to 1000) keeps the newest N backups of each component the
+  schedule backs up, however old; `keep_days` (1 to 3650) is how long the
+  schedule's own backups are kept, which may be shorter or longer than
+  `BACKUP_KEEP_DAYS` (the default when it is not set). Both are optional and
+  a platform admin's to set; `KilnCMS.Backups.Retention.Policy` turns them
+  into retention's keep rules, paused schedules included. A `keep_days`
+  shorter than the interval needs a `keep_count`
+  (`Validations.KeepCoversInterval`). Changing them never rebaselines the
+  schedule; every create, update and destroy queues a marker sync
+  (`Changes.SyncHolds`) so `scripts/backup.sh prune` learns the new holds.
   """
   use Ash.Resource,
     domain: KilnCMS.Backups,
@@ -88,7 +95,16 @@ defmodule KilnCMS.Backups.Schedule do
 
   @outcomes [:started, :queued, :folded, :deferred, :refused]
 
-  @editable [:components, :interval, :time_of_day, :starts_on, :time_zone, :enabled]
+  @editable [
+    :components,
+    :interval,
+    :time_of_day,
+    :starts_on,
+    :time_zone,
+    :enabled,
+    :keep_count,
+    :keep_days
+  ]
 
   postgres do
     table "backup_schedules"
@@ -107,6 +123,8 @@ defmodule KilnCMS.Backups.Schedule do
       validate Validations.KnownZone
       validate Validations.IntervalAvailable
       validate Validations.MediaAvailable
+      validate Validations.KeepCoversInterval
+      change Changes.SyncHolds
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_schedule_created,
@@ -128,6 +146,8 @@ defmodule KilnCMS.Backups.Schedule do
       validate Validations.KnownZone
       validate Validations.IntervalAvailable
       validate Validations.MediaAvailable
+      validate Validations.KeepCoversInterval
+      change Changes.SyncHolds
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_schedule_changed,
@@ -141,6 +161,8 @@ defmodule KilnCMS.Backups.Schedule do
     destroy :destroy do
       primary? true
       require_atomic? false
+
+      change Changes.SyncHolds
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_schedule_deleted,
@@ -292,7 +314,8 @@ defmodule KilnCMS.Backups.Schedule do
       public? true
     end
 
-    # Stored for #2219 part 3 (keep N); no action accepts them yet.
+    # Retention's keep rules for this schedule's backups (#2219); see "Keep
+    # fields". nil is "not set".
     attribute :keep_count, :integer do
       constraints min: 1, max: 1000
       public? true
@@ -333,7 +356,7 @@ defmodule KilnCMS.Backups.Schedule do
   @spec intervals() :: [atom()]
   def intervals, do: @intervals
 
-  @doc "The intervals refused until keep N retention exists (#2219, part 3)."
+  @doc "The sub-daily intervals, refused for now (`Validations.IntervalAvailable`, #2219)."
   @spec sub_daily_intervals() :: [atom()]
   def sub_daily_intervals, do: @sub_daily
 

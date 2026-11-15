@@ -387,6 +387,36 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert {:ok, %{type: :symlink}} = File.lstat(link)
     end
 
+    test "a hold marker keeps its own component only (#2219)", ctx do
+      [held, newest] = ~w(20260101-000000 20260301-000000)
+      held_files = set_files!(ctx, held)
+      age!(held_files ++ set_files!(ctx, newest), 400)
+      File.write!(Path.join(ctx.backups, "media/kiln-#{held}.hold"), "")
+
+      assert {_out, 0} = backup(ctx, "prune")
+
+      {held_db, held_media} = Enum.split_with(held_files, &String.contains?(&1, "/db/"))
+      assert Enum.all?(held_media, &File.exists?/1)
+      assert Enum.all?(held_db, &(not File.exists?(&1)))
+    end
+
+    test "a hold marker is never deleted, of any kind or age (#2219)", ctx do
+      newest = "20260301-000000"
+      age!(set_files!(ctx, newest), 400)
+      regular = Path.join(ctx.backups, "db/kiln-20250101-000000.hold")
+      link = Path.join(ctx.backups, "media/kiln-20250101-000000.hold")
+      current = Path.join(ctx.backups, "db/kiln-#{newest}.hold")
+      File.write!(regular, "")
+      File.write!(current, "")
+      File.ln_s!("/nonexistent", link)
+      age!([regular, current], 400)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert File.exists?(regular)
+      assert File.exists?(current)
+      assert {:ok, %{type: :symlink}} = File.lstat(link)
+    end
+
     test "a .work/<stamp> or a fresh .partial keeps its unit; an old .partial doesn't", ctx do
       [working, writing, stale, newest] =
         ~w(20260101-000000 20260201-000000 20260301-000000 20260401-000000)
@@ -609,6 +639,161 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       end
     end
   end
+
+  describe "prune and the schedules' keep rules (#2219)" do
+    # Cron has no schedules: it sees what they keep only through the `.hold`
+    # markers the app writes from its plan (and the newest verified backup
+    # through `.good`). Where a schedule keeps less than BACKUP_KEEP_DAYS, cron
+    # keeps more than the app, never less: its survivors are a superset.
+    test "PARITY: cron keeps at least what the app's plan keeps, given its markers", ctx do
+      now = System.os_time(:second)
+      stamp = fn days -> stamp_at(now - days * 86_400) end
+      b = ctx.backups
+
+      db = fn days ->
+        s = stamp.(days)
+        parity_put!(b, "db/kiln-db-#{s}.dump", days, "d")
+        parity_put!(b, "db/kiln-db-#{s}.sha256", days, "s")
+        s
+      end
+
+      media = fn days ->
+        s = stamp.(days)
+        parity_put!(b, "media/kiln-media-#{s}.tar.gz", days, "m")
+        s
+      end
+
+      # One stamp per age, so no two units share a Run. A: database, keep 3.
+      # B: media, 5 days (< 14). C: database, 60 days (> 14), no count.
+      policy = %Policy{
+        keep_days: 14,
+        schedules: [
+          %{id: "a", kinds: [:db], keep_count: 3, keep_days: 14},
+          %{id: "b", kinds: [:media], keep_count: nil, keep_days: 5},
+          %{id: "c", kinds: [:db], keep_count: nil, keep_days: 60}
+        ]
+      }
+
+      pinned = db.(120)
+      parity_put!(b, "db/kiln-#{pinned}.keep", 120, "")
+
+      units = %{
+        pinned: {pinned, sched_run([:db], ["a"])},
+        a100: {db.(100), sched_run([:db], ["a"])},
+        a90: {db.(90), sched_run([:db], ["a"])},
+        a80: {db.(80), sched_run([:db], ["a"])},
+        c65: {db.(65), sched_run([:db], ["c"])},
+        c50: {db.(50), sched_run([:db], ["c"])},
+        manual40:
+          {db.(40),
+           %{
+             status: :succeeded,
+             origin: :app,
+             trigger: "manual",
+             artifacts: [%{kind: :db, verified: true}]
+           }},
+        cron30:
+          {db.(30),
+           %{
+             status: :succeeded,
+             origin: :imported,
+             trigger: "cron",
+             artifacts: [%{kind: :db, verified: nil}]
+           }},
+        a20: {db.(20), sched_run([:db], ["a"])},
+        manual2:
+          {db.(2),
+           %{
+             status: :succeeded,
+             origin: :app,
+             trigger: "manual",
+             artifacts: [%{kind: :db, verified: true}]
+           }},
+        b21: {media.(21), sched_run([:media], ["b"])},
+        cron10:
+          {media.(10),
+           %{
+             status: :succeeded,
+             origin: :imported,
+             trigger: "cron",
+             artifacts: [%{kind: :media, verified: nil}]
+           }},
+        b8: {media.(8), sched_run([:media], ["b"])},
+        b4: {media.(4), sched_run([:media], ["b"])},
+        b3: {media.(3), sched_run([:media], ["b"])}
+      }
+
+      runs = Map.new(Map.values(units))
+      {:ok, inventory} = Retention.scan(b)
+      plan = Retention.plan(inventory, runs, policy, now)
+      s = fn key -> elem(units[key], 0) end
+
+      # A holds its newest three and, with the cron-made one, keeps more; C's
+      # 50-day backup and the imported one (floor: 60 days) are held by age;
+      # B's two within its 5 days are held by age too, the newest included.
+      assert plan.holds.db == Enum.sort([s.(:a90), s.(:a80), s.(:c50), s.(:cron30), s.(:a20)])
+      assert plan.holds.media == Enum.sort([s.(:b4), s.(:b3)])
+
+      # What the app writes before it deletes.
+      for {kind, stamps} <- plan.holds, st <- stamps do
+        parity_put!(b, "#{kind}/kiln-#{st}.hold", 0, "")
+      end
+
+      for {kind, st} <- plan.last_good, is_binary(st) do
+        parity_put!(b, "#{kind}/kiln-#{st}.good", 0, "")
+      end
+
+      planned = for e <- plan.delete, name <- e.files, into: MapSet.new(), do: "#{e.sub}/#{name}"
+      app_survivors = MapSet.difference(listing(ctx), planned)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      cron_survivors = listing(ctx)
+
+      assert MapSet.subset?(app_survivors, cron_survivors)
+
+      gone = fn key ->
+        {st, _run} = units[key]
+        kind = if key in [:b21, :cron10, :b8, :b4, :b3], do: "media", else: "db"
+        name = if kind == "db", do: "kiln-db-#{st}.dump", else: "kiln-media-#{st}.tar.gz"
+
+        {not MapSet.member?(app_survivors, "#{kind}/#{name}"),
+         not MapSet.member?(cron_survivors, "#{kind}/#{name}")}
+      end
+
+      # {gone in the app's plan, gone after cron's prune}
+      assert gone.(:pinned) == {false, false}
+      assert gone.(:a100) == {true, true}
+      assert gone.(:a90) == {false, false}
+      assert gone.(:a80) == {false, false}
+      assert gone.(:c65) == {true, true}
+      assert gone.(:c50) == {false, false}
+      assert gone.(:manual40) == {true, true}
+      assert gone.(:cron30) == {false, false}
+      assert gone.(:a20) == {false, false}
+      assert gone.(:manual2) == {false, false}
+      assert gone.(:b21) == {true, true}
+      assert gone.(:cron10) == {false, false}
+      # Older than B's 5 days, younger than BACKUP_KEEP_DAYS: the app deletes
+      # it, cron keeps it until its own age rule takes it.
+      assert gone.(:b8) == {true, false}
+      assert gone.(:b4) == {false, false}
+      assert gone.(:b3) == {false, false}
+    end
+  end
+
+  defp sched_run(kinds, ids) do
+    %{
+      status: :succeeded,
+      origin: :app,
+      trigger: "schedule",
+      scheduled_components: kinds,
+      schedule_ids: ids,
+      artifacts: Enum.map(kinds, &%{kind: &1, verified: true})
+    }
+  end
+
+  defp stamp_at(posix),
+    do: posix |> DateTime.from_unix!() |> Calendar.strftime("%Y%m%d-%H%M%S")
 
   # Every case the two prunes must agree on, `400` days old unless noted.
   # Returns `[{relative path, survives?}]` for the ones the test spells out.

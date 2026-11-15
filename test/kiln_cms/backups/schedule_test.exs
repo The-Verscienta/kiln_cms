@@ -8,6 +8,7 @@ defmodule KilnCMS.Backups.ScheduleTest do
   """
   use KilnCMS.DataCase, async: false
 
+  import Ecto.Query
   import KilnCMS.Test.BackupSchedules
 
   alias KilnCMS.Backups
@@ -87,8 +88,111 @@ defmodule KilnCMS.Backups.ScheduleTest do
       end
     end
 
+    test "keep fields don't lift the sub-daily refusal (#2219)" do
+      assert {:error, error} = create(%{interval: :every_2h, keep_count: 12, keep_days: 2})
+      assert :interval in error_fields(error)
+    end
+
+    test "keep fields out of range are refused (#2219)" do
+      for {field, value} <- [
+            keep_count: 0,
+            keep_count: -1,
+            keep_count: 1001,
+            keep_days: 0,
+            keep_days: 3651
+          ] do
+        assert {:error, error} = create(%{field => value}), "#{field}: #{value}"
+        assert field in error_fields(error)
+      end
+
+      assert {:ok, %{keep_count: 1000, keep_days: 3650}} =
+               create(%{keep_count: 1000, keep_days: 3650})
+    end
+
+    test "keep_days alone must cover one interval (#2219)" do
+      for {interval, short, enough} <- [
+            {:daily, nil, 1},
+            {:weekly, 6, 7},
+            {:fortnightly, 13, 14},
+            {:monthly, 30, 31}
+          ] do
+        if short do
+          assert {:error, error} = create(%{interval: interval, keep_days: short})
+          assert :keep_days in error_fields(error)
+          assert Exception.message(error) =~ "at least as long as the schedule's interval"
+
+          # A count keeps the backups however short the days.
+          assert {:ok, _} = create(%{interval: interval, keep_days: short, keep_count: 2})
+        end
+
+        assert {:ok, _} = create(%{interval: interval, keep_days: enough})
+      end
+    end
+
+    test "keep_days is checked again when the interval or the count changes (#2219)" do
+      admin = platform_admin()
+      {:ok, s} = create(%{keep_days: 3}, admin)
+
+      assert {:error, error} =
+               Backups.update_backup_schedule(s, %{interval: :weekly}, actor: admin)
+
+      assert :keep_days in error_fields(error)
+
+      {:ok, s} = Backups.update_backup_schedule(s, %{keep_count: 4}, actor: admin)
+      {:ok, s} = Backups.update_backup_schedule(s, %{interval: :weekly}, actor: admin)
+
+      assert {:error, error} = Backups.update_backup_schedule(s, %{keep_count: nil}, actor: admin)
+      assert :keep_days in error_fields(error)
+
+      # An unrelated edit of a row that breaks the rule (a newer release's)
+      # is not refused for it.
+      s = force!(s, keep_count: nil)
+
+      assert {:ok, %{enabled: false}} =
+               Backups.update_backup_schedule(s, %{enabled: false}, actor: admin)
+    end
+
     test "an unknown interval is refused" do
       assert {:error, %Ash.Error.Invalid{}} = create(%{interval: :hourly})
+    end
+  end
+
+  describe "the marker sync after a change (#2219)" do
+    defp sync_jobs do
+      worker = inspect(KilnCMS.Backups.MarkerSyncWorker)
+      KilnCMS.Repo.all(from(j in Oban.Job, where: j.worker == ^worker and j.state == "available"))
+    end
+
+    defp clear_sync_jobs, do: KilnCMS.Repo.delete_all(Oban.Job)
+
+    test "a create, an update and a destroy each queue one, after the commit" do
+      admin = platform_admin()
+      {:ok, s} = create(%{keep_count: 3}, admin)
+      assert [%{args: args}] = sync_jobs()
+      assert args == %{}
+
+      clear_sync_jobs()
+      {:ok, s} = Backups.update_backup_schedule(s, %{keep_count: 4}, actor: admin)
+      assert [_] = sync_jobs()
+
+      clear_sync_jobs()
+      :ok = Backups.destroy_backup_schedule(s, actor: admin)
+      assert [_] = sync_jobs()
+    end
+
+    test "a refused change queues none" do
+      assert {:error, _} = create(%{keep_count: 0})
+      assert {:error, _} = create(%{}, user(:editor))
+      assert sync_jobs() == []
+    end
+
+    test "none while the marker sync is turned off" do
+      original = Application.get_env(:kiln_cms, :backup_marker_sync_cron)
+      Application.put_env(:kiln_cms, :backup_marker_sync_cron, false)
+      on_exit(fn -> Application.put_env(:kiln_cms, :backup_marker_sync_cron, original) end)
+
+      assert {:ok, _} = create(%{keep_count: 3})
+      assert sync_jobs() == []
     end
   end
 

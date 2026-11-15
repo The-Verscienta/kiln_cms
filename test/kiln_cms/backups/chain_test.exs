@@ -187,7 +187,9 @@ defmodule KilnCMS.Backups.ChainTest do
       assert log =~ "Backup request folded"
       assert_received {[:kiln_cms, :backups, :request, :folded], ^ref, %{count: 1}, _}
       assert_received {[:kiln_cms, :backups, :request, :folded], ^ref, %{count: 1}, _}
-      assert %{waiting: %{trigger: "schedule", folds: 2}} = Backups.in_flight()
+      # The manual request that folded in wins the trigger (#2219): the run is
+      # no longer the schedule's alone.
+      assert %{waiting: %{trigger: "manual", folds: 2}} = Backups.in_flight()
     end
 
     test "a request that can't run here is refused before it touches the lock" do
@@ -240,7 +242,9 @@ defmodule KilnCMS.Backups.ChainTest do
       assert a.status == :succeeded and b.status == :succeeded
       assert a.stamp != b.stamp and a.chain_id != b.chain_id
       assert a.chain_id == first
-      assert b.trigger == "schedule"
+      # A manual request folded into the scheduled one, so the run is not the
+      # schedule's own (#2219).
+      assert b.trigger == "manual"
 
       assert Enum.any?(
                b.log,

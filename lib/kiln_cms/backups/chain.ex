@@ -70,6 +70,7 @@ defmodule KilnCMS.Backups.Chain do
     DirId,
     Importer,
     Lock,
+    Markers,
     Recorder,
     Retention,
     Steps,
@@ -288,22 +289,37 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   defp fold_fields(row, req) do
-    case waiting_scope(row) do
-      %{valid?: true} = scope ->
-        %{
-          waiting_components: widen(scope.components, req.components),
-          waiting_scheduled: Enum.uniq(scope.scheduled ++ req.scheduled),
-          waiting_schedule_ids: Enum.uniq(scope.schedule_ids ++ req.schedule_ids)
-        }
+    fields =
+      case waiting_scope(row) do
+        %{valid?: true} = scope ->
+          %{
+            waiting_components: widen(scope.components, req.components),
+            waiting_scheduled: Enum.uniq(scope.scheduled ++ req.scheduled),
+            waiting_schedule_ids: Enum.uniq(scope.schedule_ids ++ req.schedule_ids)
+          }
 
-      %{valid?: false} ->
-        %{
-          waiting_components: nil,
-          waiting_scheduled: req.scheduled,
-          waiting_schedule_ids: req.schedule_ids
-        }
-    end
+        %{valid?: false} ->
+          %{
+            waiting_components: nil,
+            waiting_scheduled: req.scheduled,
+            waiting_schedule_ids: req.schedule_ids
+          }
+      end
+
+    Map.merge(fields, fold_trigger(row, req))
   end
+
+  # A request that is not a schedule's wins the trigger of the fold it joins
+  # (#2219): retention gives a schedule's own runs the schedule's keep rules,
+  # and only a run whose trigger is `"schedule"` counts as one, so a manual
+  # backup folded into a scheduled request (or a scheduled request folded into
+  # a manual one, which keeps the queued trigger) is never aged out as the
+  # schedule's.
+  defp fold_trigger(%{waiting_trigger: queued}, %{trigger: trigger})
+       when trigger != "schedule" and trigger != queued,
+       do: %{waiting_trigger: trigger}
+
+  defp fold_trigger(_row, _req), do: %{}
 
   defp widen(nil, _other), do: nil
   defp widen(_one, nil), do: nil
@@ -640,7 +656,8 @@ defmodule KilnCMS.Backups.Chain do
   ## The last-good marker (#2554)
 
   @doc """
-  Bring the `.good` markers in `dir` in step with its newest verified backups
+  Bring the `.good` markers in `dir` in step with its newest verified backups,
+  and the `.hold` markers with what the schedules' keep rules hold
   (`Retention.sync_last_good/2`), for a deployment whose backups come from host
   cron, where no chain ever runs to do it. What `MarkerSyncWorker` runs.
 
@@ -705,11 +722,16 @@ defmodule KilnCMS.Backups.Chain do
     end
   end
 
+  # `held`: how many `.hold` markers the directory has once the sync is done
+  # (#2219), counted from the disk.
   defp synced(dir, last_good) do
+    markers = Markers.read(dir)
+
     :telemetry.execute([:kiln_cms, :backups, :last_good, :synced], %{count: 1}, %{
       dir: dir,
       db: last_good.db,
-      media: last_good.media
+      media: last_good.media,
+      held: Enum.sum(for {_kind, stamps} <- markers.hold, do: MapSet.size(stamps))
     })
 
     {:ok, last_good}
