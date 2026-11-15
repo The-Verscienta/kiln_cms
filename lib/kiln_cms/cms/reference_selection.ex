@@ -151,10 +151,18 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     with :ok <- known_keys(map, @top_keys, "the selection"),
          :ok <- states_shape(Map.get(map, "states")),
          :ok <- owner_shape(Map.get(map, "owner")),
-         :ok <- sort_shape(Map.get(map, "sort")) do
+         :ok <- sort_shape(Map.get(map, "sort")),
+         :ok <- create_shape(Map.get(map, "create")) do
       by_type_shape(Map.get(map, "by_type"))
     end
   end
+
+  defp create_shape(nil), do: :ok
+
+  defp create_shape(%{"type" => type} = create) when is_binary(type) and map_size(create) == 1,
+    do: :ok
+
+  defp create_shape(_other), do: {:error, "create must be {\"type\": a target type name}"}
 
   defp known_keys(map, allowed, what) do
     case Map.keys(map) -- allowed do
@@ -484,6 +492,64 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     |> Enum.map(& &1.name)
   end
 
+  # --- create-on-type (#2285, part 4) ----------------------------------------
+
+  @doc """
+  The target type a selection lets editors create on the fly, or `nil`:
+  `create: %{"type" => name}`.
+  """
+  @spec create_type(term()) :: String.t() | nil
+  def create_type(selection) do
+    case normalize(selection) do
+      %{"create" => %{"type" => type}} when is_binary(type) -> type
+      _other -> nil
+    end
+  end
+
+  @doc """
+  Why a record of `type` created from the picker could not be connected under
+  `selection`, or `nil` when it could. A new record is a **draft**, created by
+  the picker's actor with no tags or category, carrying exactly the plain
+  `fields` values the selection names — so a condition the new record cannot
+  meet makes `create` impossible:
+
+    * `:states` — `states` is set and does not include `draft`;
+    * `:owner` — `owner` is set to anything but `self` (the creator is the author);
+    * `:taxonomy` — `tags_any` or `category` is set for the type;
+    * `:field_condition` — a `fields` condition that is not plain equality
+      (`in`, `not_eq`): there is no one value to write.
+  """
+  @spec create_problem(term(), String.t() | atom()) ::
+          nil | :states | :owner | :taxonomy | :field_condition
+  def create_problem(selection, type) do
+    map = normalize(selection) || %{}
+    entry = get_in(map, ["by_type", to_string(type)]) || %{}
+
+    cond do
+      draft_refused?(Map.get(map, "states", [])) -> :states
+      Map.get(map, "owner") not in [nil, "self"] -> :owner
+      Map.has_key?(entry, "tags_any") or Map.has_key?(entry, "category") -> :taxonomy
+      Enum.any?(Map.get(entry, "fields", %{}), fn {_name, c} -> is_map(c) end) -> :field_condition
+      true -> nil
+    end
+  end
+
+  defp draft_refused?(states), do: states != [] and "draft" not in states
+
+  @doc """
+  The custom-field values a record of `type` is created with under `selection`:
+  the plain equality conditions of its `by_type` entry.
+  """
+  @spec create_values(term(), String.t() | atom()) :: %{String.t() => term()}
+  def create_values(selection, type) do
+    selection
+    |> normalize()
+    |> Kernel.||(%{})
+    |> get_in(["by_type", to_string(type), "fields"])
+    |> Kernel.||(%{})
+    |> Map.reject(fn {_name, condition} -> is_map(condition) end)
+  end
+
   # --- what still exists -----------------------------------------------------
 
   # The ids of `kind` (`:tag` or `:category`) that still exist in the org; the
@@ -561,7 +627,8 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     case normalize(selection) do
       %{} = map ->
         map
-        |> Map.take(~w(states owner sort by_type))
+        |> Map.take(~w(states owner sort by_type create))
+        |> live_create(targets)
         |> live_by_type(targets, org_id)
         |> normalize()
 
@@ -569,6 +636,12 @@ defmodule KilnCMS.CMS.ReferenceSelection do
         nil
     end
   end
+
+  defp live_create(%{"create" => %{"type" => type}} = map, targets) do
+    if type in targets, do: map, else: Map.delete(map, "create")
+  end
+
+  defp live_create(map, _targets), do: Map.delete(map, "create")
 
   defp live_by_type(%{"by_type" => %{} = by_type} = map, targets, org_id) do
     live =

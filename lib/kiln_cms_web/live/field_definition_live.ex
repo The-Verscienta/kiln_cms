@@ -138,7 +138,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       socket.assigns.form
       |> AshPhoenix.Form.validate(
         params
-        |> normalize(List.first(scopes))
+        |> normalize(List.first(scopes), nil, socket.assigns.selection_catalog)
         |> put_rules(conds, params["field_type"], socket.assigns.cond_siblings)
       )
       |> refuse_duplicates(params, scopes, socket.assigns)
@@ -170,7 +170,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         # drag handles and arrows move it from there.
         params =
           params
-          |> normalize(scope)
+          |> normalize(scope, nil, assigns.selection_catalog)
           |> put_rules(conds, params["field_type"], assigns.cond_siblings)
           |> Map.put("position", next_position(assigns.definitions, scope))
 
@@ -184,7 +184,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       scopes == [] ->
         {:noreply,
          socket
-         |> assign(:form, AshPhoenix.Form.validate(assigns.form, normalize(params, nil)))
+         |> assign(
+           :form,
+           AshPhoenix.Form.validate(
+             assigns.form,
+             normalize(params, nil, nil, assigns.selection_catalog)
+           )
+         )
          |> assign(:scope_error, gettext("Pick at least one content type."))}
 
       invalid = Enum.find(forms, &(not &1.source.valid?)) ->
@@ -241,7 +247,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           AshPhoenix.Form.validate(
             old.form,
             params
-            |> normalize(nil, old.form.source.data)
+            |> normalize(nil, old.form.source.data, socket.assigns.selection_catalog)
             |> put_rules(conds, params["field_type"], old.cond_siblings)
           ),
         builder: builder,
@@ -261,7 +267,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     submitted =
       params
-      |> normalize(nil, old.form.source.data)
+      |> normalize(nil, old.form.source.data, socket.assigns.selection_catalog)
       |> put_rules(conds, params["field_type"], old.cond_siblings)
 
     case AshPhoenix.Form.submit(old.form, params: submitted) do
@@ -1359,6 +1365,70 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     )
     |> assign(:orphaned, Enum.sort_by(orphaned, &{to_string(&1.content_type), &1.name}))
     |> assign(:unknown_type, unknown_type ++ unknown_links)
+    |> assign_selection_catalog(owned)
+  end
+
+  # What the "Which records can be picked" step offers (#2285): the site's tags
+  # and categories (the first `@selection_limit` by name) and, per target type,
+  # the fields a condition may compare. Read with the definitions, not per
+  # keystroke.
+  @selection_limit 200
+
+  defp named_taxonomy(owned) do
+    entries =
+      for %{field_type: :reference, selection: %{} = selection} <- owned,
+          {_type, %{} = entry} <-
+            Map.get(KilnCMS.CMS.ReferenceSelection.normalize(selection), "by_type", %{}),
+          do: entry
+
+    tags = entries |> Enum.flat_map(&List.wrap(&1["tags_any"])) |> Enum.uniq()
+    categories = entries |> Enum.map(& &1["category"]) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+    {tags, categories}
+  end
+
+  defp assign_selection_catalog(socket, owned) do
+    %{actor: actor, current_org: org} = socket.assigns
+    opts = [actor: actor, tenant: org, query: [sort: [name: :asc], limit: @selection_limit]]
+
+    types = org |> ContentTypes.options() |> Enum.map(fn {label, name} -> {name, label} end)
+
+    fields =
+      for {name, _label} <- types, into: %{} do
+        key =
+          case ContentTypes.get(name, org) do
+            %{source: :dynamic, definition: %{id: id}} -> {:dynamic, id}
+            %{type: type} -> {:compiled, type}
+            _gone -> nil
+          end
+
+        {name,
+         for(
+           d <- owned,
+           scope_key(d) == key,
+           KilnCMS.CMS.ReferenceSelection.equality_field?(d),
+           do: %{name: d.name, label: d.label || d.name, field_type: d.field_type}
+         )}
+      end
+
+    # Ids a stored selection names always resolve to their real names, even
+    # past the first page of the lists.
+    {tag_ids, category_ids} = named_taxonomy(owned)
+    extra = fn ids -> [actor: actor, tenant: org, query: [filter: [id: [in: ids]]]] end
+
+    tags =
+      CMS.list_tags!(opts) ++ if(tag_ids == [], do: [], else: CMS.list_tags!(extra.(tag_ids)))
+
+    categories =
+      CMS.list_categories!(opts) ++
+        if(category_ids == [], do: [], else: CMS.list_categories!(extra.(category_ids)))
+
+    assign(socket, :selection_catalog, %{
+      tags: tags |> Enum.uniq_by(& &1.id) |> Enum.map(&{&1.id, &1.name}),
+      categories: categories |> Enum.uniq_by(& &1.id) |> Enum.map(&{&1.id, &1.name}),
+      types: Map.new(types),
+      fields: fields,
+      limit: @selection_limit
+    })
   end
 
   # Where a field of an unknown type (#2605) sits: its type, or for a link
@@ -1447,7 +1517,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # default keeps none. A select's default must still be one of its options.
   # The editor input (#2284) is held to what the posted settings offer, read
   # over `record` — the stored definition being edited, nil for a new one.
-  defp normalize(params, scope \\ nil, record \\ nil) do
+  defp normalize(params, scope \\ nil, record \\ nil, catalog \\ %{}) do
     type = params["field_type"]
     pairs = if type in [nil, "select"], do: parse_option_pairs(params["options"]), else: []
     options = Enum.map(pairs, &elem(&1, 0))
@@ -1470,6 +1540,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> blank_source()
     |> unpack_validation()
     |> unpack_targets()
+    |> unpack_selection(catalog)
     |> unpack_sources_limit()
     |> unpack_inverse()
     |> unpack_widget(record)
@@ -1649,6 +1720,18 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   defp unpack_targets(params), do: params
+
+  # The step's `sel` inputs, as the `selection` map (#2285); the resource
+  # judges it. Cast values by the target types' fields in the catalog.
+  defp unpack_selection(params, catalog) do
+    targets =
+      FieldDefinition.reference_targets(%{
+        target_type: params["target_type"],
+        target_types: params["target_types"] || []
+      })
+
+    KilnCMSWeb.FieldSelection.unpack(params, targets, Map.get(catalog, :fields, %{}))
+  end
 
   # The options textarea: one option per line, or several on a line split by
   # commas, as before labels existed. A line holding `value | Label` is one
@@ -2490,6 +2573,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :id, :string, required: true
   attr :form, :any, required: true
   attr :target_types, :list, default: []
+  attr :catalog, :map, required: true
 
   defp relationship_rules(assigns) do
     ~H"""
@@ -2517,6 +2601,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         }
       />
     </section>
+    <KilnCMSWeb.FieldSelectionComponents.selection_step
+      id={"#{@id}-selection"}
+      form={@form}
+      targets={picked_targets(@form)}
+      catalog={@catalog}
+    />
     """
   end
 
@@ -3910,7 +4000,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 source={scopes_label(@scopes, @content_types, @dynamic_types)}
                 name?
               />
-              <.relationship_rules form={@form} id="new-field-rules" target_types={@target_types} />
+              <.relationship_rules
+                form={@form}
+                id="new-field-rules"
+                target_types={@target_types}
+                catalog={@selection_catalog}
+              />
             <% else %>
               <fieldset class="sm:col-span-2">
                 <legend class="mb-1 block text-sm font-medium">
@@ -4333,6 +4428,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       form={@edit.form}
                       id={"edit-field-rules-#{@edit.id}"}
                       target_types={@target_types}
+                      catalog={@selection_catalog}
                     />
                   <% else %>
                     <.input

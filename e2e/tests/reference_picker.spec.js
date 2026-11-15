@@ -169,4 +169,38 @@ test.describe("reference picker", () => {
     await page.reload();
     await expect.poll(titles).toEqual([`Fresh ${stamp}`]);
   });
+
+  test("type a name that is not found, create it as a draft, and save (#2285)", async ({ page }) => {
+    await createTypeWithReferences(page);
+
+    // The fields admin's "Let editors create what they type" step.
+    const field = `${name}_see`;
+    const row = page.locator('li[id^="field-"]').filter({ has: page.locator(`code:text-is("${field}")`) });
+    await row.getByRole("button", { name: /Edit/ }).first().click();
+    const create = page.locator('[id^="edit-field-rules-"][id$="-selection-create-page"]');
+    await create.check();
+    await page.locator('form[id^="edit-field-"] button[type=submit]').first().click();
+    await expect(page.locator("#flash-info")).toContainText("Saved.");
+
+    await newDraftContent(page, name);
+    await saveDraft(page, { title: `Refs ${stamp}`, slug: `refs-${stamp}` });
+
+    const search = page.locator(`#custom-field-${field}-search`);
+    const rows = page.locator(`#custom-field-${field}-items > li`);
+    const titles = () => rows.locator("p.truncate").allTextContents();
+
+    await search.click();
+    await search.pressSequentially(`Typed ${stamp}`);
+    const option = page.locator(`#custom-field-${field}-create-typed`);
+    await expect(option).toContainText(`Create “Typed ${stamp}” as a new Page`);
+    await option.click();
+
+    await expect.poll(titles).toEqual([`Typed ${stamp}`]);
+    await expect(rows.nth(0)).toContainText("Draft");
+    await expect(option).toHaveCount(0);
+
+    await save(page);
+    await page.reload();
+    await expect.poll(titles).toEqual([`Typed ${stamp}`]);
+  });
 });

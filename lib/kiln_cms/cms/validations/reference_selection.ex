@@ -5,8 +5,9 @@ defmodule KilnCMS.CMS.Validations.ReferenceSelection do
 
     * the map has a valid shape (no unknown keys, `states` among the content
       states, `owner` only `"self"`, `sort` `recent` or `title`);
-    * `create` is refused for now: letting an editor create a record from the
-      picker is a later release;
+    * `create` names one of the field's target types and is only allowed when a
+      new draft of it would pass the field's own filter
+      (`ReferenceSelection.create_problem/2`);
     * a `by_type` key is one of the field's own target types, so narrowing the
       targets while a condition names a type that leaves them is refused;
     * a `fields` name is a custom field of that type that is not private and
@@ -52,7 +53,7 @@ defmodule KilnCMS.CMS.Validations.ReferenceSelection do
       selection ->
         with :ok <- check_owner(changeset),
              :ok <- check_shape(selection),
-             :ok <- check_create(selection) do
+             :ok <- check_create(changeset, selection) do
           check_by_type(selection, changeset, content_changed?(changeset))
         end
     end
@@ -80,16 +81,63 @@ defmodule KilnCMS.CMS.Validations.ReferenceSelection do
     end
   end
 
-  # The creating picker is a later release; until then a stored `create`
-  # would promise a row the picker does not have.
-  defp check_create(%{"create" => _create}),
+  # `create` (create-on-type, #2285 part 4) turns a typed name into a new
+  # draft of one target type, connected at once; it is only allowed when that
+  # draft would pass the field's own filter (`ReferenceSelection.create_problem/2`).
+  defp check_create(changeset, %{"create" => %{"type" => type}} = selection) do
+    targets =
+      FieldDefinition.reference_targets(%{
+        target_type: Ash.Changeset.get_attribute(changeset, :target_type),
+        target_types: Ash.Changeset.get_attribute(changeset, :target_types) || []
+      })
+
+    cond do
+      type not in targets ->
+        error(
+          :selection,
+          gettext("names %{type} to create, which is not one of this field's target types",
+            type: type
+          )
+        )
+
+      problem = ReferenceSelection.create_problem(selection, type) ->
+        error(:selection, create_message(problem, type))
+
+      true ->
+        :ok
+    end
+  end
+
+  defp check_create(_changeset, _selection), do: :ok
+
+  @doc false
+  def create_message(:states, type),
     do:
-      error(
-        :selection,
-        gettext("can't let editors create records yet: that is coming in a later release")
+      gettext(
+        "can't let editors create %{type} records: the field does not accept drafts, and a new record is a draft",
+        type: type
       )
 
-  defp check_create(_selection), do: :ok
+  def create_message(:owner, type),
+    do:
+      gettext(
+        "can't let editors create %{type} records: the field's owner condition cannot be met by a new record",
+        type: type
+      )
+
+  def create_message(:taxonomy, type),
+    do:
+      gettext(
+        "can't let editors create %{type} records: the field only accepts records with certain tags or a category, and a new one has none",
+        type: type
+      )
+
+  def create_message(:field_condition, type),
+    do:
+      gettext(
+        "can't let editors create %{type} records: a field condition lists several values or excludes one, so there is no value to give a new record",
+        type: type
+      )
 
   # What the selection names (tags, categories, fields and their values) is
   # judged when the selection is written, never on an unrelated edit: a tag

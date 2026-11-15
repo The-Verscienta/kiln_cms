@@ -1667,11 +1667,31 @@ Why the input is an editor-only setting apart from **Editing**, and why a named 
 
 Starting point: a top-level reference field, and a reason to keep some records
 out of it (only published ones, only the writer's own, only pages tagged
-"recipes"). The editor's picker, the dropdown widget and the reverse field
-apply it (#2285, part 2). There is no admin screen for it yet (part 3), so set
-it through the API or a seed.
+"recipes"). Set it in the fields admin, or through the API or a seed. The
+editor's picker, the dropdown widget and the reverse field apply it (#2285).
 
-1. Update the field definition's `selection` as an admin. In a seed or the
+**In the fields admin.** Open a relationship field (new or **Edit**) and use
+step 6, **Which records can be picked**:
+
+1. Tick the states editors may pick (none ticked means any state they can
+   read) and, optionally, **Only records the editor created**.
+2. Choose how a blank search is ordered: newest first or by title.
+3. For each target type the field links to, optionally pick tags (any of),
+   a category, and a condition per custom field: *equals*, *is one of*
+   (values separated by commas) or *is not*, then a value. Only plain,
+   non-private fields are offered; a number or yes/no field is stored as a
+   number or boolean. Leave a value empty to not filter on that field.
+4. Read the sentence under the step ("Editors are offered: Published Page
+   records, tagged vegan, newest first.") and save. A condition the server
+   refuses shows under the step and nothing is saved. A condition naming a
+   deleted tag or category stays listed as "(not found)" so saving does not
+   drop it silently; remove it to clean up.
+
+Untick a target type and its conditions go with it. The step lists the first
+200 tags and categories by name; a field can name up to 50 tags. Changing a
+relationship back to a plain value clears the selection.
+
+**By API or seed.** 1. Update the field definition's `selection` as an admin. In a seed or the
    console:
 
    ```elixir
@@ -1735,8 +1755,8 @@ What to know before relying on it:
   without equality, is refused while a selection names it.
 - **`owner: "self"` needs a user actor.** With no user actor (an anonymous caller) it matches nothing. Through an
   API key it is the key's user.
-- **`create` is not accepted yet.** A selection with a `create` key is
-  refused until a later change.
+- **`create` (create-on-type) is a shortcut, never an API feature.** See
+  [Let editors create what they type](#let-editors-create-what-they-type).
 - **`FieldSync` and `JoinGraduation` do not carry it.** Tag and category ids
   are per site, so field-definition sync leaves it out; `mix kiln.gen.join`
   drops it with the field.
@@ -1744,10 +1764,40 @@ What to know before relying on it:
 Errors you can hit when writing the setting: `is only for a reference field`
 (a link or group sub-field, or another type), `is not valid: it …` (unknown
 key or bad value), `names <type>, which is not one of this field's target
-types`, and `can't let editors create records yet`. A selection that can no
+types`, and `can't let editors create <type> records: …` (the reason names which condition a new draft could not meet). A selection that can no
 longer be evaluated (a stored value its field can't cast) fails a save with
 `could not be checked against which records it accepts — an admin should
 review the field's selection`.
+
+### Let editors create what they type
+
+`selection.create = {"type": "ingredient"}` (in the admin's "Which records can be picked" step, **Let editors
+create what they type**) turns a typed name into a record, the way a tags
+field grows: when the search box holds text and no result is titled the same
+(case ignored), the list ends with **Create “text” as a new Ingredient**.
+Choosing it creates a **draft** with that title, as the editor, through the
+type's normal create action, and connects it as a pick does.
+
+- **Only where a draft would be accepted.** The setting is refused (and the
+  admin shows the reason) when the filter would turn the new draft away:
+  `states` that do not include `draft`; an `owner` other than "only records
+  the editor created" (the creator is the author); tags or a category on that
+  type (a new record has none); or a field condition that is not a plain
+  "equals" (there is no one value to give it). Plain "equals" conditions are
+  written onto the new record, so it passes the filter.
+- **Same rights as "Add new".** The row is offered only to an editor who may
+  create that type and write each field it would fill, never on a locked
+  field, a full list, a single reference that already holds a record, or the
+  dropdown widget. A type with required fields and no default opens the
+  existing "Add new" form with the title filled in instead of creating
+  blind. A forged or stale request for a row that is not offered does nothing.
+- **Not through the API.** Headless clients create the record at its own
+  endpoint and then connect it; a write naming a title that does not exist is
+  a validation error. The reverse field never offers it.
+- **Limits.** The duplicate check sees what the filtered search found, so a
+  record the editor cannot read, or one the filter excludes, does not
+  suppress the row. A draft stays if the editor abandons the unsaved change
+  (as with "Add new"), and `max_sources` is judged when the change is saved.
 
 ### Delete a field of an unknown type
 

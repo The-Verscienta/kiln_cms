@@ -173,6 +173,23 @@ defmodule KilnCMSWeb.ReferenceSelectionApiTest do
            }
   end
 
+  test "/api/schema reports create-on-type as a hint; the API itself never creates", ctx do
+    CMS.update_field_definition!(
+      ctx.field,
+      %{selection: %{"create" => %{"type" => "page"}}},
+      actor: ctx.admin
+    )
+
+    props =
+      build_conn()
+      |> get("/api/schema?type=post")
+      |> Map.fetch!(:resp_body)
+      |> Jason.decode!()
+      |> get_in(["$defs", "content_post", "properties", "custom_fields", "properties"])
+
+    assert props[ctx.field.name]["x-kiln-selection"] == %{"create" => %{"type" => "page"}}
+  end
+
   test "/api/schema never names a private field in a selection", ctx do
     secret =
       CMS.create_field_definition!(

@@ -117,6 +117,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Editors can create what they type in a reference field: opt in per field, and a name that is not found offers *Create “name” as a new Page* as a draft, connected at once; only where a new draft would pass the field's filter ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)).**
+  ([long form](docs/changelog/unreleased.md#reference-selection-create))
+- **The fields admin can set a reference field's `selection`: a "Which records can be picked" step with states, "only mine", order, tags, category and field conditions per target type, and a sentence that reads it back ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)).**
+  ([long form](docs/changelog/unreleased.md#reference-selection-editor))
 - **The reference picker, dropdown widget and reverse field now honor a field's `selection`: they list only records the field accepts, a footer names the active conditions, and an empty list says why; no admin editor yet ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)).**
   ([long form](docs/changelog/unreleased.md#reference-selection-picker))
 - **A reference field can limit which records may be added to it (`selection` on its definition: states, "only mine", and per target type tags, category and custom-field values), enforced on every write path and reported by `GET /api/schema`; groundwork for the filtered picker, no editor yet ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)). Run `mix ash.migrate`.**
