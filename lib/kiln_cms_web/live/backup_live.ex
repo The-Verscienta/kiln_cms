@@ -66,8 +66,10 @@ defmodule KilnCMSWeb.BackupLive do
   mount and on every poll tick, one at a time.
 
   A directory that can't be listed is said to be unreadable (#2799), never
-  read as "none yet". Every `handle_async/3` and timeout clause re-checks
-  `platform_admin?` first, as the event handlers do.
+  read as "none yet". Every disk and status `handle_async/3` and timeout
+  clause re-checks `platform_admin?` first, as the event handlers do; the
+  import's result reaches the page only through `load_history/1`, which
+  checks too.
 
   ## In flight, Cancel and Resume (#2218)
 
@@ -154,6 +156,7 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:status, nil)
        |> assign(:status_loading?, false)
        |> assign(:status_failed?, false)
+       |> assign(:status_ref, nil)
        |> assign(:importing?, false)
        |> load_status()
        |> load_in_flight()
@@ -468,6 +471,24 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
+  # A status read that hasn't answered in time: like the disk read, the page
+  # says so (when it has no earlier status to show) and the read is left to
+  # finish; no other starts while it runs. A timer of an earlier read is
+  # ignored.
+  def handle_info({:status_timeout, ref}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      case socket.assigns do
+        %{status_ref: ^ref, status_loading?: true, status: status} ->
+          {:noreply, assign(socket, :status_failed?, is_nil(status))}
+
+        _settled ->
+          {:noreply, socket}
+      end
+    else
+      deny(socket)
+    end
+  end
+
   # The import (and the stale sweep inside it) finished: show what it found.
   @impl true
   def handle_async(:import, {:ok, _result}, socket),
@@ -624,10 +645,11 @@ defmodule KilnCMSWeb.BackupLive do
   # Neither directory is known: what a read that timed out or crashed leaves.
   defp unreadable_markers, do: %{Markers.empty() | unreadable: MapSet.new([:db, :media])}
 
-  # `config :kiln_cms, KilnCMSWeb.BackupLive, disk_timeout_ms: ..., disk_view: ...`;
-  # the reader is a seam for the tests.
+  # `config :kiln_cms, KilnCMSWeb.BackupLive, disk_timeout_ms: ..., disk_view: ...,
+  # status_reader: ...`; the readers are seams for the tests.
   defp disk_timeout_ms, do: Keyword.get(live_config(), :disk_timeout_ms, @disk_timeout_ms)
   defp disk_view, do: Keyword.get(live_config(), :disk_view, DiskView)
+  defp status_reader, do: Keyword.get(live_config(), :status_reader, &Backups.status/0)
   defp live_config, do: Application.get_env(:kiln_cms, __MODULE__, [])
 
   # A running in-app run, and the policy agrees. Whether it is past the point
@@ -643,12 +665,17 @@ defmodule KilnCMSWeb.BackupLive do
   defp history_path(page), do: ~p"/editor/backups?#{%{page: page}}"
 
   # `Backups.status/0` reads `manifest.json` (#2417): off the LiveView process,
-  # one read at a time. The page shows a placeholder until the first lands.
+  # one read at a time, with the disk read's timeout. The page shows a
+  # placeholder until the first lands.
   defp load_status(socket) do
     if connected?(socket) and not socket.assigns.status_loading? do
+      ref = make_ref()
+      Process.send_after(self(), {:status_timeout, ref}, disk_timeout_ms())
+
       socket
       |> assign(:status_loading?, true)
-      |> start_async(:status, fn -> Backups.status() end)
+      |> assign(:status_ref, ref)
+      |> start_async(:status, status_reader())
     else
       socket
     end
@@ -1159,7 +1186,7 @@ defmodule KilnCMSWeb.BackupLive do
         <p>{gettext("No backups have been recorded yet.")}</p>
         <p class="text-xs">
           {gettext(
-            "Backups that cron's scripts/backup.sh makes appear here too, once the app finds them in this server's backup directory."
+            "Backups that cron's scripts/backup.sh makes appear here too, about ten minutes after they finish: the app waits that long so it doesn't record one still being written."
           )}
         </p>
       </div>

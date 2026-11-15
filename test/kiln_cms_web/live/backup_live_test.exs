@@ -2203,6 +2203,44 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute_received {:disk_read, _pid, _ids}
     end
 
+    test "a status read that doesn't answer in time: the page says so, starts no other, " <>
+           "and shows the status when it comes",
+         %{conn: conn} do
+      test = self()
+
+      reader = fn ->
+        send(test, {:status_read, self()})
+
+        receive do
+          :go -> Backups.status()
+        end
+      end
+
+      Application.put_env(:kiln_cms, KilnCMSWeb.BackupLive,
+        disk_timeout_ms: 0,
+        status_reader: reader
+      )
+
+      on_exit(fn -> Application.delete_env(:kiln_cms, KilnCMSWeb.BackupLive) end)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      assert_receive {:status_read, first}
+
+      assert has_element?(
+               lv,
+               "#backup-status-pending",
+               "Couldn't read this server's backup status"
+             )
+
+      for _ <- 1..3, do: send(lv.pid, :refresh)
+      render(lv)
+      refute_received {:status_read, _pid}
+
+      release(first)
+      render(lv)
+      refute has_element?(lv, "#backup-status-pending")
+    end
+
     test "a read that doesn't answer in time: the page says so, starts no other, and " <>
            "takes the answer when it comes",
          %{conn: conn, dir: dir} do
@@ -2296,6 +2334,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
         assert_denied(KilnCMSWeb.BackupLive.handle_async(:status, {:ok, %{}}, socket))
         assert_denied(KilnCMSWeb.BackupLive.handle_async(:status, {:exit, :boom}, socket))
         assert_denied(KilnCMSWeb.BackupLive.handle_info({:disk_timeout, make_ref()}, socket))
+        assert_denied(KilnCMSWeb.BackupLive.handle_info({:status_timeout, make_ref()}, socket))
       end
     end
   end

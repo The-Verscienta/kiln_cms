@@ -13,7 +13,8 @@ defmodule KilnCMS.Backups.Markers do
       the same way, for every unit a schedule's keep rules hold (#2219). The
       app writes and removes it alongside the last-good marker.
 
-  Read on every render of the page, never stored: the markers are on disk by
+  Read with the page's other disk checks, off the LiveView process
+  (`KilnCMS.Backups.DiskView`, #2417), never stored: the markers are on disk by
   design (#2219), so they survive a database restore, and the backup directory
   may be one per host (#2218). Two `File.ls/1` calls. This never fails: a
   display of the markers must not take the page down with it.

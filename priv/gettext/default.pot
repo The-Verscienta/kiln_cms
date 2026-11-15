@@ -4497,7 +4497,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Backups that cron's scripts/backup.sh makes appear here too, once the app finds them in this server's backup directory."
+msgid "Backups that cron's scripts/backup.sh makes appear here too, about ten minutes after they finish: the app waits that long so it doesn't record one still being written."
 msgstr ""
 
 #: lib/kiln_cms_web/live/search_palette_live.ex

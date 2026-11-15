@@ -4497,8 +4497,8 @@ msgstr "Las copias de seguridad aún no están configuradas — actívalas antes
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Backups that cron's scripts/backup.sh makes appear here too, once the app finds them in this server's backup directory."
-msgstr "Las copias de seguridad que hace scripts/backup.sh desde cron también aparecen aquí, en cuanto la aplicación las encuentra en el directorio de copias de seguridad de este servidor."
+msgid "Backups that cron's scripts/backup.sh makes appear here too, about ten minutes after they finish: the app waits that long so it doesn't record one still being written."
+msgstr "Las copias de seguridad que hace scripts/backup.sh desde cron también aparecen aquí, unos diez minutos después de terminar: la aplicación espera ese tiempo para no registrar una que aún se está escribiendo."
 
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
