@@ -295,6 +295,17 @@ defmodule KilnCMS.Backups.ChainTest do
       assert %{waiting: %{resume: nil, folds: 1}} = Backups.in_flight()
     end
 
+    # Only a queued *scheduled* request takes the trigger of a request that
+    # folds in (#2219): between two non-scheduled kinds the queued one stays,
+    # so a console backup is not relabeled "manual" in History.
+    test "a fold between two non-scheduled requests keeps the queued trigger" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(trigger: "console")
+
+      assert {:ok, %{status: :folded}} = request(trigger: "manual")
+      assert %{waiting: %{trigger: "console", folds: 1}} = Backups.in_flight()
+    end
+
     test "a resume folds into a queued resume of the same stamp", %{dir: dir} do
       stamp = resumable!(dir, "20261101-101010")
       {:ok, %{status: :started}} = request()

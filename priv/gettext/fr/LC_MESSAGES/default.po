@@ -23851,8 +23851,8 @@ msgstr "Cette planification ne peut pas être modifiée ici : elle peut seulemen
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
-msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: save again to apply yours."
-msgstr "Cette planification a changé depuis que vous l'avez ouverte : elle n'a donc pas été enregistrée. Le formulaire contient maintenant les valeurs enregistrées, avec ce que vous avez saisi à côté : enregistrez de nouveau pour appliquer les vôtres."
+msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
+msgstr "Cette planification a changé depuis que vous l'avez ouverte : elle n'a donc pas été enregistrée. Le formulaire contient maintenant les valeurs enregistrées, avec ce que vous avez saisi à côté : saisissez de nouveau les modifications que vous voulez garder, puis enregistrez."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format

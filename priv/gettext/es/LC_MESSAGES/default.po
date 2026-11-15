@@ -23851,8 +23851,8 @@ msgstr "Esta programación no se puede editar aquí: solo se puede pausar, reanu
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
-msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: save again to apply yours."
-msgstr "Esta programación cambió desde que la abrió, así que no se guardó. El formulario contiene ahora los valores guardados, con lo que introdujo al lado: guarde de nuevo para aplicar los suyos."
+msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
+msgstr "Esta programación cambió desde que la abrió, así que no se guardó. El formulario contiene ahora los valores guardados, con lo que introdujo al lado: vuelva a introducir los cambios que quiera conservar y guarde."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format

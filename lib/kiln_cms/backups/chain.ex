@@ -315,8 +315,8 @@ defmodule KilnCMS.Backups.Chain do
   # backup folded into a scheduled request (or a scheduled request folded into
   # a manual one, which keeps the queued trigger) is never aged out as the
   # schedule's.
-  defp fold_trigger(%{waiting_trigger: queued}, %{trigger: trigger})
-       when trigger != "schedule" and trigger != queued,
+  defp fold_trigger(%{waiting_trigger: "schedule"}, %{trigger: trigger})
+       when trigger != "schedule",
        do: %{waiting_trigger: trigger}
 
   defp fold_trigger(_row, _req), do: %{}

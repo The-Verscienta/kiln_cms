@@ -372,7 +372,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   defp changed_flash,
     do:
       gettext(
-        "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: save again to apply yours."
+        "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
       )
 
   defp locked_flash,
