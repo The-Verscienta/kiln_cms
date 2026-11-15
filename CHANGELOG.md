@@ -175,6 +175,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Backups Schedule tab: a save refused by another admin's change keeps the form open beside what you typed; "Last scheduled run" opens that run's History row; a weekday-only scheduler cron no longer warns all weekend; a demoted admin is sent to access-denied.**
   ([long form](docs/changelog/unreleased.md#backup-schedule-tab-2875))
 
+- **Node moves from 22.23.3 to 22.23.5 for building assets, in CI and in the release image (`.tool-versions`, Dockerfile `NODE_VERSION`). A project that builds Kiln from source should move its own `.tool-versions` to match.**
+  ([#2927](https://github.com/The-Verscienta/kiln_cms/pull/2927) · [long form](docs/changelog/unreleased.md#node-22-23-5))
+
 - **An account can hold at most 20 passkeys and add at most 5 an hour; the Passkeys section of the settings page says which limit refused.**
   ([long form](docs/changelog/unreleased.md#passkey-limits))
 
@@ -319,6 +322,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2911](https://github.com/The-Verscienta/kiln_cms/pull/2911) · [long form](docs/changelog/unreleased.md#gen-plugin-content-types-next-step))
 
 ### Security
+
+- **The astro-blog example moves to astro 7.4.7 (GHSA-r3h5-4585-7x3w, GHSA-mh32-jxcr-mh9f); it needs Node 22.23.4 or later.**
+  ([#2929](https://github.com/The-Verscienta/kiln_cms/pull/2929))
 
 - **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**
   ([#2834](https://github.com/The-Verscienta/kiln_cms/pull/2834) · [long form](docs/changelog/unreleased.md#backup-scripts-password-out-of-argv))

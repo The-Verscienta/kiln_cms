@@ -110,7 +110,7 @@ Dockerfile (Coolify, Render) all do the same thing.
 |---|---|---|---|
 | RAM | 2 GB (marginal) | 4 GB | Peak is `mix deps.compile`, not the app: the Ash ecosystem compiles in one BEAM. The Dockerfile caps the build BEAM to two schedulers so a small host is not OOM-killed |
 | Disk | 3 GB free | 6 GB | The builder stage pulls the dep tree and `node_modules`; the final image is a slim Debian trixie with the release only |
-| Toolchain | Pulled by the Dockerfile | | `hexpm/elixir:1.20.4-erlang-29.1.1` on Debian bookworm as the builder, Node 22.23.3 installed into it; nothing to install on the host but Docker |
+| Toolchain | Pulled by the Dockerfile | | `hexpm/elixir:1.20.4-erlang-29.1.1` on Debian bookworm as the builder, Node 22.23.5 installed into it; nothing to install on the host but Docker |
 | Network | Hex, npm, GitHub, Debian and PostgreSQL apt mirrors, `downloads.rclone.org` | | A build behind a proxy needs `HEX_MIRROR` and npm config as usual. The `rclone` stage downloads one pinned release and fails the build if its SHA-256 does not match the one in the `Dockerfile`. Precompiled NIFs and the tailwind binary come from GitHub releases; a failed download is retried for about 4 minutes before the build fails ([deploy.md](deploy.md#building-the-image)) |
 
 ## Running the backup scripts on the host
@@ -137,7 +137,7 @@ media phase builds in `TMPDIR` (default `/tmp`).
 | | Requirement | Notes |
 |---|---|---|
 | Elixir / OTP | **1.20.4 on OTP 29.1.1**, exactly as `.tool-versions` says; `mix.exs` requires `~> 1.20` | The floor is 1.20 rather than 1.19 because 1.20's `mix format` breaks some lines differently, so a tree formatted on one fails the other's formatting check. CI and the release image run the same pins, so the dialyzer that runs in CI is the one you run locally |
-| Node.js | **22.23.3**, pinned in `.tool-versions` and read by CI and the Dockerfile | Only for building assets: the editor bundles TipTap from `assets/node_modules`. Not needed at runtime |
+| Node.js | **22.23.5**, pinned in `.tool-versions` and read by CI and the Dockerfile | Only for building assets: the editor bundles TipTap from `assets/node_modules`. Not needed at runtime |
 | Postgres | 17 with `vector`, via `docker compose up -d postgres` | The compose file runs `pgvector/pgvector:pg17`. Two test suites running at once against one server can exhaust Postgres's default 100 connections; raise `max_connections` or run them one at a time |
 | Docker | Any recent Docker or compatible | For Postgres and the optional profiles; the app itself runs on the host |
 | libvips | `brew install vips` / `apt install libvips-dev` | `vix` builds against it; image tests need it |

@@ -1020,10 +1020,14 @@ jobs:
         # a cache restored from before an SDK version bump fails "does not
         # match the requirement" until the SDK is rebuilt. The cache key can't
         # prevent it: restore-keys falls back to that cache.
+        # `--include-children` builds the SDK's own deps first: on a cold
+        # cache (any `.tool-versions` change misses it) a bare
+        # `deps.compile kiln_plugin` compiles the SDK before Spark exists and
+        # fails "module Spark.Dsl.Verifier is not loaded" (#2927).
         run: |
           mix deps.get
           mix format --check-formatted
-          mix deps.compile kiln_plugin
+          mix deps.compile kiln_plugin --include-children
           mix compile --warnings-as-errors
 
   client-js:
