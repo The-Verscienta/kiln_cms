@@ -98,6 +98,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Check your own rclone, monitoring or retention filters over backups: `kiln-media-*.tar.gz` already matched media parts (1.9.0's note was wrong), but it and `kiln-db-*.dump` drop the `.sha256` sidecars, and a part set without one won't restore by default. Add `--include "kiln-media-*.sha256"` and `"kiln-db-*.sha256"`; don't widen to `kiln-media-*`.**
   ([#2889](https://github.com/The-Verscienta/kiln_cms/pull/2889) · [long form](docs/changelog/unreleased.md#backup-offsite-filter-sidecar-upgrade))
 
+- **Run `mix ash.migrate` (new nullable `users.totp_secret_encrypted` and `users.totp_pending_secret_encrypted`). About 10 minutes after boot a job moves authenticator-app secrets out of the plaintext columns; to roll back after that, first run `KilnCMS.Accounts.TotpSecretBackfill.revert()` on a node of this release.**
+  ([long form](docs/changelog/unreleased.md#totp-secrets-encrypted-upgrade))
+
 ### Breaking
 
 - **`/ws/gql` refuses a connect whose token does not verify (expired, revoked, garbled JWT, or a `kiln_` API key), with a `403` handshake, where it connected as anonymous; `KILN_API_REJECT_INVALID_BEARER=false` restores that.**
@@ -318,6 +321,15 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Credential tokens in sign-in, invitation, preview and newsletter links are redacted from the request log and not recorded as missed paths.**
   ([long form](docs/changelog/unreleased.md#token-paths-redacted-from-request-log))
+
+- **Passkeys and the authenticator app are managed only on the main host and console hosts; `/editor/settings` on a site's own address links there instead, and passkey registration is pinned to the host that served it.**
+  ([long form](docs/changelog/unreleased.md#second-factors-managed-on-setup-hosts))
+
+- **Removing a passkey asks for a second factor (a fresh sign-in or an authenticator code), emails the account's owner and raises a `two_factor_disabled` alert, like turning off the authenticator app; turning the app off now emails the owner too.**
+  ([long form](docs/changelog/unreleased.md#second-factor-removed-notice))
+
+- **Authenticator-app (TOTP) secrets are stored encrypted with `SECRET_KEY_BASE`, like Kiln's other stored secrets, so a database dump, backup or staging clone without it carries no usable second factor.**
+  ([long form](docs/changelog/unreleased.md#totp-secrets-encrypted))
 
 ## [1.9.2] - 2026-11-12
 

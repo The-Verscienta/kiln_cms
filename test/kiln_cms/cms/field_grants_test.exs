@@ -52,6 +52,37 @@ defmodule KilnCMS.CMS.FieldGrantsTest do
                )
     end
 
+    # The lock is written from arguments, which the accept-list check never
+    # walked: an editor granted one field could unlock a live page.
+    test "setting or removing the passphrase requires the access_password grant" do
+      admin = user(:admin)
+      post = CMS.update_post!(post!(admin), %{access_password: "shared secret"}, actor: admin)
+      title_only = user(:editor, %{field_grants: %{"post" => ["title"]}})
+
+      for params <- [%{remove_access_password: true}, %{access_password: "another secret"}] do
+        assert {:error, %Ash.Error.Invalid{} = error} =
+                 CMS.update_post(post, params, actor: title_only)
+
+        assert Exception.message(error) =~ "field grant"
+      end
+
+      reloaded = CMS.get_post!(post.id, actor: admin)
+      assert reloaded.access_password_hash == post.access_password_hash
+
+      # What a form posts on every save is not a change to the lock.
+      assert {:ok, post} =
+               CMS.update_post(post, %{title: "Renamed", remove_access_password: false},
+                 actor: title_only
+               )
+
+      granted = user(:editor, %{field_grants: %{"post" => ["title", "access_password"]}})
+
+      assert {:ok, unlocked} =
+               CMS.update_post(post, %{remove_access_password: true}, actor: granted)
+
+      assert is_nil(unlocked.access_password_hash)
+    end
+
     test "the block_tree argument requires the blocks grant" do
       admin = user(:admin)
       post = post!(admin)

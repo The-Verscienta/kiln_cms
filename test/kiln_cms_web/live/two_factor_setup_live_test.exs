@@ -84,7 +84,9 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
 
   # Signed in as `user` on `site`'s console host. `method` is what the session's
   # marker says it signed in with; `nil` leaves no marker (a remember-me or
-  # pre-upgrade session).
+  # pre-upgrade session). A passkey sign-in verified a second factor, as
+  # `PasskeyController` marks it; `{method, :second_factor}` marks any other
+  # method's session the same way (a password and a code).
   def signed_in(conn, user, site, method, extra_session \\ %{}) do
     {:ok, user} =
       User
@@ -98,7 +100,19 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
     {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(user.__metadata__.token)
 
     marker =
-      if method, do: %{"sign_in" => %{"jti" => jti, "method" => method}}, else: %{}
+      case method do
+        nil ->
+          %{}
+
+        {method, :second_factor} ->
+          %{"sign_in" => verified_marker(jti, method)}
+
+        "passkey" ->
+          %{"sign_in" => verified_marker(jti, "passkey")}
+
+        method ->
+          %{"sign_in" => %{"jti" => jti, "method" => method}}
+      end
 
     conn
     |> console_conn(site)
@@ -478,6 +492,9 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
     end
   end
 
+  defp verified_marker(jti, method),
+    do: %{"jti" => jti, "method" => method, "second_factor_at" => System.system_time(:second)}
+
   describe "removing a passkey (#2900)" do
     # The reader's only place to manage passkeys: `/editor/settings` is
     # editors only. The rules are `Passkey.:destroy`'s; the page hides the
@@ -562,7 +579,9 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
       passkey = passkey!(user)
 
       {:ok, view, _html} =
-        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+        conn
+        |> signed_in(user, site, {"password", :second_factor})
+        |> live(~p"/account/two-factor")
 
       refute has_element?(view, "#last-factor-note")
       view |> element(remove_button(passkey)) |> render_click()
@@ -577,13 +596,74 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
       passkey = passkey!(user)
 
       {:ok, view, _html} =
-        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+        conn
+        |> signed_in(user, site, {"password", :second_factor})
+        |> live(~p"/account/two-factor")
 
       refute has_element?(view, "#last-factor-note")
       view |> element(remove_button(passkey)) |> render_click()
 
       assert passkey_count(user) == 0
       refute has_element?(view, "#passkey-list")
+    end
+
+    # Removing a passkey proves a second factor now: a session that verified
+    # one in the last 15 minutes, else a code (`SaverVerifiedSecondFactor`).
+    test "without a fresh second factor, removing asks for a code; a wrong one is refused",
+         %{conn: conn} do
+      site = org("tfs-pk-step-up")
+
+      {user, secret} =
+        KilnCMS.TwoFactorFixtures.enabled_user(role: :viewer, inserted_at: @long_ago)
+
+      member!(user, site)
+      passkey = passkey!(user)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      view |> element(remove_button(passkey)) |> render_click()
+
+      assert passkey_count(user) == 1
+      assert has_element?(view, "#passkey-removal-confirm #passkey-removal-code")
+      refute has_element?(view, "#passkey-removal-error")
+
+      view
+      |> form("#passkey-removal-confirm", %{"code" => "000000"})
+      |> render_submit()
+
+      assert passkey_count(user) == 1
+      assert has_element?(view, "#passkey-removal-error")
+
+      view
+      |> form("#passkey-removal-confirm", %{
+        "code" => KilnCMS.TwoFactorFixtures.current_code(secret)
+      })
+      |> render_submit()
+
+      assert passkey_count(user) == 0
+      refute has_element?(view, "#passkey-removal-confirm")
+      assert render(view) =~ "Passkey removed."
+    end
+
+    test "a passkey-only account without a fresh one is told to sign in again; Cancel closes it",
+         %{conn: conn} do
+      site = org("tfs-pk-step-up-pk")
+      user = seed_user() |> member!(site)
+      passkey = passkey!(user)
+      passkey!(user)
+
+      {:ok, view, _html} =
+        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+
+      view |> element(remove_button(passkey)) |> render_click()
+
+      assert passkey_count(user) == 2
+      assert has_element?(view, "#passkey-removal-confirm #passkey-removal-sign-in-again")
+      refute has_element?(view, "#passkey-removal-code")
+
+      view |> element("#passkey-removal-confirm button", "Cancel") |> render_click()
+      refute has_element?(view, "#passkey-removal-confirm")
     end
 
     test "another account's passkey id is refused, and its row survives", %{conn: conn} do
@@ -636,7 +716,9 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
       passkey = passkey!(user)
 
       {:ok, view, _html} =
-        conn |> signed_in(user, site, "password") |> live(~p"/account/two-factor")
+        conn
+        |> signed_in(user, site, {"password", :second_factor})
+        |> live(~p"/account/two-factor")
 
       refute has_element?(view, "#add-passkey-form")
       refute has_element?(view, "#passkey-added-mail")

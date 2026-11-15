@@ -46,7 +46,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
   again. A forged event without the proof is refused there.
 
   The emailed code lives only in this process, as an HMAC
-  (`EnrolmentProof.send_code/3`); it is never assigned, rendered or logged.
+  (`EnrolmentProof.send_code/4`); it is never assigned, rendered or logged.
 
   ## Where "Continue" goes
 
@@ -203,7 +203,10 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
         context = Map.merge(socket.assigns.security_context, enrolment_context(socket))
 
         socket =
-          case WebAuthn.register_passkey(user, challenge, payload, context: context) do
+          case WebAuthn.register_passkey(user, challenge, payload,
+                 context: context,
+                 host: KilnCMSWeb.SecondFactorGate.socket_host(socket)
+               ) do
             {:ok, _passkey} ->
               put_flash(socket, :info, gettext("Passkey added — you can sign in with it now."))
 
@@ -236,25 +239,24 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
     do: {:noreply, assign(socket, :passkey_challenge, nil)}
 
   # As `/editor/settings`: the action decides (owner only, not the demo
-  # account, not the last factor a site requires) and records
-  # `passkey_removed` with this session's context.
-  def handle_event("remove_passkey", %{"id" => id}, socket) when is_binary(id) do
-    user = socket.assigns.current_user
+  # account, not the last factor a site requires, a second factor proved
+  # now) and records `passkey_removed` with this session's context.
+  def handle_event("remove_passkey", params, socket) do
+    case TotpEnrolment.handle_remove_passkey(socket, params) do
+      {:removed, socket, message} ->
+        {:noreply,
+         socket
+         |> assign(:passkeys, WebAuthn.list(socket.assigns.current_user))
+         |> assign_status()
+         |> put_flash(:info, message)}
 
-    socket =
-      case TotpEnrolment.remove_passkey(user, id, socket.assigns.security_context) do
-        {:ok, message} ->
-          socket
-          |> assign(:passkeys, WebAuthn.list(user))
-          |> assign_status()
-          |> put_flash(:info, message)
-
-        {:error, message} ->
-          put_flash(socket, :error, message)
-      end
-
-    {:noreply, socket}
+      {:not_removed, socket} ->
+        {:noreply, socket}
+    end
   end
+
+  def handle_event("cancel_remove_passkey", _params, socket),
+    do: {:noreply, assign(socket, :passkey_removal, nil)}
 
   @impl true
   def handle_async(:send_proof_code, {:ok, result}, socket) do
@@ -587,6 +589,11 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
               </button>
             </li>
           </ul>
+          <TotpEnrolment.passkey_removal_confirm
+            removal={@passkey_removal}
+            passkeys={@passkeys}
+            totp?={@totp_enabled?}
+          />
           <TotpEnrolment.last_factor_note :if={
             TotpEnrolment.last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
           } />

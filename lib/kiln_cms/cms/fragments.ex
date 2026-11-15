@@ -391,11 +391,25 @@ defmodule KilnCMS.CMS.Fragments do
     with %{} = ct <- ContentTypes.get(type, org_id),
          resource <- Slugs.storage_resource(ct),
          {:ok, state} <- PointInTime.snapshot_state(org_id, resource, id, as_of),
-         true <- visible_then?(state, ct, opts) do
+         true <- visible_then?(state, ct, opts),
+         true <- unlocked_now?(resource, ct, id, org_id) do
       %{id: id, blocks: Map.get(state, "blocks") || []}
     else
       _ -> nil
     end
+  end
+
+  # The passphrase hash is not in version rows, so the historical path asks the
+  # live row, as `PointInTime`'s index does ("discoverable NOW: public,
+  # unlocked"). A target that is locked today is not inlined at any date; a
+  # purged one is not either.
+  defp unlocked_now?(resource, ct, id, org_id) do
+    resource
+    |> Ash.Query.filter(id == ^id and is_nil(access_password_hash))
+    |> scope_dynamic(ct)
+    # authorize?: false — an existence probe on the same public delivery read
+    # as `read_target_live/4`; nothing of the row leaves here.
+    |> Ash.exists?(authorize?: false, tenant: org_id)
   end
 
   # `audience` is on the version row's `changes` as a string. A replayed state
@@ -429,7 +443,14 @@ defmodule KilnCMS.CMS.Fragments do
     with %{} = ct <- ContentTypes.get(type, org_id),
          resource <- Slugs.storage_resource(ct) do
       resource
-      |> Ash.Query.filter(id == ^id and state == :published and audience in ^audiences)
+      # Unlocked, too: a passphrase-locked page is public by audience, and
+      # inlining it into an unlocked host handed its body to every reader of
+      # the host. No reader's unlock reaches here, so a locked target is never
+      # inlined — the same rule every other public read applies.
+      |> Ash.Query.filter(
+        id == ^id and state == :published and audience in ^audiences and
+          is_nil(access_password_hash)
+      )
       |> Ash.Query.select([:id, :blocks])
       |> scope_dynamic(ct)
       # authorize?: false — a public delivery read: the filter above

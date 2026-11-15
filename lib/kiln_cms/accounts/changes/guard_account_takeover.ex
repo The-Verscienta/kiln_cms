@@ -60,6 +60,7 @@ defmodule KilnCMS.Accounts.Changes.GuardAccountTakeover do
 
   alias KilnCMS.Accounts.AccountLock
   alias KilnCMS.Accounts.Errors.AccountTakenOver
+  alias KilnCMS.Accounts.TotpSecrets
   alias KilnCMS.Accounts.User
 
   @impl true
@@ -114,7 +115,10 @@ defmodule KilnCMS.Accounts.Changes.GuardAccountTakeover do
   defp same_pending_secret?(_row, _changeset, flag) when flag != true, do: true
 
   defp same_pending_secret?(row, changeset, true) do
-    staged = changeset.data.totp_pending_secret
-    is_binary(staged) and row.totp_pending_secret == staged
+    staged = TotpSecrets.pending(changeset.data)
+
+    is_binary(staged) and
+      TotpSecrets.from_columns(row.totp_pending_secret, row.totp_pending_secret_encrypted) ==
+        staged
   end
 end

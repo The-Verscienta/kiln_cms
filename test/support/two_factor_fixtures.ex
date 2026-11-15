@@ -21,7 +21,7 @@ defmodule KilnCMS.TwoFactorFixtures do
   which accepts ±30s. The per-call clock read is tidiness, not the protection.)
   """
 
-  alias KilnCMS.Accounts.{RecoveryCodes, Totp, User}
+  alias KilnCMS.Accounts.{RecoveryCodes, Totp, TotpSecrets, User}
 
   @password "password123456"
 
@@ -83,6 +83,16 @@ defmodule KilnCMS.TwoFactorFixtures do
   end
 
   @doc """
+  An action context saying the session verified a second factor just now,
+  as a page passes it (`KilnCMSWeb.SignInMarker`'s `second_factor_at`):
+  what removing a passkey asks of whoever removes it
+  (`KilnCMS.CMS.Changes.SaverVerifiedSecondFactor`).
+  """
+  @spec verified_now(map()) :: map()
+  def verified_now(context \\ %{}),
+    do: Map.put(context, :second_factor_verified_at, DateTime.utc_now())
+
+  @doc """
   The code `secret` accepts right now.
 
   Takes the secret or the user — a caller mid-enrolment holds a user whose
@@ -91,7 +101,7 @@ defmodule KilnCMS.TwoFactorFixtures do
   """
   @spec current_code(binary() | User.t()) :: String.t()
   def current_code(%User{} = user),
-    do: current_code(user.totp_pending_secret || user.totp_secret)
+    do: current_code(TotpSecrets.pending(user) || TotpSecrets.live(user))
 
   def current_code(secret) when is_binary(secret),
     do: Totp.code_at(secret, System.system_time(:second))

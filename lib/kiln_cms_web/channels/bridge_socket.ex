@@ -119,7 +119,10 @@ defmodule KilnCMSWeb.BridgeSocket do
       #
       # A preview-token connection carries the token (behind a closure — see
       # the moduledoc) instead of an actor, for the re-check to verify again.
-      {:ok, Map.merge(%{type: to_string(ct.type), id: id, org: org}, credential)}
+      {:ok,
+       %{type: to_string(ct.type), id: id, org: org}
+       |> Map.merge(credential)
+       |> Map.put(:drafts?, drafts?(credential, org))}
     else
       _ -> :error
     end
@@ -143,15 +146,9 @@ defmodule KilnCMSWeb.BridgeSocket do
 
   @impl true
   def handle_info({:preview_update, payload}, state) do
-    frame = %{
-      "event" => "update",
-      "type" => state.type,
-      "id" => state.id,
-      "title" => Map.get(payload, :title),
-      "excerpt" => excerpt(Map.get(payload, :excerpt))
-    }
+    frame = %{"event" => "update", "type" => state.type, "id" => state.id}
 
-    {:push, {:text, Jason.encode!(frame)}, state}
+    {:push, {:text, Jason.encode!(with_draft_fields(frame, payload, state))}, state}
   end
 
   # The eviction broadcast. `Endpoint.broadcast/3` delivers a
@@ -186,6 +183,30 @@ defmodule KilnCMSWeb.BridgeSocket do
   def terminate(_reason, _state), do: :ok
 
   # --- helpers --------------------------------------------------------------
+
+  # The broadcast carries the editor's UNSAVED title and excerpt. A watcher who
+  # could not fetch the working copy gets the bare signal instead and re-fetches
+  # with its own credential: an anonymous connection to a published document
+  # passes the connect check (the row is world-readable), and was being pushed
+  # the next headline as it was typed.
+  defp with_draft_fields(frame, payload, %{drafts?: true}) do
+    Map.merge(frame, %{
+      "title" => Map.get(payload, :title),
+      "excerpt" => excerpt(Map.get(payload, :excerpt))
+    })
+  end
+
+  defp with_draft_fields(frame, _payload, _state), do: frame
+
+  # Draft visibility: a preview token (minted for this document by someone who
+  # has it), or an actor at the editor tier on this site. Decided at connect and
+  # again on every re-check, so a demotion stops the fields with it.
+  defp drafts?(%{preview_token: reveal}, _org) when is_function(reveal, 0), do: true
+
+  defp drafts?(%{actor: %{} = actor}, org),
+    do: KilnCMS.Accounts.Scoping.effective_tier(actor, org) in [:editor, :admin]
+
+  defp drafts?(_anonymous, _org), do: false
 
   # A presented `preview_token` is the only credential looked at — a bad one is
   # a refusal, never a quiet downgrade to the key or to an anonymous read.
@@ -332,7 +353,8 @@ defmodule KilnCMSWeb.BridgeSocket do
     with {:ok, actor} <- SocketReauth.reload_actor(state.actor),
          ct when not is_nil(ct) <- ContentTypes.get(state.type, state.org),
          :ok <- authorize_read(ct, state.id, actor, state.org) do
-      {:ok, %{state | actor: actor}}
+      {:ok,
+       %{state | actor: actor, drafts?: drafts?(%{actor: actor, preview_token: nil}, state.org)}}
     else
       _refused -> :error
     end

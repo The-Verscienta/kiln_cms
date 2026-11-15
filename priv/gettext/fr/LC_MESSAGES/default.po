@@ -2141,6 +2141,11 @@ msgstr "Une zone de recherche qui trouve l'enregistrement par son titre."
 msgid "A second factor keeps your account safe even if someone learns your password."
 msgstr "Un second facteur protège votre compte même si quelqu'un connaît votre mot de passe."
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A second factor was removed"
+msgstr "Un second facteur a été supprimé"
+
 #: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #, elixir-autogen, elixir-format
 msgid "A security notice covers Kiln %{version}."
@@ -5688,6 +5693,7 @@ msgstr "Les groupes se forment à partir des documents publiés et indexés."
 msgid "Code from the email"
 msgstr "Code reçu par e-mail"
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Code from your authenticator app"
@@ -5935,6 +5941,11 @@ msgstr "Confirmer"
 #, elixir-autogen, elixir-format
 msgid "Confirm date"
 msgstr "Confirmer la date"
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm it's you to remove “%{name}”"
+msgstr "Confirmez que c'est bien vous pour supprimer « %{name} »"
 
 #: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
 #, elixir-autogen, elixir-format
@@ -12697,6 +12708,11 @@ msgstr "Gérer les champs"
 msgid "Manage membership"
 msgstr "Gérer l'abonnement"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manage sign-in security"
+msgstr "Gérer la sécurité de connexion"
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -15967,6 +15983,11 @@ msgstr "La connexion par clé d'accès a échoué. Utilisez une autre méthode."
 msgid "Passkeys"
 msgstr "Clés d'accès"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Passkeys and two-factor authentication are managed on the main sign-in host, not on this site's address."
+msgstr "Les clés d'accès et l'authentification à deux facteurs se gèrent sur l'hôte de connexion principal, pas à l'adresse de ce site."
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -17661,6 +17682,7 @@ msgid "Remove item %{position}"
 msgstr "Retirer l’élément %{position}"
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove passkey"
@@ -17865,6 +17887,11 @@ msgstr "Supprimé. Le courrier de ce site utilise de nouveau le relais du déplo
 #, elixir-autogen, elixir-format
 msgid "Removed. This site's sign-in page no longer offers it."
 msgstr "Supprimé. La page de connexion de ce site ne le propose plus."
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Removing…"
+msgstr "Suppression…"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -19279,6 +19306,7 @@ msgstr "Recherche en cours…"
 msgid "Second factor added"
 msgstr "Second facteur ajouté"
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Second factor removed"
@@ -19857,6 +19885,7 @@ msgstr "Configurer mon compte"
 msgid "Set up two-step sign-in"
 msgstr "Configurer la connexion en deux étapes"
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up two-step sign-in on your own account first."
@@ -20260,6 +20289,11 @@ msgstr "Fermer toutes les autres sessions"
 #, elixir-autogen, elixir-format
 msgid "Sign out when idle"
 msgstr "Déconnexion après inactivité"
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out, then sign in again with a passkey. For 15 minutes after that, you can remove a passkey without a code."
+msgstr "Déconnectez-vous, puis reconnectez-vous avec une clé d'accès. Pendant les 15 minutes qui suivent, vous pourrez supprimer une clé d'accès sans code."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
@@ -21798,6 +21832,7 @@ msgstr "Ce code n'est pas valide — l'authentification à deux facteurs reste a
 msgid "That code isn't valid — try again."
 msgstr "Ce code n'est pas valide — réessayez."
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Check your authenticator app."
@@ -24578,11 +24613,6 @@ msgstr "L'authentification à deux facteurs est désormais activée."
 msgid "Two-factor authentication is on."
 msgstr "L'authentification à deux facteurs est activée."
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
-#, elixir-autogen, elixir-format
-msgid "Two-factor authentication turned off"
-msgstr "Authentification à deux facteurs désactivée"
-
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
@@ -24640,11 +24670,6 @@ msgstr "Exigence de connexion en deux étapes modifiée"
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in settings saved."
 msgstr "Réglages de la connexion en deux étapes enregistrés."
-
-#: lib/kiln_cms/security/alert_text.ex
-#, elixir-autogen, elixir-format
-msgid "Two-step verification was turned off"
-msgstr "La validation en deux étapes a été désactivée"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/calendar_live.ex
@@ -28881,6 +28906,11 @@ msgstr "ce type de fichier ne peut pas être utilisé ici"
 #, elixir-autogen, elixir-format
 msgid "this is you"
 msgstr "c'est vous"
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "this passkey"
+msgstr "cette clé d'accès"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

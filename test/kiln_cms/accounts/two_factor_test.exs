@@ -240,4 +240,107 @@ defmodule KilnCMS.Accounts.TwoFactorTest do
       assert confirmed.totp_secret == staged.totp_pending_secret
     end
   end
+
+  # GHSA-5g35-j8qr-j475: a settings tab confirms on its `current_user` assign,
+  # which may predate an enrollment (or a replacement) another tab or device
+  # finished since. Every decision about the live factor comes from the row.
+  describe "a struct loaded before another enrollment (GHSA-5g35-j8qr-j475)" do
+    # `stale` was loaded before the account enrolled elsewhere; `staged` is that
+    # same tab after `:setup_totp`, still holding `totp_confirmed_at: nil`.
+    defp enrolled_behind_a_stale_tab do
+      stale = user()
+      {:ok, elsewhere} = Accounts.setup_totp(stale, %{}, actor: stale)
+
+      {:ok, enrolled} =
+        Accounts.confirm_totp(elsewhere, %{code: current_code(elsewhere)}, actor: elsewhere)
+
+      {:ok, staged} = Accounts.setup_totp(stale, %{}, actor: stale)
+      assert is_nil(staged.totp_confirmed_at)
+      assert is_nil(staged.totp_secret)
+
+      %{
+        enrolled: enrolled,
+        staged: staged,
+        new_code: TwoFactorFixtures.current_code(staged.totp_pending_secret),
+        live_code: TwoFactorFixtures.current_code(enrolled.totp_secret)
+      }
+    end
+
+    test "the new secret's own code cannot replace the live one" do
+      %{enrolled: enrolled, staged: staged, new_code: new_code} = enrolled_behind_a_stale_tab()
+
+      assert {:error, %Ash.Error.Invalid{errors: errors}} =
+               Accounts.confirm_totp(staged, %{code: new_code}, actor: staged)
+
+      assert Enum.any?(errors, &(Map.get(&1, :field) == :current_code))
+
+      stored = Accounts.get_user!(enrolled.id, authorize?: false)
+      assert stored.totp_secret == enrolled.totp_secret
+      assert stored.totp_confirmed_at == enrolled.totp_confirmed_at
+    end
+
+    test "a code from the current authenticator replaces it" do
+      %{enrolled: enrolled, staged: staged, new_code: new_code, live_code: live_code} =
+        enrolled_behind_a_stale_tab()
+
+      assert {:ok, swapped} =
+               Accounts.confirm_totp(staged, %{code: new_code, current_code: live_code},
+                 actor: staged
+               )
+
+      assert swapped.totp_secret == staged.totp_pending_secret
+      refute swapped.totp_secret == enrolled.totp_secret
+    end
+
+    test "a recovery-code session may replace it without a current code" do
+      %{staged: staged, new_code: new_code} = enrolled_behind_a_stale_tab()
+
+      assert {:ok, swapped} =
+               Accounts.confirm_totp(staged, %{code: new_code, recovery_login?: true},
+                 actor: staged
+               )
+
+      assert swapped.totp_secret == staged.totp_pending_secret
+    end
+
+    test "a first enrollment still needs no current code" do
+      user = user()
+      {:ok, staged} = Accounts.setup_totp(user, %{}, actor: user)
+
+      assert {:ok, confirmed} =
+               Accounts.confirm_totp(staged, %{code: current_code(staged)}, actor: staged)
+
+      assert Accounts.totp_enabled?(confirmed)
+    end
+
+    test "disabling from a tab loaded before enrollment turns the stored factor off" do
+      %{enrolled: enrolled, staged: staged, live_code: live_code} = enrolled_behind_a_stale_tab()
+
+      assert {:ok, _} = Accounts.disable_totp(staged, %{code: live_code}, actor: staged)
+
+      stored = Accounts.get_user!(enrolled.id, authorize?: false)
+      refute Accounts.totp_enabled?(stored)
+      assert is_nil(stored.totp_secret)
+      assert stored.totp_recovery_hashes == []
+    end
+
+    test "a code from a replaced authenticator no longer disables 2FA or mints recovery codes" do
+      %{enrolled: old_tab, staged: staged, new_code: new_code, live_code: old_code} =
+        enrolled_behind_a_stale_tab()
+
+      {:ok, replaced} =
+        Accounts.confirm_totp(staged, %{code: new_code, current_code: old_code}, actor: staged)
+
+      # `old_tab` still holds the replaced secret; its code must not pass.
+      assert {:error, _} = Accounts.disable_totp(old_tab, %{code: old_code}, actor: old_tab)
+
+      assert {:error, _} =
+               Accounts.regenerate_totp_recovery_codes(old_tab, %{code: old_code}, actor: old_tab)
+
+      stored = Accounts.get_user!(replaced.id, authorize?: false)
+      assert Accounts.totp_enabled?(stored)
+      assert stored.totp_secret == replaced.totp_secret
+      assert stored.totp_recovery_hashes == replaced.totp_recovery_hashes
+    end
+  end
 end

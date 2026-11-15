@@ -75,7 +75,13 @@ defmodule KilnCMS.CMS.HiddenFields do
     touches_custom_fields?(query) and restricted_somewhere?(actor, query.resource, tenant)
   end
 
-  defp touches_custom_fields?(query) do
+  @doc """
+  Does `query` filter or sort on the whole `custom_fields` map? The syntactic
+  half of `probes_hidden?/3`, for `Preparations.MaskPrivateFields`, which asks
+  the same question of a reader below editor about the site's private fields.
+  """
+  @spec touches_custom_fields?(Ash.Query.t()) :: boolean()
+  def touches_custom_fields?(query) do
     filtered? =
       case query.filter do
         %Ash.Filter{expression: expression} -> probe?(expression)

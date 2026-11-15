@@ -1,7 +1,9 @@
 defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
   @moduledoc """
   The per-account budget on the TOTP actions reachable from a signed-in session
-  (#727): `:disable_totp` and `:regenerate_totp_recovery_codes`.
+  (#727): `:disable_totp`, `:regenerate_totp_recovery_codes` and
+  `:confirm_totp`. Once it is spent, every attempt gets one identical refusal
+  and no code is compared (GHSA-4854-24jg-q7j5).
 
   #714 budgeted `/sign-in/verify`. These two verify the same six digits and were
   charged nothing — and being LiveView events, they passed no router pipeline,
@@ -92,6 +94,41 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
 
   defp fresh_valid_attempt(_action, user), do: {user, %{code: valid_code()}}
 
+  # The attempt that would fail every code check the action makes — for
+  # `:confirm_totp` the outgoing factor's `current_code` too, so a refusal that
+  # still compared either code would carry an error the right attempt does not.
+  defp wrong_attempt(:confirm_totp), do: %{code: "000000", current_code: "000000"}
+  defp wrong_attempt(_action), do: %{code: "000000"}
+
+  # What an error list tells the caller: each error's kind and field. Not the
+  # retry-after seconds, which tick between two calls without saying anything
+  # about the code.
+  defp error_shape({:error, %{errors: errors}}),
+    do: Enum.map(errors, &{&1.__struct__, Map.get(&1, :field)})
+
+  defp error_shape(other), do: other
+
+  # The columns each action writes on success: unchanged means not accepted.
+  defp factor_state(user) do
+    reloaded = Ash.get!(User, user.id, authorize?: false)
+
+    {reloaded.totp_secret, reloaded.totp_confirmed_at, reloaded.totp_pending_secret,
+     reloaded.totp_recovery_hashes}
+  end
+
+  defp with_demo_mode(fun) do
+    saved = Application.get_env(:kiln_cms, KilnCMS.Demo)
+    Application.put_env(:kiln_cms, KilnCMS.Demo, enabled: true)
+
+    try do
+      fun.()
+    after
+      if saved,
+        do: Application.put_env(:kiln_cms, KilnCMS.Demo, saved),
+        else: Application.delete_env(:kiln_cms, KilnCMS.Demo)
+    end
+  end
+
   for action <- [:disable_totp, :regenerate_totp_recovery_codes, :confirm_totp] do
     describe "#{action}" do
       @action action
@@ -133,6 +170,61 @@ defmodule KilnCMS.Accounts.SecondFactorSettingsBudgetTest do
 
         AccountThrottle.forgive_second_factor(user.id)
         refute throttled?(apply(Accounts, @action, [user, %{code: "000000"}, [actor: user]]))
+      end
+
+      test "a spent budget gives a right and a wrong code one identical refusal, comparing neither (GHSA-4854-24jg-q7j5)" do
+        # Past the throttle the code checks used to run anyway: a wrong code
+        # added its own error and a right one did not, so the error list was a
+        # code oracle with no budget at all.
+        user = enabled_user()
+        {user, right} = fresh_valid_attempt(@action, user)
+        exhaust(user, @action)
+        before = factor_state(user)
+
+        right_result = apply(Accounts, @action, [user, right, [actor: user]])
+        wrong_result = apply(Accounts, @action, [user, wrong_attempt(@action), [actor: user]])
+
+        assert {:error, %{errors: [%SecondFactorThrottled{}]}} = right_result
+        assert {:error, %{errors: [%SecondFactorThrottled{}]}} = wrong_result
+        assert error_shape(right_result) == error_shape(wrong_result)
+
+        # And the right one changed nothing.
+        assert factor_state(user) == before
+      end
+
+      test "with budget left, a wrong code is still told it is wrong" do
+        user = enabled_user()
+        {user, _right} = fresh_valid_attempt(@action, user)
+
+        result = apply(Accounts, @action, [user, wrong_attempt(@action), [actor: user]])
+
+        refute throttled?(result)
+        assert {:error, %{errors: [_ | _] = errors}} = result
+        assert Enum.all?(errors, &(Map.get(&1, :field) in [:code, :current_code]))
+      end
+
+      test "a refusal before the throttle spends no attempt" do
+        # Demo mode refuses a non-admin's credential change up front; that
+        # refusal must leave the budget whole, and compare no code either.
+        user = enabled_user()
+        editor = Ash.Seed.update!(user, %{role: :editor})
+
+        with_demo_mode(fn ->
+          for _ <- 1..(@budget + 1) do
+            assert {:error, %{errors: errors}} =
+                     apply(Accounts, @action, [editor, wrong_attempt(@action), [actor: editor]])
+
+            assert [%KilnCMS.Accounts.Errors.DemoAccountLocked{}] = errors
+          end
+        end)
+
+        # The whole budget is still there: as many wrong guesses as it allows,
+        # none of them throttled.
+        for _ <- 1..@budget do
+          refute throttled?(
+                   apply(Accounts, @action, [editor, wrong_attempt(@action), [actor: editor]])
+                 )
+        end
       end
 
       test "the refusal carries how long to wait" do

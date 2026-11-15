@@ -42,6 +42,73 @@ defmodule KilnCMS.Accounts.SsoTest do
     refute is_nil(reloaded.confirmed_at)
   end
 
+  describe "an unconfirmed account registered in advance" do
+    @squatter_password "squatter-password-456"
+
+    defp squatter(address, attrs \\ %{}) do
+      Ash.Seed.seed!(
+        User,
+        Map.merge(
+          %{
+            email: address,
+            name: "Not The Owner",
+            hashed_password: Bcrypt.hash_pwd_salt(@squatter_password),
+            confirmed_at: nil,
+            role: :viewer
+          },
+          attrs
+        )
+      )
+    end
+
+    # Anyone can register an unconfirmed account for any address. Linking the
+    # provider's identity to it as it stood left the stranger's password
+    # working on the account the owner then used.
+    test "is taken over: the stranger's password and second factor are gone" do
+      address = email()
+
+      squatted =
+        squatter(address, %{
+          totp_secret: KilnCMS.Accounts.Totp.generate_secret(),
+          totp_confirmed_at: DateTime.utc_now()
+        })
+
+      assert {:ok, user} = register(%{"email" => address, "email_verified" => true})
+      assert user.id == squatted.id
+
+      reloaded = KilnCMS.Accounts.get_user!(user.id, authorize?: false)
+      refute is_nil(reloaded.confirmed_at)
+      refute Bcrypt.verify_pass(@squatter_password, reloaded.hashed_password)
+      assert is_nil(reloaded.totp_secret)
+      assert is_nil(reloaded.totp_confirmed_at)
+      assert is_nil(reloaded.name)
+    end
+
+    test "a confirmed account is linked as it is, password kept" do
+      address = email()
+      squatted = squatter(address, %{confirmed_at: DateTime.utc_now()})
+
+      assert {:ok, user} = register(%{"email" => address, "email_verified" => true})
+      assert user.id == squatted.id
+
+      reloaded = KilnCMS.Accounts.get_user!(user.id, authorize?: false)
+      assert Bcrypt.verify_pass(@squatter_password, reloaded.hashed_password)
+      assert reloaded.name == "Not The Owner"
+    end
+
+    test "the takeover action is refused to every actor" do
+      admin =
+        Ash.Seed.seed!(User, %{
+          email: email(),
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      assert {:error, _} = KilnCMS.Accounts.take_over_by_sso(squatter(email()), %{}, actor: admin)
+    end
+  end
+
   test "an unverified identity email is rejected" do
     assert {:error, error} = register(%{"email" => email(), "email_verified" => false})
     assert Exception.message(error) =~ "not verified"

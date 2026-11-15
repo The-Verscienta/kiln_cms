@@ -182,7 +182,12 @@ defmodule KilnCMS.Accounts.DemoCredentialsLockTest do
       editor = user(:editor)
       passkey = seed_passkey(editor)
 
-      assert refusal(Accounts.remove_passkey(passkey, actor: editor)) == @refused
+      assert refusal(
+               Accounts.remove_passkey(passkey,
+                 actor: editor,
+                 context: KilnCMS.TwoFactorFixtures.verified_now()
+               )
+             ) == @refused
 
       assert Enum.map(Accounts.list_passkeys!(editor.id, authorize?: false), & &1.id) == [
                passkey.id
@@ -255,10 +260,21 @@ defmodule KilnCMS.Accounts.DemoCredentialsLockTest do
       editor = user(:editor)
 
       assert {:ok, own} = enroll(admin, "demo-lock-admin")
-      assert Accounts.remove_passkey(own, actor: admin) == :ok
+      # A second one, so the admin still holds a factor of their own to prove
+      # when removing the shared account's (the step-up on `:destroy`).
+      assert {:ok, _kept} = enroll(admin, "demo-lock-admin-kept")
+
+      assert Accounts.remove_passkey(own,
+               actor: admin,
+               context: KilnCMS.TwoFactorFixtures.verified_now()
+             ) == :ok
 
       shared = seed_passkey(editor)
-      assert Accounts.remove_passkey(shared, actor: admin) == :ok
+
+      assert Accounts.remove_passkey(shared,
+               actor: admin,
+               context: KilnCMS.TwoFactorFixtures.verified_now()
+             ) == :ok
     end
   end
 
@@ -279,7 +295,11 @@ defmodule KilnCMS.Accounts.DemoCredentialsLockTest do
       editor = user(:editor)
 
       assert {:ok, passkey} = enroll(editor, "demo-lock-off")
-      assert Accounts.remove_passkey(passkey, actor: editor) == :ok
+
+      assert Accounts.remove_passkey(passkey,
+               actor: editor,
+               context: KilnCMS.TwoFactorFixtures.verified_now()
+             ) == :ok
     end
   end
 end

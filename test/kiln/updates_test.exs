@@ -456,6 +456,43 @@ defmodule Kiln.UpdatesTest do
       assert {:ok, {:behind, _}} = Updates.check()
     end
 
+    # The origin pin on `links.next` is worth nothing if a redirect from the
+    # same endpoint is followed anywhere. `stub_legs/2` flunks on any host
+    # that is neither leg, so a followed redirect fails the test.
+    test "a redirect off the feed's origin is not followed; GitHub is asked instead" do
+      newer = bump(current_version(), :minor)
+
+      redirect = fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("location", "http://169.254.169.254/latest/meta-data")
+        |> Plug.Conn.send_resp(302, "")
+      end
+
+      stub_legs(redirect, github("v#{newer}"))
+
+      assert {:ok, {:behind, release}} = Updates.check()
+      assert release.tag == "v#{newer}"
+    end
+
+    test "a redirect on the feed's own origin is followed" do
+      newer = bump(current_version(), :minor)
+
+      feed = fn conn ->
+        if conn.query_string =~ "moved=1" do
+          feed_page([feed_entry(newer)]).(conn)
+        else
+          conn
+          |> Plug.Conn.put_resp_header("location", conn.request_path <> "?moved=1")
+          |> Plug.Conn.send_resp(301, "")
+        end
+      end
+
+      stub_legs(feed, unreachable("GitHub"))
+
+      assert {:ok, {:behind, release}} = Updates.check()
+      assert to_string(release.version) == newer
+    end
+
     # Each is a different way for kilncms.dev to fail; none may become the
     # answer, and none may stop GitHub from being asked.
     for {label, feed} <- [

@@ -276,13 +276,23 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
   administrator's answer reads every site's (cached) policy.
   """
   @spec required_somewhere?(Accounts.User.t()) :: boolean()
-  def required_somewhere?(user) do
+  def required_somewhere?(user), do: requiring_orgs(user) != []
+
+  @doc """
+  The sites `required_somewhere?/1` finds: each one whose policy covers
+  `user`'s tier there, held or not, enrolled or not. `[]` for an exempt
+  account. For mail about the account's factors that must reach its owner
+  through a site's relay when the instance has none
+  (`KilnCMS.Accounts.SecondFactorNotice`).
+  """
+  @spec requiring_orgs(Accounts.User.t()) :: [Ash.UUID.t()]
+  def requiring_orgs(user) do
     if exempt?(user) do
-      false
+      []
     else
       user
       |> candidate_orgs()
-      |> Enum.any?(fn org_id ->
+      |> Enum.filter(fn org_id ->
         {tier, _source, _record} = Scoping.tier_source(user, org_id)
         covers?(policy(org_id), tier)
       end)
@@ -314,7 +324,21 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
   `[]` when no site holds the account. Option: `:now`.
   """
   @spec enforced_deadlines(Accounts.User.t(), keyword()) :: [DateTime.t()]
-  def enforced_deadlines(user, opts \\ []) do
+  def enforced_deadlines(user, opts \\ []),
+    do: for({_org_id, deadline} <- holding(user, opts), do: deadline)
+
+  @doc """
+  The sites that hold `user` now, the ones `enforced_deadlines/2` reads the
+  deadlines of. For a decision that must be judged on the sites requiring the
+  factor rather than on the page's: the email proof's mail relay
+  (`KilnCMS.Accounts.EnrolmentProof`). `[]` when no site holds the account.
+  Option: `:now`.
+  """
+  @spec holding_orgs(Accounts.User.t(), keyword()) :: [Ash.UUID.t()]
+  def holding_orgs(user, opts \\ []),
+    do: for({org_id, _deadline} <- holding(user, opts), do: org_id)
+
+  defp holding(user, opts) do
     if exempt?(user) do
       []
     else
@@ -322,7 +346,7 @@ defmodule KilnCMS.Accounts.TwoFactorRequirement do
 
       for org_id <- candidate_orgs(user),
           {:enforced, deadline} <- [status(user, org_id, opts)],
-          do: deadline
+          do: {org_id, deadline}
     end
   end
 

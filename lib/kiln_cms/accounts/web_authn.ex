@@ -80,12 +80,26 @@ defmodule KilnCMS.Accounts.WebAuthn do
 
   `payload` carries the browser response, base64url-encoded:
   `"attestation_object"`, `"client_data_json"`, and an optional `"name"`.
+
+  `opts[:host]` is required: the host the page that ran the ceremony was
+  served on, as the server knows it (a LiveView's vouched `host_uri`, never
+  anything the client reports). The registration is refused
+  (`{:error, :not_ceremony_host}`) unless that host is one passkeys are
+  registered on (`ceremony_host?/1`), and (`{:error, :origin_mismatch}`)
+  unless the origin in `clientDataJSON` names that same host. With
+  `attestation: "none"` the origin is whatever the client wrote, so Wax's
+  origin check alone accepts a script on a tenant site host that claims the
+  main host's origin (GHSA-mq8x-2p99-6q8c); the served host is what pins it.
   """
   @spec register_passkey(KilnCMS.Accounts.User.t(), Wax.Challenge.t(), map(), keyword()) ::
           {:ok, Passkey.t()} | {:error, term()}
   def register_passkey(user, challenge, payload, opts \\ []) do
-    with {:ok, attestation} <- decode(payload["attestation_object"]),
+    host = Keyword.get(opts, :host)
+
+    with :ok <- served_on_ceremony_host(host),
+         {:ok, attestation} <- decode(payload["attestation_object"]),
          {:ok, client_data} <- decode(payload["client_data_json"]),
+         :ok <- origin_on_host(client_data, host),
          {:ok, {auth_data, _attestation_result}} <-
            verifier().register(attestation, client_data, challenge) do
       credential = auth_data.attested_credential_data
@@ -112,6 +126,27 @@ defmodule KilnCMS.Accounts.WebAuthn do
       {:error, _reason} = error -> error
     end
   end
+
+  defp served_on_ceremony_host(host) when is_binary(host) do
+    if ceremony_host?(normalize_host(host)), do: :ok, else: {:error, :not_ceremony_host}
+  end
+
+  defp served_on_ceremony_host(_no_host), do: {:error, :not_ceremony_host}
+
+  # The origin the client says the ceremony ran on must be the host the page
+  # was served on. Wax checks it against the hosts ceremonies may run on;
+  # this ties it to the one this request actually came from.
+  defp origin_on_host(client_data, host) do
+    with {:ok, %{"origin" => origin}} when is_binary(origin) <- Jason.decode(client_data),
+         %URI{host: origin_host} when is_binary(origin_host) <- URI.parse(origin),
+         true <- normalize_host(origin_host) == normalize_host(host) do
+      :ok
+    else
+      _mismatch -> {:error, :origin_mismatch}
+    end
+  end
+
+  defp normalize_host(host), do: host |> String.trim_trailing(".") |> String.downcase()
 
   @doc "Mint an authentication challenge (no allow-list — discoverable credentials)."
   @spec authentication_challenge() :: Wax.Challenge.t()

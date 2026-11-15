@@ -87,7 +87,8 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
   ## Options
 
     * `:via` — the path taking the account over, recorded as the events'
-      `via`: `:invitation` (the default), `:password_reset` or `:magic_link`.
+      `via`: `:invitation` (the default), `:password_reset`, `:magic_link` or
+      `:sso`.
     * `:unconfirmed_only?` — do nothing when the locked row is confirmed
       (default `false`).
     * `:remove` — a `(changeset, user, opts) -> {:ok, boolean} | {:error,
@@ -113,16 +114,20 @@ defmodule KilnCMS.Accounts.Changes.ForgetPriorCredentials do
   alias KilnCMS.AfterCommit
   alias KilnCMS.Security.Recorder
 
+  # The plaintext columns too: a row the backfill has
+  # not reached keeps its secrets there.
   @totp_cleared [
     totp_secret: nil,
+    legacy_totp_secret: nil,
     totp_confirmed_at: nil,
     totp_pending_secret: nil,
+    legacy_totp_pending_secret: nil,
     totp_recovery_hashes: []
   ]
 
   @effects :forget_prior_credentials_after_commit
 
-  @vias [:invitation, :password_reset, :magic_link]
+  @vias [:invitation, :password_reset, :magic_link, :sso]
 
   @impl true
   def init(opts) do

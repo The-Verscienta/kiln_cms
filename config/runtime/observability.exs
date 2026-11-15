@@ -31,8 +31,14 @@ end
 if otlp_endpoint = System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT") do
   config :kiln_cms, :otel_enabled, true
 
+  # `KilnCMSWeb.RedactingSpanProcessor` first, so a span's URL attributes are
+  # redacted before any other processor sees them. Do not set `span_processor`
+  # as well: it replaces this list (KilnCMS.Config.Redaction checks at boot).
   config :opentelemetry,
-    span_processor: :batch,
+    processors: [
+      {KilnCMSWeb.RedactingSpanProcessor, %{}},
+      {:otel_batch_processor, %{}}
+    ],
     traces_exporter: :otlp,
     resource: %{service: %{name: System.get_env("OTEL_SERVICE_NAME") || "kiln_cms"}}
 

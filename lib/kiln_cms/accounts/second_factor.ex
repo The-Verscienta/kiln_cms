@@ -47,6 +47,7 @@ defmodule KilnCMS.Accounts.SecondFactor do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.SignInAlert
   alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Accounts.TotpSecrets
   alias KilnCMS.Accounts.WebAuthn
   alias KilnCMS.Security.AuthEvents
 
@@ -166,7 +167,9 @@ defmodule KilnCMS.Accounts.SecondFactor do
   # forward — or `:invalid`.
   @spec verify(Accounts.User.t(), term(), map()) :: {:ok, Accounts.User.t()} | :invalid
   defp verify(user, code, context) when is_binary(code) do
-    if is_binary(user.totp_secret) and Totp.valid?(user.totp_secret, code) do
+    secret = TotpSecrets.live(user)
+
+    if is_binary(secret) and Totp.valid?(secret, code) do
       {:ok, mark(user, :totp)}
     else
       case recovery_code(user, code, context) do

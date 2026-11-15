@@ -2141,6 +2141,11 @@ msgstr ""
 msgid "A second factor keeps your account safe even if someone learns your password."
 msgstr ""
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A second factor was removed"
+msgstr ""
+
 #: lib/kiln_cms/security/posture/checks/core_security_notices.ex
 #, elixir-autogen, elixir-format
 msgid "A security notice covers Kiln %{version}."
@@ -5688,6 +5693,7 @@ msgstr ""
 msgid "Code from the email"
 msgstr ""
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Code from your authenticator app"
@@ -5934,6 +5940,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirm date"
+msgstr ""
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm it's you to remove “%{name}”"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/two_factor_html/new.html.heex
@@ -12697,6 +12708,11 @@ msgstr ""
 msgid "Manage membership"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Manage sign-in security"
+msgstr ""
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -15967,6 +15983,11 @@ msgstr ""
 msgid "Passkeys"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Passkeys and two-factor authentication are managed on the main sign-in host, not on this site's address."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html/lock.html.heex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -17661,6 +17682,7 @@ msgid "Remove item %{position}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove passkey"
@@ -17864,6 +17886,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Removed. This site's sign-in page no longer offers it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Removing…"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -19279,6 +19306,7 @@ msgstr ""
 msgid "Second factor added"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Second factor removed"
@@ -19857,6 +19885,7 @@ msgstr ""
 msgid "Set up two-step sign-in"
 msgstr ""
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set up two-step sign-in on your own account first."
@@ -20259,6 +20288,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign out when idle"
+msgstr ""
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "Sign out, then sign in again with a passkey. For 15 minutes after that, you can remove a passkey without a code."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -21798,6 +21832,7 @@ msgstr ""
 msgid "That code isn't valid — try again."
 msgstr ""
 
+#: lib/kiln_cms_web/live/totp_enrolment.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "That code isn't valid. Check your authenticator app."
@@ -24578,11 +24613,6 @@ msgstr ""
 msgid "Two-factor authentication is on."
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
-#, elixir-autogen, elixir-format
-msgid "Two-factor authentication turned off"
-msgstr ""
-
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/account_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
@@ -24639,11 +24669,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Two-step sign-in settings saved."
-msgstr ""
-
-#: lib/kiln_cms/security/alert_text.ex
-#, elixir-autogen, elixir-format
-msgid "Two-step verification was turned off"
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex
@@ -28880,6 +28905,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "this is you"
+msgstr ""
+
+#: lib/kiln_cms_web/live/totp_enrolment.ex
+#, elixir-autogen, elixir-format
+msgid "this passkey"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex

@@ -10,8 +10,10 @@ defmodule KilnCMSWeb.SettingsLiveEnrolmentProofTest do
   opens settings on another, which holds nothing: on the holding site the
   gate would send it to the setup page before settings mounts.
 
-  A site host serves settings only while no console host is configured (with
-  one, it redirects there), so only the console-host test sets one.
+  The page manages second factors only on the main host and console hosts
+  (GHSA-mq8x-2p99-6q8c): on a tenant site host the factor sections link to
+  the main host instead, so no proof note is drawn there. The rest run on the
+  account's site's console host, which resolves to that site.
 
   `async: false`: the console host is `Application.put_env`, VM-global.
   """
@@ -39,18 +41,17 @@ defmodule KilnCMSWeb.SettingsLiveEnrolmentProofTest do
     {user, here}
   end
 
-  test "on a site host, both add controls say where to confirm, linking the main host", %{
+  test "on a site host, no add control: the factor sections send to the main host", %{
     conn: conn
   } do
     {user, here} = held_elsewhere("slep-site")
 
     {:ok, view, html} = conn |> signed_in(user, here) |> live(~p"/editor/settings")
 
-    for id <- ["#totp-proof-elsewhere", "#passkey-proof-elsewhere"] do
-      assert has_element?(view, id, @note), id
-      assert has_element?(view, ~s(#{id} a[href="#{SecondFactorGate.main_setup_url()}"])), id
-    end
-
+    refute has_element?(view, "#totp-proof-elsewhere")
+    refute has_element?(view, "#passkey-proof-elsewhere")
+    assert has_element?(view, "#two-factor-elsewhere")
+    assert has_element?(view, "#passkeys-elsewhere")
     assert html =~ "This opens on #{main_host()}, where you sign in again."
   end
 
@@ -66,9 +67,11 @@ defmodule KilnCMSWeb.SettingsLiveEnrolmentProofTest do
   end
 
   test "an add tried anyway is still refused with the flash", %{conn: conn} do
+    with_console_host()
     {user, here} = held_elsewhere("slep-refused")
 
-    {:ok, view, _html} = conn |> signed_in(user, here) |> live(~p"/editor/settings")
+    {:ok, view, _html} =
+      conn |> signed_in(user, here) |> console_conn(here) |> live(~p"/editor/settings")
 
     view |> element("button", "Enable two-factor authentication") |> render_click()
     staged = Ash.get!(KilnCMS.Accounts.User, user.id, authorize?: false)
@@ -80,10 +83,14 @@ defmodule KilnCMSWeb.SettingsLiveEnrolmentProofTest do
   end
 
   test "no note when no site holds the account", %{conn: conn} do
+    with_console_host()
     site = org("slep-free")
     user = seed_user() |> member!(site, :editor)
 
-    {:ok, view, html} = conn |> signed_in(user, site) |> live(~p"/editor/settings")
+    {:ok, view, html} =
+      conn |> signed_in(user, site) |> console_conn(site) |> live(~p"/editor/settings")
+
+    assert has_element?(view, "#two-factor-manage")
 
     refute html =~ @note
     refute has_element?(view, "#totp-proof-elsewhere")
@@ -91,19 +98,21 @@ defmodule KilnCMSWeb.SettingsLiveEnrolmentProofTest do
   end
 
   test "no note for a session that signed in with a passkey", %{conn: conn} do
+    with_console_host()
     {user, here} = held_elsewhere("slep-passkey")
     token = jwt(user)
     {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
 
-    {:ok, _view, html} =
+    {:ok, view, html} =
       conn
-      |> org_conn(here)
+      |> console_conn(here)
       |> Phoenix.ConnTest.init_test_session(%{
         "user_token" => token,
         "sign_in" => %{"jti" => jti, "method" => "passkey"}
       })
       |> live(~p"/editor/settings")
 
+    assert has_element?(view, "#two-factor-manage")
     refute html =~ @note
   end
 end

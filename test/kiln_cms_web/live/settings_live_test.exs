@@ -42,8 +42,10 @@ defmodule KilnCMSWeb.SettingsLiveTest do
     user
   end
 
+  # On the main host, where the page manages second factors.
   defp log_in(conn, user) do
     conn
+    |> main_host_conn()
     |> Phoenix.ConnTest.init_test_session(%{})
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
@@ -387,6 +389,7 @@ defmodule KilnCMSWeb.SettingsLiveTest do
 
       conn =
         conn
+        |> main_host_conn()
         |> Phoenix.ConnTest.init_test_session(%{"totp_recovery_login" => true})
         |> AshAuthentication.Plug.Helpers.store_in_session(user)
 

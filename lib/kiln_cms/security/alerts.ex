@@ -26,7 +26,7 @@ defmodule KilnCMS.Security.Alerts do
   | `role_elevation` | site | a role raised to editor (or viewer → anything below admin), a temporary non-admin grant |
   | `failed_sign_ins` | site | the site's failed sign-ins reaching the threshold in one window (off by default) |
   | `lockout` | site | an account locked out of signing in |
-  | `two_factor_disabled` | site | a second factor removed |
+  | `two_factor_disabled` | site | a second factor removed: the authenticator app turned off, or a passkey removed |
   | `sso_config_changed` | site | the site's identity provider changed |
   | `new_api_key` | platform | an API key minted (not rotated) |
   | `api_key_abuse` | platform | a rotated API key presented again |
@@ -179,7 +179,7 @@ defmodule KilnCMS.Security.Alerts do
     new_admin: [:role_granted, :elevation_granted, :registration_approved],
     role_elevation: [:role_granted, :elevation_granted],
     lockout: [:sign_in_locked],
-    two_factor_disabled: [:second_factor_removed],
+    two_factor_disabled: [:second_factor_removed, :passkey_removed],
     sso_config_changed: [:sso_config_changed],
     platform_role_changed: [:role_revoked],
     new_api_key: [:api_key_created],
@@ -304,9 +304,12 @@ defmodule KilnCMS.Security.Alerts do
 
   defp do_classify(:sign_in_locked, _metadata, _event, _context), do: [{:lockout, :site}]
 
-  defp do_classify(:second_factor_removed, metadata, _event, _context) do
+  defp do_classify(type, metadata, _event, _context)
+       when type in [:second_factor_removed, :passkey_removed] do
     # An invitee taking an account over drops the previous holder's factor
-    # (#2453): not the account's owner turning their protection off.
+    # (#2453): not the account's owner turning their protection off. Any
+    # other passkey removed counts like the authenticator app turned off: it
+    # needs only a session, and narrows the owner's ways back in.
     if meta(metadata, "via") == "invitation", do: [], else: [{:two_factor_disabled, :site}]
   end
 

@@ -331,21 +331,16 @@ defmodule KilnCMSWeb.ArtifactController do
          {resource, definition_id} when not is_nil(resource) <- storage(ct) do
       limit = index_limit(params)
 
-      # One shared slot per `{org, type, as_of, limit}`, with no caller in the
-      # key — which is only sound because `PointInTime.index/4` takes no caller
-      # input: it lists what an ANONYMOUS reader may discover (public now and
-      # then, never locked), for everyone. Anything caller-dependent added to
-      # that read must key this slot on the caller, or skip it.
+      # Not put in the shared cache, deliberately. `as_of` has microsecond
+      # precision and `limit` ranges to 500, both the caller's to choose, so a
+      # key built from them let an anonymous caller mint an entry of up to 500
+      # rows per request and push hot delivery entries out of a bounded cache
+      # (`EventIndexController` skips it for the same reason). The response's
+      # own `max-age` is the cache; the `:api` bucket bounds the reads.
       entries =
-        KilnCMS.Cache.fetch(
-          {:pit_index, org_id, type, DateTime.to_iso8601(as_of), limit},
-          :timer.minutes(5),
-          fn ->
-            PointInTime.index(org_id, resource, as_of,
-              limit: limit,
-              type_definition_id: definition_id
-            )
-          end
+        PointInTime.index(org_id, resource, as_of,
+          limit: limit,
+          type_definition_id: definition_id
         )
 
       entries =

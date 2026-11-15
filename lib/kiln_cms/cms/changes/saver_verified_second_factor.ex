@@ -2,7 +2,11 @@ defmodule KilnCMS.CMS.Changes.SaverVerifiedSecondFactor do
   @moduledoc """
   The person writing a site's two-step sign-in requirement must hold a second
   factor and prove it now (#2247). On `KilnCMS.CMS.SiteSecondFactorPolicy`'s
-  `:save` and `:update`, every write, strengthening included.
+  `:save` and `:update`, every write, strengthening included. And on
+  `KilnCMS.Accounts.Passkey`'s `:destroy`: whoever removes a passkey (its
+  owner, or a platform admin) proves their own factor first, so a stolen or
+  unattended session can't strip an account's passkeys
+  (`KilnCMSWeb.TotpEnrolment.remove_passkey/4` passes the page's mark).
 
   The actor is re-read (a struct loaded before a factor was removed must not
   speak for the account now), and must:
@@ -55,6 +59,7 @@ defmodule KilnCMS.CMS.Changes.SaverVerifiedSecondFactor do
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Accounts.TotpSecrets
   alias KilnCMS.Accounts.User
   alias KilnCMS.Security.Recorder
 
@@ -94,8 +99,9 @@ defmodule KilnCMS.CMS.Changes.SaverVerifiedSecondFactor do
       with %User{} = actor <- changeset.context[:private][:actor],
            code when is_binary(code) and code != "" <-
              Ash.Changeset.get_argument(changeset, :code),
-           %User{totp_secret: secret} = user when is_binary(secret) <- reload(actor) do
-        check_code(changeset, user, code)
+           %User{} = user <- reload(actor),
+           secret when is_binary(secret) <- TotpSecrets.live(user) do
+        check_code(changeset, user, secret, code)
       else
         _no_code_or_no_app -> nil
       end
@@ -103,10 +109,10 @@ defmodule KilnCMS.CMS.Changes.SaverVerifiedSecondFactor do
     Ash.Changeset.set_context(changeset, %{@verdict => verdict})
   end
 
-  defp check_code(changeset, user, code) do
+  defp check_code(changeset, user, secret, code) do
     case AccountThrottle.consume_second_factor(user.id) do
       :allow ->
-        if Totp.valid?(user.totp_secret, code) do
+        if Totp.valid?(secret, code) do
           AccountThrottle.forgive_second_factor(user.id)
           :verified
         else

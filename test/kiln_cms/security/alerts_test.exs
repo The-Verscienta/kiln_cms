@@ -166,6 +166,15 @@ defmodule KilnCMS.Security.AlertsTest do
       assert Alerts.classify(event(:second_factor_removed, %{"kind" => "totp"})) ==
                [{:two_factor_disabled, :site}]
 
+      # A passkey removed counts like the authenticator app turned off.
+      assert Alerts.classify(event(:passkey_removed, %{"name" => "Laptop"})) ==
+               [{:two_factor_disabled, :site}]
+
+      assert Alerts.event_types(:two_factor_disabled) == [
+               :second_factor_removed,
+               :passkey_removed
+             ]
+
       assert Alerts.classify(event(:sso_config_changed, %{"provider" => "site_oidc"})) ==
                [{:sso_config_changed, :site}]
     end
@@ -174,6 +183,9 @@ defmodule KilnCMS.Security.AlertsTest do
       assert Alerts.classify(
                event(:second_factor_removed, %{"kind" => "totp", "via" => "invitation"})
              ) == []
+
+      assert Alerts.classify(event(:passkey_removed, %{"name" => "Key", "via" => "invitation"})) ==
+               []
     end
 
     test "a minted API key is a platform new_api_key; a rotation is nothing" do
@@ -214,7 +226,6 @@ defmodule KilnCMS.Security.AlertsTest do
       for type <- [
             :sign_in,
             :member_invited,
-            :passkey_removed,
             :recovery_code_used,
             :api_key_revoked,
             :admin_access_refused,

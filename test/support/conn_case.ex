@@ -81,6 +81,15 @@ defmodule KilnCMSWeb.ConnCase do
   def org_conn(conn, org), do: %{conn | host: "#{org.slug}.#{KilnCMSWeb.Tenant.base_host()}"}
 
   @doc """
+  Point `conn` at the main host: the endpoint's own (`PHX_HOST`, the passkeys'
+  RP ID). A conn's default `www.example.com` is a host like any tenant site's,
+  where second factors are not managed (`KilnCMSWeb.SecondFactorGate.setup_host?/1`);
+  a test that drives `/editor/settings`' factor sections runs here.
+  """
+  @spec main_host_conn(Plug.Conn.t()) :: Plug.Conn.t()
+  def main_host_conn(conn), do: %{conn | host: URI.parse(KilnCMSWeb.Endpoint.url()).host}
+
+  @doc """
   Narrow a rendered console page to its own body, `<main id="main">`.
 
   The console shell carries a notification bell whose dropdown renders content

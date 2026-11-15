@@ -229,9 +229,13 @@ defmodule KilnCMSWeb.Endpoint do
   #
   # The address reader and header scrubber keep the client IP off any event
   # raised by a read of the update feed's route (#1877) — see the module.
+  #
+  # The URL scrubber records the request URL with its secret path segments and
+  # credential query parameters filtered (`KilnCMSWeb.RequestRedaction`).
   plug Sentry.PlugContext,
     body_scrubber: &KilnCMSWeb.SentryScrubber.scrub_params/1,
     header_scrubber: &KilnCMSWeb.SentryScrubber.scrub_headers/1,
+    url_scrubber: &KilnCMSWeb.SentryScrubber.scrub_url/1,
     remote_address_reader: &KilnCMSWeb.SentryScrubber.remote_address/1
 
   # CORS for the headless API surfaces (`/api/*`, `/gql`). Ahead of the router so

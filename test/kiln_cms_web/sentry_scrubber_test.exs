@@ -73,4 +73,39 @@ defmodule KilnCMSWeb.SentryScrubberTest do
     assert SentryScrubber.scrub_query_string("") == ""
     assert SentryScrubber.scrub_query_string(nil) == nil
   end
+
+  describe "the request URL and the referrer" do
+    @secret "T0kenSecretValue123"
+
+    test "scrub_url/1 filters a token route's segment and a credential parameter" do
+      url =
+        conn(:get, "https://example.com/magic_link/#{@secret}?preview_token=#{@secret}&page=2")
+        |> SentryScrubber.scrub_url()
+
+      assert url == "https://example.com/magic_link/[FILTERED]?preview_token=[FILTERED]&page=2"
+    end
+
+    test "scrub_url/1 matches the decoded path, as the router does" do
+      url =
+        conn(:get, "https://example.com//magic%5Flink/#{@secret}") |> SentryScrubber.scrub_url()
+
+      refute url =~ @secret
+    end
+
+    test "scrub_url/1 leaves an ordinary URL as Plug writes it" do
+      conn = conn(:get, "https://example.com/blog/hello?page=2")
+      assert SentryScrubber.scrub_url(conn) == Plug.Conn.request_url(conn)
+    end
+
+    test "scrub_headers/1 redacts a Referer that names a token page" do
+      headers =
+        conn(:get, "/assets/app.js")
+        |> put_req_header("referer", "https://example.com/auth/invite/#{@secret}")
+        |> put_req_header("accept", "*/*")
+        |> SentryScrubber.scrub_headers()
+
+      assert headers["referer"] == "https://example.com/auth/invite/[FILTERED]"
+      assert headers["accept"] == "*/*"
+    end
+  end
 end

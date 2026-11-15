@@ -121,6 +121,33 @@ defmodule KilnCMS.Accounts.SecondFactorTest do
       assert :invalid = SecondFactor.check(reloaded, code)
     end
 
+    # Two requests each hold the struct they loaded. The burn used to remove
+    # the code from THAT list and write the result, so a second request with a
+    # stale struct spent the same code again, or wrote back a list that still
+    # held a code the first had burned.
+    test "a stale struct cannot spend a code twice, or restore a spent one" do
+      codes = RecoveryCodes.generate()
+
+      {user, _secret} =
+        enabled_user(%{totp_recovery_hashes: Enum.map(codes, &RecoveryCodes.hash/1)})
+
+      [first, second | _rest] = codes
+      stale = user
+
+      assert {:ok, _verified} = SecondFactor.check(user, first)
+      # The same code, from a struct loaded before the burn.
+      assert :invalid = SecondFactor.check(stale, first)
+
+      # A different code from the stale struct is fine, and leaves the first spent.
+      assert {:ok, verified} = SecondFactor.check(stale, second)
+      assert length(verified.totp_recovery_hashes) == length(codes) - 2
+
+      reloaded = Ash.get!(User, user.id, authorize?: false)
+      assert length(reloaded.totp_recovery_hashes) == length(codes) - 2
+      assert :invalid = SecondFactor.check(reloaded, first)
+      assert :invalid = SecondFactor.check(reloaded, second)
+    end
+
     test "the first-factor token rides through a recovery-code burn" do
       # `consume_totp_recovery_code` returns a fresh record; losing the caller's
       # metadata here would leave the gate with nothing to store a session from.

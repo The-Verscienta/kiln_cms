@@ -32,15 +32,26 @@ defmodule KilnCMS.Accounts.Changes.ThrottleSecondFactor do
   is the bug class it exists to prevent, and getting it backwards fails
   *silently*, still refusing wrong codes but with an unbounded budget.
 
-  Declared *above* the validation for readability rather than necessity: Ash
-  runs changes and validations in declaration order, but skips a change only
-  when it sets `only_when_valid?: true`, which defaults to `false`. So this
-  would charge from below the validation too. Do not rely on that — the
-  invariant is "a wrong code costs budget", and
-  `KilnCMS.Accounts.SecondFactorSettingsBudgetTest` pins it directly rather
-  than pinning the ordering that happens to produce it.
+  ## Declared above the code check, both `only_when_valid?: true`
 
-  Living on the action rather than at the three call sites is the other half:
+  Ash runs changes and validations in declaration order, and skips one marked
+  `only_when_valid?: true` once the changeset carries an error. Every action
+  declares this change *above* its code validation with that flag on both, so:
+
+    * a changeset an earlier validation already refused spends no attempt;
+    * a spent budget leaves this change's `SecondFactorThrottled` as the
+      changeset's only error, and the code validation below never runs.
+
+  The second is a security property, not tidiness (GHSA-4854-24jg-q7j5). A
+  code validation that still ran past the refusal added its own error for a
+  wrong code and none for a right one, so the error list told the two apart:
+  an oracle with no budget at all. Once the budget is spent every attempt
+  gets one identical refusal and no code is compared.
+  `KilnCMS.Accounts.SecondFactorSettingsBudgetTest` pins both properties
+  directly — "a wrong code costs budget" and "a spent budget compares no
+  code" — rather than the ordering that happens to produce them.
+
+  Living on the action rather than at the three call sites matters as much:
   `ThrottleSignIn`'s moduledoc makes the case (*"a plug per route is a list to
   forget to add to"*), and a fourth caller of `:disable_totp` — a headless
   settings API, an admin tool — inherits the bound instead of missing it.

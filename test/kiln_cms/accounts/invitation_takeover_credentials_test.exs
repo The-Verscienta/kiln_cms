@@ -406,11 +406,22 @@ defmodule KilnCMS.Accounts.InvitationTakeoverCredentialsTest do
       stale = invitation |> squatter!() |> enroll_totp!()
       code = Totp.code_at(stale.totp_secret, System.os_time(:second))
 
+      regenerate =
+        Ash.Changeset.for_update(stale, :regenerate_totp_recovery_codes, %{code: code},
+          actor: stale
+        )
+
       assert {:ok, _} = accept(stale, token)
 
-      assert taken_over?(
+      # Built before the takeover, the changeset checked the code against the
+      # factor the takeover then removed; the row lock refuses it. `Ash.update/1`,
+      # not the code interface, which would build it again after the takeover.
+      assert taken_over?(Ash.update(regenerate))
+
+      # Built after, it is refused sooner: the code is checked against the
+      # stored secret, which the takeover cleared (GHSA-5g35-j8qr-j475).
+      assert {:error, _} =
                Accounts.regenerate_totp_recovery_codes(stale, %{code: code}, actor: stale)
-             )
 
       assert Repo.reload!(stale).totp_recovery_hashes == []
     end
