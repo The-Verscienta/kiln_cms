@@ -314,7 +314,7 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
-- **The Docker image builds its assets with Node 22.23.5 (was 22.23.3), which includes Node's 22.23.4 and 22.23.5 security releases; the astro-blog example moves to astro 7.4.7 for GHSA-r3h5-4585-7x3w and GHSA-mh32-jxcr-mh9f.**
+- **The astro-blog example moves to astro 7.4.7 (GHSA-r3h5-4585-7x3w, GHSA-mh32-jxcr-mh9f); it needs Node 22.23.4 or later.**
   ([#2929](https://github.com/The-Verscienta/kiln_cms/pull/2929))
 
 - **`backup.sh`, `restore.sh` and `staging.sh` give the database password to `pg_dump`, `pg_restore` and `psql` as `PGPASSWORD`, never as an argument visible in `ps`, and no longer print it.**
