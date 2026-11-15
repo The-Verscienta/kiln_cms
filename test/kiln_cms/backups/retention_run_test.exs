@@ -938,7 +938,7 @@ defmodule KilnCMS.Backups.RetentionRunTest do
       # The run has finished, so the mark goes through `mark_pruned`, which
       # (unlike the chain's `record_progress`, #2218) takes no status filter.
       assert [%{destinations: %{"local" => %{"status" => "pruned"}}}] = stored(@old).artifacts
-      assert Presence.for(stored(@old), dir, 14) == :pruned
+      assert Presence.for(stored(@old), Presence.context(dir)).state == :pruned
     end
   end
 end

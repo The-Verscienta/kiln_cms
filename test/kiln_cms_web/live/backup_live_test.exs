@@ -1,3 +1,17 @@
+defmodule KilnCMSWeb.BackupLiveTest.StallingDiskView do
+  @moduledoc false
+  # A `Backups.DiskView` that tells the test it started and waits for `:go`,
+  # so a test decides when a disk read answers (#2417).
+  def read(dir, runs, now) do
+    test = Application.fetch_env!(:kiln_cms, __MODULE__)
+    send(test, {:disk_read, self(), Enum.map(runs, & &1.id)})
+
+    receive do
+      :go -> KilnCMS.Backups.DiskView.read(dir, runs, now)
+    end
+  end
+end
+
 defmodule KilnCMSWeb.BackupLiveTest do
   @moduledoc """
   The backup panel (#484).
@@ -90,6 +104,29 @@ defmodule KilnCMSWeb.BackupLiveTest do
     refute socket.assigns[:flash]
   end
 
+  # The page reads `Backups.status/0`, the import and the backup directory in
+  # the background (#2417), and one result can start another read (the import
+  # landing asks for the disk again). `live/2` returns before any of it lands:
+  # this mounts, then waits until nothing is out (`data-busy="false"`).
+  defp live_ready(conn, path) do
+    {:ok, lv, _html} = live(conn, path)
+    {:ok, lv, await_page(lv)}
+  end
+
+  defp await_page(lv, tries \\ 20)
+
+  defp await_page(lv, 0) do
+    flunk("the Backups page was still busy: #{render(lv)}")
+  end
+
+  defp await_page(lv, tries) do
+    html = render_async(lv, 2_000)
+
+    if has_element?(lv, ~s|#backup-page[data-busy="false"]|),
+      do: html,
+      else: await_page(lv, tries - 1)
+  end
+
   defp seed_manifest!(dir, overrides) do
     :ok =
       Manifest.write(
@@ -116,7 +153,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       })
 
       {:ok, _lv, html} =
-        conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+        conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert html =~ "Off-site"
       refute html =~ "hunter2hunter2"
@@ -135,7 +172,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     test "admins get the panel", %{conn: conn} do
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
       assert html =~ "Backups"
     end
 
@@ -189,7 +226,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
   describe "what it says when there is no backup" do
     test "says so outright, and in the alarming tone", %{conn: conn} do
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert html =~ "No backup has ever been recorded"
       # Error tone, not a neutral note: an unprotected deployment is the state
@@ -201,7 +238,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       conn: conn,
       dir: dir
     } do
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert html =~ Manifest.path(dir)
     end
@@ -214,7 +251,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       # deployments that are backing up correctly.
       seed_manifest!(dir, trigger: "cron")
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert html =~ "Backed up"
       assert html =~ "cron"
@@ -227,7 +264,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     test "an old backup reads as stale", %{conn: conn, dir: dir} do
       seed_manifest!(dir, finished_at: DateTime.add(DateTime.utc_now(), -5 * 86_400, :second))
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert html =~ "Last backup was"
       assert html =~ "5 days"
@@ -237,7 +274,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     test "a FAILED run shows its own error, not the last success", %{conn: conn, dir: dir} do
       seed_manifest!(dir, ok: false, artifacts: [], error: "pg_dump exited 1: connection refused")
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert html =~ "The last backup failed"
       assert html =~ "connection refused"
@@ -257,7 +294,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
         finished_at: DateTime.utc_now()
       )
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       refute html =~ "border-success/30"
       assert html =~ "border-error/30"
@@ -269,7 +306,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     } do
       seed_manifest!(dir, ok: false, artifacts: [], error: "boom")
 
-      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       refute html =~ "0 file(s)"
     end
@@ -281,7 +318,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(original, :enabled, false))
       on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Backups, original) end)
 
-      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       # The button is disabled rather than absent, so the reason has somewhere
       # to live — an admin who can't back up needs to know why, not wonder
@@ -291,7 +328,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     test "enqueues a job and says so", %{conn: conn} do
-      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       if KilnCMS.Backups.availability() == :ok do
         html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
@@ -355,8 +392,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     test "shows an empty state when nothing was ever recorded", %{conn: conn} do
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, "#backup-history-empty", "No backups have been recorded yet.")
     end
@@ -373,8 +409,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
         }
       )
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       row = lv |> element("#backup-history li") |> render()
       assert row =~ "2026-01-01 03:00 UTC"
@@ -418,8 +453,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
           actor: Backups.system()
         )
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       row = lv |> element("#backup-run-#{run.id}") |> render()
       assert row =~ "3.0 KB"
@@ -427,8 +461,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert has_element?(lv, "#backup-run-#{run.id} [data-presence=present]", "on disk")
 
       File.rm!(Path.join([dir, "media", Enum.at(names, 1)]))
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
       assert has_element?(lv, "#backup-run-#{run.id} [data-presence=missing]", "missing")
     end
 
@@ -436,8 +469,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       run = seed_run!(dir, 1, started_at: DateTime.add(DateTime.utc_now(), -3600, :second))
       File.rm!(Path.join([dir, "db", hd(run.artifacts).name]))
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, "#backup-run-#{run.id} [data-presence=missing]", "missing")
     end
@@ -458,7 +490,11 @@ defmodule KilnCMSWeb.BackupLiveTest do
           }
         )
 
-      # Imported (cron-made), long past retention.
+      # Imported (cron-made), long past retention, with a newer complete dump
+      # on disk: cron's prune keeps the newest one, so only an older one can
+      # have expired (#2416).
+      write_artifact!(dir, "kiln-db-20260301-030000.dump")
+
       expired =
         Backups.import_run!(
           %{
@@ -472,8 +508,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
           actor: Backups.system()
         )
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert has_element?(
                lv,
@@ -487,8 +522,30 @@ defmodule KilnCMSWeb.BackupLiveTest do
                "off-site only"
              )
 
-      assert has_element?(lv, "#backup-run-#{expired.id} [data-presence=expired]", "expired")
+      # No manifest of cron's says its keep days: the app's stand in, and the
+      # row only says probably.
+      assert has_element?(
+               lv,
+               "#backup-run-#{expired.id} [data-presence=probably_expired]",
+               "probably expired"
+             )
+
       assert has_element?(lv, "#backup-run-#{expired.id}", "unverified (imported)")
+      assert has_element?(lv, "#presence-help-#{expired.id}", "an estimate")
+      assert has_element?(lv, "#imported-help-#{expired.id}", "scripts/backup.sh verify")
+      refute has_element?(lv, "#presence-help-#{pruned.id}")
+      refute has_element?(lv, "#imported-help-#{pruned.id}")
+
+      # backup.sh's manifest records its BACKUP_KEEP_DAYS: now it is known.
+      seed_manifest!(dir, keep_days: 14)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+      assert has_element?(lv, "#backup-run-#{expired.id} [data-presence=expired]", "expired")
+      assert has_element?(lv, "#presence-help-#{expired.id}", "BACKUP_KEEP_DAYS it records")
+
+      assert has_element?(
+               lv,
+               ~s|#presence-help-#{expired.id} a[href$="/docs/backups.md#backup-history-2217"]|
+             )
     end
 
     test "cron-made backups on disk are imported and shown", %{conn: conn, dir: dir} do
@@ -498,8 +555,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       File.write!(file, "dump")
       File.touch!(file, System.os_time(:second) - 3600)
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, "#backup-history li", "2026-01-02 03:00 UTC")
       assert has_element?(lv, ~s|#backup-history li [data-role="trigger"]|, "Cron")
@@ -519,8 +575,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
         )
       end
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
       assert lv |> render() |> String.split("backup-run-") |> length() == 26
@@ -537,7 +592,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
                conn |> admin_conn() |> live(~p"/editor/backups?page=99")
 
       # Garbage reads as page 1.
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups?page=abc")
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups?page=abc")
       assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
     end
 
@@ -560,7 +615,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       # Newest first: the oldest two are on page 2. `?run=` wins over `?page=`.
       {:ok, lv, _html} =
-        conn |> admin_conn() |> live(~p"/editor/backups?#{%{page: 1, run: oldest.id}}")
+        conn |> admin_conn() |> live_ready(~p"/editor/backups?#{%{page: 1, run: oldest.id}}")
 
       assert lv |> element("#backup-history") |> render() =~ "Page 2 of 2"
       assert has_element?(lv, ~s|#backup-run-#{oldest.id}[aria-current="true"]|)
@@ -576,7 +631,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       # The id as typed in another case is the same run.
       upper = String.upcase(newest.id)
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups?#{%{run: upper}}")
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups?#{%{run: upper}}")
       assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
       assert has_element?(lv, ~s|#backup-run-#{newest.id}[aria-current="true"]|)
 
@@ -616,7 +671,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       hourly_runs!(dir, 27)
 
       for bad <- ["not-a-uuid", Ecto.UUID.generate(), "", "1 OR 1=1"] do
-        {:ok, lv, html} = conn |> admin_conn() |> live(~p"/editor/backups?#{%{run: bad}}")
+        {:ok, lv, html} = conn |> admin_conn() |> live_ready(~p"/editor/backups?#{%{run: bad}}")
 
         assert html =~ "That backup isn&#39;t in the history."
         assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
@@ -624,7 +679,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       end
 
       # A list where an id belongs is not a run either; it reads as no `?run=`.
-      {:ok, lv, html} = conn |> admin_conn() |> live("/editor/backups?run[]=x")
+      {:ok, lv, html} = conn |> admin_conn() |> live_ready("/editor/backups?run[]=x")
       refute html =~ "isn&#39;t in the history"
       assert lv |> element("#backup-history") |> render() =~ "Page 1 of 2"
     end
@@ -642,8 +697,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert conn |> get(~p"/editor/backups") |> html_response(200) =~ "Backups"
       assert Backups.list_runs!(actor: Backups.system()) == []
 
-      {:ok, lv, _html} = live(conn, ~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, _lv, _html} = live_ready(conn, ~p"/editor/backups")
       assert [%{origin: :imported}] = Backups.list_runs!(actor: Backups.system())
     end
 
@@ -688,8 +742,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     test "the history refreshes when a manual backup finishes", %{conn: conn, dir: dir} do
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
       assert has_element?(lv, "#backup-history-empty")
 
       seed_run!(dir, 1)
@@ -737,8 +790,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     } do
       run = app_run!(dir, 1, :failed)
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, ~s|#backup-run-#{run.id} button[data-role="resume"]|, "Resume")
     end
@@ -751,8 +803,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       File.mkdir_p!(WorkState.path(dir, imported.stamp))
       :ok = WorkState.write(WorkState.path(dir, imported.stamp), WorkState.new(imported.stamp))
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       for run <- [succeeded, running, no_state, imported] do
         assert has_element?(lv, "#backup-run-#{run.id}")
@@ -767,8 +818,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     } do
       run = app_run!(dir, 1, :failed)
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       html = lv |> element(~s|#backup-run-#{run.id} [data-role="resume"]|) |> render_click()
 
@@ -790,8 +840,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       succeeded = app_run!(dir, 2, :succeeded)
       running = app_run!(dir, 3, :running)
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       for id <- [succeeded.id, running.id, Ecto.UUID.generate(), "not-a-uuid"] do
         html = render_hook(lv, "resume_run", %{"id" => id})
@@ -810,8 +859,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     test "a failed run whose state is gone is refused", %{conn: conn, dir: dir} do
       run = app_run!(dir, 4, :failed, state?: false)
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert render_hook(lv, "resume_run", %{"id" => run.id}) =~ "can&#39;t be resumed"
       assert backup_jobs() == []
@@ -857,8 +905,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
         actor: Backups.system()
       )
 
-      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       row = "#backup-run-#{run.id}"
       assert has_element?(lv, row, "Resume refused: its work files")
@@ -919,8 +966,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
           error: error
         })
 
-      {:ok, lv, html} = conn |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
 
       # The "Last run failed" box quotes the manifest's error.
       assert html =~ "Last run failed"
@@ -950,7 +996,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     test "Back up now is guarded against a double click" do
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, ~s|button[phx-click="backup_now"][phx-disable-with]|)
     end
@@ -963,8 +1009,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       File.mkdir_p!(work)
       :ok = WorkState.write(work, WorkState.new(stamp))
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       row = "#backup-run-#{run.id}"
       assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Canceled")
@@ -977,8 +1022,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
            "offers Resume" do
       %{stamp: stamp, run: run} = started!()
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Dumping the database")
       assert has_element?(lv, "#backup-in-flight", stamp)
@@ -1032,7 +1076,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       {:ok, %{status: :folded}} = Backups.request([], Backups.system())
       {:ok, %{status: :folded}} = Backups.request([], Backups.system())
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       queued = ~s|#backup-in-flight [data-role="queued"]|
       assert has_element?(lv, queued, "1 queued (requested ")
@@ -1055,21 +1099,21 @@ defmodule KilnCMSWeb.BackupLiveTest do
       started!()
       {:ok, %{status: :queued}} = Backups.request([components: [:db]], Backups.system())
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
       components = ~s|#backup-in-flight [data-role="queued-components"]|
       assert has_element?(lv, components, "Database")
       refute has_element?(lv, components, "Media")
 
       {:ok, %{status: :folded}} = Backups.request([components: [:media]], Backups.system())
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
       assert has_element?(lv, components, "Database + Media")
     end
 
     @tag :pg_tools
     test "Back up now while one runs queues it and says so" do
       started!()
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
 
@@ -1102,7 +1146,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     test "Back up now folds into a queued fresh backup and says the queued one covers it" do
       started!()
       {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
 
@@ -1115,8 +1159,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       run = resumable_run!(dir, "20261101-101010")
       started!()
       {:ok, %{status: :queued}} = Backups.request([resume: run.stamp], Backups.system())
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       html =
         lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
@@ -1132,7 +1175,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       started!()
       {:ok, %{status: :queued}} = Backups.request([resume: run.stamp], Backups.system())
       before = queue_state()
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       html = lv |> element(~s|button[phx-click="backup_now"]|) |> render_click()
 
@@ -1150,8 +1193,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       started!()
       {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
       before = queue_state()
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       html =
         lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
@@ -1170,8 +1212,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       started!()
       {:ok, %{status: :queued}} = Backups.request([resume: queued.stamp], Backups.system())
       before = queue_state()
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       html =
         lv |> element(~s|#backup-run-#{run.id} button[data-role="resume"]|) |> render_click()
@@ -1201,7 +1242,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       {:ok, state} = WorkState.read(work)
       :ok = WorkState.write(work, Map.put(state, "parts_total", 3))
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert has_element?(
                lv,
@@ -1215,8 +1256,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       %{run: run} = started!()
       Backups.mark_backup_lock_finishing!(lock_row(), %{}, actor: Backups.system())
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       refute has_element?(lv, ~s|#backup-in-flight [data-role="cancel"]|)
 
@@ -1230,8 +1270,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     test "the History row drops Cancel once the backup is finishing (#2542)" do
       %{run: run} = started!()
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       row_cancel = ~s|#backup-run-#{run.id} [data-role="cancel"]|
       assert has_element?(lv, row_cancel)
@@ -1248,8 +1287,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     test "a forged cancel of a finished run says it already finished", %{dir: dir} do
       run = app_run!(dir, 2, :succeeded)
 
-      {:ok, lv, _html} = build_conn() |> admin_conn() |> live(~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
 
       assert render_hook(lv, "cancel_run", %{"id" => run.id}) =~ "That backup already finished."
 
@@ -1330,7 +1368,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       component_run!([:db, :media], 5 * 24)
       component_run!([:db], 1)
 
-      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, "#backup-headline-db", "Database")
       assert has_element?(lv, "#backup-headline-db", "Backed up")
@@ -1356,7 +1394,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
           artifacts: [%{kind: "db", path: "db/kiln-db-x.dump", bytes: 1, verified: true}]
         })
 
-      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, "#backup-headline-db", "Backed up")
       assert has_element?(lv, "#backup-headline-media", "Backed up 3 hours ago")
@@ -1382,7 +1420,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       Backups.fail_run!(run, %{error: "boom"}, actor: Backups.system())
 
-      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, lv, html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert has_element?(lv, "#backup-headline-db", "Backed up")
       assert has_element?(lv, "#backup-headline-media", "The last backup failed")
@@ -1454,7 +1492,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       System.put_env("PATH", bin)
       assert Backups.status().rclone_missing?
 
-      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
 
       assert has_element?(
                lv,
@@ -1472,7 +1510,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       System.put_env("PATH", bin <> ":" <> System.get_env("PATH"))
       refute Backups.status().rclone_missing?
 
-      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/backups")
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live_ready(~p"/editor/backups")
       refute has_element?(lv, "#backup-rclone-missing")
     end
   end
@@ -1608,8 +1646,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     defp mount_admin(conn, locale \\ nil) do
       conn = admin_conn(conn)
       conn = if locale, do: Plug.Conn.put_session(conn, "locale", locale), else: conn
-      {:ok, lv, _html} = live(conn, ~p"/editor/backups")
-      render_async(lv, 2_000)
+      {:ok, lv, _html} = live_ready(conn, ~p"/editor/backups")
       lv
     end
 
@@ -1768,7 +1805,8 @@ defmodule KilnCMSWeb.BackupLiveTest do
       for fragment <- [
             "restore-a-media-set-that-has-several-parts",
             "media-backups-in-parts-2218",
-            "the-app-path-and-the-shell-path-share-one-format"
+            "the-app-path-and-the-shell-path-share-one-format",
+            "backup-history-2217"
           ] do
         assert fragment in slugs, "docs/backups.md has no heading whose anchor is ##{fragment}"
       end
@@ -1920,10 +1958,20 @@ defmodule KilnCMSWeb.BackupLiveTest do
                ~s|#backup-run-#{run.id} [data-role="last-good"][data-component="media"]|
              )
 
+      # Unreadable is said, not passed off as "none yet" (#2799); media's
+      # line still reads its marker.
       assert has_element?(
                lv,
-               ~s|#backup-last-good [data-role="last-good"][data-component="db"]|,
-               "none yet"
+               ~s|#backup-last-good [data-role="last-good"][data-component="db"][data-state="unreadable"]|,
+               "couldn't read this server's backup directory"
+             )
+
+      refute has_element?(lv, ~s|#backup-last-good [data-component="db"]|, "none yet")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role="presence"][data-presence="unknown"]|,
+               "couldn't check"
              )
     end
 
@@ -1978,6 +2026,280 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
   end
 
+  describe "what is on disk, read off the LiveView process (#2416, #2417, #2799)" do
+    alias KilnCMSWeb.BackupLiveTest.StallingDiskView
+
+    # Points the page at `StallingDiskView` (VM-global env: the module is
+    # `async: false`).
+    defp stall_disk!(opts \\ []) do
+      Application.put_env(:kiln_cms, StallingDiskView, self())
+      Application.put_env(:kiln_cms, KilnCMSWeb.BackupLive, [disk_view: StallingDiskView] ++ opts)
+
+      on_exit(fn ->
+        Application.delete_env(:kiln_cms, StallingDiskView)
+        Application.delete_env(:kiln_cms, KilnCMSWeb.BackupLive)
+      end)
+    end
+
+    # Lets a stalled read answer, and waits until it has (its result is then
+    # in the page's mailbox ahead of the next render).
+    defp release(pid) do
+      ref = Process.monitor(pid)
+      send(pid, :go)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 2_000
+    end
+
+    defp media_run!(dir, stamp, names, parts, destinations) do
+      File.mkdir_p!(Path.join(dir, "media"))
+      for name <- names, do: File.write!(Path.join([dir, "media", name]), "x")
+
+      Backups.import_run!(
+        %{
+          stamp: stamp,
+          trigger: "manual",
+          status: :succeeded,
+          components: [:db, :media],
+          started_at: ~U[2026-01-05 03:00:00.000000Z],
+          finished_at: ~U[2026-01-05 03:05:00.000000Z],
+          artifacts: [
+            %{
+              kind: :db,
+              name: "kiln-db-#{stamp}.dump",
+              bytes: 10,
+              verified: true,
+              destinations: %{"local" => %{"status" => "ok"}}
+            },
+            %{
+              kind: :media,
+              name: "kiln-media-#{stamp}",
+              bytes: 10,
+              verified: true,
+              parts: Enum.map(parts, &%{"name" => &1, "bytes" => 1, "sha256" => nil}),
+              destinations: destinations
+            }
+          ]
+        },
+        actor: Backups.system()
+      )
+    end
+
+    test "a run whose artifacts differ says each one's state", %{conn: conn, dir: dir} do
+      stamp = "20260105-030000"
+      write_artifact!(dir, "kiln-db-#{stamp}.dump")
+      [single] = Backups.Artifact.set_names(stamp, 1)
+      run = media_run!(dir, stamp, [], [single], %{"local" => %{"status" => "pruned"}})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="mixed"]|)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role="artifact-presence"][data-kind="db"][data-presence="present"]|,
+               "Database: on disk"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role="artifact-presence"][data-kind="media"][data-presence="pruned"]|,
+               "Media: pruned (retention)"
+             )
+
+      refute has_element?(lv, "#presence-help-#{run.id}")
+    end
+
+    test "a media set with a part gone names the part and explains it", %{conn: conn, dir: dir} do
+      stamp = "20260105-030000"
+      write_artifact!(dir, "kiln-db-#{stamp}.dump")
+      names = Backups.Artifact.set_names(stamp, 3)
+      on_disk = List.delete_at(names, 1)
+      run = media_run!(dir, stamp, on_disk, names, %{"local" => %{"status" => "ok"}})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role="parts-missing"][data-kind="media"]|,
+               "1 part missing: 02"
+             )
+
+      assert has_element?(lv, "#presence-help-#{run.id}", "nothing recorded why")
+    end
+
+    test "an app-made run has no imported-backup tip", %{conn: conn, dir: dir} do
+      name = "kiln-db-20260101-010000.dump"
+      write_artifact!(dir, name)
+
+      run =
+        Ash.Seed.seed!(KilnCMS.Backups.Run, %{
+          stamp: "20260101-010000",
+          status: :succeeded,
+          artifacts: [%KilnCMS.Backups.Artifact{kind: :db, name: name, bytes: 1}]
+        })
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-run-#{run.id}", "Not verified")
+      refute has_element?(lv, "#imported-help-#{run.id}")
+    end
+
+    test "the empty history says cron's backups show up here too", %{conn: conn} do
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-history-empty", "No backups have been recorded yet.")
+      assert has_element?(lv, "#backup-history-empty", "cron's scripts/backup.sh")
+    end
+
+    test "the first render doesn't read the disk or the manifest; it says it is reading",
+         %{conn: conn} do
+      html = conn |> admin_conn() |> get(~p"/editor/backups") |> html_response(200)
+
+      assert html =~ "Reading this server&#39;s backup status"
+      assert html =~ ~s(data-busy="true")
+    end
+
+    test "until the disk read answers, rows and markers say checking; then what is there",
+         %{conn: conn, dir: dir} do
+      stall_disk!()
+      run = seed_run!(dir, 1)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      assert_receive {:disk_read, pid, [id]}
+      assert id == run.id
+
+      # The page answers while the read is out: it is not blocked on it.
+      assert has_element?(lv, "#backup-disk-checking")
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="checking"]|, "checking…")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-last-good [data-component="db"][data-state="checking"]|
+             )
+
+      release(pid)
+
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="present"]|, "on disk")
+      refute has_element?(lv, "#backup-disk-checking")
+    end
+
+    test "one read at a time: refreshes while it is out start one more, not one each",
+         %{conn: conn, dir: dir} do
+      stall_disk!()
+      seed_run!(dir, 1)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      assert_receive {:disk_read, first, _ids}
+
+      for _ <- 1..3, do: send(lv.pid, :refresh)
+      render(lv)
+      refute_received {:disk_read, _pid, _ids}
+
+      # The refreshes (and the import landing) were owed one read, and get one.
+      release(first)
+      render(lv)
+      assert_receive {:disk_read, second, _ids}
+      release(second)
+      render(lv)
+      refute_received {:disk_read, _pid, _ids}
+    end
+
+    test "a read that doesn't answer in time: the page says so, starts no other, and " <>
+           "takes the answer when it comes",
+         %{conn: conn, dir: dir} do
+      stall_disk!(disk_timeout_ms: 0)
+      run = seed_run!(dir, 1)
+      touch_marker!(dir, "db", "kiln-20260101-010000.good")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      assert_receive {:disk_read, first, _ids}
+
+      assert has_element?(lv, "#backup-disk-timeout", "didn't answer within 1 second")
+      refute has_element?(lv, "#backup-disk-checking")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-presence="timeout"]|,
+               "couldn't check in time"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-last-good [data-component="db"][data-state="timeout"]|,
+               "couldn't check in time"
+             )
+
+      for _ <- 1..3, do: send(lv.pid, :refresh)
+      render(lv)
+      refute_received {:disk_read, _pid, _ids}
+
+      release(first)
+      render(lv)
+      assert_receive {:disk_read, second, _ids}
+      release(second)
+
+      refute has_element?(lv, "#backup-disk-timeout")
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="present"]|, "on disk")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-last-good [data-component="db"][data-state="marked"]|,
+               "20260101-010000"
+             )
+    end
+
+    test "a read started for one page fills nothing on another", %{conn: conn, dir: dir} do
+      stall_disk!()
+
+      runs =
+        for n <- 1..27 do
+          seed_run!(dir, n,
+            stamp: "20260101-00#{String.pad_leading(Integer.to_string(n), 2, "0")}00",
+            started_at: DateTime.add(~U[2026-01-01 00:00:00.000000Z], n * 3600, :second)
+          )
+        end
+
+      # Newest first: page 2 holds the two oldest.
+      page_two = runs |> Enum.take(2) |> Enum.map(& &1.id) |> Enum.sort()
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      assert_receive {:disk_read, first, first_ids}
+      assert length(first_ids) == 25
+
+      lv
+      |> element(~s|#backup-history button[phx-click="page"]:not([disabled])|)
+      |> render_click()
+
+      assert_patch(lv, ~p"/editor/backups?page=2")
+      release(first)
+
+      for id <- page_two do
+        assert has_element?(lv, ~s|#backup-run-#{id} [data-presence="checking"]|)
+      end
+
+      assert_receive {:disk_read, second, second_ids}
+      assert Enum.sort(second_ids) == page_two
+      release(second)
+
+      for id <- page_two do
+        assert has_element?(lv, ~s|#backup-run-#{id} [data-presence="present"]|)
+      end
+    end
+
+    test "every background result re-checks platform admin before it is applied" do
+      view = KilnCMS.Backups.DiskView.read(System.tmp_dir!(), [])
+
+      for user <- [%{role: :editor}, expired_grant_user()] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+
+        assert_denied(KilnCMSWeb.BackupLive.handle_async(:disk, {:ok, view}, socket))
+        assert_denied(KilnCMSWeb.BackupLive.handle_async(:disk, {:exit, :boom}, socket))
+        assert_denied(KilnCMSWeb.BackupLive.handle_async(:status, {:ok, %{}}, socket))
+        assert_denied(KilnCMSWeb.BackupLive.handle_async(:status, {:exit, :boom}, socket))
+        assert_denied(KilnCMSWeb.BackupLive.handle_info({:disk_timeout, make_ref()}, socket))
+      end
+    end
+  end
+
   # Part of #2219: the schedules themselves are on the Schedule tab
   # (`BackupScheduleLiveTest`); this page keeps the next scheduled backup, the
   # warnings that say they can't run, and each component's alarm threshold,
@@ -1988,7 +2310,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
     @baseline ~U[2026-01-01 00:00:00.000000Z]
 
     defp mount_backups(conn, admin) do
-      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/backups")
+      {:ok, lv, _html} = conn |> log_in(admin) |> live_ready(~p"/editor/backups")
       lv
     end
 

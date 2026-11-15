@@ -452,6 +452,13 @@ msgid_plural "%{count} parts"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} part missing: %{parts}"
+msgid_plural "%{count} parts missing: %{parts}"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms/security/posture/checks/second_factor_required.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} person hasn't set up two-step sign-in yet. It's enforced for them from %{date}."
@@ -2486,6 +2493,11 @@ msgstr ""
 msgid "About health"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "About imported backups"
+msgstr ""
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "About lanes"
@@ -2494,6 +2506,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "About task anchoring"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "About these files"
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
@@ -4478,6 +4495,11 @@ msgstr[1] ""
 msgid "Backups aren't set up yet — turn them on before you go live."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backups that cron's scripts/backup.sh makes appear here too, once the app finds them in this server's backup directory."
+msgstr ""
+
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Best match"
@@ -5296,6 +5318,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checking the media parts"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checking this server's backup directory…"
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -6505,6 +6532,11 @@ msgstr ""
 msgid "Couldn't change your password. Check your current password and try again."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't check this server's backup directory, so the files on disk, the markers and Resume aren't shown. Reload the page to check again."
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't check when the scheduler last ran."
@@ -6712,6 +6744,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't read %{name}: %{reason}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't read this server's backup status. Reload the page to try again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -7191,6 +7228,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Cron"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cron's scripts/backup.sh made this backup and the app found it on disk. The app didn't check it with pg_restore; run scripts/backup.sh verify on the server to check the newest backup."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cron's scripts/backup.sh prune removed these files: they are older than the BACKUP_KEEP_DAYS it records in manifest.json, and a newer backup of the same kind is on disk."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -12672,6 +12719,11 @@ msgstr ""
 msgid "Machine name"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Made by cron"
+msgstr ""
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -13119,6 +13171,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "More than %{max} rows — narrow the list first"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Most likely removed by cron's scripts/backup.sh prune: they are older than this app's retention, and a newer backup of the same kind is on disk. Cron hasn't recorded its own BACKUP_KEEP_DAYS here, so this is an estimate."
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex
@@ -17105,6 +17162,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reading the library…"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reading this server's backup status…"
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -23261,6 +23323,11 @@ msgstr ""
 msgid "These fields were changed on the live page since then. For each one, keep the live version or publish yours."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "These files aren't in this server's backup directory, and nothing recorded why: they were deleted outside the app, or the backup was taken on another server. Each server has its own backup directory."
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "These items are not reachable from the top level, so they do not appear in the menu above or on the site. Moving one to the top level brings it back, along with anything nested under it — start with the outermost, and the rest may return on their own."
@@ -23885,6 +23952,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This server isn't enforcing the admin allowlist (KILN_ADMIN_ALLOWLIST_DISABLED is set). The list is saved but not applied."
 msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server's backup directory didn't answer within %{count} second, so the files on disk, the markers and Resume aren't shown. Reload the page to check again."
+msgid_plural "This server's backup directory didn't answer within %{count} seconds, so the files on disk, the markers and Resume aren't shown. Reload the page to check again."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -27346,6 +27420,11 @@ msgstr ""
 msgid "checked %{at}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "checking…"
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "checkpoint #%{sequence}: %{message}"
@@ -27446,6 +27525,16 @@ msgstr ""
 msgid "couldn't be stored"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't check"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't check in time"
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "couldn't delete the test file (%{detail})"
@@ -27469,6 +27558,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "couldn't read the test file back from the private bucket (%{detail})"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't read this server's backup directory"
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
@@ -28458,6 +28552,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "private"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "probably expired"
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
