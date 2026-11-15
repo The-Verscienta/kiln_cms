@@ -268,6 +268,36 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
     end
   end
 
+  describe "create-on-type step" do
+    test "saves the chosen type and reads it back", ctx do
+      field = reference!(ctx.admin)
+      lv = open_edit(build_conn(), ctx.admin, field)
+
+      html =
+        lv
+        |> form("#edit-field-#{field.id}", field_definition: %{sel: %{create: "page"}})
+        |> render_change()
+
+      assert html =~ "Typing a new name offers to create a draft Page."
+      lv |> form("#edit-field-#{field.id}") |> render_submit()
+
+      assert stored(field) == %{"create" => %{"type" => "page"}}
+    end
+
+    test "is disabled, with the reason, while the filter excludes drafts", ctx do
+      field = reference!(ctx.admin)
+      lv = open_edit(build_conn(), ctx.admin, field)
+      step = "#edit-field-rules-#{field.id}-selection"
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{sel: %{states: ["published"]}})
+      |> render_change()
+
+      assert has_element?(lv, "#{step}-create-page[disabled]")
+      assert has_element?(lv, "#{step}-create-page-why", "does not accept drafts")
+    end
+  end
+
   describe "adding a field" do
     test "a new relationship can carry a selection", ctx do
       {:ok, lv, _html} = build_conn() |> log_in(ctx.admin) |> live(~p"/editor/fields")

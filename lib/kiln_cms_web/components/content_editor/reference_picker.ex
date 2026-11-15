@@ -113,8 +113,10 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
   import Ash.Expr, only: [expr: 1]
 
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldAccess
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldWidgets
   alias KilnCMS.CMS.ReferenceSelection
@@ -369,7 +371,109 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     end
   end
 
+  # Create-on-type (#2285): the row at the end of the results. It carries no
+  # value: the title is the search text the server holds and the type is the
+  # field's own `selection.create`, both re-checked here, so a forged or stale
+  # event for a row that is not offered does nothing.
+  def handle_event("ref_create_typed", _params, socket) do
+    case typed_create(socket.assigns, grants?: true) do
+      nil ->
+        {:noreply, socket}
+
+      %{entry: entry, title: title} ->
+        # The query is cleared first either way: a double click's second event
+        # finds nothing typed and does nothing, so one click makes one draft.
+        socket = socket |> assign(:query, "") |> assign(:results, []) |> assign(:more?, false)
+
+        if entry.fields == [] do
+          # The form holds the title while it is created, so a refusal
+          # stays visible under it instead of vanishing with the click.
+          socket =
+            assign(socket, :creating, %{type: entry.key, params: %{"title" => title}, errors: []})
+
+          {:noreply, create_and_connect(socket, entry, %{"title" => title})}
+        else
+          {:noreply,
+           socket
+           |> assign(:creating, %{type: entry.key, params: %{"title" => title}, errors: []})
+           |> assign(:open?, false)}
+        end
+    end
+  end
+
   def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  # The create-on-type row, or nil: what the field's `selection.create` offers
+  # for what is typed. Needs a non-blank query, a search that shows, the
+  # type in `creatable` (rights, the field's lock, the form's support), a
+  # selection a new draft would pass, and no record titled the same among
+  # what the filtered search found or is already picked.
+  defp typed_create(assigns, opts \\ []) do
+    selection = Map.get(assigns.definition, :selection)
+    title = assigns.query |> String.trim()
+    type = ReferenceSelection.create_type(selection)
+
+    with true <- type != nil and title != "" and String.length(title) <= 255,
+         true <- assigns.searchable? and not assigns.locked and not is_list(assigns.candidates),
+         nil <- ReferenceSelection.create_problem(selection, type),
+         %{prefill: {:ok, _values}} = entry <- creatable_type(assigns, type),
+         true <-
+           not Keyword.get(opts, :grants?, false) or
+             prefill_writable?(entry, assigns.actor, assigns.tenant),
+         # More matches than one page shows: the exact title may be on a later page.
+         false <- assigns.more?,
+         false <- title_listed?(title, assigns) do
+      %{entry: entry, title: title}
+    else
+      _no -> nil
+    end
+  end
+
+  defp title_listed?(title, assigns) do
+    wanted = fold(title)
+
+    Enum.any?(assigns.results ++ assigns.items, fn item ->
+      fold(Map.get(item, :title) || "") == wanted
+    end)
+  end
+
+  defp fold(text), do: text |> String.trim() |> String.downcase()
+
+  # The values a created record is given for the selection's plain equality
+  # conditions (`selection.create_values`), all of which the actor must be
+  # allowed to write on the TARGET type, and each a field that takes a plain
+  # given value: not computed, not unique, no dynamic default.
+  defp prefill(ct, selection, actor, tenant) do
+    values = ReferenceSelection.create_values(selection, ct.type)
+
+    defs =
+      if values == %{},
+        do: [],
+        else:
+          ct |> field_definitions(actor, tenant) |> Enum.filter(&Map.has_key?(values, &1.name))
+
+    cond do
+      Enum.any?(defs, &(not plain_field?(&1))) -> :blocked
+      length(defs) != map_size(values) -> :blocked
+      not prefill_writable?(%{ct: ct, prefill: {:ok, values}}, actor, tenant) -> :blocked
+      true -> {:ok, values}
+    end
+  end
+
+  defp plain_field?(%{field_type: :computed}), do: false
+  defp plain_field?(%{default_source: source}) when not is_nil(source), do: false
+
+  defp plain_field?(%{validation: %{} = validation}),
+    do: Map.get(validation, "unique", Map.get(validation, :unique)) not in [true, "true"]
+
+  defp plain_field?(_definition), do: true
+
+  defp prefill_writable?(%{ct: ct, prefill: {:ok, values}}, actor, tenant) do
+    grant = Scoping.field_grant(actor, tenant, to_string(ct.type))
+    Enum.all?(Map.keys(values), &FieldAccess.writable?(grant, [&1]))
+  end
+
+  defp prefill_writable?(_entry, _actor, _tenant), do: false
 
   defp select_pick(socket, "", nil), do: socket
 
@@ -406,7 +510,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     if title == "" do
       set_create_errors(socket, [gettext("Give it a title.")])
     else
-      attrs = %{title: title, custom_fields: new_custom_fields(entry.fields, params)}
+      attrs = %{title: title, custom_fields: new_custom_fields(entry, params)}
 
       try do
         record = ContentTypes.create!(entry.ct, attrs, actor: actor, tenant: tenant)
@@ -437,11 +541,18 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     do: update(socket, :creating, &%{&1 | errors: errors})
 
   # Only the fields the form shows; everything else falls to its default.
-  defp new_custom_fields(fields, params) do
+  defp new_custom_fields(%{fields: fields} = entry, params) do
     supplied = Map.get(params, "custom_fields", %{})
     supplied = if is_map(supplied), do: supplied, else: %{}
 
-    Map.new(fields, &{&1.name, Map.get(supplied, &1.name, "")})
+    shown = Map.new(fields, &{&1.name, Map.get(supplied, &1.name, "")})
+
+    # The selection's plain equality values win: they are what makes the new
+    # record one the field accepts (#2285), and never come from the client.
+    case entry do
+      %{prefill: {:ok, values}} when is_map(values) -> Map.merge(shown, values)
+      _plain -> shown
+    end
   end
 
   # To the editor LiveView, which owns the form — or, with `notify:
@@ -474,16 +585,33 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   defp creatable(%{locked: true}), do: []
 
   defp creatable(%{definition: definition, tenant: tenant, actor: actor}) do
+    selection = Map.get(definition, :selection)
+    create_type = ReferenceSelection.create_type(selection)
+
     definition
     |> target_types(tenant)
-    |> Enum.flat_map(fn ct ->
-      with true <- ContentTypes.can_create?(ct, actor, %{}, tenant: tenant),
-           {:ok, fields} <- form_fields(ct, actor, tenant) do
-        [%{key: to_string(ct.type), ct: ct, label: ct.label, fields: fields}]
-      else
-        _not_here -> []
-      end
-    end)
+    |> Enum.flat_map(&creatable_for(&1, create_type, selection, actor, tenant))
+  end
+
+  defp creatable_for(ct, create_type, selection, actor, tenant) do
+    with true <- ContentTypes.can_create?(ct, actor, %{}, tenant: tenant),
+         {:ok, fields} <- form_fields(ct, actor, tenant) do
+      prefill =
+        if create_type == to_string(ct.type),
+          do: prefill(ct, selection, actor, tenant),
+          else: {:ok, %{}}
+
+      [creatable_entry(ct, fields, prefill)]
+    else
+      _not_here -> []
+    end
+  end
+
+  # A prefilled field is the selection's, so the form does not ask for it.
+  defp creatable_entry(ct, fields, prefill) do
+    values = if match?({:ok, %{}}, prefill), do: elem(prefill, 1), else: %{}
+    fields = Enum.reject(fields, &Map.has_key?(values, &1.name))
+    %{key: to_string(ct.type), ct: ct, label: ct.label, fields: fields, prefill: prefill}
   end
 
   # The dropdown widget's candidates (#2284): `:off` unless this picker is a
@@ -919,6 +1047,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign(:root, "custom-field-#{assigns.definition.name}")
       |> assign(:last, length(assigns.items) - 1)
       |> assign(:dropdown?, is_list(assigns.candidates))
+      |> assign(:typed, assigns.open? and typed_create(assigns))
 
     ~H"""
     <div
@@ -1085,6 +1214,25 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
             class="cursor-pointer px-3 py-1.5 text-sm text-primary-ink transition-colors hover:bg-base-200 aria-selected:bg-primary/10"
           >
             {gettext("Show more results")}
+          </li>
+          <li
+            :if={@typed}
+            id={"#{@root}-create-typed"}
+            role="option"
+            aria-selected="false"
+            data-ref-option
+            phx-click="ref_create_typed"
+            phx-target={@myself}
+            class="flex cursor-pointer items-center gap-2 border-t border-base-content/10 px-3 py-1.5 text-sm text-primary-ink transition-colors hover:bg-base-200 aria-selected:bg-primary/10"
+          >
+            <.icon name="hero-plus" class="size-4 shrink-0" />
+            <span class="min-w-0 flex-1 truncate">
+              {gettext("Create “%{title}” as a new %{type}",
+                title: @typed.title,
+                type: @typed.entry.label
+              )}
+            </span>
+            <span class="shrink-0 text-xs text-base-content/70">{gettext("Draft")}</span>
           </li>
           <li :if={@results == []} role="presentation" class="px-3 py-2 text-sm text-base-content/60">
             {no_results_label(@query)}

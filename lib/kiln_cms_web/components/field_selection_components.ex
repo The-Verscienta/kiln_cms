@@ -43,6 +43,8 @@ defmodule KilnCMSWeb.FieldSelectionComponents do
       assign(assigns,
         view: view,
         states: ReferenceSelection.states(),
+        create_problems:
+          Map.new(assigns.targets, &{&1, ReferenceSelection.create_problem(selection, &1)}),
         sentence: FieldSelection.sentence(selection, assigns.targets, lookup),
         errors:
           for({msg, opts} <- assigns.form[:selection].errors, do: translate_error({msg, opts}))
@@ -228,6 +230,54 @@ defmodule KilnCMSWeb.FieldSelectionComponents do
           )}
         </p>
       </div>
+
+      <fieldset id={"#{@id}-create"} class="space-y-1 rounded-lg border border-base-content/10 p-3">
+        <legend class="px-1 text-sm font-medium">
+          {gettext("Let editors create what they type")}
+        </legend>
+        <p class="text-xs text-base-content/70">
+          {gettext(
+            "When an editor types a name that is not found, offer to create it as a new draft and connect it. Only possible when a new draft would pass the filter above."
+          )}
+        </p>
+        <label class="flex items-center gap-2 text-sm" for={"#{@id}-create-none"}>
+          <input
+            type="radio"
+            id={"#{@id}-create-none"}
+            name="field_definition[sel][create]"
+            value=""
+            checked={@view.create in [nil, ""]}
+          />
+          {gettext("No, editors only pick what exists")}
+        </label>
+        <div :for={type <- @targets}>
+          <label class="flex items-center gap-2 text-sm" for={"#{@id}-create-#{type}"}>
+            <input
+              type="radio"
+              id={"#{@id}-create-#{type}"}
+              name="field_definition[sel][create]"
+              value={type}
+              checked={@view.create == type}
+              disabled={@create_problems[type] != nil}
+              aria-describedby={@create_problems[type] && "#{@id}-create-#{type}-why"}
+            />
+            {gettext("Yes, create a new %{type}", type: Map.get(@catalog.types, type, type))}
+          </label>
+          <p
+            :if={@create_problems[type]}
+            id={"#{@id}-create-#{type}-why"}
+            class="ml-6 text-xs text-base-content/70"
+          >
+            <span :if={@view.create == type} class="font-medium">
+              {gettext("Turned off by the filter above.")}
+            </span>
+            {KilnCMS.CMS.Validations.ReferenceSelection.create_message(
+              @create_problems[type],
+              Map.get(@catalog.types, type, type)
+            )}
+          </p>
+        </div>
+      </fieldset>
 
       <p :for={error <- @errors} class="flex items-center gap-1.5 text-sm text-error">
         <.icon name="hero-exclamation-circle" class="size-4" />{error}

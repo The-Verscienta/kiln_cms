@@ -1287,6 +1287,11 @@ msgstr "%{selected} de %{total}"
 msgid "%{sentence} Each %{type} lists them as “%{label}”."
 msgstr "%{sentence} Cada %{type} los muestra como «%{label}»."
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{sentence} Typing a new name offers to create a draft %{type}."
+msgstr "%{sentence} Escribir un nombre nuevo ofrece crear un borrador de %{type}."
+
 #: lib/kiln_cms_web/promotion_warning.ex
 #, elixir-autogen, elixir-format
 msgid "%{sites} requires one of them now: they'll be asked to set one up before anything else."
@@ -7183,6 +7188,11 @@ msgstr "Cree su primera página o entrada para comenzar."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
+msgid "Create “%{title}” as a new %{type}"
+msgstr "Crear «%{title}» como nuevo %{type}"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
 msgid "Created by you"
 msgstr "Creados por usted"
 
@@ -12427,6 +12437,11 @@ msgstr "Deje este campo vacío"
 msgid "Less than"
 msgstr "Menor que"
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Let editors create what they type"
+msgstr "Dejar que los editores creen lo que escriben"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Let editors publish"
@@ -14608,6 +14623,11 @@ msgstr "Aún no hay webhooks"
 #, elixir-autogen, elixir-format
 msgid "No zero-result searches recorded"
 msgstr "No hay búsquedas sin resultados registradas"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "No, editors only pick what exists"
+msgstr "No, los editores solo eligen lo que existe"
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
@@ -24684,6 +24704,11 @@ msgstr "Activar la comprobación de enlaces externos"
 msgid "Turn the admin allowlist off? Anyone will be able to sign in from any network."
 msgstr "¿Desactivar la lista de redes permitidas? Cualquiera podrá iniciar sesión desde cualquier red."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Turned off by the filter above."
+msgstr "Desactivado por el filtro de arriba."
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Turning an alert off or switching off admin notifications sends every admin of this site a notice. That notice can't be turned off or muted."
@@ -25983,6 +26008,11 @@ msgstr "Si los administradores siempre entran desde redes conocidas (una oficina
 msgid "When an alert is raised"
 msgstr "Cuándo se genera una alerta"
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "When an editor types a name that is not found, offer to create it as a new draft and connect it. Only possible when a new draft would pass the filter above."
+msgstr "Cuando un editor escribe un nombre que no se encuentra, ofrece crearlo como nuevo borrador y conectarlo. Solo es posible si un borrador nuevo pasa el filtro de arriba."
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "When it's empty, use"
@@ -26379,6 +26409,11 @@ msgstr "Archivo XLIFF para importar"
 #, elixir-autogen, elixir-format
 msgid "Yes"
 msgstr "Sí"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Yes, create a new %{type}"
+msgstr "Sí, crear un nuevo %{type}"
 
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
@@ -27438,8 +27473,23 @@ msgstr "no se puede filtrar %{type} por %{field}: un campo %{kind} no tiene un v
 
 #: lib/kiln_cms/cms/validations/reference_selection.ex
 #, elixir-autogen, elixir-format
-msgid "can't let editors create records yet: that is coming in a later release"
-msgstr "aún no permite que los editores creen registros: llegará en una versión posterior"
+msgid "can't let editors create %{type} records: a field condition lists several values or excludes one, so there is no value to give a new record"
+msgstr "no se puede dejar que los editores creen registros de %{type}: una condición de campo enumera varios valores o excluye uno, así que no hay un valor que dar a un registro nuevo"
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't let editors create %{type} records: the field does not accept drafts, and a new record is a draft"
+msgstr "no se puede dejar que los editores creen registros de %{type}: el campo no acepta borradores, y un registro nuevo es un borrador"
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't let editors create %{type} records: the field only accepts records with certain tags or a category, and a new one has none"
+msgstr "no se puede dejar que los editores creen registros de %{type}: el campo solo acepta registros con ciertas etiquetas o una categoría, y uno nuevo no tiene ninguna"
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't let editors create %{type} records: the field's owner condition cannot be met by a new record"
+msgstr "no se puede dejar que los editores creen registros de %{type}: la condición de propietario del campo no puede cumplirla un registro nuevo"
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -28308,6 +28358,11 @@ msgstr "nombra %{field}, que no es un campo junto a este"
 #, elixir-autogen, elixir-format
 msgid "names %{field}, which is not a field of %{type}"
 msgstr "nombra %{field}, que no es un campo de %{type}"
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "names %{type} to create, which is not one of this field's target types"
+msgstr "nombra %{type} para crear, que no es uno de los tipos de destino de este campo"
 
 #: lib/kiln_cms/cms/validations/reference_selection.ex
 #, elixir-autogen, elixir-format
