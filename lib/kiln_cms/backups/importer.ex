@@ -97,9 +97,38 @@ defmodule KilnCMS.Backups.Importer do
 
   Separate cron entries (`backup.sh db`, then `backup.sh media`) have different
   stamps, so they become two runs.
+
+  ## A stamp whose write keeps failing (#2417)
+
+  The importer runs on every History mount, marker sync, backup end and
+  retention pass. A stamp whose insert errors (a constraint the row breaks,
+  say) would otherwise be retried, and warned about, every time. So a failed
+  write puts the stamp, keyed by `{directory, stamp}`, into a node-local
+  backoff: 15 minutes after the first failure, doubling each time, at most
+  6 hours. Until then the stamp is `deferred` in the summary: not attempted,
+  not logged. Each real attempt that fails logs one warning with the attempt
+  number, the redacted cause and the next try, and emits
+  `[:kiln_cms, :backups, :import, :failed]`. A success, a row appearing for
+  the stamp, or its files going clears its entry; `retry_failed/0` clears
+  every entry and imports at once (through `bin/kiln rpc`). The table lives
+  in `:persistent_term`, written at most once per call and only when it
+  changed, and holds at most #{500} entries (the soonest due are dropped
+  first). It is per node and lost on a restart; two concurrent calls may
+  each write it, and the later one wins. Each of those only brings a retry
+  forward.
+
+  A deferred stamp is safe to leave unrecorded. It has no Run row, so
+  retention treats its files as **Unrecorded** (kept until older than the
+  floor), exactly as when its write fails, and the application's partial
+  sweep removes a stamp's `.partial` files only once the stamp has a row, so
+  it keeps them. A deferred stamp never turns `run/1` into `{:error, _}`:
+  retention and the partial sweep go ahead only on `{:ok, _}`, and one bad
+  stamp must not stop them for every other one. A refused read (a revoked
+  grant) is still `{:error, _}` and records no backoff: nothing was
+  attempted.
   """
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Checksum, Manifest}
+  alias KilnCMS.Backups.{Artifact, Checksum, Manifest, Redact}
 
   require Logger
 
@@ -112,11 +141,20 @@ defmodule KilnCMS.Backups.Importer do
   @max_sidecar_bytes 4 * 1024 * 1024
   @sidecar ~r/\Akiln-(db|media)-(\d{8}-\d{6})\.sha256(\.partial)?\z/
 
+  # The import backoff (#2417): `%{{dir, stamp} => %{failures, retry_at,
+  # first_error}}`, `retry_at` in Unix milliseconds.
+  @failures {__MODULE__, :failures}
+  @first_backoff_ms :timer.minutes(15)
+  @max_backoff_ms :timer.hours(6)
+  @max_failures 500
+  @max_cause 300
+
   @type summary :: %{
           imported: non_neg_integer(),
           pending: non_neg_integer(),
           skipped: non_neg_integer(),
-          failed: non_neg_integer()
+          failed: non_neg_integer(),
+          deferred: non_neg_integer()
         }
 
   @doc """
@@ -126,8 +164,9 @@ defmodule KilnCMS.Backups.Importer do
   have written the same stamp, in which case the write was a no-op but is still
   counted), `pending` stamps waiting out the settle window, `skipped` stamps
   that cannot be represented (impossible date), `failed` rows whose write
-  errored — or `{:error, reason}` when the directory cannot be listed or the
-  runs cannot be read.
+  errored, `deferred` stamps whose write failed before and whose backoff has
+  not run out (not attempted, see the moduledoc) — or `{:error, reason}` when
+  the directory cannot be listed or the runs cannot be read.
   """
   @spec run() :: {:ok, summary()} | {:error, term()}
   def run, do: run(Backups.dir())
@@ -141,17 +180,40 @@ defmodule KilnCMS.Backups.Importer do
   @spec interrupted_after_s() :: pos_integer()
   def interrupted_after_s, do: @interrupted_after_s
 
+  @doc """
+  Forget every stamp's import backoff on this node and import at once, as
+  `run/0`. For an operator who fixed what made a write fail:
+  `bin/kiln rpc "KilnCMS.Backups.Importer.retry_failed()"`.
+  """
+  @spec retry_failed() :: {:ok, summary()} | {:error, term()}
+  def retry_failed do
+    reset_failures()
+    run()
+  end
+
   @doc false
-  # `list` is `list/1` outside tests, which pass one that changes the
-  # directory between the listing and the stat.
-  @spec run(Path.t(), (Path.t() -> {:ok, [{String.t(), String.t()}]} | {:error, term()})) ::
-          {:ok, summary()} | {:error, term()}
-  def run(dir, list \\ &list/1) do
+  # Empties the backoff table. `KilnCMS.DataCase.setup_sandbox/1` calls it for
+  # every synchronous test, so a stamp one test failed on is never deferred in
+  # another, whatever order the modules run in.
+  @spec reset_failures() :: :ok
+  def reset_failures do
+    if :persistent_term.get(@failures, nil), do: :persistent_term.erase(@failures)
+    :ok
+  end
+
+  @doc false
+  # Test seams, each defaulting to the real thing: `:list` (`list/1`; a test
+  # passes one that changes the directory between the listing and the stat),
+  # `:import` (the write, `attrs -> {:ok, _} | {:error, _}`) and `:now_ms`
+  # (the backoff's clock, Unix milliseconds).
+  @spec run(Path.t(), keyword()) :: {:ok, summary()} | {:error, term()}
+  def run(dir, opts \\ []) do
     reconcile_stale_runs()
+    list = Keyword.get(opts, :list, &list/1)
 
     with {:ok, names} <- list.(dir),
          {:ok, existing} <- existing_stamps() do
-      import_new(dir, names, existing)
+      import_new(dir, names, existing, opts)
     end
   rescue
     error ->
@@ -201,7 +263,7 @@ defmodule KilnCMS.Backups.Importer do
     end)
   end
 
-  defp import_new(dir, listed, existing) do
+  defp import_new(dir, listed, existing, opts) do
     manifest = Manifest.read(dir)
 
     {files, partials, sidecars} = classify(listed)
@@ -241,14 +303,27 @@ defmodule KilnCMS.Backups.Importer do
 
     attrs = Enum.map(ready, &run_attrs(&1, manifest, covered, dir, sidecars, now))
 
-    results = Enum.map(attrs ++ manifest_only, &import_one/1)
+    now_ms = Keyword.get_lazy(opts, :now_ms, fn -> System.os_time(:millisecond) end)
+    import = Keyword.get(opts, :import, &Backups.import_run(&1, actor: Backups.system()))
+    failures = failures()
+
+    {deferred, due} =
+      Enum.split_with(attrs ++ manifest_only, &deferred?(failures, dir, &1.stamp, now_ms))
+
+    results = Enum.map(due, &{&1.stamp, import_one(&1, import)})
+
+    # The stamps still waiting for a row: an entry for any other stamp of
+    # this directory (now recorded, or its files gone) is dropped.
+    live = MapSet.new(new ++ Enum.map(manifest_only, & &1.stamp))
+    save_failures(failures, update_failures(failures, dir, live, results, now_ms))
 
     {:ok,
      %{
-       imported: Enum.count(results, &(&1 == :ok)),
+       imported: Enum.count(results, &match?({_, :ok}, &1)),
        pending: length(pending),
        skipped: length(invalid),
-       failed: Enum.count(results, &(&1 == :error))
+       failed: Enum.count(results, &match?({_, {:error, _}}, &1)),
+       deferred: length(deferred)
      }}
   end
 
@@ -617,14 +692,90 @@ defmodule KilnCMS.Backups.Importer do
   defp stamped?(artifact),
     do: match?({:ok, %{partial?: false}}, Artifact.parse_file(Path.basename(artifact.path)))
 
-  defp import_one(attrs) do
-    case Backups.import_run(attrs, actor: Backups.system()) do
-      {:ok, _run} ->
-        :ok
-
-      {:error, error} ->
-        Logger.warning("Couldn't import backup #{attrs.stamp}: #{error.__struct__}")
-        :error
+  defp import_one(attrs, import) do
+    case import.(attrs) do
+      {:ok, _run} -> :ok
+      {:error, error} -> {:error, cause(error)}
     end
   end
+
+  # What went wrong, for the log. Redacted: an Ash error's message can quote
+  # attributes, and those come from files and a manifest on disk.
+  defp cause(error) when is_exception(error),
+    do: Redact.text(Exception.message(error), [], @max_cause)
+
+  defp cause(error), do: Redact.text(inspect(error), [], @max_cause)
+
+  defp failures, do: :persistent_term.get(@failures, %{})
+
+  defp deferred?(failures, dir, stamp, now_ms) do
+    case failures do
+      %{{^dir, ^stamp} => %{retry_at: retry_at}} -> now_ms < retry_at
+      _ -> false
+    end
+  end
+
+  # The table after this call: this directory's entries kept only for `live`
+  # stamps, a success cleared, a failure recorded (and warned about), then
+  # cut to `@max_failures`.
+  defp update_failures(failures, dir, live, results, now_ms) do
+    kept =
+      Map.reject(failures, fn {{entry_dir, stamp}, _entry} ->
+        entry_dir == dir and not MapSet.member?(live, stamp)
+      end)
+
+    results
+    |> Enum.reduce(kept, fn
+      {stamp, :ok}, acc -> Map.delete(acc, {dir, stamp})
+      {stamp, {:error, cause}}, acc -> record_failure(acc, dir, stamp, cause, now_ms)
+    end)
+    |> cap()
+  end
+
+  defp record_failure(failures, dir, stamp, cause, now_ms) do
+    previous = Map.get(failures, {dir, stamp}, %{failures: 0, first_error: cause})
+    attempt = previous.failures + 1
+    retry_at = now_ms + backoff_ms(attempt)
+    next = retry_at |> DateTime.from_unix!(:millisecond) |> DateTime.truncate(:second)
+
+    Logger.warning(
+      "Couldn't import backup #{stamp} (attempt #{attempt}): #{cause}. " <>
+        "Next try after #{DateTime.to_iso8601(next)}; " <>
+        "KilnCMS.Backups.Importer.retry_failed() retries now"
+    )
+
+    :telemetry.execute([:kiln_cms, :backups, :import, :failed], %{count: 1}, %{
+      stamp: stamp,
+      attempt: attempt,
+      retry_at: next,
+      error: cause
+    })
+
+    Map.put(failures, {dir, stamp}, %{
+      failures: attempt,
+      retry_at: retry_at,
+      first_error: previous.first_error
+    })
+  end
+
+  # 15 min, 30 min, 1 h, 2 h, 4 h, then 6 h.
+  defp backoff_ms(attempt),
+    do: min(@first_backoff_ms * Integer.pow(2, min(attempt - 1, 10)), @max_backoff_ms)
+
+  # The soonest due go first: losing an entry only brings its retry forward.
+  defp cap(failures) when map_size(failures) <= @max_failures, do: failures
+
+  defp cap(failures) do
+    failures
+    |> Enum.sort_by(fn {_key, %{retry_at: retry_at}} -> retry_at end, :desc)
+    |> Enum.take(@max_failures)
+    |> Map.new()
+  end
+
+  # One write per call, and none when nothing changed: replacing a
+  # `:persistent_term` value makes every process on the node scan for the old
+  # one.
+  defp save_failures(same, same), do: :ok
+  defp save_failures(_old, new) when map_size(new) == 0, do: reset_failures()
+  defp save_failures(_old, new), do: :persistent_term.put(@failures, new)
 end

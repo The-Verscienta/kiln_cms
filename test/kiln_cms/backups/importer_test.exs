@@ -828,7 +828,7 @@ defmodule KilnCMS.Backups.ImporterTest do
         {:ok, listed}
       end
 
-      assert {:ok, %{imported: 0, pending: 1}} = Importer.run(dir, list_then_finish)
+      assert {:ok, %{imported: 0, pending: 1}} = Importer.run(dir, list: list_then_finish)
       assert all_runs() == []
     end
 
@@ -933,6 +933,210 @@ defmodule KilnCMS.Backups.ImporterTest do
       assert all_runs() == []
 
       assert {:ok, %{imported: 1}} = Importer.run()
+    end
+  end
+
+  describe "a stamp whose write keeps failing (#2417)" do
+    @bad "20260801-031700"
+    @good "20260802-031700"
+    @min 60_000
+
+    # The real write, except for `@bad`, which fails the way a constraint the
+    # row breaks would.
+    defp failing do
+      fn attrs ->
+        if attrs.stamp == @bad,
+          do: {:error, RuntimeError.exception("value too long: password=hunter2secret")},
+          else: Backups.import_run(attrs, actor: Backups.system())
+      end
+    end
+
+    defp run_at(dir, now_ms, opts \\ []),
+      do: Importer.run(dir, Keyword.merge([import: failing(), now_ms: now_ms], opts))
+
+    test "the first failure warns once with the redacted cause, attempt and next try",
+         %{dir: dir} do
+      put(dir, :db, @bad)
+      now = System.os_time(:millisecond)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{imported: 0, failed: 1, deferred: 0}} = run_at(dir, now)
+        end)
+
+      assert [_one] = Regex.scan(~r/Couldn't import backup/, log)
+      assert log =~ "Couldn't import backup #{@bad} (attempt 1): value too long: password=***"
+      refute log =~ "hunter2secret"
+
+      next = (now + 15 * @min) |> DateTime.from_unix!(:millisecond) |> DateTime.truncate(:second)
+      assert log =~ "Next try after #{DateTime.to_iso8601(next)}"
+    end
+
+    test "a second call inside the backoff defers the stamp without a word", %{dir: dir} do
+      put(dir, :db, @bad)
+      now = System.os_time(:millisecond)
+      assert {:ok, %{failed: 1}} = run_at(dir, now)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{imported: 0, failed: 0, deferred: 1}} = run_at(dir, now + 14 * @min)
+        end)
+
+      refute log =~ @bad
+      assert all_runs() == []
+    end
+
+    test "past the backoff it is tried again as attempt 2, then waits twice as long",
+         %{dir: dir} do
+      put(dir, :db, @bad)
+      now = System.os_time(:millisecond)
+      assert {:ok, %{failed: 1}} = run_at(dir, now)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{failed: 1, deferred: 0}} = run_at(dir, now + 15 * @min)
+        end)
+
+      assert log =~ "Couldn't import backup #{@bad} (attempt 2)"
+
+      assert {:ok, %{deferred: 1}} = run_at(dir, now + 44 * @min)
+      assert {:ok, %{failed: 1}} = run_at(dir, now + 45 * @min)
+    end
+
+    test "the backoff stops growing at six hours", %{dir: dir} do
+      put(dir, :db, @bad)
+      six_hours = 6 * 60 * @min
+
+      # Attempts 1 to 8, each as soon as the previous backoff allows (none is
+      # longer than six hours, so six hours later is always due).
+      last =
+        Enum.reduce(1..8, System.os_time(:millisecond), fn _attempt, at ->
+          assert {:ok, %{failed: 1}} = run_at(dir, at)
+          at + six_hours
+        end) - six_hours
+
+      # 15 min x 2^7 would be 32 hours; the eighth waits six.
+      assert {:ok, %{deferred: 1}} = run_at(dir, last + six_hours - 1)
+      assert {:ok, %{failed: 1}} = run_at(dir, last + six_hours)
+    end
+
+    test "other stamps still import while one is deferred", %{dir: dir} do
+      put(dir, :db, @bad)
+      now = System.os_time(:millisecond)
+      assert {:ok, %{failed: 1}} = run_at(dir, now)
+
+      put(dir, :db, @good)
+      assert {:ok, %{imported: 1, deferred: 1}} = run_at(dir, now + @min)
+      assert %{status: :succeeded} = run!(@good)
+    end
+
+    test "a success clears the backoff", %{dir: dir} do
+      put(dir, :db, @bad)
+      now = System.os_time(:millisecond)
+      assert {:ok, %{failed: 1}} = run_at(dir, now)
+
+      # A write that reports success without leaving a row, so the stamp is
+      # still a candidate below.
+      written = fn _attrs -> {:ok, :written} end
+      assert {:ok, %{imported: 1}} = Importer.run(dir, import: written, now_ms: now + 15 * @min)
+
+      # Its entry is gone: the next failure is not deferred and counts from 1.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{failed: 1}} = run_at(dir, now + 16 * @min)
+        end)
+
+      assert log =~ "(attempt 1)"
+    end
+
+    test "retry_failed/0 forgets the backoff and imports at once", %{dir: dir} do
+      put(dir, :db, @bad)
+      assert {:ok, %{failed: 1}} = run_at(dir, System.os_time(:millisecond))
+      assert {:ok, %{deferred: 1}} = Importer.run(dir)
+
+      assert {:ok, %{imported: 1, deferred: 0}} = Importer.retry_failed()
+      assert %{status: :succeeded} = run!(@bad)
+    end
+
+    test "each real failure emits telemetry", %{dir: dir} do
+      put(dir, :db, @bad)
+      event = [:kiln_cms, :backups, :import, :failed]
+      ref = :telemetry_test.attach_event_handlers(self(), [event])
+      now = System.os_time(:millisecond)
+
+      assert {:ok, _} = run_at(dir, now)
+      assert {:ok, %{deferred: 1}} = run_at(dir, now + @min)
+      assert {:ok, _} = run_at(dir, now + 15 * @min)
+
+      assert_received {^event, ^ref, %{count: 1}, %{stamp: @bad, attempt: 1} = meta}
+      assert meta.error =~ "password=***"
+      assert %DateTime{} = meta.retry_at
+      assert_received {^event, ^ref, %{count: 1}, %{stamp: @bad, attempt: 2}}
+      refute_received {^event, ^ref, _, _}
+    end
+
+    test "the table holds at most 500 stamps, dropping the soonest due", %{dir: dir} do
+      [first | _rest] =
+        for n <- 0..500 do
+          pad = &String.pad_leading("#{&1}", 2, "0")
+          stamp = "20250101-00#{pad.(div(n, 60))}#{pad.(rem(n, 60))}"
+          put(dir, :db, stamp)
+          stamp
+        end
+
+      now = System.os_time(:millisecond)
+      fail_all = fn attrs -> {:error, RuntimeError.exception("no #{attrs.stamp}")} end
+
+      # The first fails a minute before the other 500, so it is due soonest;
+      # with them the table would hold 501, and it is the one dropped.
+      assert {:ok, %{failed: 1}} =
+               Importer.run(dir, import: fail_all, now_ms: now, list: only(first))
+
+      assert {:ok, %{failed: 500, deferred: 1}} =
+               Importer.run(dir, import: fail_all, now_ms: now + @min)
+
+      assert {:ok, %{failed: 1, deferred: 500}} =
+               Importer.run(dir, import: fail_all, now_ms: now + 2 * @min)
+    end
+
+    test "with the grant revoked it is an error and records no backoff", %{dir: dir} do
+      put(dir, :db, @bad)
+
+      assert {:error, _} =
+               Backups.with_actor(nil, fn ->
+                 run_at(dir, System.os_time(:millisecond))
+               end)
+
+      assert {:ok, %{failed: 1, deferred: 0}} = run_at(dir, System.os_time(:millisecond))
+    end
+
+    test "the backoff is per directory: the same stamp elsewhere is tried", %{dir: dir} do
+      other = Path.join(System.tmp_dir!(), "kiln_imp_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(other, "db"))
+      on_exit(fn -> File.rm_rf!(other) end)
+
+      put(dir, :db, @bad)
+      put(other, :db, @bad)
+      now = System.os_time(:millisecond)
+
+      assert {:ok, %{failed: 1}} = run_at(dir, now)
+      assert {:ok, %{failed: 1, deferred: 0}} = run_at(other, now + @min)
+      assert {:ok, %{deferred: 1}} = run_at(dir, now + 2 * @min)
+    end
+
+    test "a deferred stamp never makes the call an error", %{dir: dir} do
+      put(dir, :db, @bad)
+      now = System.os_time(:millisecond)
+      assert {:ok, _} = run_at(dir, now)
+      assert {:ok, %{deferred: 1}} = run_at(dir, now + @min)
+    end
+  end
+
+  # A `list` seam that hides every stamp but `stamp`.
+  defp only(stamp) do
+    fn dir ->
+      {:ok, listed} = Importer.list(dir)
+      {:ok, Enum.filter(listed, fn {_sub, name} -> name =~ stamp end)}
     end
   end
 
