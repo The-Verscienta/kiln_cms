@@ -1,13 +1,13 @@
 defmodule KilnCMS.Backups.MediaArchiveTest do
   # async: false: the archiver shells out to tar, so concurrent heavy tests
   # would slow it down. The bounded-memory tests measure only the archiving
-  # work's own processes (see peak_growth/1), not the whole VM.
+  # work's own processes (`KilnCMS.Test.ProcessMemory`), not the whole VM.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
   alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive}
-  alias KilnCMS.Test.{Eventually, OsProcess}
+  alias KilnCMS.Test.{Eventually, OsProcess, ProcessMemory}
 
   @moduletag :tmp_dir
 
@@ -87,114 +87,6 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
   defp real_tar, do: System.find_executable("tar")
 
   defp partials(dir), do: Path.wildcard(Path.join(dir, "**/*.partial"), match_dot: true)
-
-  # Peak memory held by the archiving work while `fun` runs, polling every
-  # 10 ms. Only the work is measured, not the whole VM: `:erlang.memory/1`
-  # also counts whatever Oban, caches and other apps allocate meanwhile, which
-  # made this flaky under CI load (#2218).
-  #
-  # `fun` runs in a fresh worker whose group leader is a private forwarder.
-  # Every process the worker spawns, transitively, inherits that group leader
-  # unless something resets it, so "has our group leader" is the work's process
-  # family (Tasks, file io servers, port watchers). Its footprint is the
-  # processes' own memory plus each off-heap (refc) binary they reference,
-  # counted once by id, plus ports they own. A file read into memory is a
-  # binary some family member holds, so it still counts in full.
-  defp peak_growth(fun) do
-    caller_gl = Process.group_leader()
-    gl = spawn_link(fn -> forward_io(caller_gl) end)
-    parent = self()
-    ref = make_ref()
-
-    worker =
-      spawn_link(fn ->
-        Process.group_leader(self(), gl)
-        send(parent, {ref, :ready})
-
-        receive do
-          {^ref, :go} -> :ok
-        end
-
-        result =
-          try do
-            {:ok, fun.()}
-          rescue
-            e -> {:raise, e, __STACKTRACE__}
-          catch
-            kind, reason -> {kind, reason, __STACKTRACE__}
-          end
-
-        send(parent, {ref, :done, result})
-      end)
-
-    receive do
-      {^ref, :ready} -> :ok
-    end
-
-    sampler = Task.async(fn -> sample(gl, 0) end)
-    send(worker, {ref, :go})
-
-    result =
-      receive do
-        {^ref, :done, result} -> result
-      end
-
-    send(sampler.pid, :stop)
-    peak = Task.await(sampler, 5_000)
-    Process.unlink(gl)
-    Process.exit(gl, :kill)
-
-    case result do
-      {:ok, _} -> peak
-      {:raise, e, stack} -> reraise e, stack
-      {kind, reason, stack} -> :erlang.raise(kind, reason, stack)
-    end
-  end
-
-  defp forward_io(target) do
-    receive do
-      msg ->
-        send(target, msg)
-        forward_io(target)
-    end
-  end
-
-  defp sample(gl, peak) do
-    receive do
-      :stop -> max(peak, footprint(gl))
-    after
-      10 -> sample(gl, max(peak, footprint(gl)))
-    end
-  end
-
-  defp footprint(gl) do
-    family =
-      for pid <- Process.list(),
-          Process.info(pid, :group_leader) == {:group_leader, gl},
-          do: pid
-
-    {heaps, binaries} =
-      Enum.reduce(family, {0, %{}}, fn pid, {heaps, binaries} ->
-        case Process.info(pid, [:memory, :binary]) do
-          [memory: memory, binary: bins] ->
-            {heaps + memory,
-             Enum.reduce(bins, binaries, fn {id, size, _}, acc -> Map.put(acc, id, size) end)}
-
-          nil ->
-            {heaps, binaries}
-        end
-      end)
-
-    ports =
-      for port <- Port.list(),
-          {:connected, owner} <- [Port.info(port, :connected)],
-          owner in family,
-          {:memory, memory} <- [Port.info(port, :memory)],
-          reduce: 0,
-          do: (acc -> acc + memory)
-
-    heaps + (binaries |> Map.values() |> Enum.sum()) + ports
-  end
 
   defp sparse!(path, bytes) do
     {:ok, io} = :file.open(path, [:write, :raw, :binary])
@@ -788,8 +680,8 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
       for n <- 1..1500, do: put(ctx.media, "d#{rem(n, 30)}/f#{n}.bin", :binary.copy("m", 700))
       sparse!(Path.join(ctx.media, "huge.bin"), 256 * 1_048_576)
 
-      growth =
-        peak_growth(fn ->
+      {_, growth} =
+        ProcessMemory.peak_growth(fn ->
           plan = plan!(ctx, part_bytes: 64 * 1_048_576)
           parts = archive!(plan, ctx)
           assert {:ok, _} = MediaArchive.checksum(plan, parts, ctx.out)
@@ -805,8 +697,8 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
       sparse!(Path.join(ctx.media, "huge-a.bin"), 2 * 1_073_741_824)
       sparse!(Path.join(ctx.media, "huge-b.bin"), 1_073_741_824)
 
-      growth =
-        peak_growth(fn ->
+      {_, growth} =
+        ProcessMemory.peak_growth(fn ->
           plan = plan!(ctx, part_bytes: 400 * 1_048_576)
           parts = archive!(plan, ctx)
           assert {:ok, _} = MediaArchive.checksum(plan, parts, ctx.out)
