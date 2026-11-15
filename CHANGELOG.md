@@ -102,7 +102,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#totp-secrets-encrypted-upgrade))
 
 - **Before a backup schedule keeps backups past `BACKUP_KEEP_DAYS`, replace `scripts/backup.sh` on every host where cron prunes: an older copy ignores the new `kiln-<stamp>.hold` markers and deletes them. Set keep values after a rolling deploy finishes. No migration; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#backup-schedule-keep-upgrade))
+  ([#2930](https://github.com/The-Verscienta/kiln_cms/pull/2930) · [long form](docs/changelog/unreleased.md#backup-schedule-keep-upgrade))
 
 ### Breaking
 
@@ -126,7 +126,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#backup-schedules))
 
 - **A backup schedule can keep its newest N backups however old (Keep the newest) and keep its own backups longer or shorter than `BACKUP_KEEP_DAYS` (Keep for (days)); `backup.sh prune` honors them through new `kiln-<stamp>.hold` markers (part of #2219).**
-  ([long form](docs/changelog/unreleased.md#backup-schedule-keep))
+  ([#2930](https://github.com/The-Verscienta/kiln_cms/pull/2930) · [long form](docs/changelog/unreleased.md#backup-schedule-keep))
 
 - **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
   ([long form](docs/changelog/unreleased.md#slack-webhook-format))
@@ -173,7 +173,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Changed
 
 - **Backups Schedule tab: a save refused by another admin's change keeps the form open beside what you typed; "Last scheduled run" opens that run's History row; a weekday-only scheduler cron no longer warns all weekend; a demoted admin is sent to access-denied.**
-  ([long form](docs/changelog/unreleased.md#backup-schedule-tab-2875))
+  ([#2930](https://github.com/The-Verscienta/kiln_cms/pull/2930) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-2875))
 
 - **Node moves from 22.23.3 to 22.23.5 for building assets, in CI and in the release image (`.tool-versions`, Dockerfile `NODE_VERSION`). A project that builds Kiln from source should move its own `.tool-versions` to match.**
   ([#2927](https://github.com/The-Verscienta/kiln_cms/pull/2927) · [long form](docs/changelog/unreleased.md#node-22-23-5))
