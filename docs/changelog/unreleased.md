@@ -555,8 +555,7 @@ carries the reasoning.
   Conditions on something that no longer exists (a deleted tag, category or
   field, a type that left the registry) are dropped, not turned into "match
   nothing". Making a field a selection names private, or retyping it to a type
-  without equality, is refused. `create` (create-on-type) is refused until a
-  later change. `GET /api/schema` reports the live selection as
+  without equality, is refused. `create` (create-on-type) is added by a later change, see below. `GET /api/schema` reports the live selection as
   `x-kiln-selection` (tag and category as ids); field-definition sync
   (`FieldSync`) leaves it out because those ids are per site; `mix
   kiln.gen.join` does not carry it. There is no admin UI for it yet (see
@@ -588,6 +587,21 @@ carries the reasoning.
   back unchanged. Nothing about what is enforced changes; this is the editor
   for the setting parts 1 and 2 added. See "Limit what can be picked" in
   `docs/extending-content.md`.
+
+<a id="reference-selection-create"></a>
+
+- **Editors can create what they type in a reference field ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285), last of four changes).**
+  A relationship field can opt in (`selection.create`, set in the fields
+  admin's **Let editors create what they type** step): type a name that is not
+  found and the list ends with *Create “name” as a new Page*. It creates a
+  draft as the editor, through the type's own create action, and connects it
+  like a pick. It is offered only when a new draft would pass the field's own
+  filter (the admin says why not otherwise), only to an editor who may create
+  that type and write the fields it fills, and a type with required fields
+  opens the "Add new" form with the title filled in. Plain "equals"
+  conditions are written onto the new record. It is an editor shortcut only:
+  the API never creates a record from a title. `GET /api/schema` reports the
+  setting as a hint inside `x-kiln-selection`.
 
 <a id="backup-schedules"></a>
 

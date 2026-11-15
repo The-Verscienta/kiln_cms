@@ -1279,6 +1279,11 @@ msgstr ""
 msgid "%{sentence} Each %{type} lists them as “%{label}”."
 msgstr ""
 
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{sentence} Typing a new name offers to create a draft %{type}."
+msgstr ""
+
 #: lib/kiln_cms_web/promotion_warning.ex
 #, elixir-autogen, elixir-format
 msgid "%{sites} requires one of them now: they'll be asked to set one up before anything else."
@@ -7153,6 +7158,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
+msgid "Create “%{title}” as a new %{type}"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
 msgid "Created by you"
 msgstr ""
 
@@ -12343,6 +12353,11 @@ msgstr ""
 msgid "Less than"
 msgstr ""
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Let editors create what they type"
+msgstr ""
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Let editors publish"
@@ -14523,6 +14538,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "No zero-result searches recorded"
+msgstr ""
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "No, editors only pick what exists"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
@@ -24575,6 +24595,11 @@ msgstr ""
 msgid "Turn the admin allowlist off? Anyone will be able to sign in from any network."
 msgstr ""
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Turned off by the filter above."
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Turning an alert off or switching off admin notifications sends every admin of this site a notice. That notice can't be turned off or muted."
@@ -25874,6 +25899,11 @@ msgstr ""
 msgid "When an alert is raised"
 msgstr ""
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "When an editor types a name that is not found, offer to create it as a new draft and connect it. Only possible when a new draft would pass the filter above."
+msgstr ""
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "When it's empty, use"
@@ -26269,6 +26299,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live/field_cells.ex
 #, elixir-autogen, elixir-format
 msgid "Yes"
+msgstr ""
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Yes, create a new %{type}"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
@@ -27324,7 +27359,22 @@ msgstr ""
 
 #: lib/kiln_cms/cms/validations/reference_selection.ex
 #, elixir-autogen, elixir-format
-msgid "can't let editors create records yet: that is coming in a later release"
+msgid "can't let editors create %{type} records: a field condition lists several values or excludes one, so there is no value to give a new record"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't let editors create %{type} records: the field does not accept drafts, and a new record is a draft"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't let editors create %{type} records: the field only accepts records with certain tags or a category, and a new one has none"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "can't let editors create %{type} records: the field's owner condition cannot be met by a new record"
 msgstr ""
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
@@ -28193,6 +28243,11 @@ msgstr ""
 #: lib/kiln_cms/cms/validations/reference_selection.ex
 #, elixir-autogen, elixir-format
 msgid "names %{field}, which is not a field of %{type}"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_selection.ex
+#, elixir-autogen, elixir-format
+msgid "names %{type} to create, which is not one of this field's target types"
 msgstr ""
 
 #: lib/kiln_cms/cms/validations/reference_selection.ex

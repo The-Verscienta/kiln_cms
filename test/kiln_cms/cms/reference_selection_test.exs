@@ -340,23 +340,80 @@ defmodule KilnCMS.CMS.ReferenceSelectionTest do
       end
     end
 
-    test "create is refused until a later release", %{admin: admin} do
-      message =
-        refusal(fn ->
-          CMS.create_field_definition(
-            %{
-              content_type: :post,
-              name: name(),
-              label: "L",
-              field_type: :reference,
-              target_type: "page",
-              selection: %{"create" => %{"type" => "page"}}
-            },
-            actor: admin
-          )
-        end)
+    test "create is accepted only when a new draft would pass the filter", %{admin: admin} do
+      category = category!(admin)
 
-      assert message =~ "coming in a later release"
+      tag =
+        CMS.create_tag!(%{name: "t", slug: "t-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      create = %{"type" => "page"}
+
+      refusals = [
+        {%{"create" => create, "states" => ["published"]}, "does not accept drafts"},
+        {%{"create" => create, "states" => ["in_review", "archived"]}, "does not accept drafts"},
+        {%{"create" => %{"type" => "post"}}, "not one of this field's target types"},
+        {%{"create" => create, "by_type" => %{"page" => %{"category" => category.id}}},
+         "tags or a category"},
+        {%{"create" => create, "by_type" => %{"page" => %{"tags_any" => [tag.id]}}},
+         "tags or a category"},
+        {%{
+           "create" => create,
+           "by_type" => %{"page" => %{"fields" => %{"level" => %{"in" => [1, 2]}}}}
+         }, "lists several values"},
+        {%{
+           "create" => create,
+           "by_type" => %{"page" => %{"fields" => %{"level" => %{"not_eq" => 1}}}}
+         }, "lists several values"},
+        {%{"create" => %{"type" => "page", "extra" => 1}}, "create must be"},
+        {%{"create" => "page"}, "create must be"}
+      ]
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "level", label: "Level", field_type: :integer},
+        actor: admin
+      )
+
+      for {selection, fragment} <- refusals do
+        message =
+          refusal(fn ->
+            CMS.create_field_definition(
+              %{
+                content_type: :post,
+                name: name(),
+                label: "L",
+                field_type: :reference,
+                target_type: "page",
+                selection: selection
+              },
+              actor: admin
+            )
+          end)
+
+        assert message =~ fragment, "#{inspect(selection)}: #{message}"
+      end
+
+      for selection <- [
+            %{"create" => create},
+            %{"create" => create, "states" => ["draft", "published"], "owner" => "self"},
+            %{"create" => create, "by_type" => %{"page" => %{"fields" => %{"level" => 3}}}}
+          ] do
+        assert %{selection: stored} =
+                 CMS.create_field_definition!(
+                   %{
+                     content_type: :post,
+                     name: name(),
+                     label: "L",
+                     field_type: :reference,
+                     target_type: "page",
+                     selection: selection
+                   },
+                   actor: admin
+                 )
+
+        assert stored["create"] == create
+      end
     end
 
     test "a by_type key must be one of the field's target types", %{admin: admin} do

@@ -17,15 +17,21 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
 
   @password "password123456"
 
-  defp authed_user(role) do
+  defp authed_user(role, attrs \\ %{}) do
     email = "ref-sel-#{System.unique_integer([:positive])}@example.com"
 
-    Ash.Seed.seed!(User, %{
-      email: email,
-      hashed_password: Bcrypt.hash_pwd_salt(@password),
-      confirmed_at: DateTime.utc_now(),
-      role: role
-    })
+    Ash.Seed.seed!(
+      User,
+      Map.merge(
+        %{
+          email: email,
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: role
+        },
+        attrs
+      )
+    )
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
 
@@ -375,6 +381,211 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
         build_conn() |> log_in(ctx.editor) |> live(~p"/editor/content/page/#{ctx.mine.id}")
 
       refute has_element?(lv, "[id$=-not-accepted]")
+    end
+  end
+
+  describe "create-on-type" do
+    defp creating_field!(ctx, name, selection, extra \\ %{}) do
+      field!(ctx.admin, name, Map.put(selection, "create", %{"type" => "page"}), extra)
+    end
+
+    defp row(lv, field), do: has_element?(lv, "#custom-field-#{field}-create-typed")
+
+    defp pages_titled(title, actor, org) do
+      KilnCMS.CMS.ContentTypes.list!("page",
+        actor: actor,
+        tenant: org,
+        query: [filter: [title: title]]
+      )
+    end
+
+    test "offers the row for a name nothing matches, and creates a connected draft", ctx do
+      creating_field!(ctx, "quick", %{"owner" => "self", "states" => ["draft"]}, %{
+        multiple: true
+      })
+
+      lv = open_editor(build_conn(), ctx.editor, ctx.post)
+      refute row(lv, "quick")
+
+      lv |> element("#custom-field-quick-search") |> render_focus()
+      refute row(lv, "quick")
+
+      name = "Brand new #{uniq()}"
+      search(lv, "quick", name)
+
+      assert has_element?(
+               lv,
+               "#custom-field-quick-create-typed",
+               "Create “#{name}” as a new Page"
+             )
+
+      lv |> element("#custom-field-quick-create-typed") |> render_click()
+
+      assert [created] = pages_titled(name, ctx.editor, ctx.post.org_id)
+      assert created.state == :draft
+      assert created.author_id == ctx.editor.id
+      assert has_element?(lv, "#custom-field-quick-items", name)
+      refute row(lv, "quick")
+
+      # The draft passes the field's own filter at save: nothing refuses it.
+      lv |> form("#post-editor") |> render_submit()
+      refute render(lv) =~ "isn't one of the records this field accepts"
+
+      saved = CMS.get_post!(ctx.post.id, actor: ctx.admin, tenant: ctx.post.org_id)
+      assert [%{"id" => id}] = saved.custom_fields["quick"]
+      assert id == created.id
+    end
+
+    test "a second click is a no-op: one click, one draft", ctx do
+      creating_field!(ctx, "dbl", %{}, %{multiple: true})
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+      name = "Twice #{uniq()}"
+      search(lv, "dbl", name)
+
+      lv |> element("#custom-field-dbl-create-typed") |> render_click()
+      lv |> element("#custom-field-dbl") |> render_hook("ref_create_typed", %{})
+      assert length(pages_titled(name, ctx.admin, ctx.post.org_id)) == 1
+    end
+
+    test "is hidden for an exact title match, in any case", ctx do
+      creating_field!(ctx, "exact", %{})
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+
+      search(lv, "exact", String.upcase(ctx.published.title))
+      refute row(lv, "exact")
+
+      search(lv, "exact", "#{ctx.published.title} and more")
+      assert row(lv, "exact")
+    end
+
+    test "is not offered by a field without it, and a forged event creates nothing", ctx do
+      field!(ctx.admin, "plain_sel", %{"states" => ["draft", "published"]})
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+      name = "Forged #{uniq()}"
+      search(lv, "plain_sel", name)
+      refute row(lv, "plain_sel")
+
+      lv |> element("#custom-field-plain_sel") |> render_hook("ref_create_typed", %{})
+      assert pages_titled(name, ctx.admin, ctx.post.org_id) == []
+    end
+
+    test "is not offered to an editor who may not create the type", ctx do
+      creating_field!(ctx, "norights", %{})
+      scoped = authed_user(:editor, %{editable_types: ["post"]})
+      lv = open_editor(build_conn(), scoped, ctx.post)
+      search(lv, "norights", "Anything #{uniq()}")
+      refute row(lv, "norights")
+    end
+
+    test "a single reference that holds a record offers nothing; the dropdown has no row", ctx do
+      creating_field!(ctx, "one", %{})
+      creating_field!(ctx, "drop", %{}, %{widget: "dropdown"})
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+      refute has_element?(lv, "#custom-field-drop-search")
+
+      search(lv, "one", ctx.word)
+      lv |> element("#custom-field-one-opt-#{ctx.published.id}") |> render_click()
+      refute has_element?(lv, "#custom-field-one-search")
+    end
+
+    test "equality conditions are written onto the new record", ctx do
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "level", label: "Level", field_type: :integer},
+        actor: ctx.admin
+      )
+
+      creating_field!(ctx, "lvl", %{
+        "by_type" => %{"page" => %{"fields" => %{"level" => 3}}}
+      })
+
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+      name = "Leveled #{uniq()}"
+      search(lv, "lvl", name)
+      lv |> element("#custom-field-lvl-create-typed") |> render_click()
+
+      assert [created] = pages_titled(name, ctx.admin, ctx.post.org_id)
+      assert created.custom_fields["level"] == 3
+    end
+
+    test "is hidden when the actor may not write a field it would fill", ctx do
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "grade", label: "Grade", field_type: :integer},
+        actor: ctx.admin
+      )
+
+      creating_field!(ctx, "grd", %{"by_type" => %{"page" => %{"fields" => %{"grade" => 2}}}})
+
+      restricted =
+        authed_user(:editor, %{
+          field_grants: %{"page" => ["title", "slug", "custom_fields.other"]}
+        })
+
+      lv = open_editor(build_conn(), restricted, ctx.post)
+      search(lv, "grd", "Grants #{uniq()}")
+      refute row(lv, "grd")
+    end
+
+    test "a type with required fields opens the Add new form, title prefilled", ctx do
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "blurb",
+          label: "Blurb",
+          field_type: :string,
+          required: true
+        },
+        actor: ctx.admin
+      )
+
+      creating_field!(ctx, "req", %{})
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+      name = "Needs blurb #{uniq()}"
+      search(lv, "req", name)
+      lv |> element("#custom-field-req-create-typed") |> render_click()
+
+      assert has_element?(lv, ~s(#custom-field-req input[value="#{name}"]))
+      assert pages_titled(name, ctx.admin, ctx.post.org_id) == []
+    end
+
+    test "a refusal on the one-click path stays visible and crashes nothing", ctx do
+      CMS.create_field_definition!(
+        %{
+          content_type: :page,
+          name: "tone",
+          label: "Tone",
+          field_type: :select,
+          options: ["warm", "cool"]
+        },
+        actor: ctx.admin
+      )
+
+      creating_field!(ctx, "bad", %{"by_type" => %{"page" => %{"fields" => %{"tone" => "warm"}}}})
+
+      # The option is removed after the selection was written: the prefill is
+      # now a value the target refuses.
+      tone = CMS.list_field_definitions!(actor: ctx.admin) |> Enum.find(&(&1.name == "tone"))
+      CMS.update_field_definition!(tone, %{options: ["cool"]}, actor: ctx.admin)
+
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+      name = "Refused #{uniq()}"
+      search(lv, "bad", name)
+      lv |> element("#custom-field-bad-create-typed") |> render_click()
+
+      assert pages_titled(name, ctx.admin, ctx.post.org_id) == []
+      assert has_element?(lv, "#custom-field-bad-new-form")
+      assert has_element?(lv, "#custom-field-bad-new-form-errors")
+    end
+
+    test "the API never creates: an unknown title is a validation error", ctx do
+      %{name: field} = creating_field!(ctx, "api", %{})
+
+      assert {:error, error} =
+               CMS.update_post(ctx.post, %{custom_fields: %{field => "No such page"}},
+                 actor: ctx.admin
+               )
+
+      refute Exception.message(error) == ""
+      assert pages_titled("No such page", ctx.admin, ctx.post.org_id) == []
     end
   end
 end

@@ -35,6 +35,7 @@ defmodule KilnCMSWeb.FieldSelection do
       |> put("owner", if(sel["owner"] == "self", do: "self"))
       |> put("sort", if(sel["sort"] == "title", do: "title"))
       |> put("by_type", by_type(sel["by_type"], targets, catalog))
+      |> put("create", create(sel["create"], targets))
 
     params
     |> Map.delete("sel")
@@ -49,6 +50,12 @@ defmodule KilnCMSWeb.FieldSelection do
 
   def unpack(%{"sel" => _sel} = params, _targets, _catalog), do: Map.delete(params, "sel")
   def unpack(params, _targets, _catalog), do: params
+
+  # `create-on-type`: one target type, only one the field links to.
+  defp create(type, targets) when is_binary(type),
+    do: if(type in targets, do: %{"type" => type})
+
+  defp create(_none, _targets), do: nil
 
   defp put(map, _key, value) when value in [nil, [], %{}, ""], do: map
   defp put(map, key, value), do: Map.put(map, key, value)
@@ -137,6 +144,7 @@ defmodule KilnCMSWeb.FieldSelection do
     %{
       states: Map.get(map, "states", []),
       owner?: Map.get(map, "owner") == "self",
+      create: get_in(map, ["create", "type"]),
       sort: Map.get(map, "sort", "recent"),
       by_type:
         Map.new(Map.get(map, "by_type", %{}), fn {type, entry} ->
@@ -199,7 +207,18 @@ defmodule KilnCMSWeb.FieldSelection do
     owner = if map["owner"] == "self", do: [gettext("created by the editor")], else: []
     sort = if map["sort"] == "title", do: gettext("by title"), else: gettext("newest first")
 
-    Enum.join([noun | parts ++ owner] ++ [sort], ", ") <> "."
+    base = Enum.join([noun | parts ++ owner] ++ [sort], ", ") <> "."
+
+    case get_in(map, ["create", "type"]) do
+      type when is_binary(type) ->
+        gettext("%{sentence} Typing a new name offers to create a draft %{type}.",
+          sentence: base,
+          type: label(lookup, type)
+        )
+
+      _none ->
+        base
+    end
   end
 
   defp upcase_first(<<first::utf8, rest::binary>>), do: String.upcase(<<first::utf8>>) <> rest
