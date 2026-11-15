@@ -9,7 +9,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   A schedule backs up the whole instance, so, as on `KilnCMSWeb.BackupLive`,
   the route's per-org admin gate is not the question: `mount/3`,
   `handle_params/3`, every `handle_event/3` and the refresh ask
-  `KilnCMSWeb.LiveUserAuth.platform_admin?/1` again, and every read and write
+  `KilnCMSWeb.LiveUserAuth.platform_admin?/1` again (a user demoted, or whose
+  grant expired, since the mount is sent to the access-denied page, #2875),
+  and every read and write
   goes through the `KilnCMS.Backups` code interfaces as the admin, so the
   schedule's policies decide as well.
 
@@ -19,16 +21,37 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   crash.
 
   An edit is saved only while the schedule still holds what the form was
-  opened on: the editable values are recorded when the form opens, and a save
-  after someone else changed any of them (another admin paused it, say) is
-  refused with a flash, so a form opened earlier never overwrites the change.
-  Only one form is open at a time: while one is, Add and Edit are hidden.
+  opened on: the editable values (keep fields included) are recorded when the
+  form opens, and a save after someone else changed any of them (another
+  admin paused it, say) is refused, so a form opened earlier never overwrites
+  the change. The refused form stays open on the values as stored now, with
+  what the admin entered shown read-only beside them
+  (`#schedule-refused-values`, #2875), so nothing typed is lost and saving
+  again is a deliberate choice; Cancel or a successful save clears it. A
+  schedule deleted meanwhile, or one the form can no longer offer, still
+  closes the form. Only one form is open at a time: while one is, Add and
+  Edit are hidden.
+
+  ## Keep fields
+
+  A schedule may keep the newest N backups of each component it backs up
+  (`keep_count`) and keep its own backups for a number of days (`keep_days`,
+  `BACKUP_KEEP_DAYS` when not set); both are optional
+  (`KilnCMS.Backups.Retention` has the rules). The preview estimates how many
+  backups of each component that keeps at a time, counting the one being
+  made while the prune runs, so N + 1. It says so when `keep_days` is shorter
+  than `BACKUP_KEEP_DAYS` (only this schedule's own backups age out sooner),
+  and, when the schedule would keep backups past `BACKUP_KEEP_DAYS` while
+  host cron backs a component up here too (`Backups.cron_backs_up?/1`), that
+  the host's `scripts/backup.sh` must be this release's, since an older copy
+  deletes what the schedule holds. Deleting a schedule says that its backups
+  then age out under `BACKUP_KEEP_DAYS`, never sooner.
 
   ## What the form can't offer, it doesn't edit
 
   The form offers daily, weekly, fortnightly and monthly (sub-daily intervals
-  are refused until keep N retention exists), the database, and the media
-  when this deployment archives any. A schedule whose stored values fall
+  are still refused, pending an owner decision on #2219), the database, and
+  the media when this deployment archives any. A schedule whose stored values fall
   outside that (an interval or component a newer release wrote, which loads
   as `KilnCMS.Types.UnknownAtom`; a sub-daily interval written from a
   console; media on a deployment that no longer has a media directory) is
@@ -52,22 +75,22 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Schedule
+  alias KilnCMS.Backups.Schedule.Validations.KeepCoversInterval
   alias KilnCMS.Backups.Schedule.Window
   alias KilnCMS.Backups.Scheduler
   alias KilnCMS.Types.UnknownAtom
 
   @refresh_ms 60_000
 
-  # The intervals the form offers: daily or longer, until keep N (part 3).
+  # The intervals the form offers: daily or longer. Sub-daily waits for an
+  # owner decision on #2219 (`Schedule.Validations.IntervalAvailable`).
   @offered_intervals [:daily, :weekly, :fortnightly, :monthly]
 
   # The least an enabled schedule may wait for the scheduler's first tick, and
   # how old the last tick may be, before the page says it hasn't run; a
-  # coarser KILN_BACKUP_SCHEDULER_CRON stretches it (`stale_after_s/1`).
+  # KILN_BACKUP_SCHEDULER_CRON slot further back stretches it
+  # (`tick_expected_since/1`).
   @stale_tick_floor_s 300
-
-  # Added to the cron's gap: a tick starts a little after its minute.
-  @stale_tick_slack_s 60
 
   @impl true
   def mount(_params, _session, socket) do
@@ -78,6 +101,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
        |> assign(:form, nil)
        |> assign(:editing, nil)
        |> assign(:opened_values, nil)
+       |> assign(:refused_values, nil)
+       |> assign(:cron_components, [])
        |> assign(:preview, nil)
        |> load()
        |> schedule_refresh()}
@@ -92,7 +117,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   def handle_params(_params, _uri, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: {:noreply, socket},
-      else: {:noreply, push_navigate(socket, to: KilnCMSWeb.AccessDenied.path(:platform))}
+      else: deny(socket)
   end
 
   @events ~w(new edit cancel validate save toggle delete)
@@ -104,8 +129,15 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   def handle_event(event, params, socket) when event in @events do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: event(event, params, socket),
-      else: {:noreply, socket}
+      else: deny(socket)
   end
+
+  # A user who stopped being a platform admin mid-session (demoted, or their
+  # grant expired) is sent where the mount would have sent them, rather than
+  # left clicking buttons that silently do nothing (#2875). Nothing is read or
+  # written first.
+  defp deny(socket),
+    do: {:noreply, push_navigate(socket, to: KilnCMSWeb.AccessDenied.path(:platform))}
 
   # Add and Edit are hidden while a form is open; a click that was already on
   # its way doesn't discard the open one.
@@ -138,12 +170,12 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   defp event("validate", %{"schedule" => params}, socket) when is_map(params) do
     with_open_form(socket, :validate, fn socket, form ->
       form = AshPhoenix.Form.validate(form, normalize(params))
-      {:noreply, socket |> assign(:form, to_form(form)) |> assign(:preview, preview(form))}
+      {:noreply, socket |> assign(:form, to_form(form)) |> assign_preview(form)}
     end)
   end
 
   defp event("save", %{"schedule" => params}, socket) when is_map(params) do
-    with_open_form(socket, :save, fn socket, form ->
+    with_open_form(socket, {:save, params}, fn socket, form ->
       case AshPhoenix.Form.submit(form, params: normalize(params)) do
         {:ok, _schedule} ->
           {:noreply,
@@ -153,7 +185,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
            |> load()}
 
         {:error, form} ->
-          {:noreply, socket |> assign(:form, to_form(form)) |> assign(:preview, preview(form))}
+          {:noreply, socket |> assign(:form, to_form(form)) |> assign_preview(form)}
       end
     end)
   end
@@ -204,7 +236,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   def handle_info(:refresh, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: {:noreply, socket |> load() |> schedule_refresh()},
-      else: {:noreply, socket}
+      else: deny(socket)
   end
 
   defp schedule_refresh(socket) do
@@ -246,7 +278,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   # The open form, after reading its schedule again when it edits one: a form
   # whose schedule was deleted, or became one the form can't offer, closes,
   # and a save whose schedule changed since the form opened is refused (see
-  # the moduledoc). `step` is `:validate` or `:save`.
+  # the moduledoc). `step` is `:validate` or `{:save, params}`.
   defp with_open_form(%{assigns: %{form: nil}} = socket, _step, _fun), do: {:noreply, socket}
 
   defp with_open_form(%{assigns: %{editing: :new, form: form}} = socket, _step, fun),
@@ -258,8 +290,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         not editable?(schedule) ->
           {:noreply, socket |> close_form() |> put_flash(:error, locked_flash())}
 
-        step == :save and editable_values(schedule) != socket.assigns.opened_values ->
-          {:noreply, socket |> close_form() |> put_flash(:error, changed_flash()) |> load()}
+        changed_since_opened?(step, schedule, socket) ->
+          {:save, params} = step
+          {:noreply, socket |> refuse_changed(schedule, params) |> load()}
 
         true ->
           # Built on the row as stored now (`Rebaseline` compares with it).
@@ -271,17 +304,51 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     end)
   end
 
+  defp changed_since_opened?({:save, _params}, schedule, socket),
+    do: editable_values(schedule) != socket.assigns.opened_values
+
+  defp changed_since_opened?(_step, _schedule, _socket), do: false
+
   # What the form edits, as stored: compared on save with what it held when
   # the form opened.
-  defp editable_values(%Schedule{} = schedule),
-    do:
-      Map.take(schedule, [:components, :interval, :time_of_day, :starts_on, :time_zone, :enabled])
+  @compared [
+    :components,
+    :interval,
+    :time_of_day,
+    :starts_on,
+    :time_zone,
+    :enabled,
+    :keep_count,
+    :keep_days
+  ]
+
+  defp editable_values(%Schedule{} = schedule), do: Map.take(schedule, @compared)
+
+  # The form stays open, rebuilt on the row as stored now, which is also what
+  # the next save is compared with; what the admin entered is shown beside it
+  # (`refused_rows/2`) until Cancel or a save that goes through.
+  defp refuse_changed(socket, schedule, params) do
+    form = edit_form(schedule, socket.assigns.current_user, socket.assigns[:security_context])
+
+    socket
+    |> assign(:form, form)
+    |> assign(:opened_values, editable_values(schedule))
+    |> assign(:refused_values, refused_rows(normalize(params), schedule))
+    |> assign_preview(form.source)
+    |> put_flash(:error, changed_flash())
+  end
 
   defp open_form(socket, editing, form) do
     socket
     |> assign(:editing, editing)
     |> assign(:form, form)
-    |> assign(:preview, preview(form.source))
+    # Asked once per form, not on every keystroke: whether host cron backs up
+    # here as well, for the preview's notice about the host's backup.sh.
+    |> assign(
+      :cron_components,
+      Enum.filter(Backups.expected_components(), &Backups.cron_backs_up?/1)
+    )
+    |> assign_preview(form.source)
   end
 
   defp close_form(socket) do
@@ -289,8 +356,13 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     |> assign(:editing, nil)
     |> assign(:form, nil)
     |> assign(:opened_values, nil)
+    |> assign(:refused_values, nil)
+    |> assign(:cron_components, [])
     |> assign(:preview, nil)
   end
+
+  defp assign_preview(socket, form),
+    do: assign(socket, :preview, preview(form, socket.assigns.cron_components))
 
   defp close_form_of(%{assigns: %{editing: id}} = socket, id), do: close_form(socket)
   defp close_form_of(socket, _id), do: socket
@@ -298,7 +370,10 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   defp gone_flash, do: gettext("That schedule no longer exists.")
 
   defp changed_flash,
-    do: gettext("This schedule changed since you opened it. Reopen it to see the current values.")
+    do:
+      gettext(
+        "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
+      )
 
   defp locked_flash,
     do: gettext("This schedule can't be edited here: it can only be paused, resumed or deleted.")
@@ -347,13 +422,27 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   # Checkboxes submit only the checked boxes, so the group carries a hidden
   # "" to send the key at all; it never reaches the attribute. Unchecking
-  # every box sends `[]`, which the resource refuses (`min_length`).
+  # every box sends `[]`, which the resource refuses (`min_length`). An empty
+  # keep field is "not set" (nil), which clears it on an edit.
   defp normalize(params) do
-    case Map.fetch(params, "components") do
-      {:ok, list} ->
-        Map.put(params, "components", list |> List.wrap() |> Enum.reject(&(&1 == "")))
+    params =
+      case Map.fetch(params, "components") do
+        {:ok, list} ->
+          Map.put(params, "components", list |> List.wrap() |> Enum.reject(&(&1 == "")))
 
-      :error ->
+        :error ->
+          params
+      end
+
+    Enum.reduce(["keep_count", "keep_days"], params, &blank_to_nil/2)
+  end
+
+  defp blank_to_nil(key, params) do
+    case Map.fetch(params, key) do
+      {:ok, value} when is_binary(value) ->
+        if String.trim(value) == "", do: Map.put(params, key, nil), else: params
+
+      _absent_or_not_text ->
         params
     end
   end
@@ -386,7 +475,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   defp locked_note(:sub_daily),
     do:
       gettext(
-        "Schedules more often than daily arrive with keep-N retention, so this one can't be edited here. You can pause, resume or delete it."
+        "Schedules more often than daily can't be edited here yet. You can pause, resume or delete it."
       )
 
   defp locked_note(:media),
@@ -398,8 +487,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   # The cadence and first window of what the form holds now, and whether it
   # is enabled, or nil while it holds something that has none (an invalid
   # zone, a missing date). Whether it would run here at all is the
-  # template's question (`@status`).
-  defp preview(%AshPhoenix.Form{source: %Ash.Changeset{} = changeset}) do
+  # template's question (`@status`). `cron` is the components host cron backs
+  # up here as well (`Backups.cron_backs_up?/1`).
+  defp preview(%AshPhoenix.Form{source: %Ash.Changeset{} = changeset}, cron) do
     timing =
       Map.new([:interval, :time_of_day, :starts_on, :time_zone], fn field ->
         {field, Ash.Changeset.get_attribute(changeset, field)}
@@ -418,12 +508,59 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         zone: timing.time_zone,
         enabled?: Ash.Changeset.get_attribute(changeset, :enabled) != false
       }
+      |> Map.merge(keep_preview(changeset, timing.interval, cron))
     else
       _ -> nil
     end
   end
 
-  defp preview(_form), do: nil
+  defp preview(_form, _cron), do: nil
+
+  # What the keep fields the form holds would keep: `estimate` backups of each
+  # component at a time, `shorter_days` when its own backups age out before
+  # BACKUP_KEEP_DAYS, and `cron` (the components host cron also backs up)
+  # when it keeps some past BACKUP_KEEP_DAYS, which an older host backup.sh
+  # would delete.
+  defp keep_preview(changeset, interval, cron) do
+    count = positive(Ash.Changeset.get_attribute(changeset, :keep_count))
+    days = positive(Ash.Changeset.get_attribute(changeset, :keep_days))
+    components = Ash.Changeset.get_attribute(changeset, :components)
+    components = if is_list(components), do: components, else: []
+    default = Backups.keep_days()
+
+    %{
+      components: components,
+      estimate: estimate(interval, count, days || default),
+      shorter_days: if(days && days < default, do: days),
+      cron:
+        if(beyond_default?(interval, count, days, default),
+          do: Enum.filter(components, &(&1 in cron)),
+          else: []
+        )
+    }
+  end
+
+  defp positive(n) when is_integer(n) and n > 0, do: n
+  defp positive(_other), do: nil
+
+  @doc false
+  # About how many backups of each component a schedule keeps at a time: the
+  # ones younger than `days` (one every interval) or its newest `count`,
+  # whichever is more, plus the one being made, since the prune runs while
+  # it is still in flight (so N + 1); never under two, as the newest finished
+  # backup is always kept beside it. Public for the tests.
+  @spec estimate(atom(), pos_integer() | nil, pos_integer()) :: pos_integer()
+  def estimate(interval, count, days) do
+    every = KeepCoversInterval.interval_days(interval) || 1
+    Enum.max([div(days, every) + 1, (count || 0) + 1, 2])
+  end
+
+  # Whether some of what the schedule keeps is older than BACKUP_KEEP_DAYS:
+  # a longer `keep_days`, or a newest N reaching further back.
+  defp beyond_default?(interval, count, days, default) do
+    every = KeepCoversInterval.interval_days(interval) || 1
+    (days != nil and days > default) or (count != nil and count * every > default)
+  end
 
   # Everything shown but the form: the schedules with their next window (one
   # source with the thresholds, `Backups.status/0`), what each one's newest
@@ -440,17 +577,20 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     |> assign(:entries, entries)
     |> assign(:runs, runs)
     |> assign(:media_dir?, Backups.media_dir() != nil)
-    |> assign(:stale_tick, stale_tick(status, entries))
+    |> assign(:stale_tick, stale_tick(status, entries, DateTime.utc_now()))
   end
 
+  @doc false
   # `{:stale, last_tick_at | nil}` when the scheduler should have ticked and
   # hasn't: it is on, an enabled schedule has existed (since its baseline)
-  # for longer than `stale_after_s/1`, and no tick started within it.
+  # since before `tick_expected_since/1`, and no tick started after it.
   # `:unknown` when that couldn't be read. The `oban_jobs` read
   # (`Scheduler.last_tick_at/0`) is made only when a tick is expected.
-  defp stale_tick(%{scheduler_enabled?: true}, entries) do
-    now = DateTime.utc_now()
-    expected_since = DateTime.add(now, -stale_after_s(now), :second)
+  # Public, with `now`, for the tests: a weekday-only cron is checked on a
+  # Saturday (#2875).
+  @spec stale_tick(map(), [map()], DateTime.t()) :: {:stale, DateTime.t() | nil} | :unknown | nil
+  def stale_tick(%{scheduler_enabled?: true}, entries, %DateTime{} = now) do
+    expected_since = tick_expected_since(now)
 
     waiting? =
       Enum.any?(entries, fn %{schedule: s} ->
@@ -467,15 +607,16 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     end
   end
 
-  defp stale_tick(_status, _entries), do: nil
+  def stale_tick(_status, _entries, _now), do: nil
 
-  # The cron's longest gap between ticks plus a minute's slack, never under
-  # five minutes: at `*/10` a seven-minute-old tick is on time.
-  defp stale_after_s(now) do
-    case Scheduler.tick_gap_s(now) do
-      gap when is_integer(gap) -> max(@stale_tick_floor_s, gap + @stale_tick_slack_s)
-      nil -> @stale_tick_floor_s
-    end
+  # The time a healthy scheduler has ticked since: the cron's newest slot at
+  # least five minutes ago, so every slot gets the same five minutes before
+  # it is late. At `* * * * 1-5` on a Saturday, and on Monday until 00:05,
+  # that is Friday 23:59, so a weekend is not "hasn't run". When the cron has
+  # no slot (`@reboot`), five minutes ago.
+  defp tick_expected_since(now) do
+    Scheduler.expected_tick_at(now, @stale_tick_floor_s) ||
+      DateTime.add(now, -@stale_tick_floor_s, :second)
   end
 
   @doc false
@@ -522,16 +663,141 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   defp components_label(components) when is_list(components),
     do: Enum.map_join(components, " + ", &component_label/1)
 
-  defp delete_confirm do
+  # Deleting a schedule never ages its backups out sooner than
+  # BACKUP_KEEP_DAYS (another schedule backing the same component up may keep
+  # them longer); its own keep fields stop applying.
+  defp delete_confirm(%Schedule{} = schedule) do
     days = Backups.keep_days()
 
-    ngettext(
-      "Delete this schedule? Backups it already took stay, and age out after %{count} day (BACKUP_KEEP_DAYS).",
-      "Delete this schedule? Backups it already took stay, and age out after %{count} days (BACKUP_KEEP_DAYS).",
-      days,
-      count: days
-    )
+    if keep_set?(schedule) do
+      ngettext(
+        "Delete this schedule? Its keep settings stop applying. Backups it already took stay, and age out after %{count} day (BACKUP_KEEP_DAYS), never sooner.",
+        "Delete this schedule? Its keep settings stop applying. Backups it already took stay, and age out after %{count} days (BACKUP_KEEP_DAYS), never sooner.",
+        days,
+        count: days
+      )
+    else
+      ngettext(
+        "Delete this schedule? Backups it already took stay, and age out after %{count} day (BACKUP_KEEP_DAYS), never sooner.",
+        "Delete this schedule? Backups it already took stay, and age out after %{count} days (BACKUP_KEEP_DAYS), never sooner.",
+        days,
+        count: days
+      )
+    end
   end
+
+  defp keep_set?(schedule), do: schedule.keep_count != nil or schedule.keep_days != nil
+
+  # The card's keep line.
+  defp keep_line(%Schedule{keep_count: count} = schedule) do
+    days = keep_days_text(schedule.keep_days)
+
+    if is_integer(count),
+      do:
+        ngettext(
+          "Keeps its newest backup, and every one from the last %{days}",
+          "Keeps its newest %{count} backups, and every one from the last %{days}",
+          count,
+          days: days
+        ),
+      else: gettext("Keeps its backups for %{days}", days: days)
+  end
+
+  defp keep_days_text(days) when is_integer(days),
+    do: ngettext("%{count} day", "%{count} days", days)
+
+  defp keep_days_text(_unset) do
+    days = Backups.keep_days()
+    ngettext("%{count} day (BACKUP_KEEP_DAYS)", "%{count} days (BACKUP_KEEP_DAYS)", days)
+  end
+
+  # What a refused save held, beside what is stored now, as display text: one
+  # row per editable field, `differs?` where they disagree. The submitted
+  # values are the client's, so they are only ever shown (escaped by HEEx)
+  # and capped in length.
+  defp refused_rows(params, %Schedule{} = schedule) do
+    for field <- @compared do
+      yours = submitted_text(field, Map.get(params, Atom.to_string(field)))
+      stored = stored_text(field, Map.get(schedule, field))
+
+      %{
+        field: field,
+        label: field_label(field),
+        yours: yours,
+        stored: stored,
+        differs?: yours != stored
+      }
+    end
+  end
+
+  @shown_max 100
+
+  defp submitted_text(:components, list) when is_list(list) do
+    known = %{"db" => :db, "media" => :media}
+
+    list
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&Map.get(known, &1, &1))
+    |> Enum.sort_by(&component_order/1)
+    |> Enum.uniq()
+    |> components_text()
+  end
+
+  defp submitted_text(:interval, value) when is_binary(value) do
+    case List.keyfind(interval_options(), value, 1) do
+      {label, _} -> label
+      nil -> cap(value)
+    end
+  end
+
+  defp submitted_text(:time_of_day, value) when is_binary(value), do: String.slice(value, 0, 5)
+  defp submitted_text(:enabled, value), do: enabled_text(value in ["true", true])
+  defp submitted_text(_field, value) when is_binary(value), do: cap(value)
+  defp submitted_text(_field, _absent), do: not_set()
+
+  defp stored_text(:components, list) when is_list(list),
+    do: list |> Enum.sort_by(&component_order/1) |> components_text()
+
+  defp stored_text(:interval, interval) do
+    case List.keyfind(interval_options(), to_string_atom(interval), 1) do
+      {label, _} -> label
+      nil -> to_string_atom(interval)
+    end
+  end
+
+  defp stored_text(:time_of_day, %Time{} = time), do: hhmm(time)
+  defp stored_text(:starts_on, %Date{} = date), do: Date.to_iso8601(date)
+  defp stored_text(:enabled, enabled), do: enabled_text(enabled == true)
+  defp stored_text(_field, nil), do: not_set()
+  defp stored_text(_field, value), do: cap(to_string(value))
+
+  defp to_string_atom(%UnknownAtom{value: value}), do: value
+  defp to_string_atom(atom), do: to_string(atom)
+
+  defp component_order(:db), do: 0
+  defp component_order(:media), do: 1
+  defp component_order(_other), do: 2
+
+  defp components_text([]), do: not_set()
+
+  defp components_text(list),
+    do: Enum.map_join(list, " + ", &if(is_binary(&1), do: cap(&1), else: component_label(&1)))
+
+  defp enabled_text(true), do: gettext("Enabled")
+  defp enabled_text(false), do: gettext("Paused")
+
+  defp not_set, do: gettext("Not set")
+
+  defp cap(text), do: String.slice(text, 0, @shown_max)
+
+  defp field_label(:components), do: gettext("What to back up")
+  defp field_label(:interval), do: gettext("How often")
+  defp field_label(:time_of_day), do: gettext("At")
+  defp field_label(:starts_on), do: gettext("Starting on")
+  defp field_label(:time_zone), do: gettext("Time zone")
+  defp field_label(:enabled), do: gettext("Enabled")
+  defp field_label(:keep_count), do: gettext("Keep the newest")
+  defp field_label(:keep_days), do: gettext("Keep for (days)")
 
   @impl true
   def render(assigns) do
@@ -579,6 +845,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           form={@form}
           editing={@editing}
           preview={@preview}
+          refused_values={@refused_values}
           media_dir?={@media_dir?}
           runs_here?={@status.scheduler_enabled? and @status.available?}
         />
@@ -617,8 +884,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
           <p id="backup-schedule-retention" class="mt-3 text-xs text-base-content/70">
             {ngettext(
-              "Retention is BACKUP_KEEP_DAYS (%{count} day) for every backup.",
-              "Retention is BACKUP_KEEP_DAYS (%{count} days) for every backup.",
+              "Backups are kept for BACKUP_KEEP_DAYS (%{count} day) unless a schedule keeps its own longer or shorter; the newest finished backup of each component is always kept.",
+              "Backups are kept for BACKUP_KEEP_DAYS (%{count} days) unless a schedule keeps its own longer or shorter; the newest finished backup of each component is always kept.",
               Backups.keep_days(),
               count: Backups.keep_days()
             )}
@@ -708,7 +975,12 @@ defmodule KilnCMSWeb.BackupScheduleLive do
             {outcome_label(@schedule)}
           </p>
           <p :if={is_struct(@run)} data-role="last-run">
-            <.link navigate={~p"/editor/backups"} class="underline hover:no-underline">
+            <%!-- The run's own row in the History, on whichever page holds
+                  it (`?run=`, #2875). --%>
+            <.link
+              navigate={~p"/editor/backups?#{%{run: @run.id}}"}
+              class="underline hover:no-underline"
+            >
               {gettext("Last scheduled run: %{status} (%{stamp})",
                 status: run_status_label(@run.status),
                 stamp: stamp(@run.started_at)
@@ -718,6 +990,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           <p :if={is_nil(@run)} data-role="last-run">{gettext("No scheduled run yet")}</p>
         </div>
       </div>
+
+      <p data-role="keep" class="text-xs text-base-content/70">{keep_line(@schedule)}</p>
 
       <p
         :if={not editable?(@schedule)}
@@ -753,7 +1027,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           phx-click="delete"
           phx-value-id={@schedule.id}
           data-role="delete"
-          data-confirm={delete_confirm()}
+          data-confirm={delete_confirm(@schedule)}
           class="btn btn-sm btn-danger"
         >
           {gettext("Delete")}
@@ -766,6 +1040,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   attr :form, Phoenix.HTML.Form, required: true
   attr :editing, :any, required: true
   attr :preview, :any, required: true
+  attr :refused_values, :any, required: true, doc: "`refused_rows/2`, or nil"
   attr :media_dir?, :boolean, required: true
   attr :runs_here?, :boolean, required: true
 
@@ -788,6 +1063,48 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       <h2 class="text-base font-semibold">
         {if @editing == :new, do: gettext("Add a schedule"), else: gettext("Edit schedule")}
       </h2>
+
+      <section
+        :if={@refused_values}
+        id="schedule-refused-values"
+        aria-labelledby="schedule-refused-values-title"
+        class="mt-3 rounded border border-warning/30 bg-warning/5 p-3 text-xs"
+      >
+        <h3 id="schedule-refused-values-title" class="font-medium text-warning-ink">
+          {gettext("Not saved: another admin changed this schedule")}
+        </h3>
+        <p class="mt-1 text-base-content/70">
+          {gettext(
+            "The form now holds the stored values. What you entered is below; changed fields are marked."
+          )}
+        </p>
+        <table class="mt-2 w-full text-left">
+          <thead>
+            <tr class="text-base-content/70">
+              <th scope="col" class="py-1 pr-3 font-medium">{gettext("Field")}</th>
+              <th scope="col" class="py-1 pr-3 font-medium">{gettext("You entered")}</th>
+              <th scope="col" class="py-1 font-medium">{gettext("Stored now")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              :for={row <- @refused_values}
+              data-field={row.field}
+              data-differs={row.differs? && "true"}
+              class={["border-t border-base-content/10", row.differs? && "font-medium"]}
+            >
+              <th scope="row" class="py-1 pr-3 font-normal">
+                {row.label}
+                <span :if={row.differs?} class="ml-1 text-warning-ink" data-role="differs">
+                  {gettext("(differs)")}
+                </span>
+              </th>
+              <td class="break-all py-1 pr-3" data-role="yours">{row.yours}</td>
+              <td class="break-all py-1" data-role="stored">{row.stored}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
       <.form
         for={@form}
@@ -865,6 +1182,39 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         </datalist>
         <.input field={@form[:enabled]} type="checkbox" label={gettext("Enabled")} />
 
+        <fieldset id="schedule-keep" class="space-y-2">
+          <legend class="mb-1 text-sm font-medium">{gettext("How long to keep its backups")}</legend>
+          <p class="text-xs text-base-content/70">
+            {gettext(
+              "Both are optional. The newest backups are kept however old; the days apply to this schedule's own backups. Whichever keeps more wins."
+            )}
+          </p>
+          <.input
+            field={@form[:keep_count]}
+            type="number"
+            min="1"
+            max="1000"
+            step="1"
+            label={gettext("Keep the newest")}
+            hint={gettext("A number of backups of each component, or empty for none.")}
+          />
+          <.input
+            field={@form[:keep_days]}
+            type="number"
+            min="1"
+            max="3650"
+            step="1"
+            label={gettext("Keep for (days)")}
+            hint={
+              ngettext(
+                "Empty keeps them for BACKUP_KEEP_DAYS, %{count} day on this deployment.",
+                "Empty keeps them for BACKUP_KEEP_DAYS, %{count} days on this deployment.",
+                Backups.keep_days()
+              )
+            }
+          />
+        </fieldset>
+
         <div
           :if={@preview}
           id="schedule-preview"
@@ -890,6 +1240,28 @@ defmodule KilnCMSWeb.BackupScheduleLive do
             data-role="wont-run"
           >
             {gettext("It won't run on this deployment until the warning above is resolved.")}
+          </p>
+          <p :if={@preview.components != []} class="text-base-content/70" data-role="estimate">
+            {ngettext(
+              "Keeps about %{count} backup at a time of each of: %{components}.",
+              "Keeps about %{count} backups at a time of each of: %{components}.",
+              @preview.estimate,
+              components: components_label(@preview.components)
+            )}
+          </p>
+          <p :if={@preview.shorter_days} class="text-warning-ink" data-role="keep-shorter">
+            {ngettext(
+              "This schedule's own backups age out after %{count} day, sooner than BACKUP_KEEP_DAYS (%{default}). Backups made by hand or by the host's cron still keep BACKUP_KEEP_DAYS.",
+              "This schedule's own backups age out after %{count} days, sooner than BACKUP_KEEP_DAYS (%{default}). Backups made by hand or by the host's cron still keep BACKUP_KEEP_DAYS.",
+              @preview.shorter_days,
+              default: Backups.keep_days()
+            )}
+          </p>
+          <p :if={@preview.cron != []} class="text-warning-ink" data-role="keep-cron">
+            {gettext(
+              "Host cron also backs up %{components} here, and this schedule keeps backups past BACKUP_KEEP_DAYS. Replace the host's scripts/backup.sh with this release's copy first: an older copy deletes them after BACKUP_KEEP_DAYS.",
+              components: components_label(@preview.cron)
+            )}
           </p>
         </div>
 

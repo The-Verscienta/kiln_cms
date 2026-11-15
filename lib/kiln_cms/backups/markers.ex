@@ -9,6 +9,9 @@ defmodule KilnCMS.Backups.Markers do
       stamp: the one in `db/` keeps that dump from `scripts/backup.sh prune`,
       the one in `media/` that media set. The app moves it
       (`KilnCMS.Backups.Retention`, `KilnCMS.Backups.MarkerSyncWorker`).
+    * A **hold marker**, `kiln-<stamp>.hold`, pins one component of one stamp
+      the same way, for every unit a schedule's keep rules hold (#2219). The
+      app writes and removes it alongside the last-good marker.
 
   Read on every render of the page, never stored: the markers are on disk by
   design (#2219), so they survive a database restore, and the backup directory
@@ -16,8 +19,8 @@ defmodule KilnCMS.Backups.Markers do
   missing or can't be listed contributes no markers. This never fails: a
   display of the markers must not take the page down with it.
 
-  Names are parsed with `KilnCMS.Backups.Artifact.parse_keep_name/1` and
-  `parse_good_name/1`, so a marker-shaped name with a bad stamp is ignored here
+  Names are parsed with `KilnCMS.Backups.Artifact.parse_keep_name/1`,
+  `parse_good_name/1` and `parse_hold_name/1`, so a marker-shaped name with a bad stamp is ignored here
   as it is by retention.
   """
   alias KilnCMS.Backups.Artifact
@@ -25,16 +28,16 @@ defmodule KilnCMS.Backups.Markers do
   @components [:db, :media]
 
   @type stamps :: %{db: MapSet.t(String.t()), media: MapSet.t(String.t())}
-  @type t :: %{keep: stamps(), good: stamps()}
+  @type t :: %{keep: stamps(), good: stamps(), hold: stamps()}
 
   @doc "No markers: what `read/1` returns for an empty or unreadable directory."
   @spec empty() :: t()
   def empty do
     none = Map.new(@components, &{&1, MapSet.new()})
-    %{keep: none, good: none}
+    %{keep: none, good: none, hold: none}
   end
 
-  @doc "The `.keep` and `.good` stamps in `dir`'s `db/` and `media/`."
+  @doc "The `.keep`, `.good` and `.hold` stamps in `dir`'s `db/` and `media/`."
   @spec read(Path.t() | nil) :: t()
   def read(dir) when is_binary(dir) do
     Enum.reduce(@components, empty(), fn component, acc ->
@@ -43,6 +46,7 @@ defmodule KilnCMS.Backups.Markers do
       acc
       |> put_in([:keep, component], stamps(names, &Artifact.parse_keep_name/1))
       |> put_in([:good, component], stamps(names, &Artifact.parse_good_name/1))
+      |> put_in([:hold, component], stamps(names, &Artifact.parse_hold_name/1))
     end)
   end
 
@@ -64,6 +68,13 @@ defmodule KilnCMS.Backups.Markers do
     do: Enum.filter(@components, &MapSet.member?(good[&1], stamp))
 
   def last_good_components(_markers, _stamp), do: []
+
+  @doc "The components whose hold marker names `stamp`, in `[:db, :media]` order."
+  @spec held_components(t(), String.t() | nil) :: [:db | :media]
+  def held_components(%{hold: hold}, stamp) when is_binary(stamp),
+    do: Enum.filter(@components, &MapSet.member?(hold[&1], stamp))
+
+  def held_components(_markers, _stamp), do: []
 
   @doc """
   The stamp `component`'s last-good marker names, or `nil`. The app keeps one

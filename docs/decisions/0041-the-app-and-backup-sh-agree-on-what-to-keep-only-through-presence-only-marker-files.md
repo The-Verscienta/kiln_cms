@@ -118,6 +118,9 @@ The contract is two marker names in `db/` and `media/`, and nothing else:
 ## When to revisit
 
 - If a third marker is needed, or a marker needs to say more than "keep",
-  the presence-only rule is the first thing to weigh against it.
+  the presence-only rule is the first thing to weigh against it. A third
+  one came with a schedule's keep settings: `kiln-<stamp>.hold`, weighed and
+  kept presence-only in
+  [ADR 0062](0062-a-schedules-keep-holds-reach-backup-sh-through-a-third-presence-only-marker.md).
 - If `backup.sh` ever ships inside the release image and runs from there,
   the separate-upgrade problem this record works around goes away.

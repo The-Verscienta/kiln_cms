@@ -1,5 +1,5 @@
 defmodule KilnCMS.Backups.MarkersTest do
-  @moduledoc "The `.keep` and `.good` markers as the Backups page reads them (#2542)."
+  @moduledoc "The `.keep`, `.good` and `.hold` markers as the Backups page reads them (#2542)."
   use ExUnit.Case, async: true
 
   alias KilnCMS.Backups.Markers
@@ -51,10 +51,27 @@ defmodule KilnCMS.Backups.MarkersTest do
     assert Markers.last_good(Markers.read(dir), :db) == "20260901-031700"
   end
 
+  test "reads hold markers per directory (#2219)", %{dir: dir} do
+    touch(dir, "db", "kiln-20260801-031700.hold")
+    touch(dir, "db", "kiln-20260802-031700.hold")
+    touch(dir, "media", "kiln-20260802-031700.hold")
+
+    markers = Markers.read(dir)
+
+    assert Markers.held_components(markers, "20260801-031700") == [:db]
+    assert Markers.held_components(markers, "20260802-031700") == [:db, :media]
+    assert Markers.held_components(markers, "20260803-031700") == []
+    assert Markers.held_components(markers, nil) == []
+    # A hold is neither a recovery point nor a last-good marker.
+    refute Markers.recovery_point?(markers, "20260801-031700")
+    assert Markers.last_good(markers, :db) == nil
+  end
+
   test "marker-shaped names with a bad stamp are ignored", %{dir: dir} do
     touch(dir, "db", "kiln-2026-08-01.keep")
     touch(dir, "db", "kiln-latest.good")
     touch(dir, "db", "other-20260801-031700.good")
+    touch(dir, "db", "kiln-db-20260801-031700.hold")
 
     assert Markers.read(dir) == Markers.empty()
   end

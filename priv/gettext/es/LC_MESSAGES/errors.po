@@ -121,6 +121,11 @@ msgstr "debe tener de 1 a 63 letras minúsculas, dígitos o guiones, y no puede 
 msgid "must be accepted"
 msgstr "debe ser aceptado"
 
+#: lib/kiln_cms/backups/schedule/validations/keep_covers_interval.ex
+#, elixir-autogen, elixir-format
+msgid "must be at least as long as the schedule's interval, unless a number of backups to keep is set"
+msgstr "debe ser al menos tan largo como el intervalo de la programación, salvo que se defina un número de copias que conservar"
+
 msgid "must be equal to %{number}"
 msgstr "debe ser igual a %{number}"
 
@@ -135,6 +140,11 @@ msgstr "debe ser menor que %{number}"
 
 msgid "must be less than or equal to %{number}"
 msgstr "debe ser menor o igual que %{number}"
+
+#: lib/kiln_cms/backups/schedule/validations/interval_available.ex
+#, elixir-autogen, elixir-format
+msgid "schedules more often than daily aren't available yet; choose daily or longer"
+msgstr "las programaciones más frecuentes que una vez al día aún no están disponibles; elige diaria o más larga"
 
 msgid "should be %{count} byte(s)"
 msgid_plural "should be %{count} byte(s)"
@@ -180,8 +190,3 @@ msgid "should have at most %{count} item(s)"
 msgid_plural "should have at most %{count} item(s)"
 msgstr[0] "debe tener como máximo %{count} elemento"
 msgstr[1] "debe tener como máximo %{count} elementos"
-
-#: lib/kiln_cms/backups/schedule/validations/interval_available.ex
-#, elixir-autogen, elixir-format
-msgid "sub-daily schedules arrive with keep-N retention; choose daily or longer"
-msgstr "las programaciones más frecuentes que una vez al día llegarán con la retención de las N últimas; elige diaria o más larga"

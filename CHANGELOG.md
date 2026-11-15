@@ -101,6 +101,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new nullable `users.totp_secret_encrypted` and `users.totp_pending_secret_encrypted`). About 10 minutes after boot a job moves authenticator-app secrets out of the plaintext columns; to roll back after that, first run `KilnCMS.Accounts.TotpSecretBackfill.revert()` on a node of this release.**
   ([long form](docs/changelog/unreleased.md#totp-secrets-encrypted-upgrade))
 
+- **Before a backup schedule keeps backups past `BACKUP_KEEP_DAYS`, replace `scripts/backup.sh` on every host where cron prunes: an older copy ignores the new `kiln-<stamp>.hold` markers and deletes them. Set keep values after a rolling deploy finishes. No migration; rolling back is safe.**
+  ([#2930](https://github.com/The-Verscienta/kiln_cms/pull/2930) · [long form](docs/changelog/unreleased.md#backup-schedule-keep-upgrade))
+
 ### Breaking
 
 - **`/ws/gql` refuses a connect whose token does not verify (expired, revoked, garbled JWT, or a `kiln_` API key), with a `403` handshake, where it connected as anonymous; `KILN_API_REJECT_INVALID_BEARER=false` restores that.**
@@ -119,8 +122,11 @@ Every summary line below that was shortened links to its own entry there.
 - **A reference field can limit which records may be added to it (`selection` on its definition: states, "only mine", and per target type tags, category and custom-field values), enforced on every write path and reported by `GET /api/schema`; groundwork for the filtered picker, no editor yet ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)). Run `mix ash.migrate`.**
   ([long form](docs/changelog/unreleased.md#reference-selection-foundation))
 
-- **In-app backup schedules (part of #2219): daily, weekly, every 2 weeks or monthly at a local time, managed by platform admins on the new Schedule tab of Backups (or from a release console). Sub-daily intervals wait for keep-N retention.**
+- **In-app backup schedules (part of #2219): daily, weekly, every 2 weeks or monthly at a local time, managed by platform admins on the new Schedule tab of Backups (or from a release console). Sub-daily intervals aren't available yet.**
   ([long form](docs/changelog/unreleased.md#backup-schedules))
+
+- **A backup schedule can keep its newest N backups however old (Keep the newest) and keep its own backups longer or shorter than `BACKUP_KEEP_DAYS` (Keep for (days)); `backup.sh prune` honors them through new `kiln-<stamp>.hold` markers (part of #2219).**
+  ([#2930](https://github.com/The-Verscienta/kiln_cms/pull/2930) · [long form](docs/changelog/unreleased.md#backup-schedule-keep))
 
 - **Webhook endpoints can post the site's security alerts into a Slack channel (or Mattermost, Rocket.Chat, Discord's `/slack`): choose Format → Slack (incoming webhook) when adding one. It takes security events only and has no signing secret to copy.**
   ([long form](docs/changelog/unreleased.md#slack-webhook-format))
@@ -165,6 +171,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2907](https://github.com/The-Verscienta/kiln_cms/pull/2907) · [long form](docs/changelog/unreleased.md#invalid-bearer-metric))
 
 ### Changed
+
+- **Backups Schedule tab: a save refused by another admin's change keeps the form open beside what you typed; "Last scheduled run" opens that run's History row; a weekday-only scheduler cron no longer warns all weekend; a demoted admin is sent to access-denied.**
+  ([#2930](https://github.com/The-Verscienta/kiln_cms/pull/2930) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-2875))
 
 - **Node moves from 22.23.3 to 22.23.5 for building assets, in CI and in the release image (`.tool-versions`, Dockerfile `NODE_VERSION`). A project that builds Kiln from source should move its own `.tool-versions` to match.**
   ([#2927](https://github.com/The-Verscienta/kiln_cms/pull/2927) · [long form](docs/changelog/unreleased.md#node-22-23-5))

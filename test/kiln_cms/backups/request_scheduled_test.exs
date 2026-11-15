@@ -157,6 +157,46 @@ defmodule KilnCMS.Backups.RequestScheduledTest do
       assert scope.schedule_ids == [s.id]
     end
 
+    test "a manual request folding into a queued scheduled one wins the trigger (#2219)" do
+      {:ok, %{status: :started}} = request()
+      s = due!()
+      {:ok, %{status: :queued}} = fire(s.id)
+      assert %{waiting_trigger: "schedule"} = lock()
+
+      assert {:ok, %{status: :folded}} = request(components: [:db])
+
+      # The schedule's scope survives the fold; only the trigger changes, so
+      # the run is not counted as the schedule's own.
+      row = lock()
+      assert row.waiting_trigger == "manual"
+      assert Chain.waiting_scope(row).schedule_ids == [s.id]
+    end
+
+    test "a scheduled request folding into a queued manual one keeps the manual trigger (#2219)" do
+      {:ok, %{status: :started}} = request()
+      {:ok, %{status: :queued}} = request(components: [:db])
+      s = due!()
+
+      assert {:ok, %{status: :folded}} = fire(s.id)
+
+      row = lock()
+      assert row.waiting_trigger == "manual"
+      assert Chain.waiting_scope(row).schedule_ids == [s.id]
+    end
+
+    test "two scheduled requests folding together keep the schedule trigger (#2219)" do
+      {:ok, %{status: :started}} = request()
+      a = due!()
+      {:ok, %{status: :queued}} = fire(a.id)
+      b = due!(%{time_of_day: ~T[02:00:00]})
+
+      assert {:ok, %{status: :folded}} = fire(b.id)
+
+      row = lock()
+      assert row.waiting_trigger == "schedule"
+      assert Enum.sort(Chain.waiting_scope(row).schedule_ids) == Enum.sort([a.id, b.id])
+    end
+
     test "W-e: two schedules due together make one request and one start job; both windows claimed" do
       a = due!()
       b = due!(%{time_of_day: ~T[02:00:00]})

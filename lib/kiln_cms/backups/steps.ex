@@ -1227,7 +1227,8 @@ defmodule KilnCMS.Backups.Steps do
 
   # Before the off-site copy, as it always ran (#2481): this run's
   # `.work/<stamp>` exists, so `Retention` counts it in flight and never
-  # touches it. A retention that can't see the backup history deletes nothing
+  # touches it (nor counts it toward a schedule's keep count: N kept plus
+  # this one until the next prune, #2219). A retention that can't see the backup history deletes nothing
   # and says so on the run; the backup's own outcome does not change.
   defp prune_step(ctx, state, rec) do
     rec =
@@ -1326,7 +1327,8 @@ defmodule KilnCMS.Backups.Steps do
     File.rm_rf(ctx.work_dir)
 
     # Once `.work/<stamp>` is gone this run is no longer in flight, so it can
-    # be the newest verified backup: its `.good` markers are written now,
+    # be the newest verified backup, and count toward its schedules' keep
+    # count: its `.good` markers (and the `.hold` markers, #2219) are written now,
     # under the lock, so a later run that fails leaving a newer complete set
     # can't get the cron prune to take this one. Total; nothing it does
     # changes the backup's outcome. It runs the importer first, so a

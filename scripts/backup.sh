@@ -9,8 +9,9 @@
 #   ./scripts/backup.sh verify   # sanity-check every file of the newest backup(s)
 #   ./scripts/backup.sh prune    # delete backups older than $BACKUP_KEEP_DAYS,
 #                                # except recovery points (kiln-<stamp>.keep),
-#                                # last-good backups (kiln-<stamp>.good), the
-#                                # newest complete one, and work in flight;
+#                                # last-good backups (kiln-<stamp>.good),
+#                                # backups a schedule holds (kiln-<stamp>.hold),
+#                                # the newest complete one, and work in flight;
 #                                # and the .partial files of a run killed
 #                                # outright, once every file of its stamp is
 #                                # 12 hours old
@@ -1418,6 +1419,11 @@ cmd_verify() {
 #     entry) in ITS OWN directory, so db/kiln-<stamp>.good keeps the dump and
 #     not the media of that stamp. The app writes it on the newest backup its
 #     run history says verified, and moves it; prune never removes one.
+#   - an in-app schedule holds it: `kiln-<stamp>.hold` (any kind of entry) in
+#     ITS OWN directory, like `.good`. The app writes one on every unit a
+#     schedule's keep count or keep days keep (which may be longer than
+#     KEEP_DAYS), and removes it once they no longer do; prune never removes
+#     one.
 #   - it is in flight: `.work/<stamp>` exists, or one of its `.partial` files is
 #     younger than 60 minutes (the app's partial grace).
 #   - it is the newest COMPLETE unit of its kind (see unit_complete) that is
@@ -1426,7 +1432,8 @@ cmd_verify() {
 #
 # The app also keeps anything its run history says is running; this script has
 # no database, so it cannot, and it knows the newest VERIFIED backup only
-# through the `.good` marker the app keeps on it. It never deletes a symlink,
+# through the `.good` marker the app keeps on it, and what the schedules keep
+# only through the `.hold` markers. It never deletes a symlink,
 # a directory, or a file that is no unit's member. Only regular files count,
 # judged with `find` (`[ -f ]` follows symlinks).
 #
@@ -1583,6 +1590,17 @@ is_last_good() {
   fi
 }
 
+# Whether an in-app schedule holds unit ($1 = kind, $2 = stamp): an entry named
+# `kiln-<stamp>.hold` (of any kind) in the listing of that kind's own directory,
+# as for is_last_good.
+is_held() {
+  if [ "$1" = db ]; then
+    has_line "$PRUNE_DB_NAMES" "kiln-${2}.hold"
+  else
+    has_line "$PRUNE_MEDIA_NAMES" "kiln-${2}.hold"
+  fi
+}
+
 # Whether unit ($2 = kind, $3 = stamp) in $1 has a `.partial` younger than the
 # 60-minute grace. Fails closed: if `find` itself fails, the unit counts as in
 # flight.
@@ -1709,6 +1727,7 @@ cmd_prune() {
       [ -n "$members" ] || continue
       is_pinned "$stamp" && continue
       is_last_good "$kind" "$stamp" && continue
+      is_held "$kind" "$stamp" && continue
       in_flight "$dir" "$kind" "$stamp" && continue
       [ "$stamp" = "$newest" ] && continue
 

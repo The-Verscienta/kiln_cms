@@ -174,9 +174,12 @@ defmodule KilnCMS.Backups.Lock do
     end
 
     # The caller (`Chain`) works out what the queued request covers once this
-    # one folds into it; the scope is re-stamped in the same statement.
+    # one folds into it; the scope is re-stamped in the same statement. The
+    # trigger changes only when a request that is not a schedule's folds into
+    # a scheduled one (#2219): the run is then not the schedule's alone, so
+    # its retention must not be the schedule's.
     update :fold do
-      accept [:waiting_components, :waiting_scheduled, :waiting_schedule_ids]
+      accept [:waiting_trigger, :waiting_components, :waiting_scheduled, :waiting_schedule_ids]
       change atomic_update(:waiting_folds, expr(waiting_folds + 1))
       change atomic_update(:waiting_scope_folds, expr(waiting_folds + 1))
       change atomic_update(:waiting_scope_at, expr(waiting_requested_at))

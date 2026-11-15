@@ -5,8 +5,8 @@ defmodule KilnCMS.Backups.Schedule.Audit do
   keys are in `KilnCMS.Security.InstanceEvent`'s allowlist, at most eight.
 
   Values are scalars: components joined (`"db,media"`), atoms and dates as
-  text, `time_of_day` as `HH:MM`. The keep fields are not editable yet (#2219,
-  part 3) but are recorded, so the events need no new keys when they are.
+  text, `time_of_day` as `HH:MM`. The keep fields (#2219) are recorded on
+  every event, before and after on a change; `nil` is "not set".
   """
 
   @compared [:components, :interval, :time_of_day, :starts_on, :time_zone, :enabled]

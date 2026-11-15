@@ -517,8 +517,11 @@ In-app backup schedules (part of #2219). Instance-wide and tenant-less, gated
 on the global role (`Accounts.Checks.PlatformAdmin`), never `OrgAdmin`. A
 platform admin manages schedules, each change audited in the instance security
 log (`backup_schedule_created`, `backup_schedule_changed`,
-`backup_schedule_deleted`); `create` and `update` accept none of the window
-fields, `baseline_at` or the keep fields. The window writes are the
+`backup_schedule_deleted`); `create` and `update` accept the keep fields
+(`keep_count`, `keep_days`, #2219) but none of the window fields or
+`baseline_at`. Retention reads every schedule, paused ones included, as the
+`:backups` system actor with `authorize_with: :error`, so a refused read
+deletes nothing. The window writes are the
 scheduler's (`Backups.system/0`), so no person can mark a window claimed,
 refused or waiting. Not exposed through GraphQL, JSON:API or MCP. Why a
 claimed window is never asked for again is argued in
