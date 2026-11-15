@@ -52,6 +52,11 @@ custom classes must fully style the input
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts
   - You must import the vendor deps into app.js and app.css to use them
   - **Never write inline <script>custom js</script> tags within templates**
+- For questions about HTML, CSS, or browser APIs (`<dialog>`, the Popover API, anchor positioning, container queries, Core Web Vitals, Baseline support), [Modern Web Guidance](https://developer.chrome.com/docs/modern-web-guidance) is a useful reference. Where it disagrees with this repo, the repo wins:
+  - LiveView owns the DOM, and a patch removes attributes and classes set on the client. Open and close native `dialog`/popover state through `JS` commands or `liveSocket.js()`, not by setting `open` directly.
+  - Sign-in and passkeys go through ash_authentication and `KilnCMSWeb.AuthOverrides`. Never hand-roll a WebAuthn flow.
+  - Components follow `docs/design-language.md`.
+- **If you install the Modern Web Guidance CLI or skills, set `DISABLE_TELEMETRY=1` first.** By default its `search` command sends each query it gets to Google, along with the guide IDs it retrieves and which agent made the call. The install command also reports itself. Put `export DISABLE_TELEMETRY=1` in `~/.zshenv` (zsh reads it in non-interactive shells too) or in your shell's equivalent, then restart any shells and agent sessions that are already running.
 
 ### UI/UX & design guidelines
 
