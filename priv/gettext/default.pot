@@ -840,6 +840,11 @@ msgstr ""
 msgid "%{field} has no simple value to copy"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} is %{values}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{field} is empty"
@@ -3969,6 +3974,7 @@ msgstr ""
 msgid "Archive this release? Its pending items are freed for other releases."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -5010,6 +5016,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
 msgid "Category"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Category %{name}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
@@ -7100,6 +7111,11 @@ msgstr ""
 msgid "Create your first page or post to get started."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Created by you"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Created via API key %{name}"
@@ -8127,6 +8143,7 @@ msgid "Downloadable document, e.g. a PDF"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -11310,6 +11327,7 @@ msgstr ""
 msgid "In one sentence:"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -15276,6 +15294,11 @@ msgstr ""
 msgid "Only editors and admins see this"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Only offering: %{conditions}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only one %{source}"
@@ -16713,6 +16736,7 @@ msgid "Publish this release now? Every item goes live together — or, if any on
 msgstr ""
 
 #: lib/kiln_cms/notifications.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
@@ -20810,6 +20834,11 @@ msgstr ""
 msgid "State:"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "State: %{states}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -21252,6 +21281,11 @@ msgstr[1] ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Tagged %{ok}; %{failed} couldn't be updated."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Tagged %{tags}"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
@@ -23404,6 +23438,11 @@ msgid_plural "This field needs at least %{count} rows."
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "This field only accepts records that match: %{conditions}."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/form_controller.ex
 #, elixir-autogen, elixir-format
 msgid "This form doesn't exist or no longer takes submissions."
@@ -23601,6 +23640,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/token_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "This preview link has expired"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "This record isn't one %{field} accepts, so %{type} records can't connect to it."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
@@ -28199,6 +28243,7 @@ msgstr ""
 msgid "options must be unique"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "or"

@@ -117,6 +117,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldWidgets
+  alias KilnCMS.CMS.ReferenceSelection
   alias KilnCMSWeb.ContentEditor.ReferenceValues
 
   @page_size 20
@@ -152,6 +153,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
      |> assign(:known, %{})
      |> assign(:ids, nil)
      |> assign(:creatable, nil)
+     |> assign(:summary, nil)
+     |> assign(:plans, nil)
      |> assign(:candidates, nil)
      |> assign(:creating, nil)
      |> assign(:announcement, "")}
@@ -190,6 +193,18 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     socket =
       if socket.assigns.creatable == nil,
         do: assign(socket, :creatable, creatable(socket.assigns)),
+        else: socket
+
+    # The selection's read plan per target type, resolved once: resolving it
+    # reads tags, categories and field definitions, which a keystroke must not.
+    socket =
+      if socket.assigns.plans == nil,
+        do: assign(socket, :plans, plans(socket.assigns)),
+        else: socket
+
+    socket =
+      if socket.assigns.summary == nil,
+        do: assign(socket, :summary, summary(socket.assigns)),
         else: socket
 
     # The dropdown widget's options: read once, like `creatable` (#2284).
@@ -509,15 +524,21 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
     ct
     |> ContentTypes.list!(
-      actor: actor,
-      tenant: tenant,
-      query:
-        search_filters("", excluded_ids(exclude, ct, definition)) ++
-          [
-            select: [:id, :title, :state, :slug, :updated_at],
-            sort: [title: :asc, id: :asc],
-            limit: limit
-          ]
+      selected(
+        [
+          actor: actor,
+          tenant: tenant,
+          query:
+            search_filters("", excluded_ids(exclude, ct, definition)) ++
+              [
+                select: [:id, :title, :state, :slug, :updated_at],
+                sort: [title: :asc, id: :asc],
+                limit: limit
+              ]
+        ],
+        socket.assigns.plans,
+        ct
+      )
     )
     |> Enum.map(&{&1, ct})
   end
@@ -584,7 +605,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> read_type(ct, query, exclude, offset + @page_size + 1, 0)
       |> Enum.map(&{&1, ct})
     end)
-    |> sort_merged(query)
+    |> sort_merged(query, socket.assigns.definition)
     |> Enum.drop(offset)
     |> Enum.take(@page_size + 1)
   end
@@ -592,25 +613,125 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   defp read_type(socket, ct, query, exclude, limit, offset) do
     %{definition: definition, tenant: tenant, actor: actor} = socket.assigns
 
-    ContentTypes.list!(ct,
-      actor: actor,
-      tenant: tenant,
-      query:
-        search_filters(query, excluded_ids(exclude, ct, definition)) ++
-          [
-            select: [:id, :title, :state, :slug, :updated_at],
-            sort: search_sort(query),
-            limit: limit,
-            offset: offset
-          ]
+    ContentTypes.list!(
+      ct,
+      selected(
+        [
+          actor: actor,
+          tenant: tenant,
+          query:
+            search_filters(query, excluded_ids(exclude, ct, definition)) ++
+              [
+                select: [:id, :title, :state, :slug, :updated_at],
+                sort: search_sort(query, definition),
+                limit: limit,
+                offset: offset
+              ]
+        ],
+        socket.assigns.plans,
+        ct
+      )
     )
   end
 
-  defp sort_merged(rows, query) do
-    if String.trim(query) == "",
+  # The field's `selection` (#2285) as one more AND on this read — the same
+  # evaluator, and the same read action, as the save-time check, so the
+  # picker cannot offer what a save refuses. It only narrows: the read still
+  # runs as the actor, whose policy decides what can be found at all. The
+  # reverse field's synthetic definition carries none.
+  defp plans(%{definition: definition, tenant: tenant, actor: actor}) do
+    for ct <- target_types(definition, tenant), into: %{} do
+      {:ok, plan} =
+        ReferenceSelection.query_for(Map.get(definition, :selection), ct.type, actor, tenant)
+
+      {to_string(ct.type), plan}
+    end
+  end
+
+  defp selected(opts, plans, ct),
+    do: ReferenceSelection.read_opts(opts, Map.get(plans, to_string(ct.type), :unfiltered))
+
+  # What the active selection reads as, once per picker: a list of short
+  # phrases for the footer and the empty state, or `:none` when the field has
+  # no selection (or nothing live is left of it).
+  defp summary(%{definition: definition, tenant: tenant}) do
+    targets = FieldDefinition.reference_targets(definition)
+
+    with selection when not is_nil(selection) <- Map.get(definition, :selection),
+         %{} = described <- ReferenceSelection.describe(selection, targets, tenant),
+         [_ | _] = phrases <- phrases(described, definition, tenant) do
+      phrases
+    else
+      _none -> :none
+    end
+  end
+
+  defp phrases(described, definition, tenant) do
+    labels = definition |> target_types(tenant) |> Map.new(&{to_string(&1.type), &1.label})
+
+    states =
+      case described.states do
+        [] ->
+          []
+
+        states ->
+          [gettext("State: %{states}", states: Enum.map_join(states, ", ", &state_name/1))]
+      end
+
+    owner = if described.owner == :self, do: [gettext("Created by you")], else: []
+
+    typed =
+      for {type, entry} <- Enum.sort(described.by_type),
+          condition <- type_phrases(entry) do
+        label = Map.get(labels, type, type)
+
+        if map_size(described.by_type) > 1 or ReferenceValues.polymorphic?(definition),
+          do: "#{label}: #{condition}",
+          else: condition
+      end
+
+    states ++ owner ++ typed
+  end
+
+  defp type_phrases(entry) do
+    tags =
+      if entry.tags == [],
+        do: [],
+        else: [
+          gettext("Tagged %{tags}", tags: Enum.join(entry.tags, " " <> gettext("or") <> " "))
+        ]
+
+    category =
+      if entry.category, do: [gettext("Category %{name}", name: entry.category)], else: []
+
+    fields =
+      for {label, values} <- entry.fields,
+          do:
+            gettext("%{field} is %{values}",
+              field: label,
+              values: Enum.join(values, " " <> gettext("or") <> " ")
+            )
+
+    tags ++ category ++ fields
+  end
+
+  defp state_name("draft"), do: gettext("Draft")
+  defp state_name("in_review"), do: gettext("In review")
+  defp state_name("published"), do: gettext("Published")
+  defp state_name("archived"), do: gettext("Archived")
+
+  defp sort_merged(rows, query, definition) do
+    if recent?(query, definition),
       do: Enum.sort(rows, &newer_first?/2),
       else: Enum.sort_by(rows, fn {record, _ct} -> {record.title || "", record.id} end)
   end
+
+  # A blank search lists newest first unless the field's selection sorts by
+  # title; a typed one is always by title.
+  defp recent?(query, definition),
+    do:
+      String.trim(query) == "" and
+        ReferenceSelection.sort(Map.get(definition, :selection)) == "recent"
 
   defp newer_first?({a, _}, {b, _}) do
     case DateTime.compare(a.updated_at, b.updated_at) do
@@ -654,8 +775,10 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     text ++ picked
   end
 
-  defp search_sort(query) do
-    if String.trim(query) == "", do: [updated_at: :desc, id: :asc], else: [title: :asc, id: :asc]
+  defp search_sort(query, definition) do
+    if recent?(query, definition),
+      do: [updated_at: :desc, id: :asc],
+      else: [title: :asc, id: :asc]
   end
 
   # Title, type and state for the picked ids this component hasn't seen yet,
@@ -965,6 +1088,19 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           </li>
           <li :if={@results == []} role="presentation" class="px-3 py-2 text-sm text-base-content/60">
             {no_results_label(@query)}
+            <span :if={@summary != :none and String.trim(@query) == ""} id={"#{@root}-filter-empty"}>
+              {gettext("This field only accepts records that match: %{conditions}.",
+                conditions: Enum.join(@summary, "; ")
+              )}
+            </span>
+          </li>
+          <li
+            :if={@summary != :none and not (@results == [] and String.trim(@query) == "")}
+            id={"#{@root}-filter"}
+            role="presentation"
+            class="border-t border-base-content/10 px-3 py-1.5 text-xs text-base-content/70"
+          >
+            {gettext("Only offering: %{conditions}", conditions: Enum.join(@summary, "; "))}
           </li>
         </ul>
         <p id={"#{@root}-status"} class="sr-only" aria-live="polite">

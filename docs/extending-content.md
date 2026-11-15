@@ -1667,10 +1667,9 @@ Why the input is an editor-only setting apart from **Editing**, and why a named 
 
 Starting point: a top-level reference field, and a reason to keep some records
 out of it (only published ones, only the writer's own, only pages tagged
-"recipes"). **Until the picker change ships (#2285, part 2) there is no admin
-screen and the picker does not apply the filter, so set it only through the
-API or a seed, and configure it only together with that picker change:** until
-then the picker offers targets a save refuses.
+"recipes"). The editor's picker, the dropdown widget and the reverse field
+apply it (#2285, part 2). There is no admin screen for it yet (part 3), so set
+it through the API or a seed.
 
 1. Update the field definition's `selection` as an admin. In a seed or the
    console:
@@ -1707,7 +1706,13 @@ then the picker offers targets a save refuses.
    import). A target the filter rejects fails the save on that field, for
    example `“Only a draft” isn't one of the records this field accepts.`
    (or `… aren't among the records this field accepts.` for several).
-3. Read it back: `GET /api/schema` reports the live selection as
+3. In the editor, the picker's search and the dropdown list only the records
+   the field accepts, newest first (or by title with `sort: "title"`). A
+   footer in the open list names the active conditions ("Only offering: State:
+   Published; Created by you"), and an empty list says why. On the target's
+   own page, the reverse field offers no add control when the field would
+   refuse that record, and says so. Existing connections show as before.
+4. Read it back: `GET /api/schema` reports the live selection as
    `x-kiln-selection` on the field, tag and category as ids.
 
 What to know before relying on it:

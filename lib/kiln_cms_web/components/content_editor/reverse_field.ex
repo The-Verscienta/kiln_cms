@@ -57,7 +57,8 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
      |> assign(:offset, 0)
      |> assign(:errors, %{})
      |> assign(:notice, nil)
-     |> assign(:capacity, nil)}
+     |> assign(:capacity, nil)
+     |> assign(:accepts?, true)}
   end
 
   # A pick (or an "Add new" record) from the add control, sent here by the
@@ -226,6 +227,32 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
       |> assign(:ids, page.ids)
       |> assign(:link_fields, FieldDefinition.link_fields(reverse.definition))
       |> assign(:capacity, capacity(record, reverse, actor, tenant))
+      |> assign(:accepts?, accepts?(record, reverse, actor, tenant))
+    end
+  end
+
+  # Whether the field's `selection` (#2285) lets the actor connect this record
+  # from the other side. The filter is about the *target* — the record shown
+  # here — and the source's own write enforces it, so an add that would be
+  # refused is disabled instead of offered. Checked when the list loads, by
+  # the same read the save uses.
+  defp accepts?(record, %{definition: definition}, actor, tenant) do
+    case Map.get(definition, :selection) do
+      nil ->
+        true
+
+      selection ->
+        case ContentTypes.type_name_for(record) do
+          nil ->
+            true
+
+          type ->
+            [record.id] ==
+              CMS.ReferenceSelection.accepted_ids(selection, type, [record.id],
+                actor: actor,
+                tenant: tenant
+              )
+        end
     end
   end
 
@@ -365,7 +392,19 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
         )}
       </p>
 
-      <div :if={@actor && not full?(@capacity)} class="mt-2">
+      <p
+        :if={@actor && not full?(@capacity) && not @accepts?}
+        id={"#{@root}-not-accepted"}
+        class="mt-2 flex items-center gap-1.5 text-xs text-base-content/70"
+      >
+        <.icon name="hero-no-symbol" class="size-3.5 shrink-0" />
+        {gettext("This record isn't one %{field} accepts, so %{type} records can't connect to it.",
+          field: @reverse.definition.label,
+          type: @reverse.source_label
+        )}
+      </p>
+
+      <div :if={@actor && not full?(@capacity) && @accepts?} class="mt-2">
         <.live_component
           module={ReferencePicker}
           id={"#{@root}-add"}
