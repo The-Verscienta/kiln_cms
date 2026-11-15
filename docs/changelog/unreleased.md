@@ -1195,6 +1195,20 @@ carries the reasoning.
 
 ## Changed
 
+<a id="node-22-23-5"></a>
+
+- **Node moves from 22.23.3 to 22.23.5 for building assets, in CI and in the release image.**
+  The example Astro site's astro 7.4.7 (and its `@astrojs/prism` and
+  `@astrojs/telemetry`) require Node `>=22.23.4`, and `astro check` refuses
+  to run on anything older, so the JS client job could not take that bump
+  (#2908). `.tool-versions` (`nodejs`, which CI's setup-node reads) and the
+  Dockerfile's `NODE_VERSION` move together, as `mix kiln.toolchain.check`
+  requires; 22.23.5 is the newest Node 22 patch release. Node only builds
+  the assets and is not in the running release. A Docker deploy needs
+  nothing; a downstream project that builds
+  Kiln from source should move its own `.tool-versions` to the same
+  version. (#2927)
+
 <a id="form-field-name-website-reserved"></a>
 
 - **No form field of any type can be named `website` any more, and the form builder flags a field that already is.**
