@@ -11,6 +11,7 @@ defmodule KilnCMS.Keys.VaultRotationTest do
 
   alias KilnCMS.Keys.Vault
   alias KilnCMS.Keys.Vault.Ciphertext
+  alias KilnCMS.Keys.Vault.EncryptedBinary
 
   @old "old-secret-key-base-" <> String.duplicate("o", 64)
   @new "new-secret-key-base-" <> String.duplicate("n", 64)
@@ -103,7 +104,10 @@ defmodule KilnCMS.Keys.VaultRotationTest do
       {KilnCMS.Federation.SiteFederation, :private_key_encrypted},
       {KilnCMS.Mail.Settings, :dkim_private_key_encrypted},
       {KilnCMS.Provenance.Settings, :private_key_encrypted},
-      {KilnCMS.Social.Account, :credential_encrypted}
+      {KilnCMS.Social.Account, :credential_encrypted},
+      # `Vault.EncryptedBinary`: plaintext in memory, ciphertext in the column.
+      {KilnCMS.Accounts.User, :totp_secret},
+      {KilnCMS.Accounts.User, :totp_pending_secret}
     ]
 
     test "discovery finds every column the vault writes" do
@@ -119,8 +123,10 @@ defmodule KilnCMS.Keys.VaultRotationTest do
         "a SHA-256 digest of the mailed token, not ciphertext",
       {KilnCMS.Accounts.Passkey, :public_key} => "a public COSE key",
       {KilnCMS.Accounts.ThrottleCounter, :key_hash} => "a SHA-256 hash of a throttle key",
-      {KilnCMS.Accounts.User, :totp_secret} => "stored raw, not through the vault",
-      {KilnCMS.Accounts.User, :totp_pending_secret} => "stored raw, not through the vault"
+      {KilnCMS.Accounts.User, :legacy_totp_secret} =>
+        "the plaintext column from before the TOTP secrets were encrypted, emptied by the backfill",
+      {KilnCMS.Accounts.User, :legacy_totp_pending_secret} =>
+        "the plaintext column from before the TOTP secrets were encrypted, emptied by the backfill"
     }
 
     test "every binary attribute is vault ciphertext or accounted for" do
@@ -134,7 +140,7 @@ defmodule KilnCMS.Keys.VaultRotationTest do
 
       unaccounted =
         for {resource, name, type} <- binary_attributes,
-            type != Ciphertext,
+            type not in [Ciphertext, EncryptedBinary],
             not Map.has_key?(@not_vault, {resource, name}),
             do: {resource, name}
 

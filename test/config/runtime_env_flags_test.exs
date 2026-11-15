@@ -74,6 +74,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
             KILN_IMAGE_TRANSFORM_AUTO_AVIF
             KILN_METRICS_ENABLED KILN_METRICS_PORT KILN_METRICS_BIND KILN_METRICS_TOKEN
+            OTEL_EXPORTER_OTLP_ENDPOINT OTEL_EXPORTER_OTLP_PROTOCOL OTEL_SERVICE_NAME
             PUBLIC_BASE_URL PHX_HOST TENANT_BASE_HOST
             RENDER_EXTERNAL_HOSTNAME RAILWAY_PUBLIC_DOMAIN FLY_APP_NAME
           ) ++ Map.keys(@prod_env)
@@ -1278,6 +1279,29 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
                config,
                [:kiln_cms, :config_warnings]
              )
+    end
+  end
+
+  describe "OTEL_EXPORTER_OTLP_ENDPOINT" do
+    test "unset leaves tracing off and the processors alone" do
+      config = eval(%{})
+      refute get_in(config, [:kiln_cms, :otel_enabled])
+      assert get_in(config, [:opentelemetry, :processors]) == nil
+    end
+
+    test "set, the redacting span processor runs first and span_processor stays unset" do
+      config = eval(%{"OTEL_EXPORTER_OTLP_ENDPOINT" => "http://collector:4318"})
+      otel = Keyword.fetch!(config, :opentelemetry)
+
+      assert get_in(config, [:kiln_cms, :otel_enabled]) == true
+
+      assert Keyword.fetch!(otel, :processors) == [
+               {KilnCMSWeb.RedactingSpanProcessor, %{}},
+               {:otel_batch_processor, %{}}
+             ]
+
+      refute Keyword.has_key?(otel, :span_processor)
+      assert KilnCMS.Config.Redaction.otel_problem(true, otel) == nil
     end
   end
 

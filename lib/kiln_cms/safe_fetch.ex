@@ -271,7 +271,7 @@ defmodule KilnCMS.SafeFetch do
         ) ++
         Keyword.get(opts, :req_options, [])
 
-    case Req.request(Req.new(options)) do
+    case request(options) do
       {:ok, %{status: status, headers: headers, body: body}} when is_binary(body) ->
         {:ok, %{status: status, headers: headers, body: body}}
 
@@ -293,6 +293,98 @@ defmodule KilnCMS.SafeFetch do
       {:error, reason} ->
         {:error, "request failed: #{inspect(reason)}"}
     end
+  end
+
+  # A pinned HTTPS request carries the target's hostname in its TLS options
+  # (`connect_target/3`), and Req starts one Finch per distinct set of connect
+  # options, named after their hash, and never stops it. Left to Req, every
+  # hostname ever fetched cost a supervisor tree and several atoms for the life
+  # of the node — and the hostname is the caller's, or an anonymous federation
+  # peer's, to choose. So such a request runs on a Finch of its own, started
+  # under one of a fixed set of names and stopped when the request ends.
+  @pool_slots Enum.map(1..32, &Module.concat(__MODULE__, "Pool#{&1}"))
+  @slot_wait_ms 5_000
+
+  defp request(options) do
+    pinned_tls? =
+      options |> Keyword.get(:connect_options, []) |> Keyword.has_key?(:transport_opts)
+
+    if pinned_tls? and not Keyword.has_key?(options, :plug),
+      do: request_on_private_pool(options),
+      else: Req.request(Req.new(options))
+  end
+
+  @doc false
+  # Public for the test, which cannot reach a pinned TLS request any other way.
+  @spec request_on_private_pool(keyword()) :: {:ok, Req.Response.t()} | {:error, term()}
+  def request_on_private_pool(options) do
+    {connect_options, options} = Keyword.pop(options, :connect_options, [])
+    pool = Req.Finch.pool_options(connect_options: connect_options)
+
+    case start_pool(pool, System.monotonic_time(:millisecond) + @slot_wait_ms) do
+      {:ok, name, pid} ->
+        watcher = watch(pid)
+
+        try do
+          Req.request(Req.new(Keyword.put(options, :finch, name: name)))
+        after
+          send(watcher, :done)
+          stop_pool(pid)
+        end
+
+      :busy ->
+        {:error, :too_many_outbound_requests}
+    end
+  end
+
+  # The name is the lock: a slot whose Finch is running is taken. Unlinked at
+  # once, so a caller that traps exits never sees the pool's `:EXIT`.
+  defp start_pool(pool, deadline) do
+    started =
+      Enum.find_value(Enum.shuffle(@pool_slots), fn name ->
+        case Finch.start_link(name: name, pools: %{default: pool}) do
+          {:ok, pid} ->
+            Process.unlink(pid)
+            {:ok, name, pid}
+
+          {:error, _taken} ->
+            nil
+        end
+      end)
+
+    cond do
+      started ->
+        started
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        :busy
+
+      true ->
+        Process.sleep(25)
+        start_pool(pool, deadline)
+    end
+  end
+
+  # `after` does not run for a caller that is killed (a timed-out task), and
+  # the pool is not linked to it. This stops the pool in that case, so a slot
+  # cannot stay taken by a request nobody is waiting for.
+  defp watch(pool) do
+    caller = self()
+
+    spawn(fn ->
+      ref = Process.monitor(caller)
+
+      receive do
+        :done -> :ok
+        {:DOWN, ^ref, :process, _pid, _reason} -> stop_pool(pool)
+      end
+    end)
+  end
+
+  defp stop_pool(pid) do
+    Supervisor.stop(pid, :normal, 5_000)
+  catch
+    :exit, _reason -> :ok
   end
 
   # `Kiln.SafeFetch`'s test seam. A stub answers the request itself, so no

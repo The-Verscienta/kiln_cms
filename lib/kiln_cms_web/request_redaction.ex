@@ -113,6 +113,21 @@ defmodule KilnCMSWeb.RequestRedaction do
     end
   end
 
+  @doc """
+  `redact_path/1` for a path as it travels in a URL: percent-**encoded**, as a
+  request line, a `Referer` or a trace attribute carries it. Each segment is
+  decoded before it is matched, as for a conn, and the redacted path is
+  rebuilt from the segments as written. Matched at offsets 0 and 1, like a
+  conn. A path that matches nothing comes back byte-identical.
+  """
+  @spec redact_encoded_path(String.t()) :: String.t()
+  def redact_encoded_path(path) when is_binary(path) do
+    case path |> String.split("/", trim: true) |> redact_segments(&decode/1, [0, 1]) do
+      {:redacted, redacted} -> redacted
+      :unchanged -> path
+    end
+  end
+
   @doc "True when the conn's path (or the path string) carries a secret. Options as `redact/2`."
   @spec secret?(Plug.Conn.t() | String.t(), keyword()) :: boolean()
   def secret?(conn_or_path, opts \\ []), do: redact(conn_or_path, opts) != :unchanged

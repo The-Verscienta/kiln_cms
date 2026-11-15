@@ -722,7 +722,11 @@ defmodule Kiln.Updates do
   # no instance id. `target` is a URL or Req options carrying one.
   defp request(target, accept) when is_binary(target), do: request([url: target], accept)
 
-  defp request(target, accept) do
+  @max_redirects 3
+
+  defp request(target, accept), do: request(target, accept, @max_redirects)
+
+  defp request(target, accept, redirects_left) do
     [
       headers: [
         {"accept", accept},
@@ -730,12 +734,34 @@ defmodule Kiln.Updates do
       ],
       # An admin is waiting on the page render; fail fast rather than retry.
       receive_timeout: 10_000,
-      retry: false
+      retry: false,
+      # Followed by hand below, and only on the origin that was asked: the
+      # origin pin on `links.next` is worth nothing if a `302` from the same
+      # endpoint can send this instance's request to any host instead.
+      redirect: false
     ]
     |> Keyword.merge(target)
     |> Keyword.merge(req_options())
     |> Req.request()
+    |> follow_same_origin(Keyword.fetch!(target, :url), accept, redirects_left)
   end
+
+  defp follow_same_origin({:ok, %Req.Response{status: status} = response}, url, accept, left)
+       when status in [301, 302, 303, 307, 308] do
+    with [location | _rest] <- Req.Response.get_header(response, "location"),
+         true <- left > 0,
+         next = url |> URI.merge(location) |> URI.to_string(),
+         true <- feed_origin(next) == feed_origin(url) do
+      request([url: next], accept, left - 1)
+    else
+      _refused -> {:error, :redirected_off_origin}
+    end
+  rescue
+    # `URI.merge/2` raises on a `Location` it cannot parse.
+    _error -> {:error, :redirected_off_origin}
+  end
+
+  defp follow_same_origin(result, _url, _accept, _left), do: result
 
   defp req_options do
     Application.get_env(:kiln_cms, __MODULE__, [])

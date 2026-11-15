@@ -344,6 +344,9 @@ defmodule KilnCMS.Accounts.User do
       # An admin demoting the last admin locks every operator out of `/editor`
       # with no route back through the UI — see the validation module.
       validate KilnCMS.Accounts.Validations.NotLastAdmin
+      # The same question again, in the transaction and under the bootstrap
+      # lock: two admins demoting each other at once both pass the validation.
+      change KilnCMS.Accounts.Changes.GuardLastAdmin
 
       # A standing tier at or above a live temporary one makes the grant
       # meaningless; leaving it on the row would show a countdown that changes
@@ -436,6 +439,7 @@ defmodule KilnCMS.Accounts.User do
       # would see `:admin` or the already-forced `:viewer` depends on which of the
       # two lines below is declared first.
       validate {KilnCMS.Accounts.Validations.NotLastAdmin, demotes?: true}
+      change {KilnCMS.Accounts.Changes.GuardLastAdmin, demotes?: true}
 
       # The registrations system actor may erase only the account a rejection
       # in this transaction has just turned away (#2514). Before the scrub, so
@@ -1085,6 +1089,25 @@ defmodule KilnCMS.Accounts.User do
               reason: :password_reset, after_commit?: true}
     end
 
+    # The same takeover for an unconfirmed account its address's owner reaches
+    # through the identity provider. The provider verified the address, not the
+    # password an earlier registrant chose, so linking as-is would share the
+    # account. System-only, as the magic-link one is: only
+    # `Changes.RegisterWithSso` calls it (`authorize?: false`).
+    update :take_over_by_sso do
+      description "Take over an unconfirmed account its address's owner signed in to through the identity provider (system-only)."
+      accept []
+      require_atomic? false
+
+      change KilnCMS.Accounts.Changes.ClaimUnconfirmedAccount
+      change KilnCMS.Accounts.Changes.RevokeAllTokens
+
+      change {KilnCMS.Accounts.Changes.ForgetPriorCredentials, via: :sso, unconfirmed_only?: true}
+
+      change {KilnCMS.Accounts.Changes.EvictSessions,
+              reason: :password_reset, after_commit?: true}
+    end
+
     update :reset_password_with_token do
       # `ForgiveSignInThrottle` runs an `after_action` hook (it needs the saved
       # record's email), which an atomic update has no place to put.
@@ -1187,6 +1210,9 @@ defmodule KilnCMS.Accounts.User do
       require_atomic? false
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
       change set_attribute(:totp_pending_secret, &KilnCMS.Accounts.Totp.generate_secret/0)
+      # The staged secret is now the encrypted one; a plaintext one left over
+      # from before the encryption would otherwise win the read.
+      change set_attribute(:legacy_totp_pending_secret, nil)
 
       # Not guarded against an invitation's takeover (#2453): a secret staged
       # from a stale session is enforced by nothing until `:confirm_totp`
@@ -1228,7 +1254,13 @@ defmodule KilnCMS.Accounts.User do
       # attacker-held session on the same account could otherwise grind the
       # 6-digit space for that same pending secret and confirm it out from
       # under them. It also budgets grinding of `current_code` below.
-      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
+      #
+      # Every step from here to the code checks runs only on a changeset still
+      # valid (GHSA-4854-24jg-q7j5): a refusal above spends no attempt, and a
+      # spent budget compares neither code. Without that, both validations
+      # still ran past the throttle's refusal and their errors told a right
+      # code from a wrong one — an oracle with no budget at all.
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor, only_when_valid?: true
       # Re-read the staged secret from the DB before the validation and the
       # promotion below both read it off `changeset.data` — a second settings
       # tab may have staged a newer one, leaving this caller's `current_user`
@@ -1236,11 +1268,10 @@ defmodule KilnCMS.Accounts.User do
       # `ValidTotpCode`: changes and validations run in declaration order at
       # build time.
       change KilnCMS.Accounts.Changes.ReloadPendingTotpSecret
-      validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret}
-      # Replacing a live factor needs the outgoing code (or a recovery-code
-      # session) — a bare setup_totp+confirm_totp can no longer swap the secret
-      # silently out from under the owner (#786).
-      validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement
+
+      validate {KilnCMS.Accounts.Validations.ValidTotpCode, secret_field: :totp_pending_secret},
+        only_when_valid?: true
+
       change KilnCMS.Accounts.Changes.PromotePendingTotpSecret
       change set_attribute(:totp_confirmed_at, &DateTime.utc_now/0)
 
@@ -1250,6 +1281,17 @@ defmodule KilnCMS.Accounts.User do
       # waits for it, then finds the staged secret cleared and is refused.
       change {KilnCMS.Accounts.Changes.GuardAccountTakeover,
               user_id: :id, lock: :no_key_update, pending_secret?: true}
+
+      # Replacing a live factor needs the outgoing code (or a recovery-code
+      # session) — a bare setup_totp+confirm_totp can no longer swap the secret
+      # silently out from under the owner (#786). Whether there IS a live factor
+      # is read from the row, after the lock above, never from the struct the
+      # caller passed in: a settings tab mounted before the account enrolled
+      # elsewhere holds `totp_confirmed_at: nil` and would otherwise skip the
+      # check (GHSA-5g35-j8qr-j475). Must stay a `before_action?` validation
+      # declared below `GuardAccountTakeover`.
+      validate KilnCMS.Accounts.Validations.RequireCurrentFactorForReplacement,
+        before_action?: true
 
       change KilnCMS.Accounts.Changes.GenerateRecoveryCodes
 
@@ -1279,13 +1321,22 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      # The code is checked against the stored secret, not the caller's
+      # possibly-stale struct (GHSA-5g35-j8qr-j475). First, above every read.
+      change KilnCMS.Accounts.Changes.ReloadTotpFactor
+
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
       # Above the validation on purpose — see the change's moduledoc. A wrong
       # code is the only one worth charging, and by the time the validation has
-      # rejected it there is no hook left to charge from.
-      change KilnCMS.Accounts.Changes.ThrottleSecondFactor
-      validate KilnCMS.Accounts.Validations.ValidTotpCode
+      # rejected it there is no hook left to charge from. Both run only on a
+      # changeset still valid, as on `:disable_totp`: a refusal spends no
+      # attempt, and a spent budget compares no code (GHSA-4854-24jg-q7j5) —
+      # otherwise the errors past the throttle told the account's CURRENT code
+      # from a wrong one, and a stolen session could recover it and mint
+      # itself recovery codes.
+      change KilnCMS.Accounts.Changes.ThrottleSecondFactor, only_when_valid?: true
+      validate KilnCMS.Accounts.Validations.ValidTotpCode, only_when_valid?: true
 
       # `ValidTotpCode` checks the code against the struct the request loaded,
       # which may hold a factor an invitation's takeover has since removed
@@ -1336,6 +1387,11 @@ defmodule KilnCMS.Accounts.User do
 
       argument :code, :string, allow_nil?: false, sensitive?: true
 
+      # The code is checked against the stored secret, and the columns below
+      # are cleared from what is stored, not from the caller's possibly-stale
+      # struct (GHSA-5g35-j8qr-j475). First, above every read.
+      change KilnCMS.Accounts.Changes.ReloadTotpFactor
+
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
       # Not the last factor while a site requires one (#2247). Ahead of the
@@ -1349,15 +1405,20 @@ defmodule KilnCMS.Accounts.User do
       # session it can only clear the factor columns, which the takeover has
       # already cleared; it signs no one in and grants nothing.
       change set_attribute(:totp_secret, nil)
+      change set_attribute(:legacy_totp_secret, nil)
       change set_attribute(:totp_confirmed_at, nil)
       change set_attribute(:totp_recovery_hashes, [])
       change set_attribute(:totp_pending_secret, nil)
+      change set_attribute(:legacy_totp_pending_secret, nil)
 
       # Audit log (#2241), in the transaction.
       change {KilnCMS.Security.Changes.Record,
               type: :second_factor_removed,
               target: fn record, _changeset -> {"user", record.id} end,
               metadata: fn _record, _changeset -> %{"kind" => "totp"} end}
+
+      # Tell the owner, after the commit.
+      change {KilnCMS.Accounts.Changes.NotifyFactorRemoved, kind: :totp}
     end
   end
 
@@ -1482,6 +1543,11 @@ defmodule KilnCMS.Accounts.User do
       forbid_if always()
     end
 
+    # The identity provider's takeover of an unconfirmed account: the same shape.
+    policy action(:take_over_by_sso) do
+      forbid_if always()
+    end
+
     # The sign-in unlock link (#2250): the same shape again. Forbidden to every
     # authorized caller; `SignInUnlockAction` refuses an actor-carrying call,
     # since the admin bypass above would pass this. The link is the credential.
@@ -1538,7 +1604,8 @@ defmodule KilnCMS.Accounts.User do
           :confirm_new_user,
           :reset_password_with_token,
           :accept_invitation_with_password,
-          :take_over_by_magic_link
+          :take_over_by_magic_link,
+          :take_over_by_sso
         ])
       ]
   end
@@ -1761,12 +1828,30 @@ defmodule KilnCMS.Accounts.User do
       public? true
     end
 
-    # Two-factor (TOTP) secret and enrolment timestamp (issue #331). The raw
-    # secret is stored as bytea; `sensitive?` keeps it out of inspect/logs and
-    # `public? false` keeps both off every API surface — they're read only
-    # internally (by the sign-in gate and the owner's enrolment UI). 2FA is
-    # "enabled" iff `totp_confirmed_at` is set.
-    attribute :totp_secret, :binary do
+    # Two-factor (TOTP) secret and enrolment timestamp (issue #331).
+    # `sensitive?` keeps the secret out of inspect/logs and `public? false`
+    # keeps both off every API surface — they're read only internally (by the
+    # sign-in gate and the owner's enrolment UI). 2FA is "enabled" iff
+    # `totp_confirmed_at` is set.
+    #
+    # Stored as vault ciphertext in `totp_secret_encrypted`, so a dump or backup of the database without
+    # `SECRET_KEY_BASE` carries no working authenticator seed. The struct holds
+    # the plaintext (`Vault.EncryptedBinary`). Read it through
+    # `KilnCMS.Accounts.TotpSecrets.live/1`, which falls back to the legacy
+    # plaintext column below for a row the backfill has not reached.
+    attribute :totp_secret, KilnCMS.Keys.Vault.EncryptedBinary do
+      source :totp_secret_encrypted
+      sensitive? true
+      public? false
+    end
+
+    # The plaintext column the secret lived in before it was encrypted
+    # at rest. Expand/contract: every write of this release
+    # clears it, `KilnCMS.Accounts.TotpSecretBackfill` moves what is left into
+    # `totp_secret_encrypted`, and a later release drops the column. Never set
+    # it to anything but `nil`.
+    attribute :legacy_totp_secret, :binary do
+      source :totp_secret
       sensitive? true
       public? false
     end
@@ -1779,8 +1864,17 @@ defmodule KilnCMS.Accounts.User do
     # enrolment run without touching `totp_secret`/`totp_confirmed_at` until
     # `:confirm_totp` proves the caller holds it and promotes it — so
     # generating one can never by itself weaken or disable an existing,
-    # confirmed factor.
-    attribute :totp_pending_secret, :binary do
+    # confirmed factor. Encrypted like `totp_secret`; read it through
+    # `KilnCMS.Accounts.TotpSecrets.pending/1`.
+    attribute :totp_pending_secret, KilnCMS.Keys.Vault.EncryptedBinary do
+      source :totp_pending_secret_encrypted
+      sensitive? true
+      public? false
+    end
+
+    # The plaintext column the staged secret lived in, as `legacy_totp_secret`.
+    attribute :legacy_totp_pending_secret, :binary do
+      source :totp_pending_secret
       sensitive? true
       public? false
     end

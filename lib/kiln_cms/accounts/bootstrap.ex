@@ -141,8 +141,20 @@ defmodule KilnCMS.Accounts.Bootstrap do
     end
   end
 
-  defp locked_create(changeset) do
+  @doc """
+  Take the bootstrap advisory lock for the current transaction. Everything that
+  decides on "is there an admin?" and then writes takes it: the first-run
+  create here, and a demotion of a standing admin
+  (`KilnCMS.Accounts.Changes.GuardLastAdmin`).
+  """
+  @spec lock!() :: :ok
+  def lock! do
     Repo.query!("SELECT pg_advisory_xact_lock($1)", [@lock_key])
+    :ok
+  end
+
+  defp locked_create(changeset) do
+    lock!()
 
     if bootstrapped?() do
       Repo.rollback(:already_bootstrapped)

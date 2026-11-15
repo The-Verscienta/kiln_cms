@@ -140,6 +140,36 @@ defmodule KilnCMS.CMS.FragmentsTest do
       assert labels(expand([fragment_block(gated)], audiences: [:member])) == ["Members only"]
     end
 
+    # A passphrase lock leaves the audience `:public`, so the audience filter
+    # alone inlined a locked page's body into any unlocked page that embedded
+    # it, for every reader.
+    test "a passphrase-locked target renders nothing, live or historically" do
+      actor = admin()
+
+      locked =
+        CMS.create_page!(
+          %{
+            title: "Locked",
+            slug: "fr-#{uniq()}",
+            blocks: [%{"_type" => "heading", "text" => "Behind the passphrase"}]
+          },
+          actor: actor
+        )
+
+      locked = CMS.publish_page!(locked, %{}, actor: actor)
+      as_of = DateTime.utc_now()
+
+      # Control: unlocked, it inlines both ways.
+      assert labels(expand([fragment_block(locked)])) == ["Behind the passphrase"]
+      assert labels(expand([fragment_block(locked)], as_of: as_of)) == ["Behind the passphrase"]
+
+      CMS.update_page!(locked, %{access_password: "shared secret"}, actor: actor)
+
+      assert expand([fragment_block(locked)]) == []
+      assert expand([fragment_block(locked)], as_of: as_of) == []
+      assert expand([fragment_block(locked)], audiences: [:member]) == []
+    end
+
     # `:audiences` widens on top of `:public`, exactly as `public_by_slug`
     # treats it — an anonymous reader arrives with `[]`, and reading that as
     # "nothing matches" would blank every fragment on the public site.

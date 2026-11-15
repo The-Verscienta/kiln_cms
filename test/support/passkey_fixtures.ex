@@ -19,15 +19,36 @@ defmodule KilnCMS.PasskeyFixtures do
 
   def b64(bytes), do: Base.url_encode64(bytes, padding: false)
 
-  @doc "Register `credential_bytes` for `user` through the real ceremony."
+  @doc "Register `credential_bytes` for `user` through the real ceremony, on the main host."
   def enroll(user, credential_bytes, name \\ "Test key") do
     challenge = WebAuthn.registration_challenge()
 
-    WebAuthn.register_passkey(user, challenge, %{
-      "attestation_object" => b64(credential_bytes),
-      "client_data_json" => b64(~s({"type":"webauthn.create"})),
-      "name" => name
-    })
+    WebAuthn.register_passkey(
+      user,
+      challenge,
+      %{
+        "attestation_object" => b64(credential_bytes),
+        "client_data_json" => b64(client_data_create()),
+        "name" => name
+      },
+      host: main_host()
+    )
+  end
+
+  @doc "The endpoint's host: the passkeys' RP ID, where registration runs."
+  def main_host, do: URI.parse(KilnCMSWeb.Endpoint.url()).host
+
+  @doc """
+  A registration's `clientDataJSON`, reporting `origin` (the main host's by
+  default). `KilnCMS.Accounts.WebAuthn.register_passkey/4` refuses one whose
+  origin is not on the host the ceremony was served on.
+  """
+  def client_data_create(origin \\ main_origin()),
+    do: Jason.encode!(%{"type" => "webauthn.create", "origin" => origin})
+
+  def main_origin do
+    uri = URI.parse(KilnCMSWeb.Endpoint.url())
+    %URI{scheme: uri.scheme, host: uri.host, port: uri.port} |> URI.to_string()
   end
 
   @doc "A sign-in assertion payload for `credential_bytes` (see the stub)."

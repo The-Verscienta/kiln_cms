@@ -62,7 +62,12 @@ defmodule KilnCMS.Accounts.KeepsRequiredSecondFactorTest do
   defp disable(user, secret),
     do: Accounts.disable_totp(user, %{code: Totp.code_at(secret, now())}, actor: user)
 
-  defp remove(passkey, actor), do: Accounts.remove_passkey(passkey, actor: actor)
+  defp remove(passkey, actor),
+    do:
+      Accounts.remove_passkey(passkey,
+        actor: actor,
+        context: KilnCMS.TwoFactorFixtures.verified_now()
+      )
 
   defp now, do: System.system_time(:second)
 

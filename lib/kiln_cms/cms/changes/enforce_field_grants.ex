@@ -77,6 +77,23 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
     |> Enum.filter(&violation?(changeset, &1, allowed))
     |> Enum.reduce(changeset, &add_violation(&2, &1))
     |> maybe_block_tree_violation(allowed)
+    |> maybe_access_password_violation(allowed)
+  end
+
+  @access_password "access_password"
+
+  # The passphrase lock is written from ARGUMENTS (`Changes.ApplyAccessPassword`
+  # force-changes the hash), so the accept-list walk above never sees it. Left
+  # unjudged, an editor granted one field could remove the lock from a live
+  # page, or put one on. Only a supplied passphrase or an explicit removal
+  # counts: a form posts `remove_access_password: false` on every save.
+  defp maybe_access_password_violation(changeset, allowed) do
+    setting? = Ash.Changeset.get_argument(changeset, :access_password) not in [nil, ""]
+    removing? = Ash.Changeset.get_argument(changeset, :remove_access_password) == true
+
+    if (setting? or removing?) and @access_password not in allowed,
+      do: add_violation(changeset, :access_password),
+      else: changeset
   end
 
   # Per-custom-field entries (`custom_fields.<name>`, #2281) move the judgement
@@ -126,7 +143,16 @@ defmodule KilnCMS.CMS.Changes.EnforceFieldGrants do
       |> Enum.uniq()
       |> Enum.reject(&ungrantable?(&1, descriptor))
 
-    Enum.filter(["title", "blocks"], &(&1 in names)) ++ (names -- ["title", "blocks"])
+    Enum.filter(["title", "blocks"], &(&1 in names)) ++
+      (names -- ["title", "blocks"]) ++ access_password_name(resource)
+  end
+
+  # Not in any accept list (it is an argument), so it is added by hand for a
+  # type whose update takes it.
+  defp access_password_name(resource) do
+    arguments = resource |> Ash.Resource.Info.action(:update) |> Map.get(:arguments, [])
+
+    if Enum.any?(arguments, &(&1.name == :access_password)), do: [@access_password], else: []
   end
 
   defp ungrantable?("type_definition_id", _descriptor), do: true

@@ -249,7 +249,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
   defp kind_label(:role_elevation), do: gettext("Role raised")
   defp kind_label(:failed_sign_ins), do: gettext("Failed sign-ins")
   defp kind_label(:lockout), do: gettext("Account locked out")
-  defp kind_label(:two_factor_disabled), do: gettext("Two-factor authentication turned off")
+  defp kind_label(:two_factor_disabled), do: gettext("Second factor removed")
   defp kind_label(:sso_config_changed), do: gettext("Single sign-on changed")
   defp kind_label(:blocked_ip), do: gettext("Blocked addresses")
 

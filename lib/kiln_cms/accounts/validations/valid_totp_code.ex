@@ -13,6 +13,7 @@ defmodule KilnCMS.Accounts.Validations.ValidTotpCode do
   use Ash.Resource.Validation
 
   alias KilnCMS.Accounts.Totp
+  alias KilnCMS.Accounts.TotpSecrets
 
   @impl true
   def init(opts), do: {:ok, opts}
@@ -21,7 +22,7 @@ defmodule KilnCMS.Accounts.Validations.ValidTotpCode do
   def validate(changeset, opts, _context) do
     field = Keyword.get(opts, :secret_field, :totp_secret)
     code = Ash.Changeset.get_argument(changeset, :code)
-    secret = Map.fetch!(changeset.data, field)
+    secret = secret(changeset.data, field)
 
     cond do
       is_nil(secret) ->
@@ -34,4 +35,8 @@ defmodule KilnCMS.Accounts.Validations.ValidTotpCode do
         {:error, field: :code, message: "that code isn't valid — check your authenticator app"}
     end
   end
+
+  # Through `TotpSecrets`, which falls back to a row's plaintext column.
+  defp secret(data, :totp_secret), do: TotpSecrets.live(data)
+  defp secret(data, :totp_pending_secret), do: TotpSecrets.pending(data)
 end

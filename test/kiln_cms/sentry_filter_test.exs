@@ -133,4 +133,53 @@ defmodule KilnCMS.SentryFilterTest do
       refute inspect(SentryFilter.before_send(exception)) =~ "LEAKED"
     end
   end
+
+  describe "URLs and process dumps" do
+    @secret "T0kenSecretValue123"
+
+    test "the request URL and a Referer header are redacted" do
+      request = %Sentry.Interfaces.Request{
+        url: "https://example.com/password-reset/#{@secret}?unlock=#{@secret}",
+        headers: %{
+          "referer" => "https://example.com/preview/#{@secret}",
+          "accept" => "text/html"
+        }
+      }
+
+      event = event(original_exception: %RuntimeError{message: "boom"}, request: request)
+      %Sentry.Event{request: scrubbed} = SentryFilter.before_send(event)
+
+      refute inspect(scrubbed) =~ @secret
+      assert scrubbed.url == "https://example.com/password-reset/[FILTERED]?unlock=[FILTERED]"
+      assert scrubbed.headers["referer"] == "https://example.com/preview/[FILTERED]"
+      assert scrubbed.headers["accept"] == "text/html"
+    end
+
+    test "a crashed LiveView's state and last message lose the join URL and token assigns" do
+      state =
+        inspect(%{
+          socket: %{
+            host_uri: %URI{scheme: "https", host: "example.com", path: "/auth/invite/#{@secret}"},
+            assigns: %{token: @secret, page_title: "Invitation"}
+          }
+        })
+
+      last_message =
+        ~s(%Phoenix.Socket.Message{event: "phx_join", payload: %{"url" => "https://example.com/magic_link/#{@secret}"}})
+
+      event =
+        event(
+          original_exception: nil,
+          # Sentry's logger handler passes these on as chardata.
+          extra: %{genserver_state: [state], last_message: last_message, other: "kept"}
+        )
+
+      %Sentry.Event{extra: extra} = SentryFilter.before_send(event)
+
+      refute inspect(extra) =~ @secret
+      assert extra.genserver_state =~ ~s(page_title: "Invitation")
+      assert extra.last_message =~ "/magic_link/[FILTERED]"
+      assert extra.other == "kept"
+    end
+  end
 end

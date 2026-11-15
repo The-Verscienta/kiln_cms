@@ -20,16 +20,20 @@ prompt there.
 
 Turning a second factor on or off is recorded in the site's
 [security log](security-events.md) (`second_factor_enrolled`,
-`second_factor_removed`), and removing one alerts the site's admins by bell and
-email unless they turned off "Two-factor authentication turned off"
-([Security alerts](security-alerts.md#what-raises-an-alert)). A factor removed
-because an invitee took the account over is logged but raises no alert.
+`second_factor_removed`, `passkey_removed`). Removing one, whether the
+authenticator app is turned off or a passkey is removed, alerts the site's
+admins by bell and email unless they turned off "Second factor removed"
+([Security alerts](security-alerts.md#what-raises-an-alert)), and emails the
+account's owner ([We email you when a second factor is removed](#we-email-you-when-a-second-factor-is-removed)).
+A factor removed because an invitee took the account over is logged but raises
+no alert and sends no email.
 
 ## How it works
 
 - **Self-service enrolment** at `/editor/settings` → "Two-factor authentication"
   (editors and admins), or at `/account/two-factor` (any signed-in account,
-  readers included, on the main or console host only; see
+  readers included); both on the main or console host only (see
+  [Where second factors are managed](#where-second-factors-are-managed) and
   [Set up two-step sign-in when your site asks](#set-up-two-step-sign-in-when-your-site-asks)):
   1. *Enable* generates a fresh secret (`setup_totp`) into a **pending** slot
      (`totp_pending_secret`) and shows a setup key + an `otpauth://`
@@ -242,6 +246,42 @@ a save needs a code, the email step reads how the session signed in, and the
 gates read it to tell a passkey-only account's password session from one that
 passed the passkey.
 
+## Where second factors are managed
+
+You add, change and remove passkeys and the authenticator app only on the
+main host (`PHX_HOST`) or a console host (`KILN_CONSOLE_HOST`), never on a
+site's own address. A site's own address is where that site's code injection
+runs, and a script there could act on the settings page for anyone signed in.
+
+- With **`KILN_CONSOLE_HOST` set**, the console is served only on console
+  hosts, so `/editor/settings` always shows the full **Two-factor
+  authentication** and **Passkeys** sections. Nothing changes for you.
+- With **no console host**, `/editor/settings` on a site's own address shows,
+  in place of both sections, "Passkeys and two-factor authentication are
+  managed on the main sign-in host, not on this site's address.", "This
+  opens on *main host*, where you sign in again." and a **Manage sign-in
+  security** button to `/account/two-factor` on the main host. The rest of the
+  page (profile, password, sessions, notifications) works as before. A forged
+  request from the page is refused with the same sentence.
+
+To manage factors on a single-host install with no console host:
+
+1. Open `/account/two-factor` on the main host (the address in `PHX_HOST`),
+   and sign in there if asked.
+2. Add an authenticator app or a passkey, or remove a passkey, as described
+   in [Set up two-step sign-in when your site asks](#set-up-two-step-sign-in-when-your-site-asks).
+3. To turn the authenticator app off or regenerate recovery codes, use
+   `/editor/settings` on the main host. That page is open to editors and
+   admins of the main host's site (the default organization). An editor of
+   another site cannot open it there; on a multi-site deployment, set
+   `KILN_CONSOLE_HOST` so every site's editors manage everything from their
+   console host.
+
+A passkey is registered only from a page served on the main host or a console
+host, and only when the browser's reported origin names that same host; any
+other registration is refused with "Couldn't verify that passkey — try
+again."
+
 ## We email you when a second factor is added
 
 Whenever a second factor is added to an account, its owner gets an email
@@ -266,7 +306,10 @@ settings list the owner has no reason to open, so the email is how they find
 out.
 
 The email is titled "A second factor was added to your (name) account", with
-the instance's name. It says:
+the instance's name. It goes out through the deployment's outgoing mail
+server. When the deployment has none, it goes through the mail relay of a
+site that requires the account to hold a second factor, if one has its own
+relay. It says:
 
 - what was added: "An authenticator app was set up…", "A new authenticator app
   replaced the one your account used… Codes from the old one no longer work."
@@ -301,6 +344,43 @@ user (id) not sent" and does not undo the new factor.
 
 Because every passkey added sends an email, an account can hold at most 20
 passkeys and add at most 5 an hour (see [Limits on adding passkeys](passkeys.md#limits-on-adding-passkeys)).
+
+## We email you when a second factor is removed
+
+The owner is also emailed whenever a second factor is removed from their
+account:
+
+- the authenticator app is turned off;
+- a passkey is removed, on `/editor/settings` or `/account/two-factor`, by the
+  owner or by a platform admin.
+
+Why: someone with a stolen or unattended session could remove your passkeys,
+keep one of their own, and leave you fewer ways back in. Removing a passkey
+also asks for a second factor first: a session that verified one in the
+last 15 minutes, or a current code from the authenticator app
+([Remove a passkey](passkeys.md#remove-a-passkey)). The site's admins get a
+`two_factor_disabled` alert for the same removal.
+
+The email is titled "A second factor was removed from your (name) account".
+It says what was removed ("The authenticator app was turned off… Its codes
+and recovery codes no longer work." or "A passkey was removed… It can no
+longer be used to sign in."), with the same **When**, **Browser** and **Site**
+lines as the email for a factor added, and never the passkey's name.
+
+- **When you removed it yourself**, there is nothing to do. If it wasn't you,
+  the email gives the same two steps: reset your password, then ask an
+  administrator of your site to check your account's sign-in methods.
+- **When a platform admin removed it**, the email says "It was removed by an
+  administrator," followed by that admin's email address, and suggests asking
+  an administrator of your site why.
+
+No email is sent when the removal is refused (the last factor a site
+requires, the shared demo account, another person's passkey, a wrong code),
+when an account is erased, or when an invitee takes over an unconfirmed
+account. Like the email for a factor added, it goes through the instance mail
+relay in English, is queued only after the removal is saved, and a mail that
+cannot be queued is logged as "Second-factor removal notice for user (id) not
+sent" without undoing the removal.
 
 ## "Remember me" and the second factor
 
@@ -652,11 +732,15 @@ It is **not** asked for when:
   covered);
 - the session signed in with a password before the deadline: the grace
   period let it add a factor then, and it still may;
-- the site the page is opened for (on the main host, the default site) has
-  **no working mail relay**: no outgoing mail server is
-  configured for the deployment and the site has none of its own, or the
-  site's relay password can no longer be decrypted. The step is skipped and
-  the enrollment is recorded with `proof: "email_skipped_no_relay"`.
+- **no working mail relay** is left to send the code through. That is judged
+  on every site the step is for: the site the page is opened for (on the main
+  host, the default site) **and** each site that holds the account. A site
+  has no working relay when no outgoing mail server is configured for the
+  deployment and the site has none of its own, or the site's relay password
+  can no longer be decrypted. If any of those sites has one, the code is sent
+  through it (the page's site first, then a holding site's) and the step is
+  not skipped. Only when none has one is the step skipped and the enrollment
+  recorded with `proof: "email_skipped_no_relay"`.
 
 A relay that fails this time (a refused connection, a site relay whose
 settings could not be read just now) does **not** skip the step: the page says
@@ -678,9 +762,9 @@ that owes one, it says so beside **Enable two-factor authentication**, beside
 **Set up a new authenticator** after a recovery-code sign-in, and beside the
 passkey form: "You need to confirm your email address before you add a second
 factor. Do that on the two-step sign-in page, and add it there." with
-a **Set up two-step sign-in** button to `/account/two-factor` (on a site's own
-address, the main host's page, and it says so). Adding there anyway is
-refused with "Confirm your email address before adding a second factor."
+a **Set up two-step sign-in** button to `/account/two-factor`. Adding there
+anyway is refused with "Confirm your email address before adding a second
+factor."
 
 What can go wrong on the setup page:
 
@@ -814,10 +898,11 @@ affected: those are how a lost or stolen factor is cleared.
 - **Headless clients of a held account get `403`.** A script or app that signs
   in as a person on a site that holds that person stops working at the
   deadline. Give it an API key instead.
-- **Mail.** The email step goes through the site's relay. A deployment with no
-  outgoing mail server skips it, which leaves the enrollment protected only by
-  the "a second factor was added" email to the owner (which also needs a
-  relay). The three-codes-an-hour cap per address is code config:
+- **Mail.** The email step goes through the relay of the site the page is
+  opened for, or else of a site that holds the account. It is skipped only
+  when none of them has a working relay, which leaves the enrollment
+  protected only by the "a second factor was added" email to the owner (which
+  also needs a relay, and then has none either). The three-codes-an-hour cap per address is code config:
   `config :kiln_cms, KilnCMS.Accounts.AccountThrottle, enrolment_proof_mail_budget: 3`.
 - **Rolling back** to a release before this one drops the enforcement without
   a warning: the table stays and an older release ignores it. Nobody is held,
@@ -902,14 +987,25 @@ with **no external dependency**. Correctness is pinned to the RFC 6238 published
 test vectors (`KilnCMS.Accounts.TotpTest`). Defaults: 6 digits, 30-second period,
 ±1 step of clock-drift tolerance, constant-time code comparison.
 
-The raw secret is stored as `users.totp_secret` (`bytea`, `sensitive?`,
-`public? false`); it is never exposed on any API surface and is read only by the
-sign-in gate and the owner's enrolment UI. 2FA is "enabled" iff
-`totp_confirmed_at` is set. `users.totp_pending_secret` holds an in-progress,
-not-yet-proven enrolment in the same shape — `setup_totp` writes only this
-one, `confirm_totp` is the only action that ever copies it into `totp_secret`,
-and it is what a code is checked against while an enrolment is in progress
-(#754).
+The secret is stored encrypted by `KilnCMS.Keys.Vault` in
+`users.totp_secret_encrypted` (`bytea`, `sensitive?`, `public? false`), under a
+key derived from `SECRET_KEY_BASE`, so a database dump, backup or staging clone
+without that secret carries no working authenticator seed. The `User` attribute `totp_secret` holds it decrypted.
+It is never exposed on any API surface and is read only by the sign-in gate and
+the owner's enrolment UI, through `KilnCMS.Accounts.TotpSecrets`. 2FA is
+"enabled" iff `totp_confirmed_at` is set. `users.totp_pending_secret_encrypted`
+holds an in-progress, not-yet-proven enrolment in the same shape — `setup_totp`
+writes only this one, `confirm_totp` is the only action that ever copies it
+into the live secret, and it is what a code is checked against while an
+enrolment is in progress (#754).
+
+Releases before the encryption stored both secrets in plaintext, in
+`users.totp_secret` and `users.totp_pending_secret`. They are still read for a
+row nothing has written since the upgrade, and every write clears them;
+`KilnCMS.Accounts.TotpSecretBackfill` moves what is left about ten minutes after
+boot. A later release drops the two columns. The secrets are part of
+`mix kiln.vault.reencrypt`'s walk like every other vault column (see
+[`secrets-rotation.md`](secrets-rotation.md)).
 
 ## Recovery codes & QR (Phase 2, shipped)
 

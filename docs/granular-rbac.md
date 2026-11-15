@@ -176,6 +176,7 @@ An entry in a type's `field_grants` list can be:
 | `custom_fields.<name>` | that one top-level field |
 | `custom_fields.<group>` | a whole group field, including adding, removing and reordering its rows |
 | `custom_fields.<group>.<sub>` | that one sub-field, in every row of the group |
+| `access_password` | set, change or remove the page's passphrase lock. Not an attribute (the editor sends it as an argument), so no other entry covers it: an editor with a `field_grants` list for the type needs this entry to touch the lock |
 
 Field names are lower-case letters, digits and underscores, starting with a
 letter, so the dot is unambiguous. Saving a role with a malformed entry

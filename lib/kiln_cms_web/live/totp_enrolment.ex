@@ -23,10 +23,18 @@ defmodule KilnCMSWeb.TotpEnrolment do
   `confirm/3` takes the action context to add (the email proof's, see
   `KilnCMS.Accounts.EnrolmentProof`); the action decides, not this module.
 
-  Removing a passkey is shared the same way (#2900): `remove_passkey/3` runs
+  Removing a passkey is shared the same way (#2900): `remove_passkey/4` runs
   `Passkey.:destroy` and says what happened, and `last_factor?/4` with
   `last_factor_note/1` hide the remove button where the action would refuse
   it. Each page keeps its own event and assigns.
+
+  Removing a passkey asks for a second factor now
+  (`KilnCMS.CMS.Changes.SaverVerifiedSecondFactor` on the action): this
+  session's verified mark when it is fresh (`:second_factor_at`, read from
+  `KilnCMSWeb.SignInMarker` at mount), else a code from the authenticator
+  app. `handle_remove_passkey/2` runs the removal for a page's event and,
+  when the action asks for that proof, opens `passkey_removal_confirm/1`
+  (`:passkey_removal`) instead of flashing an error.
   """
   use KilnCMSWeb, :html
 
@@ -38,6 +46,7 @@ defmodule KilnCMSWeb.TotpEnrolment do
   alias KilnCMS.Accounts.Errors.LastSecondFactorRequired
   alias KilnCMS.Accounts.Errors.SecondFactorThrottled
   alias KilnCMS.Accounts.Totp
+  alias KilnCMS.CMS.Changes.SaverVerifiedSecondFactor
 
   @doc """
   The assigns a page starts with. `session` is the LiveView session: whether
@@ -55,6 +64,18 @@ defmodule KilnCMSWeb.TotpEnrolment do
     |> assign(:enrolling, nil)
     # Freshly minted recovery codes, shown exactly once (#331 phase 2).
     |> assign(:recovery_codes, nil)
+    # When this session last verified a second factor, for the step-up on
+    # removing a passkey; the action decides whether it is fresh.
+    |> assign(:second_factor_at, second_factor_at(session))
+    # The passkey whose removal is waiting for a code: `%{id, reason}`.
+    |> assign(:passkey_removal, nil)
+  end
+
+  defp second_factor_at(session) do
+    case KilnCMSWeb.SignInMarker.read(session) do
+      %{second_factor_at: %DateTime{} = at} -> at
+      _none -> nil
+    end
   end
 
   @doc "Stage a new secret and show it, or flash why not."
@@ -164,25 +185,171 @@ defmodule KilnCMSWeb.TotpEnrolment do
 
   @doc """
   Remove the passkey `id` as `user`, with `context` (the page's
-  `:security_context`) as the action context: the `passkey_removed` audit
+  `:security_context`, plus `:second_factor_verified_at` when the session
+  verified a factor) as the action context: the `passkey_removed` audit
   event takes its site from it, and without it the removal commits with no
-  event. `{:ok, message}`, or `{:error, message}` saying why not: the
-  shared demo account, the last factor a site requires, or a generic refusal
-  for an id `user` may not read.
+  event. `code` is a code from `user`'s authenticator app, or `nil`.
+
+  `{:ok, message}`; `{:confirm, reason}` when the action wants a second
+  factor first (`:not_verified`, or `:wrong_code` for a code that failed);
+  or `{:error, message}` saying why not: the shared demo account, the last
+  factor a site requires, too many code attempts, no second factor of the
+  remover's own, or a generic refusal for an id `user` may not read.
 
   The policy decides whose passkey that may be, not this function: for an
   owner it is only their own, but a platform admin's bypass lets them remove
-  anyone's (recorded with the admin as actor), as on `/editor/settings`.
+  anyone's (recorded with the admin as actor, who proves their own factor).
   """
-  @spec remove_passkey(Accounts.User.t(), String.t(), map()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  def remove_passkey(user, id, context) do
+  @spec remove_passkey(Accounts.User.t(), String.t(), map(), String.t() | nil) ::
+          {:ok, String.t()} | {:confirm, :not_verified | :wrong_code} | {:error, String.t()}
+  def remove_passkey(user, id, context, code \\ nil) do
     with {:ok, passkey} <- Accounts.get_passkey(id, actor: user),
-         :ok <- Accounts.remove_passkey(passkey, actor: user, context: context) do
+         :ok <- Accounts.remove_passkey(passkey, code_params(code), actor: user, context: context) do
       {:ok, gettext("Passkey removed.")}
     else
-      error -> {:error, error_message(error, gettext("Couldn't remove that passkey."))}
+      error ->
+        case step_up_refusal(error) do
+          :not_enrolled -> {:error, gettext("Set up two-step sign-in on your own account first.")}
+          reason when reason in [:not_verified, :wrong_code] -> {:confirm, reason}
+          nil -> {:error, error_message(error, gettext("Couldn't remove that passkey."))}
+        end
     end
+  end
+
+  @doc """
+  A page's `"remove_passkey"` event: `%{"id" => id}` from a remove button, or
+  `%{"passkey_id" => id, "code" => code}` from `passkey_removal_confirm/1`. `{:removed, socket, message}` for the page
+  to reload its list, or `{:not_removed, socket}` with the confirmation open
+  or an error flashed.
+  """
+  @spec handle_remove_passkey(Phoenix.LiveView.Socket.t(), map()) ::
+          {:removed, Phoenix.LiveView.Socket.t(), String.t()}
+          | {:not_removed, Phoenix.LiveView.Socket.t()}
+  def handle_remove_passkey(socket, %{"passkey_id" => id} = params) when is_binary(id),
+    do: handle_remove_passkey(socket, params |> Map.delete("passkey_id") |> Map.put("id", id))
+
+  def handle_remove_passkey(socket, %{"id" => id} = params) when is_binary(id) do
+    user = socket.assigns.current_user
+
+    case remove_passkey(user, id, removal_context(socket), params["code"]) do
+      {:ok, message} ->
+        {:removed, assign(socket, :passkey_removal, nil), message}
+
+      {:confirm, reason} ->
+        {:not_removed, assign(socket, :passkey_removal, %{id: id, reason: reason})}
+
+      {:error, message} ->
+        {:not_removed, socket |> assign(:passkey_removal, nil) |> put_flash(:error, message)}
+    end
+  end
+
+  def handle_remove_passkey(socket, _malformed), do: {:not_removed, socket}
+
+  # The code goes to the action only when one was typed.
+  defp code_params(code) when is_binary(code) do
+    case String.trim(code) do
+      "" -> %{}
+      code -> %{code: code}
+    end
+  end
+
+  defp code_params(_none), do: %{}
+
+  defp removal_context(socket) do
+    case socket.assigns[:second_factor_at] do
+      %DateTime{} = at ->
+        Map.put(socket.assigns.security_context, :second_factor_verified_at, at)
+
+      nil ->
+        socket.assigns.security_context
+    end
+  end
+
+  # The step-up's refusals, by its own messages
+  # (`SaverVerifiedSecondFactor.messages/0`).
+  defp step_up_refusal({:error, error}), do: step_up_refusal(error)
+
+  defp step_up_refusal(%{errors: errors}) do
+    reasons =
+      Map.new(SaverVerifiedSecondFactor.messages(), fn {reason, text} -> {text, reason} end)
+
+    Enum.find_value(List.wrap(errors), fn
+      %{field: :code, message: message} -> Map.get(reasons, message)
+      _other -> nil
+    end)
+  end
+
+  defp step_up_refusal(_error), do: nil
+
+  attr :removal, :map, default: nil, doc: "`%{id, reason}`, or nil when nothing waits"
+  attr :passkeys, :list, required: true
+  attr :totp?, :boolean, required: true, doc: "whether the account has an authenticator app"
+
+  @doc """
+  Asks for a second factor before a passkey is removed, when the session's
+  is not fresh: a code from the authenticator app, or, for an account with
+  none, signing in again with a passkey.
+  """
+  def passkey_removal_confirm(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :name,
+        assigns.removal &&
+          Enum.find_value(assigns.passkeys, gettext("this passkey"), fn passkey ->
+            passkey.id == assigns.removal.id && passkey.name
+          end)
+      )
+
+    ~H"""
+    <form
+      :if={@removal}
+      id="passkey-removal-confirm"
+      phx-submit="remove_passkey"
+      class="mt-3 space-y-2 rounded-lg border border-base-content/10 p-3"
+    >
+      <input type="hidden" name="passkey_id" value={@removal.id} />
+      <p class="text-sm font-medium">
+        {gettext("Confirm it's you to remove “%{name}”", name: @name)}
+      </p>
+      <%= if @totp? do %>
+        <.input
+          name="code"
+          id="passkey-removal-code"
+          value=""
+          type="text"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          label={gettext("Code from your authenticator app")}
+        />
+        <p
+          :if={@removal.reason == :wrong_code}
+          id="passkey-removal-error"
+          class="text-sm text-error"
+        >
+          {gettext("That code isn't valid. Check your authenticator app.")}
+        </p>
+      <% else %>
+        <p id="passkey-removal-sign-in-again" class="text-sm text-base-content/70">
+          {gettext(
+            "Sign out, then sign in again with a passkey. For 15 minutes after that, you can remove a passkey without a code."
+          )}
+        </p>
+      <% end %>
+      <div class="flex gap-2">
+        <.button :if={@totp?} phx-disable-with={gettext("Removing…")}>
+          {gettext("Remove passkey")}
+        </.button>
+        <button
+          type="button"
+          phx-click="cancel_remove_passkey"
+          class="btn btn-sm btn-ghost"
+        >
+          {gettext("Cancel")}
+        </button>
+      </div>
+    </form>
+    """
   end
 
   @doc """

@@ -73,8 +73,10 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
     user
   end
 
+  # On the main host, where the page manages second factors.
   defp log_in(conn, user) do
     conn
+    |> main_host_conn()
     |> Phoenix.ConnTest.init_test_session(%{})
     |> AshAuthentication.Plug.Helpers.store_in_session(user)
   end
@@ -317,7 +319,8 @@ defmodule KilnCMSWeb.SettingsPushAndPasskeysTest do
     defp attestation(bytes) do
       %{
         "attestation_object" => Base.url_encode64(bytes, padding: false),
-        "client_data_json" => Base.url_encode64(~s({"type":"webauthn.create"}), padding: false),
+        "client_data_json" =>
+          Base.url_encode64(KilnCMS.PasskeyFixtures.client_data_create(), padding: false),
         "name" => ""
       }
     end

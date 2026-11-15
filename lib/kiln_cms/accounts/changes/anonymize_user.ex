@@ -32,10 +32,14 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   alias KilnCMS.Accounts.User
   alias KilnCMS.History
 
+  # The plaintext columns too: a row the backfill has
+  # not reached keeps its secrets there.
   @totp_cleared [
     totp_secret: nil,
+    legacy_totp_secret: nil,
     totp_confirmed_at: nil,
     totp_pending_secret: nil,
+    legacy_totp_pending_secret: nil,
     totp_recovery_hashes: []
   ]
 
@@ -320,9 +324,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     # (or the staging scrub). The person being erased owns these rows, so no
     # admin actor would be admitted to them, and the filter pins every row to
     # this user's id.
+    # `:erase`, not `:destroy`: no step-up and no "a passkey was removed"
+    # mail, since the address is no longer the owner's.
     KilnCMS.Accounts.Passkey
     |> Ash.Query.filter(user_id == ^user.id)
-    |> Ash.bulk_destroy!(:destroy, %{},
+    |> Ash.bulk_destroy!(:erase, %{},
       authorize?: false,
       strategy: [:atomic, :atomic_batches, :stream],
       return_records?: false,

@@ -266,13 +266,38 @@ defmodule KilnCMS.Webhooks.SafeUrl do
        when Bitwise.band(g1, 0xFFC0) == 0xFE80,
        do: true
 
+  # NAT64 64:ff9b::/96 (RFC 6052): a translator forwards it to the IPv4
+  # address in the last 32 bits, so that address decides. On a NAT64 network
+  # `[64:ff9b::a00:5]` is `10.0.0.5`.
+  defp blocked_address?({0x64, 0xFF9B, 0, 0, 0, 0, g7, g8}),
+    do: blocked_address?(v4_from_groups(g7, g8))
+
+  # Local-use NAT64 64:ff9b:1::/48 (RFC 8215): never a public destination.
+  defp blocked_address?({0x64, 0xFF9B, 1, _, _, _, _, _}), do: true
+
+  # 6to4 2002::/16 (RFC 3056): the next 32 bits are the IPv4 address of the
+  # relay the packet is tunnelled to.
+  defp blocked_address?({0x2002, g2, g3, _, _, _, _, _}),
+    do: blocked_address?(v4_from_groups(g2, g3))
+
+  # Teredo 2001::/32 (tunnels to an obfuscated IPv4 address) and the
+  # documentation range 2001:db8::/32: neither is a real destination.
+  defp blocked_address?({0x2001, g2, _, _, _, _, _, _}) when g2 in [0, 0xDB8], do: true
+
+  # IPv6 multicast ff00::/8
+  defp blocked_address?({g1, _, _, _, _, _, _, _})
+       when Bitwise.band(g1, 0xFF00) == 0xFF00,
+       do: true
+
   defp blocked_address?(_), do: false
 
   # The RFC 6890 special-purpose registry, as one clause per range rather than
   # one boolean expression: the expression form crossed credo's complexity
   # ceiling, and a table of heads reads like the registry it mirrors.
-  # 0/8 · 10/8 · 127/8 · 255/8 (broadcast-ish)
-  defp ipv4_blocked?(a, _b, _c) when a in [0, 10, 127, 255], do: true
+  # 0/8 · 10/8 · 127/8
+  defp ipv4_blocked?(a, _b, _c) when a in [0, 10, 127], do: true
+  # 224/4 multicast · 240/4 reserved, broadcast included
+  defp ipv4_blocked?(a, _b, _c) when a >= 224, do: true
   # 100.64/10 shared CGN
   defp ipv4_blocked?(100, b, _c) when b in 64..127, do: true
   # 169.254/16 link-local

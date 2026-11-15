@@ -27,6 +27,8 @@ defmodule KilnCMS.Application do
     warn_if_media_unwritable()
     warn_if_admin_allowlist_disabled()
     filter_challenge_response_fields()
+    filter_credential_parameters()
+    warn_if_trace_redaction_missing()
     warn_if_challenge_provider_unusable()
 
     # Ensure custom AshPhoenix form error impls (e.g. for StaleRecord) are
@@ -285,6 +287,7 @@ defmodule KilnCMS.Application do
       enqueue_occurrence_backfill()
       enqueue_legacy_audiences_migration()
       enqueue_sync_exposure_backfill()
+      enqueue_totp_secret_backfill()
       {:ok, pid}
     end
   end
@@ -333,6 +336,15 @@ defmodule KilnCMS.Application do
   defp enqueue_sync_exposure_backfill do
     if Application.get_env(:kiln_cms, :sync_exposure_backfill_on_boot, true) do
       KilnCMS.Firing.SyncExposureBackfill.enqueue()
+    end
+  end
+
+  # TOTP secrets still stored in plaintext move to their encrypted columns
+  # at rest: see `KilnCMS.Accounts.TotpSecretBackfill`. Off in
+  # `:test` and `:e2e` for the committed-`oban_jobs` reason above.
+  defp enqueue_totp_secret_backfill do
+    if Application.get_env(:kiln_cms, :totp_secret_backfill_on_boot, true) do
+      KilnCMS.Accounts.TotpSecretBackfill.enqueue()
     end
   end
 
@@ -881,6 +893,43 @@ defmodule KilnCMS.Application do
             "which the request log does not filter: add it to config :phoenix, " <>
             ":filter_parameters."
         )
+    end
+
+    :ok
+  end
+
+  # The credential keys Kiln's sockets and routes take (`token`, `api_key`,
+  # `Authorization`, …) must stay in `:filter_parameters`, or a socket connect
+  # or LiveView mount logs them. Same shape as `filter_challenge_response_fields/0`:
+  # a plain list is appended to, a compiled or `{:keep, _}` one is reported.
+  defp filter_credential_parameters do
+    current = Application.get_env(:phoenix, :filter_parameters, [])
+
+    case KilnCMS.Config.Redaction.merge_filter_parameters(current) do
+      :unchanged ->
+        :ok
+
+      {:ok, filters} ->
+        Application.put_env(:phoenix, :filter_parameters, filters)
+
+      {:unfiltered, keys} ->
+        KilnCMS.Config.Report.warn(
+          "filter_parameters",
+          "config :phoenix, :filter_parameters does not filter #{Enum.join(keys, ", ")}: " <>
+            "socket and request logs can carry these credentials. Add them to the list."
+        )
+    end
+
+    :ok
+  end
+
+  # With tracing on, `KilnCMSWeb.RedactingSpanProcessor` must run first.
+  defp warn_if_trace_redaction_missing do
+    enabled? = Application.get_env(:kiln_cms, :otel_enabled, false) == true
+
+    if message =
+         KilnCMS.Config.Redaction.otel_problem(enabled?, Application.get_all_env(:opentelemetry)) do
+      KilnCMS.Config.Report.warn("opentelemetry_processors", message)
     end
 
     :ok

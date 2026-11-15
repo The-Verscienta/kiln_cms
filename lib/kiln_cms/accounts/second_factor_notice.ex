@@ -2,10 +2,14 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
   @moduledoc """
   Tells an account owner that a second factor was added to their account
   (#2247, owner decision 1a): an authenticator app set up or replaced, or a
-  passkey registered. One mail per factor added, every time.
+  passkey registered. One mail per factor added, every time. And that one was
+  removed (`factor_removed/4`): the authenticator app turned off, or a passkey
+  removed, by the owner or by an administrator.
 
   `KilnCMS.Accounts.Changes.NotifyFactorAdded` calls `factor_added/3` after the
-  enrollment commits, so a refused or rolled-back enrollment mails nobody. A
+  enrollment commits, so a refused or rolled-back enrollment mails nobody;
+  `KilnCMS.Accounts.Changes.NotifyFactorRemoved` calls `factor_removed/4`
+  the same way. A
   passkey can be added at most `KilnCMS.Accounts.Passkey.max_per_account/0`
   times, a few an hour (`AccountThrottle.consume_passkey_registration/1`),
   which is what keeps "every time" from being a way to flood the owner.
@@ -34,11 +38,28 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
   remove it": the factor just added may be the only one the account now has,
   and its owner may not be able to get past it to remove it.
 
+  ## A factor removed
+
+  Removing a passkey needs only a signed-in session, so the same thief can
+  narrow the owner's own ways back in: remove their passkeys and keep the one
+  they added. The removal mail says which kind went, when, from what browser
+  and site, and, when an administrator removed it rather than the owner, which
+  administrator (their account's address: chosen at registration, not typed
+  into this request). Still no passkey name. It needs no throttle of its own:
+  an account holds at most `KilnCMS.Accounts.Passkey.max_per_account/0`
+  passkeys, each added one already mailed, and turning the authenticator app
+  off spends the second-factor code budget.
+
   ## Never a failure of the enrollment
 
   Account mail, so it goes through the instance relay (`Mail.enqueue!/1` with
   no `org_id`), in the operator's branding, in English, like the other account
-  mail. Anything that goes wrong is logged and swallowed: the factor is already
+  mail. When the instance has no relay (`Mail.relay_available?(nil)` is
+  false), it goes through the relay of the first site that requires the
+  account to hold a second factor and has one
+  (`TwoFactorRequirement.requiring_orgs/1`): the setup that lets a site skip
+  the enrollment's email proof for want of mail is the one where the owner
+  would otherwise never hear of a factor someone else added. Anything that goes wrong is logged and swallowed: the factor is already
   committed, and a mail that cannot be queued must not read as a failed
   enrollment.
 
@@ -52,6 +73,7 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMS.Accounts.User
   alias KilnCMS.Mail
   alias KilnCMS.Security.Recorder
@@ -61,6 +83,9 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
   `:replaced` over a confirmed one) or a passkey.
   """
   @type factor :: {:totp, :added | :replaced} | :passkey
+
+  @typedoc "What was removed: the authenticator app or a passkey."
+  @type removed_factor :: :totp | :passkey
 
   @doc """
   Mail the owner of `user_id` that `factor` was added. `context` is the
@@ -93,6 +118,36 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
       :ok
   end
 
+  @doc """
+  Mail the owner of `user_id` that `factor` was removed. `actor` is whoever
+  ran the removal: the owner, or an administrator, whom the mail then names.
+  `context` is the action's context, as for `factor_added/3`. Always returns
+  `:ok`.
+  """
+  @spec factor_removed(Ash.UUID.t(), removed_factor(), term(), map()) :: :ok
+  def factor_removed(user_id, factor, actor, context \\ %{}) do
+    case owner(user_id) do
+      %User{} = user -> deliver_removed(user, factor, remover(user, actor), details(context))
+      nil -> :ok
+    end
+
+    :ok
+  rescue
+    error ->
+      Logger.warning(
+        "Second-factor removal notice for user #{user_id} not sent: #{Exception.message(error)}"
+      )
+
+      :ok
+  catch
+    kind, reason ->
+      Logger.warning(
+        "Second-factor removal notice for user #{user_id} not sent: #{inspect({kind, reason})}"
+      )
+
+      :ok
+  end
+
   defp owner(user_id) do
     # authorize?: false — reads the account the factor was added to, only to
     # address this notice; the enrolling actor may be a platform admin or the
@@ -111,7 +166,77 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
     |> to(to_string(user.email))
     |> subject("A second factor was added to your #{site} account")
     |> html_body(body(escape(site), factor, details))
+    |> Mail.enqueue!(org_id: relay_org(user))
+  end
+
+  # `nil` (the instance relay) when the instance has one, or when no site
+  # that requires a factor of this account has one either; else that site.
+  defp relay_org(user) do
+    if Mail.relay_available?(nil) do
+      nil
+    else
+      user
+      |> TwoFactorRequirement.requiring_orgs()
+      |> Enum.find(&Mail.relay_available?/1)
+    end
+  end
+
+  defp deliver_removed(user, factor, remover, details) do
+    site = KilnCMS.Branding.for_org(nil).site_name
+
+    new()
+    |> from(Application.fetch_env!(:kiln_cms, :email_from))
+    |> to(to_string(user.email))
+    |> subject("A second factor was removed from your #{site} account")
+    |> html_body(removed_body(escape(site), factor, remover, details))
     |> Mail.enqueue!()
+  end
+
+  # `:owner` when the account's owner removed it (or nobody we can name did),
+  # else the administrator's address.
+  defp remover(%User{id: id}, %User{id: id}), do: :owner
+  defp remover(_owner, %User{email: email}) when not is_nil(email), do: {:admin, to_string(email)}
+  defp remover(_owner, _system_or_none), do: :owner
+
+  defp removed_body(site, factor, remover, details) do
+    reset = url(~p"/reset")
+
+    """
+    <p>#{removed_lead(site, factor)}</p>
+    <ul>
+    #{Enum.map_join(details, "\n", fn {label, value} -> "  <li>#{label}: #{escape(value)}</li>" end)}
+    </ul>
+    #{removed_by(remover, reset)}
+    """
+  end
+
+  defp removed_lead(site, :totp),
+    do:
+      "The authenticator app was turned off for two-step sign-in on your #{site} account. " <>
+        "Its codes and recovery codes no longer work."
+
+  defp removed_lead(site, :passkey),
+    do: "A passkey was removed from your #{site} account. It can no longer be used to sign in."
+
+  defp removed_by({:admin, email}, _reset) do
+    """
+    <p>It was removed by an administrator, #{escape(email)}.</p>
+    <p><strong>If you didn't expect this</strong>, ask an administrator of your site why, and
+    check your account's sign-in methods.</p>
+    """
+  end
+
+  defp removed_by(:owner, reset) do
+    """
+    <p><strong>If this was you</strong>, there is nothing else to do.</p>
+    <p><strong>If it wasn't you</strong>, someone is signed in to your account. Do this now:</p>
+    <ol>
+      <li><a href="#{reset}">Reset your password</a>. That signs out every session,
+      including theirs.</li>
+      <li>Then ask an administrator of your site to check your account's sign-in methods.
+      Whoever removed this may have added a second factor of their own.</li>
+    </ol>
+    """
   end
 
   defp body(site, factor, details) do

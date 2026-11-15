@@ -818,6 +818,29 @@ The match deliberately errs toward redacting:
 An odd `[FILTERED]` on a path that is not a token link is the cost of never
 logging one that is.
 
+### Params, socket connects and LiveView mounts
+
+Phoenix writes params maps through `:filter_parameters`
+(`config/config.exs`): a request's `Parameters:` line at `:debug`, and at
+`:info` every socket connect's params and every channel join and LiveView
+mount. A key that *contains* a listed string is written as `[FILTERED]`,
+case-sensitively. Besides passwords and the human-verification fields, the
+list holds the keys Kiln's sockets and links take a credential under:
+`token`, `secret`, `authorization`, `Authorization`, `api_key`, `unlock`.
+
+```text
+CONNECTED TO KilnCMSWeb.CollabSocket in 1ms
+  Parameters: %{"token" => "[FILTERED]", "vsn" => "2.0.0"}
+```
+
+An overlay that replaces the list must keep these. At boot,
+`KilnCMS.Config.Redaction` checks them and reports any it misses through
+`KilnCMS.Config.Report` (Sentry source `filter_parameters`):
+
+```text
+config :phoenix, :filter_parameters does not filter token, api_key: socket and request logs can carry these credentials. Add them to the list.
+```
+
 If the router cannot be read to build the route patterns, redaction fails
 closed. Each failed attempt logs at `error`:
 
@@ -844,9 +867,17 @@ Wiring (all gated on the DSN):
   stacktraces) into Sentry events.
 - **Request context** — `Sentry.PlugContext` in
   [the endpoint](../lib/kiln_cms_web/endpoint.ex) attaches the request method,
-  path, and **scrubbed** headers/params to any event raised while handling a
+  URL, and **scrubbed** headers/params to any event raised while handling a
   request. We deliberately do **not** use `Sentry.PlugCapture`: on Bandit (this
   app's webserver) it double-reports.
+- **Credentials in URLs** — the request URL is recorded with the secret path
+  segments of a token link and the credential query parameters as
+  `[FILTERED]` (`KilnCMSWeb.SentryScrubber.scrub_url/1`, the same route rule as
+  the [request log](#request-log-lines-for-token-links)), and so is a `Referer`
+  header. `KilnCMS.SentryFilter` applies the same redaction before an event is
+  sent, and to a crash report's `genserver_state` and `last_message`: every
+  URL, quoted path or query string in them, and every quoted value under a
+  credential-named key (`token: "…"`, `"token" => "…"`).
 - **Background jobs** — Oban job failures are captured via Sentry's built-in
   integration (`config :sentry, integrations: [oban: [capture_errors: true]]` in
   `config/config.exs`).
@@ -885,6 +916,21 @@ attaches:
   bound parameters rather than inlining them into the statement.
 - **`OpentelemetryOban`** — a span per background job, trace-linked to the
   request that enqueued it.
+
+Spans pass through `KilnCMSWeb.RedactingSpanProcessor` when they start. It
+rewrites the URL attributes the HTTP instrumentation records: `url.path` with
+the secret segments of a token link as `[FILTERED]` (the same route rule as the
+[request log](#request-log-lines-for-token-links)), the credential parameters
+of `url.query`, and both in `url.full`, `http.target` and `http.url`. A value
+it cannot redact is replaced with `[FILTERED]`.
+
+`config/runtime/observability.exs` lists it first in
+`config :opentelemetry, :processors`, ahead of the batch processor, so no
+other processor or exporter sees a span before it is redacted. An overlay that
+changes the processors must keep it first and must not set
+`:span_processor`, which replaces the whole list. With tracing on, a boot
+check reports either mistake through `KilnCMS.Config.Report` (Sentry source
+`opentelemetry_processors`).
 
 Environment variables (the standard OTel set):
 

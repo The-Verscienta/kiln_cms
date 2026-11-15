@@ -58,9 +58,11 @@ defmodule KilnCMSWeb.SettingsLiveDemoTest do
     user
   end
 
+  # On the main host, where the page manages second factors.
   defp open(conn, user) do
     {:ok, lv, _html} =
       conn
+      |> main_host_conn()
       |> Phoenix.ConnTest.init_test_session(%{})
       |> AshAuthentication.Plug.Helpers.store_in_session(user)
       |> live(~p"/editor/settings")

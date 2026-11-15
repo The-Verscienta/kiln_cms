@@ -256,6 +256,40 @@ defmodule KilnCMS.Governance.Witness.HTTPTest do
       assert Enum.map(keys, &Witness.sequence_from_key/1) == [1, 2]
     end
 
+    # RFC 8288: the target is a URI reference, and most servers send a
+    # relative one. Handed to Req as it stood it was a scheme-less URL.
+    test "a relative next is resolved against the page it came on" do
+      stub(fn conn ->
+        case conn.query_string do
+          "" ->
+            conn
+            |> Plug.Conn.put_resp_header("link", ~s(</#{@org}/?page=2>; rel="next"))
+            |> json(200, ["000000000001.json"])
+
+          "page=2" ->
+            json(conn, 200, ["000000000002.json"])
+        end
+      end)
+
+      assert {:ok, [_one, _two]} = HTTP.list(@org)
+    end
+
+    # Every page request carries the bearer token. A `next` on another host
+    # must not get it — and must not read as the end of the listing either.
+    test "a next on another origin is refused, and no request goes there" do
+      test = self()
+
+      stub(fn conn ->
+        send(test, {:requested, conn.host})
+        json(conn, 200, %{"keys" => ["000000000001.json"], "next" => "https://other.example/x"})
+      end)
+
+      assert {:error, :witness_next_off_origin} = HTTP.list(@org)
+      assert_received {:requested, host}
+      refute host == "other.example"
+      refute_received {:requested, _second}
+    end
+
     # A `next` pointing at itself must not spin forever inside a Mix task.
     test "a self-referential next is bounded, and says so" do
       stub(fn conn ->

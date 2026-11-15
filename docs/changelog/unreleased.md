@@ -412,6 +412,40 @@ carries the reasoning.
   and why the sidecar is the only checksum a restore trusts is in
   [ADR 0035](../decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
 
+<a id="totp-secrets-encrypted-upgrade"></a>
+
+- **Run `mix ash.migrate` (new nullable `users.totp_secret_encrypted` and `users.totp_pending_secret_encrypted`); to roll back after the backfill, run `revert()` first.**
+  One additive migration adds the two `bytea` columns. The plaintext
+  `users.totp_secret` and `users.totp_pending_secret` stay, and are dropped
+  in a later release. This release writes the encrypted columns only and
+  clears the plaintext ones on every write; a row nothing has written since
+  the upgrade keeps working from its plaintext column until the backfill
+  moves it. The backfill (`KilnCMS.Accounts.TotpSecretBackfill`) is queued
+  on boot to run about 10 minutes later, once per day at most, on the
+  `default` queue; a second run writes nothing.
+  `config :kiln_cms, :totp_secret_backfill_on_boot, false` turns the boot
+  enqueue off, and `bin/kiln_cms rpc "KilnCMS.Accounts.TotpSecretBackfill.run()"`
+  runs it by hand.
+  - **During a rolling deploy**, a node of the previous release reads only
+    the plaintext columns. An account that enrolls or re-enrolls on a new
+    node, or that the backfill has reached, gets no authenticator codes
+    accepted by an old node (recovery codes and passkeys still work). The
+    10-minute delay is there so the old nodes are normally gone first.
+  - **To roll back** after the backfill has run, first run
+    `bin/kiln_cms rpc "KilnCMS.Accounts.TotpSecretBackfill.revert()"` on a
+    node of this release. It copies every secret back to its plaintext
+    column, and the previous release then works as before. Without it,
+    every account with an authenticator app signs in on the previous
+    release with a recovery code or a passkey only. Rolling forward again
+    needs nothing: the plaintext copy wins until the backfill moves it.
+  - **`SECRET_KEY_BASE` now protects the second factor too.** A deployment
+    that loses its `SECRET_KEY_BASE` or rotates it without
+    `PREVIOUS_SECRET_KEY_BASE` loses its authenticator-app secrets with the
+    other vault columns: those accounts sign in with a recovery code or a
+    passkey and set the app up again. `mix kiln.vault.reencrypt` walks the
+    two new columns (see
+    [secrets-rotation.md](../secrets-rotation.md#data-at-rest-re-encrypt-before-you-retire-the-old-value)).
+
 ## Breaking
 
 <a id="ws-gql-refuses-unverified-bearer"></a>
@@ -2549,6 +2583,28 @@ carries the reasoning.
   `KilnCMS.Backups.PgUrl.split/1`; the run under macOS's `/bin/bash` 3.2 is
   skipped on Linux CI. (#2726)
 
+<a id="totp-secrets-encrypted"></a>
+
+- **Authenticator-app (TOTP) secrets are stored encrypted.**
+  Kiln's other stored secrets (DKIM key, payment keys, webhook signing
+  secrets, storage keys and more) were already encrypted with a key derived
+  from `SECRET_KEY_BASE`; the TOTP secret and the one staged during
+  enrollment were stored as they are. A copy of the database, such as a
+  backup, a `pg_dump`, a replica or a staging clone, therefore carried every
+  enrolled account's working authenticator secret. Both are now stored by
+  `KilnCMS.Keys.Vault`, so a copy without `SECRET_KEY_BASE` carries none,
+  and existing secrets are moved by a background job after the upgrade (see
+  the upgrade note). Nothing changes for people signing in or enrolling.
+
+  Developers: the `User` attributes `totp_secret` and `totp_pending_secret`
+  still hold the plaintext secret in memory; they are now of type
+  `KilnCMS.Keys.Vault.EncryptedBinary`, stored in the `*_encrypted` columns.
+  Read a secret through `KilnCMS.Accounts.TotpSecrets.live/1` and
+  `pending/1`, which fall back to the plaintext columns (now the attributes
+  `legacy_totp_secret` and `legacy_totp_pending_secret`) for a row the
+  backfill has not reached. `KilnCMS.Keys.Vault.encrypted_attributes/0`
+  lists both vault types.
+
 <a id="crawler-verification-hardening"></a>
 
 - **Crawler verification holds up better against lookup starvation, cache churn and silent reverse zones (#2588).**
@@ -2648,3 +2704,70 @@ carries the reasoning.
   Plug routes in [Plugin extensibility](../plugin-extensibility.md).
   New public functions: `KilnCMSWeb.RequestRedaction.redact/2`,
   `redact_path/1`, `secret?/2`, `credential_param?/1`. (#2449)
+
+<a id="second-factors-managed-on-setup-hosts"></a>
+
+- **Second factors are managed only on the main host and console hosts.**
+  `/account/two-factor` was already served only there. `/editor/settings`
+  now follows the same rule (`KilnCMSWeb.SecondFactorGate.setup_host?/1`):
+  on a site's own address, which is possible only with no
+  `KILN_CONSOLE_HOST`, it draws no **Two-factor authentication** or
+  **Passkeys** controls and links to `/account/two-factor` on the main host,
+  and it refuses adding, confirming or removing a passkey or the
+  authenticator app, and regenerating recovery codes, server-side. The rest
+  of the page is unchanged. Deployments with `KILN_CONSOLE_HOST` set see no
+  difference.
+
+  `KilnCMS.Accounts.WebAuthn.register_passkey/4` now requires `host:`, the
+  host the page was served on, and refuses a registration served on any
+  host but the main host or a passkey-capable console host
+  (`{:error, :not_ceremony_host}`), or whose `clientDataJSON` origin names
+  another host (`{:error, :origin_mismatch}`).
+
+  Without a console host, an editor of a site other than the default one
+  can add an authenticator app or a passkey and remove passkeys on the main
+  host's `/account/two-factor`, but turning the app off and regenerating
+  recovery codes need `/editor/settings` on a console host. See
+  [Where second factors are managed](../two-factor-auth.md#where-second-factors-are-managed).
+
+<a id="second-factor-removed-notice"></a>
+
+- **Removing a passkey now asks for a second factor, emails the account's owner and raises a `two_factor_disabled` alert, as turning off the authenticator app does; turning the app off emails the owner too.**
+  Before, only turning off the authenticator app raised the site's
+  `two_factor_disabled` alert, and the owner was emailed only when a factor
+  was added. A passkey removed (by its owner, or by a platform admin) was
+  recorded in the security log as `passkey_removed` and nothing else.
+  Removing a passkey needs only a signed-in session, so the owner had no way
+  to learn that one of their ways back in was gone.
+
+  Removing a passkey now asks whoever removes it (the owner, or a platform
+  admin, for their own account) to prove a second factor first, as turning
+  off the authenticator app asks for a code: a session that verified one in
+  the last 15 minutes, or a current code from the authenticator app, which
+  counts against the shared five-per-15-minutes second-factor budget. On
+  `/editor/settings` and `/account/two-factor`, a session without a fresh
+  one gets a "Confirm it's you" box under the passkey list instead of a
+  removal; an account with passkeys only is told to sign in again with a
+  passkey. See [Remove a passkey](../passkeys.md#remove-a-passkey).
+
+  Any second factor removed now sends the owner an email, "A second factor
+  was removed from your (name) account", after the removal is saved. It says
+  what was removed, when, and from which browser and site. When a platform
+  admin removed it, it names that admin's email address. A refused removal,
+  an erased account and an invitee's takeover of an unconfirmed account send
+  nothing. `passkey_removed` now raises `two_factor_disabled` like
+  `second_factor_removed` (not with `via` `invitation`). The alert's label
+  reads "A second factor was removed" in the bell and email, and "Second
+  factor removed" on the Security alerts page, since it now covers passkeys.
+  See [We email you when a second factor is removed](../two-factor-auth.md#we-email-you-when-a-second-factor-is-removed).
+
+  Developers: `Passkey.:destroy` (`Accounts.remove_passkey`) takes a `code`
+  argument and runs `KilnCMS.CMS.Changes.SaverVerifiedSecondFactor`; pass
+  `second_factor_verified_at` in the context for a session that verified a
+  factor, or the call is refused. Erasure removes passkeys with the new
+  system-only `Passkey.:erase` (no step-up, no mail).
+  `KilnCMSWeb.TotpEnrolment.remove_passkey/4` returns `{:confirm, reason}`
+  when a code is needed. `KilnCMS.Accounts.SecondFactorNotice.factor_removed/4` and
+  `KilnCMS.Accounts.Changes.NotifyFactorRemoved` are new; a site summary of
+  `two_factor_disabled` now also counts `passkey_removed` events
+  (`KilnCMS.Security.Alerts.event_types/1`).

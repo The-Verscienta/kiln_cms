@@ -132,7 +132,7 @@ defmodule KilnCMS.Governance.Witness.HTTP do
     |> case do
       {:ok, %{status: 200} = response} ->
         with {:ok, keys} <- keys(response.body, org_id),
-             do: continue(next_page(response), org_id, acc ++ keys, remaining)
+             do: continue(resolve_next(url, next_page(response)), org_id, acc ++ keys, remaining)
 
       # A log that has never been written for this org 404s the collection
       # rather than answering `[]`, and that is not a tampering signal. Only on
@@ -149,7 +149,31 @@ defmodule KilnCMS.Governance.Witness.HTTP do
   end
 
   defp continue(nil, _org_id, keys, _remaining), do: {:ok, keys}
+  defp continue({:error, reason}, _org_id, _keys, _remaining), do: {:error, reason}
   defp continue(next, org_id, keys, remaining), do: list_pages(next, org_id, keys, remaining - 1)
+
+  # `next` is whatever the response said. Two things follow from that:
+  #
+  #   * it is a URI REFERENCE (RFC 8288), usually a relative one, so it is
+  #     resolved against the page it came on rather than handed to Req as is;
+  #   * the next request carries the bearer token, so it goes only to the origin
+  #     the page came from. A `next` naming another host is a listing we cannot
+  #     follow without handing that host the token, and is reported as an error
+  #     rather than as the end of the listing: a truncated listing must not read
+  #     as a complete one.
+  defp resolve_next(_page_url, nil), do: nil
+
+  defp resolve_next(page_url, next) do
+    page = URI.parse(page_url)
+    resolved = URI.merge(page, next)
+
+    if {resolved.scheme, resolved.host, resolved.port} == {page.scheme, page.host, page.port},
+      do: URI.to_string(resolved),
+      else: {:error, :witness_next_off_origin}
+  rescue
+    # `URI.merge/2` raises on a reference it cannot parse.
+    _error -> {:error, :witness_next_invalid}
+  end
 
   # Two spellings, because a shim author will reach for whichever their store
   # already speaks: the `Link` header, or a `next` alongside the keys.

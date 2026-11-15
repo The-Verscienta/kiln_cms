@@ -15,6 +15,11 @@ defmodule KilnCMS.Accounts.Changes.RegisterWithSso do
       identity or verified email) is signed in as-is — role and audiences
       untouched. A brand-new user lands as `:viewer` with no audiences,
       exactly like password self-registration.
+    * **An unconfirmed account is taken over, not linked.** An account nobody
+      confirmed may have been registered by a stranger, password and all. The
+      first SSO sign-in to one replaces its password and forgets every
+      credential it held (`User.:take_over_by_sso`), as a magic-link sign-in
+      does.
     * **Invite-only respected.** When `:registration_enabled` is false, SSO
       only signs in *known* accounts — matched by an already-linked provider
       identity (`iss`/`sub`) **or** by email — so an identity-linked employee
@@ -26,6 +31,8 @@ defmodule KilnCMS.Accounts.Changes.RegisterWithSso do
   require Ash.Query
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.AlreadyConfirmed
+  alias KilnCMS.Security.Recorder
 
   @impl true
   def change(changeset, _opts, _context) do
@@ -54,6 +61,7 @@ defmodule KilnCMS.Accounts.Changes.RegisterWithSso do
           |> Ash.Changeset.change_attribute(:email, email)
           |> maybe_unusable_password(known?)
           |> maybe_set_name(info)
+          |> Ash.Changeset.before_transaction(&take_over_unconfirmed(&1, email))
         else
           Ash.Changeset.add_error(changeset,
             field: :email,
@@ -61,6 +69,58 @@ defmodule KilnCMS.Accounts.Changes.RegisterWithSso do
           )
         end
     end
+  end
+
+  # Anyone can register an unconfirmed account for any address and choose its
+  # password. Linking the provider's identity to that account as it stands
+  # would sign the address's owner in to an account a stranger can still open.
+  # So the first SSO sign-in to an unconfirmed account takes it over, as a
+  # magic link does (`User.:take_over_by_sso`): the password is replaced with
+  # one nobody knows, and every token, second factor, passkey, push device and
+  # API key it held is forgotten. Runs before the upsert's transaction opens, in
+  # its own: the takeover's after-commit effects (session eviction, audit
+  # events) must not wait on, or be undone with, the identity link's write.
+  defp take_over_unconfirmed(changeset, email) do
+    case unconfirmed_account(email) do
+      {:ok, nil} ->
+        changeset
+
+      {:ok, user} ->
+        # authorize?: false — a pre-auth flow with no actor: the provider's
+        # verified identity is the credential, and the action is system-only
+        # (`forbid_if always()`, and its change refuses any actor).
+        case Accounts.take_over_by_sso(user, %{},
+               authorize?: false,
+               context:
+                 Map.take(changeset.context, [Recorder.context_key(), Recorder.tenant_key()])
+             ) do
+          {:ok, _claimed} -> changeset
+          {:error, error} -> keep_or_refuse(changeset, error)
+        end
+
+      {:error, error} ->
+        Ash.Changeset.add_error(changeset, error)
+    end
+  end
+
+  # Confirmed between the read and the lock: nothing to take over.
+  defp keep_or_refuse(changeset, error) do
+    if already_confirmed?(error), do: changeset, else: Ash.Changeset.add_error(changeset, error)
+  end
+
+  defp already_confirmed?(%AlreadyConfirmed{}), do: true
+
+  defp already_confirmed?(%{errors: errors}) when is_list(errors),
+    do: Enum.any?(errors, &already_confirmed?/1)
+
+  defp already_confirmed?(_error), do: false
+
+  defp unconfirmed_account(email) do
+    # authorize?: false — an SSO callback, before anyone is signed in. Only the
+    # row's id and `confirmed_at` decide anything, and nothing read leaves here.
+    Accounts.User
+    |> Ash.Query.filter(email == ^email and is_nil(confirmed_at))
+    |> Ash.read_one(authorize?: false)
   end
 
   defp email_verified?(info) do

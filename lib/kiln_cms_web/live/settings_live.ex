@@ -68,6 +68,11 @@ defmodule KilnCMSWeb.SettingsLive do
      # Whether that proof is owed (#2872): this page has no step to give it,
      # so the add controls say where to go instead of only refusing.
      |> assign_proof_elsewhere()
+     # Whether this host may manage the account's second factors at all
+     # (GHSA-mq8x-2p99-6q8c): only the main host and console hosts, as for
+     # `/account/two-factor`. A tenant site host is the origin a site
+     # administrator's injected script runs on.
+     |> assign_factor_host()
      # Passkeys (#331): registered credentials + the in-flight enrolment
      # challenge (parked in LV state between the JS create() round-trip).
      |> assign(:passkeys, WebAuthn.list(user))
@@ -135,6 +140,21 @@ defmodule KilnCMSWeb.SettingsLive do
     )
   end
 
+  # Second-factor management (adding, removing or changing a passkey or the
+  # authenticator app) is served only where `/account/two-factor` is: the main
+  # host and console hosts (`SecondFactorGate.setup_host?/1`). On a tenant
+  # site host, a script the site's administrator injected runs same-origin
+  # with this page and could drive its events for whoever is signed in, so
+  # the sections link to the main host's setup page instead (`@setup_url`,
+  # `assign_proof_elsewhere/1`), and every factor event is refused here
+  # (`@factor_events`), since a script sends events directly. That page, not
+  # this one on the main host: an editor of a site is not one of the main
+  # host's site, so `/editor/settings` there would be refused.
+  defp assign_factor_host(socket) do
+    host = KilnCMSWeb.SecondFactorGate.socket_host(socket)
+    assign(socket, :factors_here?, KilnCMSWeb.SecondFactorGate.setup_host?(host))
+  end
+
   # "Your access" (#2142): the tier this page was reached with, as the policies
   # resolve it on this site, and when a temporary one changes. Read-only, and
   # only ever about the signed-in user.
@@ -153,7 +173,20 @@ defmodule KilnCMSWeb.SettingsLive do
 
   # --- passkeys (#331) -------------------------------------------------------
 
+  @factor_events ~w(passkey_begin passkey_attestation remove_passkey start_totp confirm_totp
+                     regenerate_recovery_codes disable_totp)
+
   @impl true
+  # Not on this host (`assign_factor_host/1`): ahead of every other clause, so
+  # no challenge is minted and no factor changes, whatever the event carries.
+  def handle_event(event, _params, %{assigns: %{factors_here?: false}} = socket)
+      when event in @factor_events do
+    {:noreply,
+     socket
+     |> assign(:passkey_challenge, nil)
+     |> put_flash(:error, factors_elsewhere_message())}
+  end
+
   # Refused before the browser prompt, not after it: the registration would be
   # refused anyway, and a visitor shouldn't touch their fingerprint reader first.
   def handle_event("passkey_begin", _params, %{assigns: %{credentials_locked?: true}} = socket),
@@ -196,7 +229,8 @@ defmodule KilnCMSWeb.SettingsLive do
         socket = assign(socket, :passkey_challenge, nil)
 
         case WebAuthn.register_passkey(user, challenge, payload,
-               context: Map.merge(socket.assigns.security_context, enrolment_context(socket))
+               context: Map.merge(socket.assigns.security_context, enrolment_context(socket)),
+               host: KilnCMSWeb.SecondFactorGate.socket_host(socket)
              ) do
           {:ok, _passkey} ->
             message = gettext("Passkey added — you can sign in with it now.")
@@ -241,23 +275,24 @@ defmodule KilnCMSWeb.SettingsLive do
   def handle_event("passkey_cancel", _params, socket),
     do: {:noreply, socket |> assign(:passkey_challenge, nil) |> assign(:passkey_status, nil)}
 
-  def handle_event("remove_passkey", %{"id" => id}, socket) when is_binary(id) do
-    user = socket.assigns.current_user
+  # The action decides, and asks for a second factor first when this
+  # session's is not fresh (`TotpEnrolment.handle_remove_passkey/2`).
+  def handle_event("remove_passkey", params, socket) do
+    case TotpEnrolment.handle_remove_passkey(socket, params) do
+      {:removed, socket, message} ->
+        {:noreply,
+         socket
+         |> assign(:passkeys, WebAuthn.list(socket.assigns.current_user))
+         |> assign(:passkey_status, {:ok, message})
+         |> put_flash(:info, message)}
 
-    socket =
-      case TotpEnrolment.remove_passkey(user, id, socket.assigns.security_context) do
-        {:ok, message} ->
-          socket
-          |> assign(:passkeys, WebAuthn.list(user))
-          |> assign(:passkey_status, {:ok, message})
-          |> put_flash(:info, message)
-
-        {:error, message} ->
-          put_flash(socket, :error, message)
-      end
-
-    {:noreply, socket}
+      {:not_removed, socket} ->
+        {:noreply, socket}
+    end
   end
+
+  def handle_event("cancel_remove_passkey", _params, socket),
+    do: {:noreply, assign(socket, :passkey_removal, nil)}
 
   # --- active sessions (#1823) ------------------------------------------------
   #
@@ -862,101 +897,110 @@ defmodule KilnCMSWeb.SettingsLive do
                 )}
               </p>
 
-              <TotpEnrolment.recovery_codes :if={@recovery_codes} codes={@recovery_codes} />
+              <.factors_elsewhere_note
+                :if={!@factors_here?}
+                id="two-factor-elsewhere"
+                url={@setup_url}
+                host={@setup_host}
+              />
 
-              <.demo_locked_note :if={@credentials_locked?} />
+              <div :if={@factors_here?} id="two-factor-manage">
+                <TotpEnrolment.recovery_codes :if={@recovery_codes} codes={@recovery_codes} />
 
-              <div :if={@totp_enabled? && !@enrolling && !@credentials_locked?} class="space-y-3">
-                <p class="flex items-center gap-1.5 text-sm font-medium text-success">
-                  <.icon name="hero-shield-check" class="size-4" />
-                  {gettext("Two-factor authentication is on.")}
-                </p>
-                <p class="text-sm text-base-content/70">
-                  {gettext("%{count} unused recovery codes remain.",
-                    count: length(@current_user.totp_recovery_hashes || [])
-                  )}
-                </p>
-                <%!-- After a recovery-code sign-in the live authenticator may be
+                <.demo_locked_note :if={@credentials_locked?} />
+
+                <div :if={@totp_enabled? && !@enrolling && !@credentials_locked?} class="space-y-3">
+                  <p class="flex items-center gap-1.5 text-sm font-medium text-success">
+                    <.icon name="hero-shield-check" class="size-4" />
+                    {gettext("Two-factor authentication is on.")}
+                  </p>
+                  <p class="text-sm text-base-content/70">
+                    {gettext("%{count} unused recovery codes remain.",
+                      count: length(@current_user.totp_recovery_hashes || [])
+                    )}
+                  </p>
+                  <%!-- After a recovery-code sign-in the live authenticator may be
                   gone; surface re-enrolment (backend already accepts
                   `recovery_login?`) instead of only disable/regenerate forms
                   that still need a live code. --%>
-                <div
-                  :if={@recovery_login?}
-                  class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
-                >
-                  <p class="font-medium text-warning-content">
-                    {gettext("You signed in with a recovery code.")}
-                  </p>
-                  <p class="mt-1 text-base-content/70">
-                    {gettext(
-                      "Set up a new authenticator app so you can keep signing in without using another recovery code."
-                    )}
-                  </p>
+                  <div
+                    :if={@recovery_login?}
+                    class="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
+                  >
+                    <p class="font-medium text-warning-content">
+                      {gettext("You signed in with a recovery code.")}
+                    </p>
+                    <p class="mt-1 text-base-content/70">
+                      {gettext(
+                        "Set up a new authenticator app so you can keep signing in without using another recovery code."
+                      )}
+                    </p>
+                    <.proof_elsewhere_note
+                      :if={@proof_elsewhere?}
+                      id="totp-proof-elsewhere"
+                      setup_url={@setup_url}
+                      setup_host={@setup_host}
+                      class="mt-3"
+                    />
+                    <.button phx-click="start_totp" variant="primary" class="mt-3">
+                      {gettext("Set up a new authenticator")}
+                    </.button>
+                    <TotpEnrolment.added_mail_note />
+                  </div>
+                  <form
+                    id="regenerate-recovery-form"
+                    phx-submit="regenerate_recovery_codes"
+                    class="flex items-end gap-2"
+                  >
+                    <.input
+                      name="code"
+                      value=""
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="one-time-code"
+                      label={gettext("Enter a current code to generate new recovery codes")}
+                    />
+                    <.button type="submit" variant="ghost">{gettext("Regenerate")}</.button>
+                  </form>
+                  <.last_factor_note :if={
+                    last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :totp)
+                  } />
+                  <form
+                    :if={!last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :totp)}
+                    id="disable-totp-form"
+                    phx-submit="disable_totp"
+                    class="flex items-end gap-2"
+                  >
+                    <.input
+                      name="code"
+                      value=""
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="one-time-code"
+                      label={gettext("Enter a current code to turn it off")}
+                    />
+                    <.button type="submit" variant="danger">{gettext("Disable")}</.button>
+                  </form>
+                </div>
+
+                <div :if={@enrolling && !@credentials_locked?}>
+                  <TotpEnrolment.setup enrolling={@enrolling} />
+                  <TotpEnrolment.added_mail_note />
+                </div>
+
+                <div :if={!@totp_enabled? && !@enrolling && !@credentials_locked?}>
                   <.proof_elsewhere_note
                     :if={@proof_elsewhere?}
                     id="totp-proof-elsewhere"
                     setup_url={@setup_url}
                     setup_host={@setup_host}
-                    class="mt-3"
+                    class="mb-3"
                   />
-                  <.button phx-click="start_totp" variant="primary" class="mt-3">
-                    {gettext("Set up a new authenticator")}
+                  <.button phx-click="start_totp" variant="primary">
+                    {gettext("Enable two-factor authentication")}
                   </.button>
                   <TotpEnrolment.added_mail_note />
                 </div>
-                <form
-                  id="regenerate-recovery-form"
-                  phx-submit="regenerate_recovery_codes"
-                  class="flex items-end gap-2"
-                >
-                  <.input
-                    name="code"
-                    value=""
-                    type="text"
-                    inputmode="numeric"
-                    autocomplete="one-time-code"
-                    label={gettext("Enter a current code to generate new recovery codes")}
-                  />
-                  <.button type="submit" variant="ghost">{gettext("Regenerate")}</.button>
-                </form>
-                <.last_factor_note :if={
-                  last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :totp)
-                } />
-                <form
-                  :if={!last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :totp)}
-                  id="disable-totp-form"
-                  phx-submit="disable_totp"
-                  class="flex items-end gap-2"
-                >
-                  <.input
-                    name="code"
-                    value=""
-                    type="text"
-                    inputmode="numeric"
-                    autocomplete="one-time-code"
-                    label={gettext("Enter a current code to turn it off")}
-                  />
-                  <.button type="submit" variant="danger">{gettext("Disable")}</.button>
-                </form>
-              </div>
-
-              <div :if={@enrolling && !@credentials_locked?}>
-                <TotpEnrolment.setup enrolling={@enrolling} />
-                <TotpEnrolment.added_mail_note />
-              </div>
-
-              <div :if={!@totp_enabled? && !@enrolling && !@credentials_locked?}>
-                <.proof_elsewhere_note
-                  :if={@proof_elsewhere?}
-                  id="totp-proof-elsewhere"
-                  setup_url={@setup_url}
-                  setup_host={@setup_host}
-                  class="mb-3"
-                />
-                <.button phx-click="start_totp" variant="primary">
-                  {gettext("Enable two-factor authentication")}
-                </.button>
-                <TotpEnrolment.added_mail_note />
               </div>
             </section>
 
@@ -972,155 +1016,171 @@ defmodule KilnCMSWeb.SettingsLive do
                 )}
               </p>
 
-              <%!-- Whether any are set up, said in words (#1829): the list alone
-                left "is a passkey active?" to be inferred from an empty space. --%>
-              <p
-                :if={@passkeys == []}
-                id="passkeys-none"
-                class="mb-4 flex items-center gap-1.5 text-sm text-base-content/70"
-              >
-                <.icon name="hero-key" class="size-4 shrink-0" />
-                {gettext("No passkeys yet. You sign in with your password.")}
-              </p>
-              <p
-                :if={@passkeys != []}
-                id="passkeys-count"
-                class="mb-2 flex items-center gap-1.5 text-sm font-medium text-success"
-              >
-                <.icon name="hero-shield-check" class="size-4 shrink-0" />
-                {ngettext(
-                  "You have %{count} passkey set up.",
-                  "You have %{count} passkeys set up.",
-                  length(@passkeys),
-                  count: length(@passkeys)
-                )}
-              </p>
-
-              <ul :if={@passkeys != []} class="mb-4 divide-y divide-base-content/10">
-                <li
-                  :for={passkey <- @passkeys}
-                  class="flex items-center justify-between gap-3 py-2"
-                  id={"passkey-#{passkey.id}"}
-                >
-                  <div class="min-w-0">
-                    <p class="truncate text-sm font-medium">{passkey.name}</p>
-                    <p class="text-xs text-base-content/60">
-                      {gettext("Added %{date}",
-                        date: Calendar.strftime(passkey.inserted_at, "%Y-%m-%d")
-                      )}
-                      <span :if={passkey.last_used_at}>
-                        · {gettext("last used %{date}",
-                          date: Calendar.strftime(passkey.last_used_at, "%Y-%m-%d")
-                        )}
-                      </span>
-                    </p>
-                  </div>
-                  <button
-                    :if={
-                      !@credentials_locked? &&
-                        !last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
-                    }
-                    type="button"
-                    phx-click="remove_passkey"
-                    phx-value-id={passkey.id}
-                    data-confirm={gettext("Remove this passkey? You can no longer sign in with it.")}
-                    aria-label={gettext("Remove passkey")}
-                    class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
-                  >
-                    <.icon name="hero-trash" class="size-4" />
-                  </button>
-                </li>
-              </ul>
-
-              <.demo_locked_note :if={@credentials_locked?} />
-              <.last_factor_note :if={
-                last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
-              } />
-              <p
-                :if={!@credentials_locked? && length(@passkeys) >= @passkey_limit}
-                id="passkeys-at-limit"
-                class="flex items-center gap-1.5 text-sm text-base-content/70"
-              >
-                <.icon name="hero-information-circle" class="size-4 shrink-0" />
-                {passkey_limit_message()}
-              </p>
-              <.proof_elsewhere_note
-                :if={
-                  @proof_elsewhere? && !@credentials_locked? && !@passkey_challenge &&
-                    length(@passkeys) < @passkey_limit
-                }
-                id="passkey-proof-elsewhere"
-                setup_url={@setup_url}
-                setup_host={@setup_host}
-                class="mb-3"
+              <.factors_elsewhere_note
+                :if={!@factors_here?}
+                id="passkeys-elsewhere"
+                url={@setup_url}
+                host={@setup_host}
               />
-              <form
-                :if={
-                  !@credentials_locked? && !@passkey_challenge &&
-                    length(@passkeys) < @passkey_limit
-                }
-                phx-submit="passkey_begin"
-                class="flex items-end gap-2"
-                id="add-passkey-form"
-              >
-                <.input
-                  name="name"
-                  value=""
-                  type="text"
-                  label={gettext("Name this passkey (optional)")}
-                  placeholder={gettext("e.g. MacBook Touch ID")}
+
+              <div :if={@factors_here?} id="passkeys-manage">
+                <%!-- Whether any are set up, said in words (#1829): the list alone
+                left "is a passkey active?" to be inferred from an empty space. --%>
+                <p
+                  :if={@passkeys == []}
+                  id="passkeys-none"
+                  class="mb-4 flex items-center gap-1.5 text-sm text-base-content/70"
+                >
+                  <.icon name="hero-key" class="size-4 shrink-0" />
+                  {gettext("No passkeys yet. You sign in with your password.")}
+                </p>
+                <p
+                  :if={@passkeys != []}
+                  id="passkeys-count"
+                  class="mb-2 flex items-center gap-1.5 text-sm font-medium text-success"
+                >
+                  <.icon name="hero-shield-check" class="size-4 shrink-0" />
+                  {ngettext(
+                    "You have %{count} passkey set up.",
+                    "You have %{count} passkeys set up.",
+                    length(@passkeys),
+                    count: length(@passkeys)
+                  )}
+                </p>
+
+                <ul :if={@passkeys != []} class="mb-4 divide-y divide-base-content/10">
+                  <li
+                    :for={passkey <- @passkeys}
+                    class="flex items-center justify-between gap-3 py-2"
+                    id={"passkey-#{passkey.id}"}
+                  >
+                    <div class="min-w-0">
+                      <p class="truncate text-sm font-medium">{passkey.name}</p>
+                      <p class="text-xs text-base-content/60">
+                        {gettext("Added %{date}",
+                          date: Calendar.strftime(passkey.inserted_at, "%Y-%m-%d")
+                        )}
+                        <span :if={passkey.last_used_at}>
+                          · {gettext("last used %{date}",
+                            date: Calendar.strftime(passkey.last_used_at, "%Y-%m-%d")
+                          )}
+                        </span>
+                      </p>
+                    </div>
+                    <button
+                      :if={
+                        !@credentials_locked? &&
+                          !last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
+                      }
+                      type="button"
+                      phx-click="remove_passkey"
+                      phx-value-id={passkey.id}
+                      data-confirm={
+                        gettext("Remove this passkey? You can no longer sign in with it.")
+                      }
+                      aria-label={gettext("Remove passkey")}
+                      class="btn btn-sm btn-ghost text-base-content/60 hover:text-error"
+                    >
+                      <.icon name="hero-trash" class="size-4" />
+                    </button>
+                  </li>
+                </ul>
+
+                <TotpEnrolment.passkey_removal_confirm
+                  removal={@passkey_removal}
+                  passkeys={@passkeys}
+                  totp?={@totp_enabled?}
                 />
-                <.button type="submit" variant="primary" phx-disable-with={gettext("Starting…")}>
-                  {gettext("Add a passkey")}
-                </.button>
-              </form>
-              <%!-- While the browser's own prompt is open (#1829). Server state,
+                <.demo_locked_note :if={@credentials_locked?} />
+                <.last_factor_note :if={
+                  last_factor?(@second_factor_required?, @totp_enabled?, @passkeys, :passkey)
+                } />
+                <p
+                  :if={!@credentials_locked? && length(@passkeys) >= @passkey_limit}
+                  id="passkeys-at-limit"
+                  class="flex items-center gap-1.5 text-sm text-base-content/70"
+                >
+                  <.icon name="hero-information-circle" class="size-4 shrink-0" />
+                  {passkey_limit_message()}
+                </p>
+                <.proof_elsewhere_note
+                  :if={
+                    @proof_elsewhere? && !@credentials_locked? && !@passkey_challenge &&
+                      length(@passkeys) < @passkey_limit
+                  }
+                  id="passkey-proof-elsewhere"
+                  setup_url={@setup_url}
+                  setup_host={@setup_host}
+                  class="mb-3"
+                />
+                <form
+                  :if={
+                    !@credentials_locked? && !@passkey_challenge &&
+                      length(@passkeys) < @passkey_limit
+                  }
+                  phx-submit="passkey_begin"
+                  class="flex items-end gap-2"
+                  id="add-passkey-form"
+                >
+                  <.input
+                    name="name"
+                    value=""
+                    type="text"
+                    label={gettext("Name this passkey (optional)")}
+                    placeholder={gettext("e.g. MacBook Touch ID")}
+                  />
+                  <.button type="submit" variant="primary" phx-disable-with={gettext("Starting…")}>
+                    {gettext("Add a passkey")}
+                  </.button>
+                </form>
+                <%!-- While the browser's own prompt is open (#1829). Server state,
                 not a client spinner: the challenge is set from `passkey_begin`
                 until the hook reports back, either way. --%>
-              <div
-                :if={!@credentials_locked? && @passkey_challenge}
-                id="passkey-waiting"
-                class="flex flex-wrap items-center gap-3 rounded-lg border border-base-content/10 bg-base-200/50 p-3"
-              >
-                <.icon name="hero-arrow-path" class="size-4 shrink-0 motion-safe:animate-spin" />
-                <p class="flex-1 text-sm" role="status">
-                  {gettext("Waiting for your device… Follow your browser's prompt to finish.")}
-                </p>
-                <button type="button" phx-click="passkey_cancel" class="btn btn-sm btn-default">
-                  {gettext("Cancel")}
-                </button>
-              </div>
-              <p
-                :if={!@credentials_locked? && length(@passkeys) < @passkey_limit}
-                class="mt-2 text-xs text-base-content/70"
-              >
-                {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
-                <%!-- `Passkey.:register` mails the owner every time
+                <div
+                  :if={!@credentials_locked? && @passkey_challenge}
+                  id="passkey-waiting"
+                  class="flex flex-wrap items-center gap-3 rounded-lg border border-base-content/10 bg-base-200/50 p-3"
+                >
+                  <.icon name="hero-arrow-path" class="size-4 shrink-0 motion-safe:animate-spin" />
+                  <p class="flex-1 text-sm" role="status">
+                    {gettext("Waiting for your device… Follow your browser's prompt to finish.")}
+                  </p>
+                  <button type="button" phx-click="passkey_cancel" class="btn btn-sm btn-default">
+                    {gettext("Cancel")}
+                  </button>
+                </div>
+                <p
+                  :if={!@credentials_locked? && length(@passkeys) < @passkey_limit}
+                  class="mt-2 text-xs text-base-content/70"
+                >
+                  {gettext("Your browser will prompt you to confirm with this device's screen lock.")}
+                  <%!-- `Passkey.:register` mails the owner every time
                       (`NotifyFactorAdded`, `SecondFactorNotice`). --%>
-                <span id="passkey-added-mail">
-                  {gettext("We'll email you each time a passkey is added to your account.")}
-                </span>
-              </p>
-              <p
-                :if={@passkey_status}
-                id="passkey-status"
-                role="status"
-                class={[
-                  "mt-3 flex items-center gap-1.5 text-sm",
-                  elem(@passkey_status, 0) == :ok && "text-success",
-                  elem(@passkey_status, 0) == :error && "text-error"
-                ]}
-              >
-                <.icon
-                  name={
-                    if elem(@passkey_status, 0) == :ok,
-                      do: "hero-check-circle",
-                      else: "hero-exclamation-circle"
-                  }
-                  class="size-4 shrink-0"
-                />
-                {elem(@passkey_status, 1)}
-              </p>
+                  <span id="passkey-added-mail">
+                    {gettext("We'll email you each time a passkey is added to your account.")}
+                  </span>
+                </p>
+                <p
+                  :if={@passkey_status}
+                  id="passkey-status"
+                  role="status"
+                  class={[
+                    "mt-3 flex items-center gap-1.5 text-sm",
+                    elem(@passkey_status, 0) == :ok && "text-success",
+                    elem(@passkey_status, 0) == :error && "text-error"
+                  ]}
+                >
+                  <.icon
+                    name={
+                      if elem(@passkey_status, 0) == :ok,
+                        do: "hero-check-circle",
+                        else: "hero-exclamation-circle"
+                    }
+                    class="size-4 shrink-0"
+                  />
+                  {elem(@passkey_status, 1)}
+                </p>
+              </div>
             </section>
 
             <section id="settings-sessions" class="card card-pad max-w-xl scroll-mt-24">
@@ -1526,6 +1586,37 @@ defmodule KilnCMSWeb.SettingsLive do
       </p>
       <.link href={@setup_url} class="btn btn-sm btn-default mt-2">
         {gettext("Set up two-step sign-in")}
+      </.link>
+    </div>
+    """
+  end
+
+  defp factors_elsewhere_message,
+    do:
+      gettext(
+        "Passkeys and two-factor authentication are managed on the main sign-in host, not on this site's address."
+      )
+
+  attr :id, :string, required: true
+  attr :url, :string, required: true
+  attr :host, :string, required: true
+
+  # In place of a factor section on a tenant site host (`assign_factor_host/1`).
+  defp factors_elsewhere_note(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class="rounded-lg border border-base-content/10 bg-base-200/50 p-3 text-sm"
+    >
+      <p class="flex items-start gap-1.5">
+        <.icon name="hero-shield-check" class="mt-0.5 size-4 shrink-0" />
+        {factors_elsewhere_message()}
+      </p>
+      <p class="mt-1 text-base-content/70">
+        {gettext("This opens on %{host}, where you sign in again.", host: @host)}
+      </p>
+      <.link href={@url} class="btn btn-sm btn-default mt-2">
+        {gettext("Manage sign-in security")}
       </.link>
     </div>
     """

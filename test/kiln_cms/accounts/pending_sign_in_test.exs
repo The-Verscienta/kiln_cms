@@ -64,7 +64,12 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
       blob = PendingSignIn.mint_and_hold(:session, @endpoint, user)
 
       Ash.Seed.update!(user, %{totp_confirmed_at: nil})
-      :ok = Accounts.remove_passkey(passkey, actor: user)
+
+      :ok =
+        Accounts.remove_passkey(passkey,
+          actor: user,
+          context: KilnCMS.TwoFactorFixtures.verified_now()
+        )
 
       for factor <- [:any, :totp, :passkey] do
         assert :error = PendingSignIn.resolve(:session, @endpoint, blob, factor)

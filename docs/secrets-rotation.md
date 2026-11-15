@@ -202,7 +202,8 @@ this section is long:
 ### Data at rest: re-encrypt before you retire the old value
 
 These columns hold ciphertext under the current `secret_key_base`. Every one
-has type `KilnCMS.Keys.Vault.Ciphertext`, and that type is how the
+has type `KilnCMS.Keys.Vault.Ciphertext` (or `KilnCMS.Keys.Vault.EncryptedBinary`,
+the same ciphertext decrypted as it loads), and that type is how the
 re-encryption task finds them. A test fails the build if a new binary column
 is neither that type nor explained, so the list cannot fall behind the code.
 
@@ -219,6 +220,7 @@ is neither that type nor explained, so the list cannot fall behind the code.
 | `secret_encrypted` | `KilnCMS.CMS.WebhookEndpoint` (one per endpoint) | Outbound webhook deliveries are refused — the ledger says `"delivery failed: signing secret unreadable"` and the endpoint row reports the secret unreadable | `/editor/webhooks`: *Rotate secret* on each endpoint (the old ciphertext is never opened), then give its receiver the new secret |
 | `secret_access_key_encrypted` | `KilnCMS.CMS.StorageProfile` (one per bucket a site has stored files in) | That site's uploads are **refused**, and its files in that bucket can't be read, derived or deleted (downloads 404, variant jobs retry). Nothing is written to, or read from, the operator's storage instead | `/editor/site-storage` on each such site: enter the secret access key again. A profile the site has since moved away from has no form; move the site back to that bucket, re-enter the key, then move it forward again |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | `/editor/federation` → *Re-key*, or `mix kiln.federation rekey`. See [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor) |
+| `users.totp_secret_encrypted`, `users.totp_pending_secret_encrypted` | `KilnCMS.Accounts.User` (one per account with an authenticator app) | The account's authenticator codes are refused, so it signs in with a recovery code or a passkey; an enrolment in progress can't be confirmed | The person turns the authenticator app off and sets it up again under **Settings → Two-step verification**, after signing in with a recovery code. An admin can't do it for them |
 
 One more thing is sealed under this secret but is not a column: the subject
 and body of each **queued** mail job (`KilnCMS.Mail.open_args/1`, #1843).

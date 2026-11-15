@@ -292,6 +292,54 @@ defmodule KilnCMS.SafeFetchTest do
     end
   end
 
+  # Req starts one Finch per distinct set of connect options and never stops
+  # it. The pinned TLS options carry the hostname, so each host fetched used to
+  # leave a supervisor tree and its atoms behind for the life of the node.
+  describe "a pinned TLS request leaves no connection pool behind" do
+    defp pool_slots, do: Enum.map(1..32, &Module.concat(SafeFetch, "Pool#{&1}"))
+
+    defp req_pools, do: DynamicSupervisor.count_children(Req.FinchSupervisor).active
+
+    test "three hostnames, no new Req pool and every slot free again" do
+      before = req_pools()
+
+      for host <- ~w(a.pool.test b.pool.test c.pool.test) do
+        # Port 1 on loopback: refused at once. The pool is started either way.
+        options =
+          [method: :get, retry: false, redirect: false] ++
+            SafeFetch.connect_target("https://#{host}:1/x", {127, 0, 0, 1}, 500)
+
+        assert {:error, _refused} = SafeFetch.request_on_private_pool(options)
+      end
+
+      assert req_pools() == before
+      assert Enum.all?(pool_slots(), &(Process.whereis(&1) == nil))
+    end
+
+    test "a caller killed mid-request frees its slot" do
+      test = self()
+
+      {pid, ref} =
+        spawn_monitor(fn ->
+          # A non-routable address: the connect hangs until its timeout.
+          options =
+            [method: :get, retry: false, redirect: false] ++
+              SafeFetch.connect_target("https://slow.pool.test/x", {10, 255, 255, 1}, 30_000)
+
+          send(test, :started)
+          SafeFetch.request_on_private_pool(options)
+        end)
+
+      assert_receive :started
+      Process.sleep(100)
+      Process.exit(pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^pid, :killed}
+      Process.sleep(200)
+
+      assert Enum.all?(pool_slots(), &(Process.whereis(&1) == nil))
+    end
+  end
+
   describe "the byte cap" do
     test "an over-length body is an error, and the default cap applies unasked" do
       stub(fn conn -> Plug.Conn.send_resp(conn, 200, String.duplicate("x", 300 * 1024)) end)

@@ -73,7 +73,16 @@ defmodule KilnCMS.Accounts.AccountLock do
   def exclusive(user_id), do: lock(user_id, :update)
 
   @typedoc "The account's credentials as read under the lock."
-  @type credentials :: %{hashed_password: String.t() | nil, totp_pending_secret: binary() | nil}
+  #
+  # `totp_pending_secret` is the raw plaintext column and
+  # `totp_pending_secret_encrypted` the raw vault ciphertext;
+  # `KilnCMS.Accounts.TotpSecrets.from_columns/2` reads
+  # the pair.
+  @type credentials :: %{
+          hashed_password: String.t() | nil,
+          totp_pending_secret: binary() | nil,
+          totp_pending_secret_encrypted: binary() | nil
+        }
 
   @doc """
   Take the user row in `mode` for the rest of the transaction and return the
@@ -118,7 +127,11 @@ defmodule KilnCMS.Accounts.AccountLock do
   defp credentials_row(user_id) do
     from(u in "users",
       where: u.id == type(^user_id, Ecto.UUID),
-      select: %{hashed_password: u.hashed_password, totp_pending_secret: u.totp_pending_secret}
+      select: %{
+        hashed_password: u.hashed_password,
+        totp_pending_secret: u.totp_pending_secret,
+        totp_pending_secret_encrypted: u.totp_pending_secret_encrypted
+      }
     )
   end
 

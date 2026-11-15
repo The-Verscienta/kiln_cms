@@ -59,11 +59,23 @@ defmodule KilnCMS.Accounts.Passkey do
       primary? true
       # The audit change below reads the destroyed record.
       require_atomic? false
+
+      # A current code from the remover's authenticator app, when the session
+      # has no fresh second-factor mark (below).
+      argument :code, :string, allow_nil?: true, sensitive?: true
+
       validate KilnCMS.Accounts.Validations.NotDemoSharedAccount
 
       # The owner can't remove their last second factor while a site requires
       # one (#2247). A platform admin removing it for them is unaffected.
       validate KilnCMS.Accounts.Validations.KeepsRequiredSecondFactor
+
+      # Whoever removes it proves a second factor now, as turning the
+      # authenticator app off asks for a code: a session that verified one in
+      # the last 15 minutes (the page passes `second_factor_verified_at`), or
+      # the `code` argument, charged to the shared second-factor budget. A
+      # stolen or unattended session alone can't strip the owner's passkeys.
+      change KilnCMS.CMS.Changes.SaverVerifiedSecondFactor
 
       # Audit log (#2241), in the transaction. Whoever removes it is the actor
       # (the owner, or a platform admin); the owner is the target.
@@ -71,6 +83,11 @@ defmodule KilnCMS.Accounts.Passkey do
               type: :passkey_removed,
               target: fn record, _changeset -> {"user", record.user_id} end,
               metadata: fn record, _changeset -> %{"name" => record.name} end}
+
+      # Tell the owner, after the commit; it names the admin when one removed
+      # it. The `passkey_removed` event above raises a `two_factor_disabled`
+      # alert (`KilnCMS.Security.Alerts`).
+      change {KilnCMS.Accounts.Changes.NotifyFactorRemoved, kind: :passkey}
     end
 
     # Accepting a site invitation over an unconfirmed account (#2453): a
@@ -92,6 +109,14 @@ defmodule KilnCMS.Accounts.Passkey do
                   "via" => Map.get(changeset.context, :takeover_via, "invitation")
                 }
               end}
+    end
+
+    # Erasure (`Changes.AnonymizeUser`) removes every passkey of the account
+    # it erases, `authorize?: false`, inside the erasure's transaction. No
+    # step-up, no owner mail (the address is no longer the owner's), no event
+    # (a passkey has no site of its own, and erasure records none).
+    destroy :erase do
+      description "Remove a passkey while erasing its account (system-only)."
     end
 
     # Called by KilnCMS.Accounts.WebAuthn after Wax verified the attestation —
@@ -146,6 +171,12 @@ defmodule KilnCMS.Accounts.Passkey do
     policy action(:forget_on_takeover) do
       authorize_if {KilnCMS.Checks.SystemActor,
                     subsystem: :account_takeover, action: :forget_on_takeover}
+    end
+
+    # Erasure only, `authorize?: false`. Above the admin bypass, so no actor,
+    # an admin included, can use it to skip `:destroy`'s step-up.
+    policy action(:erase) do
+      forbid_if always()
     end
 
     bypass KilnCMS.Accounts.Checks.PlatformAdmin do
