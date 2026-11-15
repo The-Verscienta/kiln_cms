@@ -8,7 +8,6 @@ defmodule KilnCMSWeb.SettingsPasskeyStepUpTest do
   """
   use KilnCMSWeb.ConnCase, async: true
 
-  import KilnCMS.OrgFixtures, only: [org: 1]
   import KilnCMS.SecondFactorFixtures
   import Phoenix.LiveViewTest
 
@@ -17,9 +16,9 @@ defmodule KilnCMSWeb.SettingsPasskeyStepUpTest do
 
   @moduletag :capture_log
 
-  # Signed in on `site`, the session marked as having verified a second
+  # Signed in on the main host, the session marked as having verified a second
   # factor `ago` seconds ago (nil: not at all).
-  defp session(conn, user, site, ago) do
+  defp session(conn, user, _site, ago) do
     token = jwt(user)
     {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(token)
     marker = %{"jti" => jti, "method" => "password"}
@@ -30,9 +29,13 @@ defmodule KilnCMSWeb.SettingsPasskeyStepUpTest do
         else: marker
 
     conn
-    |> KilnCMSWeb.ConnCase.org_conn(site)
+    |> KilnCMSWeb.ConnCase.main_host_conn()
     |> Phoenix.ConnTest.init_test_session(%{"user_token" => token, "sign_in" => marker})
   end
+
+  # The main host's site: `/editor/settings` manages second factors only on
+  # the main host and console hosts (GHSA-mq8x-2p99-6q8c).
+  defp main_site, do: %{id: Accounts.default_org_id()}
 
   defp app_editor(site) do
     {user, secret} = TwoFactorFixtures.enabled_user(role: :viewer, inserted_at: long_ago())
@@ -52,7 +55,7 @@ defmodule KilnCMSWeb.SettingsPasskeyStepUpTest do
   defp remove_button(passkey), do: ~s(#passkey-#{passkey.id} button[phx-click="remove_passkey"])
 
   test "a session that verified a second factor minutes ago removes it at once", %{conn: conn} do
-    site = org("spsu-fresh")
+    site = main_site()
     {user, _secret} = app_editor(site)
     passkey = passkey!(user)
 
@@ -65,7 +68,7 @@ defmodule KilnCMSWeb.SettingsPasskeyStepUpTest do
   end
 
   test "an older session is asked for a code first", %{conn: conn} do
-    site = org("spsu-stale")
+    site = main_site()
     {user, secret} = app_editor(site)
     passkey = passkey!(user)
 
