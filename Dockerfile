@@ -29,7 +29,7 @@ ARG DEBIAN_VERSION=bookworm-20261005-slim
 # CI built the same assets with. The `node` stage below is only a source of
 # the binary: its codename has to match the builder's (bookworm), since the
 # binary is linked against that glibc and libstdc++.
-ARG NODE_VERSION=22.23.3
+ARG NODE_VERSION=22.23.5
 
 # The runner tracks a NEWER Debian than the builder, deliberately (#807).
 #
