@@ -1,9 +1,12 @@
 defmodule KilnCMS.Backups.ChecksumTest do
-  # async: false: the bounded-memory tests sample VM-wide :erlang.memory/1, so
-  # another test allocating binaries concurrently would move the needle.
-  use ExUnit.Case, async: false
+  # async: true: the bounded-memory tests measure only the hashing work's own
+  # processes (`KilnCMS.Test.ProcessMemory`), so other tests allocating at the
+  # same time don't move the needle (#2906). Running beside them is the load
+  # the measure has to hold up under.
+  use ExUnit.Case, async: true
 
   alias KilnCMS.Backups.Checksum
+  alias KilnCMS.Test.ProcessMemory
 
   @moduletag :tmp_dir
 
@@ -288,44 +291,6 @@ defmodule KilnCMS.Backups.ChecksumTest do
   end
 
   describe "bounded memory" do
-    # Polls the VM's total memory while `fun` runs and returns the peak growth
-    # over the starting level, in bytes. Binary memory is where a whole-file
-    # read would show up (refc binaries); total covers everything else.
-    defp peak_growth(fun) do
-      :erlang.garbage_collect()
-      base_total = :erlang.memory(:total)
-      base_binary = :erlang.memory(:binary)
-      parent = self()
-
-      sampler =
-        spawn_link(fn ->
-          sample_loop(parent, base_total, base_binary, 0)
-        end)
-
-      result = fun.()
-      send(sampler, :stop)
-
-      peak =
-        receive do
-          {:peak, peak} -> peak
-        after
-          5_000 -> flunk("memory sampler did not report")
-        end
-
-      {result, peak}
-    end
-
-    defp sample_loop(parent, base_total, base_binary, peak) do
-      peak =
-        max(peak, max(:erlang.memory(:total) - base_total, :erlang.memory(:binary) - base_binary))
-
-      receive do
-        :stop -> send(parent, {:peak, peak})
-      after
-        10 -> sample_loop(parent, base_total, base_binary, peak)
-      end
-    end
-
     defp sparse!(path, bytes) do
       {:ok, io} = :file.open(path, [:write, :raw, :binary])
       {:ok, _} = :file.position(io, bytes - 1)
@@ -338,7 +303,7 @@ defmodule KilnCMS.Backups.ChecksumTest do
       sparse!(path, bytes)
       assert File.stat!(path).size == bytes
 
-      {result, peak} = peak_growth(fn -> Checksum.file(path) end)
+      {result, peak} = ProcessMemory.peak_growth(fn -> Checksum.file(path) end)
 
       assert {:ok, hex, ^bytes} = result
       assert byte_size(hex) == 64
