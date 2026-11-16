@@ -93,7 +93,7 @@ what it contributes:
 
 | Shape | How it's installed | What it can contribute |
 |---|---|---|
-| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, human-verification providers (`challenge_providers/0`, from `kiln_plugin` 1.4), security posture checks (`security_checks/0`, from `kiln_plugin` 1.4), nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb`; plug routes (`plug_routes/0`, from `kiln_plugin` 1.4) to any Plug, needing only `plug` |
+| **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, human-verification providers (`challenge_providers/0`, from `kiln_plugin` 1.4), security posture checks (`security_checks/0`, from `kiln_plugin` 1.4), backup destinations (`backup_destinations/0`, from `kiln_plugin` 1.5), nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb`; plug routes (`plug_routes/0`, from `kiln_plugin` 1.4) to any Plug, needing only `plug` |
 | **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, and LiveViews built on `KilnCMSWeb` |
 
 A dependency compiles before the core and sees only its own dependencies, so
@@ -508,6 +508,99 @@ the first registered wins; `mix kiln.plugins.doctor` reports both, and
 never carry a secret or a person's address. A plugin built against
 `kiln_plugin` older than 1.4 has no `security_checks/0`; the core treats it
 as declaring none.
+
+#### Backup destinations (#2220)
+
+In-app backups copy their files to `BACKUP_DIR`, to `BACKUP_RCLONE_REMOTE`,
+and to every destination a platform admin adds on the Backups page's
+**Destinations** tab ([Send backups to several destinations](backups.md#send-backups-to-several-destinations)).
+Kiln's own kinds are a directory on the server and a named rclone remote. A
+plugin adds another store from its entry module, with
+`backup_destinations/0` (`kiln_plugin` 1.5; require
+`{:kiln_plugin, "~> 1.5"}`). It works from a Mix dependency: the contract,
+`Kiln.BackupDestination`, is in the SDK.
+
+```elixir
+# The plugin's entry module
+@impl Kiln.Plugin
+def backup_destinations, do: [MyPlugin.BackupDestination]
+```
+
+```elixir
+defmodule MyPlugin.BackupDestination do
+  use Kiln.BackupDestination
+
+  alias Kiln.BackupDestination.Config
+
+  @impl Kiln.BackupDestination
+  def kind, do: "my_store"
+
+  @impl Kiln.BackupDestination
+  def label, do: "My store"
+
+  @impl Kiln.BackupDestination
+  def fields do
+    [
+      %{name: "bucket", type: :string, required?: true, help: "The bucket backups go to."},
+      %{name: "api_key", type: :secret, required?: true, help: nil}
+    ]
+  end
+
+  @impl Kiln.BackupDestination
+  def validate(%Config{settings: %{"bucket" => bucket}}) when bucket != "", do: :ok
+  def validate(%Config{}), do: {:error, "the bucket is missing"}
+
+  # test/1, put/3, list/1, get/3, delete/2 and describe/1 talk to the store,
+  # reading the key from config.secrets["api_key"].
+
+  @impl Kiln.BackupDestination
+  def supports, do: [:list, :delete]
+end
+```
+
+Installing it changes nothing until a platform admin adds a destination of
+its kind: the tab offers **My store** beside Kiln's own, and builds the form
+from `fields/0`, labelling each field by its name. A `:secret` field is a
+password input, stored vault-encrypted in the destination's row, decrypted
+only just before a call, and never shown again.
+`sdk/fixtures/dep_plugin/lib/kiln_dep_fixture/backup_destination.ex` is a
+complete, CI-compiled adapter that writes to a directory.
+
+What the core holds an adapter to:
+
+- **Every call runs in its own process, bounded in time.** A raise, a throw,
+  an exit or a call that runs past its bound is that destination's failure,
+  never the backup's. The bound is what is left of the backup step's run
+  time (30 seconds for a Test, and for `validate/1` on Save). Do the work in
+  the calling process or in processes linked to it, so a Cancel or a
+  timeout stops it, and keep secrets out of the arguments and state of any
+  process you spawn: crash reports log both.
+- **`put/3` must not leave a partial file under its real name.** A call can
+  be killed at any point; upload under a temporary name and rename, or use
+  the store's atomic upload. Files go to `<subdir>/<name>` (`db` or
+  `media`), so a restore finds them where `BACKUP_DIR` keeps them.
+- **Error text is shown to the admin**, after the core removes the
+  destination's secret values from it. That is a backstop: never put a
+  secret in an error, a log line or `describe/1`.
+- **Retention runs only when `supports/0` lists `:list` and `:delete`**, and
+  deletes only files Kiln recorded sending to that destination
+  ([ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)).
+  `use Kiln.BackupDestination` defaults it to `[]`. Kiln can't tell where a
+  plugin's destination writes, so it can't check that it doesn't overlap
+  `BACKUP_RCLONE_REMOTE`: while that is set, retention on a plugin's
+  destination is skipped.
+- **`kind/0` is stored on every destination of the adapter**, so it never
+  changes once released: lowercase letters, digits and `_`, at most 32
+  characters. `local` and `rclone` are Kiln's, and of two modules declaring
+  one kind the first registered wins. `mix kiln.plugins.doctor` reports a
+  module that doesn't implement the behaviour, an unusable kind, and a kind
+  that is taken; `mix kiln.plugins.list` counts each plugin's backup
+  destinations. A destination whose plugin was removed stays listed, and
+  each backup records it failed until it is deleted or disabled.
+
+Cron (`scripts/backup.sh`) never sends to a plugin's destination. A plugin
+built against `kiln_plugin` older than 1.5 has no `backup_destinations/0`;
+the core treats it as declaring none.
 
 ### 2b. Catalog metadata (the "registry")
 

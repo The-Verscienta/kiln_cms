@@ -34,7 +34,7 @@ data or capability:
 |---|---|---|
 | **Database** | Postgres (`DATABASE_URL`) — all content, versions, the event log, fired artifacts, Oban jobs, orgs/users, form submissions, webhook config, mail settings incl. the **encrypted DKIM private key** | `backup.sh db` → verified `pg_dump -Fc` |
 | **Media** | Local adapter: the uploads root (originals + variants). S3 adapter (`S3_BUCKET` set): the bucket | Local: `backup.sh media` and the in-app **Back up now** both → one `tar.gz`, or several independent `tar.gz` parts for a library bigger than 400 MB ([below](#media-backups-in-parts-2218)). S3/R2: provider-side (below) |
-| **Secrets/env** | Coolify environment variables — above all **`SECRET_KEY_BASE`**, plus `DATABASE_URL`, S3 creds, OIDC/SMTP config | Manual: keep a copy in your password manager, refreshed whenever an env var changes |
+| **Secrets/env** | Coolify environment variables — above all **`SECRET_KEY_BASE`**, plus `DATABASE_URL`, S3 creds, OIDC/SMTP config, rclone's configuration, and where each [backup destination](#send-backups-to-several-destinations) writes with its credentials | Manual: keep a copy in your password manager, refreshed whenever an env var or a destination changes |
 
 > **`SECRET_KEY_BASE` is part of the backup.** `KilnCMS.Keys.Vault` encrypts
 > database-stored key material (e.g. the DKIM private key) with a key **derived
@@ -916,7 +916,8 @@ An in-app backup is a chain of Oban jobs, one per step, on the `backup_steps`
 queue:
 
 **start** → **dump** → **plan** → **archive** (one job per media part) →
-**checksum** → **prune** → **offsite** → **finish**
+**checksum** → **prune** → **offsite** (one job per off-site destination) →
+**finish**
 
 `dump` runs only when the backup covers the database, and `plan`, `archive` and
 `checksum` only when it covers the media and there is a media directory; a step
@@ -926,6 +927,18 @@ Each step reads what the previous ones did from `.work/<stamp>/state.json`, does
 own work and hands over to the next. A failure therefore costs one step, not the
 whole backup: a database dump that verified is not taken again because the
 fourth media part failed.
+
+**Off-site, one destination at a time (#2220).** The start step settles where
+the backup is sent: `BACKUP_RCLONE_REMOTE` first, when it is set, then each
+enabled destination on the **Destinations** tab, in that tab's order
+([Send backups to several destinations](#send-backups-to-several-destinations)).
+`offsite` then runs once per destination, each with its own attempts. A
+destination that still fails on its last attempt is recorded failed and the
+backup moves on to the next one; the backup fails only when it reached none
+of them, and succeeds **partly off-site** when it reached some
+([When a backup reaches only some destinations](#when-a-backup-reaches-only-some-destinations)).
+With `BACKUP_RCLONE_REMOTE` as the only destination, nothing about this step
+changed: the same `rclone copy` commands, log lines and errors as before.
 
 **One at a time, cluster-wide.** A lock in the database (one row in
 `backup_locks`) lets one chain run at a time across every node. A backup asked
@@ -941,7 +954,7 @@ attempts:
 | Failure | Error on the run | What to do |
 |---|---|---|
 | A media part changed on disk between being archived and being checksummed | "Media part(s) changed on disk between being archived and being checksummed: `<names>`. Something other than this backup wrote to the backup directory; Resume rebuilds the changed part(s)." | Find what writes to `BACKUP_DIR`, then **Resume**: it rebuilds only the parts whose hash no longer matches. |
-| A file refused before its off-site copy | "Off-site copy REFUSED for …" | [When an off-site copy is refused](#when-an-off-site-copy-is-refused). |
+| A file refused before its off-site copy, at any destination | "Off-site copy REFUSED for …" | [When an off-site copy is refused](#when-an-off-site-copy-is-refused). |
 | The work state is gone, or belongs to another backup | "The backup's work state (.work/`<stamp>`/state.json) is missing or belongs to another backup; nothing more can be done for this one" | Take a new backup. No failure manifest is written, so the panel keeps showing the previous backup. |
 
 **When a backup fails**, it writes a failure manifest (when its `state.json`
@@ -959,6 +972,7 @@ as before.
 | `[:kiln_cms, :backups, :request, :folded]` | `trigger`, `resume`, `components` (the folding request's; `nil` for everything or a resume) | A request folded into the queued one. |
 | `[:kiln_cms, :backups, :lock, :reclaimed]` | `chain`, `stamp`, `step`, `node`, `outcome` (`:requeued` or `:interrupted`) | A step was taken back from a node that stopped responding ([below](#several-nodes-and-the-backup-lock)). |
 | `[:kiln_cms, :backups, :status, :history_unreadable]` | `error` (the error's module) | The status could not read History and fell back to the manifest ([above](#check-the-last-backup-of-each-component)). |
+| `[:kiln_cms, :backups, :offsite, :partial]` | `stamp`, `chain`, `missed` (the keys of the destinations not reached); measurements also `reached` and `total` | A backup finished having reached some of its off-site destinations but not all ([below](#when-a-backup-reaches-only-some-destinations)). |
 
 The in-app schedules emit their own events,
 `[:kiln_cms, :backups, :schedule, …]` and
@@ -2181,6 +2195,14 @@ then "and N more". The server log has a line per refused file with both full
 digests, and the run's log in the database has the rclone output for a failed
 copy (redacted).
 
+**With several destinations** ([below](#send-backups-to-several-destinations)),
+a file refused at any one of them fails the whole backup, the same way:
+destinations earlier in the list have already received their copies, and
+those after it are not sent to. A copy that failed rather than was refused
+is different: it fails only that destination, and the backup fails only
+when it reached none ([When a backup reaches only some
+destinations](#when-a-backup-reaches-only-some-destinations)).
+
 **Where it shows (cron).** `backup.sh` stops at the first refusal, exits
 non-zero (so `MAILTO` and the missing `BACKUP_PING_URL` ping catch it), prints
 the error to stderr after `error: `, and for `backup.sh all` writes it into a
@@ -2203,7 +2225,8 @@ that log.
 **What did and did not leave the host.**
 
 - **App:** every other file is still re-hashed and copied, one by one, so the
-  remote has everything except the refused files (and any whose copy failed).
+  destination that refused has everything except the refused files (and any
+  whose copy failed).
   A part set missing a part on the remote is not restorable from there:
   `restore.sh` stops with `<sidecar> lists <file>, which is missing from the
   set`.
@@ -2234,7 +2257,11 @@ with the digest the error names (`sha256sum <file>`).
    are reused, and only a file that changed (or was replaced by a symlink or
    other non-regular file) is rebuilt. A rebuilt dump is a fresh `pg_dump`,
    taken at resume time. Every file is re-hashed and copied off-site again;
-   rclone skips a file the remote already holds unchanged. The row goes back to
+   rclone skips a file the remote already holds unchanged. A destination added
+   on the **Destinations** tab is not sent a file this backup already sent it
+   with the same SHA-256 (its log line reads "`<file>` was already copied to
+   `<destination>`; not sent again"); `BACKUP_RCLONE_REMOTE` is sent every
+   file again, as it always was. The row goes back to
    `Running` and ends `Succeeded`, or `Failed` again and still resumable. A
    database-only backup (S3 media adapter, or no media directory) resumes the
    same way.
@@ -2243,7 +2270,341 @@ with the digest the error names (`sha256sum <file>`).
 
 A copy that failed (rather than was refused) is retried the same way, after
 fixing what rclone reported: usually the remote's name, its credentials in
-`rclone.conf`, or the network.
+`rclone.conf`, or the network. With several destinations that applies only
+when none was reached; a backup that reached some is not resumable, and the
+next backup sends to every destination again.
+
+### Send backups to several destinations
+
+An in-app backup keeps its files in `BACKUP_DIR` and, when it is set,
+copies them to `BACKUP_RCLONE_REMOTE`. On the **Destinations** tab of the
+Backups page a platform admin adds more places to copy them to (#2220): a
+directory on this server (a NAS mount, a second disk), a remote already
+named in rclone's configuration, or a kind a plugin adds. Each backup is
+then sent to every enabled destination, one after another, and a
+destination that fails doesn't stop the others.
+
+Destinations are used by **in-app backups only**. Cron (`scripts/backup.sh`)
+never reads them, and still copies only to `BACKUP_RCLONE_REMOTE`.
+
+**Before you start:** a running release with the `add_backup_destinations`
+and `backup_run_destinations` migrations applied, a platform admin account,
+and what the kind of destination needs:
+
+- **Directory on this server:** `BACKUP_LOCAL_DESTINATION_ROOTS` set on
+  every node, and the directory there on every node
+  ([Let backups be written to a directory on this server](#let-backups-be-written-to-a-directory-on-this-server)).
+- **Rclone remote:** the remote defined in rclone's own configuration on
+  every node, as for `BACKUP_RCLONE_REMOTE`
+  ([It needs the client tools in the image](#it-needs-the-client-tools-in-the-image)):
+  an `rclone.conf` named by `RCLONE_CONFIG`, or `RCLONE_CONFIG_<NAME>_*`
+  variables. The form takes only the remote's name, so no credential is
+  stored in Kiln's database.
+
+1. Open **Backups** (`/editor/backups`) and click the **Destinations** tab.
+   The page is headed **Backup destinations**. When `BACKUP_RCLONE_REMOTE`
+   is set, it is listed first, with its remote (credentials masked) and the
+   badge "From BACKUP_RCLONE_REMOTE — change it in the server's
+   environment". It can't be edited, tested or removed here, and what you
+   add is sent to as well as it, never instead of it. With no destination at
+   all, the list reads "No off-site destination: backups stay on this server
+   only."
+2. Click **Add a destination**. Under **What kind of destination?** pick
+   **Directory on this server**, **Rclone remote**, or a plugin's kind.
+   **Directory on this server** is missing, with "A directory on this server
+   can be added once BACKUP_LOCAL_DESTINATION_ROOTS lists where it may
+   write.", until that variable is set.
+3. Fill in the form:
+
+   | Field | What it takes |
+   |---|---|
+   | **Name** | Required, unique, at most 80 characters. History and the alarm name the destination by it. |
+   | **Path** (Directory on this server) | An absolute directory under one of `BACKUP_LOCAL_DESTINATION_ROOTS`, for example `/mnt/nas/kiln`. It need not exist yet below the root; it is created, mode 0700. |
+   | **Remote name** (Rclone remote) | The name of a remote in rclone's configuration, without the colon: `nas`, not `nas:`. |
+   | **Path** (Rclone remote) | Optional. The directory on that remote, for example a bucket and prefix: `kiln-backups/site`. |
+   | **Enabled** | Ticked, backups are sent to it; unticked, it is kept but skipped. |
+   | **Delete its old backups (retention)** | Ticked by default: prune it after each backup reaches it ([Retention on a destination](#retention-on-a-destination)). |
+
+   A plugin's kind shows its own fields. A secret field is a password box
+   that is never filled in again; on Edit, leaving it blank keeps the stored
+   value.
+4. Click **Save destination**. The button reads **Checking…** while the
+   destination is validated: a directory against the rules
+   [below](#let-backups-be-written-to-a-directory-on-this-server), a remote
+   name against `rclone listremotes` on this node. Then "Destination added."
+   appears, and the destination is a row in the list, with its kind, where
+   it writes, a **Prunes its old backups** badge, and "Not tested yet".
+5. Click **Test** on the row. It reads **Testing…** while it writes a small
+   `kiln-test-<random>.txt` under `.kiln-test/` at the destination, reads it
+   back and deletes it, at most 30 seconds. Then "NAS: the test passed (on
+   kiln@node1)." and the row reads "Last test passed 2026-11-15 10:42 UTC on
+   kiln@node1". A failure is "NAS: the test failed (on kiln@node1): …", with
+   the reason. The test runs on the node serving the page. A backup's copy
+   runs on the node that has the backup's directory, which can be another
+   node, so on a cluster test what that node sees by taking a backup.
+6. Go back to the **Backups** tab and click **Back up now**. While the
+   backup is sent to more than one destination, the progress line reads, for
+   example, "Copying off-site (2 of 3: NAS)". When it finishes, its History
+   row has a chip per destination ("NAS · ok"), and **Where backups go**
+   lists each destination under **Last in-app backup off-site**.
+
+The arrows on each row (**Move NAS up**, **Move NAS down**) set the order
+the stored destinations are sent to, always after `BACKUP_RCLONE_REMOTE`.
+**Disable** keeps a destination without sending to it. At most eight can be
+enabled at once, because the backup holds the cluster's backup lock while
+it sends to each in turn. **Delete** asks "Delete the destination NAS?
+Backups stop being sent to it; the files already there stay, and are no
+longer pruned."
+
+**Where a destination writes can't be changed.** On **Edit**, the location
+fields (a directory's **Path**; a remote's **Remote name** and **Path**)
+are read-only, with "Where a destination writes can't be changed. To move
+it, add a new destination and delete this one." Retention deletes only what
+was sent to a destination, recorded against the destination itself, so
+letting it point somewhere new would let it delete what it never sent
+there ([ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)).
+For the same reason a new destination may not be, contain or sit inside
+`BACKUP_RCLONE_REMOTE` or another destination. That check compares rclone
+remote names and paths, so an rclone `alias` remote, or two names for the
+same bucket, can't be caught: don't point two destinations at one place.
+
+Every add, change, delete and Test is in the
+[instance security log](security-events.md#the-instance-log)
+(`backup_destination_created`, `backup_destination_changed`,
+`backup_destination_deleted`, `backup_destination_tested`), with the
+destination's name and kind but never where it writes or a secret. The
+staging scrub deletes every destination (`backup_destinations_purged`), so
+a clone neither holds production's credentials nor sends to production's
+destinations ([staging-environments.md](staging-environments.md)).
+
+### Let backups be written to a directory on this server
+
+A **Directory on this server** destination writes only under a directory
+the operator lists in `BACKUP_LOCAL_DESTINATION_ROOTS`, so that a form in
+the console can't put a database dump where the app serves files, or over
+what it backs up. Set it in the app's environment on every node, for
+example:
+
+```bash
+BACKUP_LOCAL_DESTINATION_ROOTS=/mnt/nas/kiln,/mnt/disk2/kiln-backups
+```
+
+- Comma-separated absolute directories; blank entries are ignored.
+- **One unusable entry drops the whole list.** A relative path or one with
+  a `..` segment makes the app warn at boot and offer no Local destination
+  at all, rather than keep the other entries: a typo must not change where a
+  dump may be written.
+- Unset or blank, Local destinations aren't offered, and each backup records
+  a stored one failed, its files' reason "Local destinations are off:
+  BACKUP_LOCAL_DESTINATION_ROOTS is not set".
+- Read in production and in development; `scripts/backup.sh` doesn't read
+  it.
+
+A destination's directory must be a root or inside one, and every time a
+backup writes, lists or deletes there, on whichever node runs it, it is
+checked again that:
+
+- no component of its path, from `/` down, is a symbolic link;
+- it is not inside, equal to, or above `BACKUP_DIR`, `MEDIA_DIR`,
+  `priv/static`, or the public or private uploads directory;
+- the root exists on that node (a root that was unmounted is refused, not
+  written into).
+
+Files land as `BACKUP_DIR` lays them out, `db/` and `media/` under the
+destination's directory, mode 0600; a directory it has to create is made
+mode 0700, and one that exists is left as it is. Each is
+written as `<name>.partial`, hashed again and compared with the SHA-256
+the backup verified, and only then renamed, so a file that doesn't match
+never appears under its real name. Mount the same storage at the same path
+on every node that can run backups: a node where the directory is missing
+fails that destination for the backups it runs.
+
+### Manage destinations from a release console
+
+The tab's code interfaces work from a release console too, with an actor
+whose effective platform role is admin. This adds a Local destination
+(`BACKUP_LOCAL_DESTINATION_ROOTS=/mnt/nas`) and tests it:
+
+```bash
+bin/kiln_cms rpc '
+admin = KilnCMS.Accounts.get_user_by_email!("you@example.com", authorize?: false)
+
+{:ok, d} =
+  KilnCMS.Backups.create_backup_destination(
+    %{name: "NAS", kind: "local", settings: %{"path" => "/mnt/nas/kiln"}},
+    actor: admin
+  )
+
+{:ok, d} = KilnCMS.Backups.test_destination(d.id, actor: admin)
+IO.inspect(Map.take(d, [:name, :kind, :enabled, :prune, :settings, :last_test_ok, :last_test_error]))'
+# %{enabled: true, kind: "local", last_test_error: nil, last_test_ok: true,
+#   name: "NAS", prune: true, settings: %{"path" => "/mnt/nas/kiln"}}
+```
+
+`kind` is `"local"` or `"rclone"` (settings `"remote_name"` and `"path"`),
+or a plugin's kind; a plugin's secret fields go in a `secrets:` map beside
+`settings`. A refused save is `{:error, %Ash.Error.Invalid{}}` with the
+messages in the table [below](#what-can-go-wrong-with-a-destination). The
+other calls, each with `actor: admin`:
+`KilnCMS.Backups.list_backup_destinations/1`,
+`get_backup_destination(id, actor: admin)` (`{:ok, nil}` when there is
+none), `update_backup_destination(d, %{enabled: false}, actor: admin)` and
+`destroy_backup_destination(d, actor: admin)`. A test that fails still
+returns `{:ok, d}`, with `last_test_ok: false` and the reason in
+`last_test_error`.
+
+### When a backup reaches only some destinations
+
+A backup that reached at least one of its destinations but not all of them
+**succeeds, partly off-site**. Its local files are as good as any backup's,
+and at least one copy left the host, so it still counts as the last good
+backup; but a destination you added for safety has stopped receiving
+backups, so it raises the backup alarm. The reasoning is in
+[ADR 0063](decisions/0063-each-backup-destination-is-its-own-step-and-a-run-that-reaches-only-some-is-partly-off-site.md).
+
+Where it shows:
+
+- **History:** the row is `Succeeded` and badged **Partly off-site**. Each
+  destination is a chip with how it fared ("NAS · failed"); hover a failed
+  one for its error.
+- **Backups page:** the headline, in the alarm's red, adds "The last backup
+  reached 1 of 2 off-site destinations — NAS failed", and **Where backups
+  go** lists each destination of the last in-app backup with its error.
+- **Home page:** platform admins' backup strip turns red with the same line.
+- **The run's log:** "Partly off-site: reached 1 of 2 destination(s); not
+  reached: NAS", also logged as an error on the server, with the
+  `[:kiln_cms, :backups, :offsite, :partial]` telemetry event.
+
+**It can't be resumed.** It succeeded, so its work directory is gone, and
+**Resume** is only on failed, interrupted and canceled runs. Fix the
+destination (its error and its **Test** button say what is wrong), then
+**Back up now** or wait for the next backup, which tries every destination
+again. The alarm clears when an in-app backup reaches all its destinations.
+
+A backup that reached **none** of its destinations fails, as a failed
+`BACKUP_RCLONE_REMOTE` copy always did, with "Off-site copy FAILED to every
+destination (2): NAS: …; offsite-b2: …" naming each one, and it can be
+resumed.
+
+Two other badges and states:
+
+- **Off-site unknown:** a succeeded backup that recorded no outcome for its
+  destinations, which happens when a node of an older release finished it
+  during an upgrade. Check the destinations, and take a new backup.
+- **The stored destinations couldn't be read** when the backup started
+  (the database refused the read four times): the backup is sent to
+  `BACKUP_RCLONE_REMOTE` alone, if it is set, and records "Couldn't read the
+  backup destinations; this backup is sent only to BACKUP_RCLONE_REMOTE".
+  It reads partly off-site, never complete, whatever the env remote did.
+
+### Retention on a destination
+
+With **Delete its old backups (retention)** ticked, a destination is pruned
+right after each backup reaches it, by the same keep rules as `BACKUP_DIR`
+([What retention deletes and what it keeps](#what-retention-deletes-and-what-it-keeps)):
+`BACKUP_KEEP_DAYS`, the schedules' keep settings, and never the newest
+verified or newest complete backup of each component that destination
+holds. A `.keep` recovery point in `BACKUP_DIR` keeps that backup on every
+destination too. The markers themselves are never copied to a destination.
+
+**It deletes only what this installation sent there.** A backup is deleted
+from a destination only when its History row records it being sent to that
+destination. Anything else that looks like a Kiln backup there (another
+installation sharing the bucket, a cron backup copied by hand) is left
+alone, and each run's log names it: "Retention on NAS left 2 old backup(s)
+this installation has no record of sending there: db 20261101-031700,
+media 20261101-031700". The reasoning is in
+[ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md).
+
+It never runs on `BACKUP_RCLONE_REMOTE`, which the app has never pruned,
+nor on a destination whose adapter can't list and delete files (a plugin's
+says so). What it did is on the run's log:
+
+| Log line | Meaning |
+|---|---|
+| "Retention on NAS removed 4 file(s) from 2 backup(s)" | Those backups were deleted there, and are marked `pruned` for that destination in History. |
+| "Retention on NAS skipped: it overlaps BACKUP_RCLONE_REMOTE; nothing was deleted" | The destination is, contains or is inside the env remote, which changed since the destination was added. Point the two at separate places. |
+| "Retention on NAS skipped: it overlaps another backup destination; nothing was deleted" | Two destinations share a place. Delete one. |
+| "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, while `BACKUP_RCLONE_REMOTE` is set. Untick retention on it and prune it yourself, or unset the env remote. |
+| "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed. Nothing is deleted on a guess. |
+| "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed; the pass stopped there. The next backup tries again. |
+
+A failed or skipped pass doesn't change the destination's upload status:
+the backup reached it. A backup that later fails at another destination
+may already have pruned the destinations before it; only older backups
+the keep rules allowed deleting go.
+
+### Keep destination credentials outside Kiln
+
+In a full loss, the database that lists your destinations is one of the
+files on them. Keep, outside Kiln and with `SECRET_KEY_BASE` (in the same
+password manager), what you need to reach each destination without the app:
+where it writes, and its credentials.
+
+- **Rclone remotes** keep their credentials in rclone's configuration
+  (`rclone.conf` or `RCLONE_CONFIG_<NAME>_*`), never in the database. Back
+  that configuration up as you would the app's environment.
+- **A plugin's destination** may have secret fields. Those are stored in
+  the database, encrypted with a key derived from `SECRET_KEY_BASE`, and
+  never shown again. Rotating `SECRET_KEY_BASE` keeps them with
+  `PREVIOUS_SECRET_KEY_BASE` and `mix kiln.vault.reencrypt`
+  ([secrets-rotation.md](secrets-rotation.md#data-at-rest-re-encrypt-before-you-retire-the-old-value)).
+  A database restored under another `SECRET_KEY_BASE` can't open them: each
+  backup then records that destination failed with "credentials can't be
+  decrypted (was SECRET_KEY_BASE changed?); re-enter them". Open **Edit**,
+  enter the secret fields again and **Save destination**.
+
+### What can go wrong with a destination
+
+When saving (the form shows the message under the field, or above the form):
+
+| Message | Meaning |
+|---|---|
+| "… is not under BACKUP_LOCAL_DESTINATION_ROOTS (…)" | The path is outside every root. Pick a directory under one, or add a root to the variable. |
+| "… overlaps BACKUP_DIR (…); choose a directory outside it" (or `MEDIA_DIR`, `priv/static`, the uploads directory, the private uploads directory) | The path is inside, equal to, or above one of the app's own directories. |
+| "… is a symbolic link; a destination's path must have none" | A component of the path is a link. Use the real path. |
+| "… does not exist on this server" | The root itself, or a component above it, is missing on the node serving the page. |
+| "the path must be absolute", "the path must not contain .." | As it says. |
+| "rclone has no remote named nas; define it in rclone.conf first" | `rclone listremotes` on this node doesn't list it. Define the remote, then save again. |
+| "the remote name must be the name of a remote in rclone.conf, without a colon" | **Remote name** holds something a plain remote name can't: a colon, a comma or a slash (so no connection string or local path), or it doesn't start with a letter, a digit or `_`. Name a configured remote. |
+| "rclone is not installed in this image" | The image has no `rclone` ([It needs the client tools in the image](#it-needs-the-client-tools-in-the-image)). |
+| "this is, contains or is inside another destination; choose a place of its own" | It overlaps `BACKUP_RCLONE_REMOTE` or a stored destination. |
+| "at most 8 destinations can be enabled" | Disable or delete one first, or save this one unticked. |
+| "where a destination writes can't be changed; add a new destination instead" | A change to the location sent from outside the form. |
+| "the stored credentials can't be decrypted (was SECRET_KEY_BASE changed?); enter them again" | Enter every secret field again ([above](#keep-destination-credentials-outside-kiln)). |
+| "the other backup destinations couldn't be read; try again" | The checks for the cap and overlaps couldn't read the list. Nothing was saved. |
+| "Only a platform admin can change backup destinations." | Your account is no longer a platform admin. |
+
+On a backup's run, as a destination's error (the chip's tooltip, and the
+**Last in-app backup off-site** list):
+
+| Error | Meaning |
+|---|---|
+| "FAILED for 2 files: kiln-db-20261115-031700.dump (…), …" | Those files' copies still failed on the step's last attempt. In the brackets is each one's reason: rclone's output, the adapter's error, or one of the reasons below. |
+| (in the brackets) "… timed out after …" | A call ran past what was left of the step's run time, or past `call_timeout` ([below](#how-long-a-destination-may-take)). The rest of that destination's files wait for the next attempt. |
+| (in the brackets) "Local destinations are off: BACKUP_LOCAL_DESTINATION_ROOTS is not set", "… does not exist on this server" | The node that ran the backup has no roots, or not this directory ([above](#let-backups-be-written-to-a-directory-on-this-server)). |
+| "removed or disabled during this backup" | The destination was deleted or disabled after the backup started. |
+| "not attempted: its off-site step never ran" | A node of an older release ran the off-site step during an upgrade. |
+| "rclone is not installed in this image" | The node that ran the backup has no `rclone`. No retry fixes it, so it fails at once. |
+| "credentials can't be decrypted (was SECRET_KEY_BASE changed?); re-enter them" | [Above](#keep-destination-credentials-outside-kiln). |
+| "the adapter for this destination is not installed (was its plugin removed?)" | A plugin's destination whose plugin is gone. Reinstall it, or disable or delete the destination. |
+
+### How long a destination may take
+
+Each upload, listing and delete on a destination may take as long as what
+is left of the off-site step's own run time (two hours per attempt) less
+five minutes, kept to record the outcome; a call that runs past it is
+stopped and counts as that destination's failure for the attempt. To stop
+a hanging destination sooner, cap every call:
+
+```elixir
+# config/runtime.exs (or your overlay's config/project.exs)
+config :kiln_cms, KilnCMS.Backups.Destination, call_timeout: :timer.minutes(30)
+```
+
+The cap applies to each call, so a large media set with many parts still
+gets as many calls as it has files. A Test is held to 30 seconds and the
+adapter's checks on Save to 30 seconds, whatever the cap.
 
 ### Cron backups in parts
 
@@ -2404,8 +2765,10 @@ admins only, like the rest of the page.
    [in-app schedule](#schedule-backups-in-the-app) took; any other value as
    recorded), a status (`Succeeded`,
    `Failed`, `Running`, `Skipped` or `Canceled`), **Database** and **Media** badges, the
-   size, whether it was verified, its destinations, and whether its files are
-   still on this host. A media set written in several parts shows "N parts",
+   size, whether it was verified, its destinations (one chip each, with how
+   that destination fared; a backup that reached only some is badged
+   **Partly off-site**, [above](#when-a-backup-reaches-only-some-destinations)),
+   and whether its files are still on this host. A media set written in several parts shows "N parts",
    a link that opens
    [Restore a media set that has several parts](#restore-a-media-set-that-has-several-parts)
    in a new tab.
@@ -2689,10 +3052,14 @@ other stamp.
 
 ### Secrets in history
 
-Everything stored in a row (errors, log lines, off-site remote) is passed
+Everything stored in a row (errors, log lines, off-site remote, each
+destination's name and error) is passed
 through `KilnCMS.Backups.Redact`: URL userinfo, `key=value` credentials and
 rclone connection-string remotes are replaced with `***`. The status panel's
-off-site remote and `manifest.json`'s `offsite` are redacted the same way. Read
+off-site remote and `manifest.json`'s `offsite` are redacted the same way, and
+so, since #2220, is the remote in a backup's `.work/<stamp>/state.json`, which
+held it as configured before. A destination's errors are also scrubbed of its
+own secret fields. Read
 access is the platform admin only. The table is written by the `:backups`
 system actor, and by one person's action: a platform admin's `:cancel` of a
 running backup, which sets its status, finish time and error ("Canceled by a
@@ -2778,11 +3145,29 @@ the data readable.
 Scenario: the VPS is gone; you have off-site dumps + media archives and the
 env snapshot. Order matters.
 
+The list of [destinations added in the app](#send-backups-to-several-destinations)
+is in the database you are about to restore, so it can't tell you where the
+backups are. Work from the copy you kept outside Kiln
+([Keep destination credentials outside Kiln](#keep-destination-credentials-outside-kiln)).
+
 1. **Provision Postgres** (same major version, with the `vector`, `pg_trgm`,
    `citext` extensions available — the dump creates them, the server just needs
    the packages).
 2. **Fetch the newest verified dump** from the off-site remote:
    `rclone copy r2:kiln-backups/db/<newest>.dump .`
+   Every destination lays files out as `BACKUP_DIR` does, `db/` and
+   `media/` under its own place, so from one added in the app:
+   - an **Rclone remote** destination: the same command with its remote name
+     and path, `rclone copy nas:kiln-backups/site/db/<newest>.dump .`, with
+     rclone configured for that remote again;
+   - a **Directory on this server** destination (a NAS share, a second
+     disk, mounted on the new host): `cp /mnt/nas/kiln/db/<newest>.dump .`
+
+   Take the backup's `kiln-db-<stamp>.sha256` with it, and check it
+   (`sha256sum -c kiln-db-<stamp>.sha256`) before you restore. A
+   destination that was failing lacks the newest backups, so list each one
+   (`rclone lsf nas:kiln-backups/site/db/`, `ls /mnt/nas/kiln/db/`) and take
+   the newest stamp that has both its dump and its `.sha256`.
 3. **Restore the database:**
    ```bash
    RESTORE_DATABASE_URL=postgres://…/kiln_prod \
@@ -2950,7 +3335,8 @@ The app reads them in production only.
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
 | `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
-| `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused or failed copy fails the run. The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
+| `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused copy fails the run, and so does a failed one, unless an in-app backup reached another [destination](#send-backups-to-several-destinations) (then it is partly off-site). The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
+| `BACKUP_LOCAL_DESTINATION_ROOTS` | app | comma-separated absolute directories a **Directory on this server** destination may be under (default unset: that kind isn't offered). One relative or `..` entry drops the whole list with a boot warning ([details](#let-backups-be-written-to-a-directory-on-this-server)). Read in production and development |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; Ecto-only query parameters are refused by libpq ([connection URLs](#which-database-url-the-backup-tools-accept-2719)) |
 | `RCLONE_CONFIG`, `RCLONE_CONFIG_<NAME>_*`, `RCLONE_RETRIES` | rclone | read by `rclone` itself, which inherits the environment of whichever path runs it: the named remote's configuration file or settings, and rclone's retry count (default 3). Kiln does not read them. `kiln_offsite` is reserved ([above](#off-site-credentials-stay-out-of-the-rclone-command-line-2690)) |

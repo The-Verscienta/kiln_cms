@@ -51,7 +51,7 @@ you*).
 | The `__kiln_*__/0` functions the macro injects | The seam between a resource and every core registry. The double underscores read private; they are contract |
 | Workflow action names on a content resource | `:read`, `:published`, `:public_by_slug`, `:trashed`, `:create`, `:update`, `:autosave`, `:submit_for_review`, `:return_to_draft`, `:publish`, `:unpublish`, `:archive`, `:unarchive`, `:restore`, `:destroy`. Note `:restore` undoes trashing and `:unarchive` undoes `:archive` — they are not the same inverse |
 | The merge-argument convention | `tag_ids` / `add_tag_ids` / `remove_tag_ids`, and `related_<type>_ids` with the same three forms; `remove_*` stays idempotent |
-| `Kiln.Plugin` callbacks | All nineteen (`plug_routes/0`, `challenge_providers/0` and `security_checks/0` since `kiln_plugin` 1.4), their arities and their return shapes, plus the `nav_item`, `admin_route` and `plug_route` types |
+| `Kiln.Plugin` callbacks | All twenty (`plug_routes/0`, `challenge_providers/0` and `security_checks/0` since `kiln_plugin` 1.4, `backup_destinations/0` since 1.5), their arities and their return shapes, plus the `nav_item`, `admin_route` and `plug_route` types |
 | `Kiln.Block` and its DSL | The `block`, `field` and `migrate` entities, their options, the declared field-type vocabulary, and the Kiln-to-Ash type mapping |
 | The `_type` and `_version` attributes | Injected on every block, and the discriminator a stored block map is resolved by |
 | `Kiln.Block.Renderer` | The `:web`, `:json` and `:json_ld` surfaces, and that an implementation returning `nil` for an unhandled surface is correct |
@@ -75,8 +75,9 @@ you*).
 Since #1909, `Kiln.Plugin`, `Kiln.Block` and its `Kiln.Block.*` modules,
 `Kiln.FieldType`, `Kiln.Tokens`, `Kiln.Advisory` (with its `Context`,
 `Finding` and `Body`), `Kiln.Forms.SpamCheck` (with its `Context`),
-`Kiln.ImageBackend`, since `kiln_plugin` 1.3 `Kiln.SafeFetch`, and since
-`kiln_plugin` 1.4 `Kiln.Challenge.Provider` and `Kiln.Security.Check` ship in the [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md)
+`Kiln.ImageBackend`, since `kiln_plugin` 1.3 `Kiln.SafeFetch`, since
+`kiln_plugin` 1.4 `Kiln.Challenge.Provider` and `Kiln.Security.Check`, and since
+`kiln_plugin` 1.5 `Kiln.BackupDestination` (with its `Config`) ship in the [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md)
 package, which the core takes as a `path:` dependency, so that a plugin can
 depend on them without depending on the core. The names did not change and
 the promises above apply unchanged; an overlay compiles exactly as before.

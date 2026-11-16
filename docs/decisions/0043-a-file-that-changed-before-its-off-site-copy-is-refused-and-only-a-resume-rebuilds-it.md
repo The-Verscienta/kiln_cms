@@ -1,7 +1,10 @@
 # 0043. A file that changed before its off-site copy is refused, and only a Resume rebuilds it
 
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
-  #2481 in 1.9.0.
+  #2481 in 1.9.0. Partly superseded by
+  [ADR 0063](0063-each-backup-destination-is-its-own-step-and-a-run-that-reaches-only-some-is-partly-off-site.md):
+  with several off-site destinations, a failed copy fails the run only when
+  no destination was reached. The refusal rule below is unchanged.
 - **References** — [#2480](https://github.com/The-Verscienta/kiln_cms/issues/2480)
   (the owner's comment adding this record);
   [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218) and the

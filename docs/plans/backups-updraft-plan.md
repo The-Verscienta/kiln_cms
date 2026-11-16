@@ -9,6 +9,10 @@ Schedule tab that manages them, and each schedule's keep settings (keep the
 newest N, keep for a number of days, held for `backup.sh` by `.hold`
 markers) built, with sub-daily intervals still to come pending an owner
 decision;
+#2220 (off-site destinations: the `Kiln.BackupDestination` contract, Local
+and Rclone destinations, one step per destination with a "partly off-site"
+outcome, and retention on each destination) is built, with S3 (#2221) still
+to come;
 the rest is proposed.
 Builds on #484 (in-app status + "Back up now"), `scripts/backup.sh`,
 `scripts/restore.sh` and `docs/backups.md`.
