@@ -75,6 +75,10 @@ Every summary line below that was shortened links to its own entry there.
   ([#2279](https://github.com/The-Verscienta/kiln_cms/issues/2279) · [long form](docs/changelog/unreleased.md#address-field-type))
 
 
+
+- **GraphQL `customWhere` takes `_or` / `_and` / `_not` groups, the typed form of `customFilter`'s: same nesting (4 deep), same member cap (50), same errors for unknown and private fields.**
+  ([#2445](https://github.com/The-Verscienta/kiln_cms/issues/2445) · [long form](docs/changelog/unreleased.md#graphql-custom-where-groups))
+
 - **Import field definitions from the console: upload a file, review the dry-run diff and data-loss refusals, confirm `--prune` and `--allow-data-loss` separately, and apply.** ([#2438](https://github.com/The-Verscienta/kiln_cms/issues/2438) · [long form](docs/changelog/unreleased.md#field-sync-screen))
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
   ([long form](docs/changelog/unreleased.md#backup-destinations))

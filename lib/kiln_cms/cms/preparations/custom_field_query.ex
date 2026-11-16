@@ -129,6 +129,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # `custom_filter` groups (#2355).
   @max_group_depth 4
   @max_group_members 50
+  @group_keys ~w(_or _and _not)
 
   # A built-in column in a `custom_sort` (#2356): `_native:title`, `-_native:title`.
   @native_sort_prefix "_native:"
@@ -338,8 +339,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp entry_exprs(group, condition, defs, ctx) when group in ~w(_or _and) do
     with {:ok, members} <- group_members(group, condition),
          {:ok, exprs} <- member_exprs(members, defs, ctx) do
-      join = if group == "_or", do: &expr(^&2 or ^&1), else: &expr(^&2 and ^&1)
-      {:ok, [Enum.reduce(exprs, join)]}
+      {:ok, [join_group(group, exprs)]}
     end
   end
 
@@ -359,6 +359,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       conditions(target, condition, ctx)
     end
   end
+
+  defp join_group("_or", exprs), do: Enum.reduce(exprs, &expr(^&2 or ^&1))
+  defp join_group("_and", exprs), do: Enum.reduce(exprs, &expr(^&2 and ^&1))
 
   defp and_all([]), do: expr(true)
   defp and_all(exprs), do: Enum.reduce(exprs, &expr(^&2 and ^&1))
@@ -422,9 +425,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   # Groups are bounded: they nest at most `@max_group_depth` deep and hold at
   # most `@max_group_members` members in all (a field list has no such cap).
-  defp check_groups(filter) do
-    {depth, members} = group_stats(filter)
+  defp check_groups(filter), do: check_group_stats(group_stats(filter))
 
+  defp check_group_stats({depth, members}) do
     cond do
       depth > @max_group_depth ->
         {:error, "_or / _and / _not nest at most #{@max_group_depth} deep"}
@@ -1008,27 +1011,121 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp apply_where(query, where, defs, ctx) when is_list(where) do
     max = KilnCMSWeb.GraphqlLimits.max_custom_conditions()
 
-    if length(where) > max do
-      invalid(query, :custom_where, "at most #{max} conditions are allowed")
+    with :ok <- check_where_size(where, max),
+         :ok <- check_group_stats(where_stats(where)),
+         {:ok, exprs} <- where_exprs(where, defs, ctx) do
+      Enum.reduce(exprs, query, &Ash.Query.do_filter(&2, &1))
     else
-      Enum.reduce(where, query, &where_condition(&2, &1, defs, ctx))
+      {:error, message} -> invalid(query, :custom_where, message)
     end
   end
 
   defp apply_where(query, _where, _defs, _ctx),
     do: invalid(query, :custom_where, "must be a list of conditions")
 
+  defp check_where_size(where, max) do
+    if length(where) > max,
+      do: {:error, "at most #{max} conditions are allowed"},
+      else: :ok
+  end
+
+  defp where_exprs(nodes, defs, ctx) do
+    Enum.reduce_while(nodes, {:ok, []}, fn node, {:ok, acc} ->
+      case where_node(node, defs, ctx) do
+        {:ok, exprs} -> {:cont, {:ok, acc ++ exprs}}
+        {:error, _message} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  # One element of `customWhere`: a leaf condition on one custom field, or —
+  # as `customFilter`'s `_or` / `_and` / `_not` (#2355, #2445) — a group of
+  # such elements, nested within `@max_group_depth`.
+  defp where_node(raw, defs, ctx) when is_map(raw) do
+    node = Map.new(raw, fn {key, value} -> {to_string(key), value} end)
+
+    case Enum.filter(@group_keys, &(node[&1] != nil)) do
+      [] ->
+        where_leaf(raw, defs, ctx)
+
+      [group] ->
+        where_group(group, node, defs, ctx)
+
+      groups ->
+        {:error, "a condition takes one of #{group_list()}, got #{Enum.join(groups, ", ")}"}
+    end
+  end
+
+  defp where_node(_raw, _defs, _ctx), do: {:error, "every condition must be an object"}
+
+  defp where_group(group, node, defs, ctx) do
+    others = Map.keys(node) -- [group]
+    stray = Enum.find(others, &(node[&1] != nil))
+
+    cond do
+      stray != nil ->
+        {:error, "#{group} cannot be combined with #{inspect(stray)} in one condition"}
+
+      group == "_not" and is_map(node[group]) ->
+        with {:ok, exprs} <- where_node(node[group], defs, ctx) do
+          {:ok, [expr(not (^and_all(exprs)))]}
+        end
+
+      group == "_not" ->
+        {:error, "_not must hold one condition"}
+
+      true ->
+        with {:ok, members} <- group_members(group, node[group]),
+             {:ok, exprs} <- member_nodes(members, defs, ctx) do
+          {:ok, [join_group(group, exprs)]}
+        end
+    end
+  end
+
+  defp member_nodes(members, defs, ctx) do
+    members
+    |> Enum.reduce_while({:ok, []}, fn member, {:ok, acc} ->
+      case where_node(member, defs, ctx) do
+        {:ok, exprs} -> {:cont, {:ok, [and_all(exprs) | acc]}}
+        {:error, _message} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, exprs} -> {:ok, Enum.reverse(exprs)}
+      error -> error
+    end
+  end
+
+  # Depth and member counts of a `customWhere` list, counted as `group_stats/1`
+  # counts a `customFilter` map so the two share one pair of caps.
+  defp where_stats(nodes) when is_list(nodes) do
+    nodes |> Enum.map(&node_stats/1) |> Enum.reduce({0, 0}, &merge_stats/2)
+  end
+
+  defp node_stats(node) when is_map(node) do
+    Enum.reduce(node, {0, 0}, fn {key, value}, acc ->
+      merge_stats(acc, group_stat(to_string(key), value))
+    end)
+  end
+
+  defp node_stats(_node), do: {0, 0}
+
+  defp group_stat(group, value) when group in @group_keys and value != nil do
+    children = if is_map(value) and group == "_not", do: [value], else: member_list(value)
+    {depth, members} = where_stats(children)
+    {depth + 1, length(children) + members}
+  end
+
+  defp group_stat(_key, _value), do: {0, 0}
+
   # The same `resolve/2` as `custom_filter`, over the same already
   # privacy-filtered `defs`: a missing and a private field answer alike.
-  defp where_condition(query, raw, defs, ctx) do
+  defp where_leaf(raw, defs, ctx) do
     with {:ok, name, kind, ops} <- parse_condition(raw),
          {:ok, definition} <- resolve(defs, name),
          :ok <- check_kind(definition, kind, ops),
-         {:ok, filter} <- translate_ops(kind, ops, name),
-         {:ok, exprs} <- conditions(definition, filter, ctx) do
-      Enum.reduce(exprs, query, &Ash.Query.do_filter(&2, &1))
-    else
-      {:error, message} -> invalid(query, :custom_where, message)
+         {:ok, filter} <- translate_ops(kind, ops, name) do
+      conditions(definition, filter, ctx)
     end
   end
 
@@ -1037,7 +1134,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp parse_condition(raw) when is_map(raw) do
     raw = Map.new(raw, fn {key, value} -> {to_string(key), value} end)
     kind_names = Enum.map(@kind_keys, &Atom.to_string/1)
-    unknown = Map.keys(raw) -- ["name" | kind_names]
+    unknown = Map.keys(raw) -- ["name" | kind_names ++ @group_keys]
     given = Enum.filter(kind_names, &(raw[&1] != nil))
     name = raw["name"]
 
@@ -1059,8 +1156,6 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
-  defp parse_condition(_raw), do: {:error, "every condition must be an object"}
-
   defp operators(name, kind, ops) when is_map(ops) do
     ops =
       ops
@@ -1074,6 +1169,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp operators(name, kind, _ops),
     do: {:error, "the #{camel(kind)} condition on #{inspect(name)} must be an object"}
+
+  defp group_list, do: Enum.join(@group_keys, ", ")
 
   defp kind_list, do: Enum.map_join(@kind_keys, ", ", &camel/1)
 
@@ -1211,8 +1308,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       # the key: it lags a rename and would order unreadable targets.
       {:ok, %{field_type: type, multiple: multiple} = definition}
       when type in [:reference, :media] and multiple != true ->
-        key = Relations.sort_key(definition, ctx)
-        Ash.Query.sort(query, [{Ash.Sort.expr_sort(^key), direction}])
+        target_sort(query, definition, direction, ctx)
 
       {:ok, %{field_type: type}} when type in [:reference, :media] ->
         invalid(
@@ -1237,6 +1333,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       {:error, message} ->
         invalid(query, :custom_sort, message)
+    end
+  end
+
+  defp target_sort(query, definition, direction, ctx) do
+    case Relations.sort_key(definition, ctx) do
+      {:ok, key} -> Ash.Query.sort(query, [{Ash.Sort.expr_sort(^key), direction}])
+      {:error, message} -> invalid(query, :custom_sort, message)
     end
   end
 
