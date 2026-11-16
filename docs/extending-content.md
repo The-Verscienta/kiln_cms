@@ -1173,7 +1173,7 @@ cannot reach out:
   starting with `#`, and `$id`, `$dynamicRef`, `$recursiveRef` and
   `$dynamicAnchor`, are refused when the definition is saved. Nothing is ever
   fetched.
-- A check has a 250 ms deadline; a schema too expensive to evaluate (a
+- A check has a 1-second deadline; a schema too expensive to evaluate (a
   pathological `pattern`) fails the write with *took too long to check
   against the schema*.
 - The value must first pass the JSON field's own limits (64 KB, 32 levels,

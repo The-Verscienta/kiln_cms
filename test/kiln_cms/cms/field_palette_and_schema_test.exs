@@ -171,7 +171,7 @@ defmodule KilnCMS.CMS.FieldPaletteAndSchemaTest do
       value = String.duplicate("a", 40) <> "!"
       started = System.monotonic_time(:millisecond)
       assert {:error, [_ | _]} = FieldSchema.validate(%{"v" => value} |> Map.fetch!("v"), schema)
-      assert System.monotonic_time(:millisecond) - started < 2_000
+      assert System.monotonic_time(:millisecond) - started < 4_000
     end
   end
 

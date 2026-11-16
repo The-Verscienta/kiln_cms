@@ -21,7 +21,7 @@ defmodule KilnCMS.CMS.FieldSchema do
       builder's resolver chain (embedded meta-schemas and same-document
       pointers) has no network resolver, so an address cannot be fetched
       even by a keyword this module does not name;
-    * a check runs in its own process with a 250 ms deadline, so a schema
+    * a check runs in its own process with a 1-second deadline, so a schema
       that is expensive to evaluate (a pathological `pattern`, say) fails the
       write with a message instead of holding the request. The value it
       checks is already capped (64 KB, 32 levels, 5,000 values) by
@@ -35,7 +35,7 @@ defmodule KilnCMS.CMS.FieldSchema do
   @max_bytes 16 * 1024
   @max_depth 16
   @max_nodes 1_000
-  @deadline_ms 250
+  @deadline_ms 1_000
   @max_messages 5
   @draft "https://json-schema.org/draft/2020-12/schema"
   @refused_keys ~w($id $dynamicRef $recursiveRef $dynamicAnchor)
