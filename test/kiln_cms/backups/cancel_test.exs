@@ -204,11 +204,13 @@ defmodule KilnCMS.Backups.CancelTest do
   end
 
   describe "D4: cancel never writes the manifest" do
-    for step <- ["dump", "offsite"] do
+    # The env remote is the backup's one destination: its `offsite` is part 1
+    # (#2220).
+    for {step, part} <- [{"dump", nil}, {"offsite", 1}] do
       test "canceled at #{step}", %{base: base, dir: dir, admin: admin} do
         fake_rclone!(base)
         {:ok, %{status: :started}} = request()
-        step_until(unquote(step))
+        step_until(unquote(step), unquote(part))
         %{stamp: stamp} = lock()
         manifest = File.read!(Manifest.path(dir))
 
@@ -394,7 +396,7 @@ defmodule KilnCMS.Backups.CancelTest do
       """)
 
       {:ok, %{status: :started, chain: old_chain}} = request()
-      job = step_until("offsite")
+      job = step_until("offsite", 1)
       %{stamp: stamp} = lock()
 
       # The zombie claims the lease and blocks in its first `rclone copy`.
@@ -427,6 +429,67 @@ defmodule KilnCMS.Backups.CancelTest do
       end)
 
       assert %{status: :succeeded} = run_of(stamp)
+    end
+  end
+
+  describe "cancel during the second destination (#2220)" do
+    test "the destination's call dies with its step; a Resume sends to both", %{
+      base: base,
+      admin: admin
+    } do
+      fake_rclone!(base)
+      pid_file = Path.join(base, "fake.pid")
+
+      b =
+        KilnCMS.Test.BackupDestinations.destination!(%{
+          name: "Slow",
+          settings: %{
+            "mode" => "ok",
+            "put_mode" => "sleep",
+            "sleep_ms" => 60_000,
+            "pid_file" => pid_file
+          }
+        })
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      job = step_until("offsite", 2)
+      %{stamp: stamp} = lock()
+
+      # The step runs as Oban would run it, in a process of its own; the
+      # adapter's call blocks in its first `put/3`.
+      step = Task.async(fn -> StepWorker.perform(job) end)
+      Process.unlink(step.pid)
+      wait_for!(pid_file)
+      call = pid_file |> File.read!() |> String.to_charlist() |> :erlang.list_to_pid()
+      assert Process.alive?(call)
+      watch = Process.monitor(call)
+
+      BackupChain.listen(fn ->
+        assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+        assert {:error, :canceled} = BackupChain.settled(chain)
+      end)
+
+      assert Backups.in_flight() == nil
+
+      # Oban kills a canceled job's process; the adapter's call goes with it.
+      Process.exit(step.pid, :kill)
+      assert_receive {:DOWN, ^watch, :process, ^call, _reason}, 5_000
+
+      assert %{status: :canceled} = run = run_of(stamp)
+      assert Enum.find(run.destinations, &(&1.key == "dest:" <> b.id)).status == :pending
+
+      # Fixed, and resumed: both destinations are reached.
+      Backups.update_backup_destination!(
+        Backups.get_backup_destination!(b.id, actor: admin),
+        %{settings: %{"mode" => "ok"}},
+        actor: admin
+      )
+
+      backdate_finished!(stamp)
+      assert :ok = BackupChain.resume(stamp)
+
+      assert %{status: :succeeded, offsite_status: :complete} = run = run_of(stamp)
+      assert Enum.map(run.destinations, & &1.status) == [:ok, :ok]
     end
   end
 

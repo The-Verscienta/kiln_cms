@@ -92,6 +92,7 @@ defmodule KilnCMS.Keys.VaultRotationTest do
     # out of discovery (a type reverted to `:binary`) fails loudly, alongside
     # the guard below.
     @known [
+      {KilnCMS.Backups.DestinationConfig, :secrets_encrypted},
       {KilnCMS.Billing.Settings, :secret_key_encrypted},
       {KilnCMS.Billing.Settings, :webhook_secret_encrypted},
       {KilnCMS.CMS.SiteAiProvider, :api_key_encrypted},

@@ -13,6 +13,24 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## 1.5.0
+
+### Added
+
+- **`Kiln.BackupDestination` and `c:Kiln.Plugin.backup_destinations/0`
+  (kiln_cms#2220).** A plugin can add a place in-app backups copy their files
+  to, beside the built-in Local and Rclone destinations: `kind/0`, `label/0`,
+  `fields/0` (the form a platform admin fills in), `validate/1`, `test/1`,
+  `put/3`, `list/1`, `get/3`, `delete/2` and `describe/1`, each handed a
+  `Kiln.BackupDestination.Config` whose `Inspect` hides its settings and
+  secrets. The optional `supports/0` says whether `:list` and `:delete` work,
+  which retention needs; `use Kiln.BackupDestination` defaults it to `[]`. An
+  adapter must run in the calling process or in processes linked to it, and
+  keep secrets out of a spawned process's arguments and state.
+  `c:Kiln.Plugin.backup_destinations/0` defaults to `[]`; a plugin that does
+  not override it is unchanged. A plugin using it should require
+  `{:kiln_plugin, "~> 1.5"}`.
+
 ## 1.4.0
 
 ### Added

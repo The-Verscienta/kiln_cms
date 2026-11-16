@@ -56,6 +56,17 @@ defmodule KilnCMS.Backups.Manifest do
   manifest without the key (`scripts/backup.sh`, or Kiln before #2219) covers
   the kinds of its artifacts (`components/1`).
 
+  ## Destinations (#2220)
+
+  An in-app backup that had off-site destinations lists them as
+  `"destinations"`, one `{"key", "label", "status"}` object each, in the
+  order they were sent to: `key` as in a Run's artifact `destinations` map
+  (`"rclone:<redacted remote>"`, `"dest:<uuid>"`), `label` redacted, and
+  `status` `"ok"` or `"failed"` (a status this release doesn't know reads as
+  it is written). `"offsite"` keeps its meaning: the `BACKUP_RCLONE_REMOTE`
+  remote, and only when that destination was reached. `scripts/backup.sh`
+  never writes the key, and a backup without destinations omits it.
+
   ## Stamp
 
   The run's stamp (`"20260805-031700"`, the name its files and its Run carry)
@@ -89,6 +100,8 @@ defmodule KilnCMS.Backups.Manifest do
           optional(:parts_total) => pos_integer()
         }
 
+  @type destination :: %{key: String.t(), label: String.t() | nil, status: String.t()}
+
   @type t :: %__MODULE__{
           version: pos_integer(),
           stamp: String.t() | nil,
@@ -99,6 +112,7 @@ defmodule KilnCMS.Backups.Manifest do
           components: [String.t()] | nil,
           artifacts: [artifact()],
           offsite: String.t() | nil,
+          destinations: [destination()] | nil,
           keep_days: pos_integer() | nil,
           error: String.t() | nil
         }
@@ -112,6 +126,7 @@ defmodule KilnCMS.Backups.Manifest do
             components: nil,
             artifacts: [],
             offsite: nil,
+            destinations: nil,
             keep_days: nil,
             error: nil
 
@@ -223,6 +238,7 @@ defmodule KilnCMS.Backups.Manifest do
     }
     |> put_present("components", m.components)
     |> put_present("stamp", m.stamp)
+    |> put_present("destinations", destinations_out(m.destinations))
   end
 
   defp from_map(map) do
@@ -236,6 +252,7 @@ defmodule KilnCMS.Backups.Manifest do
       components: components_list(map["components"]),
       artifacts: artifacts(map["artifacts"]),
       offsite: string(map["offsite"]),
+      destinations: destinations_in(map["destinations"]),
       keep_days: positive(map["keep_days"]),
       error: string(map["error"])
     }
@@ -259,6 +276,24 @@ defmodule KilnCMS.Backups.Manifest do
   end
 
   defp artifacts(_other), do: []
+
+  defp destinations_out([_ | _] = list) do
+    for d <- list, do: %{"key" => d.key, "label" => d[:label], "status" => d.status}
+  end
+
+  defp destinations_out(_none), do: nil
+
+  # Entries without a key and a status read as absent; anything else in an
+  # entry is ignored.
+  defp destinations_in(list) when is_list(list) do
+    for %{} = entry <- list,
+        key = string(entry["key"]),
+        status = string(entry["status"]),
+        key && status,
+        do: %{key: key, label: string(entry["label"]), status: status}
+  end
+
+  defp destinations_in(_other), do: nil
 
   # Known names only, each once; anything else reads as absent.
   defp components_list(list) when is_list(list) do

@@ -159,6 +159,18 @@ defmodule KilnCMS.Backups.PresenceTest do
     assert state(run([artifact(:db, "a.dump", failed)]), dir) == :missing
   end
 
+  test "off-site only when a stored destination's copy succeeded (#2220)", %{dir: dir} do
+    key = "dest:" <> Ash.UUID.generate()
+    destinations = %{"local" => %{"status" => "ok"}, key => %{"status" => "ok"}}
+
+    assert state(run([artifact(:db, "a.dump", destinations)]), dir) == :off_site_only
+
+    for status <- ["failed", "pending", "pruned"] do
+      other = Map.put(destinations, key, %{"status" => status})
+      assert state(run([artifact(:db, "a.dump", other)]), dir) == :missing
+    end
+  end
+
   describe "expired: what cron's prune removed (#2416)" do
     @old "20260701-031700"
     @newer "20260720-031700"

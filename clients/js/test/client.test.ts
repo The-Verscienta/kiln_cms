@@ -614,6 +614,17 @@ describe("transport", () => {
     );
   });
 
+  it("trims a long run of trailing slashes in linear time", async () => {
+    const stub = stubFetch({ body: emptyDoc() });
+    const started = Date.now();
+    const kiln = createClient({
+      baseUrl: "https://cms.example.com" + "/".repeat(200_000),
+      fetch: stub.fetchImpl,
+    });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(kiln.baseUrl).toBe("https://cms.example.com");
+  });
+
   it("throws KilnHttpError with the parsed JSON error body", async () => {
     const stub = stubFetch({ status: 422, body: { errors: [{ code: "invalid" }] } });
 

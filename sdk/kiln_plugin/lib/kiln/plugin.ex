@@ -30,6 +30,11 @@ defmodule Kiln.Plugin do
     * `security_checks/0` — `Kiln.Security.Check` modules (kiln_cms#2252):
       lines on the console's Security posture page, run beside the core's own
       checks, each under its own deadline. Since 1.4.
+    * `backup_destinations/0` — `Kiln.BackupDestination` modules
+      (kiln_cms#2220): somewhere in-app backups can copy their files, beside
+      the built-in Local and Rclone destinations. Installing one changes
+      nothing until a platform admin adds a destination of its kind on the
+      Backups page. Since 1.5.
     * `nav_items/0` — links in the admin top nav
       (`%{label: "...", path: "/editor/...", role: :editor | :admin}`).
     * `admin_routes/0` — LiveViews mounted in the admin-gated live session
@@ -81,7 +86,8 @@ defmodule Kiln.Plugin do
   can build from this package alone:
 
     * blocks, field types, spam checks, advisory checks, image backends,
-      human-verification providers and security posture checks;
+      human-verification providers, security posture checks and backup
+      destinations;
     * nav items, supervision children and Oban queues;
     * routes, but only to a LiveView that depends on `phoenix_live_view`
       directly — one that does `use KilnCMSWeb, :live_view` needs the core.
@@ -141,6 +147,12 @@ defmodule Kiln.Plugin do
   to `[]`. Since 1.4.
   """
   @callback security_checks() :: [module()]
+
+  @doc """
+  `Kiln.BackupDestination` modules a platform admin can add destinations of
+  on the Backups page. Defaults to `[]`. Since 1.5.
+  """
+  @callback backup_destinations() :: [module()]
   @callback nav_items() :: [nav_item()]
   @callback admin_routes() :: [admin_route()]
   @callback editor_routes() :: [admin_route()]
@@ -197,6 +209,9 @@ defmodule Kiln.Plugin do
       def security_checks, do: []
 
       @impl Kiln.Plugin
+      def backup_destinations, do: []
+
+      @impl Kiln.Plugin
       def nav_items, do: []
 
       @impl Kiln.Plugin
@@ -229,6 +244,7 @@ defmodule Kiln.Plugin do
                      image_backends: 0,
                      challenge_providers: 0,
                      security_checks: 0,
+                     backup_destinations: 0,
                      nav_items: 0,
                      admin_routes: 0,
                      editor_routes: 0,

@@ -1,0 +1,147 @@
+# 0064. Retention on a backup destination deletes only what this installation sent there
+
+- **Status** — accepted (2026-11-15).
+- **References** — [#2220](https://github.com/The-Verscienta/kiln_cms/issues/2220)
+  and the owner's approval of its decision E4 "all as proposed"
+  (2026-11-15), with the critic's change 2 (where a destination writes is
+  fixed, and destinations may not overlap);
+  [ADR 0063](0063-each-backup-destination-is-its-own-step-and-a-run-that-reaches-only-some-is-partly-off-site.md)
+  (each destination is its own step);
+  [ADR 0041](0041-the-app-and-backup-sh-agree-on-what-to-keep-only-through-presence-only-marker-files.md)
+  and [ADR 0062](0062-a-schedules-keep-holds-reach-backup-sh-through-a-third-presence-only-marker.md)
+  (the local markers, which stay local).
+- **Changelog** — the Unreleased section of
+  [CHANGELOG.md](../../CHANGELOG.md): Added, #2220
+  ([long form](../changelog/unreleased.md#backup-destinations)).
+
+## The problem
+
+`KilnCMS.Backups.Retention` prunes `BACKUP_DIR` by age and by keep rules.
+Nothing pruned the off-site copy: `BACKUP_RCLONE_REMOTE` grows until the
+operator's own lifecycle rule or script trims it. With several destinations
+per backup (ADR 0063), leaving every one to grow without limit fills
+buckets and disks the admin added from a form, and the admin can't add a
+lifecycle rule to a directory on a NAS.
+
+But a destination is not a directory Kiln owns. A bucket can be shared by
+two installations (staging and production, two sites, a restore drill), or
+already hold backups copied there by hand or by cron. A listing shows names
+that look like Kiln's backups; it does not show who made them. Pruning by
+name and age alone would delete another installation's backups, or the
+only copies of a cron-made backup someone placed there deliberately.
+
+## Decision
+
+**Retention runs on a stored destination, right after a backup reaches
+it** (`Retention.run_on_destination/3`, called by
+`KilnCMS.Backups.Steps` once that destination is recorded `ok`), when all
+of these hold:
+
+- the destination is stored in the app (a `"dest:<id>"` key), enabled, and
+  its **Delete its old backups (retention)** box (`prune`) is ticked when
+  the pass starts (the row is read again then, so turning it off mid-backup
+  is obeyed);
+- its adapter's `supports/0` includes both `:list` and `:delete` (Kiln's
+  Local and Rclone do; a plugin's defaults to neither);
+- where it writes does not overlap `BACKUP_RCLONE_REMOTE` or any other
+  stored destination, enabled or not (checked again here, see below).
+
+**It deletes only units this installation recorded sending there.** The
+destination's `list/1` is grouped into units (one stamp of one kind) as the
+local disk is, and the same keep rules as `BACKUP_DIR` are applied to them
+(`plan/4`: recovery points, backups in flight, the newest verified and
+newest complete unit of each kind, the schedules' keep settings,
+`BACKUP_KEEP_DAYS`). Of what those rules would delete, a unit is deleted
+only when its Run records an artifact of that kind, or one of its parts,
+under **this destination's key** with status `ok` (or `pruned`, by an
+earlier pass that stopped part-way). Anything else is left in place and
+named in the run's log: "Retention on NAS left 2 old backup(s) this
+installation has no record of sending there: db 20261101-031700, …".
+
+**`BACKUP_RCLONE_REMOTE` is never pruned by the app.** Only a `"dest:<id>"`
+key is accepted. Nothing changes for the env remote.
+
+**Where a destination writes is fixed, and destinations may not overlap.**
+Ownership is recorded against a key, not a place, so the key must never
+come to mean another place:
+
+- the location settings (Local `path`; Rclone `remote_name` and `path`) are
+  read-only once a destination is saved; moving one is adding a new
+  destination;
+- a new destination may not be, contain or sit inside `BACKUP_RCLONE_REMOTE`
+  or another stored destination (`Destination.overlap?/2`, by whole path
+  segments, after normalizing `foo:bar`, `foo:bar/` and `foo:/bar`);
+- because `BACKUP_RCLONE_REMOTE` can change after a destination was saved,
+  and two destinations saved at the same moment are not checked against
+  each other, **the overlap is checked again before every pass**. A destination that
+  overlaps the env remote or another one is skipped ("it overlaps
+  BACKUP_RCLONE_REMOTE", "it overlaps another backup destination"). A
+  plugin's destination, whose settings mean nothing to Kiln, can't be
+  compared with anything: with `BACKUP_RCLONE_REMOTE` set it is skipped
+  ("can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE"); without it, it
+  is pruned on the ownership rule alone.
+
+**It fails closed.** A retention policy that can't be resolved, a local
+backup directory that can't be listed, a destination listing that fails, a
+Run read that fails or a destination row that can't be read deletes
+nothing, and the run's log says "Retention on <name> skipped: <reason>;
+nothing was deleted". The first delete that fails stops the pass. None of
+this changes the destination's upload status: the backup reached it.
+
+**The local markers stay local.** `.good`, `.hold` and `.keep` are never
+uploaded, listed or read on a destination. A `.keep` in `BACKUP_DIR` pins
+the same stamp on every destination, and a `.work/<stamp>/` pins a backup
+in flight. A unit's age on a destination is the later of its newest remote
+modification time and its stamp's own instant, so a store that resets
+modification times never makes a backup look older than it is.
+
+## Accepted
+
+**A backup that later fails may already have pruned earlier destinations.**
+Each destination is pruned as soon as it is reached, before the chain moves
+on. If a later destination then refuses a file (fatal, ADR 0043), the
+backup fails, but the destinations before it have already had their older
+owned units deleted. Only older units the keep rules allowed deleting go:
+the newest verified and newest complete unit of each kind on that
+destination stay, and the failed backup's own unit is in flight while the
+pass runs. Pruning every destination only at `finish` would hold each
+destination's files until the last one finished, and a failure at any
+destination would stop the pruning of all of them.
+
+**An rclone `alias` remote, or two remote names for one bucket, can't be
+detected.** The overlap check compares names and paths, not what they point
+at. Ownership still holds: a unit sent through the other name is recorded
+under the other key, and is not deleted through this one.
+
+## Rejected
+
+- **Prune by age alone.** It deletes another installation's backups in a
+  shared bucket, and anything placed there by hand.
+- **Upload the markers so a destination can "see" them.** It would make a
+  file on a remote, writable by whoever else holds the bucket's keys, a
+  reason to keep or not. Recovery points are decided on this host.
+- **Prune `BACKUP_RCLONE_REMOTE` too.** It changes what an operator who
+  configured cron and the env remote has relied on, with no switch they
+  asked for. An opt-in, under the same ownership rule, is a possible
+  follow-up.
+- **Let a destination's location be edited.** The key's ownership record
+  would then license deleting, at the new place, what was sent to the old
+  one.
+
+## Consequences
+
+- An admin who shares a bucket between installations sees, on every run,
+  what is accumulating there that this installation won't delete.
+- A destination whose `prune` is off, whose adapter can't list and delete,
+  or that is skipped for an overlap grows without limit until someone
+  trims it.
+- History marks the deleted files `pruned` under that destination's key on
+  their runs, and counts the units on the run that pruned them
+  (`RunDestination.pruned`).
+
+## When to revisit
+
+- If pruning `BACKUP_RCLONE_REMOTE` is ever wanted, it takes this record's
+  ownership rule as is, behind an explicit switch.
+- If a store can report who wrote an object, ownership could be read from
+  the store as well as from the Run history.

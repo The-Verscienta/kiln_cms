@@ -12,6 +12,10 @@ defmodule KilnCMS.Backups.Worker do
       backup and waits for its chain to settle; it no longer runs one inline.
     * Delegates to `KilnCMS.Backups.Steps` for the functions other modules and
       tests call by this name (`split_credentials/1` from `KilnCMS.Demo.Restore`).
+      `offsite_step/3`, `offsite_results/2` and `copy_offsite/2` copy to the
+      env destination (`BACKUP_RCLONE_REMOTE`) only, as they always did, for
+      the release console; the step chain sends to every destination, one
+      `offsite` job each (#2220).
 
   The `:backups` queue and this module go in the next minor release; drain the
   queue before upgrading to it.

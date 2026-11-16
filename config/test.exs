@@ -500,3 +500,10 @@ config :kiln_cms, KilnCMS.CrawlerVerification.Ranges,
   bootstrap?: false,
   tick_ms: :timer.hours(24),
   req_options: [plug: {Req.Test, KilnCMS.CrawlerVerification.Ranges}]
+
+# Backup destination adapters beyond Kiln's own and the plugins' (#2220): the
+# fake whose settings make a call succeed, fail, raise, exit or hang, so the
+# facade's boundary and the step chain can be tested without a real store.
+# Test-only; nothing else sets this key.
+config :kiln_cms, KilnCMS.Backups.Destination,
+  extra_adapters: [KilnCMS.Test.BackupDestinations.Fake]
