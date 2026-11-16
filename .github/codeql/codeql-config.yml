@@ -1,0 +1,12 @@
+# CodeQL configuration, read by .github/workflows/codeql.yml.
+name: KilnCMS CodeQL
+
+# Third-party code that is vendored into the repo and that Kiln doesn't
+# maintain. Kiln's own browser scripts under priv/static (embed.js,
+# embed-frame.js, bridge.js, sw.js) are hand-written, served to host pages,
+# and are scanned.
+paths-ignore:
+  - assets/vendor
+  - "**/node_modules"
+  - deps
+  - _build
