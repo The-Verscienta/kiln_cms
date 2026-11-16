@@ -205,11 +205,25 @@ defmodule KilnCMSWeb.GraphqlLimits do
   @spec custom_where_complexity(map(), non_neg_integer(), term()) :: non_neg_integer()
   def custom_where_complexity(args, child_complexity, info) do
     conditions = Map.get(args, :custom_where)
-    count = if is_list(conditions), do: length(conditions), else: 0
+    count = condition_count(conditions)
 
     AshGraphql.Graphql.Resolver.query_complexity(args, child_complexity, info) +
       count * @custom_condition_cost
   end
+
+  # Every leaf condition prices alike, however deep a group (#2445) nests it.
+  defp condition_count(nodes) when is_list(nodes),
+    do: nodes |> Enum.map(&condition_count/1) |> Enum.sum()
+
+  defp condition_count(node) when is_map(node) do
+    groups = Enum.filter([:_or, :_and, :_not], &(Map.get(node, &1) != nil))
+
+    if groups == [],
+      do: 1,
+      else: groups |> Enum.map(&condition_count(Map.fetch!(node, &1))) |> Enum.sum()
+  end
+
+  defp condition_count(_other), do: 0
 
   @doc "The most conditions one `customWhere` may hold."
   @spec max_custom_conditions() :: pos_integer()

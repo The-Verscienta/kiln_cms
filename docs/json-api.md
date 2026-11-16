@@ -467,7 +467,10 @@ Everything else is unchanged inside a group: an unknown or private field is the
 same `400` as outside one, definitions are read for the requesting site only,
 and `not` follows SQL, so `_not` of a comparison leaves out records lacking the
 field. GraphQL takes the same keys in `customFilter` (built-in names there are
-snake_case); `customWhere` has no groups.
+snake_case); `customWhere` takes `_or` / `_and` / `_not` too, as typed
+conditions (see
+[headless-graphql-api.md](headless-graphql-api.md#typed-filters-customwhere)),
+under the same two caps.
 
 Custom sorts are always **nulls last**, ascending or descending. A native
 `sort=-x` is plain `desc`, which in Postgres puts nulls first.

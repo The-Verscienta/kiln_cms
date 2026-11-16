@@ -529,6 +529,134 @@ defmodule KilnCMSWeb.GraphqlCustomWhereTest do
     end
   end
 
+  describe "boolean groups (#2445)" do
+    defp cond_count(n), do: %{"name" => "count", "int" => %{"eq" => n}}
+
+    test "_or matches either, _and both, _not the rest", %{apple: a, pear: p, plum: l, bare: b} do
+      assert ids!([%{"_or" => [cond_count(1), cond_count(10)]}]) == sorted([a, l])
+
+      assert ids!([
+               %{
+                 "_and" => [cond_count(5), %{"name" => "featured", "boolean" => %{"eq" => false}}]
+               }
+             ]) == sorted([p])
+
+      # A row without the field is not "count = 1" either, so _not keeps it.
+      assert ids!([%{"_not" => cond_count(1)}]) == sorted([p, l, b])
+    end
+
+    test "groups nest and sit beside plain conditions", %{apple: a, pear: p} do
+      where = [
+        %{"name" => "price", "float" => %{"lt" => 10.5}},
+        %{
+          "_or" => [
+            %{"_not" => %{"_or" => [cond_count(5), cond_count(10)]}},
+            %{"_and" => [cond_count(5), %{"name" => "price", "float" => %{"gt" => 9}}]}
+          ]
+        }
+      ]
+
+      assert ids!(where) == sorted([a, p])
+    end
+
+    test "agrees with customFilter's groups", %{apple: a, pear: p, plum: l, bare: b} do
+      typed = ids!([%{"_or" => [cond_count(1), %{"_not" => cond_count(5)}]}])
+
+      filter =
+        filter_ids!(%{
+          "_or" => [%{"count" => %{"eq" => 1}}, %{"_not" => %{"count" => %{"eq" => 5}}}]
+        })
+
+      assert typed == filter
+      assert typed == sorted([a, l, b])
+      refute p.id in typed
+    end
+
+    test "private fields answer as an unknown field inside a group, for every actor" do
+      private = %{"name" => "secret", "string" => %{"eq" => "classified"}}
+      where = [%{"_or" => [cond_count(1), %{"_not" => private}]}]
+
+      for actor <- [nil, user(:viewer)] do
+        assert error!(where, actor) == error!([private], actor)
+      end
+
+      assert is_list(ids!(where, user(:admin)))
+    end
+
+    test "a wrong kind inside a group is refused as outside one" do
+      assert error!([%{"_or" => [%{"name" => "count", "string" => %{"eq" => "1"}}]}]) =~
+               "int field"
+    end
+
+    test "a group takes nothing beside it, and a condition one group" do
+      assert error!([%{"_or" => [cond_count(1)], "name" => "count"}]) =~ "cannot be combined"
+
+      assert error!([%{"_or" => [cond_count(1)], "_and" => [cond_count(1)]}]) =~
+               "takes one of _or, _and, _not"
+    end
+
+    test "a condition with neither a name nor a group is refused by the read" do
+      assert error!([%{}]) =~ "needs a name"
+      assert error!([%{"string" => %{"eq" => "x"}}]) =~ "needs a name"
+    end
+
+    test "string-keyed and position-keyed groups work, as MCP and JSON:API send them", %{
+      apple: a,
+      plum: l
+    } do
+      query =
+        KilnCMS.CMS.Post
+        |> Ash.Query.for_read(:published, %{
+          custom_where: [%{"_or" => %{"1" => cond_count(10), "0" => cond_count(1)}}]
+        })
+
+      assert query.valid?
+      assert query |> Ash.read!(authorize?: false) |> sorted() == sorted([a, l])
+    end
+
+    test "an empty group is refused" do
+      assert error!([%{"_or" => []}]) =~ "non-empty list"
+      assert error!([%{"_and" => []}]) =~ "non-empty list"
+    end
+
+    test "nests at most as deep as customFilter's groups" do
+      deep = fn levels ->
+        Enum.reduce(1..levels, cond_count(1), fn _, inner -> %{"_not" => inner} end)
+      end
+
+      assert is_list(ids!([deep.(4)]))
+      assert error!([deep.(5)]) =~ "nest at most 4 deep"
+    end
+
+    test "holds at most as many members as customFilter's groups" do
+      max = 50
+      members = fn n -> %{"_or" => List.duplicate(cond_count(1), n)} end
+
+      assert is_list(ids!([members.(max)]))
+      assert error!([members.(max + 1)]) =~ "at most #{max} conditions in all"
+    end
+
+    test "each leaf in a group is priced" do
+      none = KilnCMSWeb.GraphqlLimits.custom_where_complexity(%{}, 3, nil)
+
+      group = %{_or: [%{name: "a"}, %{_not: %{name: "b"}}]}
+
+      priced = KilnCMSWeb.GraphqlLimits.custom_where_complexity(%{custom_where: [group]}, 3, nil)
+      assert priced - none == 2 * 5
+    end
+
+    test "the schema names the group fields" do
+      assert {:ok, %{data: %{"__type" => %{"inputFields" => fields}}}} =
+               Absinthe.run(
+                 ~s|{ __type(name: "CustomFieldCondition") { inputFields { name } } }|,
+                 @schema
+               )
+
+      names = Enum.map(fields, & &1["name"])
+      assert Enum.all?(~w(_or _and _not), &(&1 in names)), inspect(names)
+    end
+  end
+
   describe "the schema" do
     test "every query that takes customFilter takes customWhere" do
       {:ok, %{data: data}} =

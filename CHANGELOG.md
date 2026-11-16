@@ -67,6 +67,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **GraphQL `customWhere` takes `_or` / `_and` / `_not` groups, the typed form of `customFilter`'s: same nesting (4 deep), same member cap (50), same errors for unknown and private fields.**
+  ([#2445](https://github.com/The-Verscienta/kiln_cms/issues/2445) · [long form](docs/changelog/unreleased.md#graphql-custom-where-groups))
+
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
   ([long form](docs/changelog/unreleased.md#backup-destinations))
 
