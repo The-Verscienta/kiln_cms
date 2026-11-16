@@ -119,7 +119,9 @@ defmodule KilnCMS.CMS.AddressFieldTest do
       assert {:error, message} = cast(%{"country" => "GB", "address_line1" => "a\nb"})
       assert message =~ "single line"
       assert {:error, _} = cast(%{"country" => "GB", "locality" => "a\tb"})
-      assert {:error, _} = cast(%{"country" => "GB", "locality" => "a b"})
+
+      assert {:error, _} =
+               cast(%{"country" => "GB", "locality" => "a" <> <<0xE2, 0x80, 0xA8>> <> "b"})
 
       assert {:error, message} =
                cast(%{"country" => "GB", "locality" => String.duplicate("a", 101)})
