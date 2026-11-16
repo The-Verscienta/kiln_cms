@@ -240,7 +240,7 @@ defmodule KilnCMS.CMS.Titles do
 
     parsed
     |> Computed.references()
-    |> reachable(Map.new(computed), MapSet.new())
+    |> reachable(Map.new(computed), %{})
     |> Enum.flat_map(&document_refs(Map.get(Map.new(computed), &1)))
     |> Kernel.++(document_refs(parsed))
     |> Enum.filter(&(&1 in @cyclic))
@@ -248,13 +248,13 @@ defmodule KilnCMS.CMS.Titles do
     |> Enum.sort()
   end
 
-  defp reachable([], _computed, seen), do: MapSet.to_list(seen)
+  defp reachable([], _computed, seen), do: Map.keys(seen)
 
   defp reachable([name | rest], computed, seen) do
-    if MapSet.member?(seen, name) or not Map.has_key?(computed, name) do
+    if Map.has_key?(seen, name) or not Map.has_key?(computed, name) do
       reachable(rest, computed, seen)
     else
-      reachable(Computed.references(computed[name]) ++ rest, computed, MapSet.put(seen, name))
+      reachable(Computed.references(computed[name]) ++ rest, computed, Map.put(seen, name, true))
     end
   end
 
