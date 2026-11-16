@@ -412,22 +412,12 @@ Order: (0) → 1 → 2a → 2b → 3. At PR time run `gh pr list` and rebase aga
 any open #2282 PR touching `field_sync.ex` or the schema export (only
 one-line additive overlaps are expected; none are open today).
 
-## Questions for the maintainer
+## Decided by the maintainer (2026-11-16)
 
-1. **Cascade (PR 3):** should the parent's Save also save dirty cards (I3), or
-   is an explicit per-card Save enough for v1? The recommendation is to build
-   it, since two Save buttons are the first thing editors trip on, but the
-   plan is releasable without it.
-2. **Option shape:** a separate `edit_inline` column (I1, recommended) or a
-   `widget` value (no migration, but exclusive with the dropdown)?
-3. **Grant semantics:** should a parent field the actor cannot write (#2281)
-   hide the child cards too, or leave them (I5, recommended: the child's own
-   policy decides, no new authority)?
-4. **Advisory field locks:** is lock_version-only acceptable for v1 (I6), or
-   must a card honor the child editor's field locks before release?
-5. **Inline publish:** confirm v1 has no publish or approval button on the card
-   (I7), only a link to the child's editor.
-6. **Field scope:** confirm plain types only (I4), with blocks, media,
-   references, groups and rich text left to the full editor.
-7. **Nested write API:** confirm none in v1 (I12); a nested JSON:API/GraphQL
-   write would be its own issue and ADR.
+1. Build the cascade on parent Save (PR 3), as in I3.
+2. `edit_inline` is its own nullable column (I1), not a `widget` value.
+3. Cards still show when the parent field is not writable under #2281 grants;
+   the child's own policy decides (I5).
+4. v1 scope as planned: `lock_version` only with no advisory field locks (I6),
+   no inline publish button (I7), plain field types only (I4), and no nested
+   write API (I12). Richer field types and a nested API are separate issues.
