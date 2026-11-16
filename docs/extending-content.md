@@ -790,8 +790,13 @@ mean themselves. "Empty or not" asks *Empty* or *Has a value*. A value is at mos
 100 characters; longer is refused.
 
 Only single-valued string, text, integer, float, boolean, date, datetime, url,
-select, email, telephone, color, slug and time fields can be sorted by; the
-**Field** group lists just those. Fields the Columns picker does not offer
+select, email, telephone, color, slug, time, reference and media fields can be
+sorted by; the **Field** group lists just those. A reference or media field
+orders by its target's *current* title (a media item's current filename), as
+the API's `custom_sort` does, and a target you cannot read sorts with the
+empty ones. Its menu entry says "by current title" because the column shows the
+label saved with the record, which lags a rename until the record is saved
+again. Fields the Columns picker does not offer
 (groups, geolocation, JSON, date ranges, recurrence, computed and multi-valued
 fields) cannot be filtered either. A value typed into a condition on an email,
 telephone, color, slug or time field is cleaned the way the field cleans what
