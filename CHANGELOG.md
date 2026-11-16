@@ -67,6 +67,7 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Import field definitions from the console: upload a file, review the dry-run diff and data-loss refusals, confirm `--prune` and `--allow-data-loss` separately, and apply.** ([#2438](https://github.com/The-Verscienta/kiln_cms/issues/2438) · [long form](docs/changelog/unreleased.md#field-sync-screen))
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
   ([long form](docs/changelog/unreleased.md#backup-destinations))
 
@@ -76,18 +77,31 @@ Every summary line below that was shortened links to its own entry there.
 - **A content type can build every record's title from its fields with a title template (`{{ field.last_name }}, {{ field.first_name }}`): editors no longer type one, and existing titles are re-derived.**
   ([long form](docs/changelog/unreleased.md#computed-titles))
 
+### Changed
+
+- **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
+  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
+
 ### Fixed
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
 
-- **The second-factor test of an open page reaching its deadline no longer fails on a slow runner: the deadline sat 600 ms after the test started, and a mount that outlasted it redirected first.**
-  ([#2953](https://github.com/The-Verscienta/kiln_cms/pull/2953) · [long form](docs/changelog/unreleased.md#sfe-deadline-test-margin))
-
 ### Security
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
   ([long form](docs/changelog/unreleased.md#backup-state-json-remote))
+
+## [1.10.1] - 2026-11-16
+
+Long form: [docs/changelog/v1.10.1.md](docs/changelog/v1.10.1.md) —
+the 1.10.1 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Fixed
+
+- **The second-factor test of an open page reaching its deadline no longer fails on a slow runner: the deadline sat 600 ms after the test started, and a mount that outlasted it redirected first.**
+  ([#2953](https://github.com/The-Verscienta/kiln_cms/pull/2953) · [long form](docs/changelog/v1.10.1.md#sfe-deadline-test-margin))
 
 ## [1.10.0] - 2026-11-15
 

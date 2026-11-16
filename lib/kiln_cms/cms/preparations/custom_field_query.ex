@@ -64,9 +64,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   key.
 
   `media`/`reference` fields filter by their snapshot's stable `id`
-  (equality-shaped operators only) and are not sortable (#2354): the stored
-  label can lag the target's title, and an order over unreadable targets would
-  leak where they sit. On a `multiple` one
+  (equality-shaped operators only). A **single-valued** one is also sortable
+  (#2444, `Relations.sort_key/2`): the key is the target's *current* title (a
+  media item's current filename), read from the target and not from the stored
+  snapshot label, and it is `NULL` — last, like an unset field — where the
+  caller may not read the target, so the order of unreadable targets is never
+  revealed. A `multiple` one has no single key and is refused. On a `multiple` one
   (a gallery, a list of references) `eq` means "contains this id", `not_eq`
   "does not", and `in` "contains any of them".
 
@@ -164,7 +167,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       query
       |> apply_filter(filter, defs, ctx)
       |> apply_where(where, defs, ctx)
-      |> apply_sort(sort, defs)
+      |> apply_sort(sort, defs, ctx)
     end
   end
 
@@ -1177,7 +1180,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   # --- sorting -----------------------------------------------------------------
 
-  defp apply_sort(query, sort, defs) when is_binary(sort) do
+  defp apply_sort(query, sort, defs, ctx) when is_binary(sort) do
     sort
     |> String.split(",", trim: true)
     |> Enum.map(&String.trim/1)
@@ -1190,37 +1193,32 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       case name do
         @native_sort_prefix <> builtin -> native_sort(query, builtin, direction)
-        _ -> custom_sort(query, name, direction, defs)
+        _ -> custom_sort(query, name, direction, defs, ctx)
       end
     end)
   end
 
-  defp apply_sort(query, _sort, _defs) do
+  defp apply_sort(query, _sort, _defs, _ctx) do
     invalid(query, :custom_sort, "must be a comma-separated string of custom field names")
   end
 
-  defp custom_sort(query, name, direction, defs) do
+  defp custom_sort(query, name, direction, defs, ctx) do
     case resolve(defs, name) do
-      # A reference or media snapshot is a stored copy of the target's label:
-      # sorting by it would disagree with what a read shows (reads relabel it
-      # from the target as it is now) and, where the target is unreadable to the
-      # caller, would reveal the relative order of records they cannot see (#2354).
-      {:ok, %{field_type: :reference}} ->
-        invalid(
-          query,
-          :custom_sort,
-          "custom field #{inspect(name)} (reference) is not sortable: its stored label " <>
-            "can differ from the target's current title, and an order over targets the caller " <>
-            "cannot read would reveal where they sit; sort by a built-in or custom text field"
-        )
+      # A single reference or media field sorts by its target's current
+      # title / filename, `NULL` where the caller cannot read the target
+      # (#2444, `Relations.sort_key/2`). The stored snapshot's label is not
+      # the key: it lags a rename and would order unreadable targets.
+      {:ok, %{field_type: type, multiple: multiple} = definition}
+      when type in [:reference, :media] and multiple != true ->
+        key = Relations.sort_key(definition, ctx)
+        Ash.Query.sort(query, [{Ash.Sort.expr_sort(^key), direction}])
 
-      {:ok, %{field_type: :media}} ->
+      {:ok, %{field_type: type}} when type in [:reference, :media] ->
         invalid(
           query,
           :custom_sort,
-          "custom field #{inspect(name)} (media) is not sortable: its stored label can " <>
-            "differ from the file's current name and an order over files the caller cannot " <>
-            "read would reveal where they sit; sort by a built-in or custom text field"
+          "custom field #{inspect(name)} (#{type}) holds a list and is not sortable: " <>
+            "a list has no single key; sort by a single-valued field or a built-in"
         )
 
       # Composite values are jsonb objects. Sorting them orders by key count
