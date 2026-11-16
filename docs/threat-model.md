@@ -380,7 +380,9 @@ build if a resource is ever registered without that authorizer.
 - **Static analysis & dependencies** — Credo, Sobelow, Dialyzer, and two
   dependency audits (`mix deps.audit` against mirego's advisory mirror,
   `mix hex.audit` against Hex's own feed) in CI and `mix precommit`, failing
-  the build on a known-vulnerable locked dependency.
+  the build on a known-vulnerable locked dependency. CodeQL code scanning
+  covers the JavaScript/TypeScript (editor, client, embed scripts) and the
+  workflows in CI; it can't read Elixir.
 
 ## Per-surface risks & mitigations
 

@@ -1,0 +1,72 @@
+name: CodeQL
+
+# GitHub code scanning (advanced setup) for the parts of the repo that CodeQL
+# can read. CodeQL has no Elixir support, so the Elixir app is covered by
+# `mix sobelow` in CI and `mix precommit`. This workflow scans:
+#
+#   javascript-typescript  assets/js (the editor), clients/js (the published
+#                          client), priv/static (the embed and bridge scripts
+#                          served to host pages), the examples and e2e
+#   actions                the workflows themselves (injection, permissions)
+#   python                 scripts/benchmarks
+#
+# All three need no build (build-mode: none). Kotlin and Swift are left out on
+# purpose. The only Kotlin is the schema exporter's generated fixtures, which
+# have no Gradle/Maven build, so CodeQL's autobuild fails on them. The only
+# Swift is examples/swiftui-reader, which would need a macOS runner. Both are
+# output of the Elixir emitters that kotlin-models.yml and swiftui-reader.yml
+# already test.
+#
+# Default setup must stay off (Settings → Code security → CodeQL analysis):
+# GitHub rejects results from an advanced workflow while default setup is
+# enabled. Paths to skip are in .github/codeql/codeql-config.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so new queries in a CodeQL release run against unchanged code.
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [actions, javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+          # Default queries plus the lower-precision security ones. Kiln's
+          # attack surface (embeds, public forms, a published client) is
+          # worth the extra findings to triage.
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
