@@ -74,7 +74,8 @@ defmodule KilnCMS.CMS.FieldKindTest do
       datetime: :datetime,
       media: :media,
       reference: :reference,
-      group: :group
+      group: :group,
+      flexible: :json
     }
 
     assert Enum.sort(FieldTypes.core()) == Enum.sort(Map.keys(expected))

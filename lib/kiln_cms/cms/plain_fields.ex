@@ -33,7 +33,7 @@ defmodule KilnCMS.CMS.PlainFields do
 
   defp flagged(definitions) do
     for %{deliver_plain: true, field_type: :text} = definition <- definitions,
-        is_nil(Map.get(definition, :link_of_id)),
+        KilnCMS.CMS.FieldDefinition.top_level?(definition),
         do: definition
   end
 

@@ -25,7 +25,7 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
 
   alias KilnCMS.CMS.ScalarLists
 
-  @list_types [:media, :reference, :group] ++ ScalarLists.types()
+  @list_types [:media, :reference, :group, :flexible] ++ ScalarLists.types()
 
   # The list types a link field or group sub-field may also be, as scalars.
   @scalar_list_types ScalarLists.types()
@@ -38,12 +38,7 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
   def change(changeset, _opts, _context) do
     type = Ash.Changeset.get_attribute(changeset, :field_type)
 
-    changeset =
-      if type in @list_types and not (type in @scalar_list_types and sub_field?(changeset)) do
-        changeset
-      else
-        Ash.Changeset.force_change_attribute(changeset, :multiple, false)
-      end
+    changeset = clear_or_force(changeset, type)
 
     multiple? = Ash.Changeset.get_attribute(changeset, :multiple)
 
@@ -61,8 +56,24 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
     end
   end
 
-  defp sub_field?(changeset) do
-    not is_nil(Ash.Changeset.get_attribute(changeset, :link_of_id)) or
-      not is_nil(Ash.Changeset.get_attribute(changeset, :group_of_id))
+  defp clear_or_force(changeset, type) do
+    cond do
+      type == :flexible or item_type?(changeset) ->
+        Ash.Changeset.force_change_attribute(changeset, :multiple, true)
+
+      list_capable?(changeset, type) ->
+        changeset
+
+      true ->
+        Ash.Changeset.force_change_attribute(changeset, :multiple, false)
+    end
   end
+
+  defp list_capable?(changeset, type),
+    do: type in @list_types and not (type in @scalar_list_types and sub_field?(changeset))
+
+  defp item_type?(changeset),
+    do: not is_nil(Ash.Changeset.get_attribute(changeset, :flex_of_id))
+
+  defp sub_field?(changeset), do: not KilnCMS.CMS.FieldDefinition.top_level?(changeset)
 end

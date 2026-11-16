@@ -942,6 +942,28 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       else: group_input(assign(assigns, :row, GroupRows.row(assigns.value)))
   end
 
+  # A `:flexible` field (#2282). Until the items UI lands this is read-only:
+  # it renders a note and a count and no input, so the form posts nothing for
+  # the key and a save keeps the stored items.
+  def custom_field_input(%{definition: %{field_type: :flexible}} = assigns) do
+    assigns = assign(assigns, :item_count, flexible_item_count(assigns.value))
+
+    ~H"""
+    <div id={cf_id(@definition)}>
+      <span class="mb-1 block text-sm font-medium">{@definition.label}</span>
+      <p class="text-sm text-base-content/80">
+        {ngettext("%{count} item", "%{count} items", @item_count)}
+      </p>
+      <p class="mt-1 text-xs text-base-content/70">
+        {gettext("Edited through the API; item editing arrives with the next release.")}
+      </p>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+    </div>
+    """
+  end
+
   # A `:key_value` field (#2278): one `key=value` per line. The stored pairs
   # are shown as lines; after a failed save, the text that was posted.
   def custom_field_input(%{definition: %{field_type: :key_value}} = assigns) do
@@ -1738,6 +1760,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
 
   defp rows_count(rows, _definition),
     do: ngettext("%{count} row", "%{count} rows", length(rows))
+
+  defp flexible_item_count(items) when is_list(items), do: length(items)
+  defp flexible_item_count(_other), do: 0
 
   defp bare_custom_field_input(assigns) do
     case field_type_parts(assigns.definition) do

@@ -16,8 +16,7 @@ defmodule KilnCMS.CMS.Changes.ClearDeliverPlain do
   @impl true
   def change(changeset, _opts, _context) do
     if Ash.Changeset.get_attribute(changeset, :field_type) == :text and
-         is_nil(Ash.Changeset.get_attribute(changeset, :link_of_id)) and
-         is_nil(Ash.Changeset.get_attribute(changeset, :group_of_id)) do
+         KilnCMS.CMS.FieldDefinition.top_level?(changeset) do
       changeset
     else
       Ash.Changeset.force_change_attribute(changeset, :deliver_plain, false)

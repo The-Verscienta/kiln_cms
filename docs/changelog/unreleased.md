@@ -7,6 +7,20 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="flexible-item-types-upgrade"></a>
+
+- **Run `mix ash.migrate` (new `field_definitions.flex_of_id`, nullable, and `item_setting`, default `false`; part of #2282). Nothing changes for existing fields; rolling back is safe.**
+  Both are additions with a default or null, so the previous release keeps
+  working against them. They are the first step of flexible content (a custom
+  field holding mixed typed items), which reaches the API only: there is no
+  admin screen or editor input yet, so no site has one until an admin defines
+  it from code (`docs/extending-content.md`, "Define a flexible field from
+  code"). After a rollback, such a field reads on the previous release as a
+  field of an unknown type (hidden, its items kept; delete it from the
+  Fields screen) and its item types as ownerless groups that nothing loads.
+  Details in [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+  Refs #2282.
+
 <a id="backup-destinations-upgrade"></a>
 
 - **Run `mix ash.migrate` (new table `backup_destinations`; new `backup_runs.destinations` and `backup_runs.offsite_status`). Don't run a backup while a multi-node deployment is part-way through the upgrade. Rolling back to 1.10 is possible, but backups that reached a stored destination then read wrong in History.**

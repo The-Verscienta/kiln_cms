@@ -121,7 +121,14 @@ defmodule KilnCMS.Media.Resnapshot do
         # report a clean site having looked at nothing.
         authorize_with: :error,
         tenant: org_id,
-        query: [filter: [field_type: :media, link_of_id: [is_nil: true]]]
+        query: [
+          filter: [
+            field_type: :media,
+            link_of_id: [is_nil: true],
+            group_of_id: [is_nil: true],
+            flex_of_id: [is_nil: true]
+          ]
+        ]
       )
 
     org_id

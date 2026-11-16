@@ -221,8 +221,10 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       # A new FieldDefinition attribute lands in the document through the create
       # action's accept list. One that is not accepted would be silently left
       # out of every sync, so it must be named here as a decision.
+      # `flex_of_id` and `item_setting` (#2282) join the file with its
+      # `item_types` child list; until then an item type is not in a document.
       not_synced =
-        ~w(id org_id inserted_at updated_at content_type type_definition_id link_of_id group_of_id selection)a
+        ~w(id org_id inserted_at updated_at content_type type_definition_id link_of_id group_of_id flex_of_id item_setting selection)a
 
       stored =
         KilnCMS.CMS.FieldDefinition

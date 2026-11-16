@@ -54,8 +54,7 @@ defmodule KilnCMS.CMS.PortableFields do
   def names(definitions) do
     for %{deliver_portable: true, field_type: :text} = definition <- definitions,
         Map.get(definition, :format, :rich) == :rich,
-        is_nil(Map.get(definition, :link_of_id)),
-        is_nil(Map.get(definition, :group_of_id)),
+        KilnCMS.CMS.FieldDefinition.top_level?(definition),
         do: definition.name
   end
 

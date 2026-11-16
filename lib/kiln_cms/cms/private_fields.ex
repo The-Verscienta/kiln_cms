@@ -31,7 +31,8 @@ defmodule KilnCMS.CMS.PrivateFields do
   @ttl :timer.minutes(5)
 
   # The types whose stored value stays where it is put. See
-  # `Validations.PrivateField` for why the others cannot be private.
+  # `Validations.PrivateField` for why the others cannot be private — `:group`
+  # and `:flexible` hold nested values the masking never looks inside.
   @types [:string, :text, :integer, :float, :boolean, :date, :datetime, :url, :select, :user]
 
   @doc "The field types a private field may have."
@@ -114,7 +115,14 @@ defmodule KilnCMS.CMS.PrivateFields do
   # stored. Left out of this read, it would be served to everyone below editor.
   defp load(org_id) do
     KilnCMS.CMS.list_field_definitions!(
-      query: [filter: [private: true, link_of_id: [is_nil: true], group_of_id: [is_nil: true]]],
+      query: [
+        filter: [
+          private: true,
+          link_of_id: [is_nil: true],
+          group_of_id: [is_nil: true],
+          flex_of_id: [is_nil: true]
+        ]
+      ],
       actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
       authorize_with: :error,
       tenant: org_id,

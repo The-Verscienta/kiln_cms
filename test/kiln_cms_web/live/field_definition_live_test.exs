@@ -877,7 +877,9 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       admin = authed_user(:admin)
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
-      for type <- KilnCMS.CMS.FieldTypes.reserved() do
+      # `:flexible` is API-only until its item-types panel ships (#2282): the
+      # picker does not offer it, so it needs no description yet.
+      for type <- KilnCMS.CMS.FieldTypes.reserved() -- [:flexible] do
         html =
           lv
           |> element("#new-field-form")

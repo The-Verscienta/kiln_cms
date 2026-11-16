@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new nullable `field_definitions.flex_of_id` and `item_setting`, part of #2282). Nothing changes for existing fields; rolling back is safe.**
+  ([#2969](https://github.com/The-Verscienta/kiln_cms/pull/2969) · [long form](docs/changelog/unreleased.md#flexible-item-types-upgrade))
+
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
   ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
 

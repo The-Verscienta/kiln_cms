@@ -4,7 +4,8 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
   `required_when`; `KilnCMS.CMS.Conditions`, #2277) writable and readable:
 
     * each rule has a valid shape;
-    * a link field, a `:computed` field and a `:group` as a whole carry none;
+    * a link field, a `:computed` field, a `:group` and a `:flexible` field as a
+      whole carry none;
     * every field a rule names is a sibling in the same scope (the same
       content type or dynamic type, or the same group), not the field itself,
       not private (a private value must not steer what a viewer sees), and a
@@ -86,7 +87,7 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
       not is_nil(Ash.Changeset.get_attribute(changeset, :link_of_id)) ->
         error(:visible_when, gettext("is not available for a link field"))
 
-      type in [:computed, :group] ->
+      type in [:computed, :group, :flexible] ->
         error(:visible_when, gettext("is not available for a %{type} field", type: type))
 
       true ->
