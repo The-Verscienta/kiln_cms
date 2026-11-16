@@ -46,6 +46,16 @@ carries the reasoning.
 
 ## Added
 
+<a id="field-sync-screen"></a>
+
+- **An admin can import field definitions from the console: Custom fields → Sync definitions from a file uploads a `kiln-field-definitions` file, shows the dry-run diff and the refusals for changes that would drop stored values, and applies it after a confirmation.**
+  `--prune` and `--allow-data-loss` are two separate checkboxes, off for every
+  new file, each re-running the preview. The apply sends the digest of the plan
+  that was shown (`FieldSync.digest/1`, `import_doc(expect_digest:)`) and is
+  refused when the site's definitions no longer plan the same changes. A
+  successful apply is a `org_setting_changed` security event with the counts.
+  See [Import from the console](../field-sync.md#import-from-the-console).
+
 <a id="backup-destinations"></a>
 
 - **In-app backups can go to several destinations: the Backups page has a Destinations tab where a platform admin adds a directory on the server or a named rclone remote, tests it, and turns its retention on or off. A backup that reaches only some of them succeeds as "Partly off-site" and raises the backup alarm.**
