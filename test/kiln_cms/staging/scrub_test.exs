@@ -127,6 +127,19 @@ defmodule KilnCMS.Staging.ScrubTest do
       end
     end
 
+    # #2220: a clone must not hold production's destination credentials, nor
+    # back up to (and prune) production's off-site places.
+    test "deletes every backup destination and reports backup_destinations_purged" do
+      admin = KilnCMS.Test.BackupSchedules.platform_admin()
+      KilnCMS.Test.BackupDestinations.destination!(%{}, admin)
+      KilnCMS.Test.BackupDestinations.destination!(%{enabled: false}, admin)
+
+      summary = Scrub.run([])
+
+      assert summary.backup_destinations_purged == 2
+      assert Repo.aggregate(KilnCMS.Backups.DestinationConfig, :count) == 0
+    end
+
     test "purges the security audit log (raw IPs and email snapshots)" do
       KilnCMS.Security.record!(%{type: :sign_in, ip: "203.0.113.5"},
         actor: KilnCMS.Security.system(),

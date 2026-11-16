@@ -363,6 +363,48 @@ defmodule KilnCMS.Backups.ArtifactTest do
   end
 
   describe "destinations validation" do
+    defp create_with(destinations) do
+      Artifact
+      |> Ash.Changeset.for_create(:create, %{
+        kind: :db,
+        name: "a.dump",
+        destinations: destinations
+      })
+      |> Ash.create()
+    end
+
+    test "local is accepted" do
+      assert {:ok, _} = create_with(%{"local" => %{"status" => "ok"}})
+    end
+
+    test "an rclone remote is accepted" do
+      assert {:ok, _} = create_with(%{"rclone:r2:bucket" => %{"status" => "failed"}})
+    end
+
+    test "a stored destination's dest:<uuid> is accepted (#2220)" do
+      key = "dest:" <> Ash.UUID.generate()
+      assert {:ok, %{destinations: %{^key => _}}} = create_with(%{key => %{"status" => "ok"}})
+    end
+
+    test "dest: with anything but a canonical uuid is refused (#2220)" do
+      upper = "dest:" <> String.upcase(Ash.UUID.generate())
+
+      for key <- ["dest:not-a-uuid", "dest:", upper, "dest:" <> Ash.UUID.generate() <> "/x"] do
+        assert {:error, _} = create_with(%{key => %{"status" => "ok"}}), key
+      end
+    end
+
+    test "dest:<uuid> with an unknown status is refused" do
+      assert {:error, _} =
+               create_with(%{("dest:" <> Ash.UUID.generate()) => %{"status" => "meh"}})
+    end
+
+    test "an unknown prefix is refused" do
+      for key <- ["s3:bucket", "unreadable", "Local"] do
+        assert {:error, _} = create_with(%{key => %{"status" => "ok"}}), key
+      end
+    end
+
     test "rejects an unknown status or key" do
       for bad <- [%{"local" => %{"status" => "weird"}}, %{"s3" => %{"status" => "ok"}}] do
         assert {:error, _} =

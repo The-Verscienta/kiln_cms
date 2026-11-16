@@ -12,7 +12,7 @@ defmodule KilnCMSWeb.OverviewLive do
 
   require Ash.Query
 
-  import KilnCMSWeb.BackupComponents, only: [until: 1]
+  import KilnCMSWeb.BackupComponents, only: [offsite_headline: 1, until: 1]
 
   alias KilnCMS.Accounts.ApiKey
   alias KilnCMS.Branding
@@ -1136,10 +1136,13 @@ defmodule KilnCMSWeb.OverviewLive do
   # ago is not stale — it is recent and worthless — and gating on age let the
   # overview stay clean while `/editor/backups` said "The last backup failed".
   # Same trap as `BackupLive.alarming?/1`; it needed fixing in both places.
+  # A backup that reached only some of its off-site destinations is the alarm
+  # too (#2220), however fresh.
   defp backup_state(status) do
     cond do
       Enum.all?(status.components, fn {_component, cs} -> cs.never? end) -> :never
       status.stale? or status.failed? -> :alarm
+      offsite_headline(status.offsite) != nil -> :alarm
       true -> :ok
     end
   end
@@ -1167,11 +1170,18 @@ defmodule KilnCMSWeb.OverviewLive do
   end
 
   # One line per component that needs attention, naming it (#2219).
+  # Then the off-site line, when the last backup was partly off-site (#2220).
   defp backup_headline(status) do
-    for component <- status.expected,
-        cs = status.components[component],
-        cs.failed? or cs.stale?,
-        do: component_headline(backup_component(component), cs)
+    components =
+      for component <- status.expected,
+          cs = status.components[component],
+          cs.failed? or cs.stale?,
+          do: component_headline(backup_component(component), cs)
+
+    case offsite_headline(status.offsite) do
+      nil -> components
+      line -> components ++ [line]
+    end
   end
 
   defp backup_component(:db), do: gettext("database")

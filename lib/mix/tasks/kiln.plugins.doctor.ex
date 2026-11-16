@@ -20,6 +20,10 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       unique `name/0` — it is recorded on every image the backend holds — and
       the backend selected in `config :kiln_cms, :image_backend` is one an
       installed plugin declares;
+    * backup destinations (#2220) implement `Kiln.BackupDestination` with a
+      usable `kind/0` (lowercase letters, digits and `_`, at most 32
+      characters) — it is stored on every destination of that adapter — that
+      is neither one of Kiln's own (`local`, `rclone`) nor another module's;
     * human-verification providers (#2249) pass
       `Kiln.Challenge.Provider.conformance/1`, and their ids collide neither
       with a built-in (`turnstile`, `recaptcha`, which always win) nor with
@@ -84,6 +88,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   alias Kiln.Block.Info
   alias Kiln.Block.JsonSchema
   alias Kiln.Block.Sample
+  alias KilnCMS.Backups.Destination
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.JsonSchemaValidator
@@ -110,6 +115,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         queue_collisions(plugins) ++
         plug_route_problems(plugins) ++
         image_backend_problems(plugins, Application.get_env(:kiln_cms, :image_backend)) ++
+        backup_destination_problems(plugins) ++
         challenge_provider_problems(plugins, selected_challenge_provider()) ++
         security_check_problems(plugins) ++
         block_schema_problems(plugins, blocks_by_plugin) ++
@@ -601,6 +607,64 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       end)
 
     contract ++ names ++ collisions ++ selected_backend_problems(selected, backends)
+  end
+
+  # ── backup destinations (#2220) ─────────────────────────────────────────────
+  #
+  # `kind/0` is what every stored destination of the adapter carries, so like
+  # an image backend's name it has to be usable and unique. The registry
+  # keeps the first module of a kind and drops the rest without a word; this
+  # is where the operator hears about it.
+  @doc false
+  def backup_destination_problems(plugins) do
+    declared =
+      for plugin <- plugins,
+          Code.ensure_loaded?(plugin),
+          mod <- Kiln.Plugins.backup_destinations_of(plugin),
+          do: {plugin, mod}
+
+    {adapters, contract} =
+      Enum.split_with(declared, fn {_plugin, mod} -> Destination.adapter?(mod) end)
+
+    contract =
+      for {plugin, mod} <- contract do
+        "#{plugin.name()}: backup destination #{inspect(mod)} does not implement " <>
+          "Kiln.BackupDestination"
+      end
+
+    {kinded, unkinded} =
+      adapters
+      |> Enum.map(fn {plugin, mod} -> {plugin, mod, Destination.kind_of(mod)} end)
+      |> Enum.split_with(fn {_plugin, _mod, kind} -> match?({:ok, _}, kind) end)
+
+    kinds =
+      for {plugin, mod, :error} <- unkinded do
+        "#{plugin.name()}: backup destination #{inspect(mod)} needs a kind/0 of lowercase " <>
+          "letters, digits and _, at most 32 characters"
+      end
+
+    core = MapSet.new(["local", "rclone"])
+
+    taken =
+      for {plugin, mod, {:ok, kind}} <- kinded, kind in core do
+        "#{plugin.name()}: backup destination #{inspect(mod)} takes the kind " <>
+          "#{inspect(kind)} of one of Kiln's own destinations"
+      end
+
+    collisions =
+      kinded
+      |> Enum.reject(fn {_plugin, _mod, {:ok, kind}} -> kind in core end)
+      |> Enum.uniq_by(fn {_plugin, mod, _kind} -> mod end)
+      |> Enum.group_by(fn {_plugin, _mod, {:ok, kind}} -> kind end)
+      |> Enum.flat_map(fn
+        {_kind, [_one]} ->
+          []
+
+        {kind, _many} ->
+          ["backup destination kind #{inspect(kind)} is declared by more than one module"]
+      end)
+
+    contract ++ kinds ++ taken ++ collisions
   end
 
   defp selected_backend_problems(nil, _backends), do: []

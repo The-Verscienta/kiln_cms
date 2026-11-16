@@ -514,7 +514,7 @@ defmodule Kiln.Plugins.HealthTest do
       assert %Installed{source: :overlay} =
                Enum.find(installed, &(&1.plugin == KilnCMS.FixturePlugin))
 
-      assert %Installed{source: :path, app: :kiln_dep_fixture, sdk_requirement: "~> 1.4"} =
+      assert %Installed{source: :path, app: :kiln_dep_fixture, sdk_requirement: "~> 1.5"} =
                Enum.find(installed, &(&1.plugin == KilnDepFixture.Plugin))
 
       assert requests() == []

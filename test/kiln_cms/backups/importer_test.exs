@@ -143,8 +143,13 @@ defmodule KilnCMS.Backups.ImporterTest do
       )
 
       assert {:ok, %{imported: 1}} = Importer.run()
-      assert %{artifacts: [db]} = run!("20260801-031700")
+      assert %{artifacts: [db]} = run = run!("20260801-031700")
       assert %{"status" => "ok"} = db.destinations["rclone:r2:kiln"]
+
+      # #2220: a cron run has no Run-level destinations and no off-site
+      # outcome; History reads its artifacts' maps, as before.
+      assert run.destinations == []
+      assert run.offsite_status == nil
     end
 
     test "a failed manifest with no files becomes a failed run keyed by its start", %{dir: dir} do

@@ -87,6 +87,16 @@ defmodule Kiln.PluginsTest do
     assert fixture.challenge_providers == []
   end
 
+  test "manifests/0 lists a dependency plugin's backup destinations (#2220)" do
+    manifest = Enum.find(Kiln.Plugins.manifests(), &(&1.module == KilnDepFixture.Plugin))
+
+    assert manifest.backup_destinations == [KilnDepFixture.BackupDestination]
+    assert KilnDepFixture.BackupDestination in Kiln.Plugins.backup_destinations()
+
+    fixture = Enum.find(Kiln.Plugins.manifests(), &(&1.module == FixturePlugin))
+    assert fixture.backup_destinations == []
+  end
+
   describe "a plugin compiled against kiln_plugin before 1.4" do
     # No `plug_routes/0` at all: the behaviour is implemented by hand, as a
     # plugin built against the 1.3 package would be.
@@ -103,6 +113,11 @@ defmodule Kiln.PluginsTest do
       assert KilnCMS.Security.Posture.Registry.of_plugin(OldPlugin) == []
     end
 
+    test "contributes no backup destinations (#2220)" do
+      assert Kiln.Plugins.backup_destinations_of(OldPlugin) == []
+      assert Kiln.Plugins.backup_destinations_of(NotLoadedAnywhere) == []
+    end
+
     test "contributes no challenge providers (#2249)" do
       assert KilnCMS.Challenge.Registry.of_plugin(OldPlugin) == []
       assert KilnCMS.Challenge.Registry.of_plugin(NotLoadedAnywhere) == []
@@ -117,6 +132,7 @@ defmodule Kiln.PluginsTest do
       assert Kiln.Plugins.PlugRoute.of(DefaultsPlugin) == []
       assert DefaultsPlugin.challenge_providers() == []
       assert DefaultsPlugin.security_checks() == []
+      assert DefaultsPlugin.backup_destinations() == []
       assert KilnCMS.Challenge.Registry.of_plugin(DefaultsPlugin) == []
     end
   end
@@ -165,6 +181,11 @@ defmodule Kiln.PluginsTest do
       assert contributions(security_checks: [Captcha, Other]) == "2 security checks"
     end
 
+    test "the contribution summary counts backup destinations (#2220)" do
+      assert contributions(backup_destinations: [Captcha]) == "1 backup destination"
+      assert contributions(backup_destinations: [Captcha, Other]) == "2 backup destinations"
+    end
+
     test "the contribution summary counts advisories and spam checks" do
       # The other two kinds no in-tree plugin declares. `advisories` is also the
       # one irregular plural in the summary — the generic rule would render it
@@ -203,6 +224,7 @@ defmodule Kiln.PluginsTest do
           image_backends: [],
           challenge_providers: [],
           security_checks: [],
+          backup_destinations: [],
           nav_items: 0,
           admin_routes: 0,
           editor_routes: 0,
@@ -414,8 +436,8 @@ defmodule Kiln.PluginsTest do
     # #1909: the core overrides `kiln_plugin` so a plugin's Hex requirement
     # converges on the bundled copy, and Mix then checks no requirement on it.
     test "reads each dependency's kiln_plugin requirement from the resolved graph" do
-      # The real one: sdk/fixtures/dep_plugin/mix.exs declares "~> 1.4".
-      assert {:kiln_dep_fixture, "~> 1.4"} in Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirements(
+      # The real one: sdk/fixtures/dep_plugin/mix.exs declares "~> 1.5".
+      assert {:kiln_dep_fixture, "~> 1.5"} in Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirements(
                Mix.Tasks.Kiln.Plugins.Doctor.declared_deps()
              )
 
@@ -916,6 +938,85 @@ defmodule Kiln.PluginsTest do
                [KilnCMS.FixturePlugin],
                KilnCMS.FixturePlugin.ImageBackend
              ) == []
+    end
+
+    # #2220: `kind/0` is stored on every destination of the adapter, and the
+    # registry keeps the first module of a kind without a word.
+    test "flags backup destinations that break the contract, take a core kind, or share one" do
+      defmodule NotADestination do
+        def kind, do: "not_a_destination"
+      end
+
+      defmodule BadKindDestination do
+        use Kiln.BackupDestination
+        def kind, do: "Has Spaces"
+        def label, do: "x"
+        def fields, do: []
+        def validate(_config), do: :ok
+        def test(_config), do: :ok
+        def put(_config, _file, _opts), do: :ok
+        def list(_config), do: {:ok, []}
+        def get(_config, _ref, _to), do: :ok
+        def delete(_config, _ref), do: :ok
+        def describe(_config), do: "x"
+      end
+
+      defmodule LocalImpostor do
+        use Kiln.BackupDestination
+        def kind, do: "local"
+        def label, do: "x"
+        def fields, do: []
+        def validate(_config), do: :ok
+        def test(_config), do: :ok
+        def put(_config, _file, _opts), do: :ok
+        def list(_config), do: {:ok, []}
+        def get(_config, _ref, _to), do: :ok
+        def delete(_config, _ref), do: :ok
+        def describe(_config), do: "x"
+      end
+
+      defmodule TwinDestination do
+        use Kiln.BackupDestination
+        def kind, do: "dep_fixture_dir"
+        def label, do: "x"
+        def fields, do: []
+        def validate(_config), do: :ok
+        def test(_config), do: :ok
+        def put(_config, _file, _opts), do: :ok
+        def list(_config), do: {:ok, []}
+        def get(_config, _ref, _to), do: :ok
+        def delete(_config, _ref), do: :ok
+        def describe(_config), do: "x"
+      end
+
+      defmodule DestinationPlugin do
+        use Kiln.Plugin
+
+        def backup_destinations,
+          do: [NotADestination, BadKindDestination, LocalImpostor, TwinDestination]
+      end
+
+      problems =
+        Mix.Tasks.Kiln.Plugins.Doctor.backup_destination_problems([
+          KilnDepFixture.Plugin,
+          DestinationPlugin
+        ])
+
+      assert Enum.any?(
+               problems,
+               &(&1 =~ "NotADestination does not implement Kiln.BackupDestination")
+             )
+
+      assert Enum.any?(problems, &(&1 =~ "BadKindDestination needs a kind/0"))
+      assert Enum.any?(problems, &(&1 =~ ~s(LocalImpostor takes the kind "local")))
+
+      assert Enum.any?(
+               problems,
+               &(&1 =~ ~s(kind "dep_fixture_dir" is declared by more than one module))
+             )
+
+      assert Mix.Tasks.Kiln.Plugins.Doctor.backup_destination_problems([KilnDepFixture.Plugin]) ==
+               []
     end
 
     # #2249: the core turns verification off for a provider that fails the

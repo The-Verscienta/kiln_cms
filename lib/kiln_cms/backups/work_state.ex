@@ -32,6 +32,28 @@ defmodule KilnCMS.Backups.WorkState do
   `KilnCMS.Backups.Recorder.to_state/1`). A version-1 file, written by a release
   before the chain, still reads: a resume of it stamps the chain into it.
 
+  ## Destinations (#2220)
+
+  Two more keys, additive, so the version stays 2:
+
+    * `destinations` — the off-site destinations the start step settled
+      (`KilnCMS.Backups.Destination.active/0`'s entries: `key`, `id`, `kind`,
+      `source`, `label`), in the order the `offsite` step's parts send to
+      them. No secret and no remote string is ever here: the env remote
+      appears only as its redacted key and label, a stored destination only
+      by its id, and its secrets are decrypted just before each call.
+    * `sent` — what a stored destination was sent: `%{"<key>|<location
+      fingerprint>" => %{file_name => sha256}}`, written with each attempt.
+      Like a recorded hash, **a recorded send is the only license to skip a
+      copy**, and only while the file's sha256 is still the one recorded; a
+      rebuilt file is sent again. The env destination is never in it: it
+      copies every file on every attempt, as it always did.
+
+  `offsite` now holds the env remote's redacted label once that destination
+  was reached (a state an older release wrote may hold the remote itself).
+  A state without `destinations` is a chain an older release started: its
+  `offsite` step settles them then.
+
   `path/2` is the one place a path is built from a stamp, and it refuses anything
   that is not a real `YYYYMMDD-HHMMSS` instant, so a forged stamp cannot walk out
   of `.work`.

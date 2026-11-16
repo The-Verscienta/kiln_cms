@@ -967,6 +967,11 @@ msgstr "%{id} nombra varios paquetes; no se puede saber si afecta a Kiln."
 msgid "%{id}: its affected versions can't be read."
 msgstr "%{id}: no se pueden leer sus versiones afectadas."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{kind} (not installed)"
+msgstr "%{kind} (no instalado)"
+
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "%{label} (from %{ip})"
@@ -1142,6 +1147,16 @@ msgstr "%{name} ha tomado el control de “%{field}”. Tus cambios sin guardar 
 #, elixir-autogen, elixir-format
 msgid "%{name}: the package Hex publishes at %{version} differs from the one this release was built from."
 msgstr "%{name}: el paquete que Hex publica en la versión %{version} difiere del que se usó para compilar esta versión."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{name}: the test failed (on %{node}): %{error}"
+msgstr "%{name}: la prueba falló (en %{node}): %{error}"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{name}: the test passed (on %{node})."
+msgstr "%{name}: la prueba se superó (en %{node})."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -1831,6 +1846,11 @@ msgstr "Un rol personalizado agrupa un alcance granular: defina «Editor de blog
 #, elixir-autogen, elixir-format
 msgid "A date and a time of day. For when something opens, happened or expires."
 msgstr "Una fecha con su hora. Para cuándo algo abre, ocurrió o caduca."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "A directory on this server can be added once BACKUP_LOCAL_DESTINATION_ROOTS lists where it may write."
+msgstr "Se puede añadir un directorio de este servidor en cuanto BACKUP_LOCAL_DESTINATION_ROOTS indique dónde puede escribir."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -2784,6 +2804,16 @@ msgstr "Añadir un bloque aquí"
 #, elixir-autogen, elixir-format
 msgid "Add a condition"
 msgstr "Añadir una condición"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a destination"
+msgstr "Añadir un destino"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a destination: %{kind}"
+msgstr "Añadir un destino: %{kind}"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -4219,6 +4249,11 @@ msgid_plural "At most %{count} characters."
 msgstr[0] "Como máximo %{count} carácter."
 msgstr[1] "Como máximo %{count} caracteres."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "At most %{max} destinations can be enabled. Each backup goes to every enabled one, in this order; one that fails doesn't stop the others, and the backup then reads as partly off-site."
+msgstr "Se pueden activar como máximo %{max} destinos. Cada copia de seguridad va a todos los activados, en este orden; uno que falla no detiene a los demás, y la copia figura entonces como parcialmente fuera del servidor."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "At most %{max}."
@@ -4469,6 +4504,31 @@ msgstr "Copia de seguridad cancelada"
 #, elixir-autogen, elixir-format
 msgid "Backup canceled. Its files are kept, so it can be resumed."
 msgstr "Copia de seguridad cancelada. Sus archivos se conservan, así que puede reanudarse."
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup destination added"
+msgstr "Destino de copias de seguridad añadido"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup destination changed"
+msgstr "Destino de copias de seguridad modificado"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup destination deleted"
+msgstr "Destino de copias de seguridad eliminado"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup destination tested"
+msgstr "Destino de copias de seguridad probado"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup destinations"
+msgstr "Destinos de copias de seguridad"
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
@@ -4983,6 +5043,7 @@ msgstr "No se puede verificar"
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -5359,6 +5420,7 @@ msgstr "Comprobando las partes de medios"
 msgid "Checking this server's backup directory…"
 msgstr "Comprobando el directorio de copias de seguridad de este servidor…"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -6445,6 +6507,11 @@ msgstr "Copiar las copias de seguridad a otro lugar"
 msgid "Copying off-site"
 msgstr "Copiando fuera del sitio"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Copying off-site (%{index} of %{total}: %{name})"
+msgstr "Copiando fuera del sitio (%{index} de %{total}: %{name})"
+
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "Could not reach Hex or the security notices feed. Open System to check."
@@ -6555,6 +6622,11 @@ msgstr "No se pudo cambiar esa regla."
 #, elixir-autogen, elixir-format
 msgid "Couldn't change that setting."
 msgstr "No se pudo cambiar ese ajuste."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't change the backup destination."
+msgstr "No se pudo cambiar el destino de copias de seguridad."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
@@ -6717,6 +6789,11 @@ msgstr "No se pudo generar el texto. Inténtalo de nuevo."
 #, elixir-autogen, elixir-format
 msgid "Couldn't import that photo from Unsplash."
 msgstr "No se pudo importar esa foto de Unsplash."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't load the backup destinations."
+msgstr "No se pudieron cargar los destinos de copias de seguridad."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -7583,6 +7660,7 @@ msgstr "Campos definidos"
 msgid "Defined types"
 msgstr "Tipos definidos"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -7663,6 +7741,11 @@ msgstr "Eliminar embudo"
 msgid "Delete item"
 msgstr "Eliminar elemento"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete its old backups (retention)"
+msgstr "Eliminar sus copias antiguas (retención)"
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Delete menu"
@@ -7709,6 +7792,11 @@ msgstr "Eliminar seleccionados"
 #, elixir-autogen, elixir-format
 msgid "Delete submission"
 msgstr "Eliminar envío"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Delete the destination %{name}? Backups stop being sent to it; the files already there stay, and are no longer pruned."
+msgstr "¿Eliminar el destino %{name}? Las copias de seguridad dejan de enviarse a él; los archivos que ya están allí se quedan y ya no se depuran."
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -7970,6 +8058,37 @@ msgstr "Describe qué debe decir esta sección y vuelve a intentarlo."
 msgid "Description"
 msgstr "Descripción"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Destination added."
+msgstr "Destino añadido."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Destination deleted."
+msgstr "Destino eliminado."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Destination disabled."
+msgstr "Destino desactivado."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Destination enabled."
+msgstr "Destino activado."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Destination saved."
+msgstr "Destino guardado."
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Destinations"
+msgstr "Destinos"
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Detached items"
@@ -8057,6 +8176,7 @@ msgid "Directory"
 msgstr "Directorio"
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -8074,6 +8194,7 @@ msgstr "Desactivar la federación"
 msgid "Disable federation? Followers stop receiving posts; the identity is kept."
 msgstr "¿Desactivar la federación? Los seguidores dejan de recibir publicaciones; la identidad se conserva."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -8536,6 +8657,7 @@ msgstr "Cada valor se usa una sola vez."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -8582,6 +8704,11 @@ msgstr "Editar como"
 #, elixir-autogen, elixir-format
 msgid "Edit block %{n} on the page"
 msgstr "Editar el bloque %{n} en la página"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Edit destination: %{kind}"
+msgstr "Editar destino: %{kind}"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -8983,6 +9110,7 @@ msgid "Empty trash"
 msgstr "Vaciar papelera"
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -9000,6 +9128,7 @@ msgid "Enable two-factor authentication"
 msgstr "Activar la autenticación de doble factor"
 
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -9337,6 +9466,11 @@ msgstr "Cada 2 semanas el %{weekday} a las %{time} (%{zone}), desde el %{date}"
 #, elixir-autogen, elixir-format
 msgid "Every administrator and editor uses an authenticator app."
 msgstr "Todos los administradores y editores usan una aplicación de autenticación."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every backup is sent here first, by in-app backups and cron alike. The app never prunes it."
+msgstr "Cada copia de seguridad se envía aquí primero, tanto las de la aplicación como las de cron. La aplicación nunca lo depura."
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -10386,6 +10520,11 @@ msgstr "De %{min} a %{max}."
 #, elixir-autogen, elixir-format
 msgid "From (UTC)"
 msgstr "Desde (UTC)"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "From BACKUP_RCLONE_REMOTE — change it in the server's environment"
+msgstr "De BACKUP_RCLONE_REMOTE — cámbielo en el entorno del servidor"
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -12270,6 +12409,11 @@ msgstr "Último error"
 msgid "Last good: %{component}"
 msgstr "Última buena: %{component}"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last in-app backup off-site"
+msgstr "Última copia de la aplicación fuera del servidor"
+
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Last posted %{when}"
@@ -12314,6 +12458,16 @@ msgstr "Visto por última vez"
 #, elixir-autogen, elixir-format
 msgid "Last swept %{at}."
 msgstr "Último rastreo: %{at}."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last test failed %{at} on %{node}: %{error}"
+msgstr "La última prueba falló el %{at} en %{node}: %{error}"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last test passed %{at} on %{node}"
+msgstr "La última prueba se superó el %{at} en %{node}"
 
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #, elixir-autogen, elixir-format
@@ -12432,6 +12586,11 @@ msgstr "Déjalo en blanco para mantener la URL actual."
 #, elixir-autogen, elixir-format
 msgid "Leave blank to keep the current one."
 msgstr "Déjelo en blanco para conservar el actual."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Leave blank to keep the stored value."
+msgstr "Déjelo en blanco para conservar el valor guardado."
 
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #, elixir-autogen, elixir-format
@@ -13278,6 +13437,16 @@ msgstr "Bajar %{label}"
 msgid "Move %{label} up"
 msgstr "Subir %{label}"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move %{name} down"
+msgstr "Bajar %{name}"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Move %{name} up"
+msgstr "Subir %{name}"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -13489,6 +13658,7 @@ msgstr "Mis tareas"
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/billing_live.ex
 #: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -14330,6 +14500,11 @@ msgstr "Aún no hay menús"
 msgid "No minimum"
 msgstr "Sin mínimo"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "No off-site destination: backups stay on this server only. A copy somewhere else is what lets you recover when this server is lost."
+msgstr "Ningún destino fuera del servidor: las copias de seguridad se quedan solo en este servidor. Una copia en otro lugar es lo que permite recuperarse si se pierde este servidor."
+
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "No one with that email address is in this log."
@@ -14858,6 +15033,11 @@ msgstr "No se configura aquí"
 msgid "Not sure which surface to use? Start with the consumer guide:"
 msgstr "¿No sabe qué superficie usar? Empiece por la guía del consumidor:"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not tested yet"
+msgstr "Aún no probado"
+
 #: lib/kiln_cms_web/controllers/content_html/blog_index.html.heex
 #, elixir-autogen, elixir-format
 msgid "Not translated yet"
@@ -15219,6 +15399,11 @@ msgstr "Si está desactivado, una alerta muestra solo la red de la dirección: s
 msgid "Off-site"
 msgstr "Fuera del servidor"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Off-site unknown"
+msgstr "Fuera del servidor: desconocido"
+
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
 msgid "Off: people can sign in from any network."
@@ -15478,6 +15663,11 @@ msgstr "Solo se pueden importar archivos .xlf, .xliff y .xml."
 #, elixir-autogen, elixir-format
 msgid "Only a platform admin can cancel a backup."
 msgstr "Solo un administrador de la plataforma puede cancelar una copia de seguridad."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only a platform admin can change backup destinations."
+msgstr "Solo un administrador de la plataforma puede cambiar los destinos de copias de seguridad."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
@@ -16100,6 +16290,11 @@ msgstr "Elemento superior"
 #, elixir-autogen, elixir-format
 msgid "Part"
 msgstr "Parte"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Partly off-site"
+msgstr "Parcialmente fuera del servidor"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -16939,6 +17134,11 @@ msgstr "Identificador de precio del proveedor"
 #, elixir-autogen, elixir-format
 msgid "Provisioning URI"
 msgstr "URI de aprovisionamiento"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Prunes its old backups"
+msgstr "Depura sus copias antiguas"
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
@@ -18021,6 +18221,11 @@ msgstr "¿Quitar esta variante?"
 msgid "Removed"
 msgstr "Eliminado"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Removed destination"
+msgstr "Destino eliminado"
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Removed from the 404 list."
@@ -18398,6 +18603,11 @@ msgstr "Reanudar"
 #, elixir-autogen, elixir-format
 msgid "Retention"
 msgstr "Retención"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Retention here deletes only backups this installation sent to this destination, by the same rules as on this server, and only on destinations that can list and delete."
+msgstr "Aquí la retención solo elimina las copias que esta instalación envió a este destino, con las mismas reglas que en este servidor, y solo en destinos que pueden listar y eliminar."
 
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
@@ -18974,6 +19184,11 @@ msgstr "Guardar las audiencias"
 msgid "Save branding"
 msgstr "Guardar personalización de marca"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save destination"
+msgstr "Guardar destino"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save detail"
@@ -19161,6 +19376,7 @@ msgstr "Al guardar esto, el contenido de este sitio se envía a la URL de abajo.
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
@@ -21754,6 +21970,7 @@ msgid "Terms"
 msgstr "Términos"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Test"
 msgstr "Prueba"
@@ -21794,6 +22011,7 @@ msgstr "Probar el bucket guardado"
 msgid "Testing “%{title}”"
 msgstr "Probando «%{title}»"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Testing…"
@@ -22052,6 +22270,11 @@ msgstr "Ese día no está en este calendario: no se movió nada."
 #, elixir-autogen, elixir-format
 msgid "That delivery's endpoint was deleted, so it can't be redelivered."
 msgstr "El endpoint de esa entrega se eliminó, así que no se puede volver a entregar."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "That destination no longer exists."
+msgstr "Ese destino ya no existe."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -22795,6 +23018,11 @@ msgstr[1] "La última copia de seguridad (%{component}) fue hace %{count} horas.
 msgid "The last backup failed"
 msgstr "La última copia de seguridad falló"
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed"
+msgstr "La última copia de seguridad llegó a %{ok} de %{total} destinos fuera del servidor — fallaron: %{names}"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "The last save was at %{time}."
@@ -23221,6 +23449,11 @@ msgstr "El principio de un texto, cortado a una longitud."
 msgid "The target's blocks are inlined where this block sits. Editing the target updates every page that embeds it; an unpublished or restricted target renders nothing."
 msgstr "Los bloques del destino se insertan donde está este bloque. Editar el destino actualiza todas las páginas que lo incrustan; un destino no publicado o restringido no muestra nada."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The test didn't finish. Try again."
+msgstr "La prueba no terminó. Inténtelo de nuevo."
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "The test didn't send: %{reason}"
@@ -23547,6 +23780,11 @@ msgstr "Esto también se aplica a los miembros y lectores que inician sesión en
 #, elixir-autogen, elixir-format
 msgid "This backend can't check its connection."
 msgstr "Este servicio no puede comprobar su conexión."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This backup recorded no outcome for its off-site destinations."
+msgstr "Esta copia de seguridad no registró ningún resultado para sus destinos fuera del servidor."
 
 #: lib/kiln_cms_web/live/content_editor/block_ops.ex
 #, elixir-autogen, elixir-format
@@ -25983,6 +26221,11 @@ msgstr "Qué ocurre cuando una contraseña nueva aparece en una filtración cono
 msgid "What it adds"
 msgstr "Qué añade"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "What kind of destination?"
+msgstr "¿Qué tipo de destino?"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "What other servers show for this actor. Peers refetch it on their own schedule."
@@ -26122,6 +26365,11 @@ msgstr "Cuando publica o corrige algo, cada sitio web, aplicación y caché que 
 msgid "When you reject someone"
 msgstr "Al rechazar a alguien"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Where a destination writes can't be changed. To move it, add a new destination and delete this one."
+msgstr "No se puede cambiar dónde escribe un destino. Para moverlo, añada un destino nuevo y elimine este."
+
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "Where a security researcher reports a vulnerability in this site, published as /.well-known/security.txt (RFC 9116)."
@@ -26136,6 +26384,11 @@ msgstr "Dónde se guardan las copias"
 #, elixir-autogen, elixir-format
 msgid "Where each %{type} sits. Drag to reorder; indent to nest."
 msgstr "Dónde se sitúa cada %{type}. Arrastra para reordenar; sangra para anidar."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Where in-app backups are copied after they finish, one destination after another. Cron backups (scripts/backup.sh) copy only to BACKUP_RCLONE_REMOTE."
+msgstr "Adónde se copian las copias de seguridad de la aplicación al terminar, un destino tras otro. Las copias de cron (scripts/backup.sh) solo se copian a BACKUP_RCLONE_REMOTE."
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -29025,6 +29278,7 @@ msgstr "desde el %{date}"
 msgid "single-locale site"
 msgstr "sitio con un solo idioma"
 
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "skipped"
@@ -29149,6 +29403,11 @@ msgstr "el artefacto renderizado: cuerpo de bloques completo, precompilado y cac
 #, elixir-autogen, elixir-format
 msgid "the server operator"
 msgstr "quien gestiona el servidor"
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "the stored destinations (couldn't be read)"
+msgstr "los destinos guardados (no se pudieron leer)"
 
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format

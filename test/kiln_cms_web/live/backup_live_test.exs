@@ -1252,6 +1252,50 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
 
     @tag :pg_tools
+    test "the off-site step names destination k of n, only when there are several (#2220)", %{
+      dir: dir
+    } do
+      %{stamp: stamp} = started!()
+      row = lock_row()
+      {:ok, dir_id} = DirId.local(dir)
+
+      Backups.move_backup_lock!(
+        row,
+        %{step: :offsite, part: 2, step_job_id: row.step_job_id, dir_id: dir_id},
+        actor: Backups.system()
+      )
+
+      work = WorkState.path(dir, stamp)
+      {:ok, state} = WorkState.read(work)
+      env = %{"key" => "rclone:r2:kiln", "source" => "env", "label" => "r2:kiln"}
+      bucket = %{"key" => "dest:b", "source" => "db", "label" => "Bucket <B>"}
+      :ok = WorkState.write(work, Map.put(state, "destinations", [env, bucket]))
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Copying off-site (2 of 2: Bucket <B>)"
+             )
+
+      # One destination: the label it always had.
+      :ok = WorkState.write(work, Map.put(state, "destinations", [env]))
+
+      Backups.move_backup_lock!(
+        lock_row(),
+        %{step: :offsite, part: 1, step_job_id: row.step_job_id, dir_id: dir_id},
+        actor: Backups.system()
+      )
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert lv
+             |> element(~s|#backup-in-flight [data-role="step"]|)
+             |> render() =~ ~r/>\s*Copying off-site\s*</
+    end
+
+    @tag :pg_tools
     test "a backup that is finishing has no Cancel on the strip, and a forced cancel is refused" do
       %{run: run} = started!()
       Backups.mark_backup_lock_finishing!(lock_row(), %{}, actor: Backups.system())
@@ -2671,6 +2715,230 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       refute has_element?(lv, "#overview-backup-setup")
       refute has_element?(lv, "#overview-backup-warning")
+    end
+  end
+
+  # #2220: History names each destination the run recorded, says when a
+  # backup reached only some of them, and the alarm says so on both panels.
+  describe "off-site destinations (#2220)" do
+    @env_key "rclone:offsite:kiln"
+    @nas "dest:6c1f6a52-6a44-4d3e-9b39-0b1f8c1a7e11"
+    @bucket "dest:0b6d9f0e-2f43-4c1a-8f5e-3f6b6e0d9a22"
+    @gone "dest:9a1e2c3d-4b5f-4a6b-8c7d-0e1f2a3b4c5d"
+
+    # An in-app run finished `hours` ago: its artifact's per-destination
+    # results, and the Run-level entries with its `offsite_status`.
+    defp offsite_run!(artifact_destinations, run_destinations, offsite_status, hours \\ 1) do
+      at = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+      stamp = Backups.Artifact.stamp(at)
+
+      run =
+        Backups.start_run!(
+          %{stamp: stamp, trigger: "manual", components: [:db], started_at: at},
+          actor: Backups.system()
+        )
+
+      Backups.finish_run!(
+        run,
+        %{
+          artifacts: [
+            %{
+              kind: :db,
+              name: "kiln-db-#{stamp}.dump",
+              bytes: 2048,
+              verified: true,
+              destinations: artifact_destinations
+            }
+          ],
+          destinations: run_destinations,
+          offsite_status: offsite_status
+        },
+        actor: Backups.system()
+      )
+    end
+
+    defp partial_run! do
+      offsite_run!(
+        %{
+          "local" => %{"status" => "ok"},
+          @env_key => %{"status" => "ok"},
+          @nas => %{"status" => "ok"},
+          @bucket => %{"status" => "failed"}
+        },
+        [
+          %{key: @env_key, kind: "rclone", label: "offsite:kiln", status: :ok},
+          %{key: @nas, kind: "local", label: "NAS", status: :ok},
+          %{
+            key: @bucket,
+            kind: "rclone",
+            label: "Bucket",
+            status: :failed,
+            error: "rclone exited 1: bucket not found"
+          }
+        ],
+        :partial
+      )
+    end
+
+    test "History: a chip per destination by its recorded name, its status, and a partial badge",
+         %{conn: conn} do
+      run = partial_run!()
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, "#{row} [data-role=destination][data-status=ok]", "Local · ok")
+
+      assert has_element?(
+               lv,
+               "#{row} [data-role=destination][data-status=ok]",
+               "offsite:kiln · ok"
+             )
+
+      assert has_element?(lv, "#{row} [data-role=destination][data-status=ok]", "NAS · ok")
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role=destination][data-status=failed][title="rclone exited 1: bucket not found"]|,
+               "Bucket · failed"
+             )
+
+      assert has_element?(lv, "#{row} [data-role=offsite-partial]", "Partly off-site")
+      refute has_element?(lv, "#{row} [data-role=offsite-unknown]")
+      refute render(lv) =~ @nas
+    end
+
+    test "History: a destination the run has no record of is a removed one", %{conn: conn} do
+      run =
+        offsite_run!(
+          %{"local" => %{"status" => "ok"}, @gone => %{"status" => "ok"}},
+          [],
+          nil
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-run-#{run.id} [data-role=destination]",
+               "Removed destination · ok"
+             )
+
+      refute render(lv) =~ @gone
+    end
+
+    test "History: a destination that failed before any file still gets its chip", %{conn: conn} do
+      run =
+        offsite_run!(
+          %{"local" => %{"status" => "ok"}, @env_key => %{"status" => "ok"}},
+          [
+            %{key: @env_key, kind: "rclone", label: "offsite:kiln", status: :ok},
+            %{key: @nas, kind: "fake", label: "NAS", status: :failed, error: "not installed"}
+          ],
+          :partial
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role=destination][data-status=failed][title="not installed"]|,
+               "NAS · failed"
+             )
+    end
+
+    test "History: a succeeded run with destinations and no outcome reads unknown", %{
+      conn: conn
+    } do
+      run =
+        offsite_run!(
+          %{"local" => %{"status" => "ok"}, @env_key => %{"status" => "pending"}},
+          [%{key: @env_key, kind: "rclone", label: "offsite:kiln", status: :pending}],
+          nil,
+          2
+        )
+
+      complete =
+        offsite_run!(
+          %{"local" => %{"status" => "ok"}, @env_key => %{"status" => "ok"}},
+          [%{key: @env_key, kind: "rclone", label: "offsite:kiln", status: :ok}],
+          :complete
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-run-#{run.id} [data-role=offsite-unknown]",
+               "Off-site unknown"
+             )
+
+      refute has_element?(lv, "#backup-run-#{run.id} [data-role=offsite-partial]")
+      refute has_element?(lv, "#backup-run-#{complete.id} [data-role=offsite-unknown]")
+      refute has_element?(lv, "#backup-run-#{complete.id} [data-role=offsite-partial]")
+    end
+
+    test "the headline says how many destinations the last backup reached, in the alarm tone",
+         %{conn: conn} do
+      partial_run!()
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-offsite",
+               "The last backup reached 2 of 3 off-site destinations — Bucket failed"
+             )
+
+      assert has_element?(lv, "section.border-error\\/30 #backup-headline-offsite")
+
+      assert has_element?(
+               lv,
+               "#backup-offsite-destinations [data-role=offsite-destination][data-status=failed]",
+               "rclone exited 1: bucket not found"
+             )
+    end
+
+    test "a complete one is not an alarm, and says nothing of the kind", %{conn: conn} do
+      offsite_run!(
+        %{"local" => %{"status" => "ok"}, @env_key => %{"status" => "ok"}},
+        [%{key: @env_key, kind: "rclone", label: "offsite:kiln", status: :ok}],
+        :complete
+      )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "#backup-headline-offsite")
+      refute has_element?(lv, "section.border-error\\/30")
+      assert has_element?(lv, "#backup-offsite-destinations", "offsite:kiln")
+    end
+
+    test "the overview strip shows a platform admin the partial line", %{conn: conn} do
+      partial_run!()
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning [data-role=backup-headline]",
+               "The last backup reached 2 of 3 off-site destinations — Bucket failed"
+             )
+    end
+
+    test "and is hidden from an org admin who is not a platform admin", %{conn: conn} do
+      partial_run!()
+      user = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      {:ok, _lv, html} = conn |> log_in(user) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-backup-warning"
+      refute html =~ "off-site destinations"
     end
   end
 end

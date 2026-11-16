@@ -68,6 +68,117 @@ defmodule KilnCMS.Backups.RunTest do
     end
   end
 
+  describe "off-site destinations (#2220)" do
+    test "a new run has none, and round-trips them through the embedded array" do
+      run = start!()
+      assert run.destinations == []
+      assert run.offsite_status == nil
+
+      key = "dest:" <> Ash.UUID.generate()
+
+      run =
+        Backups.finish_run!(
+          run,
+          %{
+            destinations: [
+              %{key: "rclone:r2:b", kind: "rclone", status: :ok, files_ok: 2, files_total: 2},
+              %{key: key, kind: "local", label: "NAS", status: :failed, error: "disk full"}
+            ],
+            offsite_status: :partial
+          },
+          actor: Backups.system()
+        )
+
+      stored = Backups.get_run!(run.id, actor: Backups.system())
+      assert stored.offsite_status == :partial
+
+      assert [
+               %{key: "rclone:r2:b", status: :ok, files_ok: 2, files_total: 2, pruned: 0},
+               %{key: ^key, label: "NAS", status: :failed, error: "disk full"}
+             ] = stored.destinations
+    end
+
+    test "an unknown status is refused as input" do
+      assert {:error, %Ash.Error.Invalid{}} =
+               Backups.record_run_progress(start!(), %{offsite_status: :sideways},
+                 actor: Backups.system()
+               )
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Backups.record_run_progress(
+                 start!(),
+                 %{destinations: [%{key: "rclone:x", status: :teleported}]},
+                 actor: Backups.system()
+               )
+    end
+
+    test "a destination's error and label are redacted and capped" do
+      secret_url = "https://user:pa55w0rdz@example.com/bucket"
+
+      run =
+        Backups.record_run_progress!(
+          start!(),
+          %{
+            destinations: [
+              %{
+                key: "dest:" <> Ash.UUID.generate(),
+                label: "Box " <> secret_url <> String.duplicate("l", 400),
+                status: :failed,
+                error: "upload to #{secret_url} refused " <> String.duplicate("e", 900)
+              }
+            ]
+          },
+          actor: Backups.system()
+        )
+
+      [entry] = Backups.get_run!(run.id, actor: Backups.system()).destinations
+      refute entry.error =~ "pa55w0rdz"
+      refute entry.label =~ "pa55w0rdz"
+      assert entry.error =~ "example.com"
+      assert String.length(entry.error) <= 500
+      assert String.length(entry.label) <= 200
+    end
+
+    # A newer release may add values; this one must still read its rows.
+    test "an unknown offsite_status or destination status written out of band loads as unknown" do
+      import Ecto.Query
+
+      run = start!()
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          from(r in "backup_runs",
+            where: r.id == type(^run.id, :binary_id),
+            update: [
+              set: [
+                offsite_status: "sideways",
+                destinations:
+                  type(
+                    ^[
+                      %{"key" => "rclone:x", "status" => "teleported", "files_ok" => 0},
+                      %{"key" => "rclone:y", "status" => "ok", "files_ok" => 1}
+                    ],
+                    {:array, :map}
+                  )
+              ]
+            ]
+          ),
+          []
+        )
+
+      stored = Backups.get_run!(run.id, actor: Backups.system())
+      assert stored.offsite_status == %KilnCMS.Types.UnknownAtom{value: "sideways"}
+
+      assert [
+               %{key: "rclone:x", status: %KilnCMS.Types.UnknownAtom{value: "teleported"}},
+               %{key: "rclone:y", status: :ok}
+             ] = stored.destinations
+
+      assert [%{offsite_status: %KilnCMS.Types.UnknownAtom{}}] =
+               Backups.list_runs!(actor: Backups.system(), query: [filter: [id: run.id]])
+    end
+  end
+
   describe "a duplicate stamp" do
     test "start is refused by the unique identity" do
       run = start!()
@@ -156,6 +267,37 @@ defmodule KilnCMS.Backups.RunTest do
       assert resumed.stamp == run.stamp
       assert resumed.started_at == run.started_at
       assert %{step: "resume", level: :info} = List.last(resumed.log)
+    end
+
+    test "clears the off-site outcome, unless it is given (#2220)" do
+      run = start!()
+
+      run =
+        Backups.fail_run!(
+          run,
+          %{
+            error: "boom",
+            destinations: [%{key: "rclone:r", status: :failed, error: "nope"}],
+            offsite_status: :failed
+          },
+          actor: Backups.system()
+        )
+
+      resumed = Backups.resume_run!(run, %{}, actor: Backups.system())
+      assert resumed.destinations == []
+      assert resumed.offsite_status == nil
+
+      again = Backups.fail_run!(resumed, %{error: "boom"}, actor: Backups.system())
+
+      settled =
+        Backups.resume_run!(
+          again,
+          %{destinations: [%{key: "rclone:r", kind: "rclone"}]},
+          actor: Backups.system()
+        )
+
+      assert [%{key: "rclone:r", status: :pending}] = settled.destinations
+      assert settled.offsite_status == nil
     end
 
     test "re-opens a running run only when it has gone quiet" do

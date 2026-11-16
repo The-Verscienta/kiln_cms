@@ -117,4 +117,30 @@ backup_opts =
     media_dir -> Keyword.put(backup_opts, :media_dir, media_dir)
   end
 
+# Directories a Local backup destination may write under (#2220), comma
+# separated, each absolute. Unset (or blank) means Local destinations are not
+# offered. One unusable entry (relative, or with a `..`) drops the whole list
+# with a warning rather than keeping the rest: a typo must not change where a
+# database dump may be written.
+backup_opts =
+  case backup_env.("BACKUP_LOCAL_DESTINATION_ROOTS") do
+    nil ->
+      backup_opts
+
+    raw ->
+      case KilnCMS.Backups.Destination.Local.parse_roots(raw) do
+        {:ok, roots} ->
+          Keyword.put(backup_opts, :local_destination_roots, roots)
+
+        :error ->
+          Env.record_unusable(
+            "BACKUP_LOCAL_DESTINATION_ROOTS",
+            raw,
+            "comma-separated absolute directories, none containing .."
+          )
+
+          backup_opts
+      end
+  end
+
 config :kiln_cms, KilnCMS.Backups, backup_opts

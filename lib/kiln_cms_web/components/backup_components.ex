@@ -10,14 +10,15 @@ defmodule KilnCMSWeb.BackupComponents do
   `KilnCMSWeb.OverviewLive` all say these things, so they say them from here.
 
   The tabs are links to separate pages, each its own LiveView at
-  `/editor/backups/<tab>`, so the tabs #2231 adds later (Destinations,
-  Settings, Log) slot in as one more entry each.
+  `/editor/backups/<tab>`, so the tabs #2231 adds later (Settings, Log) slot
+  in as one more entry each, as Destinations (`KilnCMSWeb.BackupDestinationsLive`,
+  #2220) did.
   """
   use KilnCMSWeb, :html
 
   alias KilnCMS.Types.UnknownAtom
 
-  @tabs [:history, :schedule]
+  @tabs [:history, :schedule] ++ [:destinations]
 
   @doc "The tab keys, in the order they are shown."
   @spec tab_keys() :: [atom()]
@@ -48,6 +49,42 @@ defmodule KilnCMSWeb.BackupComponents do
 
   defp tab(:schedule),
     do: %{key: :schedule, path: ~p"/editor/backups/schedules", label: gettext("Schedule")}
+
+  defp tab(:destinations),
+    do: %{
+      key: :destinations,
+      path: ~p"/editor/backups/destinations",
+      label: gettext("Destinations")
+    }
+
+  @doc """
+  The alarm line for a backup that reached only some of its off-site
+  destinations (#2220): `Backups.status/0`'s `offsite` when its state is
+  `:partial`, else nil. The Backups page and the home strip both say it.
+  """
+  @spec offsite_headline(map() | nil) :: String.t() | nil
+  def offsite_headline(%{state: :partial, ok: ok, total: total, failed: failed}) do
+    gettext(
+      "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed",
+      ok: ok,
+      total: total,
+      names: Enum.map_join(failed, ", ", &run_destination_label(&1.key, &1.label))
+    )
+  end
+
+  def offsite_headline(_offsite), do: nil
+
+  @doc """
+  What a run's off-site destination is called: the label the run recorded,
+  or, for the entry a run records when the stored destinations couldn't be
+  read (`KilnCMS.Backups.RunDestination.unreadable_key/0`), a sentence.
+  """
+  @spec run_destination_label(String.t(), String.t() | nil) :: String.t()
+  def run_destination_label(key, label) do
+    if key == KilnCMS.Backups.RunDestination.unreadable_key(),
+      do: gettext("the stored destinations (couldn't be read)"),
+      else: label || key
+  end
 
   @doc "A component's name: Database, Media, or what a newer release stored."
   @spec component_label(atom() | UnknownAtom.t()) :: String.t()
