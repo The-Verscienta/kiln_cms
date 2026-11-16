@@ -60,6 +60,36 @@ msgstr "%{field} doit être au plus %{max}"
 msgid "%{field}: %{message}"
 msgstr "%{field} : %{message}"
 
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has the wrong type"
+msgstr "%{name} n'a pas le bon type"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is a secret and can't be a setting"
+msgstr "%{name} est un secret et ne peut pas être un réglage"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is not a secret of this kind"
+msgstr "%{name} n'est pas un secret de ce type"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is not a setting of this kind"
+msgstr "%{name} n'est pas un réglage de ce type"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is required"
+msgstr "%{name} est obligatoire"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} must be text"
+msgstr "%{name} doit être du texte"
+
 #: lib/kiln_cms/cms/validations/webhook_format_events.ex
 #, elixir-autogen, elixir-format
 msgid "Slack endpoints can only receive security events"
@@ -67,6 +97,11 @@ msgstr "les endpoints Slack ne peuvent recevoir que des événements de sécurit
 
 msgid "are still associated with this entry"
 msgstr "sont toujours associés à cette entrée"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "at most %{max} destinations can be enabled"
+msgstr "au plus %{max} destinations peuvent être activées"
 
 msgid "can't be blank"
 msgstr "ne peut pas être vide"
@@ -118,6 +153,11 @@ msgstr "les médias ne sont pas archivés sur ce déploiement"
 msgid "must be 1 to 63 lowercase letters, digits or hyphens, and cannot start or end with a hyphen"
 msgstr "doit comporter de 1 à 63 lettres minuscules, chiffres ou tirets, et ne peut pas commencer ni se terminer par un tiret"
 
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "must be a map of fields"
+msgstr "doit être un ensemble de champs"
+
 msgid "must be accepted"
 msgstr "doit être accepté"
 
@@ -140,6 +180,11 @@ msgstr "doit être inférieur à %{number}"
 
 msgid "must be less than or equal to %{number}"
 msgstr "doit être inférieur ou égal à %{number}"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "no installed backup destination has this kind (was its plugin removed?)"
+msgstr "aucune destination de sauvegarde installée n'est de ce type (son extension a-t-elle été supprimée ?)"
 
 #: lib/kiln_cms/backups/schedule/validations/interval_available.ex
 #, elixir-autogen, elixir-format
@@ -190,3 +235,23 @@ msgid "should have at most %{count} item(s)"
 msgid_plural "should have at most %{count} item(s)"
 msgstr[0] "doit avoir au plus %{count} élément"
 msgstr[1] "doit avoir au plus %{count} éléments"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "the other backup destinations couldn't be read; try again"
+msgstr "les autres destinations de sauvegarde n'ont pas pu être lues ; réessayez"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "the stored credentials can't be decrypted (was SECRET_KEY_BASE changed?); enter them again"
+msgstr "les identifiants enregistrés ne peuvent pas être déchiffrés (SECRET_KEY_BASE a-t-il changé ?) ; saisissez-les à nouveau"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "this is, contains or is inside another destination; choose a place of its own"
+msgstr "cet emplacement est, contient ou se trouve dans une autre destination ; choisissez un emplacement qui lui est propre"
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "where a destination writes can't be changed; add a new destination instead"
+msgstr "l'emplacement où écrit une destination ne peut pas être modifié ; ajoutez plutôt une nouvelle destination"

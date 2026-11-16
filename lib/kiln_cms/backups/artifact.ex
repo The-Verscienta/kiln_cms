@@ -6,8 +6,11 @@ defmodule KilnCMS.Backups.Artifact do
   `name` is the **filename only** (`kiln-db-20260805-031700.dump`); the local
   path is derived from `KilnCMS.Backups.dir/0` and the kind's subdirectory, so
   a Run stays true when the backup directory moves. `destinations` is keyed by
-  `"local"` or `"rclone:<redacted remote>"`, each value a map with a `"status"`
-  of `pending | ok | failed | pruned` and optional `"at"`, `"error"`, `"ref"`.
+  `"local"`, `"rclone:<redacted remote>"` (`BACKUP_RCLONE_REMOTE`) or
+  `"dest:<uuid>"` (a stored `KilnCMS.Backups.DestinationConfig`, #2220), each
+  value a map with a `"status"` of `pending | ok | failed | pruned` and
+  optional `"at"`, `"error"`, `"ref"`. How each destination fared as a whole
+  is on the Run (`KilnCMS.Backups.RunDestination`).
 
   `parts` is `[]` for a single file. A media set written in several parts
   (#2218) is ONE artifact: `name` is the logical `kiln-media-<stamp>` (never

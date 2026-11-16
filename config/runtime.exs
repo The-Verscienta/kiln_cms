@@ -211,3 +211,14 @@ if config_env() == :test do
     hostname: System.get_env("POSTGRES_HOST", "localhost"),
     database: "kiln_cms_test#{System.get_env("MIX_TEST_PARTITION")}"
 end
+
+# Local backup destinations in development (#2220): the same variable and the
+# same parser as `config/runtime/prod/backups.exs`, so a developer can try a
+# Local destination without a release. Down here for the reason the block
+# above is: it shifts no anchor. An unusable value leaves Local off.
+if config_env() == :dev do
+  with raw when is_binary(raw) <- System.get_env("BACKUP_LOCAL_DESTINATION_ROOTS"),
+       {:ok, roots} <- KilnCMS.Backups.Destination.Local.parse_roots(raw) do
+    config :kiln_cms, KilnCMS.Backups, local_destination_roots: roots
+  end
+end

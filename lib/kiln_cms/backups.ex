@@ -65,6 +65,8 @@ defmodule KilnCMS.Backups do
 
   alias KilnCMS.Backups.{
     Chain,
+    Destination,
+    DestinationConfig,
     Heartbeat,
     Lock,
     Manifest,
@@ -137,6 +139,20 @@ defmodule KilnCMS.Backups do
       define :note_backup_schedule_deferred, action: :note_deferred
     end
 
+    resource KilnCMS.Backups.DestinationConfig do
+      # A platform admin lists and manages destinations (#2220); the step
+      # chain reads the enabled ones as `system/0`, and `test_destination/2`
+      # records a Test's result as `system/0` after reading the row as the
+      # admin.
+      define :list_backup_destinations, action: :read
+      define :get_backup_destination, action: :read, get_by: [:id], not_found_error?: false
+      define :create_backup_destination, action: :create
+      define :update_backup_destination, action: :update
+      define :destroy_backup_destination, action: :destroy
+      define :list_enabled_backup_destinations, action: :enabled
+      define :record_backup_destination_test, action: :record_test_result
+    end
+
     resource KilnCMS.Backups.NodeBeat do
       # The heartbeat's, as `system/0`.
       define :beat_node, action: :beat
@@ -183,6 +199,67 @@ defmodule KilnCMS.Backups do
       if previous == :unset,
         do: Process.delete(@actor_override),
         else: Process.put(@actor_override, previous)
+    end
+  end
+
+  # A Test waits this long for the destination at most.
+  @destination_test_timeout :timer.seconds(30)
+
+  @doc """
+  Tests the stored destination `id` (#2220), behind the Destinations tab's
+  **Test** button: the adapter's `test/1` (write a probe file, read it back,
+  remove it), then the outcome recorded on the row.
+
+    1. The row is read as `opts[:actor]` with `authorize_with: :error`, so
+       anyone but a platform admin is refused before any file or network I/O.
+    2. `test/1` runs through `KilnCMS.Backups.Destination.call/4`, bounded to
+       30 seconds (`opts[:timeout]` overrides it), its error scrubbed of the
+       destination's secrets. Nothing here opens a transaction: call it
+       outside one, so a slow destination holds no database connection.
+    3. The outcome (ok or the error, and the node it ran on) is recorded as
+       `system/0` through `:record_test_result`, audited as
+       `backup_destination_tested` with the admin as its actor.
+
+  Credentials no key decrypts, or an uninstalled adapter, are a failed Test
+  with that reason, recorded like any other.
+
+  Returns `{:ok, destination}` with `last_test_ok`, `last_test_error`,
+  `last_test_node` and `last_tested_at` set; `{:error, :not_found}` for no
+  such row; `{:error, %Ash.Error.Forbidden{}}` for an actor who may not read
+  it; or the record write's error.
+  """
+  @spec test_destination(String.t(), keyword()) ::
+          {:ok, KilnCMS.Backups.DestinationConfig.t()} | {:error, term()}
+  def test_destination(id, opts) do
+    actor = Keyword.fetch!(opts, :actor)
+    timeout = Keyword.get(opts, :timeout, @destination_test_timeout)
+
+    with {:ok, %DestinationConfig{} = destination} <-
+           found(get_backup_destination(id, actor: actor, authorize_with: :error)) do
+      result = run_destination_test(destination, timeout)
+
+      record_backup_destination_test(destination, result,
+        actor: system(),
+        context: %{tested_by: actor}
+      )
+    end
+  end
+
+  defp found({:ok, nil}), do: {:error, :not_found}
+  defp found(other), do: other
+
+  defp run_destination_test(destination, timeout) do
+    node = to_string(node())
+
+    outcome =
+      with {:ok, config} <- DestinationConfig.to_config(destination) do
+        Destination.call(config, :test, [], timeout: timeout)
+      end
+
+    case outcome do
+      :ok -> %{ok: true, error: nil, node: node}
+      {:ok, _value} -> %{ok: true, error: nil, node: node}
+      {:error, reason} -> %{ok: false, error: Destination.format_reason(reason), node: node}
     end
   end
 
@@ -432,7 +509,24 @@ defmodule KilnCMS.Backups do
           rclone_missing?: boolean(),
           scheduler_enabled?: boolean(),
           schedules: :none | :unreadable | [schedule_entry()],
-          next_at: DateTime.t() | nil
+          next_at: DateTime.t() | nil,
+          offsite: offsite_status()
+        }
+
+  @typedoc """
+  How the newest finished in-app backup that had off-site destinations fared
+  there (#2220), as `status/0`'s `offsite` says it. See `status/0`.
+  """
+  @type offsite_status :: %{
+          state: :none | :complete | :partial | :failed | :unknown,
+          stamp: String.t() | nil,
+          at: DateTime.t() | nil,
+          ok: non_neg_integer(),
+          total: non_neg_integer(),
+          failed: [%{key: String.t(), label: String.t(), error: String.t() | nil}],
+          destinations: [
+            %{key: String.t(), label: String.t(), status: term(), error: String.t() | nil}
+          ]
         }
 
   @doc """
@@ -579,6 +673,28 @@ defmodule KilnCMS.Backups do
   eight days as well, the lower of that and `BACKUP_STALE_AFTER_HOURS` (the
   environment's winning is `{:cron, "BACKUP_STALE_AFTER_HOURS"}`).
   Otherwise it is `BACKUP_STALE_AFTER_HOURS` (`{:env, ...}`).
+
+  ## Off-site destinations (#2220)
+
+  `offsite` says how the newest finished in-app run that had off-site
+  destinations fared there: the newest app run with any `destinations` that
+  succeeded, or that failed with its `offsite_status` settled (a run that
+  failed before its off-site step says nothing about the destinations, and
+  doesn't hide the outcome before it). Its `state`:
+
+    * `:none` — no such run, or every destination of it was skipped;
+    * `:complete` — every destination was reached;
+    * `:partial` — some were, some weren't: the backup succeeded, partly
+      off-site, and the panels raise the backup alarm for it;
+    * `:failed` — none was (the run itself failed);
+    * `:unknown` — the run succeeded but recorded no outcome (a node of an
+      older release finished it), recorded one this release doesn't know, or
+      the history couldn't be read.
+
+  `stamp` and `at` are that run's; `ok` and `total` count the destinations
+  reached and tried (skipped ones left out); `destinations` lists each with
+  its redacted `label`, `status` and `error`, and `failed` those that failed.
+  Read as `system/0`; a read that fails is `:unknown`, never a crash.
   """
   @spec status() :: status()
   def status do
@@ -613,9 +729,84 @@ defmodule KilnCMS.Backups do
       rclone_missing?: rclone_missing?(),
       scheduler_enabled?: scheduler?,
       schedules: schedule_entries(schedules, firing?, now),
-      next_at: components |> Enum.map(fn {_c, cs} -> cs.next_at end) |> earliest()
+      next_at: components |> Enum.map(fn {_c, cs} -> cs.next_at end) |> earliest(),
+      offsite: status_offsite()
     }
   end
+
+  @offsite_none %{
+    state: :none,
+    stamp: nil,
+    at: nil,
+    ok: 0,
+    total: 0,
+    failed: [],
+    destinations: []
+  }
+
+  # The off-site outcome of the newest finished in-app run that had
+  # destinations (see `status/0`). A read that fails is `:unknown`: the same
+  # telemetry and occasional warning as the rest of the history.
+  defp status_offsite do
+    query =
+      Run
+      |> Ash.Query.filter(
+        origin == :app and fragment("cardinality(?) > 0", destinations) and
+          (status == :succeeded or (status == :failed and not is_nil(offsite_status)))
+      )
+      |> Ash.Query.sort(started_at: :desc, id: :desc)
+      |> Ash.Query.limit(1)
+      |> Ash.Query.select([
+        :stamp,
+        :status,
+        :started_at,
+        :finished_at,
+        :destinations,
+        :offsite_status
+      ])
+
+    case list_runs(query: query, actor: system(), authorize_with: :error) do
+      {:ok, [run]} ->
+        offsite_of(run)
+
+      {:ok, []} ->
+        @offsite_none
+
+      {:error, error} ->
+        history_unreadable(error)
+        %{@offsite_none | state: :unknown}
+    end
+  end
+
+  defp offsite_of(run) do
+    counted = Enum.reject(run.destinations, &(&1.status == :skipped))
+
+    destinations =
+      for d <- counted do
+        %{key: d.key, label: d.label || d.key, status: d.status, error: d.error}
+      end
+
+    %{
+      state: offsite_state(run.offsite_status, counted),
+      stamp: run.stamp,
+      at: run.finished_at || run.started_at,
+      ok: Enum.count(counted, &(&1.status == :ok)),
+      total: length(counted),
+      failed:
+        for(d <- destinations, d.status == :failed, do: Map.take(d, [:key, :label, :error])),
+      destinations: destinations
+    }
+  end
+
+  # A run whose destinations were all skipped is `:none` whatever it stored.
+  defp offsite_state(_stored, []), do: :none
+
+  defp offsite_state(stored, _counted) when stored in [:none, :complete, :partial, :failed],
+    do: stored
+
+  # Nil (finished by an older node, or with every destination still
+  # pending) or an outcome a newer release wrote.
+  defp offsite_state(_stored, _counted), do: :unknown
 
   # Every schedule, read as `system/0`; `:unreadable` (logged now and then)
   # when that fails, so the thresholds fall back to the environment's.
@@ -1192,6 +1383,10 @@ defmodule KilnCMS.Backups do
   What the backup lock holds right now, or `nil` when no backup runs: the chain,
   its stamp, trigger, step and part, `parts_total` (the archive step's part
   count, when this node has the chain's backup directory; else nil),
+  `destinations_total` and `destination_label` (#2220; during the `offsite`
+  step, how many destinations the backup sends to and the redacted label of
+  the one `part` names, when this node has the chain's backup directory;
+  else nil),
   `components` (#2219; what the backup covers, from its `state.json` when this
   node has the chain's backup directory; else nil), phase (`:running`, or
   `:finishing` once Cancel is refused), when it took the lock, and the queued

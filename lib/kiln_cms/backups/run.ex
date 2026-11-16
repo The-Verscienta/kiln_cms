@@ -26,8 +26,10 @@ defmodule KilnCMS.Backups.Run do
   identity: the importer upserts on it and a run it did not make is never
   modified.
 
-  Artifacts and log entries are embedded (`KilnCMS.Backups.Artifact`,
-  `KilnCMS.Backups.LogEntry`); see `KilnCMS.Backups.Log` for the log bound.
+  Artifacts, log entries and the per-destination outcomes are embedded
+  (`KilnCMS.Backups.Artifact`, `KilnCMS.Backups.LogEntry`,
+  `KilnCMS.Backups.RunDestination`); see `KilnCMS.Backups.Log` for the log
+  bound.
 
   `dir_id` (#2539) names the backup directory the run's files are in, so a
   resume's start runs on a node that has them (`KilnCMS.Backups.StepWorker`).
@@ -44,6 +46,8 @@ defmodule KilnCMS.Backups.Run do
   # cannot cast it (accepted, see the upgrade note).
   @statuses [:running, :succeeded, :failed, :skipped, :canceled]
   @statuses_sql Enum.map_join(@statuses, ", ", &"'#{&1}'")
+
+  @offsite_statuses [:none, :complete, :partial, :failed]
 
   postgres do
     table "backup_runs"
@@ -96,7 +100,9 @@ defmodule KilnCMS.Backups.Run do
         :started_at,
         :oban_job_id,
         :chain_id,
-        :dir_id
+        :dir_id,
+        :destinations,
+        :offsite_status
       ]
 
       change set_attribute(:origin, :app)
@@ -130,7 +136,7 @@ defmodule KilnCMS.Backups.Run do
     # `canceled`, a newer outcome, or a resume's progress. `dir_id` (#2539):
     # a fresh start retried on another node records that node's directory.
     update :record_progress do
-      accept [:components, :artifacts, :log, :dir_id]
+      accept [:components, :artifacts, :log, :dir_id, :destinations, :offsite_status]
       require_atomic? false
       change filter(expr(status == :running))
       change OwnChain
@@ -138,7 +144,7 @@ defmodule KilnCMS.Backups.Run do
     end
 
     update :finish do
-      accept [:components, :artifacts, :log]
+      accept [:components, :artifacts, :log, :destinations, :offsite_status]
       require_atomic? false
       change filter(expr(status == :running))
       change OwnChain
@@ -148,7 +154,7 @@ defmodule KilnCMS.Backups.Run do
     end
 
     update :fail do
-      accept [:components, :artifacts, :log, :error]
+      accept [:components, :artifacts, :log, :error, :destinations, :offsite_status]
       require_atomic? false
       change filter(expr(status == :running))
       change OwnChain
@@ -163,14 +169,18 @@ defmodule KilnCMS.Backups.Run do
     # a stale `running` one, and re-checks the same in the UPDATE's WHERE, so
     # two callers holding one stale struct can't both flip it (#2421). The
     # stamp and `started_at` stay the original attempt's. `dir_id` (#2539) is
-    # rebound to the directory the resume read `state.json` from.
+    # rebound to the directory the resume read `state.json` from. The
+    # off-site outcome (#2220) is cleared too, unless the caller settles new
+    # destinations with it: the resume's start sends to them again.
     update :resume do
-      accept [:chain_id, :dir_id]
+      accept [:chain_id, :dir_id, :destinations, :offsite_status]
       require_atomic? false
       change Resume
       change set_attribute(:status, :running)
       change set_attribute(:finished_at, nil)
       change set_attribute(:error, nil)
+      change set_new_attribute(:destinations, [])
+      change set_new_attribute(:offsite_status, nil)
       change Normalize
     end
 
@@ -366,6 +376,23 @@ defmodule KilnCMS.Backups.Run do
       public? true
     end
 
+    # How each off-site destination fared (#2220), and what that adds up to:
+    # `:none` (no destination), `:complete`, `:partial` (some reached, the run
+    # still succeeded) or `:failed`. `KilnCMS.Backups.Recorder.offsite_outcome/1`
+    # derives the second from the first. `[]` and nil on imported runs and on
+    # runs from before #2220. `KnownAtom`, so a value a newer release adds
+    # doesn't break this one's history page.
+    attribute :destinations, {:array, KilnCMS.Backups.RunDestination} do
+      allow_nil? false
+      default []
+      public? true
+    end
+
+    attribute :offsite_status, KilnCMS.Types.KnownAtom do
+      constraints one_of: @offsite_statuses
+      public? true
+    end
+
     attribute :oban_job_id, :integer, public?: true
 
     # The step chain (#2218) writing this run; a resume or retry under a new
@@ -386,4 +413,7 @@ defmodule KilnCMS.Backups.Run do
 
   @doc "Every valid status."
   def statuses, do: @statuses
+
+  @doc "Every valid `offsite_status` (#2220)."
+  def offsite_statuses, do: @offsite_statuses
 end

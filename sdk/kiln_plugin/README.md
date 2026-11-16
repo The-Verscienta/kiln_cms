@@ -12,6 +12,7 @@ the behaviours and macros a plugin `use`s.
 | `Kiln.ImageBackend` (`check/0` since 1.2) | An external image service new uploads can go to |
 | `Kiln.Challenge.Provider`, since 1.4 | A human-verification widget and its check, which the operator can pick instead of Turnstile or reCAPTCHA |
 | `Kiln.Security.Check` (+ `Result`, `Context`), since 1.4 | A line on the console's Security posture page: is a security setting on, and what fixes it |
+| `Kiln.BackupDestination` (+ `Config`), since 1.5 | Somewhere in-app backups copy their files to, which a platform admin adds on the Backups page |
 | `Kiln.Advisory` (+ `Finding`, `Context`, `Body`), since 1.1 | An editorial check shown in the content editor's advice panels |
 | `Kiln.SafeFetch`, since 1.3 | Fetch a URL from content or settings without an SSRF hole: the address is checked and pinned, redirects re-checked, the body capped |
 
@@ -86,6 +87,7 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Image backends (`image_backends/0`) | Yes. The connection check, `check/0`, from 1.2 (`{:kiln_plugin, "~> 1.2"}`) |
 | Human-verification providers (`challenge_providers/0`, `Kiln.Challenge.Provider`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). The provider verifies through the `:post` function the core hands it, so it needs no HTTP client of its own |
 | Security posture checks (`security_checks/0`, `Kiln.Security.Check`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). Each runs in its own process under a deadline; a check that crashes or overruns shows as "could not run", never as a pass. Its summary and details are shown as written (translate them with `Context.locale`), and its facts must never carry a secret |
+| Backup destinations (`backup_destinations/0`, `Kiln.BackupDestination`) | Yes, from 1.5 (`{:kiln_plugin, "~> 1.5"}`). An adapter runs in the calling process or in processes linked to it, so a cancel or a deadline stops it; a secret must never be an argument or state of a process it spawns, since crash reports log both |
 | Nav items, supervision children, Oban queues | Yes |
 | Admin, editor and public routes | Only for a LiveView that depends on `phoenix_live_view` directly; one that does `use KilnCMSWeb, :live_view` or renders `Layouts.app` needs the core, so it stays an overlay |
 | Plug routes (`plug_routes/0`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). A route is `{verb, path, plug_module, plug_opts}` or `{:forward, path, plug, opts}`, so the dependency needs `plug` and nothing else |

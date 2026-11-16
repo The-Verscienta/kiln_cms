@@ -25,9 +25,17 @@ defmodule KilnCMS.Backups.Recorder do
   writes a Run whose `chain_id` is its own chain's, and the UPDATE enforces it
   (`KilnCMS.Backups.Run.Changes.OwnChain`, #2538): a step that outlived its
   Cancel can't write over a resume of the same run.
+
+  ## Off-site destinations (#2220)
+
+  `destinations` is the Run-level summary, one entry per off-site destination
+  (`KilnCMS.Backups.RunDestination`), upserted by key with
+  `put_run_destination/3`. Like `artifacts`, every Run write re-sends it whole
+  and it travels in `state.json`. `finish/1` and `fail/2` record the
+  `offsite_status` that `offsite_outcome/1` derives from it.
   """
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Redact}
+  alias KilnCMS.Backups.{Artifact, Redact, RunDestination}
 
   require Logger
 
@@ -37,12 +45,47 @@ defmodule KilnCMS.Backups.Recorder do
           dir_id: String.t() | nil,
           components: [:db | :media],
           artifacts: [map()],
-          log: [map()]
+          log: [map()],
+          destinations: [run_destination()]
         }
+
+  @typedoc "A Run-level destination entry, as `KilnCMS.Backups.RunDestination` takes it."
+  @type run_destination :: %{
+          required(:key) => String.t(),
+          optional(:kind) => String.t() | nil,
+          optional(:label) => String.t() | nil,
+          optional(:status) => :pending | :ok | :failed | :skipped,
+          optional(:error) => String.t() | nil,
+          optional(:at) => DateTime.t() | nil,
+          optional(:files_ok) => non_neg_integer(),
+          optional(:files_total) => non_neg_integer(),
+          optional(:pruned) => non_neg_integer()
+        }
+
+  @type offsite_outcome :: :none | :complete | :partial | :failed | :unknown
 
   @artifact_fields [:kind, :name, :bytes, :sha256, :verified, :parts, :encrypted?, :destinations]
 
-  defstruct run: nil, chain_id: nil, dir_id: nil, components: [], artifacts: [], log: []
+  @destination_fields [
+    :key,
+    :kind,
+    :label,
+    :status,
+    :error,
+    :at,
+    :files_ok,
+    :files_total,
+    :pruned
+  ]
+  @destination_statuses RunDestination.statuses()
+
+  defstruct run: nil,
+            chain_id: nil,
+            dir_id: nil,
+            components: [],
+            artifacts: [],
+            log: [],
+            destinations: []
 
   @doc """
   Open the run for an attempt. On a stamp collision or any write error the
@@ -52,7 +95,8 @@ defmodule KilnCMS.Backups.Recorder do
   step retried) is taken up again instead of colliding with itself. `extra`
   may carry `scheduled_components` and `schedule_ids` (#2219), and `dir_id`,
   the directory the run's files go to (#2539), which `progress/1` records
-  again, so a start retried on another node rebinds it.
+  again, so a start retried on another node rebinds it, and `destinations`,
+  the Run-level off-site entries the start settled (#2220).
   """
   @spec open(
           String.t(),
@@ -65,6 +109,8 @@ defmodule KilnCMS.Backups.Recorder do
         ) ::
           t()
   def open(stamp, trigger, started_at, components, job_id, chain_id \\ nil, extra \\ %{}) do
+    destinations = Enum.map(Map.get(extra, :destinations, []), &destination_entry/1)
+
     attrs =
       Map.merge(Map.take(extra, [:scheduled_components, :schedule_ids, :dir_id]), %{
         stamp: stamp,
@@ -72,10 +118,16 @@ defmodule KilnCMS.Backups.Recorder do
         components: components,
         started_at: started_at,
         oban_job_id: job_id,
-        chain_id: chain_id
+        chain_id: chain_id,
+        destinations: destinations
       })
 
-    rec = %__MODULE__{components: components, chain_id: chain_id, dir_id: extra[:dir_id]}
+    rec = %__MODULE__{
+      components: components,
+      chain_id: chain_id,
+      dir_id: extra[:dir_id],
+      destinations: destinations
+    }
 
     case own_run(stamp, chain_id) do
       %{} = run -> %{rec | run: run}
@@ -122,10 +174,23 @@ defmodule KilnCMS.Backups.Recorder do
           chain_id: chain_id,
           components: run.components,
           artifacts: Enum.map(run.artifacts, &Map.take(&1, @artifact_fields)),
-          log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message]))
+          log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message])),
+          destinations: Enum.map(run.destinations, &stored_destination/1)
         }
     end
   end
+
+  # A loaded entry back into the accumulator's shape. A status this release
+  # doesn't know (`UnknownAtom`) is written back as `pending`: input refuses
+  # the struct, and nothing here may claim the destination was reached.
+  defp stored_destination(%RunDestination{} = entry) do
+    entry
+    |> Map.take(@destination_fields)
+    |> Map.update!(:status, &known_status/1)
+  end
+
+  defp known_status(status) when status in @destination_statuses, do: status
+  defp known_status(_unknown), do: :pending
 
   defp own_run(_stamp, nil), do: nil
 
@@ -150,6 +215,12 @@ defmodule KilnCMS.Backups.Recorder do
             "step" => entry.step,
             "message" => entry.message
           }
+        end),
+      "destinations" =>
+        Enum.map(rec.destinations, fn entry ->
+          for {key, value} <- entry, into: %{} do
+            {Atom.to_string(key), if(key == :status, do: Atom.to_string(value), else: value)}
+          end
         end)
     }
   end
@@ -166,7 +237,14 @@ defmodule KilnCMS.Backups.Recorder do
           do: String.to_existing_atom(c)
         ),
       artifacts: for(a <- List.wrap(saved["artifacts"]), is_map(a), do: decode_artifact(a)),
-      log: for(e <- List.wrap(saved["log"]), is_map(e), do: decode_entry(e))
+      log: for(e <- List.wrap(saved["log"]), is_map(e), do: decode_entry(e)),
+      destinations:
+        for(
+          d <- List.wrap(saved["destinations"]),
+          is_map(d),
+          is_binary(d["key"]),
+          do: decode_destination(d)
+        )
     }
   end
 
@@ -181,25 +259,47 @@ defmodule KilnCMS.Backups.Recorder do
     end
   end
 
-  defp decode_entry(entry) do
-    at =
-      case entry["at"] do
-        %DateTime{} = at ->
-          at
+  @destination_keys Enum.map(@destination_fields, &Atom.to_string/1)
+  @destination_status_names Enum.map(@destination_statuses, &Atom.to_string/1)
 
-        text when is_binary(text) ->
-          case DateTime.from_iso8601(text) do
-            {:ok, at, _} -> at
-            _ -> DateTime.utc_now()
-          end
+  # Only the known fields; a status this release doesn't know reads as
+  # `pending`, never as reached.
+  defp decode_destination(map) do
+    for {key, value} <- map, key in @destination_keys, into: %{} do
+      case key do
+        "status" ->
+          {:status,
+           if(value in @destination_status_names,
+             do: String.to_existing_atom(value),
+             else: :pending
+           )}
 
-        _ ->
-          DateTime.utc_now()
+        "at" ->
+          {:at, decode_time(value, nil)}
+
+        key ->
+          {String.to_existing_atom(key), value}
       end
+    end
+  end
+
+  defp decode_entry(entry) do
+    at = decode_time(entry["at"], DateTime.utc_now())
 
     level = if entry["level"] in @levels, do: String.to_existing_atom(entry["level"]), else: :info
     %{at: at, level: level, step: to_string(entry["step"]), message: to_string(entry["message"])}
   end
+
+  defp decode_time(%DateTime{} = at, _default), do: at
+
+  defp decode_time(text, default) when is_binary(text) do
+    case DateTime.from_iso8601(text) do
+      {:ok, at, _} -> at
+      _ -> default
+    end
+  end
+
+  defp decode_time(_other, default), do: default
 
   @doc """
   Re-open the run for `stamp` as `running` (#2218), through its `:resume` action:
@@ -209,6 +309,9 @@ defmodule KilnCMS.Backups.Recorder do
 
   `dir_id` is the directory the resume read `state.json` from (#2539): the
   run is rebound to it, which also back-fills a run from before #2539.
+
+  The run's off-site outcome is cleared with it (#2220): the resume's start
+  settles the destinations again.
 
   Unlike every other call here this one reports `{:error, reason}`: the caller
   must refuse the resume when the run can't be re-opened (it is no longer
@@ -254,7 +357,8 @@ defmodule KilnCMS.Backups.Recorder do
       dir_id: run.dir_id,
       components: run.components,
       artifacts: [],
-      log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message]))
+      log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message])),
+      destinations: []
     }
   end
 
@@ -377,6 +481,87 @@ defmodule KilnCMS.Backups.Recorder do
   end
 
   @doc """
+  Upsert the Run-level entry for the off-site destination `key` (#2220):
+  `attrs` (any of `kind`, `label`, `status`, `error`, `at`, `files_ok`,
+  `files_total`, `pruned`) are merged into the entry with that key, or a new
+  entry is appended (status `pending` unless given). A status given without
+  `at` is stamped now. `error` and `label` are redacted and capped here, and
+  again when written.
+  """
+  @spec put_run_destination(t(), String.t(), map() | keyword()) :: t()
+  def put_run_destination(%__MODULE__{} = rec, key, attrs) when is_binary(key) do
+    attrs = attrs |> Map.new() |> Map.take(@destination_fields -- [:key])
+
+    attrs =
+      if Map.has_key?(attrs, :status) and not Map.has_key?(attrs, :at),
+        do: Map.put(attrs, :at, DateTime.utc_now()),
+        else: attrs
+
+    destinations =
+      if Enum.any?(rec.destinations, &(&1.key == key)),
+        do: Enum.map(rec.destinations, &merge_destination(&1, key, attrs)),
+        else: rec.destinations ++ [destination_entry(Map.put(attrs, :key, key))]
+
+    %{rec | destinations: destinations}
+  end
+
+  defp merge_destination(%{key: key} = entry, key, attrs),
+    do: destination_entry(Map.merge(entry, attrs))
+
+  defp merge_destination(entry, _key, _attrs), do: entry
+
+  # An entry in the accumulator's shape: the known fields, the defaults the
+  # embedded resource would give, and `error`/`label` scrubbed.
+  defp destination_entry(%{} = attrs) do
+    %{key: to_string(attrs[:key]), status: :pending, files_ok: 0, files_total: 0, pruned: 0}
+    |> Map.merge(Map.take(attrs, @destination_fields -- [:key]))
+    |> scrub(:error, 500)
+    |> scrub(:label, 200)
+  end
+
+  defp scrub(entry, field, max) do
+    case Map.get(entry, field) do
+      text when is_binary(text) -> Map.put(entry, field, Redact.text(text, [], max))
+      _none -> entry
+    end
+  end
+
+  @doc """
+  What a run's off-site destinations add up to (#2220), from its Run-level
+  entries (maps or `KilnCMS.Backups.RunDestination`s):
+
+    * `:none` - no destination (entries marked `skipped` don't count);
+    * `:complete` - every destination is `ok`;
+    * `:failed` - no destination is `ok` and every one that could be read
+      `failed`;
+    * `:unknown` - every destination is still `pending`: nothing was
+      settled. A running backup's off-site step hasn't reached them yet; a
+      finished run like that was closed by a release from before #2220,
+      whose off-site step and finish don't record destinations (critic
+      change 12), so it must not read as "still sending". Never written as
+      a Run's `offsite_status`: `finish/1` and `fail/2` leave it nil;
+    * `:partial` - anything else: some `ok` and some not, a destination still
+      `pending` (or in a status this release doesn't know) beside a settled
+      one, or the `RunDestination.unreadable_key/0` entry, which never counts
+      as complete: the destinations it stands for may not have been sent to.
+  """
+  @spec offsite_outcome([run_destination() | RunDestination.t()]) :: offsite_outcome()
+  def offsite_outcome(destinations) when is_list(destinations) do
+    unreadable = RunDestination.unreadable_key()
+    counted = Enum.reject(destinations, &(&1.status == :skipped))
+    {fenced, real} = Enum.split_with(counted, &(&1.key == unreadable))
+    statuses = Enum.map(real, & &1.status)
+
+    cond do
+      counted == [] -> :none
+      fenced == [] and Enum.all?(statuses, &(&1 == :pending)) -> :unknown
+      fenced == [] and Enum.all?(statuses, &(&1 == :ok)) -> :complete
+      real != [] and Enum.all?(statuses, &(&1 == :failed)) -> :failed
+      true -> :partial
+    end
+  end
+
+  @doc """
   Mark the artifact holding the file called `name` as not verified (#2218): a
   file whose off-site copy was refused because it changed on disk after the
   backup verified it. `name` is a single-file artifact's name or one part of a
@@ -405,28 +590,57 @@ defmodule KilnCMS.Backups.Recorder do
   def progress(%__MODULE__{} = rec),
     do: write(rec, "progress", &Backups.record_run_progress/3, %{dir_id: rec.dir_id})
 
-  @doc "Close the run as succeeded."
+  @doc """
+  Close the run as succeeded, with the `offsite_status` its destinations add
+  up to (`offsite_outcome/1`; nil while it is `:unknown`).
+  """
   @spec finish(t()) :: t()
   def finish(%__MODULE__{run: nil} = rec), do: rec
-  def finish(%__MODULE__{} = rec), do: write(rec, "finish", &Backups.finish_run/3)
 
-  @doc "Close the run as failed. `error` is redacted and capped when written."
+  def finish(%__MODULE__{} = rec) do
+    offsite =
+      case offsite_outcome(rec.destinations) do
+        :unknown -> nil
+        settled -> settled
+      end
+
+    write(rec, "finish", &Backups.finish_run/3, %{offsite_status: offsite})
+  end
+
+  @doc """
+  Close the run as failed. `error` is redacted and capped when written.
+
+  `offsite_status` is recorded only when it is settled: `:failed` when every
+  destination failed, `:none` when there is none. A run that failed before
+  its destinations were all tried leaves it nil: there is nothing to say
+  about an off-site copy that never ran to the end.
+  """
   @spec fail(t(), String.t()) :: t()
   def fail(%__MODULE__{run: nil} = rec, _error), do: rec
 
-  def fail(%__MODULE__{} = rec, error),
-    do: write(rec, "fail", &Backups.fail_run/3, %{error: error})
+  def fail(%__MODULE__{} = rec, error) do
+    offsite =
+      case offsite_outcome(rec.destinations) do
+        settled when settled in [:failed, :none] -> settled
+        _unsettled -> nil
+      end
+
+    write(rec, "fail", &Backups.fail_run/3, %{error: error, offsite_status: offsite})
+  end
 
   @doc """
-  Mark `local` as `pruned` on the artifacts of OTHER runs whose files the
-  retention sweep just deleted (`names` are file names). Best-effort per run.
+  Mark `key` as `pruned` on the artifacts of OTHER runs whose files a
+  retention pass just deleted there (`names` are file names): `"local"` for
+  this host's backup directory (the default), or a destination's key for
+  retention on that destination (#2220). Best-effort per run, through the
+  run's `:mark_pruned` action.
 
   A media set's parts are one artifact: each deleted part is marked, and the
   artifact itself once none of its files is left to mark. Names that are not
   artifacts (a checksum sidecar) are ignored.
   """
-  @spec mark_pruned([String.t()]) :: :ok
-  def mark_pruned(names) do
+  @spec mark_pruned([String.t()], String.t()) :: :ok
+  def mark_pruned(names, key \\ "local") when is_binary(key) do
     at = now()
 
     names
@@ -434,15 +648,15 @@ defmodule KilnCMS.Backups.Recorder do
       with {:ok, %{stamp: stamp}} <- Artifact.parse_file(name), do: stamp
     end)
     |> Enum.each(fn
-      {stamp, stamp_names} when is_binary(stamp) -> mark_run_pruned(stamp, stamp_names, at)
+      {stamp, stamp_names} when is_binary(stamp) -> mark_run_pruned(stamp, stamp_names, key, at)
       _unparsed -> :ok
     end)
   end
 
-  defp mark_run_pruned(stamp, names, at) do
+  defp mark_run_pruned(stamp, names, key, at) do
     safely("prune", fn ->
       with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
-        artifacts = Enum.map(run.artifacts, &prune_artifact(&1, names, at))
+        artifacts = Enum.map(run.artifacts, &prune_artifact(&1, names, key, at))
         Backups.mark_run_pruned(run, %{artifacts: artifacts}, actor: Backups.system())
       end
     end)
@@ -450,41 +664,49 @@ defmodule KilnCMS.Backups.Recorder do
     :ok
   end
 
-  defp prune_artifact(artifact, names, at) do
+  defp prune_artifact(artifact, names, key, at) do
     attrs = Map.take(artifact, @artifact_fields)
     pruned = %{"status" => "pruned", "at" => at}
 
     case attrs.parts do
       [] ->
-        if artifact.name in names, do: put_local(attrs, pruned), else: attrs
+        if artifact.name in names, do: put_pruned(attrs, key, pruned), else: attrs
 
       parts ->
-        prune_parts(attrs, parts, names, pruned)
+        prune_parts(attrs, parts, names, key, pruned)
     end
   end
 
-  defp prune_parts(attrs, parts, names, pruned) do
+  defp prune_parts(attrs, parts, names, key, pruned) do
     parts =
       Enum.map(parts, fn part ->
-        if part["name"] in names, do: put_local_part(part, pruned), else: part
+        if part["name"] in names, do: put_part_pruned(part, key, pruned), else: part
       end)
 
     attrs = %{attrs | parts: parts}
-    if Enum.all?(parts, &local_pruned?/1), do: put_local(attrs, pruned), else: attrs
+    if Enum.all?(parts, &part_pruned?(&1, key)), do: put_pruned(attrs, key, pruned), else: attrs
   end
 
-  defp put_local(attrs, pruned),
-    do: %{attrs | destinations: Map.put(attrs.destinations, "local", pruned)}
+  defp put_pruned(attrs, key, pruned),
+    do: %{attrs | destinations: Map.put(attrs.destinations, key, pruned)}
 
-  defp put_local_part(part, pruned) do
-    Map.update(part, "destinations", %{"local" => pruned}, &Map.put(&1, "local", pruned))
+  defp put_part_pruned(part, key, pruned) do
+    Map.update(part, "destinations", %{key => pruned}, &Map.put(&1, key, pruned))
   end
 
-  defp local_pruned?(part), do: get_in(part, ["destinations", "local", "status"]) == "pruned"
+  defp part_pruned?(part, key), do: get_in(part, ["destinations", key, "status"]) == "pruned"
 
   defp write(rec, label, fun, extra \\ %{}) do
     params =
-      Map.merge(%{components: rec.components, artifacts: rec.artifacts, log: rec.log}, extra)
+      Map.merge(
+        %{
+          components: rec.components,
+          artifacts: rec.artifacts,
+          log: rec.log,
+          destinations: rec.destinations
+        },
+        extra
+      )
 
     case safely(label, fn -> fun.(rec.run, params, actor: Backups.system()) end) do
       {:ok, run} -> %{rec | run: run}

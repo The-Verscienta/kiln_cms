@@ -962,6 +962,8 @@ defmodule KilnCMS.Backups.Chain do
   def in_flight do
     case Backups.backup_lock(actor: Backups.system()) do
       {:ok, %{chain_id: chain} = row} when is_binary(chain) ->
+        {destinations_total, destination_label} = destination_progress(row)
+
         %{
           chain: chain,
           stamp: row.stamp || row.resume_stamp,
@@ -969,6 +971,8 @@ defmodule KilnCMS.Backups.Chain do
           step: row.step,
           part: row.part,
           parts_total: parts_total(row),
+          destinations_total: destinations_total,
+          destination_label: destination_label,
           components: holder_components(row),
           phase: row.phase,
           acquired_at: row.acquired_at,
@@ -1002,6 +1006,25 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   defp parts_total(_row), do: nil
+
+  # Which destination the `offsite` step sends to (#2220): `{n, label}`, the
+  # number of destinations the start froze in `state.json` and the redacted
+  # label of the one `part` names, readable only on a node that has the
+  # chain's backup directory. `{nil, nil}` elsewhere, and for the no-op
+  # `offsite` of a backup without destinations.
+  defp destination_progress(%{step: :offsite, part: part, stamp: stamp, dir_id: dir_id})
+       when is_integer(part) and is_binary(stamp) do
+    with {:ok, ^dir_id} <- DirId.current(),
+         {:ok, %{"destinations" => list}} when is_list(list) <-
+           WorkState.read(Backups.work_dir(stamp)),
+         %{"label" => label} when is_binary(label) <- Enum.at(list, part - 1) do
+      {length(list), label}
+    else
+      _ -> {nil, nil}
+    end
+  end
+
+  defp destination_progress(_row), do: {nil, nil}
 
   # The holder's components, from its `state.json` (their only record; see the
   # moduledoc): readable only on a node that has the chain's backup directory,

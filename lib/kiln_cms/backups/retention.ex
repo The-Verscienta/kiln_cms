@@ -137,9 +137,55 @@ defmodule KilnCMS.Backups.Retention do
   killed outright, once every file of the stamp is 12 hours old (#2478). Here
   a `.partial` is only ever a reason to keep; the start step's sweep removes
   one, once its stamp has a run row.
+
+  ## On an off-site destination (#2220, ADR 0064)
+
+  `run_on_destination/3` prunes one stored destination, right after a backup
+  finished sending to it (`KilnCMS.Backups.Steps`), when the destination's
+  `prune` is on and its adapter `supports/0` both `:list` and `:delete`. The
+  env destination (`BACKUP_RCLONE_REMOTE`) is never pruned: only a key of the
+  form `"dest:<id>"` is accepted.
+
+    0. **Location.** Before anything is listed, where the destination writes
+       is checked again (`Destination.location/1`), since its row was saved
+       before the environment or the other rows were what they are now.
+       Nothing is pruned on a destination that is, contains or is inside
+       `BACKUP_RCLONE_REMOTE`, or another stored destination; nor on one
+       whose location can't be told (a plugin's kind) while
+       `BACKUP_RCLONE_REMOTE` is set, since nothing can show the two apart.
+    1. **Inventory.** The destination's `list/1`, through
+       `KilnCMS.Backups.Destination.call/4`, grouped into units as `scan/1`
+       groups the local disk (`destination_inventory/4`). Only whole backup
+       files in their own `db/` or `media/` count; anything else it lists is
+       ignored. A unit's age is the later of its newest remote mtime and its
+       stamp's own instant, so a copy whose mtime the store reset, or doesn't
+       report, is never older than the backup itself.
+    2. **Local pins.** The `.keep` markers and the `.work/` directories of
+       this host's backup directory are merged in, so a recovery point pins
+       the remote copy too, and a backup in flight is never touched. The
+       `.good`, `.hold` and `.keep` markers stay local: nothing here uploads,
+       lists or reads a marker on the destination.
+    3. **The keep rules**, exactly as above (`plan/4`), over the
+       destination's own units: its newest verified and newest complete unit
+       of each kind are never deleted.
+    4. **Ownership.** Of what the rules would delete, only a unit whose Run
+       records this installation sending it to THIS destination key (an
+       artifact of that kind, or one of its parts, with the key's status `ok`,
+       or `pruned` by an earlier pass that stopped part-way) is deleted
+       (`destination_plan/4`). Anything else, such as another installation's
+       backup in a shared bucket, is left and reported.
+    5. **Delete.** Each unit is re-checked (`recheck/2`), then deleted one
+       file at a time, data before the sidecar. The first delete that fails
+       or runs past its bound stops the pass. The files deleted are marked
+       `pruned` under that key on their runs (`Recorder.mark_pruned/2`).
+
+  It fails closed: a policy that can't be resolved, a local backup directory
+  that can't be listed, a destination listing that fails, or a Run read that
+  fails deletes nothing and returns `{:error, reason}`.
   """
+  alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Importer, Recorder, WorkState}
+  alias KilnCMS.Backups.{Artifact, Destination, Importer, Recorder, WorkState}
   alias KilnCMS.Backups.Retention.Policy
 
   require Logger
@@ -165,11 +211,16 @@ defmodule KilnCMS.Backups.Retention do
           partials: [integer()]
         }
 
+  @typedoc """
+  What `scan/1` found on this host's disk, or `destination_inventory/4` on a
+  destination, which also carries the destination's `key`.
+  """
   @type inventory :: %{
-          units: %{{String.t(), :db | :media} => unit()},
-          markers: MapSet.t(String.t()),
-          work: MapSet.t(String.t()),
-          strays: [%{name: String.t(), sub: String.t(), mtime: integer()}]
+          required(:units) => %{{String.t(), :db | :media} => unit()},
+          required(:markers) => MapSet.t(String.t()),
+          required(:work) => MapSet.t(String.t()),
+          required(:strays) => [%{name: String.t(), sub: String.t(), mtime: integer()}],
+          optional(:key) => String.t()
         }
 
   @type entry :: %{
@@ -307,6 +358,24 @@ defmodule KilnCMS.Backups.Retention do
     do: "couldn't list #{sub}/ in the backup directory (#{inspect(reason)})"
 
   def describe({:lstat, name, reason}), do: "couldn't read #{name} (#{inspect(reason)})"
+
+  def describe({:list, reason}),
+    do: "couldn't list the destination (#{Destination.format_reason(reason)})"
+
+  def describe({:read_destination, reason}),
+    do: "couldn't read the destination's settings (#{inspect(reason)})"
+
+  def describe({:delete, name, reason}),
+    do: "couldn't delete #{name} (#{Destination.format_reason(reason)})"
+
+  def describe(:env_overlap), do: "it overlaps BACKUP_RCLONE_REMOTE"
+
+  def describe(:env_overlap_unknown),
+    do: "can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE"
+
+  def describe(:destination_overlap), do: "it overlaps another backup destination"
+  def describe(:not_prunable), do: "this destination is never pruned by Kiln"
+  def describe(:unsupported), do: "its adapter can't list and delete files"
   def describe({:crashed, module}), do: "it crashed (#{inspect(module)})"
   def describe(reason), do: inspect(reason)
 
@@ -1134,6 +1203,288 @@ defmodule KilnCMS.Backups.Retention do
     if expired?(stray.mtime, policy.keep_days, now),
       do: {:delete, Map.put(entry, :reason, {:expired, :stray, policy.keep_days})},
       else: {:keep, Map.put(entry, :reason, :keep_days)}
+  end
+
+  ## Destinations (#2220)
+
+  @doc """
+  Prune the stored destination `config`, after a backup sent to it (see "On
+  an off-site destination"). `dir` is this host's backup directory, for its
+  `.keep` markers and `.work/` directories.
+
+  Returns `{:ok, %{deleted: names, units: count, unowned: entries, stopped:
+  nil | reason}}`: the file names deleted (already marked `pruned` on their
+  runs), how many units they came from, the units the keep rules would have
+  deleted but this installation has no record of sending there (left
+  alone), and why the deleting broke off, if it did. `{:error, reason}`
+  when it could not start, with nothing deleted. The env destination
+  (any key but `"dest:<id>"`) is `{:error, :not_prunable}`, and an adapter
+  that can't list and delete is `{:error, :unsupported}`.
+
+  Options:
+
+    * `:policy` and `:now` - as for `run/2`;
+    * `:timeout` or `:deadline` - the bound on each `list` and `delete`
+      call, passed to `KilnCMS.Backups.Destination.call/4` (its own default
+      when both are absent). A backup step passes its `:deadline`.
+  """
+  @spec run_on_destination(Path.t(), Config.t(), keyword()) ::
+          {:ok,
+           %{
+             deleted: [String.t()],
+             units: non_neg_integer(),
+             unowned: [entry()],
+             stopped: term() | nil
+           }}
+          | {:error, term()}
+  def run_on_destination(dir, config, opts \\ [])
+
+  def run_on_destination(dir, %Config{key: "dest:" <> _} = config, opts) do
+    if Destination.supports?(config, [:list, :delete]) do
+      with :ok <- clear_to_prune(config),
+           {:ok, plan} <- prepare_destination(dir, config, opts),
+           do: execute_destination(dir, config, plan, opts)
+    else
+      {:error, :unsupported}
+    end
+  end
+
+  def run_on_destination(_dir, %Config{}, _opts), do: {:error, :not_prunable}
+
+  # Step 0 above. The overlap was refused when the row was created, but
+  # `BACKUP_RCLONE_REMOTE` can have changed since, and a plugin's location
+  # was never known: retention must not reach files another destination,
+  # above all the env remote Kiln never prunes, was sent.
+  defp clear_to_prune(config) do
+    location = Destination.location(config)
+
+    with :ok <- clear_of_env(location, Destination.env_location()),
+         do: clear_of_others(location, config)
+  end
+
+  defp clear_of_env(_location, nil), do: :ok
+  defp clear_of_env(:unknown, _env), do: {:error, :env_overlap_unknown}
+
+  defp clear_of_env(location, env) do
+    if Destination.overlap?(location, env), do: {:error, :env_overlap}, else: :ok
+  end
+
+  defp clear_of_others(:unknown, _config), do: :ok
+
+  # Every row, disabled ones too: a disabled destination's files are still
+  # there. Settings are enough for `Destination.location/1`.
+  defp clear_of_others(location, %Config{id: id}) do
+    case Backups.list_backup_destinations(actor: Backups.system(), authorize_with: :error) do
+      {:ok, rows} ->
+        overlapping? =
+          Enum.any?(rows, fn row ->
+            row.id != id and
+              Destination.overlap?(
+                location,
+                Destination.location(%Config{kind: row.kind, settings: row.settings})
+              )
+          end)
+
+        if overlapping?, do: {:error, :destination_overlap}, else: :ok
+
+      {:error, error} ->
+        {:error, {:read_destination, error.__struct__}}
+    end
+  end
+
+  defp prepare_destination(dir, config, opts) do
+    now = Keyword.get_lazy(opts, :now, fn -> System.os_time(:second) end)
+
+    with {:ok, policy} <- policy(opts),
+         {:ok, local} <- scan(dir),
+         {:ok, listing} <- list_destination(config, opts),
+         inventory = destination_inventory(config.key, listing, local, now),
+         {:ok, runs} <- read_runs(stamps(inventory)) do
+      {:ok, destination_plan(inventory, runs, policy, now)}
+    end
+  rescue
+    error -> {:error, {:crashed, error.__struct__}}
+  end
+
+  defp list_destination(config, opts) do
+    case Destination.call(config, :list, [], Keyword.take(opts, [:timeout, :deadline])) do
+      {:ok, listing} when is_list(listing) -> {:ok, listing}
+      {:ok, _other} -> {:error, {:list, "the adapter's listing is not a list"}}
+      {:error, reason} -> {:error, {:list, reason}}
+    end
+  end
+
+  @doc """
+  The inventory of a destination keyed `key`, from its `list/1` output, with
+  `local`'s (`scan/1`'s) `.keep` markers and `.work/` stamps merged in. Pure.
+
+  Only a whole backup file (`Destination.backup_file?/1`) listed in its own
+  kind's `db/` or `media/` is a member: anything else is ignored, never a
+  stray, since nothing proves it is Kiln's. Every member counts as a regular
+  file of its listed size (an unknown size is 0, so such a unit is never
+  complete and never takes a newest slot). Its mtime is the later of the
+  listed one and the stamp's own instant; with neither, `now`, so a unit
+  whose age can't be told never ages out.
+  """
+  @spec destination_inventory(String.t(), [map()], inventory(), integer()) :: inventory()
+  def destination_inventory(key, listing, local, now) do
+    units =
+      listing
+      |> Enum.flat_map(&remote_member(&1, now))
+      |> Enum.reduce(%{}, fn {{stamp, kind} = unit_key, file}, acc ->
+        unit = Map.get(acc, unit_key, %{stamp: stamp, kind: kind, files: [], partials: []})
+        Map.put(acc, unit_key, %{unit | files: [file | unit.files]})
+      end)
+
+    %{units: units, markers: local.markers, work: local.work, strays: [], key: key}
+  end
+
+  defp remote_member(%{subdir: subdir, name: name} = item, now)
+       when is_binary(subdir) and is_binary(name) do
+    with true <- Destination.backup_file?(name) and name == Path.basename(name),
+         {role, %{kind: kind, stamp: stamp} = parsed} <- parsed(name),
+         true <- Artifact.subdir(kind) == subdir do
+      [
+        {{stamp, kind},
+         %{
+           name: name,
+           role: role,
+           part: parsed.part,
+           type: :regular,
+           size: remote_size(item[:bytes]),
+           mtime: remote_age(item[:mtime], stamp, now)
+         }}
+      ]
+    else
+      _ -> []
+    end
+  end
+
+  defp remote_member(_item, _now), do: []
+
+  defp remote_size(bytes) when is_integer(bytes) and bytes >= 0, do: bytes
+  defp remote_size(_unknown), do: 0
+
+  # The later of the two, so a tie, or a store that reset the mtime to the
+  # upload's, errs toward keeping.
+  defp remote_age(mtime, stamp, now) do
+    at =
+      case Artifact.parse_stamp(stamp) do
+        {:ok, at} -> DateTime.to_unix(at)
+        :error -> nil
+      end
+
+    case Enum.reject([remote_mtime(mtime), at], &is_nil/1) do
+      [] -> now
+      times -> Enum.max(times)
+    end
+  end
+
+  defp remote_mtime(%DateTime{} = at), do: DateTime.to_unix(at)
+  defp remote_mtime(posix) when is_integer(posix), do: posix
+  defp remote_mtime(_unknown), do: nil
+
+  @doc """
+  The plan for a destination's inventory (`destination_inventory/4`):
+  `plan/4`'s keep rules, then the ownership filter. Pure.
+
+  Returns `%{delete: entries, keep: entries, unowned: entries}`. `delete`
+  holds only units whose Run records this installation sending them to the
+  inventory's key; `unowned` the units the rules would have deleted but that
+  have no such record (they are in `keep` too, with the reason
+  `{:not_sent_here, rule_reason}`).
+  """
+  @spec destination_plan(inventory(), %{String.t() => map()}, Policy.t(), integer()) :: %{
+          delete: [entry()],
+          keep: [entry()],
+          unowned: [entry()]
+        }
+  def destination_plan(%{key: key} = inventory, runs, %Policy{} = policy, now) do
+    plan = plan(inventory, runs, policy, now)
+    {owned, unowned} = Enum.split_with(plan.delete, &sent_here?(runs[&1.stamp], &1.kind, key))
+    left = Enum.map(unowned, &%{&1 | reason: {:not_sent_here, &1.reason}})
+
+    %{
+      delete: owned,
+      keep: Enum.sort_by(plan.keep ++ left, &{&1.stamp || "", &1.kind, &1.files}),
+      unowned: unowned
+    }
+  end
+
+  @sent_here ["ok", "pruned"]
+
+  # The Run of the stamp has an artifact of this kind that it recorded sent
+  # to `key` (the artifact, or any of its parts), or pruned there by an
+  # earlier pass that stopped part-way. Nothing else licenses a delete.
+  defp sent_here?(%{artifacts: artifacts}, kind, key) when is_list(artifacts) do
+    Enum.any?(artifacts, fn artifact ->
+      artifact.kind == kind and
+        (recorded_here?(artifact.destinations, key) or
+           Enum.any?(artifact.parts || [], &recorded_here?(&1["destinations"], key)))
+    end)
+  end
+
+  defp sent_here?(_run, _kind, _key), do: false
+
+  defp recorded_here?(%{} = destinations, key),
+    do: get_in(destinations, [key, "status"]) in @sent_here
+
+  defp recorded_here?(_none, _key), do: false
+
+  # The deletes, each unit re-checked first (`recheck/2`), data before the
+  # sidecar. The first delete that fails stops the pass: a store refusing
+  # one delete (or hanging on it) would only do so again.
+  defp execute_destination(dir, config, plan, opts) do
+    call_opts = Keyword.take(opts, [:timeout, :deadline])
+
+    {deleted, units, stopped} =
+      Enum.reduce_while(plan.delete, {[], 0, nil}, fn entry, {deleted, units, nil} ->
+        case remove_remote_safely(dir, config, entry, call_opts) do
+          {:ok, []} -> {:cont, {deleted, units, nil}}
+          {:ok, names} -> {:cont, {[names | deleted], units + 1, nil}}
+          {:stop, [], reason} -> {:halt, {deleted, units, reason}}
+          {:stop, names, reason} -> {:halt, {[names | deleted], units + 1, reason}}
+        end
+      end)
+
+    deleted = deleted |> Enum.reverse() |> List.flatten()
+    Recorder.mark_pruned(deleted, config.key)
+
+    {:ok, %{deleted: deleted, units: units, unowned: plan.unowned, stopped: stopped}}
+  end
+
+  defp remove_remote_safely(dir, config, entry, call_opts) do
+    case recheck(dir, entry.stamp) do
+      :ok ->
+        remove_remote(config, entry, call_opts)
+
+      {:skip, why} ->
+        Logger.info(
+          "Retention on #{config.key} left #{label(entry)} in place: #{why} since it was planned"
+        )
+
+        {:ok, []}
+    end
+  rescue
+    error -> {:stop, [], {:crashed, error.__struct__}}
+  end
+
+  defp remove_remote(config, entry, call_opts) do
+    result =
+      Enum.reduce_while(entry.files, {:ok, []}, fn name, {:ok, removed} ->
+        ref = %{subdir: entry.sub, name: name}
+
+        case Destination.call(config, :delete, [ref], call_opts) do
+          :ok -> {:cont, {:ok, [name | removed]}}
+          {:error, reason} -> {:halt, {:stop, removed, {:delete, name, reason}}}
+          other -> {:halt, {:stop, removed, {:delete, name, inspect(other)}}}
+        end
+      end)
+
+    case result do
+      {:ok, removed} -> {:ok, Enum.reverse(removed)}
+      {:stop, removed, reason} -> {:stop, Enum.reverse(removed), reason}
+    end
   end
 
   ## Delete

@@ -22,7 +22,9 @@ defmodule KilnCMS.Backups.Presence do
     * otherwise the unit is absent, and the first reason that applies names it:
       * `:pruned` - the application's own retention removed it (its `"local"`
         destination is marked `"pruned"`).
-      * `:off_site_only` - an rclone copy of it succeeded.
+      * `:off_site_only` - a copy of it reached an off-site destination
+        (any key but `"local"` recorded `"ok"`: the rclone remote or a stored
+        destination, #2220).
       * `:expired` / `:probably_expired` - see below.
       * `:missing` - gone for no recorded reason (deleted out of band, or the
         run was recorded on another node: `BACKUP_DIR` is host-local).
@@ -271,7 +273,8 @@ defmodule KilnCMS.Backups.Presence do
 
   defp off_site?(%{destinations: destinations}) when is_map(destinations) do
     Enum.any?(destinations, fn
-      {"rclone:" <> _remote, %{"status" => "ok"}} -> true
+      {"local", _local} -> false
+      {key, %{"status" => "ok"}} when is_binary(key) -> true
       _ -> false
     end)
   end

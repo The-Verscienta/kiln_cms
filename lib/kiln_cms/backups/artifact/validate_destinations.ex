@@ -1,11 +1,18 @@
 defmodule KilnCMS.Backups.Artifact.ValidateDestinations do
   @moduledoc """
-  An artifact's `destinations` map must be `%{"local" | "rclone:<remote>" =>
-  %{"status" => "pending" | "ok" | "failed" | "pruned", ...}}` (#2217).
+  An artifact's `destinations` map must be `%{"local" | "rclone:<remote>" |
+  "dest:<uuid>" => %{"status" => "pending" | "ok" | "failed" | "pruned", ...}}`
+  (#2217, #2220).
+
+  `dest:` takes a canonical lowercase UUID only (a stored
+  `KilnCMS.Backups.DestinationConfig`'s id, as `KilnCMS.Backups.Destination`
+  builds the key), so one destination never has two keys. Any other key is
+  refused.
   """
   use Ash.Resource.Validation
 
   @statuses ~w(pending ok failed pruned)
+  @uuid ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
 
   @impl true
   def validate(changeset, _opts, _context) do
@@ -28,5 +35,9 @@ defmodule KilnCMS.Backups.Artifact.ValidateDestinations do
 
   defp valid?({"local", %{"status" => status}}), do: status in @statuses
   defp valid?({"rclone:" <> _remote, %{"status" => status}}), do: status in @statuses
+
+  defp valid?({"dest:" <> id, %{"status" => status}}),
+    do: status in @statuses and Regex.match?(@uuid, id)
+
   defp valid?(_other), do: false
 end
