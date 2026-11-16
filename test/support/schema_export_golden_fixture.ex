@@ -42,7 +42,15 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
     {"summary", :text, %{deliver_plain: true}},
     {"code_sample", :text, %{format: :plain}},
     {"read_time", :integer, %{section: "Overview", width: :third}},
-    {"rating", :float, %{}},
+    # The number options (#2432): `x-kiln-step`, `x-kiln-prefix`,
+    # `x-kiln-suffix` and a slider's `x-kiln-widget`.
+    {"rating", :float,
+     %{
+       step: 0.5,
+       suffix: "stars",
+       validation: %{"min" => 0, "max" => 5},
+       widget: "slider"
+     }},
     {"featured", :boolean, %{}},
     {"launch_date", :date, %{}},
     {"published_at", :datetime, %{}},

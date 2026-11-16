@@ -1575,9 +1575,33 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       allow_custom: posted_bool(params, "allow_custom", base.allow_custom),
       format: posted_format(params["format"], base.format),
       options: if(is_list(params["options"]), do: params["options"], else: base.options),
-      widget: posted_widget(params, base.widget)
+      widget: posted_widget(params, base.widget),
+      validation: posted_validation(params, base.validation)
     )
   end
+
+  # The bounds the number cards read (#2432: a slider needs both), so they
+  # follow the min and max inputs as they are typed. Posted as text until
+  # `unpack_validation/1` parses them, so a string is parsed here too; one that
+  # is no number is no bound.
+  defp posted_validation(%{"validation" => %{} = posted}, _fallback) do
+    for {key, value} <- posted, key in ["min", "max"], is_number(bound(value)), into: %{} do
+      {key, bound(value)}
+    end
+  end
+
+  defp posted_validation(_params, fallback), do: fallback
+
+  defp bound(value) when is_number(value), do: value
+
+  defp bound(value) when is_binary(value) do
+    case Float.parse(String.trim(value)) do
+      {number, ""} -> number
+      _other -> nil
+    end
+  end
+
+  defp bound(_value), do: nil
 
   # A registered type's atom for a posted name; never a new atom.
   defp posted_type(type, fallback) when is_binary(type),
@@ -2329,17 +2353,40 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   # A field's value constraints in the list (#2276), when it has any.
-  defp constraints_summary(%{validation: validation}) do
+  defp constraints_summary(%{validation: validation} = definition) do
     validation = FieldConstraints.normalize(validation)
 
     [
       range_summary(validation["min"], validation["max"]),
+      number_options_summary(definition),
       length_summary(validation["min_length"], validation["max_length"]),
       if(validation["pattern"], do: gettext("Must match a pattern.")),
       if(validation["unique"] == true, do: gettext("Each value used once."))
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" ")
+  end
+
+  # A number's step, prefix and suffix (#2432), in the list.
+  defp number_options_summary(definition) do
+    step = Map.get(definition, :step)
+    prefix = Map.get(definition, :prefix)
+    suffix = Map.get(definition, :suffix)
+
+    parts =
+      [
+        if(is_number(step),
+          do:
+            gettext("In steps of %{step}.",
+              step: if(step == trunc(step), do: trunc(step), else: step)
+            )
+        ),
+        if(prefix not in [nil, ""], do: gettext("Prefix %{prefix}.", prefix: prefix)),
+        if(suffix not in [nil, ""], do: gettext("Suffix %{suffix}.", suffix: suffix))
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    if parts != [], do: Enum.join(parts, " ")
   end
 
   defp range_summary(nil, nil), do: nil
@@ -3388,6 +3435,17 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        gettext("Every option on view as a row of buttons — for a few short ones."),
        "hero-squares-2x2"}
 
+  defp widget_choice(%{field_type: type}, "number") when type in [:integer, :float],
+    do:
+      {gettext("Number box"), gettext("A box to type the number in, with spin arrows."),
+       "hero-hashtag"}
+
+  defp widget_choice(%{field_type: type}, "slider") when type in [:integer, :float],
+    do:
+      {gettext("Slider"),
+       gettext("Drag along the range from the minimum to the maximum, with the value beside it."),
+       "hero-adjustments-horizontal"}
+
   defp widget_choice(%{field_type: :text}, "textarea"),
     do:
       {gettext("Several lines"), gettext("A box that grows with the text."),
@@ -3542,6 +3600,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       assigns
       |> assign(:type, type)
       |> assign(:keys, keys)
+      |> assign(:number?, type in ["integer", "float"])
       |> assign(:unique?, "unique" in keys and not assigns.nested? and not multiple?)
       |> assign(:validation, validation)
       |> assign(:errors, errors)
@@ -3579,6 +3638,37 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           label={gettext("Maximum value")}
           placeholder={gettext("No limit")}
           errors={key_errors(@errors, "max")}
+        />
+        <.input
+          :if={@number?}
+          field={@form[:step]}
+          id={"#{@id}-step"}
+          type="number"
+          min="0"
+          step="any"
+          label={gettext("Step")}
+          placeholder={if @type == "integer", do: "1", else: gettext("Any value")}
+          hint={
+            gettext("How far the editor's arrows and slider move at a time. Not checked on save.")
+          }
+        />
+        <.input
+          :if={@number?}
+          field={@form[:prefix]}
+          id={"#{@id}-prefix"}
+          maxlength="16"
+          label={gettext("Prefix")}
+          placeholder="$"
+          hint={gettext("Shown before the number in the editor.")}
+        />
+        <.input
+          :if={@number?}
+          field={@form[:suffix]}
+          id={"#{@id}-suffix"}
+          maxlength="16"
+          label={gettext("Suffix")}
+          placeholder="kg"
+          hint={gettext("Shown after the number in the editor.")}
         />
         <.input
           :if={"min_length" in @keys}

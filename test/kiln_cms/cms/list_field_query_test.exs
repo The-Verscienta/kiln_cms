@@ -125,6 +125,25 @@ defmodule KilnCMS.CMS.ListFieldQueryTest do
     end
   end
 
+  describe "reference and media sorts (#2444)" do
+    test "a single reference or media field is sortable by its target's key" do
+      for type <- [:reference, :media] do
+        assert ListFieldQuery.sortable?(%{field_type: type})
+        assert ListFieldQuery.sortable?(%{field_type: type, multiple: false})
+        refute ListFieldQuery.sortable?(%{field_type: type, multiple: true})
+      end
+
+      # A user field is an id: its order means nothing to an editor.
+      refute ListFieldQuery.sortable?(%{field_type: :user})
+    end
+
+    test "sort_basis names the key only where it differs from the shown value" do
+      assert ListFieldQuery.sort_basis(%{field_type: :reference}) == :title
+      assert ListFieldQuery.sort_basis(%{field_type: :media}) == :filename
+      assert ListFieldQuery.sort_basis(%{field_type: :string}) == nil
+    end
+  end
+
   describe "the format field types (#2278)" do
     test "their ops, and which can be sorted" do
       assert ListFieldQuery.ops(:email) == ~w(eq contains null)

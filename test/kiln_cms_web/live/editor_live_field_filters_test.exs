@@ -188,6 +188,92 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
     end
   end
 
+  describe "field sort by a reference (#2444)" do
+    # A published target page, titled `title`.
+    defp target!(admin, title) do
+      page = CMS.create_page!(%{title: title, slug: "ffr-#{uniq()}"}, actor: admin)
+      CMS.publish_page!(page, %{}, actor: admin)
+    end
+
+    test "orders by the target's current title, across Load more, and says so", %{
+      conn: conn,
+      admin: admin,
+      prefix: prefix
+    } do
+      define!(admin, "mentor", %{field_type: :reference, target_type: "page"})
+
+      # Distinct titles with ties (rem 9), so page 2 must break ties by id.
+      targets = for n <- 0..8, do: {n, target!(admin, "Mentor #{n}")}
+
+      rows =
+        for n <- 1..60,
+            {k, t} = Enum.at(targets, rem(n, 9)),
+            do: {k, a_page(prefix, %{"mentor" => %{"id" => t.id, "label" => "stale"}})}
+
+      bare = for _ <- 1..2, do: a_page(prefix, %{})
+      by_id = Map.new(rows, fn {k, page} -> {page.id, k} end)
+
+      {lv, _html} = open(conn, prefix, %{"sort" => "field:mentor"})
+
+      assert has_element?(
+               lv,
+               "#field-sort option[value='field:mentor']",
+               "Field: Mentor by current title (↑)"
+             )
+
+      for {sort, dir} <- [{"field:mentor", :asc}, {"-field:mentor", :desc}] do
+        {lv, html} = open(conn, prefix, %{"sort" => sort})
+        assert length(ids(html)) == 50
+
+        lv |> element("button", "Load more") |> render_click()
+        all = ids(render(lv))
+
+        assert length(all) == 62
+        assert all == Enum.uniq(all), "a row repeated across the page boundary"
+
+        {valued, missing} = Enum.split(all, 60)
+        assert MapSet.new(missing) == MapSet.new(bare, & &1.id)
+        ranks = Enum.map(valued, &Map.fetch!(by_id, &1))
+        assert ranks == Enum.sort(ranks, dir)
+      end
+    end
+
+    test "follows a rename of the target, not the stored label", %{
+      conn: conn,
+      admin: admin,
+      prefix: prefix
+    } do
+      define!(admin, "mentor", %{field_type: :reference, target_type: "page"})
+      apple = target!(admin, "Apple")
+      banana = target!(admin, "Banana")
+
+      r_apple = a_page(prefix, %{"mentor" => %{"id" => apple.id, "label" => "Apple"}})
+      r_banana = a_page(prefix, %{"mentor" => %{"id" => banana.id, "label" => "Banana"}})
+
+      {_lv, html} = open(conn, prefix, %{"sort" => "field:mentor"})
+      assert ids(html) == [r_apple.id, r_banana.id]
+
+      CMS.update_page!(apple, %{title: "Zucchini"}, actor: admin)
+
+      {_lv, html} = open(conn, prefix, %{"sort" => "field:mentor"})
+      assert ids(html) == [r_banana.id, r_apple.id]
+    end
+
+    test "a list-valued reference is not offered and its sort URL is ignored", %{
+      conn: conn,
+      admin: admin,
+      prefix: prefix
+    } do
+      define!(admin, "friends", %{field_type: :reference, target_type: "page", multiple: true})
+      older = a_page(prefix, %{})
+      newer = a_page(prefix, %{})
+
+      {lv, html} = open(conn, prefix, %{"sort" => "field:friends"})
+      refute has_element?(lv, "#field-sort option[value='field:friends']")
+      assert ids(html) == [newer.id, older.id]
+    end
+  end
+
   describe "events" do
     test "add_field_filter patches the URL; remove_field_filter takes it back", %{
       conn: conn,

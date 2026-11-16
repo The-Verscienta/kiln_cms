@@ -3098,11 +3098,26 @@ defmodule KilnCMSWeb.EditorLive do
   defp sortable_options(options),
     do: Enum.filter(options, &KilnCMS.CMS.ListFieldQuery.sortable?/1)
 
-  defp field_sort_label(option, :asc),
-    do: gettext("Field: %{field} (↑)", field: field_name(option))
+  defp field_sort_label(option, dir) do
+    arrow = if dir == :asc, do: "↑", else: "↓"
 
-  defp field_sort_label(option, :desc),
-    do: gettext("Field: %{field} (↓)", field: field_name(option))
+    case KilnCMS.CMS.ListFieldQuery.sort_basis(option) do
+      :title ->
+        gettext("Field: %{field} by current title (%{dir})",
+          field: field_name(option),
+          dir: arrow
+        )
+
+      :filename ->
+        gettext("Field: %{field} by current filename (%{dir})",
+          field: field_name(option),
+          dir: arrow
+        )
+
+      nil ->
+        gettext("Field: %{field} (%{dir})", field: field_name(option), dir: arrow)
+    end
+  end
 
   # The value control for the draft condition, by field type: `{input type,
   # extra attrs, select options or nil}`.

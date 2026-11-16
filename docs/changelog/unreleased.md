@@ -77,6 +77,39 @@ carries the reasoning.
 
 
 
+
+<a id="number-field-options"></a>
+
+- **Number fields can set a step, a prefix and a suffix, and an editor input of Slider. The step, prefix and suffix are new keys in field-sync files, which a release before this one refuses.**
+  In the fields admin an Integer or Float field gains **Step**, **Prefix**
+  and **Suffix** inputs in the **Validation** fieldset, and its **Editor
+  input** group offers **Number box** (the default) or **Slider**, the
+  latter only while the field has both a minimum and a maximum. Run
+  `mix ash.migrate`: it adds three nullable columns to `field_definitions`
+  (`step`, `prefix`, `suffix`), so a rollback reads nothing different.
+
+  All three are editor-only hints. `step` moves the editor's arrows and
+  slider and is **not** enforced on save; only `validation.min` and `max`
+  bound a value. It must be above 0, a whole number on an integer field, and
+  no wider than the span between min and max. `prefix` and `suffix` are up to
+  16 characters. A blank slider field shows **Set a value** (stores the
+  minimum) rather than a range input, so the slider never fills in a field
+  nobody set. Only the core `:integer` and `:float` types read the options;
+  they clear on any other type, and a plugin field type never carries them.
+
+  **Field sync.** Exports now carry `"step"`, `"prefix"` and `"suffix"`
+  (`null` when unset). Version stays 1, so a 1.10 build refuses such a file
+  as unknown keys, as it does for `width`: export from the older build, or
+  delete the keys with `jq` first. A file without the keys still imports into
+  this release, but missing keys read as `null`, so it clears the options on
+  fields that had them (the dry run shows `~`).
+
+  **APIs.** JSON:API field-definition payloads (`?include=field_definitions`)
+  gain `step`, `prefix` and `suffix`; the schema export gains `x-kiln-step`,
+  `x-kiln-prefix` and `x-kiln-suffix` (absent when unset) and
+  `x-kiln-widget: "slider"`. Guide:
+  [Show a number as a slider or with a unit](../extending-content.md#show-a-number-as-a-slider-or-with-a-unit).
+
 <a id="graphql-custom-where-groups"></a>
 
 - **GraphQL `customWhere` takes `_or` / `_and` / `_not` groups.**
@@ -220,6 +253,19 @@ carries the reasoning.
   large table narrow the read with a filter. No migration; rolling back only brings the refusal
   back. See [json-api.md](../json-api.md)
   and the amendment in decision 0014.
+
+<a id="list-sort-reference-media"></a>
+
+- **The content list's Sort by → Field menu now offers single-valued reference and media fields.**
+  They order by the same key as the API above (the target's current title, or
+  a media item's current filename), read as the signed-in editor: a target
+  they cannot read sorts with the unset rows, and Load more continues the
+  order without repeating or skipping a row. The menu entry reads "Field:
+  Mentor by current title (↑)" (or "by current filename"), because the Columns
+  cell shows the label stored with the referrer, which lags a rename until
+  the referrer is saved again, so the two can disagree without the sort being
+  wrong. A list-valued field is still not offered, and a `sort=field:…` URL or
+  saved view naming one falls back to the default order. No migration.
 
 ## Fixed
 
