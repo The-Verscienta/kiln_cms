@@ -13,10 +13,17 @@ ID, Windows Hello, a phone, a security key) and signs in without a password.
   is added to your account." The browser prompts for the device screen lock
   while the page reads "Waiting for your device…". The credential is then listed with its name, the date it was
   added and the date it was last used. A passkey can't be renamed: remove it
-  with the trash button and add it again. Multiple passkeys per account.
+  with the trash button and add it again. Up to 20 passkeys per account
+  ([Limits on adding passkeys](#limits-on-adding-passkeys)).
   Settings is for editors and admins; anyone signed in, readers included,
   adds and removes passkeys at `/account/two-factor` instead
-  ([Remove a passkey](#remove-a-passkey)).
+  ([Remove a passkey](#remove-a-passkey)). Both pages manage passkeys only on
+  the main host (`PHX_HOST`) or a console host (`KILN_CONSOLE_HOST`). Opened
+  on a site's own address, `/editor/settings` shows "Passkeys and two-factor
+  authentication are managed on the main sign-in host, not on this site's
+  address." with a **Manage sign-in security** button to the main host's
+  `/account/two-factor`
+  ([Where second factors are managed](two-factor-auth.md#where-second-factors-are-managed)).
 - **Sign in** at `/sign-in` → "Use a passkey" (the button appears only in
   WebAuthn-capable browsers). The browser offers your saved passkeys, with no
   email or password typed. If the ceremony fails, the page says "Passkey
@@ -118,9 +125,9 @@ run), the section shows the list without the add form, the limit note or the
 no passkeys there, the section is not shown at all.
 
 Removing a passkey asks for no emailed code, even where adding one would: the
-code gates adding a factor, not removing one. Removal does not email the
-owner; only an added factor is mailed. It is recorded in the security log
-like any other removal (below).
+code gates adding a factor, not removing one. The second factor in step 4
+is what guards a removal. It is recorded in the security log like any other
+removal (below).
 
 What can go wrong:
 
@@ -135,11 +142,16 @@ What can go wrong:
 - **"Couldn't remove that passkey."** The passkey no longer exists (removed
   in another tab, for example) or isn't yours. Reload the page to see the
   current list.
+- **"Too many attempts — try again in N seconds."** The code in step 4 used
+  up the account's five second-factor attempts per 15 minutes, which the
+  sign-in code prompt and the settings forms share. Wait the seconds it
+  names.
 
 Adding or removing a passkey is recorded in the site's
 [security log](security-events.md) as `passkey_added` / `passkey_removed`,
-with the passkey's name. Adding one also emails the account's owner, without
-the name ([We email you when a second factor is added](two-factor-auth.md#we-email-you-when-a-second-factor-is-added)).
+with the passkey's name. Either one also emails the account's owner, without
+the name ([We email you when a second factor is added](two-factor-auth.md#we-email-you-when-a-second-factor-is-added),
+[We email you when a second factor is removed](two-factor-auth.md#we-email-you-when-a-second-factor-is-removed)).
 
 ## Limits on adding passkeys
 
@@ -154,8 +166,11 @@ stolen session could flood the owner's inbox and the instance's mail quota.
   (On `/account/two-factor`, the note and the form appear only on a host where
   a passkey can be added.) An account that already had more than 20 keeps
   them all.
-- Over the hourly budget, adding one fails with "You've added several passkeys
-  in a short time. Try again in N minutes." The budget counts every
+- Over the hourly budget, adding one on `/editor/settings` fails with "You've
+  added several passkeys in a short time. Try again in N minutes." On
+  `/account/two-factor` the same refusal reads only "Couldn't verify that
+  passkey — try again." If that repeats after you have just added several,
+  wait up to an hour (the default window) before adding another. The budget counts every
   registration the browser completed and the server verified, including one
   that then failed (a passkey already registered); a registration refused by
   the 20 cap is not counted.
@@ -190,6 +205,12 @@ them, and refuse with `KilnCMS.Accounts.Errors.PasskeyLimitReached` and
   `/account/two-factor` (`PasskeyEnroll` JS hook): the server parks the challenge in LiveView state, the browser runs
   `navigator.credentials.create()`, and the attestation comes back as an
   event for server-side verification.
+  `KilnCMS.Accounts.WebAuthn.register_passkey/4` requires `host:`, the host
+  the page was served on, and refuses a registration from any host but the
+  main host or a passkey-capable console host (`{:error, :not_ceremony_host}`),
+  or whose `clientDataJSON` origin names another host
+  (`{:error, :origin_mismatch}`). The page shows "Couldn't verify that
+  passkey — try again." for both.
 - **Sign-in** is a two-step JSON ceremony (`POST /auth/passkey/options` →
   `POST /auth/passkey/verify`, `KilnCMSWeb.PasskeyController`) driven by
   progressive-enhancement JS on `/sign-in`: `KilnCMSWeb.SignInLive` renders
@@ -228,9 +249,13 @@ them, and refuse with `KilnCMS.Accounts.Errors.PasskeyLimitReached` and
   #2453), since whoever registered the address first may have enrolled them.
   Only the invitations system actor may call that action, never a person, a
   platform admin included; an owner or admin removes a passkey with
-  `:destroy`. Both pages remove through `KilnCMSWeb.TotpEnrolment.remove_passkey/3`,
+  `:destroy`. Both pages remove through `KilnCMSWeb.TotpEnrolment.remove_passkey/4`,
   which passes the page's security context so the `passkey_removed` event
-  is recorded for the site. See
+  is recorded for the site, plus the session's `second_factor_verified_at`
+  and any code typed, for `:destroy`'s step-up
+  (`KilnCMS.CMS.Changes.SaverVerifiedSecondFactor`); it answers
+  `{:confirm, reason}` when a code is still needed. Erasure removes passkeys
+  with the system-only `:erase` instead (no step-up, no email). See
   [What taking over an account removes](account-administration.md#what-taking-over-an-account-removes).
   A registration already under way when the takeover starts cannot outlive
   it: `:register` takes the account's row first (`Changes.GuardAccountTakeover`)
@@ -244,7 +269,11 @@ them, and refuse with `KilnCMS.Accounts.Errors.PasskeyLimitReached` and
   multi-site (#336) deployments, sign-in happens on the main host as usual,
   or on a console host under it (`KILN_CONSOLE_HOST`). A passkey ceremony
   cannot run on a site's own host, so the code prompt there does not offer
-  one.
+  one, and passkeys are added there neither on `/editor/settings` nor on
+  `/account/two-factor`, which is not served on a site's own host at all.
+  A console host outside `PHX_HOST` serves both pages, but can't register or
+  use a passkey: `/account/two-factor` there lists and removes passkeys only,
+  and an add attempted from `/editor/settings` there is refused.
 - **SAML** is deliberately out of scope: enterprise IdPs (Okta, Entra,
   Google Workspace, Keycloak, Authentik, …) all speak OpenID Connect, which
   Kiln ships (docs/sso.md). A SAML-only IdP can federate through any

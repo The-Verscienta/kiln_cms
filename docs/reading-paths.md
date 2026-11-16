@@ -41,7 +41,8 @@ You read Kiln's content from your own site or app, or extend Kiln itself.
 4. [Webhooks](webhooks.md): hearing about a change as soon as it is
    published, including retractions.
 5. [Extending the content model](extending-content.md): adding content types
-   and fields.
+   and fields, including reference fields that limit which records can be
+   picked and let editors create a missing one from the field.
 6. [The overlay contract](overlay-contract.md): what your own project may rely
    on across Kiln releases.
 7. [Plugins](plugin-extensibility.md): adding blocks, field types,
@@ -59,18 +60,22 @@ You install, run and upgrade a Kiln site.
    hosted options.
 3. [Environment variables](environment-variables.md): every setting, and
    which ones you must set.
-4. [Backups and restore](backups.md): what to back up, and how to bring a site
-   back.
+4. [Backups and restore](backups.md): what to back up, how to schedule it in
+   the app or with cron, and how to bring a site back.
 5. [Observability](observability.md): telemetry and performance profiling
    for the editor, with an optional Prometheus exporter.
 6. [Account administration](account-administration.md): adding people,
    inviting them by email, approving who registers, and giving them roles.
-   [Granular RBAC](granular-rbac.md) covers finer-grained permissions.
+   [Granular RBAC](granular-rbac.md) covers finer-grained permissions, and
+   [Two-factor authentication](two-factor-auth.md) covers requiring two-step
+   sign-in on a site.
 7. [Secrets rotation](secrets-rotation.md): replacing each secret a
    deployment depends on, and what breaks while you do.
 8. [Threat model](threat-model.md): what the public APIs expose, and how each
    risk is handled. [Security posture](security-posture.md) then checks which
-   security settings a running site has on, and what to fix first.
+   security settings a running site has on, and what to fix first, and
+   [Security alerts](security-alerts.md) tells admins, a webhook or a Slack
+   channel when something needs a look.
 
 Upgrade steps live in the release guide, under Contributing to Kiln:
 [Updating a project to a release](releasing.md#updating-a-project-to-a-release).

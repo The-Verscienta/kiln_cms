@@ -25,7 +25,8 @@ contributor. It points at the right guide rather than restating it.
 
 ## 1. Run it locally
 
-Prerequisites: Elixir 1.20+ / OTP 29+, Docker (for Postgres), Node.js 22. The
+Prerequisites: Elixir 1.20+ / OTP 29+, Docker (for Postgres), Node.js 22
+(`.tool-versions` pins 22.23.5). The
 full list, for running, building and developing, is in
 [system-requirements.md](system-requirements.md).
 
@@ -93,6 +94,13 @@ what readers saw. For what to read first as an editor, a developer building on
 Kiln's APIs, or an operator running a site, follow
 [Reading paths by role](reading-paths.md). It is the one list of those, and
 the kilncms.dev `/docs` index shows the same tracks.
+
+New in 1.10, each in the guide for its area:
+[requiring two-step sign-in on a site](two-factor-auth.md#requiring-two-step-sign-in-on-a-site),
+[backup schedules in the app](backups.md#schedule-backups-in-the-app),
+[limiting what a reference field can pick](extending-content.md#limit-what-can-be-picked)
+and [letting editors create what they type](extending-content.md#let-editors-create-what-they-type)
+in one, and [security alerts in a Slack channel](security-alerts.md#send-alerts-to-slack).
 
 Working on Kiln itself needs a few more:
 

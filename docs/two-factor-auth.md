@@ -336,9 +336,14 @@ The email gives two steps, in this order:
 
 ### For operators
 
-The email goes through the instance mail relay (`KilnCMS.Mailer`), never a
-site's own, in English, like the other account email, and it cannot be
-muted. An erased account gets none. It is queued only after the factor is
+The email goes through the instance mail relay (`KilnCMS.Mailer`), in
+English, like the other account email, and it cannot be muted. Only when the
+deployment has no outgoing mail server of its own does it go through a site's
+relay instead: the first site that requires the account to hold a second
+factor and has a working relay. That is the setup in which the
+[emailed code](#when-the-emailed-code-is-asked-for) is skipped for want of
+mail, so this email is then the owner's only notice. An erased account gets
+none. It is queued only after the factor is
 saved: a mail that cannot be queued is logged as "Second-factor notice for
 user (id) not sent" and does not undo the new factor.
 
@@ -434,6 +439,11 @@ What an operator should know when a user reports it:
   is `regenerate_totp_recovery_codes`' prize through a different door. The cost
   is that a user enrolling with a skewed device clock can spend the budget that
   gates their next sign-in — a correct code clears it.
+- **So do the other code checks.** The authenticator code that removing a
+  passkey can ask for ([Remove a passkey](passkeys.md#remove-a-passkey)), the
+  one a save of the [site requirement](#require-two-step-sign-in-on-your-site)
+  can ask for, and each try at the code mailed by the setup page's
+  [email step](#when-the-emailed-code-is-asked-for) charge the same bucket.
 - **TOTP codes and recovery codes share it.** Someone who has spent the budget
   guessing codes cannot fall back to recovery codes until the window rolls.
 - **A completed password reset clears it.** That is the remedy to offer: it is
@@ -941,8 +951,7 @@ running cluster, and the site's slug if it is not the default site.
    The change reaches every node now, and is in the site's security log.
    ```
 
-   A site that requires nothing (every site, in this release) is left as it
-   is:
+   A site that requires nothing is left as it is:
 
    ```text
    This site does not require two-step sign-in; nothing to turn off.

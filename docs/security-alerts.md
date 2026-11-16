@@ -124,7 +124,9 @@ are not counted: they are only in the default site's bell.
   description such as "An account was locked out (from 203.0.113.0/24)", in
   the language of the console you read it in. A row written before this
   wording was translated shows its English line.
-- **The email.** Subject "Security alert on (site): (what happened)". It says
+- **The email.** Subject "Security alert on (site): (what happened)", or
+  "Security alert summary for (site)" for a summary and "Security alerts on
+  (site) were changed" for a notice. It says
   when (UTC), links to the security log on the site's own console host (a
   notice links to the Security alerts page), and says why you got it. Emails
   are in English, whatever language the console is in: an account stores no

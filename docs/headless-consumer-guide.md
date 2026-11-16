@@ -128,13 +128,22 @@ Admin-defined **custom fields** are delivered in each entry's `custom_fields`
 map on every surface — including the fired artifact's `json` surface — and are
 **filterable/sortable** on the JSON:API and GraphQL list surfaces via
 `custom_filter`/`custom_sort` (see
-[json-api.md](json-api.md) → "Custom fields"). Scalar fields are JSON-native values; `media` and
+[json-api.md](json-api.md) → "Custom fields"), and through the typed
+`custom_where` / `customWhere`. An operand of the wrong shape (an object, or
+a list beside any operator but `in`) is a `400 invalid_argument` naming the
+operator and the field, and a write that sends an object to a single field
+is a `400` naming the field (the list cases are in json-api.md → "A single
+custom field takes one value"). Scalar fields are JSON-native values; `media` and
 `reference` fields are **write-time snapshots** — `{"id", "url", "alt"}` for
 media, `{"id", "type", "slug", "title"}` for references, and an ordered
 array of those for a media gallery or a list of references (a field defined
 with `multiple: true`; `/api/schema` types it as an array) — so no extra
 resolution is needed to render them (fetch fresh content by `id`/`type` when
-you need more than the label). A `geolocation` field is
+you need more than the label). A reference field can accept only some records
+(only published ones, say); `/api/schema` reports which as `x-kiln-selection`,
+and a write that adds another is refused on the field with
+`“Title” isn't one of the records this field accepts.` (see
+[json-api.md](json-api.md) → "Writing a reference"). A `geolocation` field is
 `{"lat", "lng"}` (plus optional `"zoom"`/`"label"`), and also appears on the
 `json_ld` surface as the document's `contentLocation`. A `computed` field is
 **derived server-side and read-only** — writing to its key is silently ignored,
@@ -579,9 +588,11 @@ set up two-step sign-in. See
 [Accounts a site requires two-step sign-in of](api.md#accounts-a-site-requires-two-step-sign-in-of).
 
 An operator who needs time to fix a client can set
-`KILN_API_REJECT_INVALID_BEARER=false` to restore the anonymous fallback. That
-escape hatch lasts one release and is then removed
-([ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)).
+`KILN_API_REJECT_INVALID_BEARER=false` to restore the anonymous fallback, over
+HTTP and on `/ws/gql` alike. That escape hatch is kept for one more release
+and then removed, once the stale-token count it watches is zero
+([ADR 0017](decisions/0017-an-unverifiable-bearer-flips-on-a-minor-with-a-breaking-note-and-is-counted-first.md),
+[ADR 0012](decisions/0012-headless-services-get-a-draft-write-api-key-scope-not-oidc-pass-through.md)).
 
 ## Mirroring: sync instead of re-reading everything
 

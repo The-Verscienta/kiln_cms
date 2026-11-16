@@ -168,6 +168,7 @@ A rule the form refuses says why. The messages an editor can see include:
 
 | Message | Meaning |
 | --- | --- |
+| `FREQ HOURLY isn't supported — use DAILY, WEEKLY, MONTHLY or YEARLY` | Any `FREQ` but those four. |
 | `BYDAY 6TU: the number before the weekday must be 1..5 or -1..-5` | A numbered weekday out of range, or `0TU`. |
 | `an ordinal BYDAY like 2TU only works with MONTHLY or YEARLY` | A numbered weekday in a daily or weekly rule. |
 | `BYDAY isn't supported with FREQ=DAILY — use FREQ=WEEKLY` | Daily rules can't pick weekdays. |

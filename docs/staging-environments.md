@@ -82,6 +82,11 @@ sends mail, fires a webhook, or contacts a subprocessor.
 | **Membership tiers** | deactivated (`tiers_deactivated`) | The catalogue shape keeps staging useful; the price pointer is replaced with a per-row tombstone so nothing in the clone can bill a real account. (Per-row because `provider_price_id` is `NOT NULL` with a per-org unique index.) |
 | **A fresh staging admin** | provisioned, opt-in (`admin_provisioned`) | Because every real account is anonymized (nobody can sign in), the scrub can seed **one** known admin from `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` so the environment is usable. |
 
+The names in parentheses are the keys of the summary map `KilnCMS.Staging.scrub!/1`
+returns. The summary the scrub prints lists only users anonymized, API keys, auth
+tokens, webhooks, mail settings, search queries and the staging admin; call
+`scrub!/1` from `rpc` (path 3 below) to see every count.
+
 The scrub is **idempotent** — re-running it anonymizes only accounts that aren't already
 anonymized and re-purges empty tables cheaply.
 
@@ -153,10 +158,15 @@ on the production VPS.
 |----------|----------|---------|
 | `PROD_DATABASE_URL` | yes (`up`) | Source to `pg_dump`. Read-only; the script never writes to it. |
 | `STAGING_DATABASE_URL` | yes | Throwaway target. Its **name must look ephemeral** (see guards). |
-
-Both URLs may be `postgres://`, `postgresql://` or `ecto://`. The script gives each password only to its own `pg_dump` or `psql`, as `PGPASSWORD`, never as an argument, and its closing `DATABASE_URL=` line leaves the password out ([backups.md](backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726)).
 | `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` | recommended | Seed one usable admin; without them you can't sign in to staging. |
 | `KILN_BIN` | no (default `mix`) | How to run migrate + scrub: `mix` for a checkout, or a release bin path like `/app/bin/kiln_cms` in Docker. |
+
+Both URLs may be `postgres://`, `postgresql://` or `ecto://`. The script gives
+each password only to its own `pg_dump` or `psql`, as `PGPASSWORD`, never as an
+argument. Its closing `DATABASE_URL=` line, which says "password not shown",
+leaves the password out: put it back, or export `PGPASSWORD`, before you use
+that line
+([backups.md](backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726)).
 
 The script never sets `KILN_STAGING_FORCE`; the ephemeral-name guard stays in force
 unless you invoke the scrub yourself.
@@ -204,6 +214,14 @@ scrubbed database — no new build, no new service definition:
    - **`KILN_ENV_LABEL=staging`** (and optionally `KILN_ENV_COLOR`) — see below,
    - outbound integrations left **off** (default): no `MAIL_MODE`, `KilnCMS.Search.Meilisearch`
      `enabled: false`, `KilnCMS.Storage.Local`.
+   - **not** production's backup settings: leave `BACKUP_RCLONE_REMOTE` and any
+     `RCLONE_CONFIG*` variables unset (or point them at a staging remote), and give
+     the clone its own `BACKUP_DIR`, or set `BACKUP_ENABLED=false`. A backup taken on
+     the clone would otherwise land beside production's under the same file names.
+     The scrub has already paused the clone's in-app backup schedules; resume one on
+     the **Schedule** tab of **Backups** only once these are set.
+     ([deploy-staging.md](deploy-staging.md#3-stand-up-a-staging-environment)
+     has the checklist.)
    - optionally set the crawler to noindex via your reverse proxy.
 4. **Tear down.** Stop/delete the staging application and `dropdb kiln_staging`.
 

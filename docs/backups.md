@@ -814,7 +814,12 @@ rclone copy /var/backups/kiln/db r2:kiln-backups/db \
 
 Don't widen it to `kiln-media-*`: that also copies a running backup's
 `.partial` files (and a killed one's), and `restore.sh` refuses a set with one
-beside it. Why the two writers split media the same way is in [ADR 0042](decisions/0042-backup-sh-re-implements-the-media-planner-in-bash-and-both-change-in-the-same-pull-request.md).
+beside it. The Backups page says the same in the `?` beside **Where backups
+go** (**About copying backups**): "If you copy backups off this host yourself,
+copy each backup's .sha256 files with it: without them a media backup in parts
+won't restore, and nothing can check the others. The built-in off-site copy
+already includes them." `BACKUP_RCLONE_REMOTE` copies every sidecar, so the
+hint is for copies you make yourself. Why the two writers split media the same way is in [ADR 0042](decisions/0042-backup-sh-re-implements-the-media-planner-in-bash-and-both-change-in-the-same-pull-request.md).
 
 The one difference is recovery. A failed in-app backup keeps its finished parts
 so it can be [resumed](#media-backups-in-parts-2218); a failed cron run removes
@@ -1277,8 +1282,9 @@ it requests one and waits for it, returning `:ok` or `{:error, reason}`, and
 `{:error, :queued}` or `{:error, :folded}` without waiting when another backup
 is running (`{:error, {:queue_busy, queued}}` when one of another kind is
 queued). For an off-site failure the reason is the run's error text. Both,
-the `backups` queue and `KilnCMS.Backups.Worker` are removed in the next minor
-release.
+the `backups` queue and `KilnCMS.Backups.Worker` are still in 1.10 and will be
+removed in a later release, which its changelog will name. Drain the `backups`
+queue before upgrading to it.
 
 ### Back up only the database or only the media
 
@@ -2056,6 +2062,8 @@ What can go wrong when you click **Resume**:
 |---|---|
 | "That backup was canceled moments ago. Resume it again in N seconds: a step on a server that lost contact with the database may still be stopping." | It was canceled less than 150 seconds ago. Click again when the time is up. |
 | "That backup is running right now." | It is the backup that is running. |
+| "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears." | A fresh backup waits behind the running one, and a resume never folds into it ([Back up while another backup runs](#back-up-while-another-backup-runs)). Click again once it has started. |
+| "A backup is running and a resume of `<stamp>` is queued after it, so this resume was not queued. Try again once the queue clears." | A resume of another backup is already waiting. |
 | "That backup can't be resumed: only a failed, interrupted or canceled backup can." | It succeeded, was skipped or imported, or is still working. |
 | "That backup can't be resumed: the files it had written are gone." | Its `.work/<stamp>/` is not on this server (swept, deleted, or on another host). |
 | "That backup can't be resumed." | Anything else, for example a malformed stamp. |
@@ -2391,15 +2399,24 @@ What can go wrong:
 admins only, like the rest of the page.
 
 1. Open **Backups** (`/editor/backups`) as a platform admin.
-2. Scroll to **History**. Each row shows the trigger (**Manual**, **Cron** or
-   **Console**; any other value as recorded), a status (`Succeeded`,
+2. Scroll to **History**. Each row shows the trigger (**Manual**, **Cron**,
+   **Console** or **Scheduled**, the last for a backup an
+   [in-app schedule](#schedule-backups-in-the-app) took; any other value as
+   recorded), a status (`Succeeded`,
    `Failed`, `Running`, `Skipped` or `Canceled`), **Database** and **Media** badges, the
    size, whether it was verified, its destinations, and whether its files are
-   still on this host. A media set written in several parts shows "N parts".
+   still on this host. A media set written in several parts shows "N parts",
+   a link that opens
+   [Restore a media set that has several parts](#restore-a-media-set-that-has-several-parts)
+   in a new tab.
    A failed, interrupted or canceled run shows **Resume**
    ([above](#media-backups-in-parts-2218)); its tooltip names which of the
    three it is and, for a canceled one, says to wait about two and a half
-   minutes after the Cancel. A resume that was refused after the click shows
+   minutes after the Cancel. Beside it, a `?` (**About Resume**) says what a
+   resume reuses: "Continues from the files already written; each is reused
+   only if its checksum still matches. It backs up the files listed when the
+   backup first started, so its files can be from different times." A resume
+   that was refused after the click shows
    "Resume refused: …" above the row's error. A running in-app one shows **Cancel**
    ([above](#cancel-a-running-backup)) until it is finishing.
 3. Use **Previous** / **Next** to page ("Page 1 of 3").
@@ -2923,7 +2940,7 @@ The app reads them in production only.
 |---|---|---|
 | `DATABASE_URL` | backup | source DB (read-only): `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_dump` as `PGPASSWORD` only ([connection URLs](#which-database-url-the-backup-tools-accept-2719)) |
 | `BACKUP_DIR` | backup + app | local backup root (default `/var/backups/kiln`) |
-| `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set |
+| `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set and `S3_BUCKET` is not |
 | `BACKUP_KEEP_DAYS` | backup + app | local retention, 1 to 2147483647 days (default 14; anything else keeps 14 and warns): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)); an in-app schedule may keep its own backups longer or shorter ([per schedule](#set-how-long-a-schedule-keeps-its-backups)) |
 | `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
 | `KILN_BACKUP_MARKER_SYNC_CRON` | app | when the app moves the [last-good](#the-last-good-marker) and [hold](#the-hold-markers) markers for cron's backups (default `*/15 * * * *`; `false` turns it off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |

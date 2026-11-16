@@ -16,7 +16,8 @@ its last answer for a site for 30 seconds, in memory, without any line's
 
 - **Site administrators** see **This site**: the lines about their own site.
   These cover which of the site's administrators and editors have two-step
-  sign-in, the idle sign-out, the admin allowlist, the breached-password
+  sign-in, whether the site requires it and who is still in their grace
+  period, the idle sign-out, the admin allowlist, the breached-password
   policy, and whether the site's security alerts reach anyone.
 - **Platform administrators** see **This site** for the site they are on,
   and also **This installation**: lines about the whole deployment. These
@@ -610,8 +611,9 @@ All the checks run at once, each in its own process with its own deadline,
 so the page waits at most as long as the slowest deadline.
 
 - **Each check has a deadline.** It is one second unless the check asks for
-  more, and never less than 0.1 seconds or more than five. The core's
-  second-factor and API key checks take three. A check still running at its
+  more, and never less than 0.1 seconds or more than five. The core's three
+  two-step sign-in checks, the API key check and the security alerts check
+  take three. A check still running at its
   deadline is stopped and shows "This check could not run: it took too
   long."
 - **A broken check is one line, not a broken page.** A check that raises,

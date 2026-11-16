@@ -140,14 +140,19 @@ What to expect:
   working one, and the receiver then needs it ([secrets rotation](secrets-rotation.md)).
 - **The record is a log line.** Each rotation logs at info level
   `webhook secret rotated endpoint_id=… org_id=… actor_id=…`, never the
-  secret. There is no other audit trail.
+  secret. When the endpoint is subscribed to any `security.*` event, the
+  rotation also sends the site's admins a `webhook_secret_rotated`
+  [silencing notice](security-alerts.md#silencing-notices), because its
+  receiver stops verifying security deliveries until it has the new secret.
 
 What can go wrong:
 
 - **"Couldn't rotate that signing secret."**: the endpoint was not found
   (another admin deleted it after your page loaded) or the rotation was
   refused. Reload the page to see the current list.
-- **No Rotate secret button**: your role can't rotate secrets. Ask an admin.
+- **No Rotate secret button**: your role can't rotate secrets (ask an
+  admin), or the endpoint is Slack-format, which has no secret to give a
+  receiver ([Slack-format endpoints](#slack-format-endpoints)).
 - **The receiver answers 4xx after the rotation**: it still holds the old
   secret. Reveal the new one and update the receiver; failed deliveries retry
   on their own and can be redelivered ([Ping and redeliver](#ping-and-redeliver)).
@@ -252,7 +257,7 @@ auto-disabled: there is no need to disable it first.
 
 1. Open **Webhooks** in the console navigation (`/editor/webhooks`). Each
    endpoint's row ends with **Ping**, **Disable** (or **Enable**), **Edit**,
-   **Rotate secret** and a red **Delete**.
+   **Rotate secret** (not on a Slack-format row) and a red **Delete**.
 2. Click **Delete** on the endpoint's row. If you already have the endpoint
    open under **Edit**, the form's **Delete webhook** button, to the right of
    **Save** and **Cancel**, does the same.
