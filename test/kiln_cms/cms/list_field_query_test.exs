@@ -132,7 +132,7 @@ defmodule KilnCMS.CMS.ListFieldQueryTest do
       assert ListFieldQuery.ops(:time) == ~w(eq gte lte null)
       assert ListFieldQuery.ops(:json) == []
 
-      for type <- [:range, :key_value, :link] do
+      for type <- [:range, :key_value, :link, :address] do
         assert ListFieldQuery.ops(type) == []
         refute ListFieldQuery.sortable?(%{field_type: type})
         assert :error = ListFieldQuery.cast(%{field_type: type}, "eq", "x")

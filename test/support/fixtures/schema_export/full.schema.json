@@ -1410,6 +1410,48 @@
                 "null"
               ]
             },
+            "office": {
+              "additionalProperties": false,
+              "properties": {
+                "address_line1": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "address_line2": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "administrative_area": {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "country": {
+                  "description": "ISO 3166-1 alpha-2 country code.",
+                  "pattern": "^[A-Z]{2}$",
+                  "type": "string"
+                },
+                "locality": {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "postal_code": {
+                  "maxLength": 16,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "country"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            },
             "opens_at": {
               "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
               "type": [

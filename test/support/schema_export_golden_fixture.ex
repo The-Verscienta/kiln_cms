@@ -68,6 +68,7 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
     {"price_band", :range, %{}},
     {"specs", :key_value, %{}},
     {"source", :link, %{}},
+    {"office", :address, %{}},
     {"event_dates", :date, %{multiple: true, max_items: 10}},
     {"scores", :integer, %{multiple: true, min_items: 1}},
     {"contacts", :email, %{multiple: true}}

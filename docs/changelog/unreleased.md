@@ -7,6 +7,18 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="address-field-type-name-upgrade"></a>
+
+- **The field type name `address` is reserved (#2279).**
+  Kiln now ships a built-in `:address` type, and a name can be registered only
+  once. An overlay or plugin `Kiln.FieldType` that registers `address` must be
+  renamed, in the module's `name/0` and in any stored field definition;
+  `mix kiln.plugins.doctor` fails otherwise. A stored definition that already
+  used the name is cast by the built-in type. No migration. Rolling back to
+  1.8.0 or older needs the `address` fields removed first, like `key_value`
+  and `telephone`; see
+  [docs/releasing.md](../releasing.md#rolling-back-to-v180).
+
 <a id="backup-destinations-upgrade"></a>
 
 - **Run `mix ash.migrate` (new table `backup_destinations`; new `backup_runs.destinations` and `backup_runs.offsite_status`). Don't run a backup while a multi-node deployment is part-way through the upgrade. Rolling back to 1.10 is possible, but backups that reached a stored destination then read wrong in History.**
@@ -45,6 +57,23 @@ carries the reasoning.
   See [docs/releasing.md](../releasing.md#rolling-back-past-backup-destinations).
 
 ## Added
+
+<a id="address-field-type"></a>
+
+- **A built-in `:address` custom field type: a postal address stored as one object (country, administrative area, locality, postal code, two address lines), with a country select in the editor (#2279).**
+  The country is an ISO 3166-1 alpha-2 code and is required once any other
+  part is given; parts are trimmed, single-line and capped, and unknown keys
+  are refused. The postal code is upper-cased and given its canonical spacing,
+  and its format is checked for US, CA, GB, DE, FR, NL, AU, ES, IT, JP, CH, SE,
+  BR and IN; any other country takes free text. No licensed dataset ships: the
+  country list is the public ISO assignment and the formats are a small
+  hand-written table. Served as generic JSON, never sortable, filterable only
+  for "Empty or not"; a `searchable` flag indexes the lines, locality, region
+  and postal code. Guide:
+  [Address fields](../extending-content.md#address-fields).
+  - **Not yet.** Labels and required parts that follow the country,
+    administrative-area lists, a schema.org `PostalAddress` in the JSON-LD
+    output, and a geocode hand-off to `:geolocation`.
 
 <a id="backup-destinations"></a>
 

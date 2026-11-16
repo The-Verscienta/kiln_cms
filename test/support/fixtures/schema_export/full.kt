@@ -562,6 +562,7 @@ public data class PostDocument(
         public val hero: MediaSnapshot? = null,
         public val homepage: String? = null,
         @SerialName("launch_date") public val launchDate: String? = null,
+        public val office: Office? = null,
         @SerialName("opens_at") public val opensAt: String? = null,
         /**
          * Write-time snapshot of a referenced record.
@@ -599,6 +600,17 @@ public data class PostDocument(
             public val amount: Double? = null,
             public val form: String? = null,
             public val unit: String? = null,
+        )
+
+        @Serializable
+        public data class Office(
+            @SerialName("address_line1") public val addressLine1: String? = null,
+            @SerialName("address_line2") public val addressLine2: String? = null,
+            @SerialName("administrative_area") public val administrativeArea: String? = null,
+            /** ISO 3166-1 alpha-2 country code. */
+            public val country: String,
+            public val locality: String? = null,
+            @SerialName("postal_code") public val postalCode: String? = null,
         )
 
         @Serializable

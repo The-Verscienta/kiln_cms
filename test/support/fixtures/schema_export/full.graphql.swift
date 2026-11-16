@@ -1150,6 +1150,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let hero: MediaSnapshot?
         public let homepage: String?
         public let launchDate: String?
+        public let office: Office?
         public let opensAt: String?
         /// Write-time snapshot of a referenced record.
         ///
@@ -1178,7 +1179,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let tier: String?
         public let `where`: Where?
 
-        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, contacts: [String]? = nil, dosages: [DosagesItem]? = nil, eventDates: [String]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, priceBand: PriceBand? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, scores: [Int]? = nil, seo: Seo? = nil, source: Source? = nil, specs: [SpecsItem]? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, contacts: [String]? = nil, dosages: [DosagesItem]? = nil, eventDates: [String]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, office: Office? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, priceBand: PriceBand? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, scores: [Int]? = nil, seo: Seo? = nil, source: Source? = nil, specs: [SpecsItem]? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
             self.accent = accent
             self.codeSample = codeSample
             self.contactEmail = contactEmail
@@ -1192,6 +1193,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
             self.hero = hero
             self.homepage = homepage
             self.launchDate = launchDate
+            self.office = office
             self.opensAt = opensAt
             self.parent = parent
             self.phone = phone
@@ -1226,6 +1228,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
             case hero
             case homepage
             case launchDate = "launch_date"
+            case office
             case opensAt = "opens_at"
             case parent
             case phone
@@ -1255,6 +1258,34 @@ public struct PostDocument: Codable, Hashable, Sendable {
                 self.amount = amount
                 self.form = form
                 self.unit = unit
+            }
+        }
+
+        public struct Office: Codable, Hashable, Sendable {
+            public let addressLine1: String?
+            public let addressLine2: String?
+            public let administrativeArea: String?
+            /// ISO 3166-1 alpha-2 country code.
+            public let country: String
+            public let locality: String?
+            public let postalCode: String?
+
+            public init(addressLine1: String? = nil, addressLine2: String? = nil, administrativeArea: String? = nil, country: String, locality: String? = nil, postalCode: String? = nil) {
+                self.addressLine1 = addressLine1
+                self.addressLine2 = addressLine2
+                self.administrativeArea = administrativeArea
+                self.country = country
+                self.locality = locality
+                self.postalCode = postalCode
+            }
+
+            enum CodingKeys: String, CodingKey {
+                case addressLine1 = "address_line1"
+                case addressLine2 = "address_line2"
+                case administrativeArea = "administrative_area"
+                case country
+                case locality
+                case postalCode = "postal_code"
             }
         }
 
@@ -1817,7 +1848,7 @@ public struct PostCustomFields: Codable, Hashable, Sendable {
           subtitle: customString(name: "subtitle")
           summary: customString(name: "summary")
           tier: customString(name: "tier")
-          fields(names: ["contacts", "dosages", "event_dates", "extra", "gallery", "parent", "price_band", "properties", "related", "scores", "seo", "source", "specs", "synonyms", "where"]) {
+          fields(names: ["contacts", "dosages", "event_dates", "extra", "gallery", "office", "parent", "price_band", "properties", "related", "scores", "seo", "source", "specs", "synonyms", "where"]) {
             __typename
             name
             ... on StringValue { asString: value }

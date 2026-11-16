@@ -62,10 +62,17 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Overlays and plugins: the field type name `address` is now built in. Rename a type that uses it.**
+  ([long form](docs/changelog/unreleased.md#address-field-type-name-upgrade))
+
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
   ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
 
 ### Added
+
+- **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
+  Served as generic JSON, filterable only for "Empty or not", not sortable. Country-driven labels, region lists and schema.org output are not yet.
+  ([#2279](https://github.com/The-Verscienta/kiln_cms/issues/2279) · [long form](docs/changelog/unreleased.md#address-field-type))
 
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
   ([long form](docs/changelog/unreleased.md#backup-destinations))
