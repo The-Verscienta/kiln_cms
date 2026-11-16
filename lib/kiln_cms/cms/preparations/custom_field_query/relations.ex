@@ -134,14 +134,49 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
 
   A reference may point at several types (`target_types`): each is its own
   correlated subquery on its primary key and they are `coalesce`d, since an
-  id lives in one table. `ctx` carries `:actor` and `:tenant`.
-  """
-  @spec sort_key(map(), map()) :: term()
-  def sort_key(%{field_type: :media, name: name}, ctx),
-    do: target_key([KilnCMS.CMS.MediaItem], :filename, name, ctx)
+  id lives in one table. A field whose target type no longer resolves probes
+  every content resource, like `LinkEndsReadable`. `ctx` carries `:actor` and
+  `:tenant`.
 
-  def sort_key(%{field_type: :reference, name: name} = definition, ctx),
-    do: target_key(target_resources(definition, ctx), :title, name, ctx)
+  ## Cost, and the cap
+
+  Measured at 100,000 referrers (`custom_sort_target_key_benchmark_test.exs`,
+  `docs/json-api.md`): the whole table costs about 1 s with one probed type
+  and about 1 s more per added type, and the same read narrowed to 1,000
+  rows costs 10-60 ms at any of them. The cost is linear in the number of
+  probed resources, so the sort is refused (`{:error, message}`) for a field
+  that would probe more than `max_sort_targets/0`, instead of letting an
+  overlay with many content types turn one request into a multi-second scan.
+  Not a refusal of the unresolved-type fallback as such: on a default build
+  that is three resources, the same as a declared three-type field.
+  """
+  @spec sort_key(map(), map()) :: {:ok, term()} | {:error, String.t()}
+  def sort_key(%{field_type: :media, name: name}, ctx),
+    do: {:ok, target_key([KilnCMS.CMS.MediaItem], :filename, name, ctx)}
+
+  def sort_key(%{field_type: :reference, name: name} = definition, ctx) do
+    resources = target_resources(definition, ctx)
+    max = max_sort_targets()
+
+    if length(resources) > max do
+      {:error,
+       "custom field #{inspect(name)} (reference) targets #{length(resources)} content types " <>
+         "and is not sortable: a sort looks the target up in each, at most #{max} are allowed; " <>
+         "narrow the field's target types or sort by a built-in"}
+    else
+      {:ok, target_key(resources, :title, name, ctx)}
+    end
+  end
+
+  @default_max_sort_targets 8
+
+  @doc """
+  The most content resources a reference sort probes per row. Settable with
+  `config :kiln_cms, :reference_sort_max_targets` (the tests lower it).
+  """
+  @spec max_sort_targets() :: pos_integer()
+  def max_sort_targets,
+    do: Application.get_env(:kiln_cms, :reference_sort_max_targets, @default_max_sort_targets)
 
   # The snapshot's id as a uuid, or NULL for anything else a row may hold
   # under the name (a retyped field, a list, a seeded string).

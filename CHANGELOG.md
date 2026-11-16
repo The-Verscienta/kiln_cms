@@ -62,11 +62,21 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` (new nullable `field_definitions.flex_of_id` and `item_setting`, part of #2282). Nothing changes for existing fields; rolling back is safe.**
+  ([#2969](https://github.com/The-Verscienta/kiln_cms/pull/2969) · [long form](docs/changelog/unreleased.md#flexible-item-types-upgrade))
+
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
   ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
 
 ### Added
 
+- **Number fields: Step, Prefix and Suffix in the Validation fieldset and a Slider editor input. Field-sync exports now carry `step`, `prefix` and `suffix`, which a release before this one refuses as unknown keys.**
+  ([long form](docs/changelog/unreleased.md#number-field-options))
+
+- **GraphQL `customWhere` takes `_or` / `_and` / `_not` groups, the typed form of `customFilter`'s: same nesting (4 deep), same member cap (50), same errors for unknown and private fields.**
+  ([#2445](https://github.com/The-Verscienta/kiln_cms/issues/2445) · [long form](docs/changelog/unreleased.md#graphql-custom-where-groups))
+
+- **Import field definitions from the console: upload a file, review the dry-run diff and data-loss refusals, confirm `--prune` and `--allow-data-loss` separately, and apply.** ([#2438](https://github.com/The-Verscienta/kiln_cms/issues/2438) · [long form](docs/changelog/unreleased.md#field-sync-screen))
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
   ([long form](docs/changelog/unreleased.md#backup-destinations))
 
@@ -81,6 +91,8 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
+- **The content list can sort by a single-valued reference or media field too (Sort by → Field), by the target's current title or filename.**
+  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
 
 ### Fixed
 

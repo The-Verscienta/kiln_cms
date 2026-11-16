@@ -165,8 +165,7 @@ defmodule KilnCMS.CMS.HiddenFields do
   def visible_definitions(actor, org, descriptor, definitions),
     do: actor |> console_access(org, descriptor, definitions) |> elem(0)
 
-  defp top_level?(definition),
-    do: is_nil(Map.get(definition, :link_of_id)) and is_nil(Map.get(definition, :group_of_id))
+  defp top_level?(definition), do: KilnCMS.CMS.FieldDefinition.top_level?(definition)
 
   defp restricted(actor, org_id, type, read, private_names) do
     write = Scoping.field_grant(actor, org_id, type)

@@ -7,6 +7,20 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="flexible-item-types-upgrade"></a>
+
+- **Run `mix ash.migrate` (new `field_definitions.flex_of_id`, nullable, and `item_setting`, default `false`; part of #2282). Nothing changes for existing fields; rolling back is safe.**
+  Both are additions with a default or null, so the previous release keeps
+  working against them. They are the first step of flexible content (a custom
+  field holding mixed typed items), which reaches the API only: there is no
+  admin screen or editor input yet, so no site has one until an admin defines
+  it from code (`docs/extending-content.md`, "Define a flexible field from
+  code"). After a rollback, such a field reads on the previous release as a
+  field of an unknown type (hidden, its items kept; delete it from the
+  Fields screen) and its item types as ownerless groups that nothing loads.
+  Details in [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+  Refs #2282.
+
 <a id="backup-destinations-upgrade"></a>
 
 - **Run `mix ash.migrate` (new table `backup_destinations`; new `backup_runs.destinations` and `backup_runs.offsite_status`). Don't run a backup while a multi-node deployment is part-way through the upgrade. Rolling back to 1.10 is possible, but backups that reached a stored destination then read wrong in History.**
@@ -45,6 +59,77 @@ carries the reasoning.
   See [docs/releasing.md](../releasing.md#rolling-back-past-backup-destinations).
 
 ## Added
+
+<a id="number-field-options"></a>
+
+- **Number fields can set a step, a prefix and a suffix, and an editor input of Slider. The step, prefix and suffix are new keys in field-sync files, which a release before this one refuses.**
+  In the fields admin an Integer or Float field gains **Step**, **Prefix**
+  and **Suffix** inputs in the **Validation** fieldset, and its **Editor
+  input** group offers **Number box** (the default) or **Slider**, the
+  latter only while the field has both a minimum and a maximum. Run
+  `mix ash.migrate`: it adds three nullable columns to `field_definitions`
+  (`step`, `prefix`, `suffix`), so a rollback reads nothing different.
+
+  All three are editor-only hints. `step` moves the editor's arrows and
+  slider and is **not** enforced on save; only `validation.min` and `max`
+  bound a value. It must be above 0, a whole number on an integer field, and
+  no wider than the span between min and max. `prefix` and `suffix` are up to
+  16 characters. A blank slider field shows **Set a value** (stores the
+  minimum) rather than a range input, so the slider never fills in a field
+  nobody set. Only the core `:integer` and `:float` types read the options;
+  they clear on any other type, and a plugin field type never carries them.
+
+  **Field sync.** Exports now carry `"step"`, `"prefix"` and `"suffix"`
+  (`null` when unset). Version stays 1, so a 1.10 build refuses such a file
+  as unknown keys, as it does for `width`: export from the older build, or
+  delete the keys with `jq` first. A file without the keys still imports into
+  this release, but missing keys read as `null`, so it clears the options on
+  fields that had them (the dry run shows `~`).
+
+  **APIs.** JSON:API field-definition payloads (`?include=field_definitions`)
+  gain `step`, `prefix` and `suffix`; the schema export gains `x-kiln-step`,
+  `x-kiln-prefix` and `x-kiln-suffix` (absent when unset) and
+  `x-kiln-widget: "slider"`. Guide:
+  [Show a number as a slider or with a unit](../extending-content.md#show-a-number-as-a-slider-or-with-a-unit).
+
+<a id="graphql-custom-where-groups"></a>
+
+- **GraphQL `customWhere` takes `_or` / `_and` / `_not` groups.**
+  A condition in the typed list can now be a group instead of a field
+  condition: `_or` and `_and` hold a list of conditions, `_not` holds one.
+  They nest and sit beside plain conditions, and they run through the engine
+  `customFilter` uses (`CustomFieldQuery`), so the meaning is the same,
+  including SQL's `not` (a record lacking the field is kept by `_not`). The
+  caps are the ones JSON:API and `customFilter` have: 4 deep, 50 conditions
+  in all, with the same error text; the 10-condition cap bounds only the
+  top level of the list (a group is one element), so over GraphQL the query's
+  complexity cap (200, 5 per condition) is the practical limit on groups,
+  well under 50; JSON:API and MCP callers have no pricing and get the full
+  50. Kind, operator, private-field and site checks apply inside
+  a group as outside one. Each condition at any depth adds 5 to the query's
+  complexity.
+
+  The change to the schema is additive for queries: `CustomFieldCondition`
+  gains `_or`, `_and` and `_not`, and its `name` is no longer `String!` (a
+  group has none). Existing documents and variables stay valid, but a
+  condition with neither a name nor a group now passes validation and is
+  refused by the read ("every condition needs a name"). A client generated
+  from the schema (Apollo Kotlin, Swift, TypeScript codegen) types `name` as
+  optional after regenerating, so code that builds the input may need a small
+  edit. A second input type behind a second argument would have been strictly
+  additive but would leave two arguments for one feature. The same groups
+  work in the MCP and JSON:API `custom_where` argument. Guide:
+  [headless-graphql-api.md](../headless-graphql-api.md#typed-filters-customwhere).
+
+<a id="field-sync-screen"></a>
+
+- **An admin can import field definitions from the console: Custom fields → Sync definitions from a file uploads a `kiln-field-definitions` file, shows the dry-run diff and the refusals for changes that would drop stored values, and applies it after a confirmation.**
+  `--prune` and `--allow-data-loss` are two separate checkboxes, off for every
+  new file, each re-running the preview. The apply sends the digest of the plan
+  that was shown (`FieldSync.digest/1`, `import_doc(expect_digest:)`) and is
+  refused when the site's definitions no longer plan the same changes. A
+  successful apply is a `org_setting_changed` security event with the counts.
+  See [Import from the console](../field-sync.md#import-from-the-console).
 
 <a id="backup-destinations"></a>
 
@@ -151,12 +236,31 @@ carries the reasoning.
   label until the referrer is saved again. A `multiple` reference or media field
   stays refused, now with `custom field "x" (reference) holds a list and is not
   sortable`. Clients that treated the old `400` as the signal can drop it.
-  Cost: one primary-key lookup per matching row (once per distinct target),
-  about 30-50 ms for a `limit` of 20 over 20,000 referrers and 2,000 targets.
-  No index on the source table can serve this order, so on a large table narrow
-  the read with a filter. No migration; rolling back only brings the refusal
+  Cost: one primary-key lookup per matching row in each type the field may
+  target. Measured at 100,000 referrers: 0.8-1.6 s over the whole table with one
+  type, up to 2.7-3.9 s with three, and 10-60 ms once a filter narrows the read
+  to 1,000 rows, for an editor and an anonymous reader alike (numbers and
+  method in [json-api.md](../json-api.md)). The cost grows linearly with the
+  types probed, so a field that would probe more than 8 content types (set by
+  `config :kiln_cms, :reference_sort_max_targets`) is refused with a `400`. The
+  unresolved-type fallback is not refused as such: it is three types on a
+  default build. No index on the source table can serve this order, so on a
+  large table narrow the read with a filter. No migration; rolling back only brings the refusal
   back. See [json-api.md](../json-api.md)
   and the amendment in decision 0014.
+
+<a id="list-sort-reference-media"></a>
+
+- **The content list's Sort by → Field menu now offers single-valued reference and media fields.**
+  They order by the same key as the API above (the target's current title, or
+  a media item's current filename), read as the signed-in editor: a target
+  they cannot read sorts with the unset rows, and Load more continues the
+  order without repeating or skipping a row. The menu entry reads "Field:
+  Mentor by current title (↑)" (or "by current filename"), because the Columns
+  cell shows the label stored with the referrer, which lags a rename until
+  the referrer is saved again, so the two can disagree without the sort being
+  wrong. A list-valued field is still not offered, and a `sort=field:…` URL or
+  saved view naming one falls back to the default order. No migration.
 
 ## Fixed
 

@@ -199,10 +199,7 @@ defmodule KilnCMS.CMS.Validations.FieldConstraints do
 
   defp unique(_changeset, _validation), do: :ok
 
-  defp nested?(changeset) do
-    not is_nil(Ash.Changeset.get_attribute(changeset, :link_of_id)) or
-      not is_nil(Ash.Changeset.get_attribute(changeset, :group_of_id))
-  end
+  defp nested?(changeset), do: not KilnCMS.CMS.FieldDefinition.top_level?(changeset)
 
   # The default is stored unchecked when a field is left blank, so it has to
   # satisfy what everything else must.

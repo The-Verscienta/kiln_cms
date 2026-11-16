@@ -32,8 +32,7 @@ defmodule KilnCMS.CMS.Changes.ClearDefaultSource do
   defp usable?(changeset, source, type) do
     source in DynamicDefaults.sources_for(type) and
       not Ash.Changeset.get_attribute(changeset, :multiple) and
-      is_nil(Ash.Changeset.get_attribute(changeset, :link_of_id)) and
-      is_nil(Ash.Changeset.get_attribute(changeset, :group_of_id))
+      KilnCMS.CMS.FieldDefinition.top_level?(changeset)
   end
 
   defp clear_field(changeset, :copy_of), do: changeset

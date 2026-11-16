@@ -408,19 +408,25 @@ type CreatePostResult {
 A condition on one custom field. Give `name` and exactly one of `string`,
 `int`, `float`, `boolean`, `date` or `dateTime`, which must be the kind of
 the field (`customString`, `customInt`, ...). Conditions in a list are ANDed.
+Instead of `name` and a kind, a condition can be one group: `_or` (any of the
+conditions in the list), `_and` (all of them) or `_not` (not this one
+condition); groups nest at most 4 deep and hold at most 50 conditions in all.
 A list of values (a `multiple` field of numbers, dates, text, ...) takes the
 kind of its items with `eq` (contains), `notEq` (does not contain), `in`
 (contains any) and `isNull`; `customFilter` also takes `has`, `has_all`,
 `has_none` and `count` on it.
 """
 input CustomFieldCondition {
-  name: String!
+  name: String
   string: StringFilter
   int: IntFilter
   float: FloatFilter
   boolean: BooleanFilter
   date: DateFilter
   dateTime: DateTimeFilter
+  _or: [CustomFieldCondition!]
+  _and: [CustomFieldCondition!]
+  _not: CustomFieldCondition
 }
 
 """

@@ -22,6 +22,11 @@ defmodule KilnCMS.CMS.FieldSyncVersionTest do
     target_type target_types validation visible_when widget width
   )
 
+  # Added since 1.9.0 under ADR 0047's second option: version 1 stays, and a
+  # release that predates a key refuses a file carrying it as unknown.
+  #   * `step`, `prefix`, `suffix` (#2432): a number's editor options.
+  @added_field_keys ~w(prefix step suffix)
+
   @v1_section_keys ~w(display initially name)
 
   @v1_type_keys ~w(
@@ -36,7 +41,7 @@ defmodule KilnCMS.CMS.FieldSyncVersionTest do
   end
 
   test "a field carries the keys version 1 shipped with" do
-    assert_keys(FieldSync.field_keys(), @v1_field_keys, "field")
+    assert_keys(FieldSync.field_keys(), Enum.sort(@v1_field_keys ++ @added_field_keys), "field")
   end
 
   test "a section layout carries the keys version 1 shipped with" do

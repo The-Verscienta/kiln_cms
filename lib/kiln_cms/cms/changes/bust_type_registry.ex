@@ -63,6 +63,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
              replain?(changeset, record) or
              reconvert?(changeset, record) or
              rebyline?(changeset, record) or
+             item_type_destroyed?(changeset, record) or
              Ash.Changeset.changing_attribute?(changeset, :private) do
           # Determine which type this field belongs to and sweep it
           type =
@@ -88,9 +89,10 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
                 to_string(content_type)
 
               # A link field (R3) re-fires its reference field's type, a group
-              # sub-field its group's: its values were moved or purged inside
-              # that type's documents.
-              parent_id = Map.get(record, :link_of_id) || Map.get(record, :group_of_id) ->
+              # sub-field its group's, an item type or an item's sub-field
+              # (#2282) its flexible field's — however deep it nests: its
+              # values were moved or purged inside that type's documents.
+              parent_id = KilnCMS.CMS.FieldDefinition.parent_id(record) ->
                 link_parent_type(parent_id, record.org_id)
 
               true ->
@@ -114,29 +116,22 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
 
   defp enqueue_seo_refire(_changeset, other, _context), do: other
 
+  # The type a nested definition's values live in: walk up to the top-level
+  # field that owns them (one hop for a link field or a group's sub-field, up to
+  # `2 * max_flexible_depth` for a sub-field of a nested item type), then name
+  # its type.
   defp link_parent_type(parent_id, org_id) do
-    case KilnCMS.CMS.get_field_definition(parent_id,
-           actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
-           authorize_with: :error,
-           tenant: org_id
-         ) do
-      {:ok, %{type_definition_id: id}} when not is_nil(id) ->
-        case KilnCMS.CMS.get_type_definition(id,
-               actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
-               authorize_with: :error,
-               tenant: org_id
-             ) do
-          {:ok, type_def} -> type_def.name
-          _ -> nil
-        end
-
-      {:ok, %{content_type: type}} when is_atom(type) and not is_nil(type) ->
-        to_string(type)
-
-      _ ->
-        nil
+    with %{} = parent <-
+           KilnCMS.CMS.Validations.FlexibleField.parent(parent_id, org_id),
+         %{} = owner <- KilnCMS.CMS.FlexiblePath.owner(parent, org_id) do
+      KilnCMS.CMS.FlexiblePath.type_name(owner, org_id)
     end
   end
+
+  # Destroying an item type (#2282) removes its items from every document of
+  # the type: they re-fire without them.
+  defp item_type_destroyed?(changeset, record),
+    do: changeset.action_type == :destroy and KilnCMS.CMS.FieldDefinition.item_type?(record)
 
   # `names_record` too: a flagged field's value is in the `A` bucket of
   # `search_weighted`, which weights `search_vector` and is the alias and

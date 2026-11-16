@@ -340,7 +340,8 @@ defmodule KilnCMSWeb.Graphql.CustomFields do
   # group's sub-fields hang off it (`group_fields`), a reference's link fields
   # are not values of the record.
   defp top_level(definitions) do
-    for %{group_of_id: nil, link_of_id: nil} = definition <- definitions,
+    for definition <- definitions,
+        KilnCMS.CMS.FieldDefinition.top_level?(definition),
         into: %{},
         do: {definition.name, %{definition: definition}}
   end

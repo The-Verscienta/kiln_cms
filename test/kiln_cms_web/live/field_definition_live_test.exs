@@ -877,7 +877,9 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       admin = authed_user(:admin)
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
-      for type <- KilnCMS.CMS.FieldTypes.reserved() do
+      # `:flexible` is API-only until its item-types panel ships (#2282): the
+      # picker does not offer it, so it needs no description yet.
+      for type <- KilnCMS.CMS.FieldTypes.reserved() -- [:flexible] do
         html =
           lv
           |> element("#new-field-form")
@@ -2389,6 +2391,115 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert CMS.get_field_definition!(sub_id, authorize?: false).validation == %{
                "max_length" => 4
              }
+    end
+  end
+
+  # #2432: a number's step, prefix and suffix, and the slider that needs bounds.
+  describe "number options" do
+    test "step, prefix and suffix are offered for numbers only", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      for type <- ~w(integer float) do
+        type_change(lv, type)
+
+        for option <- ~w(step prefix suffix) do
+          assert has_element?(lv, "#new-field-validation-#{option}"), "#{option} on #{type}"
+        end
+      end
+
+      for type <- ~w(string boolean date) do
+        type_change(lv, type)
+
+        for option <- ~w(step prefix suffix) do
+          refute has_element?(lv, "#new-field-validation-#{option}"), "#{option} on #{type}"
+        end
+      end
+    end
+
+    test "the slider card appears once both bounds are typed, and goes with one", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "integer")
+      refute has_element?(lv, "#new-field-widget")
+
+      create_change(lv, %{field_type: "integer", validation: %{"min" => "0"}})
+      refute has_element?(lv, "#new-field-widget")
+
+      create_change(lv, %{field_type: "integer", validation: %{"min" => "0", "max" => "10"}})
+      assert widget_cards(lv) == ~w(number slider)
+      assert lv |> element("label[for=new-field-widget-slider]") |> render() =~ "Slider"
+      assert lv |> element("label[for=new-field-widget-number]") |> render() =~ "Number box"
+      assert has_element?(lv, "#new-field-widget-number[value=''][checked]")
+
+      create_change(lv, %{field_type: "integer", validation: %{"min" => "0", "max" => ""}})
+      refute has_element?(lv, "#new-field-widget")
+
+      # A list of numbers is never a slider, bounds or not.
+      create_change(lv, %{
+        field_type: "integer",
+        multiple: "true",
+        validation: %{"min" => "0", "max" => "10"}
+      })
+
+      refute has_element?(lv, "#new-field-widget")
+    end
+
+    test "a number is saved with its options and a slider, summarized in the list", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      lv
+      |> element("#new-field-form")
+      |> render_submit(%{
+        "field_definition" => %{
+          "scopes" => ["page"],
+          "name" => "dose",
+          "label" => "Dose",
+          "field_type" => "float",
+          "validation" => %{"min" => "0", "max" => "10"},
+          "step" => "0.5",
+          "prefix" => "~",
+          "suffix" => "mg",
+          "widget" => "slider"
+        }
+      })
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "dose"))
+
+      assert {field.step, field.prefix, field.suffix, field.widget} == {0.5, "~", "mg", "slider"}
+
+      html = lv |> element("#field-#{field.id}") |> render()
+      assert html =~ "In steps of 0.5."
+      assert html =~ "Suffix mg."
+      assert html =~ "Slider"
+    end
+
+    test "a step too wide for the bounds is refused, naming the input", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      html =
+        lv
+        |> element("#new-field-form")
+        |> render_submit(%{
+          "field_definition" => %{
+            "scopes" => ["page"],
+            "name" => "dose",
+            "label" => "Dose",
+            "field_type" => "integer",
+            "validation" => %{"min" => "0", "max" => "10"},
+            "step" => "50"
+          }
+        })
+
+      assert html =~ "more than the span between min and max"
+    end
+
+    test "an editor can't open the page to set any of it", %{conn: conn} do
+      assert {:error, {:redirect, _}} =
+               conn |> log_in(authed_user(:editor)) |> live(~p"/editor/fields")
     end
   end
 

@@ -4064,6 +4064,19 @@
                 "description": "Field included by default.",
                 "type": "string"
               },
+              "flex_of_id": {
+                "anyOf": [
+                  {
+                    "format": "uuid",
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
               "format": {
                 "description": "Field included by default.",
                 "enum": [
@@ -4120,6 +4133,10 @@
                   }
                 ],
                 "description": "Field included by default."
+              },
+              "item_setting": {
+                "description": "Field included by default.",
+                "type": "boolean"
               },
               "label": {
                 "description": "Field included by default.",
@@ -4214,6 +4231,18 @@
                 "description": "Field included by default.",
                 "type": "integer"
               },
+              "prefix": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
               "private": {
                 "description": "Field included by default.",
                 "type": "boolean"
@@ -4282,6 +4311,31 @@
                   {
                     "nullable": true,
                     "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "step": {
+                "anyOf": [
+                  {
+                    "format": "float",
+                    "nullable": true,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
+              },
+              "suffix": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "string"
                   },
                   {
                     "type": "null"
@@ -4364,6 +4418,7 @@
               "on_target_delete",
               "private",
               "validation",
+              "item_setting",
               "position",
               "names_record",
               "searchable",
@@ -4380,6 +4435,32 @@
             "additionalProperties": false,
             "description": "A relationships object for a field_definition",
             "properties": {
+              "flex_of": {
+                "properties": {
+                  "data": {
+                    "additionalProperties": false,
+                    "description": "An identifier for flex_of",
+                    "nullable": true,
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "meta": {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      "type": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "id"
+                    ],
+                    "type": "object"
+                  }
+                }
+              },
               "group_fields": {
                 "properties": {
                   "data": {
@@ -4433,6 +4514,36 @@
                       "id"
                     ],
                     "type": "object"
+                  }
+                }
+              },
+              "item_types": {
+                "properties": {
+                  "data": {
+                    "description": "Relationship data for item_types",
+                    "items": {
+                      "additionalProperties": false,
+                      "description": "Resource identifiers for item_types",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "meta": {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "id"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
                   }
                 }
               },
@@ -4570,6 +4681,12 @@
           "field_type": {
             "$ref": "#/components/schemas/field_definition-filter-field_type"
           },
+          "flex_of": {
+            "$ref": "#/components/schemas/field_definition-filter"
+          },
+          "flex_of_id": {
+            "$ref": "#/components/schemas/field_definition-filter-flex_of_id"
+          },
           "format": {
             "$ref": "#/components/schemas/field_definition-filter-format"
           },
@@ -4593,6 +4710,12 @@
           },
           "inverse_name": {
             "$ref": "#/components/schemas/field_definition-filter-inverse_name"
+          },
+          "item_setting": {
+            "$ref": "#/components/schemas/field_definition-filter-item_setting"
+          },
+          "item_types": {
+            "$ref": "#/components/schemas/field_definition-filter"
           },
           "label": {
             "$ref": "#/components/schemas/field_definition-filter-label"
@@ -4646,6 +4769,9 @@
           "position": {
             "$ref": "#/components/schemas/field_definition-filter-position"
           },
+          "prefix": {
+            "$ref": "#/components/schemas/field_definition-filter-prefix"
+          },
           "private": {
             "$ref": "#/components/schemas/field_definition-filter-private"
           },
@@ -4669,6 +4795,12 @@
           },
           "selection": {
             "$ref": "#/components/schemas/field_definition-filter-selection"
+          },
+          "step": {
+            "$ref": "#/components/schemas/field_definition-filter-step"
+          },
+          "suffix": {
+            "$ref": "#/components/schemas/field_definition-filter-suffix"
           },
           "target_type": {
             "$ref": "#/components/schemas/field_definition-filter-target_type"
@@ -5129,6 +5261,54 @@
         },
         "type": "object"
       },
+      "field_definition-filter-flex_of_id": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "not_eq": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "field_definition-filter-format": {
         "additionalProperties": false,
         "properties": {
@@ -5446,6 +5626,45 @@
           },
           "string_starts_with": {
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-item_setting": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "boolean"
+          },
+          "greater_than": {
+            "type": "boolean"
+          },
+          "greater_than_or_equal": {
+            "type": "boolean"
+          },
+          "in": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "boolean"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "boolean"
+          },
+          "less_than": {
+            "type": "boolean"
+          },
+          "less_than_or_equal": {
+            "type": "boolean"
+          },
+          "not_eq": {
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -5987,6 +6206,60 @@
         },
         "type": "object"
       },
+      "field_definition-filter-prefix": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "field_definition-filter-private": {
         "additionalProperties": false,
         "properties": {
@@ -6349,6 +6622,108 @@
           },
           "not_eq": {
             "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-step": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "format": "float",
+            "type": "number"
+          },
+          "greater_than": {
+            "format": "float",
+            "type": "number"
+          },
+          "greater_than_or_equal": {
+            "format": "float",
+            "type": "number"
+          },
+          "in": {
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "format": "float",
+            "type": "number"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "format": "float",
+            "type": "number"
+          },
+          "less_than": {
+            "format": "float",
+            "type": "number"
+          },
+          "less_than_or_equal": {
+            "format": "float",
+            "type": "number"
+          },
+          "not_eq": {
+            "format": "float",
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-suffix": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
           }
         },
         "type": "object"

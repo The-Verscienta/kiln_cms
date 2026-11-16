@@ -48,7 +48,9 @@ defmodule KilnCMS.CMS.FieldSync do
   that owner's layouts as they are, even with `prune?: true`; an owner with
   it, `[]` included, declares all its layouts. A file this release writes
   cannot be imported by a release that predates #2280: every field carries
-  `"width"`, a key such a release refuses as unknown.
+  `"width"`, a key such a release refuses as unknown. The same holds, from
+  #2432, for `"step"`, `"prefix"` and `"suffix"` (a number's editor options,
+  `null` when unset); a file without them still imports unchanged.
 
   ## Import
 
@@ -85,7 +87,15 @@ defmodule KilnCMS.CMS.FieldSync do
   @format "kiln-field-definitions"
   @version 1
 
-  @owner_keys ~w(content_type type_definition_id link_of_id group_of_id)a
+  @owner_keys ~w(content_type type_definition_id link_of_id group_of_id flex_of_id)a
+  # Attributes of the flexible-content model (#2282) the file does not carry
+  # yet: an item type is a child row (`flex_of_id`) and `item_setting` marks
+  # one of its sub-fields, so both arrive together with the `"item_types"`
+  # child list. Until then export and import leave item types and their
+  # sub-fields alone: `FieldDefinition.parent_id/1` keeps them out of the
+  # top-level list, and no child list reaches them, so a prune never deletes
+  # one either.
+  @pending_keys ~w(item_setting)a
   # Attributes of a field that belong to one site and are not synced (#2285):
   # `selection` names tag and category ids, which differ per site, and fields
   # of its targets that this import may not have created yet.
@@ -113,7 +123,7 @@ defmodule KilnCMS.CMS.FieldSync do
     FieldDefinition
     |> Ash.Resource.Info.action(:create)
     |> Map.fetch!(:accept)
-    |> Enum.reject(&(&1 in @owner_keys or &1 in @site_keys))
+    |> Enum.reject(&(&1 in @owner_keys or &1 in @site_keys or &1 in @pending_keys))
     |> Enum.map(&Atom.to_string/1)
     |> Enum.sort()
   end
@@ -253,19 +263,24 @@ defmodule KilnCMS.CMS.FieldSync do
   any `:error` case.
 
   Options: `actor:` (an admin), `tenant:`, `apply?:` (default `false` — a dry
-  run), `prune?:` (delete fields absent from the file), `allow_data_loss?:`.
+  run), `prune?:` (delete fields absent from the file), `allow_data_loss?:`,
+  `expect_digest:` (a `digest/1` of the plan the caller showed; when the plan
+  computed now differs, nothing runs and the result is `{:error, :stale}` —
+  how the console screen applies exactly the diff the admin confirmed).
   """
-  @spec import_doc(map(), keyword()) :: {:ok, report()} | {:error, :forbidden | report()}
+  @spec import_doc(map(), keyword()) ::
+          {:ok, report()} | {:error, :forbidden | :stale | report()}
   def import_doc(doc, opts) do
     scope = Keyword.take(opts, [:actor, :tenant])
     apply? = Keyword.get(opts, :apply?, false)
     prune? = Keyword.get(opts, :prune?, false)
     allow? = Keyword.get(opts, :allow_data_loss?, false)
+    expect = Keyword.get(opts, :expect_digest)
 
     with :ok <- authorize(scope) do
       case parse(doc) do
         {:error, problems} -> {:error, invalid_report(problems, apply?)}
-        {:ok, owners} -> plan_and_run(owners, scope, apply?, prune?, allow?)
+        {:ok, owners} -> plan_and_run(owners, scope, {apply?, prune?, allow?, expect})
       end
     end
   end
@@ -275,13 +290,44 @@ defmodule KilnCMS.CMS.FieldSync do
     %{empty_report(apply?) | errors: errors}
   end
 
-  defp plan_and_run(owners, scope, apply?, prune?, allow?) do
+  defp plan_and_run(owners, scope, {apply?, prune?, allow?, expect}) do
     report = owners |> plan(scope, prune?) |> build_report(apply?)
 
-    if report.blocked != [] and not allow?,
-      do: {:error, report},
-      else: execute(report, scope, apply?)
+    cond do
+      expect != nil and digest(report) != expect -> {:error, :stale}
+      report.blocked != [] and not allow? -> {:error, report}
+      true -> execute(report, scope, apply?)
+    end
   end
+
+  @doc """
+  A fingerprint of what a report would write: every op's kind, action, path,
+  attributes or changes, and data-loss refusal — not the stored records, and
+  not whether the report is a dry run. Two plans with the same digest do the
+  same thing, so a screen that shows a plan can pass it back as
+  `expect_digest:` and apply exactly what it showed.
+  """
+  @spec digest(report()) :: String.t()
+  def digest(%{ops: ops}) do
+    ops
+    |> Enum.map(&Map.take(&1, [:kind, :op, :path, :attrs, :changes, :blocked]))
+    |> normalize()
+    |> :erlang.term_to_binary()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  # Maps become sorted key lists, so the digest does not depend on how a map
+  # was built.
+  defp normalize(%{} = map),
+    do: map |> Enum.map(fn {k, v} -> {k, normalize(v)} end) |> Enum.sort()
+
+  defp normalize(list) when is_list(list), do: Enum.map(list, &normalize/1)
+
+  defp normalize(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.map(&normalize/1) |> List.to_tuple()
+
+  defp normalize(other), do: other
 
   defp authorize(scope) do
     if CMS.can_create_field_definition?(scope[:actor], %{}, tenant: scope[:tenant]),

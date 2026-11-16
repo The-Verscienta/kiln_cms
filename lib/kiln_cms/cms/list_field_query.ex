@@ -36,8 +36,16 @@ defmodule KilnCMS.CMS.ListFieldQuery do
 
   `sortable?/1` says which fields the list can order by: a single-valued
   `string`, `text`, `integer`, `float`, `boolean`, `date`, `datetime`, `url`, `select`,
-  `email`, `telephone`, `color`, `slug` or `time`. The sort is passed as `custom_sort` (`name`, or `-name` for
+  `email`, `telephone`, `color`, `slug`, `time`, `reference` or `media`. The sort is passed as `custom_sort` (`name`, or `-name` for
   descending), and rows without a value come last either way.
+
+  A `reference` or `media` field orders by its target's **current** title (a
+  media item's current filename), the key the API's `custom_sort` uses
+  (`KilnCMS.CMS.Preparations.CustomFieldQuery.Relations.sort_key/2`, #2444),
+  read as the console user: a target they cannot read has no key and sorts
+  with the unset rows. `sort_basis/1` names that key for the sort menu, since
+  the list's own column shows the label stored with the referrer, which lags a
+  rename.
 
   The URL and saved-view spelling of these conditions (`cf`, `sort=field:…`)
   is `KilnCMSWeb.EditorLive.Filters`.
@@ -68,9 +76,9 @@ defmodule KilnCMS.CMS.ListFieldQuery do
     time: ~w(eq gte lte null)
   }
 
-  # What a sort can order by one short scalar. `user` is an id, so its order
+  # What a sort can order by one short key. `user` is an id, so its order
   # means nothing to an editor; the rest are refused by the preparation.
-  @sortable ~w(string text integer float boolean date datetime url select email telephone color slug time)a
+  @sortable ~w(string text integer float boolean date datetime url select email telephone color slug time reference media)a
 
   @typedoc "One condition: a field name, an op from `ops/1`, a canonical value."
   @type condition :: %{field: String.t(), op: String.t(), value: String.t()}
@@ -92,6 +100,15 @@ defmodule KilnCMS.CMS.ListFieldQuery do
     do: type in @sortable and Map.get(definition, :multiple) != true
 
   def sortable?(_definition), do: false
+
+  @doc """
+  What a sort by the field orders by, when that is not the value the list
+  shows: `:title` for a reference, `:filename` for media, `nil` otherwise.
+  """
+  @spec sort_basis(map()) :: :title | :filename | nil
+  def sort_basis(%{field_type: :reference}), do: :title
+  def sort_basis(%{field_type: :media}), do: :filename
+  def sort_basis(_definition), do: nil
 
   @doc """
   The canonical value for `raw` as a `op` condition on `definition`, or

@@ -1,7 +1,7 @@
 defmodule KilnCMS.CMS.Changes.ClearLinkFieldOptions do
   @moduledoc """
-  On a link field (`link_of_id` set, R3) or a group sub-field (`group_of_id`
-  set), resets the options that only mean something on a record-level field:
+  On a link field (`link_of_id` set, R3), a group sub-field (`group_of_id`
+  set) or an item type of a flexible field (`flex_of_id`, #2282), resets the options that only mean something on a record-level field:
   `searchable` and `names_record` (search reads a record's own fields, not
   the data on its connections or inside a group's rows), `localization`
   (the value lives inside its parent field's value, so it follows that field
@@ -19,8 +19,7 @@ defmodule KilnCMS.CMS.Changes.ClearLinkFieldOptions do
 
   @impl true
   def change(changeset, _opts, _context) do
-    if is_nil(Ash.Changeset.get_attribute(changeset, :link_of_id)) and
-         is_nil(Ash.Changeset.get_attribute(changeset, :group_of_id)) do
+    if KilnCMS.CMS.FieldDefinition.top_level?(changeset) do
       changeset
     else
       changeset

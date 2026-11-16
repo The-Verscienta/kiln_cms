@@ -748,6 +748,50 @@ defmodule KilnCMS.SchemaExportTest do
     end
   end
 
+  describe "a number's editor options (#2432)" do
+    test "x-kiln-step, -prefix, -suffix and a slider widget, absent while unset",
+         %{actor: actor, org: org} do
+      for attrs <- [
+            %{
+              name: "dose",
+              label: "Dose",
+              field_type: :float,
+              step: 0.5,
+              prefix: "~",
+              suffix: "mg",
+              validation: %{"min" => 0, "max" => 10},
+              widget: "slider"
+            },
+            %{name: "whole", label: "Whole", field_type: :integer, step: 5},
+            %{name: "plain", label: "Plain", field_type: :integer},
+            %{name: "doses", label: "Doses", field_type: :float, multiple: true, suffix: "mg"}
+          ] do
+        CMS.create_field_definition!(Map.put(attrs, :content_type, :page),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert %{"x-kiln-step" => 0.5, "x-kiln-prefix" => "~", "x-kiln-suffix" => "mg"} =
+               fields["dose"]
+
+      assert fields["dose"]["x-kiln-widget"] == "slider"
+      assert fields["dose"]["x-kiln-minimum"] == 0
+      assert fields["whole"]["x-kiln-step"] == 5.0
+      refute Map.has_key?(fields["whole"], "x-kiln-prefix")
+      refute Map.has_key?(fields["whole"], "x-kiln-suffix")
+      refute Map.has_key?(fields["whole"], "x-kiln-widget")
+
+      for key <- ~w(x-kiln-step x-kiln-prefix x-kiln-suffix) do
+        refute Map.has_key?(fields["plain"], key)
+      end
+
+      assert fields["doses"]["x-kiln-suffix"] == "mg"
+    end
+  end
+
   describe "a typed list (#2289)" do
     setup %{actor: actor, org: org} do
       for attrs <- [

@@ -635,6 +635,8 @@ defmodule KilnCMSWeb.Router do
       # (#497). Admin-only: the stored credentials are the site's public voice.
       live "/editor/social", SocialLive, :index
       live "/editor/fields", FieldDefinitionLive, :index
+      # Upload, preview and apply a field-definitions file (#2438).
+      live "/editor/fields/sync", FieldSyncLive, :index
       live "/editor/types", TypeDefinitionLive, :index
       # Per-site syndication policy (#719) — which types appear in this site's
       # feeds and which carry their full body. Org-scoped for the same reason

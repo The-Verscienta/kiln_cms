@@ -15,6 +15,14 @@ stay migrations.
 Both directions need an **admin** (the import and export check that the user can
 define fields).
 
+A **flexible field** (`:flexible`, #2282) travels as a field, but its item
+types and their sub-fields do **not** yet: the file format has no child list
+for them, and `item_setting` is not a synced attribute. Importing such a file
+creates the field with no item types (item writes are refused until you define
+some), and neither an import nor `--prune` plans or deletes an item type of an
+existing field. See
+[Define a flexible field from code](extending-content.md#define-a-flexible-field-from-code).
+
 ## Export
 
 ```bash
@@ -23,7 +31,7 @@ mix kiln.fields.export --org other-site --actor admin@example.com
 ```
 
 A signed-in admin can also download the same file from the browser by opening
-`/editor/fields/export.json` (the Fields screen has no button for it yet). It
+`/editor/fields/export.json`, or from the **Sync definitions** screen below. It
 saves as `field-definitions.json`; anyone below admin gets a `403` with
 `{"error": "admin_required"}`. On a release:
 
@@ -110,6 +118,42 @@ must fail on a refused import.
   field if it holds data. Rename it in the target's console first (that moves
   the values), then export again.
 
+## Import from the console
+
+An admin with no shell on the environment can import from **Custom fields →
+Sync definitions from a file** (`/editor/fields/sync`). It is a screen over the
+same import as `mix kiln.fields.import`: nothing is diffed or validated by the
+screen itself.
+
+1. **Choose a file.** One `.json` file of up to 2 MB, made by Export. It is
+   checked by content: anything that is not a JSON object is refused whatever
+   its name, and a JSON object that is not a `kiln-field-definitions` document
+   is reported by the import with its path.
+2. **Review the changes.** *Preview changes* runs a dry run: the `+` create,
+   `~` update, `-` delete and `?` kept lines (also spelled out as words, not
+   only signs), the counts, any write the real run would refuse, and the
+   changes that are **refused because records hold values** (a delete, a type
+   change, a list made single). Nothing is written.
+3. **Confirmations.** Two separate checkboxes, both off for every new file:
+   *Delete fields this file does not list* (`--prune`) and *Allow changes that
+   drop values records already hold* (`--allow-data-loss`). Changing either
+   re-runs the preview. While a refusal is listed and data loss is not allowed,
+   **Apply** stays disabled and the remaining writes are not checked yet.
+4. **Apply.** *Apply…* shows a summary, including which confirmations you
+   gave; only *Yes, apply these changes* writes. The apply sends the plan you
+   saw: if another admin or an import changed the site's definitions in the
+   meantime so that the plan differs, nothing is written, the page says so and
+   shows the updated changes. The import is still one transaction. The window
+   between that check and the write is milliseconds, and the check does not
+   lock another admin's edit of the same field in that instant.
+
+Only an admin reaches the screen, and each step re-checks it. A successful
+apply is recorded in the security log as **Site setting changed**
+(`setting` `field_definitions`, with the created / updated / deleted counts and
+whether pruning or data loss was confirmed;
+[security events](security-events.md)). An import from the command line or the
+release `rpc` is **not** recorded there.
+
 ## The file
 
 ```json
@@ -118,7 +162,7 @@ must fail on a refused import.
   "version": 1,
   "owners": [
     { "kind": "compiled", "type": "post",
-      "fields": [ { "name": "rating", "label": "Rating", "field_type": "integer", "section": "Clinical", "width": "half", "validation": {"min": 1, "max": 5}, "…": "…" } ],
+      "fields": [ { "name": "rating", "label": "Rating", "field_type": "integer", "section": "Clinical", "width": "half", "step": null, "prefix": null, "suffix": null, "validation": {"min": 1, "max": 5}, "…": "…" } ],
       "sections": [ { "name": "Clinical", "display": "tab", "initially": "auto" } ] },
     { "kind": "dynamic", "type": "recipe", "definition": { "name": "recipe", "label": "Recipe", "…": "…" }, "fields": [ ], "sections": [ ] }
   ]
@@ -188,6 +232,27 @@ leaves out takes the attribute's default, normally what every field had
 before the attribute existed. The import then sets that attribute back to the
 default on every field that holds something else, and the dry run lists it
 as `~`.
+
+### Number options (`step`, `prefix`, `suffix`)
+
+A number field's export carries `"step"` (a number), `"prefix"` and
+`"suffix"` (text), each `null` when unset. See
+[Show a number as a slider or with a unit](extending-content.md#show-a-number-as-a-slider-or-with-a-unit).
+
+- **A release before this one refuses the file.** These keys first ship
+  after 1.10, so an older build reads an export that has them as unknown keys,
+  one error per field (`unknown key(s) step, prefix, suffix`), the same way it
+  treats `width` (see
+  [Moving a file to an older build](#moving-a-file-to-an-older-build)).
+  Export from the older build, or remove the keys with `jq`, and accept that
+  the target keeps its own values.
+- **An older file still imports, and clears the options.** A file without
+  the keys is read with all three as `null`, so importing it into this
+  release sets them back to `null` on every field that has them, and the dry
+  run lists each as `~`. Keep them in the file if you want to keep them.
+- **`step` follows the field's rules.** A fractional step on an integer
+  field, or one wider than its min-to-max span, fails that field with the
+  field's path and nothing is written.
 
 ### Editor inputs (`widget`)
 

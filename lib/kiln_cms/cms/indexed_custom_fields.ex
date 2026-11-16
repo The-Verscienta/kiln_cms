@@ -44,6 +44,7 @@ defmodule KilnCMS.CMS.IndexedCustomFields do
 
   @name_format ~r/\A[a-z][a-z0-9_]*\z/
   @max_length 24
+  # Scalars only: a `:group` or `:flexible` value is a composite object.
   @eligible_types [:integer, :float, :date, :datetime]
 
   # `config :kiln_cms, :indexed_custom_fields` is a list (every content table

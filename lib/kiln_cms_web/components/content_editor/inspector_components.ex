@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   import KilnCMSWeb.ContentEditor.Shared,
     only: [blank_to_nil: 1, selected_tag_ids: 2, user_label: 1, with_counts: 2]
 
+  alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldWidgets
   alias KilnCMSWeb.ContentEditor.Conditional
@@ -746,6 +747,11 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
           >
             <.icon name="hero-bars-2" class="size-3.5" />
           </span>
+          <.number_unit
+            definition={@definition}
+            side="prefix"
+            id={"#{cf_id(@definition)}-#{index}-prefix"}
+          />
           <input
             type={@input_type}
             id={"#{cf_id(@definition)}-#{index}"}
@@ -756,6 +762,11 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
             }
             class="field-input min-w-0 flex-1 py-1 text-sm"
             {@item_attrs}
+          />
+          <.number_unit
+            definition={@definition}
+            side="suffix"
+            id={"#{cf_id(@definition)}-#{index}-suffix"}
           />
           <button
             type="button"
@@ -929,6 +940,28 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     if definition.multiple,
       do: group_rows_input(assign(assigns, :rows, GroupRows.rows(assigns.value))),
       else: group_input(assign(assigns, :row, GroupRows.row(assigns.value)))
+  end
+
+  # A `:flexible` field (#2282). Until the items UI lands this is read-only:
+  # it renders a note and a count and no input, so the form posts nothing for
+  # the key and a save keeps the stored items.
+  def custom_field_input(%{definition: %{field_type: :flexible}} = assigns) do
+    assigns = assign(assigns, :item_count, flexible_item_count(assigns.value))
+
+    ~H"""
+    <div id={cf_id(@definition)}>
+      <span class="mb-1 block text-sm font-medium">{@definition.label}</span>
+      <p class="text-sm text-base-content/80">
+        {ngettext("%{count} item", "%{count} items", @item_count)}
+      </p>
+      <p class="mt-1 text-xs text-base-content/70">
+        {gettext("Edited through the API; item editing arrives with the next release.")}
+      </p>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+    </div>
+    """
   end
 
   # A `:key_value` field (#2278): one `key=value` per line. The stored pairs
@@ -1802,6 +1835,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   defp rows_count(rows, _definition),
     do: ngettext("%{count} row", "%{count} rows", length(rows))
 
+  defp flexible_item_count(items) when is_list(items), do: length(items)
+  defp flexible_item_count(_other), do: 0
+
   defp bare_custom_field_input(assigns) do
     case field_type_parts(assigns.definition) do
       [] -> scalar_custom_field_input(assigns)
@@ -2013,17 +2049,50 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
 
   # A plain `<input>`. Plugin and built-in field types (`Kiln.FieldType`) pick
   # their HTML input kind + extra attributes (min/max/step/readonly/…) via the
-  # registry; core types map below.
+  # registry; core types map below. A core number may draw as a range slider
+  # (#2432, `FieldWidgets`) and carries its `prefix`/`suffix` beside the input.
   defp scalar_custom_field_input(assigns) do
     {input_type, extra} = input_kind(assigns.definition)
     assigns = assigns |> assign(:input_type, input_type) |> assign(:extra, extra)
 
+    case slider_state(assigns.definition, assigns.value) do
+      :off ->
+        number_or_plain_input(assigns)
+
+      :blank ->
+        slider_custom_field_input(assign(assigns, slider: :blank, number: nil))
+
+      {:value, number, min, max} ->
+        slider_custom_field_input(
+          assign(assigns, slider: :value, number: number, min: min, max: max)
+        )
+    end
+  end
+
+  defp number_or_plain_input(assigns) do
     ~H"""
     <div>
       <label for={cf_id(@definition)} class="mb-1 block text-sm font-medium">
         {@definition.label}
       </label>
+      <div :if={number_adornments?(@definition)} class="flex items-center gap-1.5">
+        <.number_unit definition={@definition} side="prefix" />
+        <input
+          id={cf_id(@definition)}
+          type={@input_type}
+          name={@name}
+          value={@value}
+          placeholder={@placeholder}
+          required={@definition.required}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={number_describedby(@definition, @errors)}
+          class="field-input min-w-0 flex-1"
+          {@extra}
+        />
+        <.number_unit definition={@definition} side="suffix" />
+      </div>
       <input
+        :if={!number_adornments?(@definition)}
         id={cf_id(@definition)}
         type={@input_type}
         name={@name}
@@ -2043,6 +2112,190 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A range slider (#2432). The browser's range input always holds a value, so
+  # a blank field must not draw one: it would submit its `min` on the first
+  # unrelated edit and quietly fill a field nobody set. A blank field shows a
+  # "Set a value" button instead (the server stores the field's minimum), and
+  # a set one a "Clear" button unless the field is required. A stored value
+  # outside the bounds never reaches here (`slider_state/2`): it draws as the
+  # plain number input, so nothing is clamped and re-submitted.
+  attr :definition, :map, required: true
+  attr :name, :string, required: true
+  attr :value, :any, required: true
+  attr :errors, :list, default: []
+  attr :slider, :atom, required: true
+  attr :number, :any, default: nil
+  attr :min, :any, default: nil
+  attr :max, :any, default: nil
+
+  defp slider_custom_field_input(assigns) do
+    ~H"""
+    <div>
+      <label
+        for={cf_id(@definition)}
+        id={"#{cf_id(@definition)}-label"}
+        class="mb-1 block text-sm font-medium"
+      >
+        {@definition.label}
+      </label>
+      <div :if={@slider == :blank} class="flex items-center gap-2">
+        <%!-- A present blank key is what clears a stored value on save; without
+        it a cleared field would simply not submit and keep the old one. --%>
+        <input type="hidden" name={@name} value="" />
+        <button
+          type="button"
+          id={cf_id(@definition)}
+          phx-click="number_field_set"
+          phx-value-field={@definition.name}
+          aria-describedby={@errors != [] && cf_errors_id(@definition)}
+          class="btn btn-ghost btn-sm"
+        >
+          {gettext("Set a value")}
+        </button>
+        <span class="text-xs text-base-content/70">{gettext("No value yet.")}</span>
+      </div>
+      <div :if={@slider == :value} class="flex items-center gap-3">
+        <input
+          id={cf_id(@definition)}
+          type="range"
+          name={@name}
+          value={@number}
+          min={@min}
+          max={@max}
+          step={slider_step(@definition)}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && cf_errors_id(@definition)}
+          aria-valuetext={number_text(@definition, @number)}
+          class="min-w-0 flex-1 accent-primary"
+        />
+        <output
+          id={"#{cf_id(@definition)}-readout"}
+          for={cf_id(@definition)}
+          class="min-w-12 text-right text-sm tabular-nums"
+        >
+          {number_text(@definition, @number)}
+        </output>
+        <button
+          :if={!@definition.required}
+          type="button"
+          id={"#{cf_id(@definition)}-clear"}
+          phx-click="number_field_clear"
+          phx-value-field={@definition.name}
+          aria-label={gettext("Clear %{field}", field: @definition.label)}
+          class="btn btn-ghost btn-sm"
+        >
+          {gettext("Clear")}
+        </button>
+      </div>
+      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+        {@definition.help_text}
+      </p>
+      <.custom_field_errors_list definition={@definition} errors={@errors} />
+    </div>
+    """
+  end
+
+  attr :definition, :map, required: true
+  attr :side, :string, values: ~w(prefix suffix), required: true
+  # A list repeats the unit on every item, so each needs an id of its own.
+  attr :id, :string, default: nil
+
+  # A number's `prefix` or `suffix` (#2432) drawn beside its input.
+  defp number_unit(assigns) do
+    assigns = assign(assigns, :text, unit_text(assigns.definition, assigns.side))
+
+    ~H"""
+    <span
+      :if={@text}
+      id={@id || "#{cf_id(@definition)}-#{@side}"}
+      class="shrink-0 text-sm text-base-content/70"
+    >
+      {@text}
+    </span>
+    """
+  end
+
+  defp unit_text(definition, "prefix"), do: blank_to_nil(Map.get(definition, :prefix))
+  defp unit_text(definition, "suffix"), do: blank_to_nil(Map.get(definition, :suffix))
+
+  defp number_adornments?(definition),
+    do:
+      core_number?(definition) and
+        (Map.get(definition, :prefix) not in [nil, ""] or
+           Map.get(definition, :suffix) not in [nil, ""])
+
+  defp core_number?(definition), do: Map.get(definition, :field_type) in [:integer, :float]
+
+  # The unit spans' ids ride on the input's description, with any errors.
+  defp number_describedby(definition, errors) do
+    ids =
+      [
+        Map.get(definition, :prefix) not in [nil, ""] && "#{cf_id(definition)}-prefix",
+        Map.get(definition, :suffix) not in [nil, ""] && "#{cf_id(definition)}-suffix",
+        errors != [] && cf_errors_id(definition)
+      ]
+      |> Enum.filter(& &1)
+
+    if ids == [], do: nil, else: Enum.join(ids, " ")
+  end
+
+  # "$ 40 kg": the value with the field's own prefix and suffix.
+  defp number_text(definition, number) do
+    [Map.get(definition, :prefix), to_string(number), Map.get(definition, :suffix)]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" ")
+  end
+
+  # `:off` — draw the number input; `:blank` — a slider field with no value;
+  # `{:value, number, min, max}` — a value inside its bounds.
+  defp slider_state(definition, value) do
+    with true <- core_number?(definition),
+         "slider" <- FieldWidgets.effective(definition),
+         %{"min" => min, "max" => max} when is_number(min) and is_number(max) <-
+           FieldConstraints.normalize(Map.get(definition, :validation)) do
+      case slider_number(value) do
+        :blank -> :blank
+        {:ok, number} when number >= min and number <= max -> {:value, number, min, max}
+        _outside_or_invalid -> :off
+      end
+    else
+      _not_a_slider -> :off
+    end
+  end
+
+  defp slider_number(value) when is_number(value), do: {:ok, value}
+  defp slider_number(nil), do: :blank
+
+  defp slider_number(value) when is_binary(value) do
+    text = String.trim(value)
+
+    case {text, Integer.parse(text), Float.parse(text)} do
+      {"", _int, _float} -> :blank
+      {_text, {int, ""}, _float} -> {:ok, int}
+      {_text, _int, {float, ""}} -> {:ok, float}
+      _other -> :invalid
+    end
+  end
+
+  defp slider_number(_value), do: :invalid
+
+  defp slider_step(definition) do
+    case step_attr(definition) do
+      nil -> if definition.field_type == :integer, do: "1", else: "any"
+      step -> step
+    end
+  end
+
+  # The HTML `step` of a core number's `step` setting; nil leaves the type's
+  # own (a whole number for an integer, any value for a float).
+  defp step_attr(definition) do
+    case Map.get(definition, :step) do
+      step when is_number(step) and step == trunc(step) -> Integer.to_string(trunc(step))
+      step when is_number(step) -> to_string(step)
+      _none -> nil
+    end
+  end
+
   # The `<input>` a scalar field renders — its HTML type and extra attributes
   # (min/max/step/pattern/placeholder/…) — whether it is the single field's
   # one input or an item of its list.
@@ -2053,9 +2306,18 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         module -> {module.input_type(), module.input_attrs(definition)}
       end
 
-    if input_type == "number" and definition.field_type == :float,
-      do: {input_type, Map.put_new(extra, :step, "any")},
-      else: {input_type, extra}
+    cond do
+      # Only the core numbers read the field's `step` (#2432); a plugin type
+      # keeps the attributes it declares.
+      input_type == "number" and core_number?(definition) and step_attr(definition) ->
+        {input_type, Map.put(extra, :step, step_attr(definition))}
+
+      input_type == "number" and definition.field_type == :float ->
+        {input_type, Map.put_new(extra, :step, "any")}
+
+      true ->
+        {input_type, extra}
+    end
   end
 
   attr :definition, :map, required: true

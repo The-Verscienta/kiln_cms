@@ -445,10 +445,33 @@ where an unreadable target would sit. Your own list may still show the stored
 label until the referrer is saved again. A `multiple` one is refused: the `400`
 reads `custom field "x" (reference) holds a list and is not sortable`.
 
-Cost: each matching row looks up its target by primary key (once per distinct
-target), about 30-50 ms for a `page[limit]=20` read over 20,000 referrers and
-2,000 targets. No index on the source table can serve this order, so on a large
-table narrow the read with a filter first.
+Cost: each matching row looks up its target by primary key in each content
+type the field may point at (`target_types`; a field whose type no longer
+resolves probes every content type, which on a default build is page, post and
+the dynamic-type table). Measured at 100,000 referrers (the `:benchmark` test
+`custom_sort_target_key_benchmark_test.exs`; a 20-row page, an editor or an
+anonymous reader, one machine, a few runs, so read these as orders of
+magnitude):
+
+| Field targets | Whole table | Narrowed to 1,000 rows |
+| --- | --- | --- |
+| one type | 0.8-1.6 s | 10-16 ms |
+| two types | 1.5-2.8 s | 16-30 ms |
+| two + a dynamic type | 2.7-3.9 s | 25-41 ms |
+| unresolved type (all three) | 1.9-3.8 s | 22-60 ms |
+
+The cost is linear in the number of types probed (about 1 s per type per
+100,000 rows, most of it the id parse and the probe, not the sort), and the
+anonymous reader pays no more than an editor. No index on the source table can
+serve this order, so on a large table narrow the read with a filter first: the
+same sort over 1,000 matching rows is tens of milliseconds at any of these
+shapes. A field that would probe more than 8 content types (an overlay with
+many types and an unresolved target) is refused with a `400` rather than
+multiplying that cost; `config :kiln_cms, :reference_sort_max_targets` sets the
+bound. An edge-based key (reading the target id from the `content_links` edge
+instead of the stored snapshot) measured about 0.56 s for three types over the
+whole table, roughly five times faster, but it would make the sort follow edge
+state rather than the stored value, so it is left as a follow-up.
 
 A built-in column can follow a custom one in the same order by spelling it
 `_native:<name>` in `custom_sort`: `custom_sort=price,_native:title` or
@@ -476,7 +499,10 @@ Everything else is unchanged inside a group: an unknown or private field is the
 same `400` as outside one, definitions are read for the requesting site only,
 and `not` follows SQL, so `_not` of a comparison leaves out records lacking the
 field. GraphQL takes the same keys in `customFilter` (built-in names there are
-snake_case); `customWhere` has no groups.
+snake_case); `customWhere` takes `_or` / `_and` / `_not` too, as typed
+conditions (see
+[headless-graphql-api.md](headless-graphql-api.md#typed-filters-customwhere)),
+under the same two caps.
 
 Custom sorts are always **nulls last**, ascending or descending. A native
 `sort=-x` is plain `desc`, which in Postgres puts nulls first.
@@ -1168,7 +1194,8 @@ none), which a write to `custom_fields` is checked against — see
 [Constrain the values of a field](extending-content.md#constrain-the-values-of-a-field) —
 and `visible_when` / `required_when`, the field's conditional rules (or `null`); see
 [extending-content.md](extending-content.md#make-a-field-conditional). A hidden
-field is an editor concept: its value is still in every read. `widget` is the
+field is an editor concept: its value is still in every read. `step`, `prefix` and `suffix` are
+a number field's editor hints (`null` when unset; not enforced on write); `widget` is the
 editor input an admin chose for the field (`"radios"`, `"single_line"`, a
 plugin's own), or `null` for the type's default; it changes nothing about the
 value (see
@@ -1176,6 +1203,12 @@ value (see
 `?include=field_definitions.group_fields` adds the sub-fields of
 each `:group` field — the keys each of its rows takes; a sub-field names its
 group in `group_of_id`.
+`?include=field_definitions.item_types` adds the **item types** of each
+`:flexible` field (a `:group`-typed definition whose `flex_of_id` names the
+field; `item_setting` marks a sub-field that is one of the item's settings).
+A flexible field's value in `custom_fields` is a list of objects, each with
+`_id`, `_type`, its item type's keys and optional `_settings`; see
+[Define a flexible field from code](extending-content.md#define-a-flexible-field-from-code).
 
 It is the same read as `/mcp`'s `read_type_definitions`, with the same policy:
 the credential must belong to an **editor or admin of the request's org** (a

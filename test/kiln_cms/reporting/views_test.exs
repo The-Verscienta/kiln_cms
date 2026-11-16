@@ -625,6 +625,99 @@ defmodule KilnCMS.Reporting.ViewsTest do
                )
     end
 
+    # An item type (`flex_of_id`, #2282) has neither a content type nor a type
+    # definition, and a sub-field of one hangs off it by `group_of_id`, so the
+    # views' definition join (`ViewSql.allowed_definition/2`) must keep both
+    # out: a key that happens to share a name with one shows nothing. Proven
+    # for the wide and the long view, on a compiled and a dynamic type.
+    test "an item type and its sub-fields never join a view's allowlist", ctx do
+      %{admin: admin, role: role} = ctx
+
+      flexible = field!(admin, %{name: "sections", field_type: :flexible})
+
+      hero =
+        field!(admin, %{
+          name: "hero",
+          field_type: :group,
+          flex_of_id: flexible.id,
+          content_type: nil
+        })
+
+      field!(admin, %{
+        name: "headline",
+        group_of_id: hero.id,
+        content_type: nil
+      })
+
+      page = page!(admin, %{})
+
+      # Injected, as the flexible field's own write path is a later step: the
+      # field's raw value, and stray top-level keys under the item type's and
+      # its sub-field's names — what a stale write could leave behind.
+      inject!("pages", page.id, %{
+        "sections" => [%{"_id" => "1", "_type" => "hero", "headline" => "SENT-ITEM-2d"}],
+        "hero" => "SENT-HERO-4e",
+        "headline" => "SENT-HEAD-5f"
+      })
+
+      dump = ReportingRole.dump(role)
+      refute dump["pages"] =~ "SENT-HERO-4e"
+      refute dump["pages"] =~ "SENT-HEAD-5f"
+      refute dump["pages_field_values"] =~ "SENT-HERO-4e"
+      refute dump["pages_field_values"] =~ "SENT-HEAD-5f"
+
+      names =
+        ReportingRole.as(role, fn ->
+          KilnCMS.Repo.query!(
+            "SELECT DISTINCT field_name FROM kiln_reporting_v1.pages_field_values"
+          ).rows
+          |> List.flatten()
+        end)
+
+      refute "hero" in names
+      refute "headline" in names
+
+      # The flexible field itself is a top-level key like a group's: raw JSON.
+      assert "sections" in names
+    end
+
+    test "an item type never joins a dynamic type's view either", ctx do
+      %{admin: admin, role: role} = ctx
+
+      type =
+        CMS.create_type_definition!(
+          %{name: "flexrpt#{System.unique_integer([:positive])}", label: "Flex"},
+          actor: admin
+        )
+
+      flexible =
+        CMS.create_field_definition!(
+          %{type_definition_id: type.id, name: "blocks", label: "B", field_type: :flexible},
+          actor: admin
+        )
+
+      CMS.create_field_definition!(
+        %{name: "card", label: "Card", field_type: :group, flex_of_id: flexible.id},
+        actor: admin
+      )
+
+      entry =
+        CMS.create_entry!(
+          %{
+            title: "E",
+            slug: slug(),
+            type_definition_id: type.id,
+            custom_fields: %{}
+          },
+          actor: admin
+        )
+        |> then(&CMS.publish_entry!(&1, actor: admin))
+
+      inject!("entries", entry.id, %{"card" => "SENT-CARD-6a"})
+
+      assert [] == ReportingRole.leaks(role, ["SENT-CARD-6a"])
+    end
+
     test "a computed value is not derived from a private field", ctx do
       %{admin: admin, role: role} = ctx
 

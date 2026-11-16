@@ -72,13 +72,63 @@ defmodule KilnCMS.CMS.FieldWidgetsTest do
     end
 
     test "every other core type has no choice" do
-      for type <- [:string, :integer, :float, :boolean, :date, :datetime, :url, :media, :group] do
+      for type <- [:string, :boolean, :date, :datetime, :url, :media, :group] do
         assert FieldWidgets.allowed(field(%{field_type: type})) == [], "#{type}"
       end
     end
 
     test "a built-in type without widgets/1 has no choice" do
       assert FieldWidgets.allowed(field(%{field_type: :geolocation})) == []
+    end
+
+    test "a number offers a slider only while it has both a min and a max" do
+      for type <- [:integer, :float] do
+        bounded = field(%{field_type: type, validation: %{"min" => 0, "max" => 10}})
+
+        assert FieldWidgets.allowed(bounded) == ~w(number slider)
+        assert FieldWidgets.default(bounded) == "number"
+
+        for validation <- [%{}, nil, %{"min" => 0}, %{"max" => 10}, %{"min" => "0", "max" => "9"}] do
+          assert FieldWidgets.allowed(field(%{field_type: type, validation: validation})) ==
+                   ~w(number)
+        end
+      end
+    end
+
+    test "atom-keyed bounds count, as the constraints read them" do
+      bounded = field(%{field_type: :float, validation: %{min: 0.5, max: 2}})
+      assert FieldWidgets.allowed(bounded) == ~w(number slider)
+    end
+
+    test "a bare map without validation has no bounds, so a stored slider resolves to number" do
+      bare = %{field_type: :integer, widget: "slider"}
+
+      assert FieldWidgets.allowed(bare) == ~w(number)
+      assert FieldWidgets.resolve(bare) == "number"
+    end
+
+    test "a stored slider resolves to slider while bounded, to number once they go" do
+      assert FieldWidgets.resolve(
+               field(%{
+                 field_type: :integer,
+                 widget: "slider",
+                 validation: %{"min" => 1, "max" => 5}
+               })
+             ) == "slider"
+
+      assert FieldWidgets.resolve(
+               field(%{field_type: :integer, widget: "slider", validation: %{"min" => 1}})
+             ) == "number"
+    end
+
+    test "a multiple number, and a number inside a group or link, have no choice" do
+      bounded = %{field_type: :integer, validation: %{"min" => 0, "max" => 5}}
+
+      assert FieldWidgets.allowed(field(Map.put(bounded, :multiple, true))) == []
+
+      for owner <- [:link_of_id, :group_of_id] do
+        assert FieldWidgets.allowed(field(Map.put(bounded, owner, Ecto.UUID.generate()))) == []
+      end
     end
 
     test "a plugin type offers what its widgets/1 declares, default first" do
