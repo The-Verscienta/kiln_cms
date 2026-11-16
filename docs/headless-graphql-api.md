@@ -193,8 +193,32 @@ reads):
   other `multiple` fields, reference, media, group, geolocation and link
   fields, and the relationship operators. Use `customFilter` for those.
   Sorting stays `customSort`; a list is not sortable.
-- Limits: at most 10 conditions per query and 50 values in an `in`; each
-  condition adds 5 to the query's [complexity](#query-cost).
+- **Groups.** Instead of `name` and a kind, a condition can be one group:
+  `_or` or `_and` (a non-empty list of conditions) or `_not` (one condition).
+  Groups nest, sit beside plain conditions, and mean what `customFilter`'s
+  `_or` / `_and` / `_not` mean (`_not` follows SQL, so it keeps records that
+  lack the field). To negate several conditions, put them in `_and` inside
+  `_not`:
+
+  ```graphql
+  customWhere: [
+    { name: "price", float: { lt: 50 } }
+    { _or: [
+        { name: "color", string: { eq: "red" } }
+        { _not: { name: "stock", int: { gt: 0 } } }
+    ] }
+  ]
+  ```
+
+  A condition takes one of `_or`, `_and`, `_not`, and then nothing else
+  (`name` and the kind keys included). Everything inside a group is checked
+  as outside one: kind, operators, privacy (a private or unknown field is the
+  same `unknown custom field` error) and the site's own definitions.
+- Limits: at most 10 conditions at the top of the list and 50 values in an
+  `in`. Groups share `customFilter`'s caps: 4 deep and 50 conditions in all
+  (the error text is the same). Each condition, at any depth, adds 5 to the
+  query's [complexity](#query-cost), so the 200 cap allows fewer than 50
+  once the query's own fields are priced.
 
 How a custom field's `customFilter` / `customSort` differs from a column's
 `filter` / `sort` (the same vocabulary as JSON:API, full table in
