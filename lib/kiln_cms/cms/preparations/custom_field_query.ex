@@ -1210,8 +1210,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       # the key: it lags a rename and would order unreadable targets.
       {:ok, %{field_type: type, multiple: multiple} = definition}
       when type in [:reference, :media] and multiple != true ->
-        key = Relations.sort_key(definition, ctx)
-        Ash.Query.sort(query, [{Ash.Sort.expr_sort(^key), direction}])
+        target_sort(query, definition, direction, ctx)
 
       {:ok, %{field_type: type}} when type in [:reference, :media] ->
         invalid(
@@ -1236,6 +1235,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       {:error, message} ->
         invalid(query, :custom_sort, message)
+    end
+  end
+
+  defp target_sort(query, definition, direction, ctx) do
+    case Relations.sort_key(definition, ctx) do
+      {:ok, key} -> Ash.Query.sort(query, [{Ash.Sort.expr_sort(^key), direction}])
+      {:error, message} -> invalid(query, :custom_sort, message)
     end
   end
 
