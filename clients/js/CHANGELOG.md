@@ -7,6 +7,11 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+- **Fix: trimming trailing slashes off `baseUrl` takes linear time.** The
+  constructor used `/\/+$/`, which takes quadratic time on a long run of `/`
+  (CodeQL `js/polynomial-redos`). `baseUrl` is the integrator's own config,
+  so this was never reachable by an attacker. It now trims in a loop, with the
+  same result.
 - **Fix: the default `fetch` works in browsers and Workers.** The client
   stored `globalThis.fetch` and called it as a method of itself, which
   browsers and Cloudflare Workers reject with `TypeError: Illegal

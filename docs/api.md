@@ -1898,7 +1898,9 @@ Any active form can be embedded on a third-party site with a one-line snippet
 standalone document rendering the same form markup as an on-site form block —
 and keeps its height in sync with the content, so there's no inner scrollbar.
 Optional attributes: `data-kiln-origin` (CMS base URL, defaults to the script's
-own origin), `data-kiln-title`, `data-kiln-height` (initial px).
+own origin; it must be an `http:` or `https:` URL, and with any other value,
+such as `javascript:` or `data:`, the snippet mounts nothing), `data-kiln-title`,
+`data-kiln-height` (initial px).
 
 **Schema.** `GET /api/forms/:slug` returns each field as `name`, `label`,
 `type`, `required`, `options`, `help_text`, `placeholder`, `default_value`,

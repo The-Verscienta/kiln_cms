@@ -75,6 +75,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
+  ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
+
 - **The second-factor test of an open page reaching its deadline no longer fails on a slow runner: the deadline sat 600 ms after the test started, and a mount that outlasted it redirected first.**
   ([#2953](https://github.com/The-Verscienta/kiln_cms/pull/2953) · [long form](docs/changelog/unreleased.md#sfe-deadline-test-margin))
 
