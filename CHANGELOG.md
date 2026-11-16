@@ -81,6 +81,8 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
+- **The content list can sort by a single-valued reference or media field too (Sort by → Field), by the target's current title or filename.**
+  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
 
 ### Fixed
 

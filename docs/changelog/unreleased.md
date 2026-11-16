@@ -190,6 +190,19 @@ carries the reasoning.
   back. See [json-api.md](../json-api.md)
   and the amendment in decision 0014.
 
+<a id="list-sort-reference-media"></a>
+
+- **The content list's Sort by → Field menu now offers single-valued reference and media fields.**
+  They order by the same key as the API above (the target's current title, or
+  a media item's current filename), read as the signed-in editor: a target
+  they cannot read sorts with the unset rows, and Load more continues the
+  order without repeating or skipping a row. The menu entry reads "Field:
+  Mentor by current title (↑)" (or "by current filename"), because the Columns
+  cell shows the label stored with the referrer, which lags a rename until
+  the referrer is saved again, so the two can disagree without the sort being
+  wrong. A list-valued field is still not offered, and a `sort=field:…` URL or
+  saved view naming one falls back to the default order. No migration.
+
 ## Fixed
 
 <a id="codeql-embed-origin-hardening"></a>
