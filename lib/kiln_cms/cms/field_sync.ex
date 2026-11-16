@@ -85,7 +85,15 @@ defmodule KilnCMS.CMS.FieldSync do
   @format "kiln-field-definitions"
   @version 1
 
-  @owner_keys ~w(content_type type_definition_id link_of_id group_of_id)a
+  @owner_keys ~w(content_type type_definition_id link_of_id group_of_id flex_of_id)a
+  # Attributes of the flexible-content model (#2282) the file does not carry
+  # yet: an item type is a child row (`flex_of_id`) and `item_setting` marks
+  # one of its sub-fields, so both arrive together with the `"item_types"`
+  # child list. Until then export and import leave item types and their
+  # sub-fields alone: `FieldDefinition.parent_id/1` keeps them out of the
+  # top-level list, and no child list reaches them, so a prune never deletes
+  # one either.
+  @pending_keys ~w(item_setting)a
   # Attributes of a field that belong to one site and are not synced (#2285):
   # `selection` names tag and category ids, which differ per site, and fields
   # of its targets that this import may not have created yet.
@@ -113,7 +121,7 @@ defmodule KilnCMS.CMS.FieldSync do
     FieldDefinition
     |> Ash.Resource.Info.action(:create)
     |> Map.fetch!(:accept)
-    |> Enum.reject(&(&1 in @owner_keys or &1 in @site_keys))
+    |> Enum.reject(&(&1 in @owner_keys or &1 in @site_keys or &1 in @pending_keys))
     |> Enum.map(&Atom.to_string/1)
     |> Enum.sort()
   end

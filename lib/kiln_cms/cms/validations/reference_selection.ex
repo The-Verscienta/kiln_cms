@@ -60,9 +60,7 @@ defmodule KilnCMS.CMS.Validations.ReferenceSelection do
   end
 
   defp check_owner(changeset) do
-    top_level? =
-      is_nil(Ash.Changeset.get_attribute(changeset, :link_of_id)) and
-        is_nil(Ash.Changeset.get_attribute(changeset, :group_of_id))
+    top_level? = KilnCMS.CMS.FieldDefinition.top_level?(changeset)
 
     if Ash.Changeset.get_attribute(changeset, :field_type) == :reference and top_level? do
       :ok

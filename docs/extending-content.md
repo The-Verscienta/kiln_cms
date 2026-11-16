@@ -21,10 +21,11 @@ UI" workflow, scoped to fields.
   `target_type`, `target_types`, `multiple`, `min_items`, `max_items`,
   `max_sources`, `on_target_delete`, `inverse_label`, `inverse_name`,
   `schema_org_property`,
-  `link_of_id`, `group_of_id`, `help_text`, `position`, `default`, `compute`,
+  `link_of_id`, `group_of_id`, `flex_of_id`, `item_setting`, `help_text`, `position`, `default`, `compute`,
   `private`, `validation`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
-  `:select`, `:media`, `:reference`, `:group`, `:user`, `:geolocation`,
+  `:select`, `:media`, `:reference`, `:group`, `:flexible` (code only for now, see
+  "Define a flexible field from code"), `:user`, `:geolocation`,
   `:datetime_range`, `:recurrence`, `:computed`, the six format types
   `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (see
   "Built-in format types" below) and the composite `:range`, `:key_value` and
@@ -1903,6 +1904,153 @@ What the editor can see go wrong:
 - A field error from the new record, such as a required field or a unique
   value already taken, shows in the **New *Type*** form, and nothing is
   created.
+
+### Define a flexible field from code
+
+A `:flexible` field holds an ordered list of items of **different types** (a
+hero, a quote), each type with its own sub-fields. It is the first release of
+the feature (#2282): the model and the write path work, and there is **no
+admin screen or editor input yet**. The Fields screen does not offer the type,
+and the content editor shows a flexible field as its label and an item count
+with the note "Edited through the API; item editing arrives with the next
+release." (no input, so saving keeps the stored items). Define it from code or
+a release task, as an admin. The design is in
+[ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+
+What the definition rows are:
+
+- the field: `field_type: :flexible`, owned by a content type or a dynamic
+  type like any field. It is always a list, so `multiple` is forced on;
+- an **item type**: a `field_type: :group` row with `flex_of_id` set to the
+  field's id (and no other owner). `label`, `position` and `max_items` (how
+  many items of this type one value may hold, with `min_items`) apply;
+- the item type's **sub-fields**: rows with `group_of_id` set to the item type.
+  A sub-field with `item_setting: true` is a **setting** (a background, a
+  width): its value is stored under the item's `_settings`, not beside the
+  content. Sub-fields take the plain types, and also `:flexible`, so an item
+  can hold its own list, **3 levels deep at most**
+  (`KilnCMS.CMS.FieldDefinition.max_flexible_depth/0`). Media and reference
+  sub-fields are not allowed yet.
+
+1. As an admin, create the field, an item type, and its sub-fields:
+
+   ```elixir
+   alias KilnCMS.CMS
+
+   sections =
+     CMS.create_field_definition!(
+       %{content_type: :post, name: "sections", label: "Sections", field_type: :flexible},
+       actor: admin
+     )
+
+   hero =
+     CMS.create_field_definition!(
+       %{name: "hero", label: "Hero", field_type: :group, flex_of_id: sections.id},
+       actor: admin
+     )
+
+   CMS.create_field_definition!(
+     %{name: "headline", label: "Headline", field_type: :string,
+       group_of_id: hero.id, required: true},
+     actor: admin
+   )
+
+   CMS.create_field_definition!(
+     %{name: "background", label: "Background", field_type: :select,
+       options: ["dark", "light"], group_of_id: hero.id, item_setting: true},
+     actor: admin
+   )
+   ```
+
+   Each call returns the new definition. A mistake comes back as a normal
+   `Ash.Error.Invalid` (see the table below).
+
+2. Write items in the record's `custom_fields`, each naming its type in
+   `_type`; settings go in `_settings`:
+
+   ```elixir
+   post =
+     CMS.create_post!(
+       %{title: "Page", slug: "page",
+         custom_fields: %{"sections" => [
+           %{"_type" => "hero", "headline" => "Hello",
+             "_settings" => %{"background" => "dark"}}
+         ]}},
+       actor: admin
+     )
+   ```
+
+   Read it back: `post.custom_fields["sections"]` is
+
+   ```elixir
+   [%{"_id" => "6f1c…", "_type" => "hero", "headline" => "Hello",
+      "_settings" => %{"background" => "dark"}}]
+   ```
+
+   `_id` is minted when you send none and **kept** when you send back the one
+   you read (a valid UUID, not repeated in the same write); send it back on
+   every save so the item keeps its identity.
+
+3. Over JSON:API, a content write takes the same `custom_fields` shape, and
+   `GET /api/json/type-definitions?include=field_definitions.item_types`
+   returns a dynamic type's flexible fields with their `item_types`
+   (`flex_of_id` names the owning field; `item_setting` marks a setting on a
+   sub-field).
+
+Things to know:
+
+- **Order and blanks.** Items keep the order sent. An item whose content is
+  all blank is dropped (an untouched card is no item). Leaving the key out
+  keeps the stored list; `[]` or `""` clears it.
+- **At most 100 items per field**, unless the definition sets `max_items`.
+  To change the default for the whole installation, set
+  `config :kiln_cms, :flexible, max_items: 250` in `config/config.exs`; it is
+  read at compile time, so recompile after changing it.
+- **Excluded options.** A flexible field can't be `private`, `searchable`,
+  `unique`, or take a `default`, `names_record`, or its own `visible_when` /
+  `required_when`; it is not offered as a list column, an index or a
+  `custom_filter` leaf (a filter on it answers only `null`). Sub-fields keep
+  their own `required`, `validation` and conditions, which see the item's own
+  fields and settings together.
+- **Grants.** `custom_fields.sections` grants the whole field. A grant that
+  names an item type (`custom_fields.sections.hero`) is not valid yet.
+- **Renaming and deleting.** Renaming a sub-field renames its key in every
+  item of that type; renaming an item type rewrites each item's `_type`.
+  Deleting a sub-field removes its key from every item (an item left empty is
+  dropped). Deleting an item type is **refused while any record holds an item
+  of it**; pass `purge_items?: true` to remove the items with the type:
+
+  ```elixir
+  CMS.destroy_field_definition(hero, %{purge_items?: true}, actor: admin)
+  ```
+
+  The check and the removal are not one step: an item saved between them is
+  removed too. Deleting the whole flexible field removes its item types, their
+  sub-fields and every item, without the guard, as deleting a group does.
+- **Copies, restores and imports.** A copy or a version restore drops an item
+  whose `_type` the field no longer has, with a warning in the log. A JSON
+  import fails that row instead, naming the path (`sections[2]._type`).
+- **Field sync.** `mix kiln.fields.export` and `import` carry the flexible
+  field but **not** its item types or their sub-fields yet
+  ([Syncing field definitions](field-sync.md)); define the item types on the
+  target site from code until the file format carries them.
+
+**What can go wrong**
+
+| You see | Meaning |
+|---|---|
+| `is required (item types: hero, quote)` at `sections[0]._type` | An item without `_type`. |
+| `"teaser" is not an item type of this field (item types: hero, quote)` at `sections[1]._type` | The type name is not one of the field's item types. |
+| `is not a field of the hero item type (fields: background, headline)` | A key the item type does not declare. Settings go in `_settings`. |
+| `must be a list of items` | The value was not a list (an object, a string). |
+| `can have at most 3 hero items (has 4)` / `needs at least 1 hero items (has 0)` | The item type's `max_items` / `min_items`. |
+| `can have at most 100 items (has 101)` | The field's own `max_items`, or the default. |
+| `flexible fields nest at most 3 levels deep` | Creating a flexible sub-field or an item type one level past the cap. |
+| `item types can only be added to a flexible field` / `an item type must be a group` | `flex_of_id` points at another type of field, or the item type isn't a `:group`. |
+| `a flexible field can only be added to an item type` | A `:flexible` sub-field of a plain group. |
+| `can't be deleted while documents hold hero items; …` | The item type guard; remove the items, or destroy with `purge_items?: true`. |
+| `can't be deleted: whether documents hold hero items could not be checked; …` | The check failed (a read error, or the chain is past the cap). Try again, or destroy with `purge_items?: true`. |
+| `an item type stays in the flexible field it was added to` / `can't change once the sub-field exists` | `flex_of_id` and `item_setting` can't change on update. |
 
 ### Delete a field of an unknown type
 

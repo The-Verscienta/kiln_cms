@@ -8770,6 +8770,11 @@ msgstr "Editar los bloques de este documento como Markdown"
 msgid "Edit tier"
 msgstr "Editar nivel"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Edited through the API; item editing arrives with the next release."
+msgstr "Se edita mediante la API; la edición de elementos llegará en la próxima versión."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editing"

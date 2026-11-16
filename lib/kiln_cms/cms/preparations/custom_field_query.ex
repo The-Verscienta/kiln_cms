@@ -708,8 +708,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   # A group is an object or a list of them, for the same reason: `null` above
   # is the one question its value answers as a whole.
-  defp condition(%{field_type: :group, name: name}, _op, _raw),
-    do: {:error, "custom field #{inspect(name)} (group) only supports null"}
+  defp condition(%{field_type: type, name: name}, _op, _raw) when type in [:group, :flexible],
+    do: {:error, "custom field #{inspect(name)} (#{type}) only supports null"}
 
   # A list is `in`'s operand only (#2739): beside `ilike` it was joined into
   # one pattern, beside a media id into one id.
@@ -1227,7 +1227,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       # then key/value text, which is meaningless for a coordinate or a
       # snapshot — refuse rather than return a 200 in nonsense order.
       {:ok, %{field_type: type}}
-      when type in [:geolocation, :group, :json, :range, :key_value, :link] ->
+      when type in [:geolocation, :group, :flexible, :json, :range, :key_value, :link] ->
         invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
 
       {:ok, %{field_type: type, multiple: true}} when type in @scalar_list_types ->

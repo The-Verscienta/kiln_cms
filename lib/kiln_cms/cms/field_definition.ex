@@ -12,7 +12,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
   content editor renders an input per definition, so editors add structured
   fields without a code change or migration.
 
-  A definition is scoped to **exactly one** of four owners (D17, R3):
+  A definition is scoped to **exactly one** of five owners (D17, R3):
 
     * `content_type` — a compiled content type's atom (`:page`), the original
       D4 scope;
@@ -35,7 +35,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
       snapshot's `"link"` map, which is why this is a column of its own rather
       than a second meaning of `link_of_id`. The same rules otherwise: only
       `link_field_types/0`, no nesting, never listed by `for_type` or
-      `for_definition` — they load it into the group's `group_fields`.
+      `for_definition` — they load it into the group's `group_fields`; or
+    * `flex_of_id` — a `:flexible` definition (#2282), which makes the row an
+      **item type** of that field: a `:group`-typed row ("hero", "quote") whose
+      own sub-fields (`group_of_id` → the item type) are what one item of that
+      type holds. A sub-field of an item type may also be a `:flexible` field
+      (`item_field_types/0`), so an item can hold its own list of mixed
+      items, down to `max_flexible_depth/0` levels. Like a sub-field it is
+      never listed by `for_type` or `for_definition`; they load it into the
+      flexible field's `item_types`. `docs/flexible-content-plan.md`.
 
   This deliberately does *not* replace hand-declared attributes: core, queryable,
   or strongly-typed fields still belong in the resource. It covers the long tail
@@ -77,7 +85,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
   # this resource's own read policy (editor-or-above).
   json_api do
     type "field_definition"
-    includes [:group_fields]
+    includes [:group_fields, :item_types]
   end
 
   @doc """
@@ -162,12 +170,93 @@ defmodule KilnCMS.CMS.FieldDefinition do
   def group_fields(_definition), do: []
 
   @doc """
-  The definition a sub-field hangs off, if any: its reference (a link field)
-  or its group (a group sub-field).
+  The item types a `:flexible` definition declares: its loaded `item_types`, or
+  `[]` for any other type. Raises when they were not loaded, for the reason
+  `group_fields/1` does — "no item types" would refuse every item a write
+  sends.
+  """
+  @spec item_types(t() | map()) :: [t()]
+  def item_types(%{field_type: :flexible, item_types: %Ash.NotLoaded{}} = definition),
+    do: raise(ArgumentError, "item_types not loaded on field #{inspect(definition.name)}")
+
+  def item_types(%{field_type: :flexible, item_types: types}) when is_list(types), do: types
+  def item_types(_definition), do: []
+
+  # What a sub-field of an item type (`flex_of_id` parent) may be: the plain
+  # types, and a `:flexible` field, so an item can hold a list of its own.
+  # Media and reference sub-fields join in a later step (group parity).
+  @item_field_types @link_field_types ++ [:flexible]
+
+  @doc """
+  The field types a sub-field of an **item type** may have: the plain ones
+  (`link_field_types/0`) and `:flexible`, for nesting. A plain `:group` keeps
+  `link_field_types/0`; a `:flexible` sub-field is allowed only under an item
+  type, never in a plain group.
+  """
+  @spec item_field_types() :: [atom()]
+  def item_field_types, do: @item_field_types
+
+  # How many `:flexible` levels may nest: a top-level flexible field is level 1,
+  # a flexible sub-field of one of its item types level 2, and so on. A
+  # compile-time constant, not a setting (design doc §2, D1): the bound every
+  # recursion (coercion, owner walks, SQL, display) shares.
+  @max_flexible_depth 3
+
+  # The columns that make a row the child of another field.
+  @parent_keys [:link_of_id, :group_of_id, :flex_of_id]
+
+  @doc """
+  The deepest `:flexible` nesting allowed (a top-level flexible field is level
+  1). Every recursion over item trees stops here, and the definitions enforce
+  it (`Validations.FlexibleField`, `Validations.GroupField`).
+  """
+  @spec max_flexible_depth() :: pos_integer()
+  def max_flexible_depth, do: @max_flexible_depth
+
+  @doc """
+  Whether a definition is a **top-level field** of a content type or a dynamic
+  type: it hangs off no other field — not a reference (`link_of_id`), a group
+  (`group_of_id`) or a flexible field (`flex_of_id`). The one predicate every
+  reader of "a type's own fields" uses, so a new parent column is added here
+  and nowhere else. Takes a definition (a struct or any map: a missing key
+  reads as `nil`) or an `Ash.Changeset` for one.
+
+  That the row has an owner at all is `Validations.OneFieldScope`'s question,
+  not this one's, so a map without `content_type` (a test double, a snapshot)
+  is still top-level.
+
+      iex> KilnCMS.CMS.FieldDefinition.top_level?(%{content_type: :page, link_of_id: nil, group_of_id: nil, flex_of_id: nil})
+      true
+
+      iex> KilnCMS.CMS.FieldDefinition.top_level?(%{flex_of_id: "x"})
+      false
+
+      iex> KilnCMS.CMS.FieldDefinition.top_level?(%{group_of_id: "x", content_type: :page})
+      false
+  """
+  @spec top_level?(t() | map() | Ash.Changeset.t()) :: boolean()
+  def top_level?(%Ash.Changeset{} = changeset) do
+    Enum.all?(@parent_keys, &is_nil(Ash.Changeset.get_attribute(changeset, &1)))
+  end
+
+  def top_level?(definition), do: Enum.all?(@parent_keys, &is_nil(Map.get(definition, &1)))
+
+  @doc """
+  Whether a definition is an **item type** of a flexible field: a row with
+  `flex_of_id` set.
+  """
+  @spec item_type?(t() | map()) :: boolean()
+  def item_type?(definition), do: not is_nil(Map.get(definition, :flex_of_id))
+
+  @doc """
+  The definition a sub-field hangs off, if any: its reference (a link field),
+  its group (a group sub-field) or its flexible field (an item type).
   """
   @spec parent_id(t() | map()) :: Ash.UUID.t() | nil
-  def parent_id(definition),
-    do: Map.get(definition, :link_of_id) || Map.get(definition, :group_of_id)
+  def parent_id(definition) do
+    Map.get(definition, :link_of_id) || Map.get(definition, :group_of_id) ||
+      Map.get(definition, :flex_of_id)
+  end
 
   @doc """
   The machine name a field's label suggests: lowercase ASCII letters, digits
@@ -310,6 +399,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
       # Deleting a group deletes its sub-fields; their values went with the
       # group's key. Indexed by `unique_group_field`, as above.
       reference :group_of, on_delete: :delete
+
+      # Deleting a flexible field deletes its item types (and, through
+      # `group_of`, their sub-fields) **in the database, bypassing
+      # `Changes.SyncFieldValues`** — as for a group. Refusing an item type's
+      # delete while items exist is therefore a validation, not this key.
+      # Indexed by `unique_flex_item_type`.
+      reference :flex_of, on_delete: :delete
     end
   end
 
@@ -326,15 +422,30 @@ defmodule KilnCMS.CMS.FieldDefinition do
     end
   end
 
+  # What `for_type` / `for_definition` load: link fields, sub-fields, and the
+  # item types of every flexible field with their sub-fields — to a fixed depth
+  # (`max_flexible_depth/0`): an item type's sub-field may itself be a flexible
+  # field, whose item types are loaded the same way, down to the cap.
+  @item_tree Enum.reduce(2..@max_flexible_depth, [item_types: [:group_fields]], fn _level,
+                                                                                   inner ->
+               [item_types: [group_fields: inner]]
+             end)
+  @schema_load [:link_fields, :group_fields] ++ @item_tree
+
   actions do
     defaults [:read]
 
     # `require_atomic? false` because `BustTypeRegistry` runs `after_action`, and
     # an atomic destroy has no record to hand it. A field-definition destroy is
     # a rare admin action, so losing the atomic path costs nothing.
+    #
+    # `purge_items?` (#2282): destroying an item type of a flexible field is
+    # refused while documents hold items of it (`Validations.ItemTypeInUse`);
+    # `true` removes them with the type.
     destroy :destroy do
       primary? true
       require_atomic? false
+      argument :purge_items?, :boolean, default: false, allow_nil?: false
     end
 
     default_accept [
@@ -342,6 +453,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :type_definition_id,
       :link_of_id,
       :group_of_id,
+      :flex_of_id,
+      :item_setting,
       :name,
       :label,
       :field_type,
@@ -414,7 +527,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
     read :for_type do
       argument :content_type, :atom, allow_nil?: false
       filter expr(content_type == ^arg(:content_type))
-      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields, :group_fields])
+      prepare build(sort: [position: :asc, name: :asc], load: @schema_load)
     end
 
     # The dynamic-type equivalent of `for_type`: all field definitions owned by
@@ -422,7 +535,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
     read :for_definition do
       argument :type_definition_id, :uuid, allow_nil?: false
       filter expr(type_definition_id == ^arg(:type_definition_id))
-      prepare build(sort: [position: :asc, name: :asc], load: [:link_fields, :group_fields])
+      prepare build(sort: [position: :asc, name: :asc], load: @schema_load)
     end
 
     # The reverse fields a content type shows (R4): every top-level
@@ -564,7 +677,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
   validations do
     # A field belongs to exactly one owner: a compiled type, a dynamic one, a
-    # reference field (a link field, R3) or a group (a sub-field).
+    # reference field (a link field, R3), a group (a sub-field) or a flexible
+    # field (an item type).
     validate KilnCMS.CMS.Validations.OneFieldScope
 
     # A link field's parent is a top-level `:reference` field of the same
@@ -574,6 +688,14 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # A sub-field's parent is a top-level `:group` field of the same site, and
     # the sub-field is one of the plain types.
     validate KilnCMS.CMS.Validations.GroupField
+
+    # An item type's parent is a top-level or nested `:flexible` field of the
+    # same site, it is a `:group`, and a flexible field takes none of the
+    # options that only fit a plain value (#2282).
+    validate KilnCMS.CMS.Validations.FlexibleField
+
+    # An item type with stored items is not deleted by accident (#2282).
+    validate KilnCMS.CMS.Validations.ItemTypeInUse, on: :destroy
 
     # When compiled-scoped, the content type must be a real, registered
     # KilnCMS content type (no-op when `content_type` is nil).
@@ -875,6 +997,13 @@ defmodule KilnCMS.CMS.FieldDefinition do
       public?: true,
       constraints: [max_length: KilnCMS.Limits.paragraph()]
 
+    # Whether a sub-field of an item type (#2282) is one of the item's
+    # **settings** (a background, an alignment) rather than its content. Settings
+    # are stored under the item's `_settings` and never mixed into its content,
+    # so delivery and search can ignore them. Only meaningful on a sub-field of
+    # an item type (`Validations.FlexibleField`).
+    attribute :item_setting, :boolean, allow_nil?: false, default: false, public?: true
+
     # Display order within a content type's custom-field section.
     attribute :position, :integer, allow_nil?: false, default: 0, public?: true
 
@@ -1053,6 +1182,22 @@ defmodule KilnCMS.CMS.FieldDefinition do
       sort position: :asc, name: :asc
       public? true
     end
+
+    # The `:flexible` field owning this item type (#2282) — nil for every
+    # other field.
+    belongs_to :flex_of, __MODULE__ do
+      allow_nil? true
+      public? true
+    end
+
+    # A `:flexible` field's item types — `:group` rows, each declaring one
+    # kind of item — in editor order. Includable through JSON:API
+    # (`include=field_definitions.item_types`).
+    has_many :item_types, __MODULE__ do
+      destination_attribute :flex_of_id
+      sort position: :asc, name: :asc
+      public? true
+    end
   end
 
   calculations do
@@ -1084,5 +1229,6 @@ defmodule KilnCMS.CMS.FieldDefinition do
     identity :unique_definition_field, [:type_definition_id, :name]
     identity :unique_link_field, [:link_of_id, :name]
     identity :unique_group_field, [:group_of_id, :name]
+    identity :unique_flex_item_type, [:flex_of_id, :name]
   end
 end

@@ -1,10 +1,38 @@
 # Flexible content — plan for mixed typed items inside a custom field
 
-**Status:** plan, not built. Design record for
+**Status:** PR 1 of 7 (section 9: model and write path) built on branch
+`feat/2282-flexible-content-pr1-394939`, not yet merged; PRs 2 to 7 are plan
+only. Design record for
 [#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282), written from a
 read of the model as it stood on 2026-11-10 (after custom-field waves 1–5). Read
 the resources for current behavior and this for *why*. Nothing here is a
 decision until the PR that carries it merges; the open questions are in §10.
+The decisions PR 1 makes are argued in
+[ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+
+**Where PR 1 differs from this plan** (the code is right; this text is
+unchanged below):
+
+- The depth cap is the constant `FieldDefinition.max_flexible_depth/0` (3), not
+  a "default"; there is no setting for it. The 100-item default is a
+  compile-time config key, `config :kiln_cms, :flexible, max_items: n`.
+- It adds three small helpers the plan did not name: `FieldDefinition.top_level?/1`
+  and `item_type?/1`, `item_field_types/0`, and a `KilnCMS.CMS.FlexiblePath`
+  module that builds the nested SQL and walks owners.
+- Two pieces of UI landed in PR 1 so the existing screens do not break: the
+  Fields screen leaves `:flexible` out of its type picker and hides item types
+  and their sub-fields; the content editor shows a flexible field as a label,
+  an item count and a read-only note. The panel, cards and inputs are still PR 2.
+- `FieldSync` skips item types and `item_setting` (an `@pending_keys` list)
+  instead of carrying them; the file format gains `item_types` in PR 2, so
+  export and import are lossy until then.
+- A JSON import fails the row on an unknown item `_type`
+  (`custom_fields_items: :strict`), where a restore or copy drops the item; the
+  plan only named strict and drop.
+- The reporting views needed no change: a test shows item types never join.
+- `FieldCondition` needed only to refuse conditions on a `:flexible` field; its
+  scope is sibling-based, so no owner walk was added there.
+- Retyping an existing field to or from `:flexible` is not guarded (ADR 0065).
 
 **Goal:** a custom field whose value is an **ordered list of items of different
 types** (hero, quote, feature grid, …), each type with its own sub-fields and a

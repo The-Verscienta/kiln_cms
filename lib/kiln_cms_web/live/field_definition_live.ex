@@ -87,7 +87,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
      |> assign(:page_title, gettext("Custom fields"))
      |> assign(:content_types, ContentTypes.all())
      |> assign(:dynamic_types, ContentTypes.dynamic_all(org))
-     |> assign(:field_types, FieldDefinition.field_types())
+     # `:flexible` (#2282) is API-only until its item-types panel ships, so the
+     # picker does not offer a field the screen cannot finish defining.
+     |> assign(:field_types, FieldDefinition.field_types() -- [:flexible])
      |> assign(:target_types, ContentTypes.options(org))
      |> assign(:edit, nil)
      |> assign(:link_form, nil)
@@ -1308,6 +1310,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
+  # Item types (`flex_of_id`) and the sub-fields hanging off them.
+  defp without_item_types(rows) do
+    item_type_ids =
+      for %{flex_of_id: id} = row <- rows, not is_nil(id), into: MapSet.new(), do: row.id
+
+    Enum.reject(rows, fn row ->
+      FieldDefinition.item_type?(row) or MapSet.member?(item_type_ids, row.group_of_id)
+    end)
+  end
+
   defp load_definitions(socket) do
     {links, definitions} =
       CMS.list_field_definitions!(
@@ -1316,6 +1328,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         query: [sort: [position: :asc, name: :asc]],
         context: FieldDefinition.all_types_context()
       )
+      # The item types of a flexible field (#2282) and their sub-fields have
+      # no panel here yet: leave them out rather than list them as links.
+      |> without_item_types()
       # Link fields (R3) are listed under their reference field, and a
       # group's sub-fields under their group — not as fields of a type.
       |> Enum.split_with(&(not is_nil(FieldDefinition.parent_id(&1))))
