@@ -106,7 +106,10 @@ defmodule KilnCMS.Security.Event do
     api_key_created: ~w(name scope via),
     api_key_revoked: ~w(name),
     sso_config_changed: ~w(provider change),
-    org_setting_changed: ~w(setting),
+    # `created` / `updated` / `deleted` / `prune` / `data_loss` only for the
+    # field-definition import screen (#2438): how many rows it wrote, and
+    # whether the admin confirmed pruning or a change that drops values.
+    org_setting_changed: ~w(setting created updated deleted prune data_loss),
     ip_auto_blocked: ~w(reason count window_minutes block_minutes),
     session_idle_expired: ~w(timeout_minutes tier surface),
     all_sessions_revoked: ~w(count except_self),

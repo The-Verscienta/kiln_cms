@@ -370,13 +370,17 @@ defmodule KilnCMSWeb.SecondFactorEnforcementTest do
 
     test "an open page goes to setup at the deadline", %{conn: conn} do
       site = org("sfe-lv-deadline")
-      # One day of grace that started a day ago, less a moment.
-      since = DateTime.add(DateTime.utc_now(), -86_400 * 1000 + 600, :millisecond)
+      # One day of grace that started a day ago, less a moment. The moment has
+      # to outlast creating the account, signing in and mounting the page: if
+      # the deadline passes first, the mount itself redirects and this tests
+      # the mount gate, not the open page's timer. 600 ms did not on a loaded
+      # 2-scheduler CI runner; 2.5 s leaves room and the wait below covers it.
+      since = DateTime.add(DateTime.utc_now(), -86_400 * 1000 + 2_500, :millisecond)
       policy_row!(site, :editors, grace_days: 1, since: since)
       user = editor(site)
 
       {:ok, view, _html} = conn |> signed_in(user, site) |> live(~p"/editor/overview")
-      assert_redirect(view, main_setup(), 3_000)
+      assert_redirect(view, main_setup(), 6_000)
     end
 
     test "a page whose account enrolled meanwhile is not bounced", %{conn: conn} do

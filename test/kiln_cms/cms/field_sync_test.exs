@@ -539,6 +539,53 @@ defmodule KilnCMS.CMS.FieldSyncTest do
     end
   end
 
+  describe "applying exactly the plan that was shown (#2438)" do
+    test "the digest is the same for a dry run and the apply of one plan", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin) |> put_in_field("note", "label", "Renamed")
+
+      assert {:ok, dry} = FieldSync.import_doc(doc, actor: admin)
+
+      assert {:ok, %{applied?: true} = applied} =
+               FieldSync.import_doc(doc,
+                 actor: admin,
+                 apply?: true,
+                 expect_digest: FieldSync.digest(dry)
+               )
+
+      assert applied.counts == dry.counts
+    end
+
+    test "a plan that moved since the preview is refused and writes nothing", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin) |> put_in_field("note", "label", "Renamed")
+      assert {:ok, dry} = FieldSync.import_doc(doc, actor: admin)
+
+      # Someone else edits the same field after the preview.
+      note = Enum.find(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "note"))
+      CMS.update_field_definition!(note, %{label: "Edited elsewhere"}, actor: admin)
+
+      assert {:error, :stale} =
+               FieldSync.import_doc(doc,
+                 actor: admin,
+                 apply?: true,
+                 expect_digest: FieldSync.digest(dry)
+               )
+
+      assert Enum.find(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "note")).label ==
+               "Edited elsewhere"
+    end
+
+    test "the digest tells the prune and data-loss flags apart", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin) |> without("rating")
+
+      {:ok, kept} = FieldSync.import_doc(doc, actor: admin)
+      {:ok, pruned} = FieldSync.import_doc(doc, actor: admin, prune?: true)
+      refute FieldSync.digest(kept) == FieldSync.digest(pruned)
+    end
+  end
+
   describe "section layouts" do
     defp map_sections(doc, fun),
       do: update_in(doc, ["owners", Access.all()], &Map.update!(&1, "sections", fun))

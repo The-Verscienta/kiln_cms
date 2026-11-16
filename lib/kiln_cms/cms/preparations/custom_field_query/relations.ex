@@ -43,6 +43,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
   # `exists`, and a query string is no place for an unbounded list.
   @max_ids 100
 
+  @uuid_pattern "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
   @doc "The operators this module answers."
   @spec operators() :: [String.t()]
   def operators, do: @operators
@@ -109,6 +111,116 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
       )
     )
   end
+
+  @doc """
+  The sort key of a single-valued `:reference` or `:media` field (#2444): the
+  target's **current** title (a media item's current filename) when the
+  caller may read the target, SQL `NULL` otherwise.
+
+  Two properties make it safe to order by:
+
+    * It is read from the target, not from the snapshot stored in
+      `custom_fields`, so a renamed target sorts under its new name. (An
+      editor's list still shows the stored label until the referrer is saved
+      again; masking and relabeling apply to non-editor reads only.)
+    * The same read filter that gates `has` / `count` (`readable_target/2`,
+      derived from the target resource's own policy for this actor) is inside
+      the key, so a target the caller cannot read has no key: it sorts with
+      the unset records and its title, and where it would have sorted, never
+      leave the database. The order never rises above what the caller may
+      read. The target must also be in the query's own organization, whatever
+      id the stored snapshot names. A preview grant (shared draft) is not
+      honored here: that target sorts as unreadable.
+
+  A reference may point at several types (`target_types`): each is its own
+  correlated subquery on its primary key and they are `coalesce`d, since an
+  id lives in one table. A field whose target type no longer resolves probes
+  every content resource, like `LinkEndsReadable`. `ctx` carries `:actor` and
+  `:tenant`.
+
+  ## Cost, and the cap
+
+  Measured at 100,000 referrers (`custom_sort_target_key_benchmark_test.exs`,
+  `docs/json-api.md`): the whole table costs about 1 s with one probed type
+  and about 1 s more per added type, and the same read narrowed to 1,000
+  rows costs 10-60 ms at any of them. The cost is linear in the number of
+  probed resources, so the sort is refused (`{:error, message}`) for a field
+  that would probe more than `max_sort_targets/0`, instead of letting an
+  overlay with many content types turn one request into a multi-second scan.
+  Not a refusal of the unresolved-type fallback as such: on a default build
+  that is three resources, the same as a declared three-type field.
+  """
+  @spec sort_key(map(), map()) :: {:ok, term()} | {:error, String.t()}
+  def sort_key(%{field_type: :media, name: name}, ctx),
+    do: {:ok, target_key([KilnCMS.CMS.MediaItem], :filename, name, ctx)}
+
+  def sort_key(%{field_type: :reference, name: name} = definition, ctx) do
+    resources = target_resources(definition, ctx)
+    max = max_sort_targets()
+
+    if length(resources) > max do
+      {:error,
+       "custom field #{inspect(name)} (reference) targets #{length(resources)} content types " <>
+         "and is not sortable: a sort looks the target up in each, at most #{max} are allowed; " <>
+         "narrow the field's target types or sort by a built-in"}
+    else
+      {:ok, target_key(resources, :title, name, ctx)}
+    end
+  end
+
+  @default_max_sort_targets 8
+
+  @doc """
+  The most content resources a reference sort probes per row. Settable with
+  `config :kiln_cms, :reference_sort_max_targets` (the tests lower it).
+  """
+  @spec max_sort_targets() :: pos_integer()
+  def max_sort_targets,
+    do: Application.get_env(:kiln_cms, :reference_sort_max_targets, @default_max_sort_targets)
+
+  # The snapshot's id as a uuid, or NULL for anything else a row may hold
+  # under the name (a retyped field, a list, a seeded string).
+  defp target_key(resources, label, name, ctx) do
+    # The snapshot id is data an editor wrote: the target must also be in the
+    # query's own organization, whatever its read filter says.
+    org_id = KilnCMS.Accounts.org_id(ctx.tenant)
+
+    id =
+      expr(
+        fragment(
+          "(CASE WHEN jsonb_typeof(? -> ?::text) = 'object' AND (? -> ?::text ->> 'id') ~* ? THEN (? -> ?::text ->> 'id')::uuid END)",
+          ^ref(:custom_fields),
+          ^name,
+          ^ref(:custom_fields),
+          ^name,
+          ^@uuid_pattern,
+          ^ref(:custom_fields),
+          ^name
+        )
+      )
+
+    resources
+    |> Enum.map(fn resource ->
+      case read_filter(resource, ctx) do
+        false ->
+          expr(type(nil, :string))
+
+        filter ->
+          unrelated_first(
+            resource,
+            label,
+            expr(id == parent(^id) and org_id == ^org_id and ^filter)
+          )
+      end
+    end)
+    |> Enum.reduce(fn key, acc -> expr(fragment("COALESCE(?, ?)", ^acc, ^key)) end)
+  end
+
+  # `first(Resource, field: label, query: [filter: filter])` with the
+  # resource known only at runtime.
+  # authorize?: false — the filter carries the reader's gate (`read_filter/2`), as `count` does above
+  defp unrelated_first(resource, label, filter),
+    do: expr(first(^resource, field: ^label, query: [filter: ^filter], authorize?: false))
 
   @doc """
   The ids of a link filter's `target` (#2044): one id or a list, at most

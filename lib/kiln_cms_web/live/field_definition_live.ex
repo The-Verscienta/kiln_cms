@@ -3975,6 +3975,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               "Add typed fields to a content type without a code change. Editors fill them in the content editor; values are validated against these definitions."
             )}
           </p>
+          <p class="mt-1 text-sm">
+            <.link navigate={~p"/editor/fields/sync"} id="fields-sync-link" class="underline">
+              {gettext("Sync definitions from a file")}
+            </.link>
+          </p>
         </div>
 
         <section class="space-y-4">

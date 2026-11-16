@@ -63,6 +63,7 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
       lib/kiln_cms/cms/hidden_fields.ex
       lib/kiln_cms/cms/preparations/custom_field_query.ex
       lib/kiln_cms/cms/preparations/custom_field_query/lists.ex
+      lib/kiln_cms/cms/preparations/custom_field_query/relations.ex
       lib/kiln_cms/cms/preparations/mask_private_fields.ex
       lib/kiln_cms/cms/preparations/mask_unreadable_references.ex
       lib/kiln_cms/cms/preparations/mask_version_fields.ex

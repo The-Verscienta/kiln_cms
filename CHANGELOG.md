@@ -70,11 +70,20 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **GraphQL `customWhere` takes `_or` / `_and` / `_not` groups, the typed form of `customFilter`'s: same nesting (4 deep), same member cap (50), same errors for unknown and private fields.**
+  ([#2445](https://github.com/The-Verscienta/kiln_cms/issues/2445) · [long form](docs/changelog/unreleased.md#graphql-custom-where-groups))
+
+- **Import field definitions from the console: upload a file, review the dry-run diff and data-loss refusals, confirm `--prune` and `--allow-data-loss` separately, and apply.** ([#2438](https://github.com/The-Verscienta/kiln_cms/issues/2438) · [long form](docs/changelog/unreleased.md#field-sync-screen))
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
   ([long form](docs/changelog/unreleased.md#backup-destinations))
 
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
+
+### Changed
+
+- **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
+  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
 
 ### Fixed
 
@@ -85,6 +94,17 @@ Every summary line below that was shortened links to its own entry there.
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
   ([long form](docs/changelog/unreleased.md#backup-state-json-remote))
+
+## [1.10.1] - 2026-11-16
+
+Long form: [docs/changelog/v1.10.1.md](docs/changelog/v1.10.1.md) —
+the 1.10.1 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Fixed
+
+- **The second-factor test of an open page reaching its deadline no longer fails on a slow runner: the deadline sat 600 ms after the test started, and a mount that outlasted it redirected first.**
+  ([#2953](https://github.com/The-Verscienta/kiln_cms/pull/2953) · [long form](docs/changelog/v1.10.1.md#sfe-deadline-test-margin))
 
 ## [1.10.0] - 2026-11-15
 

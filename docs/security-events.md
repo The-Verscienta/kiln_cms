@@ -194,7 +194,7 @@ a type may carry only the keys below; anything else is dropped.
 | `api_key_created` | API key created | A key was minted, or a draft-write key was rotated into a new one | `name`, `scope`, `via` |
 | `api_key_revoked` | API key revoked | A key was revoked by an admin, or when an invitation took over its unconfirmed account (a repeat revoke records nothing) | `name` |
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a verified SSO domain was saved, verified or removed | `provider`, `change` |
-| `org_setting_changed` | Site setting changed | Any other site-level setting, or a blocked-address rule, was saved or removed | `setting` |
+| `org_setting_changed` | Site setting changed | Any other site-level setting, or a blocked-address rule, was saved or removed | `setting` (the field-definition import adds `created`, `updated`, `deleted`, `prune`, `data_loss`) |
 | `ip_auto_blocked` | Address blocked automatically | The [scanner guard](ip-blocking.md#block-scanners-automatically) temporarily blocked an address for racking up 404s or probing bait paths. The address is the event's IP; there is no acting person | `reason`, `count`, `window_minutes`, `block_minutes` |
 | `session_idle_expired` | Signed out after inactivity | A browser session (with its remember-me cookie) was signed out by the site's [idle timeout](account-administration.md#sign-people-out-when-idle). The person is the account signed out | `timeout_minutes`, `tier`, `surface` |
 | `all_sessions_revoked` | Everyone signed out | An admin used [Sign out everyone](account-administration.md#sign-everyone-out); the target is the site (target type `organization`) | `count`, `except_self` |

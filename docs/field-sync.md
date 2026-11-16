@@ -31,7 +31,7 @@ mix kiln.fields.export --org other-site --actor admin@example.com
 ```
 
 A signed-in admin can also download the same file from the browser by opening
-`/editor/fields/export.json` (the Fields screen has no button for it yet). It
+`/editor/fields/export.json`, or from the **Sync definitions** screen below. It
 saves as `field-definitions.json`; anyone below admin gets a `403` with
 `{"error": "admin_required"}`. On a release:
 
@@ -117,6 +117,42 @@ must fail on a refused import.
   environments, so a file that renames `dosage` to `dose` blocks on the old
   field if it holds data. Rename it in the target's console first (that moves
   the values), then export again.
+
+## Import from the console
+
+An admin with no shell on the environment can import from **Custom fields →
+Sync definitions from a file** (`/editor/fields/sync`). It is a screen over the
+same import as `mix kiln.fields.import`: nothing is diffed or validated by the
+screen itself.
+
+1. **Choose a file.** One `.json` file of up to 2 MB, made by Export. It is
+   checked by content: anything that is not a JSON object is refused whatever
+   its name, and a JSON object that is not a `kiln-field-definitions` document
+   is reported by the import with its path.
+2. **Review the changes.** *Preview changes* runs a dry run: the `+` create,
+   `~` update, `-` delete and `?` kept lines (also spelled out as words, not
+   only signs), the counts, any write the real run would refuse, and the
+   changes that are **refused because records hold values** (a delete, a type
+   change, a list made single). Nothing is written.
+3. **Confirmations.** Two separate checkboxes, both off for every new file:
+   *Delete fields this file does not list* (`--prune`) and *Allow changes that
+   drop values records already hold* (`--allow-data-loss`). Changing either
+   re-runs the preview. While a refusal is listed and data loss is not allowed,
+   **Apply** stays disabled and the remaining writes are not checked yet.
+4. **Apply.** *Apply…* shows a summary, including which confirmations you
+   gave; only *Yes, apply these changes* writes. The apply sends the plan you
+   saw: if another admin or an import changed the site's definitions in the
+   meantime so that the plan differs, nothing is written, the page says so and
+   shows the updated changes. The import is still one transaction. The window
+   between that check and the write is milliseconds, and the check does not
+   lock another admin's edit of the same field in that instant.
+
+Only an admin reaches the screen, and each step re-checks it. A successful
+apply is recorded in the security log as **Site setting changed**
+(`setting` `field_definitions`, with the created / updated / deleted counts and
+whether pruning or data loss was confirmed;
+[security events](security-events.md)). An import from the command line or the
+release `rpc` is **not** recorded there.
 
 ## The file
 

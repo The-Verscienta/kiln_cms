@@ -60,6 +60,45 @@ carries the reasoning.
 
 ## Added
 
+<a id="graphql-custom-where-groups"></a>
+
+- **GraphQL `customWhere` takes `_or` / `_and` / `_not` groups.**
+  A condition in the typed list can now be a group instead of a field
+  condition: `_or` and `_and` hold a list of conditions, `_not` holds one.
+  They nest and sit beside plain conditions, and they run through the engine
+  `customFilter` uses (`CustomFieldQuery`), so the meaning is the same,
+  including SQL's `not` (a record lacking the field is kept by `_not`). The
+  caps are the ones JSON:API and `customFilter` have: 4 deep, 50 conditions
+  in all, with the same error text; the 10-condition cap bounds only the
+  top level of the list (a group is one element), so over GraphQL the query's
+  complexity cap (200, 5 per condition) is the practical limit on groups,
+  well under 50; JSON:API and MCP callers have no pricing and get the full
+  50. Kind, operator, private-field and site checks apply inside
+  a group as outside one. Each condition at any depth adds 5 to the query's
+  complexity.
+
+  The change to the schema is additive for queries: `CustomFieldCondition`
+  gains `_or`, `_and` and `_not`, and its `name` is no longer `String!` (a
+  group has none). Existing documents and variables stay valid, but a
+  condition with neither a name nor a group now passes validation and is
+  refused by the read ("every condition needs a name"). A client generated
+  from the schema (Apollo Kotlin, Swift, TypeScript codegen) types `name` as
+  optional after regenerating, so code that builds the input may need a small
+  edit. A second input type behind a second argument would have been strictly
+  additive but would leave two arguments for one feature. The same groups
+  work in the MCP and JSON:API `custom_where` argument. Guide:
+  [headless-graphql-api.md](../headless-graphql-api.md#typed-filters-customwhere).
+
+<a id="field-sync-screen"></a>
+
+- **An admin can import field definitions from the console: Custom fields → Sync definitions from a file uploads a `kiln-field-definitions` file, shows the dry-run diff and the refusals for changes that would drop stored values, and applies it after a confirmation.**
+  `--prune` and `--allow-data-loss` are two separate checkboxes, off for every
+  new file, each re-running the preview. The apply sends the digest of the plan
+  that was shown (`FieldSync.digest/1`, `import_doc(expect_digest:)`) and is
+  refused when the site's definitions no longer plan the same changes. A
+  successful apply is a `org_setting_changed` security event with the counts.
+  See [Import from the console](../field-sync.md#import-from-the-console).
+
 <a id="backup-destinations"></a>
 
 - **In-app backups can go to several destinations: the Backups page has a Destinations tab where a platform admin adds a directory on the server or a named rclone remote, tests it, and turns its retention on or off. A backup that reaches only some of them succeeds as "Partly off-site" and raises the backup alarm.**
@@ -135,6 +174,35 @@ carries the reasoning.
   implements the behaviour and has a usable `kind/0` that neither
   `local`, `rclone` nor another module already has. See *Backup
   destinations* in [plugin-extensibility.md](../plugin-extensibility.md).
+
+## Changed
+
+<a id="sort-reference-media"></a>
+
+- **`custom_sort` (JSON:API) and `customSort` (GraphQL) now sort a single-valued reference or media field, by its target's current title (a media item's current filename).**
+  Before this, both were refused with a `400` (#2354), because the label stored
+  in the referrer can lag a rename and an order over targets the caller cannot
+  read would reveal where they sit. The key is now read from the target, not
+  from the stored label, so a renamed target moves at once. It is `NULL`, which
+  sorts last like an unset field, where the caller may not read the target, so
+  the order of unreadable targets is never revealed. The target must also be in
+  the query's organization, and a preview (shared-draft) grant is not honored:
+  such a target sorts as unreadable. An editor's list still shows the stored
+  label until the referrer is saved again. A `multiple` reference or media field
+  stays refused, now with `custom field "x" (reference) holds a list and is not
+  sortable`. Clients that treated the old `400` as the signal can drop it.
+  Cost: one primary-key lookup per matching row in each type the field may
+  target. Measured at 100,000 referrers: 0.8-1.6 s over the whole table with one
+  type, up to 2.7-3.9 s with three, and 10-60 ms once a filter narrows the read
+  to 1,000 rows, for an editor and an anonymous reader alike (numbers and
+  method in [json-api.md](../json-api.md)). The cost grows linearly with the
+  types probed, so a field that would probe more than 8 content types (set by
+  `config :kiln_cms, :reference_sort_max_targets`) is refused with a `400`. The
+  unresolved-type fallback is not refused as such: it is three types on a
+  default build. No index on the source table can serve this order, so on a
+  large table narrow the read with a filter. No migration; rolling back only brings the refusal
+  back. See [json-api.md](../json-api.md)
+  and the amendment in decision 0014.
 
 ## Fixed
 

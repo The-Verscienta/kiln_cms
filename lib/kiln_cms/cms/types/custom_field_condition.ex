@@ -9,6 +9,10 @@ defmodule KilnCMS.CMS.Types.CustomFieldCondition do
   field's definition by `KilnCMS.CMS.Preparations.CustomFieldQuery`, the one
   place that knows which fields exist and who may see them.
 
+  Instead of a `name` and a kind, a condition can be a group (#2445): exactly one
+  of `_or` / `_and` (a list of conditions) or `_not` (one condition), nesting
+  under the same caps as `custom_filter`'s groups.
+
   Absinthe delivers atom keys (`%{name: "price", float: %{gt: 10.0}}`), a
   JSON:API caller string keys; both are accepted and normalised to atoms by the
   preparation.

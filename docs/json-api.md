@@ -435,11 +435,43 @@ comma-separated for multi-key. Records lacking the field always sort last, as do
 `null`, array or object under it (read as no value).
 `custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but
 `custom_sort` outranks an action's *default* order (e.g. `/posts/published`'s
-`-published_at`). `media`/`reference` fields are not sortable: the `400` says
-why. Their stored label can lag the target's current title (a read relabels it
-from the target as it is now), and an order over targets the caller may not read
-would reveal where they sit, so a reference or media sort is refused rather than
-ordered by a stale or leaky key. Sort by a built-in or a text custom field instead.
+`-published_at`). A single-valued `reference` or `media` field sorts by its
+target's **current** title (a media item's current filename), read from the
+target and not from the label stored in the referrer, so a renamed target moves
+at once. Where the caller may not read the target (or it sits in another
+organization, or is only readable through a shared-draft preview link), the key
+is `NULL`: that record sorts last with the unset ones, so the order never shows
+where an unreadable target would sit. Your own list may still show the stored
+label until the referrer is saved again. A `multiple` one is refused: the `400`
+reads `custom field "x" (reference) holds a list and is not sortable`.
+
+Cost: each matching row looks up its target by primary key in each content
+type the field may point at (`target_types`; a field whose type no longer
+resolves probes every content type, which on a default build is page, post and
+the dynamic-type table). Measured at 100,000 referrers (the `:benchmark` test
+`custom_sort_target_key_benchmark_test.exs`; a 20-row page, an editor or an
+anonymous reader, one machine, a few runs, so read these as orders of
+magnitude):
+
+| Field targets | Whole table | Narrowed to 1,000 rows |
+| --- | --- | --- |
+| one type | 0.8-1.6 s | 10-16 ms |
+| two types | 1.5-2.8 s | 16-30 ms |
+| two + a dynamic type | 2.7-3.9 s | 25-41 ms |
+| unresolved type (all three) | 1.9-3.8 s | 22-60 ms |
+
+The cost is linear in the number of types probed (about 1 s per type per
+100,000 rows, most of it the id parse and the probe, not the sort), and the
+anonymous reader pays no more than an editor. No index on the source table can
+serve this order, so on a large table narrow the read with a filter first: the
+same sort over 1,000 matching rows is tens of milliseconds at any of these
+shapes. A field that would probe more than 8 content types (an overlay with
+many types and an unresolved target) is refused with a `400` rather than
+multiplying that cost; `config :kiln_cms, :reference_sort_max_targets` sets the
+bound. An edge-based key (reading the target id from the `content_links` edge
+instead of the stored snapshot) measured about 0.56 s for three types over the
+whole table, roughly five times faster, but it would make the sort follow edge
+state rather than the stored value, so it is left as a follow-up.
 
 A built-in column can follow a custom one in the same order by spelling it
 `_native:<name>` in `custom_sort`: `custom_sort=price,_native:title` or
@@ -467,7 +499,10 @@ Everything else is unchanged inside a group: an unknown or private field is the
 same `400` as outside one, definitions are read for the requesting site only,
 and `not` follows SQL, so `_not` of a comparison leaves out records lacking the
 field. GraphQL takes the same keys in `customFilter` (built-in names there are
-snake_case); `customWhere` has no groups.
+snake_case); `customWhere` takes `_or` / `_and` / `_not` too, as typed
+conditions (see
+[headless-graphql-api.md](headless-graphql-api.md#typed-filters-customwhere)),
+under the same two caps.
 
 Custom sorts are always **nulls last**, ascending or descending. A native
 `sort=-x` is plain `desc`, which in Postgres puts nulls first.
