@@ -30,17 +30,15 @@ defmodule Mix.Tasks.Kiln.Titles.Regenerate do
     ct =
       KilnCMS.CMS.ContentTypes.get(type, org_id) || Mix.raise("unknown content type #{type}")
 
-    cond do
-      is_nil(ct.title_template) ->
-        Mix.shell().info("#{type} has no title_template; nothing to do.")
+    if is_nil(ct.title_template) do
+      Mix.shell().info("#{type} has no title_template; nothing to do.")
+    else
+      summary = KilnCMS.CMS.TitleRegeneration.run(ct, org_id)
 
-      true ->
-        summary = KilnCMS.CMS.TitleRegeneration.run(ct, org_id)
-
-        Mix.shell().info(
-          "Done: #{summary.changed} retitled, #{summary.skipped} skipped (working copy), " <>
-            "#{summary.failed} failed, #{summary.scanned} scanned."
-        )
+      Mix.shell().info(
+        "Done: #{summary.changed} retitled, #{summary.skipped} skipped (working copy), " <>
+          "#{summary.failed} failed, #{summary.scanned} scanned."
+      )
     end
   end
 end

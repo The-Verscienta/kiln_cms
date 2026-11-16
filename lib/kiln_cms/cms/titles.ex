@@ -251,12 +251,10 @@ defmodule KilnCMS.CMS.Titles do
   defp reachable([], _computed, seen), do: MapSet.to_list(seen)
 
   defp reachable([name | rest], computed, seen) do
-    cond do
-      MapSet.member?(seen, name) or not Map.has_key?(computed, name) ->
-        reachable(rest, computed, seen)
-
-      true ->
-        reachable(Computed.references(computed[name]) ++ rest, computed, MapSet.put(seen, name))
+    if MapSet.member?(seen, name) or not Map.has_key?(computed, name) do
+      reachable(rest, computed, seen)
+    else
+      reachable(Computed.references(computed[name]) ++ rest, computed, MapSet.put(seen, name))
     end
   end
 
