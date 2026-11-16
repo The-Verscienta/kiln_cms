@@ -190,10 +190,14 @@ defmodule KilnCMS.CMS.CustomFieldQueryTest do
                [thirty.id, ten.id, nine.id]
     end
 
-    test "media/reference fields are not sortable" do
+    test "a multiple media/reference field is not sortable" do
       admin = admin()
       related = field_name("related")
-      define!(%{name: related, field_type: :reference, target_type: "page"}, admin)
+
+      define!(
+        %{name: related, field_type: :reference, target_type: "page", multiple: true},
+        admin
+      )
 
       assert {:error, %Ash.Error.Invalid{} = error} =
                CMS.list_pages(%{custom_sort: related}, actor: admin)

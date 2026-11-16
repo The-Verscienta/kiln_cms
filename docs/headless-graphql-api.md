@@ -119,7 +119,10 @@ consumers never need the plain, credential-widened list.
 > "Sale"}` inside a condition for built-in columns (snake_case names) — see
 > [json-api.md](json-api.md) → "Boolean groups". `customSort` may put a built-in
 > after a custom key with `_native:`: `customSort: "-price,_native:title"`. A
-> reference or media field is not sortable; the error says why.
+> single-valued reference or media field sorts by its target's current title
+> (filename for media), last where the caller cannot read the target; a list of
+> them is not sortable and the error says so. See [json-api.md](json-api.md) →
+> "Sorting".
 >
 > `customSort` is also an argument of the keyword and semantic search queries
 > (and their `…Published` twins). Precedence: explicit `sort` > `customSort` >
