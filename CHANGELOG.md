@@ -76,6 +76,12 @@ Every summary line below that was shortened links to its own entry there.
 - **Color fields can be limited to a palette (`validation["palette"]`, shown as swatches in the editor) and JSON fields can carry a JSON Schema (`validation["json_schema"]`, draft 2020-12, local `$ref` only, bounded, never fetches); both are checked when a value changes. No migration.**
   ([long form](docs/changelog/unreleased.md#color-palette-json-schema))
 
+||||||| b80c95150
+### Changed
+
+- **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
+  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
+
 ### Fixed
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
