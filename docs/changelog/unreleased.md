@@ -22,4 +22,4 @@ carries the reasoning.
     in `embed.js`).** `/\/+$/` is quadratic on a long run of `/`. With 100,000
     slashes it took about 4 s in Node. Its input is the integrator's own
     `baseUrl` or attribute. Both now trim in a loop, with the same result.
-  ([#PR](https://github.com/The-Verscienta/kiln_cms/pull/PR))
+  ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947))
