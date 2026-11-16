@@ -17,7 +17,7 @@ carries the reasoning.
   used the name is cast by the built-in type. No migration. Rolling back to
   1.8.0 or older needs the `address` fields removed first, like `key_value`
   and `telephone`; see
-  [docs/releasing.md](../releasing.md#rolling-back-to-v180).
+  [docs/releasing.md](../releasing.md#new-values-in-an-atom-column).
 
 <a id="backup-destinations-upgrade"></a>
 
