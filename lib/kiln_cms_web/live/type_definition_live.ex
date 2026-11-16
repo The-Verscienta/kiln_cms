@@ -258,6 +258,18 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
             </div>
             <div class="sm:col-span-2">
               <.input
+                field={@form[:title_template]}
+                label={gettext("Title template (optional)")}
+                placeholder="{{ field.last_name }}, {{ field.first_name }}"
+              />
+              <p class="mt-1 text-xs text-base-content/70">
+                {gettext(
+                  "Builds each record's title from its fields when it is saved, so editors don't type one. Use {{ field.<name> }}; the title and slug can't be read. Blank = titles are typed by hand."
+                )}
+              </p>
+            </div>
+            <div class="sm:col-span-2">
+              <.input
                 field={@form[:alias_pattern]}
                 label={gettext("Path alias pattern (optional)")}
                 placeholder="/products/shoes/size/[field:size]"
@@ -437,6 +449,18 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
                   label={gettext("Slug pattern (optional)")}
                   placeholder="[yyyy]-[mm]-[title]"
                 />
+                <div class="sm:col-span-2">
+                  <.input
+                    field={@edit.form[:title_template]}
+                    label={gettext("Title template (optional)")}
+                    placeholder="{{ field.last_name }}, {{ field.first_name }}"
+                  />
+                  <p class="mt-1 text-xs text-base-content/70">
+                    {gettext(
+                      "Builds each record's title from its fields when it is saved, so editors don't type one. Use {{ field.<name> }}; the title and slug can't be read. Blank = titles are typed by hand."
+                    )}
+                  </p>
+                </div>
                 <.input
                   field={@edit.form[:alias_pattern]}
                   label={gettext("Path alias pattern (optional)")}

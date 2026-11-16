@@ -67,6 +67,7 @@ defmodule KilnCMS.CMS.Content do
     :schema_org_type,
     :slug_pattern,
     :alias_pattern,
+    :title_template,
     :seo_title_pattern,
     :seo_description_pattern,
     :noindex_default,
@@ -576,6 +577,12 @@ defmodule KilnCMS.CMS.Content do
     # "/products/shoes/size/[field:size]" — auto-fills `path_alias`.
     alias_pattern =
       opts |> Keyword.get(:alias_pattern) |> KilnCMS.Slug.Pattern.validate!(usage: :alias)
+
+    # Optional computed-title template (#2287), e.g.
+    # "{{ field.last_name }}, {{ field.first_name }}" — the computed-field
+    # language (`KilnCMS.CMS.Computed`). A syntax error or a `title`/`slug`
+    # reference fails the build; nil = titles are typed by hand.
+    title_template = opts |> Keyword.get(:title_template) |> KilnCMS.CMS.Titles.validate!()
 
     # Optional default SEO patterns (#805), e.g. "[title] | [site-name]" — see
     # `KilnCMS.Seo.Pattern`. Unknown tokens fail the build here. Resolved at
@@ -2161,6 +2168,10 @@ defmodule KilnCMS.CMS.Content do
           # Optional pathauto alias pattern (#485); nil = no auto alias.
           def __kiln_content_alias_pattern__, do: unquote(alias_pattern)
 
+          # Optional computed-title template (#2287); nil = hand-typed titles.
+          # Dynamic entries carry theirs on the TypeDefinition row.
+          def __kiln_content_title_template__, do: unquote(title_template)
+
           # Optional default SEO patterns (#805); nil = the record's own
           # fields. Dynamic entries carry theirs on the TypeDefinition row.
           def __kiln_seo_title_pattern__, do: unquote(seo_title_pattern)
@@ -2807,6 +2818,9 @@ defmodule KilnCMS.CMS.Content do
           primary? true
           # A blank/omitted slug is derived from the title (stop words
           # stripped), so a title alone is enough to create content.
+          # A type's `title_template` owns the title (#2287); BEFORE the slug,
+          # which follows it, and before `ApplyCustomFields`.
+          change KilnCMS.CMS.Changes.DeriveTitle
           change KilnCMS.CMS.Changes.DeriveSlug
           change KilnCMS.CMS.Changes.DeriveAlias
           # The type's robots defaults, only where the caller left a flag out (#2256).
@@ -2888,6 +2902,9 @@ defmodule KilnCMS.CMS.Content do
           # a `StaleRecord` error and must reload.
           change optimistic_lock(:lock_version)
           # Clearing the slug regenerates it from the title — see `:create`.
+          # A type's `title_template` owns the title (#2287); BEFORE the slug,
+          # which follows it, and before `ApplyCustomFields`.
+          change KilnCMS.CMS.Changes.DeriveTitle
           change KilnCMS.CMS.Changes.DeriveSlug
           change KilnCMS.CMS.Changes.DeriveAlias
           # Renaming a published slug leaves a 301 behind at the old URL.
@@ -3017,6 +3034,9 @@ defmodule KilnCMS.CMS.Content do
           change filter(expr(^ref(:state) == :draft))
           change optimistic_lock(:lock_version)
           # Clearing the slug regenerates it from the title — see `:create`.
+          # A type's `title_template` owns the title (#2287); BEFORE the slug,
+          # which follows it, and before `ApplyCustomFields`.
+          change KilnCMS.CMS.Changes.DeriveTitle
           change KilnCMS.CMS.Changes.DeriveSlug
           change KilnCMS.CMS.Changes.DeriveAlias
           # Mirrors `:update`'s tag arguments (#521). Autosave isn't on any API
@@ -3117,6 +3137,9 @@ defmodule KilnCMS.CMS.Content do
           # this write is built on (#2281). BEFORE the change that reads them.
           change KilnCMS.CMS.Changes.RestoreHiddenFields
           change KilnCMS.CMS.Changes.StageWorkingFields
+          # The held title follows the held fields (#2287); BEFORE the stamp,
+          # which compares it with the live title.
+          change {KilnCMS.CMS.Changes.DeriveTitle, target: :working_title}
           change KilnCMS.CMS.Changes.StampWorkingCopy
           change KilnCMS.CMS.Changes.CoalesceAutosaveVersions
           # A translation's shared fields in the held body (#1860). The held

@@ -190,6 +190,12 @@ release `rpc` is **not** recorded there.
   unknown key is refused (a typo would otherwise be silently ignored).
 - A dynamic type's `definition` is optional on import if the type exists in
   the target already.
+- A dynamic type's `definition` carries `title_template` (computed titles, see
+  [Build record titles from fields](extending-content.md#build-record-titles-from-fields)).
+  Unlike other keys it is **not** reset to its default when absent: a
+  definition that leaves it out, as every file written before it existed does,
+  keeps the target's stored template. To clear one, send `"title_template":
+  null`.
 - `version` is bumped only for a change old readers cannot understand; a file
   with a newer version is refused rather than half-read. A new field
   attribute does not bump it, so an older build refuses such a file by the

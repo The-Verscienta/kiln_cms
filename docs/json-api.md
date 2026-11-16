@@ -1022,7 +1022,13 @@ final URL segment (the type's path prefix stays in front). Date tokens anchor
 to the publish date, else the scheduled date, else the record's creation
 date; a pattern that expands to nothing for a record (e.g. `[category]` on an
 uncategorized entry) falls back to the default derivation, so a title alone
-is still always enough. Three surfaces let a
+is still always enough. A type with a **title template**
+(`TypeDefinition.title_template`, readable on `/type-definitions`; the Content
+macro's `title_template:` option) builds the `title` itself from the record's
+fields on every save: a `title` you send is accepted and ignored, and the
+response carries the derived one (see
+[Build record titles from fields](extending-content.md#build-record-titles-from-fields)).
+Three surfaces let a
 front end handle URLs without mirroring Kiln's scheme:
 
 - **`path` field** — every content read exposes a `path` calculation, the full
