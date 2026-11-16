@@ -22,9 +22,26 @@
   // to the frame that sent them (a page may embed several forms).
   var mounted = [];
 
+  // Trailing slashes, trimmed in a loop: `/\/+$/` is quadratic on long runs of "/".
+  function trimSlashes(url) {
+    var end = url.length;
+    while (end > 0 && url.charAt(end - 1) === "/") end--;
+    return url.slice(0, end);
+  }
+
+  // The CMS base URL, or null when `data-kiln-origin` isn't an http(s) URL —
+  // anything else (`javascript:`, `data:`) must never become the iframe's src.
   function originOf(script) {
     var explicit = script.getAttribute("data-kiln-origin");
-    if (explicit) return explicit.replace(/\/+$/, "");
+    if (explicit) {
+      try {
+        var protocol = new URL(explicit, window.location.href).protocol;
+        if (protocol !== "https:" && protocol !== "http:") return null;
+      } catch (e) {
+        return null;
+      }
+      return trimSlashes(explicit);
+    }
 
     try {
       return new URL(script.src, window.location.href).origin;
@@ -39,6 +56,7 @@
     script.setAttribute("data-kiln-mounted", "1");
 
     var origin = originOf(script);
+    if (origin === null) return;
     var iframe = document.createElement("iframe");
 
     iframe.src = origin + "/forms/" + encodeURIComponent(slug) + "/embed";

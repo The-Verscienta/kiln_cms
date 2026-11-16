@@ -185,7 +185,10 @@ export class KilnClient {
   private readonly imageTransformKey?: string;
 
   constructor(options: KilnClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    // Trailing slashes trimmed in a loop: `/\/+$/` is quadratic on long runs of "/".
+    let baseUrl = options.baseUrl;
+    while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+    this.baseUrl = baseUrl;
     this.apiKey = options.apiKey;
     // Wrapped, not stored bare: `this.fetchImpl(…)` would call the platform's
     // fetch with the client as `this`, which browsers and Workers reject with

@@ -73,6 +73,11 @@ Every summary line below that was shortened links to its own entry there.
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
 
+### Fixed
+
+- **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
+  ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
+
 ### Security
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
