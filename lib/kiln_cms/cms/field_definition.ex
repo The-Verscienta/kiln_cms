@@ -362,6 +362,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :position,
       :section,
       :width,
+      :step,
+      :prefix,
+      :suffix,
       :default,
       :default_source,
       :default_field,
@@ -529,6 +532,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `plain_breaks` shapes that rendition, so it drops with it.
     change KilnCMS.CMS.Changes.ClearDeliverPlain
 
+    # `step`, `prefix` and `suffix` (#2432) shape a number's editor input, so
+    # they drop on any type but `:integer` and `:float`.
+    change KilnCMS.CMS.Changes.ClearNumberOptions
+
     # `deliver_portable` converts a rich `:text` field's HTML, so it drops on
     # any other type, on a `:plain` one, and on a link or group sub-field.
     change KilnCMS.CMS.Changes.ClearDeliverPortable
@@ -593,6 +600,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # A widget the write names must be one the field offers (#2284).
     validate KilnCMS.CMS.Validations.FieldWidget
+
+    # A number's `step` (#2432) must fit its type and its bounds.
+    validate KilnCMS.CMS.Validations.NumberOptions
 
     # A :reference field must target known content types (compiled or
     # dynamic): one through `target_type`, or several through `target_types`.
@@ -907,6 +917,20 @@ defmodule KilnCMS.CMS.FieldDefinition do
       constraints one_of: [:full, :half, :third]
       public? false
     end
+
+    # Number options (#2432), `:integer` and `:float` only
+    # (`Changes.ClearNumberOptions`): the editor input's `step`, and a
+    # `prefix`/`suffix` drawn beside it ("$", "kg"). Editor-only hints, like
+    # `widget`: values are stored and delivered as plain numbers, and `step`
+    # is not enforced on write — `validation.min`/`max` stay the only bounds
+    # (`Validations.NumberOptions` keeps the step itself sensible). All three
+    # nullable, so older rows and releases read nothing different; a nil step
+    # is the type's own (1 for an integer, any value for a float).
+    attribute :step, :float, public?: true, constraints: [greater_than: 0]
+
+    attribute :prefix, :string, public?: true, constraints: [max_length: 16]
+
+    attribute :suffix, :string, public?: true, constraints: [max_length: 16]
 
     # Whether this field's value is another *name* for the record — a Latin
     # name, a pinyin spelling, a trade name — so that a query containing it

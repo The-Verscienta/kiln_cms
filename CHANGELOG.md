@@ -67,6 +67,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Number fields: Step, Prefix and Suffix in the Validation fieldset and a Slider editor input. Field-sync exports now carry `step`, `prefix` and `suffix`, which a release before this one refuses as unknown keys.**
+  ([long form](docs/changelog/unreleased.md#number-field-options))
+
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
   ([long form](docs/changelog/unreleased.md#backup-destinations))
 

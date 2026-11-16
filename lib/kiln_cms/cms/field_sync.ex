@@ -48,7 +48,9 @@ defmodule KilnCMS.CMS.FieldSync do
   that owner's layouts as they are, even with `prune?: true`; an owner with
   it, `[]` included, declares all its layouts. A file this release writes
   cannot be imported by a release that predates #2280: every field carries
-  `"width"`, a key such a release refuses as unknown.
+  `"width"`, a key such a release refuses as unknown. The same holds, from
+  #2432, for `"step"`, `"prefix"` and `"suffix"` (a number's editor options,
+  `null` when unset); a file without them still imports unchanged.
 
   ## Import
 
