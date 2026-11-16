@@ -35,6 +35,7 @@ defmodule KilnCMS.Staging.Scrub do
           billing_events_purged: non_neg_integer(),
           backup_runs_purged: non_neg_integer(),
           backup_schedules_disabled: non_neg_integer(),
+          backup_destinations_purged: non_neg_integer(),
           security_events_purged: non_neg_integer(),
           instance_security_events_purged: non_neg_integer(),
           security_alert_dispatches_purged: non_neg_integer(),
@@ -106,6 +107,12 @@ defmodule KilnCMS.Staging.Scrub do
         set: [enabled: false]
       )
 
+    # Backup destinations (#2220) are deleted, not paused: their credentials
+    # are production's (a clone would hold, and could test, the keys to
+    # production's off-site copies), and their places are production's, where
+    # a staging backup must never land or prune.
+    {backup_destinations_purged, _} = Repo.delete_all(KilnCMS.Backups.DestinationConfig)
+
     # The security audit log (#2241) holds raw IPs, user agents and email
     # snapshots of the production sign-ins: personal data a clone must not carry.
     {security_events_purged, _} = Repo.delete_all(KilnCMS.Security.Event)
@@ -165,6 +172,7 @@ defmodule KilnCMS.Staging.Scrub do
       billing_events_purged: billing_events_purged,
       backup_runs_purged: backup_runs_purged,
       backup_schedules_disabled: backup_schedules_disabled,
+      backup_destinations_purged: backup_destinations_purged,
       security_events_purged: security_events_purged,
       instance_security_events_purged: instance_security_events_purged,
       security_alert_dispatches_purged: security_alert_dispatches_purged,

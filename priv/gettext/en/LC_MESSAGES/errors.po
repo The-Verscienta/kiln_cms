@@ -59,12 +59,47 @@ msgstr ""
 msgid "%{field}: %{message}"
 msgstr ""
 
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} has the wrong type"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is a secret and can't be a setting"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is not a secret of this kind"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is not a setting of this kind"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} is required"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} must be text"
+msgstr ""
+
 #: lib/kiln_cms/cms/validations/webhook_format_events.ex
 #, elixir-autogen, elixir-format
 msgid "Slack endpoints can only receive security events"
 msgstr ""
 
 msgid "are still associated with this entry"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "at most %{max} destinations can be enabled"
 msgstr ""
 
 ## From Ecto.Changeset.cast/4
@@ -125,6 +160,11 @@ msgstr ""
 msgid "must be 1 to 63 lowercase letters, digits or hyphens, and cannot start or end with a hyphen"
 msgstr ""
 
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "must be a map of fields"
+msgstr ""
+
 ## From Ecto.Changeset.validate_acceptance/3
 msgid "must be accepted"
 msgstr ""
@@ -148,6 +188,11 @@ msgid "must be less than %{number}"
 msgstr ""
 
 msgid "must be less than or equal to %{number}"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "no installed backup destination has this kind (was its plugin removed?)"
 msgstr ""
 
 #: lib/kiln_cms/backups/schedule/validations/interval_available.ex
@@ -200,3 +245,23 @@ msgid "should have at most %{count} item(s)"
 msgid_plural "should have at most %{count} item(s)"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "the other backup destinations couldn't be read; try again"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "the stored credentials can't be decrypted (was SECRET_KEY_BASE changed?); enter them again"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "this is, contains or is inside another destination; choose a place of its own"
+msgstr ""
+
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "where a destination writes can't be changed; add a new destination instead"
+msgstr ""

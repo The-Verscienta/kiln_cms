@@ -50,6 +50,14 @@ defmodule KilnCMS.Security.InstanceEvent do
     :backup_schedule_created,
     :backup_schedule_changed,
     :backup_schedule_deleted,
+    # A platform admin added, changed, deleted or tested a backup destination
+    # (#2220). The target is the destination. Never a setting's value or a
+    # secret: a change names the fields that changed and whether secrets were
+    # given (`KilnCMS.Backups.DestinationConfig.Audit`).
+    :backup_destination_created,
+    :backup_destination_changed,
+    :backup_destination_deleted,
+    :backup_destination_tested,
     # A platform admin saved the platform's security alert settings (#2245):
     # which platform alert kinds are off (`KilnCMS.Security.PlatformAlertSettings`).
     :platform_alerts_changed
@@ -62,6 +70,11 @@ defmodule KilnCMS.Security.InstanceEvent do
     backup_schedule_changed:
       ~w(changed components interval enabled keep_count_before keep_count_after keep_days_before keep_days_after),
     backup_schedule_deleted: ~w(components interval enabled keep_count keep_days),
+    backup_destination_created: ~w(name kind enabled prune secrets_changed),
+    backup_destination_changed: ~w(changed name kind enabled prune secrets_changed),
+    backup_destination_deleted: ~w(name kind enabled),
+    # `node`: the node the Test ran on (a Local destination is that node's disk).
+    backup_destination_tested: ~w(name kind ok node),
     # `disabled_kinds`: the platform kinds off after the save, comma-joined,
     # or "none".
     platform_alerts_changed: ~w(disabled_kinds)

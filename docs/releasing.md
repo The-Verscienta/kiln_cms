@@ -1035,6 +1035,37 @@ For field definitions that is every release from the one that fixed #2605:
 it hides a field of a type it doesn't know and keeps the field's values
 (see [Delete a field of an unknown type](extending-content.md#delete-a-field-of-an-unknown-type)).
 
+### Rolling back past backup destinations
+
+Backup destinations (#2220, the release after v1.10.0) record a stored
+destination's results under a `dest:<uuid>` key in each backup run's
+artifacts. v1.10 and earlier validate those keys on every write to a run
+and know only `local` and `rclone:`, so they refuse to write a run that
+carries one: its finish, its fail, and retention's mark-pruned. Nothing
+breaks a read. What it means in practice:
+
+- **Don't run a backup while a multi-node deployment is part-way through
+  the upgrade.** The off-site step became one job per destination, and a
+  v1.10 node that picks one up copies only to `BACKUP_RCLONE_REMOTE`; the
+  new release then records the other destinations as "not attempted", and
+  a v1.10 node that writes the run is refused. Pause the in-app schedules
+  and the cron entry for the length of the deploy if one could fire.
+- **After rolling back to v1.10**, backups go to `BACKUP_DIR` and
+  `BACKUP_RCLONE_REMOTE` only: v1.10 ignores the `backup_destinations`
+  table and the new `backup_runs` columns. A run sent to a stored
+  destination before the rollback reads wrong in History there: its files
+  are never marked pruned when local retention deletes them, its chip
+  names the destination by its raw key, and once its local files are gone
+  it reads "missing" rather than "off-site only". Rolling forward again
+  shows it correctly. There is nothing to run before the rollback.
+
+The release that adds destinations accepts `dest:<uuid>` keys, and stores
+a run's `offsite_status` and each destination's status as
+`KilnCMS.Types.KnownAtom`, so a later release can add values to those two
+without breaking it. A new kind of artifact destination key, or a new
+status inside an artifact's `destinations` map, would still be refused by
+it the same way.
+
 ### What zero-downtime does and does not cover
 
 The policy makes the **schema** safe for two releases at once. Kiln's boot

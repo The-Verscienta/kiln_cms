@@ -138,6 +138,10 @@ Contributions are expected to keep these green — see
 [`CONTRIBUTING.md`](../CONTRIBUTING.md):
 
 - **`mix sobelow`** — static security scan, part of `mix precommit` and CI.
+- **CodeQL** — GitHub code scanning for the JavaScript/TypeScript (editor,
+  client, embed scripts), the workflows and the Python scripts, on every PR,
+  push to `main` and weekly ([`codeql.yml`](workflows/codeql.yml)). CodeQL
+  can't read Elixir; Sobelow covers that.
 - **`mix deps.audit`** — `mix.lock` against the Elixir advisory database, in
   `mix precommit` and as its own CI job so a new advisory doesn't bury unrelated
   results.

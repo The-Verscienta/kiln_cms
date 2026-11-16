@@ -6,7 +6,7 @@ defmodule Kiln.ContractTest do
   """
   use ExUnit.Case, async: true
 
-  alias Kiln.ContractTest.{Backend, Captcha, Links, Note, Plugin, Stars}
+  alias Kiln.ContractTest.{Backend, Captcha, Destination, Links, Note, Plugin, Stars}
 
   test "use Kiln.Plugin defaults every callback a plugin doesn't override" do
     assert Plugin.name() == "contract_test"
@@ -14,6 +14,7 @@ defmodule Kiln.ContractTest do
     assert Plugin.field_types() == []
     assert Plugin.plug_routes() == []
     assert Plugin.challenge_providers() == []
+    assert Plugin.backup_destinations() == []
   end
 
   test "use Kiln.Block builds an embedded resource from the DSL" do
@@ -60,6 +61,60 @@ defmodule Kiln.ContractTest do
     assert Backend.csp_hosts() == []
     assert Backend.key_for_url("https://img.example/k") == :error
     assert Backend.check() == :unsupported
+  end
+
+  describe "a backup destination" do
+    test "the contract's callbacks and arities, with supports/0 the only optional one" do
+      assert Enum.sort(Kiln.BackupDestination.behaviour_info(:callbacks)) == [
+               delete: 2,
+               describe: 1,
+               fields: 0,
+               get: 3,
+               kind: 0,
+               label: 0,
+               list: 1,
+               put: 3,
+               supports: 0,
+               test: 1,
+               validate: 1
+             ]
+
+      assert Kiln.BackupDestination.behaviour_info(:optional_callbacks) == [supports: 0]
+    end
+
+    test "use Kiln.BackupDestination defaults supports/0 to nothing, so nothing is pruned" do
+      assert Destination.supports() == []
+      assert Kiln.BackupDestination in Keyword.get(Destination.__info__(:attributes), :behaviour)
+    end
+
+    test "a config's inspect shows neither its settings nor its secrets" do
+      config = %Kiln.BackupDestination.Config{
+        id: "0b6f8d1e-6a47-4c7e-9a0e-3c1b2d4e5f60",
+        key: "dest:0b6f8d1e-6a47-4c7e-9a0e-3c1b2d4e5f60",
+        kind: "sdk_test",
+        settings: %{"bucket" => "private-bucket-name"},
+        secrets: %{"token" => "s3cr3t-xyz"}
+      }
+
+      inspected = inspect(config)
+      assert inspected =~ "sdk_test"
+      assert inspected =~ "dest:0b6f8d1e"
+      refute inspected =~ "s3cr3t-xyz"
+      refute inspected =~ "private-bucket-name"
+      refute inspected =~ "secrets"
+
+      # Nested in a crash-report-shaped term too.
+      refute inspect({:put, [config, %{name: "x"}]}, limit: :infinity) =~ "s3cr3t-xyz"
+
+      assert Destination.describe(config) == "sdk-test:0b6f8d1e-6a47-4c7e-9a0e-3c1b2d4e5f60"
+    end
+
+    test "a config needs a kind, and defaults to empty settings and secrets" do
+      assert %Kiln.BackupDestination.Config{settings: %{}, secrets: %{}, id: nil} =
+               struct!(Kiln.BackupDestination.Config, kind: "sdk_test")
+
+      assert_raise ArgumentError, fn -> struct!(Kiln.BackupDestination.Config, []) end
+    end
   end
 
   describe "a challenge provider" do

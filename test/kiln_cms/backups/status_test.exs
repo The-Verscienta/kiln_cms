@@ -462,4 +462,147 @@ defmodule KilnCMS.Backups.StatusTest do
       assert entries[db.id] == status.components.db.next_at
     end
   end
+
+  # #2220: how the newest finished in-app run that had off-site destinations
+  # fared there. The rest of the status is untouched by it.
+  describe "off-site destinations" do
+    @env_key "rclone:offsite:kiln"
+
+    # An in-app run, `hours` ago, finished with `destinations` (Run-level
+    # entries) and `offsite_status`.
+    defp offsite_run!(hours, destinations, offsite_status, opts \\ []) do
+      at = hours_ago(hours)
+      stamp = Artifact.stamp(at)
+
+      run =
+        Backups.start_run!(
+          %{stamp: stamp, trigger: "manual", components: [:db], started_at: at},
+          actor: Backups.system()
+        )
+
+      attrs = %{
+        artifacts: [artifact(:db, stamp, true)],
+        destinations: destinations,
+        offsite_status: offsite_status
+      }
+
+      case Keyword.get(opts, :status, :succeeded) do
+        :succeeded -> Backups.finish_run!(run, attrs, actor: Backups.system())
+        :failed -> Backups.fail_run!(run, Map.put(attrs, :error, "boom"), actor: Backups.system())
+      end
+    end
+
+    defp dest(key, label, status, error \\ nil),
+      do: %{key: key, kind: "rclone", label: label, status: status, error: error}
+
+    @nas "dest:6c1f6a52-6a44-4d3e-9b39-0b1f8c1a7e11"
+
+    test "no in-app run with destinations: none, and every other key as before" do
+      run!([:db, :media], 1)
+
+      assert %{state: :none, stamp: nil, ok: 0, total: 0, failed: [], destinations: []} =
+               Backups.status().offsite
+
+      # A run with no destinations at all (no remote configured) is none too.
+      offsite_run!(0, [], nil)
+      assert Backups.status().offsite.state == :none
+    end
+
+    test "complete: every destination reached" do
+      run = offsite_run!(1, [dest(@env_key, "offsite:kiln", :ok)], :complete)
+
+      status = Backups.status()
+      assert %{state: :complete, ok: 1, total: 1, failed: []} = status.offsite
+      assert status.offsite.stamp == run.stamp
+      refute status.failed?
+    end
+
+    test "partial: says how many of how many, and which failed with its error" do
+      offsite_run!(
+        1,
+        [
+          dest(@env_key, "offsite:kiln", :ok),
+          dest(@nas, "NAS", :failed, "the store refused it")
+        ],
+        :partial
+      )
+
+      status = Backups.status()
+
+      assert %{
+               state: :partial,
+               ok: 1,
+               total: 2,
+               failed: [%{key: @nas, label: "NAS", error: "the store refused it"}]
+             } = status.offsite
+
+      assert [%{label: "offsite:kiln", status: :ok}, %{label: "NAS", status: :failed}] =
+               status.offsite.destinations
+
+      # Partly off-site is the backup alarm's, not a failed backup.
+      refute status.failed?
+    end
+
+    test "skipped destinations count for nothing" do
+      offsite_run!(
+        1,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :skipped)],
+        :complete
+      )
+
+      assert %{state: :complete, ok: 1, total: 1} = Backups.status().offsite
+    end
+
+    test "a succeeded run with destinations and no recorded outcome is unknown" do
+      offsite_run!(1, [dest(@env_key, "offsite:kiln", :pending)], nil)
+
+      assert %{state: :unknown, total: 1} = Backups.status().offsite
+    end
+
+    test "the alarm clears when the next run reaches every destination" do
+      offsite_run!(
+        5,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :failed, "down")],
+        :partial
+      )
+
+      assert Backups.status().offsite.state == :partial
+
+      offsite_run!(1, [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :ok)], :complete)
+
+      assert %{state: :complete, failed: []} = Backups.status().offsite
+    end
+
+    test "a later run that failed before its off-site step doesn't hide the outcome" do
+      offsite_run!(
+        5,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :failed, "down")],
+        :partial
+      )
+
+      offsite_run!(1, [dest(@env_key, "offsite:kiln", :pending)], nil, status: :failed)
+
+      assert Backups.status().offsite.state == :partial
+
+      # One that failed at the off-site step says so.
+      offsite_run!(0, [dest(@env_key, "offsite:kiln", :failed, "rclone exited 1")], :failed,
+        status: :failed
+      )
+
+      assert %{state: :failed, ok: 0, total: 1} = Backups.status().offsite
+    end
+
+    test "imported (cron) runs are not in-app runs" do
+      run!([:db], 1)
+      assert Backups.status().offsite.state == :none
+    end
+
+    test "an unreadable history is unknown, never a crash" do
+      offsite_run!(1, [dest(@env_key, "offsite:kiln", :ok)], :complete)
+
+      status = Backups.with_actor(KilnCMS.SystemActor.new(:billing), fn -> Backups.status() end)
+
+      assert %{state: :unknown, stamp: nil, failed: []} = status.offsite
+    end
+  end
 end

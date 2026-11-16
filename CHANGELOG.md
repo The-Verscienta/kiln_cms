@@ -60,10 +60,28 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
+  ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
+
+### Added
+
+- **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
+  ([long form](docs/changelog/unreleased.md#backup-destinations))
+
+- **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
+  ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
+
 ### Fixed
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
+
+### Security
+
+- **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
+  ([long form](docs/changelog/unreleased.md#backup-state-json-remote))
 
 ## [1.10.0] - 2026-11-15
 

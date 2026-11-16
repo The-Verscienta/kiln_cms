@@ -98,6 +98,20 @@ defmodule KilnCMSWeb.BackupLive do
   resumable (a succeeded or still-running run, a forged id, a run whose files
   are gone). The page never sends or trusts a stamp.
 
+  ## Off-site destinations (#2220)
+
+  A backup that reached only some of its off-site destinations succeeded,
+  partly off-site: the headline adds a line naming how many it reached and
+  which failed (`Backups.status/0`'s `offsite`), in the alarm tone, and
+  "Where backups go" lists how each destination fared in the last in-app
+  backup. In History, each destination is a chip under the name the run
+  recorded for it (so it outlives the destination; one the run has no
+  record of reads "Removed destination"), with its error as the chip's
+  tooltip, and the row is badged "Partly off-site", or "Off-site unknown"
+  when a succeeded run recorded no outcome for its destinations. The
+  destinations themselves are the Destinations tab
+  (`KilnCMSWeb.BackupDestinationsLive`).
+
   ## Tabs (part of #2219)
 
   This is the Backups tab; the in-app schedules and their forms are the
@@ -122,6 +136,8 @@ defmodule KilnCMSWeb.BackupLive do
     only: [
       tabs: 1,
       component_label: 1,
+      offsite_headline: 1,
+      run_destination_label: 2,
       run_status_label: 1,
       threshold_label: 1,
       unavailable_message: 1,
@@ -821,6 +837,15 @@ defmodule KilnCMSWeb.BackupLive do
                 <span class="text-base-content/70">{component_label(component)}:</span>
                 {headline(@status.components[component])}
               </p>
+              <%!-- Partly off-site (#2220): the backup succeeded, but not
+                    every destination has a copy. --%>
+              <p
+                :if={offsite_headline(@status.offsite)}
+                id="backup-headline-offsite"
+                class="font-medium"
+              >
+                {offsite_headline(@status.offsite)}
+              </p>
               <p
                 :if={@status.manifest && @status.manifest.artifacts != []}
                 class="mt-1 text-sm text-base-content/70"
@@ -913,6 +938,31 @@ defmodule KilnCMSWeb.BackupLive do
             </dt>
             <dd :if={@manifest && @manifest.offsite} class="font-mono text-xs">
               {KilnCMS.Backups.Redact.text(@manifest.offsite)}
+            </dd>
+            <%!-- Each destination the last in-app backup sent to (#2220),
+                  with how it fared; the destinations themselves are on the
+                  Destinations tab. --%>
+            <dt
+              :if={@status && @status.offsite.destinations != []}
+              class="text-base-content/70"
+            >
+              {gettext("Last in-app backup off-site")}
+            </dt>
+            <dd :if={@status && @status.offsite.destinations != []}>
+              <ul id="backup-offsite-destinations" class="space-y-0.5 text-xs">
+                <li
+                  :for={d <- @status.offsite.destinations}
+                  data-role="offsite-destination"
+                  data-status={status_key(d.status)}
+                >
+                  <span class="font-mono">{run_destination_label(d.key, d.label)}</span>
+                  ·
+                  <span class={destination_status_class(status_key(d.status))}>{destination_status_label(
+                    status_key(d.status)
+                  )}</span>
+                  <span :if={d.error} class="text-base-content/70">— {d.error}</span>
+                </li>
+              </ul>
             </dd>
             <dt
               :if={@status && @status.rclone_missing? && !(@manifest && @manifest.offsite)}
@@ -1053,6 +1103,21 @@ defmodule KilnCMSWeb.BackupLive do
 
   defp step_label(%{step: :archive, part: part}) when is_integer(part),
     do: gettext("Archiving media: part %{part}", part: part)
+
+  # Which destination, only when there is more than one (#2220).
+  defp step_label(%{
+         step: :offsite,
+         part: part,
+         destinations_total: total,
+         destination_label: name
+       })
+       when is_integer(part) and is_integer(total) and total > 1 and is_binary(name),
+       do:
+         gettext("Copying off-site (%{index} of %{total}: %{name})",
+           index: part,
+           total: total,
+           name: name
+         )
 
   defp step_label(%{step: step}) do
     case step do
@@ -1276,11 +1341,31 @@ defmodule KilnCMSWeb.BackupLive do
               </span>
             </a>
             <span
-              :for={{label, status} <- destination_chips(run)}
+              :for={{label, status, error} <- destination_chips(run)}
               data-role="destination"
+              data-status={status}
+              title={error}
               class="rounded border border-base-content/20 px-1.5 py-0.5 font-mono"
             >
               {label} · {destination_status_label(status)}
+            </span>
+            <%!-- #2220: a backup that reached only some destinations, or one
+                  that recorded no outcome for them (finished by an older
+                  node). --%>
+            <span
+              :if={run_offsite(run) == :partial}
+              data-role="offsite-partial"
+              class="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
+            >
+              {gettext("Partly off-site")}
+            </span>
+            <span
+              :if={run_offsite(run) == :unknown}
+              data-role="offsite-unknown"
+              title={gettext("This backup recorded no outcome for its off-site destinations.")}
+              class="rounded bg-base-content/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-base-content/70"
+            >
+              {gettext("Off-site unknown")}
             </span>
             <.presence
               run={run}
@@ -1575,18 +1660,72 @@ defmodule KilnCMSWeb.BackupLive do
   end
 
   # One chip per destination across the run's artifacts, worst status wins, so
-  # a single failed copy is not hidden behind the others' success.
+  # a single failed copy is not hidden behind the others' success. A
+  # destination the run recorded but no artifact reached (it failed before
+  # its first file) gets a chip too, from the run's own entry (#2220), and
+  # every chip carries that entry's error as its tooltip.
   defp destination_chips(run) do
-    run.artifacts
-    |> Enum.flat_map(&Enum.map(&1.destinations, fn {key, value} -> {key, value["status"]} end))
-    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    recorded = Map.new(run.destinations || [], &{&1.key, &1})
+
+    from_artifacts =
+      run.artifacts
+      |> Enum.flat_map(&Enum.map(&1.destinations, fn {key, value} -> {key, value["status"]} end))
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+    only_recorded =
+      for {key, d} <- recorded,
+          not Map.has_key?(from_artifacts, key),
+          d.status != :skipped,
+          into: %{},
+          do: {key, [status_key(d.status)]}
+
+    from_artifacts
+    |> Map.merge(only_recorded)
     |> Enum.sort_by(fn {key, _} -> {key != "local", key} end)
-    |> Enum.map(fn {key, statuses} -> {destination_label(key), worst(statuses)} end)
+    |> Enum.map(fn {key, statuses} ->
+      entry = Map.get(recorded, key)
+      {destination_label(key, run), worst(statuses), entry && entry.error}
+    end)
   end
 
-  defp destination_label("local"), do: gettext("Local")
-  defp destination_label("rclone:" <> remote), do: remote
-  defp destination_label(other), do: other
+  defp destination_label("local", _run), do: gettext("Local")
+  defp destination_label("rclone:" <> remote, _run), do: remote
+
+  # A stored destination (#2220) by the name the run recorded for it, which
+  # outlives the destination; "Removed destination" when the run has no
+  # record of it.
+  defp destination_label("dest:" <> _id = key, run) do
+    case Enum.find(run.destinations || [], &(&1.key == key)) do
+      %{label: label} when is_binary(label) and label != "" -> label
+      _ -> gettext("Removed destination")
+    end
+  end
+
+  defp destination_label(other, _run), do: run_destination_label(other, nil)
+
+  # The run's off-site outcome as History badges it (#2220): `:partial`, or
+  # `:unknown` for a succeeded run that had destinations and recorded no
+  # outcome it knows; anything else gets no badge.
+  defp run_offsite(%{offsite_status: :partial}), do: :partial
+
+  defp run_offsite(%{status: :succeeded, destinations: [_ | _] = destinations} = run) do
+    counted? = Enum.any?(destinations, &(&1.status != :skipped))
+
+    if counted? and run.offsite_status not in [:none, :complete, :failed],
+      do: :unknown,
+      else: nil
+  end
+
+  defp run_offsite(_run), do: nil
+
+  # A `RunDestination` status as the chips spell it.
+  defp status_key(status) when is_atom(status), do: Atom.to_string(status)
+  defp status_key(%KilnCMS.Types.UnknownAtom{value: value}), do: value
+  defp status_key(status) when is_binary(status), do: status
+
+  defp destination_status_class("ok"), do: "text-success-ink"
+  defp destination_status_class("failed"), do: "text-error-ink"
+  defp destination_status_class(_other), do: "text-base-content/70"
 
   defp worst(statuses) do
     Enum.find(["failed", "pending", "pruned"], &(&1 in statuses)) || "ok"
@@ -1596,6 +1735,7 @@ defmodule KilnCMSWeb.BackupLive do
   defp destination_status_label("failed"), do: gettext("failed")
   defp destination_status_label("pending"), do: gettext("pending")
   defp destination_status_label("pruned"), do: gettext("pruned")
+  defp destination_status_label("skipped"), do: gettext("skipped")
   defp destination_status_label(_other), do: "—"
 
   defp presence_label(:present), do: gettext("on disk")
@@ -1611,7 +1751,10 @@ defmodule KilnCMSWeb.BackupLive do
   # recent and it is worthless — and tone driven by age alone rendered "The
   # last backup failed" with a green tick and a success border. Any component
   # (#2219): a fresh database backup doesn't make stale media fine.
-  defp alarming?(status), do: status.stale? or status.failed?
+  # Partly off-site (#2220) too: a good local backup that some destination
+  # doesn't have is not a deployment that is fine.
+  defp alarming?(status),
+    do: status.stale? or status.failed? or match?(%{offsite: %{state: :partial}}, status)
 
   # One component's line (#2219).
   defp headline(%{failed?: true}), do: gettext("The last backup failed")

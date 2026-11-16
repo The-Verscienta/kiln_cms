@@ -78,6 +78,28 @@ defmodule Kiln.Plugins do
   @spec security_checks() :: [module()]
   def security_checks, do: KilnCMS.Security.Posture.Registry.plugin_checks()
 
+  @doc """
+  Backup destination adapters contributed by plugins (`Kiln.BackupDestination`,
+  #2220). Installing one changes nothing until a platform admin adds a
+  destination of its kind. A plugin compiled against a `kiln_plugin` older than
+  1.5 has no such callback and contributes none.
+  """
+  @spec backup_destinations() :: [module()]
+  def backup_destinations, do: Enum.flat_map(all(), &backup_destinations_of/1)
+
+  @doc """
+  The backup destinations `plugin` contributes: none for a plugin compiled
+  against a `kiln_plugin` older than 1.5, which has no such callback.
+  """
+  @spec backup_destinations_of(module()) :: [module()]
+  def backup_destinations_of(plugin) do
+    Code.ensure_loaded(plugin)
+
+    if function_exported?(plugin, :backup_destinations, 0),
+      do: plugin.backup_destinations(),
+      else: []
+  end
+
   @doc "Every plugin-declared admin nav item."
   @spec nav_items() :: [Kiln.Plugin.nav_item()]
   def nav_items, do: Enum.flat_map(all(), & &1.nav_items())
@@ -133,6 +155,7 @@ defmodule Kiln.Plugins do
           image_backends: [module()],
           challenge_providers: [module()],
           security_checks: [module()],
+          backup_destinations: [module()],
           nav_items: non_neg_integer(),
           admin_routes: non_neg_integer(),
           editor_routes: non_neg_integer(),
@@ -167,6 +190,7 @@ defmodule Kiln.Plugins do
       image_backends: plugin.image_backends(),
       challenge_providers: KilnCMS.Challenge.Registry.of_plugin(plugin),
       security_checks: KilnCMS.Security.Posture.Registry.of_plugin(plugin),
+      backup_destinations: backup_destinations_of(plugin),
       nav_items: length(plugin.nav_items()),
       admin_routes: length(plugin.admin_routes()),
       editor_routes: length(plugin.editor_routes()),

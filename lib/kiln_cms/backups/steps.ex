@@ -2,7 +2,30 @@ defmodule KilnCMS.Backups.Steps do
   @moduledoc """
   The bodies of a backup's steps (#2218), one per `KilnCMS.Backups.StepWorker`
   job: `start`, `dump`, then with a media directory `plan`, `archive` (one job
-  per part) and `checksum`, then `prune`, `offsite` and `finish`.
+  per part) and `checksum`, then `prune`, `offsite` (one job per off-site
+  destination) and `finish`.
+
+  ## Off-site destinations (#2220)
+
+  The start step (a resume's too) settles where the backup is sent:
+  `KilnCMS.Backups.Destination.active/0`, the env destination
+  (`BACKUP_RCLONE_REMOTE`) first, then the enabled stored ones. It freezes
+  them in `state.json` and opens the Run with each one pending. A table that
+  can't be read retries the start; on the last attempt the backup goes ahead
+  with the env destination alone plus a failed "unreadable" entry, so it can
+  be no better than partly off-site.
+
+  `prune` moves on to `offsite` part 1, and part k sends every file to the
+  k-th destination before moving on (see "Nothing leaves the host
+  unverified" below for what each copy checks). A destination that fails on
+  the step's last attempt, or in a way no retry fixes, is recorded failed and
+  the chain moves on. Only when the last one fails and none was reached does
+  the backup fail. `finish` closes the run with the `offsite_status` the
+  destinations add up to (`KilnCMS.Backups.Recorder.offsite_outcome/1`); a
+  backup that reached some but not all succeeds, **partly off-site**, with an
+  error line on the run and a `[:kiln_cms, :backups, :offsite, :partial]`
+  telemetry event. With the env destination alone every command, log line,
+  key and error reads as it did before destinations existed.
 
   ## Which components (#2219)
 
@@ -76,16 +99,25 @@ defmodule KilnCMS.Backups.Steps do
   (after rclone's own retries) is retried with the step. The work directory
   is kept until the off-site copy succeeds, so Resume retries it, rebuilding
   only a file that changed.
+
+  The check runs once per destination (ADR 0043), immediately before that
+  destination's copy, never once for all of them. A refused file fails the
+  whole backup, whichever destination it was refused for. Each adapter call
+  is bounded (`KilnCMS.Backups.Destination.call/4`); one that runs past its
+  bound ends that destination's attempt. A stored destination skips a file
+  an earlier attempt sent it with the same sha256 (`state.json`'s `sent`);
+  the env destination copies every file every time.
   """
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.ExternalCommand
 
   alias KilnCMS.Backups.{
     Artifact,
     Chain,
     Checksum,
+    Command,
+    Destination,
     DirId,
     Heartbeat,
     Importer,
@@ -97,6 +129,8 @@ defmodule KilnCMS.Backups.Steps do
     Recorder,
     Redact,
     Retention,
+    RunDestination,
+    StepWorker,
     WorkState
   }
 
@@ -309,25 +343,36 @@ defmodule KilnCMS.Backups.Steps do
     end
   end
 
-  # sobelow_skip ["Traversal.FileModule"]
+  # The destinations are settled before the run is opened: a table that can't
+  # be read retries the start with nothing written.
   defp open_fresh(lease, job, work_dir, components) do
+    case settle_destinations(job) do
+      {:ok, destinations, run_destinations} ->
+        open_fresh(lease, job, work_dir, components, {destinations, run_destinations})
+
+      {:error, reason} ->
+        retry_or_fail(context(lease, nil), lease, job, nil, %Recorder{}, reason)
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp open_fresh(lease, job, work_dir, components, {destinations, run_destinations}) do
     trigger = lease.trigger || "manual"
     started_at = DateTime.utc_now()
     scheduled = schedule_fields(job.args, components)
 
+    extra =
+      scheduled
+      |> Map.put(:dir_id, lease.dir_id)
+      |> Map.put(:destinations, run_destinations)
+
     rec =
       lease.stamp
-      |> Recorder.open(
-        trigger,
-        started_at,
-        components,
-        job.id,
-        lease.chain,
-        Map.put(scheduled, :dir_id, lease.dir_id)
-      )
+      |> Recorder.open(trigger, started_at, components, job.id, lease.chain, extra)
       |> Recorder.log(:info, "start", "Backup started (#{trigger})")
       |> log_components(components)
       |> log_queue(job.args)
+      |> log_destinations(destinations, run_destinations)
 
     state =
       WorkState.new(lease.stamp, %{
@@ -341,7 +386,9 @@ defmodule KilnCMS.Backups.Steps do
         "schedule_ids" => scheduled.schedule_ids,
         "outputs" => [],
         "reused" => [],
-        "offsite" => nil
+        "offsite" => nil,
+        "destinations" => destinations,
+        "sent" => %{}
       })
 
     ctx = context(lease, state)
@@ -381,8 +428,12 @@ defmodule KilnCMS.Backups.Steps do
         # so on the row. The re-open comes before the sweeps below: they fail
         # `running` runs that went quiet, and this one was exactly that until
         # `Recorder.reopen/3` flipped it back.
+        # The destinations are settled from the config as it is now (#2220),
+        # before the run is re-opened: a table that can't be read retries
+        # this start with the run as it was.
         with :ok <- resumable_here(lease.stamp),
              {:ok, state} <- WorkState.read(work_dir),
+             {:ok, destinations, run_destinations} <- settle_destinations(job),
              {:ok, %{run: run} = rec} <- reopen(lease) do
           dir = Backups.dir()
           reconcile_stale_runs()
@@ -390,9 +441,11 @@ defmodule KilnCMS.Backups.Steps do
           sweep_work_dirs(dir)
 
           rec =
-            rec
+            run_destinations
+            |> Enum.reduce(rec, &Recorder.put_run_destination(&2, &1.key, Map.delete(&1, :key)))
             |> Recorder.log(:info, "resume", "Backup resumed (#{run.trigger})")
             |> log_queue(job.args)
+            |> log_destinations(destinations, run_destinations)
 
           state =
             Map.merge(state, %{
@@ -407,12 +460,20 @@ defmodule KilnCMS.Backups.Steps do
               "schedule_ids" => run.schedule_ids,
               "outputs" => [],
               "reused" => [],
-              "offsite" => nil
+              "offsite" => nil,
+              # What earlier attempts sent to stored destinations stays: a
+              # file whose digest still matches is not sent there again.
+              "destinations" => destinations,
+              "sent" => sent_map(state)
             })
 
           conclude(context(lease, state), lease, job, {:next, "dump", nil, state, rec})
         else
-          {:error, reason} -> refuse_resume(lease, reason)
+          {:error, :destinations_unreadable = reason} ->
+            retry_or_fail(context(lease, nil), lease, job, nil, %Recorder{}, reason)
+
+          {:error, reason} ->
+            refuse_resume(lease, reason)
         end
     end
   end
@@ -588,6 +649,91 @@ defmodule KilnCMS.Backups.Steps do
 
   defp log_queue(rec, _args), do: rec
 
+  ## Destinations (#2220)
+
+  # The destinations this backup sends to, settled once per start and frozen
+  # in `state.json` as `"destinations"` (`Destination.active/0`'s entries: no
+  # secret and no remote string, only redacted labels and keys), with the
+  # Run-level entries the run opens with, all pending.
+  #
+  # Fails closed (critic change 4): stored destinations that can't be read
+  # retry the start. On its last attempt the backup goes ahead with the env
+  # destination alone, plus a failed `RunDestination.unreadable_key/0` entry,
+  # so the run can be no better than partly off-site and raises the alarm.
+  defp settle_destinations(job) do
+    case Destination.active() do
+      {:ok, destinations} ->
+        {:ok, destinations, Enum.map(destinations, &run_destination/1)}
+
+      {:error, :unreadable} ->
+        if job.attempt >= job.max_attempts do
+          destinations = List.wrap(Destination.env_destination())
+
+          {:ok, destinations,
+           Enum.map(destinations, &run_destination/1) ++ [unreadable_destination()]}
+        else
+          {:error, :destinations_unreadable}
+        end
+    end
+  end
+
+  defp run_destination(entry),
+    do: %{key: entry["key"], kind: entry["kind"], label: entry["label"]}
+
+  defp unreadable_destination do
+    %{
+      key: RunDestination.unreadable_key(),
+      label: "Stored destinations",
+      status: :failed,
+      at: DateTime.utc_now(),
+      error: Destination.format_reason(:unreadable) <> "; this backup was not sent to them"
+    }
+  end
+
+  # Said only when the backup goes somewhere `BACKUP_RCLONE_REMOTE` alone
+  # wouldn't say, so an env-only backup's log reads as it always did.
+  defp log_destinations(rec, destinations, run_destinations) do
+    rec =
+      if Enum.any?(destinations, &(&1["source"] != "env")),
+        do:
+          Recorder.log(
+            rec,
+            :info,
+            "start",
+            "Sending off-site to #{length(destinations)} destination(s): " <>
+              Enum.map_join(destinations, ", ", & &1["label"])
+          ),
+        else: rec
+
+    if Enum.any?(run_destinations, &(&1.key == RunDestination.unreadable_key())),
+      do:
+        Recorder.log(
+          rec,
+          :error,
+          "start",
+          "Couldn't read the backup destinations; this backup is sent only to " <>
+            if(destinations == [], do: "no destination", else: "BACKUP_RCLONE_REMOTE")
+        ),
+      else: rec
+  end
+
+  defp destinations(state) do
+    case state["destinations"] do
+      list when is_list(list) ->
+        Enum.filter(list, &match?(%{"key" => key} when is_binary(key), &1))
+
+      _ ->
+        []
+    end
+  end
+
+  defp sent_map(state) do
+    case state["sent"] do
+      %{} = sent -> sent
+      _ -> %{}
+    end
+  end
+
   ## The steps after start
 
   defp run_step(lease, job, state) do
@@ -601,7 +747,7 @@ defmodule KilnCMS.Backups.Steps do
         "archive" -> archive_step(ctx, lease.part, state, rec)
         "checksum" -> checksum_step(ctx, state, rec)
         "prune" -> prune_step(ctx, state, rec)
-        "offsite" -> offsite_chain_step(ctx, state, rec)
+        "offsite" -> offsite_dest_step(ctx, job, state, rec)
         "finish" -> finish_step(ctx, lease, state, rec)
       end
 
@@ -708,6 +854,10 @@ defmodule KilnCMS.Backups.Steps do
     # superseded this job leaves the previous manifest standing.
     if state && ctx.work_dir && WorkState.exists?(ctx.work_dir) do
       partial = state |> outputs() |> unverify(reason)
+
+      # What this attempt sent to stored destinations, so a Resume doesn't
+      # send it there again (#2220). Fenced like every state write.
+      _ = if match?({:offsite, _}, reason), do: keep_log(ctx, lease, state, rec)
 
       _ =
         Chain.while_holding(lease, fn ->
@@ -1256,31 +1406,528 @@ defmodule KilnCMS.Backups.Steps do
           )
       end
 
-    {:next, "offsite", nil, state, rec}
+    # One `offsite` job per destination (#2220), part k for the k-th. With
+    # none, the one no-op `offsite` it always had (part nil), so the step
+    # sequence of a backup without a remote is unchanged.
+    part = if destinations(state) == [], do: nil, else: 1
+    {:next, "offsite", part, state, rec}
   end
 
   defp removed(names, units),
     do: "Retention removed #{length(names)} file(s) from #{units} backup(s)"
 
-  ## offsite
+  ## offsite (one job per destination, #2220)
 
-  # A refused file is fatal (never retried, #2481); so is a missing rclone,
-  # which no retry installs (#2482). A failed copy is retried with the step,
-  # and fails the backup on the last attempt.
-  defp offsite_chain_step(ctx, state, rec) do
-    case offsite_step(ctx.dir, outputs(state), rec) do
-      {:ok, remote, rec} ->
-        {:next, "finish", nil, Map.put(state, "offsite", remote), rec}
+  # Said of the env remote when this image has no `rclone` (#2482).
+  @missing_rclone "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image"
 
-      {:error, {:offsite, %{refused: [_ | _]}} = reason, rec} ->
-        {:fatal, reason, state, rec}
+  # Part k sends every file to the k-th destination `state.json` froze at
+  # start, then moves on to part k+1, or to finish after the last.
+  #
+  #   * a refused file (it changed on disk after it verified) is fatal, for
+  #     the whole backup, whichever destination it was refused for (#2481);
+  #   * a failed copy retries this part, keeping what it sent
+  #     (`state["sent"]`) for the next attempt;
+  #   * on the last attempt, or for a failure no retry fixes (no rclone, the
+  #     destination removed, credentials that can't be decrypted), this
+  #     destination is recorded failed and the chain moves on. Unless it was
+  #     the last one and none was reached: then the backup fails, as an
+  #     env-only backup always did (ADR 0043 decision 3, with the text it
+  #     always had when the env remote is the only destination).
+  #
+  # An `offsite` job with no part and no `"destinations"` in the state is
+  # one a release before #2220 queued (or a prune before it ran): the
+  # destinations are settled now and it runs as part 1.
+  defp offsite_dest_step(ctx, job, state, rec) do
+    case state["destinations"] do
+      list when is_list(list) ->
+        offsite_part(ctx, job, job.args["part"] || 1, state, rec)
 
-      {:error, {:offsite, :missing_rclone} = reason, rec} ->
-        {:fatal, reason, state, rec}
+      _legacy ->
+        case settle_destinations(job) do
+          {:ok, destinations, run_destinations} ->
+            state = state |> Map.put("destinations", destinations) |> Map.put("sent", %{})
 
-      {:error, reason, rec} ->
-        {:retry, reason, state, rec}
+            rec =
+              Enum.reduce(
+                run_destinations,
+                rec,
+                &Recorder.put_run_destination(&2, &1.key, Map.delete(&1, :key))
+              )
+
+            offsite_part(ctx, job, 1, state, rec)
+
+          {:error, reason} ->
+            {:retry, reason, state, rec}
+        end
     end
+  end
+
+  defp offsite_part(ctx, job, k, state, rec) do
+    list = destinations(state)
+
+    case Enum.at(list, k - 1) do
+      %{} = entry ->
+        dest = %{
+          entry: entry,
+          index: k,
+          total: length(list),
+          solo?: solo_env?(list),
+          last_attempt?: job.attempt >= job.max_attempts,
+          deadline: call_deadline(job)
+        }
+
+        send_to(ctx, dest, state, rec)
+
+      nil ->
+        {:next, "finish", nil, state, rec}
+    end
+  end
+
+  # When this attempt's adapter calls must be done by, as a
+  # `System.monotonic_time(:millisecond)` instant: the step's own timeout
+  # (`StepWorker.timeout/1`) from when Oban started the attempt, less a
+  # margin to record the outcome. Each put, list and delete gets what is left
+  # (`Destination.call_timeout/1`), so an upload takes as long as the step
+  # allows, as `rclone copy` always could; the `:call_timeout` config, when
+  # set, caps each call below that.
+  @call_margin_ms :timer.minutes(5)
+
+  defp call_deadline(job) do
+    now = System.monotonic_time(:millisecond)
+
+    elapsed =
+      case job.attempted_at do
+        %DateTime{} = at -> max(DateTime.diff(DateTime.utc_now(), at, :millisecond), 0)
+        _not_started -> 0
+      end
+
+    now + StepWorker.timeout(job) - elapsed - @call_margin_ms
+  end
+
+  # The env destination alone: everything it says reads as it always has
+  # (the S0 parity test pins it).
+  defp solo_env?(destinations), do: match?([%{"source" => "env"}], destinations)
+
+  defp send_to(ctx, dest, state, rec) do
+    case resolve_destination(dest.entry) do
+      {:ok, config} ->
+        copy_to(ctx, dest, config, state, rec)
+
+      {:error, :unreadable} when not dest.last_attempt? ->
+        {:retry, {:offsite, :unreadable}, state,
+         Recorder.log(
+           rec,
+           :error,
+           "offsite",
+           "#{dest.entry["label"]}: couldn't be read; retrying"
+         )}
+
+      {:error, reason} ->
+        destination_failed(dest, reason, state, rec)
+    end
+  end
+
+  # A missing rclone is refused before any file is touched (#2482): no
+  # retry installs it.
+  defp resolve_destination(entry) do
+    with {:ok, config} <- Destination.resolve(entry) do
+      if config.kind == "rclone" and System.find_executable("rclone") == nil,
+        do: {:error, :missing_rclone},
+        else: {:ok, config}
+    end
+  end
+
+  defp copy_to(ctx, dest, config, state, rec) do
+    key = dest.entry["key"]
+    sent_key = sent_key(dest.entry, config)
+    artifacts = outputs(state)
+    files = artifacts ++ expected_sidecars(artifacts)
+    sent = if sent_key, do: Map.get(sent_map(state), sent_key, %{}), else: %{}
+
+    {results, sent} = put_files(ctx.dir, files, {config, dest.deadline}, sent)
+
+    state =
+      if sent_key,
+        do: Map.put(state, "sent", Map.put(sent_map(state), sent_key, sent)),
+        else: state
+
+    rec = Enum.reduce(results, rec, &record_put(&1, &2, key, label_for(dest)))
+    counts = %{files_ok: Enum.count(results, &sent?/1), files_total: length(files)}
+
+    case offsite_problems(results) do
+      %{refused: [], failed: []} ->
+        destination_ok(ctx, dest, config, counts, state, rec)
+
+      %{refused: [_ | _]} = problems ->
+        rec =
+          Recorder.put_run_destination(
+            rec,
+            key,
+            Map.merge(counts, %{status: :failed, error: destination_error(problems)})
+          )
+
+        {:fatal, {:offsite, problems}, state, rec}
+
+      problems when dest.last_attempt? ->
+        destination_failed(dest, {:offsite, problems}, state, rec, counts)
+
+      problems ->
+        {:retry, {:offsite, problems}, state, Recorder.put_run_destination(rec, key, counts)}
+    end
+  end
+
+  # One file after another, each re-checked immediately before its own copy
+  # to THIS destination (ADR 0043: once per destination, so a file that
+  # changed while an earlier destination was being sent to is refused here).
+  # A stored destination skips a file it was sent in an earlier attempt with
+  # the same digest; the env destination sends every file every time, as it
+  # always did (critic change 5). A call that times out ends the attempt:
+  # the next file would only wait as long again.
+  defp put_files(dir, files, target, sent) do
+    {results, sent} =
+      Enum.reduce_while(files, {[], sent}, fn file, {acc, sent} ->
+        {step, result, sent} = send_one(dir, file, target, sent)
+        {step, {[{file, result} | acc], sent}}
+      end)
+
+    {Enum.reverse(results), sent}
+  end
+
+  defp send_one(dir, file, target, sent) do
+    name = Path.basename(file.path)
+    digest = digest(file)
+
+    if digest != nil and Map.get(sent, name) == digest do
+      {:cont, :skipped, sent}
+    else
+      case put_file(dir, file, target) do
+        :ok -> {:cont, :ok, put_sent(sent, name, digest)}
+        {:error, reason} = error -> {halt_on(reason), error, sent}
+        refused -> {:cont, refused, sent}
+      end
+    end
+  end
+
+  defp halt_on(reason), do: if(Destination.timed_out?(reason), do: :halt, else: :cont)
+
+  defp put_sent(sent, _name, nil), do: sent
+  defp put_sent(sent, name, digest), do: Map.put(sent, name, digest)
+
+  # What a send is recorded against: an artifact's verified sha256, or for a
+  # checksum sidecar the digest of the lines it must hold.
+  defp digest(%{sidecar?: true, entries: entries}) do
+    if Enum.all?(entries, &match?({_name, hex} when is_binary(hex), &1)) do
+      lines = Enum.map_join(entries, "\n", fn {name, hex} -> "#{hex}  #{name}" end)
+      Base.encode16(:crypto.hash(:sha256, lines), case: :lower)
+    end
+  end
+
+  defp digest(file), do: file[:sha256]
+
+  # `"<key>|<location fingerprint>"` for a stored destination, so a record
+  # of a send never licenses a skip somewhere else; nil for the env
+  # destination, which never skips.
+  defp sent_key(%{"source" => "env"}, _config), do: nil
+
+  defp sent_key(%{"key" => key}, config) do
+    where =
+      case Destination.location(config) do
+        :unknown -> {:settings, config.kind, config.settings}
+        location -> location
+      end
+
+    fingerprint =
+      :sha256
+      |> :crypto.hash(:erlang.term_to_binary(where))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 16)
+
+    key <> "|" <> fingerprint
+  end
+
+  defp put_file(dir, file, {config, deadline}) do
+    path = Path.join(dir, file.path)
+
+    with :ok <- precheck(path, file),
+         {:ok, put} <- put_args(path, file) do
+      Destination.call(config, :put, [put, []], deadline: deadline)
+    else
+      {:error, reason} -> {:refused, reason}
+    end
+  end
+
+  # `Kiln.BackupDestination.file`: a sidecar's size and digest are read
+  # from it here, right after `precheck/2` found it holds what it must.
+  defp put_args(path, file) do
+    name = Path.basename(path)
+    subdir = file.path |> Path.dirname() |> Path.basename()
+
+    if file[:sidecar?] do
+      with {:ok, sha256, bytes} <- Checksum.file(path),
+           do: {:ok, %{path: path, subdir: subdir, name: name, bytes: bytes, sha256: sha256}}
+    else
+      {:ok, %{path: path, subdir: subdir, name: name, bytes: file[:bytes], sha256: file[:sha256]}}
+    end
+  end
+
+  defp sent?({_file, result}), do: result in [:ok, :skipped]
+
+  # nil: the env destination alone speaks as it always did ("off-site").
+  defp label_for(%{solo?: true}), do: nil
+  defp label_for(%{entry: entry}), do: entry["label"]
+
+  defp destination_ok(ctx, dest, config, counts, state, rec) do
+    key = dest.entry["key"]
+
+    rec =
+      rec
+      |> Recorder.put_run_destination(key, Map.merge(counts, %{status: :ok, error: nil}))
+      |> prune_destination(ctx, dest, config)
+
+    # The env remote, redacted, for the manifest's `offsite` (cron's
+    # all-or-nothing field), and for a finish an older node runs.
+    state =
+      if dest.entry["source"] == "env",
+        do: Map.put(state, "offsite", dest.entry["label"]),
+        else: state
+
+    next_destination(dest, state, rec)
+  end
+
+  # Retention on the destination just reached (#2220, ADR 0064), when its
+  # `prune` is on and its adapter can list and delete: only what this
+  # installation recorded sending there is ever deleted
+  # (`Retention.run_on_destination/3`). Only a stored destination matches the
+  # first clause; the env destination (`BACKUP_RCLONE_REMOTE`) is never
+  # pruned, and `Retention` refuses any key but `"dest:<id>"` as well.
+  #
+  # Whatever happens here, the destination's upload status stays as it is:
+  # a pass that can't start deletes nothing and says so on the run. It runs
+  # in the step's body, outside the lock's transaction (ADR 0045), so the
+  # Run writes marking other runs' files `pruned` hold no lock.
+  defp prune_destination(
+         rec,
+         ctx,
+         %{entry: %{"source" => "db", "id" => id, "key" => "dest:" <> _} = entry} = dest,
+         config
+       )
+       when is_binary(id) do
+    if Destination.supports?(config, [:list, :delete]) do
+      case prune_enabled(id) do
+        {:ok, true} -> prune_on(rec, ctx, entry, config, dest.deadline)
+        {:ok, false} -> rec
+        {:error, reason} -> prune_skipped(rec, entry, reason)
+      end
+    else
+      rec
+    end
+  end
+
+  defp prune_destination(rec, _ctx, _dest, _config), do: rec
+
+  # The row as it is now: an admin who turned `prune` off during the backup
+  # is obeyed. A row that can't be read prunes nothing.
+  defp prune_enabled(id) do
+    case Backups.get_backup_destination(id, actor: Backups.system(), authorize_with: :error) do
+      {:ok, %{enabled: true, prune: true}} -> {:ok, true}
+      {:ok, _off_disabled_or_gone} -> {:ok, false}
+      {:error, error} -> {:error, {:read_destination, error.__struct__}}
+    end
+  end
+
+  defp prune_on(rec, ctx, entry, config, deadline) do
+    label = entry["label"]
+
+    case Retention.run_on_destination(ctx.dir, config, deadline: deadline) do
+      {:ok, result} ->
+        rec
+        |> log_pruned(label, result)
+        |> log_not_sent_here(label, result.unowned)
+        |> Recorder.put_run_destination(entry["key"], %{pruned: result.units})
+
+      {:error, reason} ->
+        prune_skipped(rec, entry, reason)
+    end
+  end
+
+  defp prune_skipped(rec, entry, reason) do
+    message =
+      "Retention on #{entry["label"]} skipped: #{Retention.describe(reason)}; nothing was deleted"
+
+    Logger.error("Backup " <> message)
+    Recorder.log(rec, :error, "offsite", message)
+  end
+
+  defp log_pruned(rec, _label, %{deleted: [], stopped: nil}), do: rec
+
+  defp log_pruned(rec, label, %{deleted: names, units: units, stopped: nil}),
+    do:
+      Recorder.log(rec, :info, "offsite", "Retention on #{label} " <> removed_text(names, units))
+
+  defp log_pruned(rec, label, %{deleted: names, units: units, stopped: reason}) do
+    message =
+      "Retention on #{label} " <>
+        removed_text(names, units) <> ", then stopped: #{Retention.describe(reason)}"
+
+    Logger.error("Backup " <> message)
+    Recorder.log(rec, :error, "offsite", message)
+  end
+
+  defp removed_text(names, units),
+    do: "removed #{length(names)} file(s) from #{units} backup(s)"
+
+  # Old enough to go, but not this installation's to delete: said on every
+  # run, so an admin sharing a bucket sees what is piling up there.
+  defp log_not_sent_here(rec, _label, []), do: rec
+
+  defp log_not_sent_here(rec, label, unowned) do
+    shown =
+      unowned
+      |> Enum.map(&"#{&1.kind} #{&1.stamp}")
+      |> Enum.uniq()
+
+    more = if length(shown) > 10, do: ", and #{length(shown) - 10} more", else: ""
+
+    Recorder.log(
+      rec,
+      :warn,
+      "offsite",
+      "Retention on #{label} left #{length(shown)} old backup(s) this installation has " <>
+        "no record of sending there: " <> Enum.join(Enum.take(shown, 10), ", ") <> more
+    )
+  end
+
+  defp destination_failed(dest, reason, state, rec, counts \\ %{}) do
+    key = dest.entry["key"]
+    error = destination_error(reason)
+
+    rec =
+      rec
+      |> log_destination_failure(dest, reason, error)
+      |> Recorder.put_run_destination(key, Map.merge(counts, %{status: :failed, error: error}))
+
+    if dest.index >= dest.total and not reached_any?(rec, dest) do
+      {:fatal, all_failed(dest, reason, rec, state), state, rec}
+    else
+      next_destination(dest, state, rec)
+    end
+  end
+
+  # A failure the per-file lines don't already say.
+  defp log_destination_failure(rec, %{solo?: true} = dest, :missing_rclone, _error) do
+    message = @missing_rclone <> "; nothing was copied off-site"
+    Logger.error(message <> " (#{dest.entry["label"]})")
+    Recorder.log(rec, :error, "offsite", message)
+  end
+
+  defp log_destination_failure(rec, dest, {:offsite, _problems}, error) do
+    if dest.solo?,
+      do: rec,
+      else:
+        Recorder.log(
+          rec,
+          :error,
+          "offsite",
+          "#{dest.entry["label"]}: not reached (#{error}); moving on"
+        )
+  end
+
+  defp log_destination_failure(rec, dest, _reason, error) do
+    message = "#{dest.entry["label"]}: #{error}; nothing was sent to it"
+    Logger.error("Backup off-site copy: " <> message)
+    Recorder.log(rec, :error, "offsite", message)
+  end
+
+  defp reached_any?(rec, dest) do
+    keys = [dest.entry["key"]]
+    Enum.any?(rec.destinations, &(&1.status == :ok and &1.key not in keys))
+  end
+
+  # Why the backup failed when no destination was reached. The env remote
+  # alone keeps its reason terms, and so its text (`describe_offsite/2`).
+  defp all_failed(%{solo?: true}, :missing_rclone, _rec, _state), do: {:offsite, :missing_rclone}
+  defp all_failed(%{solo?: true}, {:offsite, _} = reason, _rec, _state), do: reason
+
+  defp all_failed(_dest, _reason, rec, state) do
+    keys = Enum.map(destinations(state), & &1["key"])
+
+    failures =
+      for %{key: key, status: :failed} = entry <- rec.destinations, key in keys do
+        {entry[:label] || key, entry[:error] || "failed"}
+      end
+
+    {:offsite, {:destinations, failures}}
+  end
+
+  defp next_destination(%{index: k, total: total}, state, rec) when k < total,
+    do: {:next, "offsite", k + 1, state, rec}
+
+  defp next_destination(_dest, state, rec), do: {:next, "finish", nil, state, rec}
+
+  # One line for a destination's Run entry.
+  defp destination_error({:offsite, %{refused: [_ | _] = refused}}),
+    do: "REFUSED for #{count_files(refused)}: " <> named(refused, &short_refusal/1)
+
+  defp destination_error({:offsite, %{failed: failed}}),
+    do: "FAILED for #{count_files(failed)}: " <> named(failed, &short_destination_failure/1)
+
+  defp destination_error(:removed), do: "removed or disabled during this backup"
+  defp destination_error(:unreadable), do: "couldn't be read"
+  defp destination_error(reason), do: Destination.format_reason(reason)
+
+  defp short_destination_failure({:exit_status, _executable, _status, _output} = reason),
+    do: short_failure(reason)
+
+  defp short_destination_failure(reason) when is_binary(reason),
+    do: String.slice(reason, 0, 160)
+
+  defp short_destination_failure(reason), do: Destination.format_reason(reason)
+
+  # The per-file outcome, on the Run log and the artifact's destination map
+  # under `key`. `label` nil is the env destination alone, said as it always
+  # was (`record_offsite/3`).
+  defp record_put({file, :skipped}, rec, key, label) do
+    name = Path.basename(file.path)
+    rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, :ok)
+    Recorder.log(rec, :info, "offsite", "#{name} was already copied to #{label}; not sent again")
+  end
+
+  defp record_put(result, rec, key, nil), do: record_offsite(result, rec, key)
+
+  defp record_put({file, :ok}, rec, key, label) do
+    name = Path.basename(file.path)
+    rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, :ok)
+    Recorder.log(rec, :info, "offsite", "Copied #{name} to #{label}")
+  end
+
+  defp record_put({file, {:error, reason}}, rec, key, label) do
+    name = Path.basename(file.path)
+    error = Destination.format_reason(reason)
+
+    rec =
+      if file[:sidecar?],
+        do: rec,
+        else: Recorder.put_destination(rec, name, key, {:error, error})
+
+    Recorder.log(rec, :error, "offsite", "Copy of #{name} to #{label} failed: #{error}")
+  end
+
+  defp record_put({file, {:refused, reason}}, rec, key, label) do
+    name = Path.basename(file.path)
+    why = describe_refusal(reason)
+    message = "Copy of #{name} to #{label} REFUSED: #{why}; it was not uploaded"
+    Logger.error(message)
+
+    rec =
+      if file[:sidecar?],
+        do: rec,
+        else:
+          rec
+          |> Recorder.put_destination(name, key, {:error, "Refused: " <> why})
+          |> Recorder.put_unverified(name)
+
+    Recorder.log(rec, :error, "offsite", message)
   end
 
   ## finish
@@ -1301,7 +1948,11 @@ defmodule KilnCMS.Backups.Steps do
   # sobelow_skip ["Traversal.FileModule"]
   defp succeed(ctx, lease, state, rec) do
     artifacts = outputs(state)
+    rec = settle_unsent(rec, destinations(state))
+    # The env remote, redacted, only when it was reached (`destination_ok/4`);
+    # a raw remote only from a chain an older release ran this far.
     offsite = state["offsite"]
+    rec = note_partial(rec, ctx, lease)
 
     # The manifest FIRST: it has no database dependency, and cron-era
     # consumers read it. The run is closed after. On a resume this
@@ -1315,6 +1966,7 @@ defmodule KilnCMS.Backups.Steps do
       components: covered(ctx, state),
       artifacts: artifacts,
       offsite: offsite && Redact.text(offsite),
+      destinations: manifest_destinations(rec),
       keep_days: Backups.keep_days()
     })
 
@@ -1342,6 +1994,63 @@ defmodule KilnCMS.Backups.Steps do
 
     settled(lease, :ok)
     :ok
+  end
+
+  # A destination still pending at finish was never sent to: its part ran on
+  # a node from before #2220 (which copies to the env remote only), or never
+  # ran. It counts as failed, so the run reads partly off-site, never complete.
+  defp settle_unsent(rec, destinations) do
+    keys = Enum.map(destinations, & &1["key"])
+
+    Enum.reduce(rec.destinations, rec, fn
+      %{key: key, status: :pending}, rec ->
+        if key in keys,
+          do:
+            Recorder.put_run_destination(rec, key, %{
+              status: :failed,
+              error: "not attempted: its off-site step never ran"
+            }),
+          else: rec
+
+      _entry, rec ->
+        rec
+    end)
+  end
+
+  # Partly off-site (#2220, decision E1): the backup succeeded, and says on
+  # every surface that some destination wasn't reached.
+  defp note_partial(rec, ctx, lease) do
+    if Recorder.offsite_outcome(rec.destinations) == :partial do
+      counted = Enum.reject(rec.destinations, &(&1.status == :skipped))
+      reached = Enum.filter(counted, &(&1.status == :ok))
+      missed = Enum.map_join(counted -- reached, ", ", &(&1[:label] || &1.key))
+
+      message =
+        "Partly off-site: reached #{length(reached)} of #{length(counted)} destination(s); " <>
+          "not reached: #{missed}"
+
+      Logger.error("Backup #{ctx.stamp} " <> message)
+
+      :telemetry.execute(
+        [:kiln_cms, :backups, :offsite, :partial],
+        %{count: 1, reached: length(reached), total: length(counted)},
+        %{stamp: ctx.stamp, chain: lease.chain, missed: Enum.map(counted -- reached, & &1.key)}
+      )
+
+      Recorder.log(rec, :error, "offsite", message)
+    else
+      rec
+    end
+  end
+
+  # Additive (`Manifest`): every destination's key, label and status. Nil
+  # when there were none, so such a manifest reads as before.
+  defp manifest_destinations(%{destinations: []}), do: nil
+
+  defp manifest_destinations(rec) do
+    for entry <- rec.destinations do
+      %{key: entry.key, label: entry[:label], status: Atom.to_string(entry.status)}
+    end
   end
 
   # The manifest must not call a refused file verified.
@@ -1376,8 +2085,6 @@ defmodule KilnCMS.Backups.Steps do
   # file is touched. The official image ships rclone, so only a custom image
   # without it gets here. The reason carries no remote: `fail/5` logs
   # `inspect(reason)`, and a connection-string remote holds credentials.
-  @missing_rclone "BACKUP_RCLONE_REMOTE is set but rclone is not installed in this image"
-
   @doc false
   @spec offsite_step(Path.t(), [map()], Recorder.t()) ::
           {:ok, String.t() | nil, Recorder.t()} | {:error, term(), Recorder.t()}
@@ -1405,7 +2112,7 @@ defmodule KilnCMS.Backups.Steps do
   defp offsite_problems(results) do
     problems =
       Enum.reduce(results, %{refused: [], failed: []}, fn
-        {_file, :ok}, acc ->
+        {_file, result}, acc when result in [:ok, :skipped] ->
           acc
 
         {file, {:refused, reason}}, acc ->
@@ -1426,7 +2133,7 @@ defmodule KilnCMS.Backups.Steps do
 
   defp record_offsite({file, {:error, reason}}, rec, key) do
     name = Path.basename(file.path)
-    error = describe(reason)
+    error = Destination.format_reason(reason)
 
     rec =
       if file[:sidecar?],
@@ -1502,6 +2209,28 @@ defmodule KilnCMS.Backups.Steps do
       if(resumable?, do: "Resume this backup.", else: "run a new backup.")
   end
 
+  # No destination reached, with more than the env remote to reach (#2220):
+  # each named by its redacted label, with its own one-line reason.
+  def describe_offsite({:offsite, {:destinations, failures}}, resumable?) do
+    named =
+      failures
+      |> Enum.take(@max_named)
+      |> Enum.map_join("; ", fn {label, error} -> "#{label}: #{error}" end)
+
+    more =
+      case length(failures) - @max_named do
+        more when more > 0 -> "; and #{more} more"
+        _ -> ""
+      end
+
+    tail =
+      if resumable?,
+        do: "The local files are kept; Resume retries the off-site copies.",
+        else: "The local files are kept; run a new backup to try the off-site copies again."
+
+    "Off-site copy FAILED to every destination (#{length(failures)}): #{named}#{more}. " <> tail
+  end
+
   def describe_offsite({:offsite, %{refused: refused, failed: failed}}, resumable?) do
     refused_text =
       if refused != [] do
@@ -1564,7 +2293,7 @@ defmodule KilnCMS.Backups.Steps do
   # `media/` subdirectory, in that order. Each file is re-checked immediately
   # before its own copy (not all up front, which would leave the whole upload
   # window open) and refused, without calling rclone, if it changed. An
-  # error's rclone output has been through `Redact` (see `cmd/3`), so it is
+  # error's rclone output has been through `Redact` (see `Command.cmd/3`), so it is
   # safe to store and show.
   @doc false
   def offsite_results(dir, artifacts) do
@@ -1590,7 +2319,7 @@ defmodule KilnCMS.Backups.Steps do
       :ok ->
         # Mirrors the script's `rclone copy <file> <remote>/<subdir>`.
         subdir = file.path |> Path.dirname() |> Path.basename()
-        cmd(exe, ["copy", path, "#{remote}/#{subdir}"], env)
+        Command.cmd(exe, ["copy", path, "#{remote}/#{subdir}"], env)
 
       {:error, reason} ->
         {:refused, reason}
@@ -1649,7 +2378,7 @@ defmodule KilnCMS.Backups.Steps do
          # timeout. Failing at once reports the real cause.
          {url, env} = split_credentials(Backups.database_url()),
          :ok <-
-           cmd(
+           Command.cmd(
              "pg_dump",
              [
                "--no-password",
@@ -1661,7 +2390,7 @@ defmodule KilnCMS.Backups.Steps do
              ],
              env
            ),
-         :ok <- cmd("pg_restore", ["--list", "#{target}.partial"]),
+         :ok <- Command.cmd("pg_restore", ["--list", "#{target}.partial"]),
          :ok <- File.rename("#{target}.partial", target),
          :ok <- File.chmod(target, 0o600) do
       checksummed(dir, stamp, name, target)
@@ -1972,33 +2701,8 @@ defmodule KilnCMS.Backups.Steps do
 
   ## External commands
 
-  # An argv list exec'd directly — no shell, so nothing here can be injected
-  # into even though the database URL carries a password.
-  #
-  # `ExternalCommand`, not `System.cmd/3`: a job killed mid-run (timeout,
-  # cancel, a fenced node) must take `pg_dump`/`rclone` down with it rather
-  # than leave it writing a `.partial` a retry collides with. No wall-clock
-  # bound of its own; the job's timeout is the bound.
-  #
-  # stderr is captured rather than inherited so a failure can be reported with
-  # its actual reason. It is NOT logged verbatim: `pg_dump`'s error output can
-  # echo the connection string, and a backup failure should not put the
-  # database password in the log.
-  defp cmd(executable, args, env \\ []) do
-    # `rclone` arrives as an absolute path, `pg_dump`/`pg_restore` by name;
-    # `System.find_executable/1` resolves both (`:spawn_executable` searches
-    # no `PATH`).
-    case System.find_executable(executable) do
-      nil ->
-        {:error, {executable, :enoent}}
-
-      exe ->
-        case ExternalCommand.run(exe, args, :infinity, env: env) do
-          {_output, 0} -> :ok
-          {output, status} -> {:error, {:exit_status, executable, status, redact(output, env)}}
-        end
-    end
-  end
+  # Run through `KilnCMS.Backups.Command.cmd/3` (#2220), which the backup
+  # destinations share, so the off-site copy runs the same command either way.
 
   @doc """
   Splits a connection URL into a password-free URL plus a `PGPASSWORD`
@@ -2020,13 +2724,6 @@ defmodule KilnCMS.Backups.Steps do
   """
   @spec split_credentials(String.t() | nil) :: {String.t() | nil, [{String.t(), String.t()}]}
   defdelegate split_credentials(url), to: PgUrl, as: :split
-
-  # This string reaches the manifest, which the console renders.
-  #
-  # The scrubbing itself (known secrets, URL userinfo, `key=value`) lives in
-  # `KilnCMS.Backups.Redact`, the single path every backup text goes through
-  # (#2217); this just bounds the diagnostic to 500 characters.
-  defp redact(output, env), do: Redact.text(output, env, 500)
 
   # 0700/0600 throughout. A `.dump` is a complete logical copy of the database
   # — password hashes, session and API tokens, every row of PII — and the

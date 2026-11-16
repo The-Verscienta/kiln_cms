@@ -69,6 +69,32 @@ defmodule Kiln.ContractTest.Backend do
   def url(key), do: "https://img.example/" <> key
 end
 
+defmodule Kiln.ContractTest.Destination do
+  @moduledoc false
+  use Kiln.BackupDestination
+
+  @impl Kiln.BackupDestination
+  def kind, do: "sdk_test"
+  @impl Kiln.BackupDestination
+  def label, do: "SDK test"
+  @impl Kiln.BackupDestination
+  def fields, do: [%{name: "token", type: :secret, required?: true, help: nil}]
+  @impl Kiln.BackupDestination
+  def validate(_config), do: :ok
+  @impl Kiln.BackupDestination
+  def test(_config), do: :ok
+  @impl Kiln.BackupDestination
+  def put(_config, _file, _opts), do: :ok
+  @impl Kiln.BackupDestination
+  def list(_config), do: {:ok, []}
+  @impl Kiln.BackupDestination
+  def get(_config, _ref, _to), do: :ok
+  @impl Kiln.BackupDestination
+  def delete(_config, _ref), do: :ok
+  @impl Kiln.BackupDestination
+  def describe(config), do: "sdk-test:" <> to_string(config.id)
+end
+
 defmodule Kiln.ContractTest.Captcha do
   @moduledoc false
   use Kiln.Challenge.Provider

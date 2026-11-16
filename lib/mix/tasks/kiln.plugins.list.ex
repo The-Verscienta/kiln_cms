@@ -194,6 +194,7 @@ defmodule Mix.Tasks.Kiln.Plugins.List do
         count("image backend", length(m.image_backends)),
         count("challenge provider", length(m.challenge_providers)),
         count("security check", length(m.security_checks)),
+        count("backup destination", length(m.backup_destinations)),
         count("nav item", m.nav_items),
         count("admin route", m.admin_routes),
         # Every route kind is its own seam (admin-gated, editor-gated, public);
