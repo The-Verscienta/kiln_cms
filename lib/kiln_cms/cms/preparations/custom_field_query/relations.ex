@@ -182,8 +182,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Relations do
   end
 
   # `first(Resource, field: label, query: [filter: filter])` with the
-  # resource known only at runtime. authorize?: false — the filter carries the
-  # reader's gate (`read_filter/2`), as `count` does above.
+  # resource known only at runtime.
+  # authorize?: false — the filter carries the reader's gate (`read_filter/2`), as `count` does above
   defp unrelated_first(resource, label, filter),
     do: expr(first(^resource, field: ^label, query: [filter: ^filter], authorize?: false))
 
