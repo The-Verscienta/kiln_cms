@@ -90,7 +90,8 @@ Reads (all policy-scoped — drafts are visible only if the owner is an editor):
 >   operators, value shapes, equality matching and private fields are in
 >   [json-api.md](json-api.md) → "Custom fields".
 > - `custom_where` is a list of typed conditions, `{"name": …, <kind>:
->   {operators}}` with exactly one kind. See
+>   {operators}}` with exactly one kind, or a group (`_or` / `_and` of a list of
+  conditions, `_not` of one), nesting 4 deep and 50 conditions in all. See
 >   [Typed conditions](json-api.md#typed-conditions-custom_where). Unlike a
 >   JSON:API query string, it takes several conditions: at most 10, and 50
 >   values in an `in`.
