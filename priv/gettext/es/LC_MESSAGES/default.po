@@ -10115,13 +10115,18 @@ msgstr "Tipos de campo"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Field: %{field} (↑)"
-msgstr "Campo: %{field} (↑)"
+msgid "Field: %{field} (%{dir})"
+msgstr "Campo: %{field} (%{dir})"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Field: %{field} (↓)"
-msgstr "Campo: %{field} (↓)"
+msgid "Field: %{field} by current filename (%{dir})"
+msgstr "Campo: %{field}, por nombre de archivo actual (%{dir})"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Field: %{field} by current title (%{dir})"
+msgstr "Campo: %{field}, por título actual (%{dir})"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex

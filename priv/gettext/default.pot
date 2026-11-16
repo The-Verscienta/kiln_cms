@@ -10115,12 +10115,17 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Field: %{field} (↑)"
+msgid "Field: %{field} (%{dir})"
 msgstr ""
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Field: %{field} (↓)"
+msgid "Field: %{field} by current filename (%{dir})"
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Field: %{field} by current title (%{dir})"
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
