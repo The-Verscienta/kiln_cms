@@ -70,6 +70,7 @@ Every summary line below that was shortened links to its own entry there.
 - **Number fields: Step, Prefix and Suffix in the Validation fieldset and a Slider editor input. Field-sync exports now carry `step`, `prefix` and `suffix`, which a release before this one refuses as unknown keys.**
   ([long form](docs/changelog/unreleased.md#number-field-options))
 
+- **Import field definitions from the console: upload a file, review the dry-run diff and data-loss refusals, confirm `--prune` and `--allow-data-loss` separately, and apply.** ([#2438](https://github.com/The-Verscienta/kiln_cms/issues/2438) · [long form](docs/changelog/unreleased.md#field-sync-screen))
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
   ([long form](docs/changelog/unreleased.md#backup-destinations))
 

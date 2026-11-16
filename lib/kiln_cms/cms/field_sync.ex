@@ -255,19 +255,24 @@ defmodule KilnCMS.CMS.FieldSync do
   any `:error` case.
 
   Options: `actor:` (an admin), `tenant:`, `apply?:` (default `false` — a dry
-  run), `prune?:` (delete fields absent from the file), `allow_data_loss?:`.
+  run), `prune?:` (delete fields absent from the file), `allow_data_loss?:`,
+  `expect_digest:` (a `digest/1` of the plan the caller showed; when the plan
+  computed now differs, nothing runs and the result is `{:error, :stale}` —
+  how the console screen applies exactly the diff the admin confirmed).
   """
-  @spec import_doc(map(), keyword()) :: {:ok, report()} | {:error, :forbidden | report()}
+  @spec import_doc(map(), keyword()) ::
+          {:ok, report()} | {:error, :forbidden | :stale | report()}
   def import_doc(doc, opts) do
     scope = Keyword.take(opts, [:actor, :tenant])
     apply? = Keyword.get(opts, :apply?, false)
     prune? = Keyword.get(opts, :prune?, false)
     allow? = Keyword.get(opts, :allow_data_loss?, false)
+    expect = Keyword.get(opts, :expect_digest)
 
     with :ok <- authorize(scope) do
       case parse(doc) do
         {:error, problems} -> {:error, invalid_report(problems, apply?)}
-        {:ok, owners} -> plan_and_run(owners, scope, apply?, prune?, allow?)
+        {:ok, owners} -> plan_and_run(owners, scope, {apply?, prune?, allow?, expect})
       end
     end
   end
@@ -277,13 +282,44 @@ defmodule KilnCMS.CMS.FieldSync do
     %{empty_report(apply?) | errors: errors}
   end
 
-  defp plan_and_run(owners, scope, apply?, prune?, allow?) do
+  defp plan_and_run(owners, scope, {apply?, prune?, allow?, expect}) do
     report = owners |> plan(scope, prune?) |> build_report(apply?)
 
-    if report.blocked != [] and not allow?,
-      do: {:error, report},
-      else: execute(report, scope, apply?)
+    cond do
+      expect != nil and digest(report) != expect -> {:error, :stale}
+      report.blocked != [] and not allow? -> {:error, report}
+      true -> execute(report, scope, apply?)
+    end
   end
+
+  @doc """
+  A fingerprint of what a report would write: every op's kind, action, path,
+  attributes or changes, and data-loss refusal — not the stored records, and
+  not whether the report is a dry run. Two plans with the same digest do the
+  same thing, so a screen that shows a plan can pass it back as
+  `expect_digest:` and apply exactly what it showed.
+  """
+  @spec digest(report()) :: String.t()
+  def digest(%{ops: ops}) do
+    ops
+    |> Enum.map(&Map.take(&1, [:kind, :op, :path, :attrs, :changes, :blocked]))
+    |> normalize()
+    |> :erlang.term_to_binary()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  # Maps become sorted key lists, so the digest does not depend on how a map
+  # was built.
+  defp normalize(%{} = map),
+    do: map |> Enum.map(fn {k, v} -> {k, normalize(v)} end) |> Enum.sort()
+
+  defp normalize(list) when is_list(list), do: Enum.map(list, &normalize/1)
+
+  defp normalize(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.map(&normalize/1) |> List.to_tuple()
+
+  defp normalize(other), do: other
 
   defp authorize(scope) do
     if CMS.can_create_field_definition?(scope[:actor], %{}, tenant: scope[:tenant]),

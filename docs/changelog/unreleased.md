@@ -78,6 +78,16 @@ carries the reasoning.
   `x-kiln-widget: "slider"`. Guide:
   [Show a number as a slider or with a unit](../extending-content.md#show-a-number-as-a-slider-or-with-a-unit).
 
+<a id="field-sync-screen"></a>
+
+- **An admin can import field definitions from the console: Custom fields → Sync definitions from a file uploads a `kiln-field-definitions` file, shows the dry-run diff and the refusals for changes that would drop stored values, and applies it after a confirmation.**
+  `--prune` and `--allow-data-loss` are two separate checkboxes, off for every
+  new file, each re-running the preview. The apply sends the digest of the plan
+  that was shown (`FieldSync.digest/1`, `import_doc(expect_digest:)`) and is
+  refused when the site's definitions no longer plan the same changes. A
+  successful apply is a `org_setting_changed` security event with the counts.
+  See [Import from the console](../field-sync.md#import-from-the-console).
+
 <a id="backup-destinations"></a>
 
 - **In-app backups can go to several destinations: the Backups page has a Destinations tab where a platform admin adds a directory on the server or a named rclone remote, tests it, and turns its retention on or off. A backup that reaches only some of them succeeds as "Partly off-site" and raises the backup alarm.**
@@ -170,10 +180,16 @@ carries the reasoning.
   label until the referrer is saved again. A `multiple` reference or media field
   stays refused, now with `custom field "x" (reference) holds a list and is not
   sortable`. Clients that treated the old `400` as the signal can drop it.
-  Cost: one primary-key lookup per matching row (once per distinct target),
-  about 30-50 ms for a `limit` of 20 over 20,000 referrers and 2,000 targets.
-  No index on the source table can serve this order, so on a large table narrow
-  the read with a filter. No migration; rolling back only brings the refusal
+  Cost: one primary-key lookup per matching row in each type the field may
+  target. Measured at 100,000 referrers: 0.8-1.6 s over the whole table with one
+  type, up to 2.7-3.9 s with three, and 10-60 ms once a filter narrows the read
+  to 1,000 rows, for an editor and an anonymous reader alike (numbers and
+  method in [json-api.md](../json-api.md)). The cost grows linearly with the
+  types probed, so a field that would probe more than 8 content types (set by
+  `config :kiln_cms, :reference_sort_max_targets`) is refused with a `400`. The
+  unresolved-type fallback is not refused as such: it is three types on a
+  default build. No index on the source table can serve this order, so on a
+  large table narrow the read with a filter. No migration; rolling back only brings the refusal
   back. See [json-api.md](../json-api.md)
   and the amendment in decision 0014.
 
