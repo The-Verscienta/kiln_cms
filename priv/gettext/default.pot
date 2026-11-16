@@ -1814,6 +1814,11 @@ msgstr ""
 msgid "A box to tick beside every option."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A box to type the number in, with spin arrows."
+msgstr ""
+
 #: lib/kiln_cms/security/posture/checks/breached_passwords.ex
 #, elixir-autogen, elixir-format
 msgid "A breached password is allowed with a warning, administrators included."
@@ -3937,6 +3942,11 @@ msgstr ""
 msgid "Any uploader"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any value"
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Anyone"
@@ -5758,6 +5768,7 @@ msgstr ""
 msgid "Claim released; the release can be retried."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -5766,6 +5777,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Clear"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Clear %{field}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -8548,6 +8564,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/api_key_live.ex
 #, elixir-autogen, elixir-format
 msgid "Drafts-only keys only. Until this date the service can swap the key for a fresh one itself; after it, mint a new key. Other scopes ignore it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drag along the range from the minimum to the maximum, with the value beside it."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
@@ -11353,6 +11374,11 @@ msgstr ""
 msgid "How editors fill this in. The type and text format of the field stay as they are."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "How far the editor's arrows and slider move at a time. Not checked on save."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "How it works"
@@ -11740,6 +11766,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "In review"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "In steps of %{step}."
 msgstr ""
 
 #: lib/kiln_cms_web/components/layouts.ex
@@ -14929,6 +14960,11 @@ msgstr ""
 msgid "No user agent"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "No value yet."
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No versions recorded."
@@ -15453,6 +15489,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Number (range)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Number box"
 msgstr ""
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
@@ -17033,6 +17074,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
 msgid "Preferred languages"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Prefix"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Prefix %{prefix}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/presentation_live.ex
@@ -20351,6 +20402,11 @@ msgstr ""
 msgid "Set PRESENTATION_PREVIEW_URL to your front end (e.g. https://site.example.com{path}) to enable side-by-side editing."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Set a value"
+msgstr ""
+
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set by the operator in configuration, and used by any site that has not saved its own chains above."
@@ -20686,6 +20742,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Shown after the number in the editor."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Shown as"
 msgstr ""
 
@@ -20707,6 +20768,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "Shown as the site's account on link previews in X (Twitter), e.g. @kilncms. Leave blank to omit it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown before the number in the editor."
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex
@@ -21149,6 +21215,11 @@ msgstr ""
 msgid "Slack webhook added."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slider"
+msgstr ""
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -21540,6 +21611,7 @@ msgid "Stays open when this publishes"
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Step"
@@ -21753,6 +21825,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Success message"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Suffix"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Suffix %{suffix}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
@@ -27951,6 +28033,11 @@ msgstr ""
 msgid "can't be more than the maximum (%{max})"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/number_options.ex
+#, elixir-autogen, elixir-format
+msgid "can't be more than the span between min and max"
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "can't be processed — PDF metadata stripping isn't available on this server"
@@ -28897,6 +28984,11 @@ msgstr ""
 #: lib/kiln_cms/cms/validations/form_field_config.ex
 #, elixir-autogen, elixir-format
 msgid "must be a whole number from 1 to %{max}"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/number_options.ex
+#, elixir-autogen, elixir-format
+msgid "must be a whole number on an integer field"
 msgstr ""
 
 #: lib/kiln_cms/cms/validations/form_field_config.ex

@@ -15,8 +15,10 @@ defmodule KilnCMS.CMS.FieldWidgets do
   | `:select`, `multiple`                   | `tags`, `checkboxes` (not with `allow_custom`) |
   | `:text`, `format: :plain`               | `textarea`, `single_line`             |
   | `:reference`, single                    | `autocomplete`, `dropdown`            |
+  | `:integer` / `:float`, single           | `number`, plus `slider` while `validation` has both a `min` and a `max` |
   | a `Kiln.FieldType` with `c:Kiln.FieldType.widgets/1` | what it declares         |
   | a link field or group sub-field         | none                                  |
+  | a `multiple` number                     | none (every item is a number input)   |
   | anything else (rich `:text` included)   | none                                  |
 
   Names are strings, as `FieldDefinition.widget` stores them: a plugin's
@@ -31,17 +33,19 @@ defmodule KilnCMS.CMS.FieldWidgets do
 
   Every function takes a `FieldDefinition` or any map with its keys
   (`:field_type`, `:multiple`, `:allow_custom`, `:format`, `:options`,
-  `:link_of_id`, `:group_of_id`, `:widget`); a missing key reads as the
-  attribute's default. Labels for the core widgets are translated in the web
+  `:link_of_id`, `:group_of_id`, `:widget`, and `:validation` for the numbers'
+  slider); a missing key reads as the attribute's default, so a map without
+  `:validation` has no bounds and a number offers no slider. Labels for the core widgets are translated in the web
   layer; a plugin's own labels come from `plugin_labels/1`.
   """
 
-  alias KilnCMS.CMS.FieldTypes
+  alias KilnCMS.CMS.{FieldConstraints, FieldTypes}
 
   @single_select ["dropdown", "radios", "buttons"]
   @multiple_select ["tags", "checkboxes"]
   @plain_text ["textarea", "single_line"]
   @single_reference ["autocomplete", "dropdown"]
+  @number_types [:integer, :float]
 
   # One input per option: past this many, the editor keeps the default.
   @option_cap 50
@@ -130,10 +134,26 @@ defmodule KilnCMS.CMS.FieldWidgets do
     if Map.get(definition, :multiple) == true, do: [], else: bare(@single_reference)
   end
 
+  # A slider needs both ends (`validation` min and max) to be a range at all;
+  # until then the number input is the only one, so there is no choice to show.
+  # A `multiple` number is a list of inputs, never a slider.
+  defp entries(type, definition) when type in @number_types do
+    cond do
+      Map.get(definition, :multiple) == true -> []
+      bounded?(Map.get(definition, :validation)) -> bare(["number", "slider"])
+      true -> bare(["number"])
+    end
+  end
+
   defp entries(type, definition) when is_atom(type) and not is_nil(type),
     do: type |> FieldTypes.get() |> plugin_entries(definition)
 
   defp entries(_type, _definition), do: []
+
+  defp bounded?(validation) do
+    validation = FieldConstraints.normalize(validation)
+    is_number(validation["min"]) and is_number(validation["max"])
+  end
 
   defp plugin_entries(nil, _definition), do: []
   defp plugin_entries(module, definition), do: plugin_widgets(module, definition)
