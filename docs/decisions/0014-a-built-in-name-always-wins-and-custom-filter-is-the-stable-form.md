@@ -82,7 +82,11 @@ per-resource types and cannot gain per-site fields; `customFilter` /
 - **Custom sorts are always nulls-last;** a native `-x` is plain descending.
 - **Reference and media fields stay unsortable.** A stored snapshot title goes
   stale on target rename and would leak the relative order of masked targets.
-  A readability-aware sort key is a separate piece of work.
+  A readability-aware sort key is a separate piece of work. *Amended (#2444):*
+  that work is done for single-valued fields. A `reference` / `media` field
+  sorts by the target's current title (filename), read from the target, `NULL`
+  (last) where the caller cannot read it. A `multiple` one stays refused
+  (*holds a list and is not sortable*).
 - **`custom_sort` on search** is declared only on the public keyword and
   semantic search actions, not the shared facet arguments, so the internal
   title/alias legs that decide which rows count as "named" are unaffected.

@@ -73,6 +73,11 @@ Every summary line below that was shortened links to its own entry there.
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
 
+### Changed
+
+- **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
+  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
+
 ### Fixed
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**

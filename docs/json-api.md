@@ -435,11 +435,20 @@ comma-separated for multi-key. Records lacking the field always sort last, as do
 `null`, array or object under it (read as no value).
 `custom_sort` composes with `sort=`: explicit `sort` keys take precedence, but
 `custom_sort` outranks an action's *default* order (e.g. `/posts/published`'s
-`-published_at`). `media`/`reference` fields are not sortable: the `400` says
-why. Their stored label can lag the target's current title (a read relabels it
-from the target as it is now), and an order over targets the caller may not read
-would reveal where they sit, so a reference or media sort is refused rather than
-ordered by a stale or leaky key. Sort by a built-in or a text custom field instead.
+`-published_at`). A single-valued `reference` or `media` field sorts by its
+target's **current** title (a media item's current filename), read from the
+target and not from the label stored in the referrer, so a renamed target moves
+at once. Where the caller may not read the target (or it sits in another
+organization, or is only readable through a shared-draft preview link), the key
+is `NULL`: that record sorts last with the unset ones, so the order never shows
+where an unreadable target would sit. Your own list may still show the stored
+label until the referrer is saved again. A `multiple` one is refused: the `400`
+reads `custom field "x" (reference) holds a list and is not sortable`.
+
+Cost: each matching row looks up its target by primary key (once per distinct
+target), about 30-50 ms for a `page[limit]=20` read over 20,000 referrers and
+2,000 targets. No index on the source table can serve this order, so on a large
+table narrow the read with a filter first.
 
 A built-in column can follow a custom one in the same order by spelling it
 `_native:<name>` in `custom_sort`: `custom_sort=price,_native:title` or
