@@ -151,20 +151,6 @@ carries the reasoning.
     `baseUrl` or attribute. Both now trim in a loop, with the same result.
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947))
 
-<a id="sfe-deadline-test-margin"></a>
-
-- **The second-factor test of an open page reaching its deadline no longer fails on a slow runner.**
-  `SecondFactorEnforcementTest` "an open page goes to setup at the deadline"
-  set the grace deadline 600 ms after the test started. Creating the account,
-  signing in and mounting the page outlasted that on a loaded 2-scheduler CI
-  runner (Verscienta's overlay CI, on its 1.10.0 bump), so the mount itself
-  redirected and `live/2` returned `{:error, {:redirect, ...}}`: the test
-  exercised the mount gate rather than the open page's timer, and failed its
-  match. The margin is now 2.5 s and the redirect wait 6 s; with a 1.5 s
-  delay injected before the mount the test still passes on the timer path.
-  Test-only; no change to the release.
-  ([#2953](https://github.com/The-Verscienta/kiln_cms/pull/2953))
-
 ## Security
 
 <a id="backup-state-json-remote"></a>
