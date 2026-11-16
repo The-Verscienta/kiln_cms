@@ -24,7 +24,7 @@ either.
 | Refused from outside the list | Not affected |
 |---|---|
 | The console: every `/editor/**` page, `/media` (the media library), editor previews under `/editor/preview/...`, and plugin console pages | The public site, `/membership`, forms, feeds and search |
-| The console's downloads: the content, fields, translations, forms entries, analytics, governance and security-log exports, and `/editor/account/export.json` | `/account` (a reader's own settings page) and `/sign-out` |
+| The console's downloads: the content, fields, translations, forms entries, analytics, governance and security-log exports, and `/editor/account/export.json` | `/account` (a reader's own settings page), `/account/two-factor` (the two-step sign-in setup page) and `/sign-out` |
 | `/setup` (the first-run wizard) | Media downloads, transforms and streams (`/media/:id/...`), `/uploads/*` and static assets |
 | † Every sign-in route, for **everyone**, members included: `/sign-in`, `/register`, password reset, magic links, passkeys, single sign-on (`/auth/*`), the two-factor prompt `/sign-in/verify` (and its passkey routes under `/sign-in/verify/passkey`), sign-in unlock links (`/sign-in/unlock`, `/auth/unlock/...`), account confirmation and invitations (`/auth/invite/...`) | `/preview/...` links (token preview) |
 | † Headless sign-in: `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` | JSON:API, `/gql` and REST with an API key or a token already issued; MCP with an API key; `/ws/bridge` with an API key or a preview token; `/ws/gql` with a token already issued (it takes no API key). The security posture endpoint is the exception (left) |
@@ -129,8 +129,13 @@ With it off:
 from outside the list. With it off, a password (and its second factor, if the
 account has one) works from anywhere. For an admin, that is a token from
 `POST /api/auth/sign_in` with the admin's full role, which JSON:API, GraphQL
-and MCP accept from any network: those APIs are not gated by the list. Require
-two-factor sign-in for admins before turning it off.
+and MCP accept from any network: those APIs are not gated by the list.
+Before turning it off,
+[require two-step sign-in](two-factor-auth.md#require-two-step-sign-in-on-your-site)
+of administrators at **Organization → Two-step sign-in** (`/editor/two-factor`).
+Past the grace period, an admin with no second factor then gets no token
+from `POST /api/auth/sign_in` (`403` `second_factor_required`), and a token
+they already hold stops working.
 
 The Security posture page (and `GET /api/security/posture`) still passes the
 admin allowlist check, and says "Sign-in is open to every network"; its facts

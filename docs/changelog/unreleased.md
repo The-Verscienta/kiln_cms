@@ -2822,7 +2822,8 @@ carries the reasoning.
     404 exemption, so a spoofer rotating addresses inside one IPv6 `/64`
     stays exempt once the `/64`'s 30 lookups a minute are spent; several
     rented networks can still spend the node's 600 lookups a minute with
-    real lookups; and published IP ranges are not read yet (#2586). See
+    real lookups. (The published IP ranges, #2586, ship in this release
+    too; see [Crawler IP ranges](#crawler-ip-ranges).) See
     [the threat model](../threat-model.md#bot-budgets).
 
 <a id="token-paths-redacted-from-request-log"></a>

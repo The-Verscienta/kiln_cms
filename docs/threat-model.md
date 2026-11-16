@@ -275,7 +275,7 @@ build if a resource is ever registered without that authorizer.
   host-scoped for *writes* as well as reads: orgs are siblings under one
   registrable domain, and RFC 6265 otherwise lets script on any tenant origin
   set a same-named cookie for the parent domain. It would then outrank the
-  victim's own — Plug honours the header's *first* cookie of a name, and
+  victim's own — Plug honors the header's *first* cookie of a name, and
   RFC 6265 §5.4 sends longer `Path`s first, so `Domain=.<base_host>;
   Path=/editor` wins on exactly the authoring routes. Browsers refuse to store
   a `__Host-` cookie that is not `Secure`, `Path=/`, and `Domain`-less, so the
@@ -516,7 +516,7 @@ build if a resource is ever registered without that authorizer.
     prompt does not have.
 
     *Residual:* a hold that cannot be written does not fail the sign-in — it
-    logs and leaves the pre-#742 behaviour, because refusing instead would turn
+    logs and leaves the pre-#742 behavior, because refusing instead would turn
     a token-store hiccup into "no account with a second factor can sign in".
     The token is still minted; what is closed is that it is usable.
   - The pending blob is **encrypted** (`Phoenix.Token.encrypt/4`), not signed.
@@ -600,7 +600,7 @@ build if a resource is ever registered without that authorizer.
   refusing on "root with no route" would put it in a reload loop.) A test walks
   every `live` route in the router and fails if its view does not carry the
   guard, which is what enforces it for plugin panels rather than assuming it.
-  *Watch:* third-party LiveViews keep the framework behaviour — AshAdmin's are
+  *Watch:* third-party LiveViews keep the framework behavior — AshAdmin's are
   compile-gated to `:dev_routes`. AshAuthentication's are now all routed through
   thin Kiln wrappers, so they carry the guard like everything else:
   `/sign-in`, `/register` and `/reset` through `KilnCMSWeb.SignInLive` (#715),
@@ -650,7 +650,7 @@ build if a resource is ever registered without that authorizer.
   *Watch:* the mail detects; it does not prevent. A thief who also controls
   the owner's mailbox is not stopped by it.
 - **`setup_totp` as a second, code-free door to the same removal** —
-  `confirm_totp` was never scoped to an enrolment in progress, so on an already
+  `confirm_totp` was never scoped to an enrollment in progress, so on an already
   -enrolled account it checked the account's **live** secret; a session that
   called `setup_totp` first got a fresh secret written straight into
   `totp_secret` with `totp_confirmed_at` nulled in the same call — turning 2FA
@@ -1052,7 +1052,7 @@ see [bot-budgets.md](bot-budgets.md).
   edge to another draft stays hidden (`LinkEndsReadable`). A presented token
   that does not verify is a 404, never a fall back to the anonymous read.
   A write never reads the token. Responses are `private, no-store`; every
-  response of an honouring route `Vary`s on the header; the query-string form
+  response of an honoring route `Vary`s on the header; the query-string form
   is filtered from the request log, and Sentry events drop the header and mask
   the parameter (`KilnCMSWeb.SentryScrubber`).
 
@@ -1730,7 +1730,7 @@ creates an account and grants a site tier.
   `magic_link`.
 - **Who can send, and for how long it counts.** Only a standing platform admin
   can invite or resend (`StandingAdminOnly`): a temporary admin's invitation
-  would outlast the grant. An `:admin` invitation is honoured at accept time
+  would outlast the grant. An `:admin` invitation is honored at accept time
   only while its sender is still a standing platform admin, not erased and not
   deleted. A `:viewer` or `:editor` invitation is honored whatever has
   happened to its sender since, and that now includes raising a lower
@@ -1781,7 +1781,7 @@ creates an account and grants a site tier.
   holds the invitation.* A forwarded or intercepted link is accepted by
   whoever opens it first; the account it creates has the invited address,
   and an admin can remove the membership from Team. (4) *Accepting through single sign-on is not supported*, so an
-  invitee whose organisation signs in by SSO must still accept with a password
+  invitee whose organization signs in by SSO must still accept with a password
   or an existing account first. (5) *Pending invitations from before #2452.*
   A tier change or removal made on a build that had invitations but not #2452
   did not retire the member's pending invitation, so for up to 7 days after
@@ -2240,6 +2240,61 @@ policy is under "Security posture" in [policy-matrix.md](policy-matrix.md).
   node, so a cluster runs the checks up to once per node per window, and two
   answers a second apart can differ.
 
+### Security alerts (#2245)
+
+`KilnCMS.Security.Alerts`, `KilnCMS.Security.AlertGate`,
+`KilnCMS.Security.AlertDispatch`, `KilnCMSWeb.SecurityAlertsLive`. A
+security log event of certain kinds tells the site's admins, or the platform
+admins, by bell, email and webhook; see
+[security-alerts.md](security-alerts.md). The decisions are
+[ADR 0027](decisions/0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md),
+[ADR 0028](decisions/0028-webhook-urls-are-credentials-masked-wherever-they-are-shown-exported-or-logged.md)
+and [ADR 0029](decisions/0029-security-alert-email-stays-english-until-accounts-store-a-locale.md).
+
+- **An alert cannot be forged apart from the log.** Nothing records an alert
+  on its own: the event is written to the security log and the alert's window
+  is claimed in the same transaction, so an event that rolls back raises
+  nothing, and an alert always has its event.
+- **An intruder cannot quiet the alerts without a word.** Turning a kind off,
+  switching admin notifications off, changing, deleting, re-keying or
+  auto-disabling a webhook subscribed to `security.*`, removing or demoting
+  another admin, and changing the site's mail relay each write an
+  `alerts_silenced` notice in the change's own transaction. A notice that
+  cannot be written rolls the change back. No setting turns a notice off and
+  no mute silences it. The one exception is the platform's own switch for
+  `api_key_rate_limited`, recorded in the instance security log instead.
+- **The mail does not depend on what a site admin controls.** Alert email
+  goes through the instance relay (`KilnCMS.Mailer`), never the site's own
+  SMTP relay, which a site admin can change.
+- **What an alert carries.** No email address, user agent, secret or webhook
+  URL. The client's address is cut to its `/24` or `/48` unless the site
+  ticks **Show the full IP address in alerts**, and always for platform
+  alerts. A `blocked_ip` alert's event records no address at all; the block
+  rule it names is masked the same way.
+- **Webhook URLs are credentials.** A Slack-format endpoint's URL is its only
+  credential, since Slack checks no signature, so every endpoint's URL is
+  masked (`KilnCMS.Webhooks.display_url/1`) wherever it is shown, exported or
+  logged ([Webhooks (outbound)](#webhooks-outbound)). The list's **Select
+  all** does not tick the `security.*` events, so an endpoint set up to
+  mirror content does not start receiving client addresses and user ids.
+- **Platform alerts stay out of other sites' origins.** A platform alert's
+  bell row is in the default site. In any other site's console the platform
+  admin sees only "N unread platform alerts" with a link to the default
+  site's inbox: no headline, site name or address, because that console is
+  another site's origin (residual risk 16).
+- **Rate-limit alerts cannot be spent by forged keys.** See "A key used
+  beyond its normal rate" under GraphQL, JSON:API and REST above.
+- **Residual risks.** (1) A notice goes to the site's member admins, so it
+  reaches the owner of an account an intruder is using only through that
+  owner's email. (2) Alerts are delivered by a job every minute; an alert
+  older than a day is never sent, and a delivery that fails 10 times is
+  stamped failed and emits `[:kiln_cms, :security, :alert_failed]`. (3) The
+  blocked-address and
+  rate-limit gates are per node, so on a cluster a summary can count up to
+  about 20 networks per node, and a rate-limit refusal alerts only on a node
+  that recently verified the key
+  ([Running more than one server](security-alerts.md#running-more-than-one-server)).
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
 admin-triggered from System, or from Security posture when no answer is
@@ -2329,7 +2384,7 @@ theirs, and accounts belong to the whole deployment — so the provider is treat
 as able to assert *anything*, and what it may achieve is bounded by Kiln, not by
 the provider. See [sso.md](sso.md#per-site-providers).
 
-- **Asserting someone else's address** — a provider is honoured only for email
+- **Asserting someone else's address** — a provider is honored only for email
   addresses in a domain the site verified by DNS (a `_kiln-sso.<domain>` TXT
   record carrying a per-site random token), re-checked on every sign-in, exact
   domains only, and only with `email_verified` true. DNS control implies control
@@ -2445,7 +2500,7 @@ was named, never to the person who named it.
 `:register_with_password` **after** the password is hashed, so a known address
 pays for bcrypt like a new one. If the address already has an account the
 action fails with `KilnCMS.Accounts.Errors.AlreadyRegistered` and creates no
-row. `KilnCMSWeb.AuthRegisterForm` and `KilnCMSWeb.AuthController` recognise
+row. `KilnCMSWeb.AuthRegisterForm` and `KilnCMSWeb.AuthController` recognize
 that error and answer exactly as they answer a success. The owner is mailed
 "Someone tried to create a (site name) account with your address" by
 `KilnCMS.Accounts.User.Senders.SendRegistrationNotice`. It carries no token,
@@ -2505,7 +2560,7 @@ because other files cite them by number.
 1. ~~**Form embeds default to `frame-ancestors *`.**~~ **Closed in #562.**
    `EMBED_ORIGINS` unset now means same-origin only, so cross-site embedding is
    opt-in, and a malformed value closes the policy rather than widening it.
-   `EMBED_ORIGINS=*` restores the old any-site behaviour if a deployment
+   `EMBED_ORIGINS=*` restores the old any-site behavior if a deployment
    genuinely wants it. See [forms.md](forms.md#embedding-on-another-site).
    **Remainder, narrowed in #648:** the allowlist can now be set **on the
    form**, and a form's list replaces the deployment's rather than extending it,
@@ -2692,7 +2747,7 @@ because other files cite them by number.
    Roadmap decision 4 (2026-09-18) settled this, and #1547 implements it: an
    unset `TENANT_STRICT_HOST` turns on once a second organization exists. The
    2026-09-27 audit closed the two gaps that were left: an explicit `false`
-   is no longer honoured on a multi-org deployment (#1662, a `### Breaking`
+   is no longer honored on a multi-org deployment (#1662, a `### Breaking`
    change in 0.12.0), and a node that missed the broadcast catches up within
    30 seconds rather than five minutes (#1654). The
    sub-residuals stay accepted: the plain-text refusal lets a sweep enumerate
@@ -2726,11 +2781,11 @@ because other files cite them by number.
    silent (#564):** the app logs a warning, once per node, the first time a
    request arrives carrying a forwarding header (`Forwarded`, `X-Forwarded-For`,
    `X-Client-IP` or `X-Real-IP`) while no proxies are trusted. The
-   trap itself remains — honouring the header without a trusted-proxy list would
+   trap itself remains — honoring the header without a trusted-proxy list would
    be worse, since it is spoofable — so this is detection, not a fix.
    **On Fly.io, Railway and DigitalOcean App Platform (#1548)**, whose proxies
    publish no address range, `CLIENT_IP_HEADER` reads the proxy's own
-   client-address header instead. It is honoured only while that platform's
+   client-address header instead. It is honored only while that platform's
    runtime variables are present, so a copy elsewhere is refused and logged.
    Two gaps remain: another app on the platform's private network reaches Kiln
    without the proxy and can send the header itself, and sockets see only `x-`

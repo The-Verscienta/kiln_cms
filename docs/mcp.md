@@ -114,6 +114,24 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 `create_tag` takes an optional `tag_group_id` — discover the groups with
 `read_tag_groups`.
 
+> **Custom fields on a write.** `create_*` and `update_*` take
+> `custom_fields` under `input`, checked as a JSON:API write is
+> ([json-api.md](json-api.md) → "A single custom field takes one value").
+> A refused value comes back as a tool result with `isError: true` (HTTP
+> `200`) naming the field, and nothing is written:
+>
+> ```json
+> {"name": "update_page", "arguments": {"id": "<page id>",
+>   "input": {"custom_fields": {"subtitle": {"en": "x"}}}}}
+> ```
+>
+> answers `isError: true` with `Subtitle (subtitle) must be a single value,
+> not an object or a list`. A reference field that accepts only some records
+> ([Limit what can be picked](extending-content.md#limit-what-can-be-picked))
+> refuses another the same way: `“Title” isn't one of the records this field
+> accepts.` The tools never create a record from a title; create it first
+> (`create_page`, …), then connect its id.
+
 > **Change severity: `change_severity`.** `update_page` / `update_post` /
 > `update_entry` accept an optional `change_severity` (`critical`, `notable` or
 > `routine`). It is recorded on the edit only when the document is published and

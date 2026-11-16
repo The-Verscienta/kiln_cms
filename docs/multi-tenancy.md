@@ -115,6 +115,16 @@ hosts. A platform admin (`User.role == :admin`) is the exception and keeps
 admin everywhere. Details: [granular-rbac.md](granular-rbac.md), "Per-org
 capability tiers".
 
+A second factor follows the account too: an authenticator app or a passkey
+added once counts on every site. Whether one is **required** is per org
+([Requiring two-step sign-in on a site](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)),
+so an account that belongs to two sites is held only by the one that
+requires it of its role there. Second factors are added and removed only on
+the main host (`PHX_HOST`) and console hosts, never on an org's own host
+([Where second factors are managed](two-factor-auth.md#where-second-factors-are-managed)),
+so once any org requires one, every member of it has to be able to reach the
+main host.
+
 A membership has a `status`. Every membership is `:active` unless it came from
 a password sign-up on a site that [requires approval](account-administration.md#approving-registrations):
 that row is `:pending` until a site admin approves it (it becomes `:active`) or
@@ -195,8 +205,9 @@ Setting it up:
 1. **Pick a host under `PHX_HOST`**, e.g. `console.example.com` for
    `PHX_HOST=example.com`. Passkeys' relying-party ID is the `PHX_HOST` host,
    and a browser accepts it only on hosts under it. A console host outside
-   `PHX_HOST` still works, but without passkey sign-in, and Kiln warns about
-   that at boot. Existing passkeys keep working; nobody re-enrolls.
+   `PHX_HOST` still works, but without passkey sign-in or adding a passkey
+   there, and Kiln warns about that at boot. Existing passkeys keep working;
+   nobody re-enrolls.
 2. **DNS and TLS for the host and its wildcard**: `console.example.com` and
    `*.console.example.com`. A certificate for `*.example.com` does not cover
    `acme.console.example.com`.
@@ -206,6 +217,15 @@ Setting it up:
 
 On a single-org deployment only the bare console host is ever used, so the
 wildcard is optional there.
+
+With a console host, each org's editors manage their passkeys and
+authenticator app under **Settings** on their console host. Without one, the
+console is served on each org's own host, where `/editor/settings` shows no
+**Two-factor authentication** or **Passkeys** sections and links to
+`/account/two-factor` on the main host instead. There an editor of another
+org can add a factor and remove passkeys, but cannot turn the authenticator
+app off or regenerate recovery codes, which only `/editor/settings` does
+([Where second factors are managed](two-factor-auth.md#where-second-factors-are-managed)).
 
 On a **multi-org** deployment without it, an org admin's code injection can act
 with the session of any editor who opens that org's site signed in, a platform

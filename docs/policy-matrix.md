@@ -790,11 +790,24 @@ Sign-in looks the key up through the AshAuthentication interaction bypass.
 | `destroy` | ✅ | ✅ (own) | ❌ | ❌ |
 | `register`, `bump_usage` | ⚙️ | ⚙️ | ⚙️ | ⚙️ |
 | `forget_on_takeover` | ❌ | ❌ | ❌ | ❌ (⚙️ system actor, `:account_takeover`) |
+| `erase` | ❌ | ❌ | ❌ | ❌ (⚙️ erasure, `authorize?: false`) |
 
 `register` and `bump_usage` are `forbid_if always()` — the WebAuthn ceremony
 code writes them as the system. `forget_on_takeover` (#2453) is the
 invitations system actor's alone, declared above the platform-admin bypass;
-`for_user` admits that actor too, for the same takeover.
+`for_user` admits that actor too, for the same takeover. `erase` is
+`forbid_if always()`, also above the bypass, so no actor can use it to skip
+`destroy`'s checks; only account erasure (`Changes.AnonymizeUser`) calls it.
+
+Beyond the policy, `destroy` asks the remover, owner or platform admin, for
+a fresh second factor of their own (`Changes.SaverVerifiedSecondFactor`: a
+session that verified one in the last 15 minutes, or a `code` argument), and
+refuses an owner's last factor while a site requires one
+(`Validations.KeepsRequiredSecondFactor`). `register` refuses a 21st passkey
+and more than 5 an hour (`Validations.PasskeyCap`,
+`Changes.ThrottlePasskeyRegistration`) and, past a site's deadline, an
+enrollment from a password-only session that has not confirmed the emailed
+code (`Changes.RequireEnrolmentProof`).
 
 `Invitation` (#2135, `lib/kiln_cms/accounts/invitation.ex`) — a pending
 invitation to a site by email. Global like `OrgMembership`: the Team page reads
@@ -1145,6 +1158,28 @@ list that is on, or empty the list, and nothing else. `destroy` is
 `forbid_if always()` to everyone: off is `save` with an empty list, so turning
 it off has one path and one audit trail. The resource is not on JSON:API,
 GraphQL or MCP.
+
+## Two-step sign-in requirement — `SiteSecondFactorPolicy` (#2247)
+
+| Action | org admin (incl. platform admin) | editor | viewer | anonymous | `:accounts` system actor | `:operator` system actor |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `read` | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| `save`, `update` | ✅ (with a fresh second factor) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `operator_override` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `destroy` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+Whether the site requires a second factor of its administrators, its editors
+and administrators, or everyone, and the grace period, at `/editor/two-factor`
+([guide](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)). The
+`OrgSettings` read and write policies are both `Checks.OrgAdmin`. On top of
+the policy, `Changes.SaverVerifiedSecondFactor` runs on every person's `save`
+and `update`: the writer must hold a second factor and prove it, by a session
+that verified one in the last 15 minutes or a `code` argument charged to the
+shared second-factor budget. `operator_override` carries a second policy that admits
+only the `:operator` system actor (`KilnCMS.Release.second_factor_requirement_off/1`),
+so an org admin, who passes the write policy, is still refused; it can only
+set the requirement to off. `destroy` is `forbid_if always()`: off is a `save`
+of `required_for: :off`. The resource is not on JSON:API, GraphQL or MCP.
 
 ## Content types — `TypeDefinition`
 

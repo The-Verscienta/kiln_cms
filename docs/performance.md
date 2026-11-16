@@ -108,7 +108,7 @@ queues: [firing: 5, search: 5, mail: 3, newsletter: 3, billing: 3, media: 3, web
 | `federation` | `Federation.DeliveryWorker`, `AnnounceWorker`, `ActorUpdateWorker` |
 | `push`       | `Push.Worker` (Web Push)                               |
 | `backup_steps` | `Backups.StepWorker`: one step of an in-app backup, concurrency 1 per node ([backups.md](backups.md#how-an-in-app-backup-runs-2218)) |
-| `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; removed in the next minor |
+| `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; still in 1.10, removed in a later release |
 | `occurrence_backfill` | `Events.BackfillWorker`: the boot-time recompute of events' next dates, one job per recurrence engine version per day, ten minutes after boot ([events.md](events.md#recomputing-stored-dates-at-boot)) |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
 | `default`    | Daily AshOban triggers (trash purge, untitled sweep)   |

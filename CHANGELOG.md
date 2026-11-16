@@ -56,11 +56,16 @@ else.
 
 ## [Unreleased]
 
+What's new, with examples and migration steps: [docs/whats-new/v1.10.md](docs/whats-new/v1.10.md).
+
 Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
+
+- **`KilnCMS.Backups.Worker`, `Backups.enqueue/1` and the `backups` Oban queue are still here: 1.9.0 said this minor would remove them, and it doesn't. They stay deprecated for `Backups.request/2`; drain the `backups` queue before the release that removes them.**
+  ([1.9.0 long form](docs/changelog/v1.9.0.md#backup-request-api))
 
 - **Run `mix ash.migrate` (new `webhook_endpoints.format`, default `kiln`, and nullable `notifications.details`). Before rolling back to 1.9, deactivate every Slack-format endpoint: 1.9 sends it the Kiln envelope, which Slack refuses, until it auto-disables.**
   ([long form](docs/changelog/unreleased.md#slack-webhooks-upgrade))
@@ -114,6 +119,31 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Custom-field API: requests that used to succeed are now a `400`: `[]` for a single custom field (it cleared it), a list beside `ilike` or a media or reference `eq`/`not_eq` (it was joined into one string), a `null` `ilike` operand, and a `{year, month, day}` object as a date or date-time filter operand. `not_eq` on a tidied field can now exclude more records.**
   ([#2857](https://github.com/The-Verscienta/kiln_cms/pull/2857) · [long form](docs/changelog/unreleased.md#custom-field-api-stricter-shapes))
+
+### Known issues
+
+- **Backups History shows an "ok" off-site copy for a cron backup that failed.** Affects cron failures imported before upgrading to 1.9.
+  Treat those rows as never copied off-site. ([#2485](https://github.com/The-Verscienta/kiln_cms/issues/2485))
+- **GraphQL `customWhere` with `dateTime` can miss date-time list items saved with fractional seconds.** Not reproduced yet.
+  Filter with `custom_filter` on the REST API instead. ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+- **Renaming a field's section can move or leave its layout wrongly when another admin changed the same type meanwhile.** Reload
+  Fields before renaming a section, and check the type's sections afterwards. ([#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652))
+- **On a site other than the default one, New draft and Translations can be offered or hidden by the default site's type scope.**
+  Saving is still checked against the right site. No workaround. ([#2599](https://github.com/The-Verscienta/kiln_cms/issues/2599))
+- **Lock and teaser pages, embedded forms and newsletter confirmation mail can be in the wrong language on a multilingual site.**
+  No workaround yet. ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+- **A gallery carousel can't be scrolled with the keyboard.** Affects keyboard and switch users. Use the grid layout where that
+  matters. ([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590))
+- **The sign-in page on a site's own address offers "Use a passkey", which fails there.** Passkeys work only on the main and console
+  hosts. Sign in there, or with a password and code on the site's address. ([#2827](https://github.com/The-Verscienta/kiln_cms/issues/2827))
+- **"Confirm it's you with your passkey" shows no passkey button.** Affects passkey-only accounts in a browser without WebAuthn or
+  with JavaScript off. Use another browser, a recovery code, or ask an admin. ([#2887](https://github.com/The-Verscienta/kiln_cms/issues/2887))
+- **A quarantined upload released while the quarantine reaper sweeps can stay in the library without its original file.** Rare.
+  Upload the file again and delete the broken item. ([#2835](https://github.com/The-Verscienta/kiln_cms/issues/2835))
+- **A recurrence rule with a date-time `UNTIL` (`…T000000Z`) can end a day early or late.** Affects events whose zone is not
+  UTC. Write `UNTIL` as a date (`UNTIL=20261231`). ([#2861](https://github.com/The-Verscienta/kiln_cms/issues/2861))
+- **A member who starts checkout again for the tier they hold drops to "incomplete" and loses access.** Affects paid memberships,
+  comps included. The provider's next subscription update restores a paid one; comp a comped one again. ([#2747](https://github.com/The-Verscienta/kiln_cms/issues/2747))
 
 ### Added
 

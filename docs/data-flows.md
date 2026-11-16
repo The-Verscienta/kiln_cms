@@ -111,8 +111,13 @@ erasure does not rewrite that log. See
 
 A **Slack-format endpoint** (#2245) receives only `security.*` events, as a
 chat message: the alert's headline, the site's name, the time, the address as
-above and a link to the console, without user ids. The message lands in a
-chat workspace, under that tool's retention, not Kiln's.
+above and a link to the console, without user ids, delivery ids or endpoint
+ids; its test ping says only "KilnCMS webhook test for" the site. The message
+goes to the chat tool's incoming-webhook URL (Slack, or a Slack-compatible
+Mattermost, Rocket.Chat or Discord `/slack` endpoint) and lands in that
+workspace, under that tool's retention, not Kiln's. Link previews are turned
+off in the message, so the chat tool is not asked to fetch the console
+link.
 
 Endpoint URLs are stored in full in `webhook_endpoints.url` and in each
 delivery row's `endpoint_url`, in the clear. The console, the governance
@@ -617,7 +622,12 @@ the origin. For a funnel goal the goal page is the funnel's *final step*.
 
 ## Quick operator checklist
 
-- [ ] Reviewed configured webhook endpoints (`/editor/webhooks`).
+- [ ] Reviewed configured webhook endpoints (`/editor/webhooks`), Slack-format
+      ones included: their messages live in the chat workspace.
+- [ ] Decided on the calls that are on by default (the update check, the
+      plugin health check, crawler verification and its published IP lists,
+      the breached-password check), and listed the ones you keep, or set
+      their switches ([Optional subprocessors](#optional-subprocessors)).
 - [ ] Decided on Meilisearch / S3 / Stripe — listed as subprocessors if enabled.
 - [ ] If memberships are sold: know that erasing a member does **not** cancel
       their subscription at the provider — do that in the provider's dashboard.

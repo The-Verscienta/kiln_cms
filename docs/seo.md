@@ -101,7 +101,7 @@ knowing:
 - The editor's SEO panel scores what the record itself holds. A record relying
   on the pattern shows an empty title there and the length check says so, which
   is the honest reading: the pattern is the type's, not the record's. Type a
-  title if you want it analysed.
+  title if you want it analyzed.
 
 **Patterns reach every surface that renders a description.** The delivered
 HTML page (`<title>`, meta description, Open Graph and Twitter tags, inline
@@ -274,9 +274,9 @@ cross-tenant leak.
 - **Drafts are generated in the record's locale**, not the admin UI's.
 
 Everything the author controls — the title, the excerpt, the headings, the
-existing SEO values and the body — is fenced and labelled as untrusted data in
+existing SEO values and the body — is fenced and labeled as untrusted data in
 the prompt, and passed through `KilnCMS.LLM.Fence` so that nothing inside a
-region can close it early. The labelled fields and the body get *separate*
+region can close it early. The labeled fields and the body get *separate*
 regions, so a body line reading `Current SEO title: …` cannot pass for the real
 field. That helps and costs nothing, but it is not a security boundary — the
 three points above are. `KilnCMS.LLM.Fence` is where that defence lives for all
@@ -376,7 +376,7 @@ stays listed.
 The flags are an instruction to crawlers, not a delivery switch. The document is
 still served, and still appears in the sync/change feed, the fired artifacts,
 the static export, JSON:API and GraphQL, each carrying the flags so a separate
-frontend can honour them.
+frontend can honor them.
 
 How fast a crawler may fetch pages is a separate setting: a search engine whose
 address DNS has verified gets twice the browser rate limit by default, any other
