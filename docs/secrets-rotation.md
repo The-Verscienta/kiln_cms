@@ -460,9 +460,18 @@ objects — not merely read and write them.
    change:
    - the backup crontab (`/etc/cron.d/kiln-backup`) — see
      the restore runbook in [`backups.md`](backups.md);
-   - `BACKUP_DATABASE_URL`, if this deployment sets it;
+   - `BACKUP_DATABASE_URL`, if this deployment sets it. Without it the in-app
+     backup dumps through `DATABASE_URL` (when that names the database the app
+     is connected to) or a URL rebuilt from the Repo, so the restart in step 4
+     moves it to the new role;
    - any staging/drill tooling that points at production for a dump
      (`PROD_DATABASE_URL` in [`staging-environments.md`](staging-environments.md)).
+
+   In the URLs the backup tools read, write an `@` in the new password as
+   `%40`: `backup.sh`, `restore.sh`, `staging.sh` and the in-app backup end
+   the user and password at the first `@` before the first `/`, as libpq
+   does, and hand the decoded password to `pg_dump`/`psql` as `PGPASSWORD`
+   ([backups.md](backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726)).
 4. **Restart the application** so `runtime.exs` re-evaluates. With more than
    one instance behind the proxy, restart them one at a time — the old role is
    still valid, so instances on either side of the cutover both work, and this
@@ -517,9 +526,11 @@ three break together:
   configured.
 
 **Off-site backups do *not* use these keys.** `BACKUP_RCLONE_REMOTE` is an
-rclone remote, and its credentials live in `rclone.conf` on the host, outside
-the application entirely. Rotating the bucket credentials there is a separate
-change to a separate file — see step 5.
+rclone remote, and its credentials are rclone's own: `rclone.conf` on the host
+for cron, and `RCLONE_CONFIG_<NAME>_*` variables or a mounted `rclone.conf`
+in the app's environment for in-app backups
+([backups.md](backups.md#it-needs-the-client-tools-in-the-image)). Rotating
+the bucket credentials there is a separate change — see step 5.
 
 **How the credentials are read.** ExAws rebuilds its config from application
 environment on **every request** — there is no cached client and no long-lived
@@ -559,7 +570,10 @@ public endpoint), not through the application's credentials.
    `rclone config update <remote> …` on the host, then run
    `./scripts/backup.sh all` once by hand and confirm the off-site copy
    succeeds — the script fails the run when the off-site copy fails, so a
-   successful manual run is the proof.
+   successful manual run is the proof. For in-app backups, change the
+   remote's settings in the app's environment as well (the off-site row of
+   the table below), then click **Back up now** on **Backups**
+   (`/editor/backups`) and check that the run ends `Succeeded`.
 6. **Delete the old access key** in the provider console. Do this only after
    step 4 and step 5 both pass; until you do, the leaked credential is still
    live.
@@ -685,6 +699,7 @@ to be exercised.
 | `docker-compose.prod.yml` reference stack | `.env.prod` | `docker compose -f docker-compose.prod.yml --env-file .env.prod up -d` |
 | Kubernetes / other orchestrator | Secret → env | Roll the deployment; instances restart one at a time |
 | Backup cron | `/etc/cron.d/kiln-backup` (`DATABASE_URL`, `BACKUP_RCLONE_REMOTE`) | Next scheduled run — test it by hand first |
+| In-app backups and backup schedules | The app's own environment (`DATABASE_URL` or `BACKUP_DATABASE_URL`, `BACKUP_RCLONE_REMOTE`, `RCLONE_CONFIG*`) | Restart the app; test with **Back up now** on `/editor/backups` |
 | rclone off-site remote | `rclone.conf` on the host | Next run — test with `./scripts/backup.sh all` |
 
 Keep the password-manager snapshot as the source of truth for all of them:

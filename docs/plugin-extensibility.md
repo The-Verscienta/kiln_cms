@@ -151,6 +151,18 @@ Mix project depending on `kiln_plugin`: `mix kiln.gen.plugin <Name> --dep`
 scaffolds one at `../<name>` (or `--path`), and `sdk/fixtures/dep_plugin` is
 a worked, CI-compiled example.
 
+No generator writes content types into a plugin's own domain yet:
+`mix kiln.gen.content` registers every type on the core `KilnCMS.CMS`, and
+has no `--domain` option. Write an overlay plugin's types by hand on
+`use KilnCMS.CMS.Content, type: …, domain: <Plugin>.Catalog`, with
+`projects/example/catalog.ex` and `projects/example/catalog/` as the
+template. The notice `mix kiln.gen.plugin` prints when it finishes lists
+every step: uncomment `domains/0` in the generated plugin, register the
+domain in `:ash_domains` and `:content_domains` in
+`projects/<name>/project.exs`, and move the migrations and snapshots
+`mix ash.codegen` writes into the overlay's `priv/`
+([Plugins](extending-content.md#5-plugins-d18) has the rest).
+
 #### Plug routes: webhooks, JSON endpoints, feeds (`plug_routes/0`, #2272)
 
 `public_routes/0` mounts a LiveView page. For an endpoint with no page, such as

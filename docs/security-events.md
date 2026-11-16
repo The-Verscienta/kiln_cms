@@ -346,7 +346,7 @@ event carries the address the sign-in came from). For `registration_approved`,
 - `invitation`: the applicant accepted an invitation to the site, which
   approves the registration with the invited tier
   ([Invitations and registrations](account-administration.md#invitations-and-registrations)).
-  No person: the system honours the invitation (`SystemActor` `:invitations`);
+  No person: the system honors the invitation (`SystemActor` `:invitations`);
 - `added`: a platform admin entered the address in Team's **Add or invite**,
   approving it with the tier they picked. The person is that admin. This is
   also how a rejection is overridden from Team, so a `registration_approved`

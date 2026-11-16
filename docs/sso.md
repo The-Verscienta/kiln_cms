@@ -69,7 +69,17 @@ The sign-in page then offers "Sign in with Sso" alongside password/magic-link.
   random hash; password sign-in works only after an explicit password reset.
 - **2FA still applies.** SSO completes through the same
   `AuthController.success/4`, so a TOTP-enrolled account still hits the
-  second-factor gate (docs/two-factor-auth.md).
+  second-factor gate ([Two-factor authentication](two-factor-auth.md)), and
+  can answer it with a passkey on the main or console host
+  ([Using a passkey at the code prompt](two-factor-auth.md#using-a-passkey-at-the-code-prompt)).
+  On a site that [requires two-step sign-in](two-factor-auth.md#requiring-two-step-sign-in-on-a-site),
+  an SSO sign-in is held like any other: past the deadline, an account with
+  no second factor is sent to set one up, and a passkey-only account stops at
+  the passkey prompt on the main or console host and is refused on a site's
+  own host. An SSO session is not asked for the
+  [emailed code](two-factor-auth.md#when-the-emailed-code-is-asked-for)
+  before adding a factor; the enrollment is recorded with `proof`
+  `not_required`.
 - SSO users are auto-confirmed (the IdP verified the email) — no second
   confirmation loop.
 
@@ -130,7 +140,9 @@ not trusted for everything it asserts:
   invitation. If the setting can't be read, a first sign-in is refused with
   the "unavailable" message below and creates nothing. Details:
   [Hold new single sign-on accounts too](account-administration.md#hold-new-single-sign-on-accounts-too).
-- **A second factor still applies.**
+- **A second factor still applies**, as for the operator's provider above,
+  including the site's
+  [two-step sign-in requirement](two-factor-auth.md#requiring-two-step-sign-in-on-a-site).
 - **`RS256` ID tokens only**, from the keys at the provider's `jwks_uri`. Every
   request Kiln makes to the provider goes through the same SSRF guard as
   webhooks: `https://`, no private or metadata addresses, no redirects.

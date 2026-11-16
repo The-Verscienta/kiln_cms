@@ -1488,6 +1488,11 @@ It publishes **shape**, not editorial content: field `help_text` and a
 `:select`'s option list are deliberately withheld, as is the organization id.
 Type and field *names* are published, so a site where an unannounced content
 type is itself sensitive should keep this endpoint off the public internet.
+A reference field's `selection`, which records it accepts
+([Limit what can be picked](extending-content.md#limit-what-can-be-picked)),
+is published as `x-kiln-selection`: states, owner, sort, tag and category ids,
+and the values of conditions on non-private fields. A condition on a private
+field, or on something deleted since, is left out.
 
 This describes the **read** surface. The write API's authoring shape (which
 differs — a `video`'s stored `media_id`/`url` pair is delivered as one resolved

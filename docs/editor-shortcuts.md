@@ -116,3 +116,7 @@ travels; a file the browser refuses — over the image size cap, or not an
 image — stays there with the reason and a Dismiss. Several files pasted at
 once keep their order. The upload runs through the same pipeline as the media
 library's own uploads (`KilnCMS.Media.Ingest`), under your own permissions.
+
+To set a featured image, a social image, an image block's picture or a
+gallery from a new file instead, upload it from the image picker's own
+upload area ([Upload an image from the image picker](media-pipeline.md#upload-an-image-from-the-image-picker)).

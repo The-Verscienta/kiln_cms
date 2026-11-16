@@ -481,6 +481,23 @@ a script or app signing in as a person who has not set up a second factor:
 move it to an API key. The sign-ins themselves are in the security log as
 `second_factor_required` ([Security log](security-events.md#what-is-recorded)).
 
+## Backups
+
+In-app backups, the last-good and hold markers, retention and the in-app
+backup schedules emit `[:kiln_cms, :backups, …]` events. None is in
+`KilnCMSWeb.Telemetry.metrics/0`, so none reaches Prometheus: attach a
+`:telemetry` handler to count them. Each is documented beside the behavior it
+reports in [backups.md](backups.md): the run's chain, folded requests and
+reclaimed steps under
+[How an in-app backup runs](backups.md#how-an-in-app-backup-runs-2218), the
+marker events under [The last-good marker](backups.md#the-last-good-marker)
+and [The hold markers](backups.md#the-hold-markers), retention's under
+[When retention is skipped or stops](backups.md#when-retention-is-skipped-or-stops),
+and the schedules'
+`[:kiln_cms, :backups, :schedule, …]` and
+`[:kiln_cms, :backups, :status, :schedules_unreadable]` under
+[The scheduler job](backups.md#the-scheduler-job).
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in

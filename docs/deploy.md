@@ -45,8 +45,10 @@ Everything else in this guide is optional.
    release shell (below).
 7. Point your restart-triggering healthcheck at `/live` and your load balancer
    or uptime monitor at `/up`.
-8. Schedule [`scripts/backup.sh`](../scripts/backup.sh) before you have
-   anything to lose.
+8. Schedule backups before you have anything to lose: host cron running
+   [`scripts/backup.sh`](../scripts/backup.sh), or an in-app schedule on the
+   **Schedule** tab of **Backups**
+   ([Backups](#backups), below).
 
 [`docker-compose.prod.yml`](../docker-compose.prod.yml) at the repository
 root does steps 1–4 as a reference; the rest of this document explains each
@@ -416,6 +418,17 @@ On any other platform, give `BACKUP_DIR` a persistent mount writable by
 mounted there works) or the in-app page will report available and every job
 will fail at run time.
 
+**Host cron or an in-app schedule.** Instead of the cron line, a platform
+admin can schedule the database and media backups from inside the app:
+daily, weekly, every 2 weeks or monthly at a local time, on the **Schedule**
+tab of **Backups** (`/editor/backups/schedules`). It needs the
+`add_backup_schedules` migration (applied at boot by `bin/migrate`) and the
+scheduler job, which is on unless `KILN_BACKUP_SCHEDULER_CRON=false`. Run one
+or the other on each component, not both, or every window takes two backups.
+Rolling back to a release before the schedules fires none of them, so keep
+cron ready if you might roll back
+([Schedule backups in the app](backups.md#schedule-backups-in-the-app)).
+
 Three more things the two paths need from a deployment:
 
 - **Keep the host's `scripts/backup.sh` at the release you run.** Cron runs a
@@ -423,7 +436,13 @@ Three more things the two paths need from a deployment:
   app marks the newest verified backup of each component with a
   `kiln-<stamp>.good` file that `backup.sh prune` must honor, and the script
   splits media into parts as the app does; an older copy ignores both
-  ([The last-good marker](backups.md#the-last-good-marker)). The script needs
+  ([The last-good marker](backups.md#the-last-good-marker)). Since v1.10.0 the
+  app also writes `kiln-<stamp>.hold` for the backups an in-app schedule's
+  keep settings hold, which an older copy deletes once they pass
+  `BACKUP_KEEP_DAYS` ([The hold markers](backups.md#the-hold-markers)), and a
+  live run keeps its `.partial` files fresh, so an older copy's run that is
+  quiet for 3 hours can be recorded in History as Interrupted
+  ([When a cron run is killed outright](backups.md#when-a-cron-run-is-killed-outright-2478)). The script needs
   GNU tar or bsdtar on the host, not busybox tar
   ([system-requirements.md](system-requirements.md#running-the-backup-scripts-on-the-host)).
   The reasoning is in [ADR 0041](decisions/0041-the-app-and-backup-sh-agree-on-what-to-keep-only-through-presence-only-marker-files.md) (the markers) and
@@ -479,7 +498,8 @@ by design, so an N-node cluster admits N times each of those.
 [`docker-compose.prod.yml`](../docker-compose.prod.yml) runs the app and a
 pgvector Postgres, with MinIO, Meilisearch and Dragonfly behind the profiles
 above. It is a starting point, not a platform: it does not terminate TLS,
-does not schedule backups (it only makes them possible — above), and keeps
+does not schedule backups (it only makes them possible: host cron or an
+in-app schedule takes them, above), and keeps
 Postgres on the compose network with TLS off because the traffic never leaves
 the host. It needs the Docker Compose v2 plugin (2.24 or newer — older
 releases evaluate the nested default that lets `DATABASE_URL` replace the

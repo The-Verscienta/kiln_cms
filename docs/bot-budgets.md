@@ -540,6 +540,13 @@ checked by DNS alone, and DuckDuckBot claims are never verified nor proven
 false: they keep the search-engine class, held to the browser limit, as before
 #2586. Set it on every node.
 
+The switch holds for every way a fetch can start. A fetch job already queued
+(by the cron, or by hand as below) does nothing on a node with the lists off,
+and so does a call to `KilnCMS.CrawlerVerification.RangesWorker.refresh/2`,
+which answers `:disabled` without a request, a metric or a list sent to the
+other nodes. The switch is read from the node's own configuration, never from
+the job or the caller, so nothing can fetch past it (#2853).
+
 To keep the lists but stop Kiln fetching them on its own, set
 `KILN_CRAWLER_RANGES_CRON=false`. That removes the 6-hourly job **and** the
 fetches a node queues at boot and when a list goes stale. A list then reaches a

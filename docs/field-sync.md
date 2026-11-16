@@ -218,6 +218,13 @@ default. See
 - **Per-field role grants.** "Role X may read/write field Y" lives on roles and
   memberships (see [granular-rbac.md](granular-rbac.md)); export and re-apply
   those with the roles.
+- **A reference field's `selection`** (which records it accepts and
+  create-on-type, [Limit what can be picked](extending-content.md#limit-what-can-be-picked)).
+  It names tag and category ids, which differ per site, and fields of its
+  target types an import may not have created yet. An export leaves it out,
+  and an import neither sets, changes nor clears it, so each environment
+  keeps its own; set it in each one's fields admin. A hand-written file with
+  a `"selection"` key is refused like any unknown key.
 - **Content, taxonomies, media** — see [content-portability.md](content-portability.md).
 - **Compiled content types and plugins.** A field of a compiled type needs that
   type (and any plugin field type it uses) installed in the target; otherwise the

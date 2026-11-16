@@ -83,14 +83,19 @@ Full flow, recipe, and the serve step live in
       from the clone's **Backups** page lands in production's off-site store,
       beside production's own backups under the same file names, where a
       restore can pick it up by mistake. Set
-      `BACKUP_ENABLED=false` if the clone needs no backups at all.
+      `BACKUP_ENABLED=false` if the clone needs no backups at all. The scrub
+      pauses every in-app backup schedule the clone carried over
+      (`backup_schedules_disabled`); resume one on the clone's **Schedule** tab
+      of **Backups** only after these settings are the clone's own
+      ([backups.md](backups.md#restoring-the-database-brings-back-the-schedules)).
 
 ## 4. Safety callouts
 
 - [ ] **Never run the scrub against production.** It anonymizes every account,
       purges API keys/tokens/search queries, de-activates webhooks, drops the
-      mail settings (incl. the DKIM private key), and deletes the backup history
-      and both security logs (the sites' and the instance's). The confirmation flag +
+      mail settings (incl. the DKIM private key), deletes the backup history
+      and both security logs (the sites' and the instance's), and pauses every
+      in-app backup schedule. The confirmation flag +
       ephemeral-name guard exist to prevent a mistyped `DATABASE_URL` — respect them.
 - [ ] **Scrub before exposing** the staging box. `scripts/staging.sh up` and the
       `bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'` path both scrub *before*

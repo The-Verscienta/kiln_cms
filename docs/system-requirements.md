@@ -1,7 +1,7 @@
 # Minimum system requirements
 
 What a machine needs to run Kiln, to build the release image, and to develop
-on it. Written against v1.9.0. The versions here restate
+on it. Written against v1.10.0. The versions here restate
 [`.tool-versions`](https://github.com/The-Verscienta/kiln_cms/blob/main/.tool-versions)
 and the [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile);
 when they disagree, those files win and this page needs editing
@@ -21,6 +21,7 @@ Postgres, a reverse proxy, and somewhere for media to live.
 | Postgres | 17 with the `vector` extension | 17, `pgvector/pgvector:pg17` | The only required service. Older majors are not tested. Extensions created on migrate: `citext`, `pg_trgm`, `unaccent`, `vector`; a server without `vector` available fails at `mix ash.setup` with "extension vector is not available" |
 | Postgres pool | `POOL_SIZE=10` | Sized per [performance.md](performance.md) | The pool is shared by web requests and Oban workers, so a busy instance wants more |
 | Reverse proxy | TLS termination, WebSocket pass-through | | LiveView and the API sockets need WebSockets forwarded; the proxy must set `x-forwarded-for` and `x-forwarded-proto`. See [deploy.md](deploy.md) |
+| Main host reachable | The `PHX_HOST` address answers everyone who signs in | | Passkeys and the authenticator app are added and removed only on the main host or a console host (`KILN_CONSOLE_HOST`). A site that requires two-step sign-in sends a person who has no second factor yet to `/account/two-factor` there, so on a multi-site install the main host must be reachable by every site's members, readers included when a site requires it of everyone. See [Requiring two-step sign-in on a site](two-factor-auth.md#requiring-two-step-sign-in-on-a-site) |
 | Outbound network | 443, and DNS | | Webhooks, oEmbed, the update feed, the search engines' published crawler IP lists, image imports and the CDN purge all go out over HTTPS through `KilnCMS.SafeFetch`. Some calls are on by default; see [Outbound calls made by default](#outbound-calls-made-by-default) below for each, and the switch that stops it. Port 25 outbound only for `MAIL_MODE=direct` (the built-in MTA); most clouds block it, see [direct-email-delivery.md](direct-email-delivery.md) |
 | Database TLS | On by default | | `ssl: true`; set `DATABASE_CACERTFILE` to verify the server certificate |
 
@@ -74,7 +75,8 @@ such call.
 Opt-in calls, made only once you configure the feature: human verification
 (`challenges.cloudflare.com` for Turnstile, `www.recaptcha.net` for reCAPTCHA,
 from the server and from visitors' browsers), the `BACKUP_RCLONE_REMOTE`
-remote, `KILN_CDN_PURGE_URL`, webhooks, mail, S3, Meilisearch, Sentry,
+remote, `KILN_CDN_PURGE_URL`, webhooks (a Slack-format endpoint posts to
+the chat tool's incoming-webhook URL, such as `hooks.slack.com`), mail, S3, Meilisearch, Sentry,
 OpenTelemetry, and the AI providers.
 
 ## Presets
@@ -137,7 +139,7 @@ media phase builds in `TMPDIR` (default `/tmp`).
 | | Requirement | Notes |
 |---|---|---|
 | Elixir / OTP | **1.20.4 on OTP 29.1.1**, exactly as `.tool-versions` says; `mix.exs` requires `~> 1.20` | The floor is 1.20 rather than 1.19 because 1.20's `mix format` breaks some lines differently, so a tree formatted on one fails the other's formatting check. CI and the release image run the same pins, so the dialyzer that runs in CI is the one you run locally |
-| Node.js | **22.23.5**, pinned in `.tool-versions` and read by CI and the Dockerfile | Only for building assets: the editor bundles TipTap from `assets/node_modules`. Not needed at runtime |
+| Node.js | **22.23.5**, pinned in `.tool-versions` and read by CI and the Dockerfile (`NODE_VERSION`) | Only for building assets: the editor bundles TipTap from `assets/node_modules`. Not needed at runtime. An overlay that builds Kiln from source should pin the same version in its own `.tool-versions`. The `examples/astro-blog` consumer needs 22.23.4 or later (astro 7.4.7) |
 | Postgres | 17 with `vector`, via `docker compose up -d postgres` | The compose file runs `pgvector/pgvector:pg17`. Two test suites running at once against one server can exhaust Postgres's default 100 connections; raise `max_connections` or run them one at a time |
 | Docker | Any recent Docker or compatible | For Postgres and the optional profiles; the app itself runs on the host |
 | libvips | `brew install vips` / `apt install libvips-dev` | `vix` builds against it; image tests need it |

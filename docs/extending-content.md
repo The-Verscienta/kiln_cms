@@ -341,9 +341,11 @@ UI" workflow, scoped to fields.
   it is full. The schema export reports it as
   `x-kiln-max-sources`.
 - **Which records can be added (`selection`, #2285)**: a filter on what a
-  write may add to the field. It has its own section,
-  [Limit what can be picked](#limit-what-can-be-picked); there is no admin
-  screen for it yet.
+  write may add to the field, set in the relationship form's **Which records
+  can be picked** step. It can also let editors create a record from what
+  they type. Both have their own sections:
+  [Limit what can be picked](#limit-what-can-be-picked) and
+  [Let editors create what they type](#let-editors-create-what-they-type).
 - **When a target is deleted for good (`on_target_delete`)**: what purging a
   connected record does to this field's connections to it. `:keep` (the
   default, and the behaviour before 1.5) leaves the connection as a broken
@@ -1575,8 +1577,9 @@ content editor shows for it. You need the admin role.
    **One choice** or **Several terms** for a select, **Plain text** under
    **Editing** for a text field, the single-record choice for a relationship.
    An **Editor input** group appears with a card for each input the field can
-   use, the default checked. If no such group appears, the field has no
-   choice (see the table below).
+   use, the default checked, under the line *How editors fill this in. The
+   type and text format of the field stay as they are.* If no such group
+   appears, the field has no choice (see the table below).
 3. Pick a card:
 
    | Field | Cards (default first) | Stored `widget` |
@@ -1640,7 +1643,8 @@ What to know before relying on it:
 - **One line keeps line breaks.** A value that already holds a line break
   opens in the several-lines box, so saving it does not drop the breaks.
 - **The reference dropdown lists what you can read.** It lists the target
-  records you could find by searching, on this site only, sorted by title and
+  records you could find by searching (so only those the field's
+  [selection](#limit-what-can-be-picked) accepts), on this site only, sorted by title and
   grouped by type when the field allows several types; *— None —* clears the
   pick. It lists at most 100 records across all target types: past that the
   editor keeps the search box and says *Too many to list — search instead.* A
@@ -1665,34 +1669,52 @@ Why the input is an editor-only setting apart from **Editing**, and why a named 
 
 ### Limit what can be picked
 
-Starting point: a top-level reference field, and a reason to keep some records
-out of it (only published ones, only the writer's own, only pages tagged
-"recipes"). Set it in the fields admin, or through the API or a seed. The
-editor's picker, the dropdown widget and the reverse field apply it (#2285).
+Starting point: a top-level reference field (a relationship), and a reason to
+keep some records out of it (only published ones, only the writer's own, only
+pages tagged "recipes"). The setting is the field definition's `selection`.
+Set it in the fields admin or from code; there is no JSON:API or GraphQL write
+for field definitions. The editor's picker, the dropdown widget, the reverse
+field and every write path apply it (#2285). You need the admin role.
 
-**In the fields admin.** Open a relationship field (new or **Edit**) and use
-step 6, **Which records can be picked**:
+**In the fields admin.**
 
-1. Tick the states editors may pick (none ticked means any state they can
-   read) and, optionally, **Only records the editor created**.
-2. Choose how a blank search is ordered: newest first or by title.
-3. For each target type the field links to, optionally pick tags (any of),
-   a category, and a condition per custom field: *equals*, *is one of*
-   (values separated by commas) or *is not*, then a value. Only plain,
-   non-private fields are offered; a number or yes/no field is stored as a
-   number or boolean. Leave a value empty to not filter on that field.
-4. Read the sentence under the step ("Editors are offered: Published Page
-   records, tagged vegan, newest first.") and save. A condition the server
-   refuses shows under the step and nothing is saved. A condition naming a
-   deleted tag or category stays listed as "(not found)" so saving does not
-   drop it silently; remove it to clean up.
+1. Open **Fields** (`/editor/fields`) and choose **Edit** on a relationship
+   field, or add a new one with **A relationship**. Set the types it links
+   to in step 1, **Which records connect**, first: the step below offers
+   conditions only for those types.
+2. Scroll to step 6, **Which records can be picked**. Under **Only records
+   that are**, tick the states editors may pick: Draft, In review, Published,
+   Archived. Ticking none offers records in any state the editor can read.
+3. Optionally tick **Only records the editor created**.
+4. Under **Order a blank search**, choose **Newest first** (the default) or
+   **By title**. This orders the list an editor sees before typing.
+5. For each linked type, under **Only *Type* records that match**, optionally
+   choose tags in **Tagged with any of**, a category in **In category**, and a
+   condition per custom field: **equals**, **is one of** or **is not**, then a
+   value. For **is one of**, separate the values with commas. Leave a value
+   empty to not filter on that field. Only plain, non-private fields are
+   listed; a value on a number or yes/no field is saved as a number or a
+   boolean.
+6. Optionally, under **Let editors create what they type**, choose **Yes,
+   create a new *Type***. See
+   [Let editors create what they type](#let-editors-create-what-they-type).
+7. Read the sentence at the end of the step, which restates the setting, for
+   example *Editors are offered: Published Page records, tagged vegan, newest
+   first.* Then save the field (**Save**, or **Add field** for a new one).
+
+If the server refuses a condition, the reason shows under the step and
+nothing is saved. A condition naming a tag or category deleted since it was
+set stays listed as "(not found)", so a save does not drop it silently;
+remove it to clean up.
 
 Untick a target type and its conditions go with it. The step lists the first
 200 tags and categories by name; a field can name up to 50 tags. Changing a
 relationship back to a plain value clears the selection.
 
-**By API or seed.** 1. Update the field definition's `selection` as an admin. In a seed or the
-   console:
+**From code.**
+
+1. Update the field definition's `selection` as an admin. In a seed or a
+   release console:
 
    ```elixir
    CMS.update_field_definition!(
@@ -1720,8 +1742,9 @@ relationship back to a plain value clears the selection.
    `by_type`, each key must be one of the field's target types. `tags_any`
    takes tag ids, `category` one category id, and `fields` maps a custom field
    name to a value, `{"in": [...]}` or `{"not_eq": value}` (only non-private
-   plain fields, not media, reference, group, geolocation or link). Conditions
-   AND together.
+   fields with a plain value, see the errors table below; not `text`, media,
+   reference, group, geolocation or link). `create` is `{"type": "<one of the
+   target types>"}`. Conditions AND together.
 2. Write a reference as usual (editor, reverse field, JSON:API, GraphQL, MCP,
    import). A target the filter rejects fails the save on that field, for
    example `“Only a draft” isn't one of the records this field accepts.`
@@ -1733,7 +1756,28 @@ relationship back to a plain value clears the selection.
    own page, the reverse field offers no add control when the field would
    refuse that record, and says so. Existing connections show as before.
 4. Read it back: `GET /api/schema` reports the live selection as
-   `x-kiln-selection` on the field, tag and category as ids.
+   `x-kiln-selection` on the field, tag and category as ids. It needs no
+   credential:
+
+   ```bash
+   curl -s 'http://localhost:4000/api/schema?type=post' \
+     | jq '."$defs".content_post.properties.custom_fields.properties.linked."x-kiln-selection"'
+   ```
+
+   ```json
+   {
+     "states": ["published"],
+     "owner": "self",
+     "sort": "title",
+     "by_type": {"page": {"tags_any": ["<tag id>"], "category": "<category id>"}}
+   }
+   ```
+
+   Only the live conditions are reported: one that names a deleted tag,
+   category or field is left out, and so is one on a private field, since
+   the endpoint is anonymous. A field with no live condition left has no
+   `x-kiln-selection`. Create-on-type is reported too, as
+   `"create": {"type": "page"}`.
 
 What to know before relying on it:
 
@@ -1761,43 +1805,104 @@ What to know before relying on it:
   are per site, so field-definition sync leaves it out; `mix kiln.gen.join`
   drops it with the field.
 
-Errors you can hit when writing the setting: `is only for a reference field`
-(a link or group sub-field, or another type), `is not valid: it …` (unknown
-key or bad value), `names <type>, which is not one of this field's target
-types`, and `can't let editors create <type> records: …` (the reason names which condition a new draft could not meet). A selection that can no
-longer be evaluated (a stored value its field can't cast) fails a save with
-`could not be checked against which records it accepts — an admin should
-review the field's selection`.
+Errors you can hit when writing the setting. In the fields admin they show
+under the step; from code they are errors on `selection`:
+
+| Message | Meaning |
+|---|---|
+| `is only for a reference field` | The field is not a top-level reference: another type, or a link or group sub-field. |
+| `is not valid: it …` | The shape is wrong: an unknown key, a state outside the four, an `owner` other than `"self"`, a `sort` other than `recent` or `title`, more than 50 tag ids, more than 10 field conditions, or more than 50 values in an `in`. The rest of the message names which. |
+| `names <type>, which is not one of this field's target types` | A `by_type` key is a type the field does not link to. Narrowing the field's targets while a condition names a type that leaves them is refused the same way. |
+| `names <type> to create, which is not one of this field's target types` | `create.type` is a type the field does not link to. |
+| `names a tag for <type> that does not exist on this site` | A `tags_any` id is not one of this site's tags (`category` says "a category"). |
+| `names <field>, which is not a field of <type>` | A `fields` key is not a custom field of that type. |
+| `can't filter <type> by <field>, a private field` | Private fields can't be conditions: which records the picker offers would reveal their values. |
+| `can't filter <type> by <field>: a <kind> field has no plain value to match` | Only `string`, `integer`, `float`, `boolean`, `date`, `datetime`, `url`, `select`, `email`, `telephone`, `color`, `slug` and `time` fields can be conditions: not `text`, media, reference, group, geolocation or a plugin type. |
+| `has a value for <field> that it does not accept: it …` | The value is not one the field could store (`abc` on a number field). |
+| `can't let editors create <type> records: …` | Create-on-type is on, but the filter would turn a new draft away; the reason says which condition ([below](#let-editors-create-what-they-type)). |
+
+The guard runs the other way too: making a field private, or changing its
+type to one without a plain value, while a selection names it is refused on
+that field with `is used by the selection of <fields>; remove it from there
+first`. A selection that can no longer be evaluated (a stored value its field
+can't cast) fails a save of the record with `could not be checked against
+which records it accepts — an admin should review the field's selection`.
 
 ### Let editors create what they type
 
-`selection.create = {"type": "ingredient"}` (in the admin's "Which records can be picked" step, **Let editors
-create what they type**) turns a typed name into a record, the way a tags
-field grows: when the search box holds text and no result is titled the same
-(case ignored), the list ends with **Create “text” as a new Ingredient**.
-Choosing it creates a **draft** with that title, as the editor, through the
-type's normal create action, and connects it as a pick does.
+Starting point: a relationship field whose editors often look for a record
+that does not exist yet (an ingredient, a person, a venue). Instead of leaving
+the record to create it, they can type its name and create it from the field,
+the way a tags field grows. The setting is `selection.create` on the field
+definition. You need the admin role to turn it on, and the editor needs the
+right to create records of that type.
+
+1. Open **Fields** (`/editor/fields`) and choose **Edit** on the
+   relationship field.
+2. In step 6, **Which records can be picked**, find **Let editors create what
+   they type**. Choose **Yes, create a new *Type*** for the type new records
+   should be (one type, even when the field links to several). A choice the
+   filter above rules out is greyed out, with the reason under it.
+3. Save the field (**Save**). The sentence at the end of the step now ends
+   *Typing a new name offers to create a draft *Type*.*
+4. As an editor, open a record of the source type and type a name into the
+   field's search box. When no result is titled the same (letter case
+   ignored), the list ends with **Create “name” as a new *Type***, marked
+   *Draft*.
+5. Choose it. Kiln creates a **draft** with that title, as the editor,
+   through the type's normal create action, and connects it as a pick does;
+   a screen reader hears *Created “name” as a draft and connected it.* If the
+   type has required fields with no default, the **New *Type*** form opens
+   instead with the title filled in: fill the rest in and choose **Create
+   and connect**.
+6. Save the record. The connection is saved like any other; the new record
+   stays a draft until someone publishes it.
+
+From code, the same setting is one more key in `selection`:
+
+```elixir
+CMS.update_field_definition!(
+  field,
+  %{selection: %{"states" => ["draft", "published"], "create" => %{"type" => "ingredient"}}},
+  actor: admin
+)
+```
+
+What to know before relying on it:
 
 - **Only where a draft would be accepted.** The setting is refused (and the
-  admin shows the reason) when the filter would turn the new draft away:
-  `states` that do not include `draft`; an `owner` other than "only records
-  the editor created" (the creator is the author); tags or a category on that
-  type (a new record has none); or a field condition that is not a plain
-  "equals" (there is no one value to give it). Plain "equals" conditions are
-  written onto the new record, so it passes the filter.
+  admin shows the reason) when the field's filter would turn the new draft
+  away: `states` ticked without `draft`; tags or a category on that type (a
+  new record has none); or a field condition that is *is one of* or *is not*
+  (there is no one value to give it). **Only records the editor created** is
+  fine, since the editor is the new record's author. Plain *equals*
+  conditions are written onto the new record, so it passes the filter.
 - **Same rights as "Add new".** The row is offered only to an editor who may
   create that type and write each field it would fill, never on a locked
   field, a full list, a single reference that already holds a record, or the
-  dropdown widget. A type with required fields and no default opens the
-  existing "Add new" form with the title filled in instead of creating
-  blind. A forged or stale request for a row that is not offered does nothing.
+  dropdown widget. A forged or stale request for a row that is not offered
+  does nothing.
 - **Not through the API.** Headless clients create the record at its own
   endpoint and then connect it; a write naming a title that does not exist is
-  a validation error. The reverse field never offers it.
-- **Limits.** The duplicate check sees what the filtered search found, so a
-  record the editor cannot read, or one the filter excludes, does not
-  suppress the row. A draft stays if the editor abandons the unsaved change
-  (as with "Add new"), and `max_sources` is judged when the change is saved.
+  a validation error. `GET /api/schema` reports the setting inside
+  `x-kiln-selection` as a hint only. The reverse field never offers it.
+- **Limits.** The row needs a name of at most 255 characters, and is not
+  offered while the search has more results than one page shows (the exact
+  title may be on a later page): type more of the name. The duplicate check
+  sees only what the filtered search found, so a record the editor cannot
+  read, or one the filter excludes, does not suppress the row. A draft stays
+  if the editor abandons the unsaved change (as with "Add new"), and
+  `max_sources` is judged when the change is saved.
+
+What the editor can see go wrong:
+
+- *You can't create this here.* The create was refused by the type's
+  policies (the editor's rights changed since the field opened).
+- *Give it a title.* The **New *Type*** form was submitted with an empty
+  title.
+- A field error from the new record, such as a required field or a unique
+  value already taken, shows in the **New *Type*** form, and nothing is
+  created.
 
 ### Delete a field of an unknown type
 

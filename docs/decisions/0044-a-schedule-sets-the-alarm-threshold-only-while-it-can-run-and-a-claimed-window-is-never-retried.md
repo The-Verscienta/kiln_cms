@@ -7,9 +7,9 @@
   the next one the Schedule tab);
   [#2540](https://github.com/The-Verscienta/kiln_cms/issues/2540) for why a
   fresh backup never folds into a queued Resume.
-- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md)
+- **Changelog** — the 1.10.0 section of [CHANGELOG.md](../../CHANGELOG.md)
   (Added, "In-app backup schedules"), long form in
-  [unreleased.md](../changelog/unreleased.md#backup-schedules).
+  [v1.10.0.md](../changelog/v1.10.0.md#backup-schedules).
 
 ## The problem
 

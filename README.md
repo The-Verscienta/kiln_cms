@@ -50,7 +50,7 @@ shipped yet; the
 [guide](docs/right-everywhere-provably.md#what-is-not-built-yet) lists what
 is still to come.
 
-**Stable (`v1.9.2`), single maintainer, and consumed as a source overlay
+**Stable (`v1.10.0`), single maintainer, and consumed as a source overlay
 rather than a package.** If you are evaluating KilnCMS for a team, read this
 section before the feature list.
 
@@ -83,7 +83,7 @@ docker pull ghcr.io/the-verscienta/kiln_cms:latest   # linux/amd64
 ```
 
 `latest` is for trying it out. For a site you keep, pin the exact version
-(`:1.9.2`), or the floating major (`:1`) if you want patches and
+(`:1.10.0`), or the floating major (`:1`) if you want patches and
 minor releases without editing the tag;
 [which tag to pin](docs/deploy-platforms.md#which-tag-to-pin) has the
 trade-offs.
@@ -431,9 +431,15 @@ the front-end integration guide.
 - **Check what is still off.** **Organization → Security posture** lists which security
   settings are on for a site and what to fix first; platform admins also see the
   installation's checks ([`docs/security-posture.md`](docs/security-posture.md)).
-  **Organization → Security alerts** chooses which events email a site's admins
+  **Organization → Security alerts** chooses which events email a site's admins, and
+  can also post them to a Slack channel through a webhook
   ([`docs/security-alerts.md`](docs/security-alerts.md)), and the security log records
   them ([`docs/security-events.md`](docs/security-events.md)).
+- **Require two-step sign-in.** **Organization → Two-step sign-in** (`/editor/two-factor`)
+  requires a second factor of a site's administrators, its editors and administrators,
+  or everyone, with a grace period. People it holds set theirs up on the main host (`PHX_HOST`), so that address
+  must be reachable by them
+  ([`docs/two-factor-auth.md`](docs/two-factor-auth.md#requiring-two-step-sign-in-on-a-site)).
 
 ## Security
 
@@ -489,6 +495,16 @@ fields with value constraints, layout and editor inputs
 sign-in, registration and public forms ([`docs/human-verification.md`](docs/human-verification.md));
 and the delivery schema as OpenAPI components
 ([`docs/native-apps.md`](docs/native-apps.md#generate-from-openapi-components)).
+
+Since 1.10, also: a site can require two-step sign-in of its admins, its editors and
+admins, or everyone ([`docs/two-factor-auth.md`](docs/two-factor-auth.md#requiring-two-step-sign-in-on-a-site));
+platform admins schedule backups in the app, daily to monthly, with how many to keep
+([`docs/backups.md`](docs/backups.md#schedule-backups-in-the-app)); a reference field
+can limit which records may be picked, and let editors create a missing one as a draft
+from the field
+([`docs/extending-content.md`](docs/extending-content.md#limit-what-can-be-picked)); and
+security alerts can be posted to a Slack channel
+([`docs/security-alerts.md`](docs/security-alerts.md#send-alerts-to-slack)).
 
 > **Note:** clone this project to a path **without spaces**. One dependency,
 > `picosat_elixir`, cannot compile under a spaced path such as iCloud Drive's

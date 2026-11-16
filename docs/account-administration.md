@@ -165,6 +165,36 @@ Paging is `limit`/`offset` with one extra row read to decide whether "Next"
 exists — the authentication resource's primary read carries no `pagination`, and
 an account register is not worth teaching it to count.
 
+## Change an account's platform role
+
+You need the platform admin role as your **standing** role: a temporary
+platform admin is refused here, for the reason in
+[Temporary roles](#temporary-roles) ("A grantee cannot grant").
+
+1. Open **Accounts** (`/editor/accounts`) and click the account's email (or
+   **Manage**).
+2. To change the standing role: under **Platform access**, pick **Admin**,
+   **Editor** or **Viewer** in **Platform role** and click **Save access**.
+   The page says "Access updated." and the header's **Platform:** badge
+   shows the new role.
+3. To grant a higher role for a while instead: under **Temporary role**, pick
+   the **Grant role** and a duration in **For** (6 hours to 30 days), or a
+   time in **Or until (UTC)**, and click **Grant**. The page says, for
+   example, "Admin until 2026-11-21 17:00 UTC." **End it now** ends it early.
+
+A platform admin is an administrator on every site. So when the change makes
+the account a platform admin and it has no second factor, the confirmation
+goes on to say which sites
+[require two-step sign-in](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)
+of administrators: those that will ask for it at once, and those that give a
+grace period, with the earliest deadline. For example: "sam@example.com has
+no second factor, and a platform administrator is an administrator on every
+site. Main requires one of them now: they'll be asked to set one up before
+anything else." Up to three sites are named, and more are counted. The
+warning never blocks the change; to spare the person the surprise, ask them
+to add an authenticator app or a passkey first
+([When you give someone a covered role](two-factor-auth.md#when-you-give-someone-a-covered-role)).
+
 ## Temporary roles
 
 A grant is "admin until Friday": a higher role that expires on its own.
@@ -401,10 +431,14 @@ can submit again.
 
 The invitee signs in with the new password alone. An editor or admin sets up
 **Two-factor authentication** and **Passkeys** again under **Settings**
-(`/editor/settings`). A viewer cannot reach that page, and sets up an
+(`/editor/settings`), on the main host or a console host: on a site's own
+address that page links to the main host instead
+([Where second factors are managed](two-factor-auth.md#where-second-factors-are-managed)).
+A viewer cannot reach that page, and sets up an
 authenticator app or a passkey on `/account/two-factor` instead, where they
 can also remove a passkey later
-([Remove a passkey](passkeys.md#remove-a-passkey)). An
+([Remove a passkey](passkeys.md#remove-a-passkey)). Each factor they add
+emails them ([We email you when a second factor is added](two-factor-auth.md#we-email-you-when-a-second-factor-is-added)). An
 admin who minted an API key for the account mints a new one under **API keys**
 if it is still wanted; the old key stays listed as revoked.
 

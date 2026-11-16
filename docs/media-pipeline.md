@@ -192,6 +192,90 @@ and fired artifacts keep serving the old URL until re-publish. The focal point
 is carried through the geometry (rotating the image rotates the point), and
 variants regenerate from the edited original.
 
+## Upload an image from the image picker
+
+You can add a new photo to a page without leaving the editor: the image
+picker has its own upload area. You need to be an editor or admin who may
+edit the document; nobody else sees the upload area.
+
+1. Open the document in the editor and open the image picker for what you
+   want to fill:
+   - **Featured image** or **Social image** in the **Settings** tab: choose
+     **Choose from library**.
+   - An image block: **Choose from library**.
+   - A media field: **Choose from library**, or **Replace** once it has an
+     image.
+   - A gallery block or gallery field: **Add images**.
+   - A new image block at the end of the page: **Media library** in the
+     editor's top bar.
+
+   The picker opens as a drawer on the right, titled for what it fills
+   (*Featured image*, *Choose a social image*, *Choose an image*, *Add
+   images to the gallery* or *Insert an image*). If Unsplash is turned on,
+   the drawer has **Library** and **Unsplash** tabs; the upload area is on
+   **Library**.
+2. At the top of the library, click **Upload an image** (**Upload images** in
+   a gallery) and choose a file, or drop one on it. The hint under it lists
+   what it takes: *JPG, PNG, WebP or GIF up to 10 MB*.
+3. While it uploads, a row reads *Uploading hero.png… 40%* with a progress
+   bar and a **Cancel** button.
+4. When it finishes, the image is used straight away:
+   - for a featured image, a social image, an image block or a media field,
+     it is set and the drawer closes (from **Media library**, it becomes a
+     new image block). The **Featured image** field shows the
+     thumbnail, the file name and **Remove**.
+   - for a gallery, it joins the selection (*2 images selected*) and the
+     drawer stays open. Upload or pick more, then choose **Add to gallery**.
+5. Save as usual. A draft autosaves; on a published page, a **Settings**
+   change such as the featured image waits for **Save**.
+
+Every upload is also added to the media library, through the same pipeline as
+an upload at **Media** (`KilnCMS.Media.Ingest`): the size cap, the metadata
+strip and the derived variants. It arrives without alt text. For an image
+block, write the description in the block's **Alt text** field; a site that
+requires alt text refuses to publish without it
+([Alt text is enforced at publish](#alt-text-is-enforced-at-publish-not-at-upload)).
+
+A few things to know:
+
+- **Closing the drawer cancels** an upload that hasn't finished. In a
+  single-image picker the first file to finish is the one used: the drawer
+  closes and any other file still uploading is canceled.
+- **The library lists the 500 most recent images**; search reaches the rest.
+  The **Featured image** field shows its image, with **Remove**, however old
+  it is.
+- **The file is checked on the server** before anything is stored, so a PDF
+  renamed `.png` is refused rather than becoming a featured image.
+- **The Branding page's library drawer** has no upload area. Use the
+  **Upload** button beside **Choose from library** there instead.
+- **Pasting or dropping an image into a text block** is a different path: it
+  adds a new image block after that block
+  ([Pictures](editor-shortcuts.md#pictures)).
+
+### What can go wrong
+
+A file the browser refuses stays in the list as *hero.png couldn't be
+uploaded:* and a reason, with **Dismiss**:
+
+| Reason | Meaning |
+|---|---|
+| *too large (max 10 MB)* | The file is over the image size cap. |
+| *not an image type this editor accepts* | Not a `.jpg`, `.jpeg`, `.png`, `.webp` or `.gif` file. |
+| *too many files at once (max 8)* | More than eight files in one go. |
+
+A file the server refuses shows a flash, *Couldn't upload hero.png:* and a
+reason, stores nothing, and leaves the drawer open:
+
+| Reason | Meaning |
+|---|---|
+| *unsupported file format* | The bytes are not an image Kiln accepts, whatever the file name says. |
+| *image dimensions are too large* | Over the decompression-bomb pixel budget. Resize it and try again. |
+| *couldn't be stored* or *couldn't be saved* | Storage or the database failed. Try again; if it persists, an operator should check storage. |
+| *wasn't stored — this site's own object storage can't be used right now…* | The site's own bucket is unreachable. An admin can check it under **Integrations → Object storage** ([Per-site buckets](#per-site-buckets-1559)). |
+
+*You don't have permission to add images here.* means you may no longer edit
+the document, usually because your role changed after the editor opened.
+
 ## On-the-fly transforms
 
 The fixed variants above cover Kiln's own templates. Anything else — a 16:9
@@ -553,6 +637,17 @@ of that happens on the request:
    removes any item still quarantined after `KILN_MEDIA_QUARANTINE_MAX_AGE_HOURS`
    (24): a strip job that was never queued or never succeeded must not leave a
    private blob and a permanently held row.
+
+Both purges, the worker's refusal in step 4 and the reaper's, go through
+`CMS.purge_quarantined_media_item` (`:purge_quarantined`), not the trash's
+`purge_media_item` (#2610). It deletes only a row that is still quarantined,
+and only `KilnCMS.Media.system/0` may run it: a person, admins included, is
+refused, and so is the system actor once the quarantine has been released.
+An upload the pipeline is still holding is therefore never hard-deleted from
+the media trash by mistake, and the media trash cannot delete a file someone
+restored. Overlay code that purged a quarantined upload as `Media.system()`
+through `purge_media_item` must switch
+([Trash and restore](trash.md#for-developers)).
 
 | `KILN_AV_STRIP_MODE` | private storage | Result |
 | --- | --- | --- |

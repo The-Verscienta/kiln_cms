@@ -52,7 +52,12 @@ groups: **Planned** (open, scheduled, publishing, failed), **Published**, and
 
    **Publish now is withheld** while any item is blocked, or while the release
    is empty — the go-live could only abort, and the page already knows it.
-   **Scheduling only warns.** The difference is deliberate: a readiness verdict
+   **Scheduling only warns.** With a blocked item, pressing **Schedule** asks
+   first (*1 item can't ship as it stands. Schedule anyway? Unless it is
+   fixed first, the release will fail and nothing will go live.*); choose
+   **OK** to schedule it, or cancel and fix the item. The question comes with
+   the button, not the date field, so picking a date never triggers it. The
+   difference is deliberate: a readiness verdict
    is about *right now*, and the entire point of a go-live date is that the
    blocking record gets fixed before it arrives. Refusing to schedule would
    forbid the normal way of working; scheduling over a known blocker in silence
@@ -257,7 +262,11 @@ nothing moves.
 ## Calendar and events
 
 Scheduled, shipped and **failed** releases appear on the editorial calendar
-(`/editor/calendar`) alongside per-item schedules, with their own chip colours.
+(`/editor/calendar`) alongside per-item schedules, with their own chip colors.
+A scheduled release's *Release go-live* chip can be dragged, or moved with the
+arrow keys, to another day, but only by an admin, since scheduling a release
+is admin work. For an editor it is a plain link to the release
+([Rescheduling from the grid](content-lifecycles.md#rescheduling-from-the-grid)).
 
 A failed release keeps the `scheduled_at` it was meant to fire at, so its chip
 stays on the day the launch was planned for rather than the day somebody

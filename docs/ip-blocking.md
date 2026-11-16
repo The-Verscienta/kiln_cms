@@ -203,11 +203,14 @@ Never counted, so a person or a service is not blocked by mistake:
   - **No answer to the forward (A or AAAA) query** for a name under the
     engine's own domain, when that query had its full one-second budget: the
     claim keeps the exemption. (A forward query cut short because the lookup
-    ran out of time is read like an unanswered PTR query, above.) That silence is in
-    the engine's zone, which the address's owner does not control. With `KILN_CRAWLER_VERIFICATION=false`
-  the six names Googlebot, Bingbot, DuckDuckBot, Applebot, YandexBot and
-  Baiduspider in the user agent are enough. **Bait paths count for everyone**:
-  no crawler has a reason to ask for one.
+    ran out of time is read like an unanswered PTR query, above.) That
+    silence is in the engine's zone, which the address's owner does not
+    control.
+
+  With `KILN_CRAWLER_VERIFICATION=false` the six names Googlebot, Bingbot,
+  DuckDuckBot, Applebot, YandexBot and Baiduspider in the user agent are
+  enough. **Bait paths count for everyone**: no crawler has a reason to ask
+  for one.
 
 Link-preview fetchers (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and
 Yahoo's `Slurp` are **not** exempt, since #2254: anyone can claim to be one,
@@ -258,7 +261,7 @@ refuses raise `blocked_ip` like any rule's (see
 
 | You see | Meaning |
 |---|---|
-| Nothing is ever blocked | The variable is not set, or is set to a value Kiln did not recognise (a warning on stderr names it). Or the site is behind a proxy with no `TRUSTED_PROXIES`, or your test client is on a private network. |
+| Nothing is ever blocked | The variable is not set, or is set to a value Kiln did not recognize (a warning on stderr names it). Or the site is behind a proxy with no `TRUSTED_PROXIES`, or your test client is on a private network. |
 | A visitor reports an empty `403` | They tripped the limit (a crawler gone wrong, a link checker, a browser extension). Find the rule on `/editor/ip-blocks` by its note and **Remove** it, or wait for the expiry. Consider raising `KILN_SCANNER_BLOCKING_THRESHOLD`. |
 | A search engine's address is blocked (most often Baiduspider or YandexBot) | Its claim was proven false, or its reverse zone was slow to answer while this node's resolver answered others, so its misses counted (#2588). Check the address against [Verified search engines](bot-budgets.md#verified-search-engines); if it is the engine's, **Remove** the rule or wait for the expiry. |
 | A DuckDuckBot address is blocked | The address was not in DuckDuckGo's published list when this node last fetched it (#2586). If [duckduckbot.json](https://duckduckgo.com/duckduckbot.json) lists it now, the next fetch (within 6 hours) stops it happening again; **Remove** the rule or wait for the expiry. |
