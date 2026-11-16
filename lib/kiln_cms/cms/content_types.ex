@@ -29,6 +29,7 @@ defmodule KilnCMS.CMS.ContentTypes do
           path_segment: String.t() | nil,
           slug_pattern: String.t() | nil,
           alias_pattern: String.t() | nil,
+          title_template: String.t() | nil,
           seo_title_pattern: String.t() | nil,
           seo_description_pattern: String.t() | nil,
           noindex_default: boolean(),
@@ -358,6 +359,10 @@ defmodule KilnCMS.CMS.ContentTypes do
         if(function_exported?(resource, :__kiln_content_alias_pattern__, 0),
           do: resource.__kiln_content_alias_pattern__()
         ),
+      title_template:
+        if(function_exported?(resource, :__kiln_content_title_template__, 0),
+          do: resource.__kiln_content_title_template__()
+        ),
       seo_title_pattern:
         if(function_exported?(resource, :__kiln_seo_title_pattern__, 0),
           do: resource.__kiln_seo_title_pattern__()
@@ -397,6 +402,7 @@ defmodule KilnCMS.CMS.ContentTypes do
       path_segment: definition.path_segment,
       slug_pattern: definition.slug_pattern,
       alias_pattern: definition.alias_pattern,
+      title_template: definition.title_template,
       seo_title_pattern: definition.seo_title_pattern,
       seo_description_pattern: definition.seo_description_pattern,
       noindex_default: definition.noindex_default,

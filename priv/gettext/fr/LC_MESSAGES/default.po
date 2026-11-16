@@ -4983,6 +4983,11 @@ msgstr "Créez une formule pour voir ce qu’elle donne."
 msgid "Build public forms, place them on content with the form block, and review submissions here."
 msgstr "Créez des formulaires publics, placez-les dans votre contenu avec le bloc formulaire, et consultez les soumissions ici."
 
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Builds each record's title from its fields when it is saved, so editors don't type one. Use {{ field.<name> }}; the title and slug can't be read. Blank = titles are typed by hand."
+msgstr "Construit le titre de chaque enregistrement à partir de ses champs à l’enregistrement, pour que les éditeurs n’aient pas à en saisir un. Utilisez {{ field.<nom> }} ; le titre et le slug ne peuvent pas être lus. Vide = titres saisis à la main."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Built"
@@ -10834,6 +10839,11 @@ msgstr "Générer une clé"
 #, elixir-autogen, elixir-format
 msgid "Generate key"
 msgstr "Générer une clé"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Generated from the template on save"
+msgstr "Généré à partir du modèle à l’enregistrement"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -25014,6 +25024,11 @@ msgstr "Titre (A–Z)"
 msgid "Title contains “%{text}”"
 msgstr "Le titre contient « %{text} »"
 
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Title template (optional)"
+msgstr "Modèle de titre (facultatif)"
+
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
 msgid "To"
@@ -28158,6 +28173,16 @@ msgstr "impossible de laisser les éditeurs créer des enregistrements %{type} :
 msgid "can't let editors create %{type} records: the field's owner condition cannot be met by a new record"
 msgstr "impossible de laisser les éditeurs créer des enregistrements %{type} : la condition de propriétaire du champ ne peut pas être remplie par un nouvel enregistrement"
 
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "can't read %{refs}: the title is built from this template and the slug from the title"
+msgstr "ne peut pas lire %{refs} : le titre est construit à partir de ce modèle et le slug à partir du titre"
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "can't read the private field %{names}: a title is public"
+msgstr "ne peut pas lire le champ privé %{names} : un titre est public"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "category"
@@ -28842,6 +28867,11 @@ msgstr "repasse en brouillon"
 msgid "is submitted for review"
 msgstr "est soumis à relecture"
 
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "is too long (at most %{count} characters)"
+msgstr "est trop long (%{count} caractères au maximum)"
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "is unpublished"
@@ -28861,6 +28891,11 @@ msgstr "est utilisé par la sélection de %{fields} ; retirez-le d'abord de là"
 #, elixir-autogen, elixir-format
 msgid "is used in the conditions of %{fields}; remove those conditions first"
 msgstr "est utilisé dans les conditions de %{fields} ; supprimez d'abord ces conditions"
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "isn't a valid template: %{message}"
+msgstr "n’est pas un modèle valide : %{message}"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -29142,6 +29177,7 @@ msgstr "aucune gagnante — simplement arrêter"
 msgid "none"
 msgstr "aucun"
 
+#: lib/kiln_cms/cms/titles.ex
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "none yet"
@@ -29410,6 +29446,11 @@ msgstr "lecture"
 #, elixir-autogen, elixir-format
 msgid "readable"
 msgstr "lisible"
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "reads %{names}, which this type has no field for (fields: %{defined})"
+msgstr "lit %{names}, pour lesquels ce type n’a pas de champ (champs : %{defined})"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format

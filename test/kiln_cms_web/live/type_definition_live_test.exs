@@ -294,4 +294,39 @@ defmodule KilnCMSWeb.TypeDefinitionLiveTest do
     assert saved.noindex_default == true
     assert saved.nofollow_default == true
   end
+
+  test "a title template is set on an existing type, and a bad one is refused", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "tpl#{System.unique_integer([:positive])}", label: "Tpl"},
+        actor: admin
+      )
+
+    CMS.create_field_definition!(
+      %{type_definition_id: definition.id, name: "city", label: "City", field_type: :string},
+      actor: admin
+    )
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/types")
+    lv |> element("#type-#{definition.id} button[phx-click=edit]") |> render_click()
+
+    html =
+      lv
+      |> form("#edit-type-#{definition.id}", type_definition: %{title_template: "{{ title }}"})
+      |> render_submit()
+
+    assert html =~ "title"
+    assert CMS.get_type_definition!(definition.id, actor: admin).title_template == nil
+
+    lv
+    |> form("#edit-type-#{definition.id}",
+      type_definition: %{title_template: "Town: {{ field.city }}"}
+    )
+    |> render_submit()
+
+    assert CMS.get_type_definition!(definition.id, actor: admin).title_template ==
+             "Town: {{ field.city }}"
+  end
 end

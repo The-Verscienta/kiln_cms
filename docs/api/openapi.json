@@ -16308,6 +16308,18 @@
                   }
                 ],
                 "description": "Field included by default."
+              },
+              "title_template": {
+                "anyOf": [
+                  {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Field included by default."
               }
             },
             "required": [
@@ -16447,6 +16459,9 @@
           },
           "slug_pattern": {
             "$ref": "#/components/schemas/type_definition-filter-slug_pattern"
+          },
+          "title_template": {
+            "$ref": "#/components/schemas/type_definition-filter-title_template"
           }
         },
         "type": "deepObject"
@@ -17235,6 +17250,60 @@
         "type": "object"
       },
       "type_definition-filter-slug_pattern": {
+        "additionalProperties": false,
+        "properties": {
+          "contains": {
+            "type": "string"
+          },
+          "eq": {
+            "type": "string"
+          },
+          "greater_than": {
+            "type": "string"
+          },
+          "greater_than_or_equal": {
+            "type": "string"
+          },
+          "ilike": {
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "string"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "string"
+          },
+          "less_than": {
+            "type": "string"
+          },
+          "less_than_or_equal": {
+            "type": "string"
+          },
+          "like": {
+            "type": "string"
+          },
+          "not_eq": {
+            "type": "string"
+          },
+          "string_ends_with": {
+            "type": "string"
+          },
+          "string_starts_with": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type_definition-filter-title_template": {
         "additionalProperties": false,
         "properties": {
           "contains": {
@@ -31117,7 +31186,7 @@
             "name": "sort",
             "required": false,
             "schema": {
-              "pattern": "^(id|-id|\\+\\+id|--id|name|-name|\\+\\+name|--name|label|-label|\\+\\+label|--label|plural_label|-plural_label|\\+\\+plural_label|--plural_label|path_segment|-path_segment|\\+\\+path_segment|--path_segment|slug_pattern|-slug_pattern|\\+\\+slug_pattern|--slug_pattern|alias_pattern|-alias_pattern|\\+\\+alias_pattern|--alias_pattern|seo_title_pattern|-seo_title_pattern|\\+\\+seo_title_pattern|--seo_title_pattern|seo_description_pattern|-seo_description_pattern|\\+\\+seo_description_pattern|--seo_description_pattern|noindex_default|-noindex_default|\\+\\+noindex_default|--noindex_default|nofollow_default|-nofollow_default|\\+\\+nofollow_default|--nofollow_default|has_excerpt|-has_excerpt|\\+\\+has_excerpt|--has_excerpt|has_published_feed|-has_published_feed|\\+\\+has_published_feed|--has_published_feed|icon|-icon|\\+\\+icon|--icon|description|-description|\\+\\+description|--description|schema_org_type|-schema_org_type|\\+\\+schema_org_type|--schema_org_type|default_review_after_days|-default_review_after_days|\\+\\+default_review_after_days|--default_review_after_days)(,(id|-id|\\+\\+id|--id|name|-name|\\+\\+name|--name|label|-label|\\+\\+label|--label|plural_label|-plural_label|\\+\\+plural_label|--plural_label|path_segment|-path_segment|\\+\\+path_segment|--path_segment|slug_pattern|-slug_pattern|\\+\\+slug_pattern|--slug_pattern|alias_pattern|-alias_pattern|\\+\\+alias_pattern|--alias_pattern|seo_title_pattern|-seo_title_pattern|\\+\\+seo_title_pattern|--seo_title_pattern|seo_description_pattern|-seo_description_pattern|\\+\\+seo_description_pattern|--seo_description_pattern|noindex_default|-noindex_default|\\+\\+noindex_default|--noindex_default|nofollow_default|-nofollow_default|\\+\\+nofollow_default|--nofollow_default|has_excerpt|-has_excerpt|\\+\\+has_excerpt|--has_excerpt|has_published_feed|-has_published_feed|\\+\\+has_published_feed|--has_published_feed|icon|-icon|\\+\\+icon|--icon|description|-description|\\+\\+description|--description|schema_org_type|-schema_org_type|\\+\\+schema_org_type|--schema_org_type|default_review_after_days|-default_review_after_days|\\+\\+default_review_after_days|--default_review_after_days))*$",
+              "pattern": "^(id|-id|\\+\\+id|--id|name|-name|\\+\\+name|--name|label|-label|\\+\\+label|--label|plural_label|-plural_label|\\+\\+plural_label|--plural_label|path_segment|-path_segment|\\+\\+path_segment|--path_segment|slug_pattern|-slug_pattern|\\+\\+slug_pattern|--slug_pattern|alias_pattern|-alias_pattern|\\+\\+alias_pattern|--alias_pattern|title_template|-title_template|\\+\\+title_template|--title_template|seo_title_pattern|-seo_title_pattern|\\+\\+seo_title_pattern|--seo_title_pattern|seo_description_pattern|-seo_description_pattern|\\+\\+seo_description_pattern|--seo_description_pattern|noindex_default|-noindex_default|\\+\\+noindex_default|--noindex_default|nofollow_default|-nofollow_default|\\+\\+nofollow_default|--nofollow_default|has_excerpt|-has_excerpt|\\+\\+has_excerpt|--has_excerpt|has_published_feed|-has_published_feed|\\+\\+has_published_feed|--has_published_feed|icon|-icon|\\+\\+icon|--icon|description|-description|\\+\\+description|--description|schema_org_type|-schema_org_type|\\+\\+schema_org_type|--schema_org_type|default_review_after_days|-default_review_after_days|\\+\\+default_review_after_days|--default_review_after_days)(,(id|-id|\\+\\+id|--id|name|-name|\\+\\+name|--name|label|-label|\\+\\+label|--label|plural_label|-plural_label|\\+\\+plural_label|--plural_label|path_segment|-path_segment|\\+\\+path_segment|--path_segment|slug_pattern|-slug_pattern|\\+\\+slug_pattern|--slug_pattern|alias_pattern|-alias_pattern|\\+\\+alias_pattern|--alias_pattern|title_template|-title_template|\\+\\+title_template|--title_template|seo_title_pattern|-seo_title_pattern|\\+\\+seo_title_pattern|--seo_title_pattern|seo_description_pattern|-seo_description_pattern|\\+\\+seo_description_pattern|--seo_description_pattern|noindex_default|-noindex_default|\\+\\+noindex_default|--noindex_default|nofollow_default|-nofollow_default|\\+\\+nofollow_default|--nofollow_default|has_excerpt|-has_excerpt|\\+\\+has_excerpt|--has_excerpt|has_published_feed|-has_published_feed|\\+\\+has_published_feed|--has_published_feed|icon|-icon|\\+\\+icon|--icon|description|-description|\\+\\+description|--description|schema_org_type|-schema_org_type|\\+\\+schema_org_type|--schema_org_type|default_review_after_days|-default_review_after_days|\\+\\+default_review_after_days|--default_review_after_days))*$",
               "type": "string"
             },
             "style": "form"
@@ -31175,12 +31244,12 @@
             "schema": {
               "additionalProperties": true,
               "example": {
-                "type_definition": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days"
+                "type_definition": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,title_template,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days"
               },
               "properties": {
                 "type_definition": {
                   "description": "Comma separated field names for type_definition",
-                  "example": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days",
+                  "example": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,title_template,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days",
                   "type": "string"
                 }
               },
@@ -31270,12 +31339,12 @@
             "schema": {
               "additionalProperties": true,
               "example": {
-                "type_definition": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days"
+                "type_definition": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,title_template,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days"
               },
               "properties": {
                 "type_definition": {
                   "description": "Comma separated field names for type_definition",
-                  "example": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days",
+                  "example": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,title_template,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days",
                   "type": "string"
                 }
               },
@@ -31359,12 +31428,12 @@
             "schema": {
               "additionalProperties": true,
               "example": {
-                "type_definition": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days"
+                "type_definition": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,title_template,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days"
               },
               "properties": {
                 "type_definition": {
                   "description": "Comma separated field names for type_definition",
-                  "example": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days",
+                  "example": "id,name,label,plural_label,path_segment,slug_pattern,alias_pattern,title_template,seo_title_pattern,seo_description_pattern,noindex_default,nofollow_default,has_excerpt,has_published_feed,icon,description,schema_org_type,default_review_after_days",
                   "type": "string"
                 }
               },

@@ -369,6 +369,45 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       assert Map.keys(again.counts) == [:unchanged]
     end
 
+    test "a definition without title_template leaves a stored template unchanged (#2287)", %{
+      admin: admin
+    } do
+      type =
+        CMS.create_type_definition!(
+          %{name: "tt#{System.unique_integer([:positive])}", label: "TT"},
+          actor: admin
+        )
+
+      CMS.create_field_definition!(
+        %{type_definition_id: type.id, name: "city", label: "City", field_type: :string},
+        actor: admin
+      )
+
+      CMS.update_type_definition!(type, %{title_template: "{{ field.city }}"}, actor: admin)
+
+      doc = %{
+        "format" => "kiln-field-definitions",
+        "version" => 1,
+        "owners" => [
+          %{
+            "kind" => "dynamic",
+            "type" => type.name,
+            "definition" => %{
+              "name" => type.name,
+              "label" => "Renamed",
+              "path_segment" => type.path_segment
+            },
+            "fields" => []
+          }
+        ]
+      }
+
+      assert {:ok, _} = apply!(doc, admin)
+      reloaded = CMS.get_type_definition!(type.id, actor: admin)
+      assert reloaded.label == "Renamed"
+      assert reloaded.title_template == "{{ field.city }}"
+    end
+
     test "refuses an unknown key, a wrong version and a non-document", %{admin: admin} do
       assert {:error, %{errors: [%{messages: [m]}]}} =
                FieldSync.import_doc(%{"nope" => 1}, actor: admin)

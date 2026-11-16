@@ -4983,6 +4983,11 @@ msgstr ""
 msgid "Build public forms, place them on content with the form block, and review submissions here."
 msgstr ""
 
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Builds each record's title from its fields when it is saved, so editors don't type one. Use {{ field.<name> }}; the title and slug can't be read. Blank = titles are typed by hand."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Built"
@@ -10833,6 +10838,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_push_live.ex
 #, elixir-autogen, elixir-format
 msgid "Generate key"
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Generated from the template on save"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -25014,6 +25024,11 @@ msgstr ""
 msgid "Title contains “%{text}”"
 msgstr ""
 
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Title template (optional)"
+msgstr ""
+
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
 msgid "To"
@@ -28158,6 +28173,16 @@ msgstr ""
 msgid "can't let editors create %{type} records: the field's owner condition cannot be met by a new record"
 msgstr ""
 
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "can't read %{refs}: the title is built from this template and the slug from the title"
+msgstr ""
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "can't read the private field %{names}: a title is public"
+msgstr ""
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "category"
@@ -28842,6 +28867,11 @@ msgstr ""
 msgid "is submitted for review"
 msgstr ""
 
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "is too long (at most %{count} characters)"
+msgstr ""
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "is unpublished"
@@ -28860,6 +28890,11 @@ msgstr ""
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
 msgid "is used in the conditions of %{fields}; remove those conditions first"
+msgstr ""
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "isn't a valid template: %{message}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -29142,6 +29177,7 @@ msgstr ""
 msgid "none"
 msgstr ""
 
+#: lib/kiln_cms/cms/titles.ex
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "none yet"
@@ -29409,6 +29445,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "readable"
+msgstr ""
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "reads %{names}, which this type has no field for (fields: %{defined})"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex

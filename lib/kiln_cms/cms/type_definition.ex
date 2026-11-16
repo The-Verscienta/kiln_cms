@@ -78,6 +78,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :path_segment,
         :slug_pattern,
         :alias_pattern,
+        :title_template,
         :seo_title_pattern,
         :seo_description_pattern,
         :noindex_default,
@@ -92,6 +93,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
 
       change KilnCMS.CMS.Changes.DefaultPathSegment
       validate KilnCMS.CMS.Validations.SlugPatternTokens
+      validate KilnCMS.CMS.Validations.TitleTemplate
+      change KilnCMS.CMS.Changes.EnqueueTitleRegeneration
       validate KilnCMS.CMS.Validations.SeoPatternTokens
     end
 
@@ -107,6 +110,7 @@ defmodule KilnCMS.CMS.TypeDefinition do
         :path_segment,
         :slug_pattern,
         :alias_pattern,
+        :title_template,
         :seo_title_pattern,
         :seo_description_pattern,
         :noindex_default,
@@ -120,6 +124,8 @@ defmodule KilnCMS.CMS.TypeDefinition do
       ]
 
       validate KilnCMS.CMS.Validations.SlugPatternTokens
+      validate KilnCMS.CMS.Validations.TitleTemplate
+      change KilnCMS.CMS.Changes.EnqueueTitleRegeneration
       validate KilnCMS.CMS.Validations.SeoPatternTokens
     end
 
@@ -280,6 +286,14 @@ defmodule KilnCMS.CMS.TypeDefinition do
     attribute :alias_pattern, :string,
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
+
+    # Optional computed-title template (#2287), in the computed-field language:
+    # "{{ field.last_name }}, {{ field.first_name }}". When set, every entry's
+    # `title` is derived from its fields on save — see `KilnCMS.CMS.Titles`.
+    # Nil = titles are typed by hand.
+    attribute :title_template, :string,
+      public?: true,
+      constraints: [max_length: KilnCMS.CMS.Titles.max_length()]
 
     # Optional default `<title>` / meta-description patterns (#805), e.g.
     # "[title] | [site-name]" — see `KilnCMS.Seo.Pattern`. Resolved at RENDER
