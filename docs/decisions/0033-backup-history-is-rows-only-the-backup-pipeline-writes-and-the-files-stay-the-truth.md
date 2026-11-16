@@ -84,7 +84,7 @@ history can be trusted:
 - **`pruned` is stored; unexplained absence is computed on read.** Retention
   knows what it deleted, so it records it at the moment: the artifact's
   `local` destination becomes `pruned`. Everything else is worked out by
-  `KilnCMS.Backups.Presence.for/4` when the page is shown, for the rows in
+  `KilnCMS.Backups.Presence.for/2` when the page is shown, for the rows in
   view only, with an `lstat` per file: `:present`, `:pruned`,
   `:partly_pruned`, `:off_site_only`, `:expired` (a heuristic for imported
   runs past the retention window plus a day, since cron records no prune),

@@ -214,7 +214,8 @@ deletes it once it is older than `BACKUP_KEEP_DAYS`, and `backup.sh` leaves it
 alone.
 
 In History, a run whose dump retention removed while its media is still on disk
-reads `partly pruned (retention)` ([Backup history](#backup-history-2217)).
+reads `Database: pruned (retention)` beside `Media: on disk`
+([Backup history](#backup-history-2217)).
 
 ### Keep a backup as a recovery point
 
@@ -399,7 +400,8 @@ and the app able to see the backup directory.
 4. Open **Backups** (`/editor/backups`) as a platform admin. Under
    **History**, **Last-good marker (kept by backup.sh prune)** lists each
    component the deployment backs up (**Database**, and **Media** when media
-   backups are configured) with the stamp its marker names, or "none yet". The
+   backups are configured) with the stamp its marker names, or "none yet"
+   (or why it couldn't tell: [Backup history](#backup-history-2217)). The
    backup's row in History carries a **Last good: Database** and/or **Last
    good: Media** badge. Or list the backup directories on the host; each
    component with a verified backup has one marker:
@@ -1938,6 +1940,7 @@ tick now and returns `:ok`; what it did is in the log and the telemetry below.
 | `[:kiln_cms, :backups, :schedule, :invalid]` | `schedule_ids` (one) | A schedule's window can't be computed (an interval, zone or component this release doesn't know). Logged at most once an hour per schedule per node. |
 | `[:kiln_cms, :backups, :schedule, :unreadable]` | `error` (the error's module) | The tick couldn't read the schedules. Logged at most once every 15 minutes. |
 | `[:kiln_cms, :backups, :status, :schedules_unreadable]` | `error` (the error's module) | The status couldn't read the schedules and used `BACKUP_STALE_AFTER_HOURS` for every component. Logged at most once every 15 minutes. |
+| `[:kiln_cms, :backups, :import, :failed]` | `stamp`, `attempt`, `retry_at` (a `DateTime`), `error` (the redacted cause) | The History importer couldn't write a stamp's row; it waits out a backoff before the next try. Not a scheduler event, listed here with the other backup events ([When an import keeps failing](#when-an-import-keeps-failing)). |
 
 **Rolling deploys and rolling back.** The `add_backup_schedules` migration
 only creates the `backup_schedules` table, so an older release runs against
@@ -2434,10 +2437,20 @@ on-disk markers protect, so you don't need a shell to check:
   `kiln-<stamp>.good` names this backup, so `backup.sh prune` keeps that
   component of it ([The last-good marker](#the-last-good-marker)).
 - **Last-good marker (kept by backup.sh prune)**, above the list: the stamp each
-  component's marker names, or "none yet". It is there even when the marked
-  backup is on another page of History. It lists only the components this
-  deployment backs up (**Media** only when media backups are configured).
-  Should a directory hold more than one `.good`, the newest stamp is shown.
+  component's marker names, or what the page could not find out (table
+  below). It is there even when the marked backup is on another page of
+  History. It lists only the components this deployment backs up (**Media**
+  only when media backups are configured). Should a directory hold more than
+  one `.good`, the newest stamp is shown.
+
+| Last-good summary shows | Meaning |
+|-------|---------|
+| a stamp | That component's `.good` marker names this backup. |
+| `none yet` | The directory was listed and holds no `.good`, or it doesn't exist yet. |
+| `checking…` | The page's first read of the backup directory hasn't answered yet. |
+| `couldn't read this server's backup directory` | `db/` or `media/` exists but can't be listed: its permissions, an I/O error, or a file where the directory should be. Badges from that directory are missing too. |
+| `couldn't check in time` | The read of the backup directory didn't answer within 5 seconds ([below](#what-history-reads-from-disk)). |
+| `couldn't check` | The read of the backup directory failed outright. |
 
 The page has no badge yet for a backup a schedule holds
 ([hold markers](#the-hold-markers)); list `db/` and `media/` on the host, or
@@ -2447,21 +2460,41 @@ run the dry run in
 The markers are read from this server's `BACKUP_DIR` whenever the page loads
 History (opening it, paging, after an action, and on each refresh while a
 backup runs); they are never stored. With a backup directory per host,
-another server may show different markers. A `db/` or `media/` the app can't
-list contributes no badges, and the summary reads "none yet" for that component
-even if a marker is there; the page itself still loads. Check the host with `ls`
-when the summary disagrees with what you expect.
+another server may show different markers. Before #2799 a directory the app
+couldn't list read "none yet", a claim about markers it never saw; now it
+says so, and the page itself still loads. Check the host with
+`ls -ld $BACKUP_DIR/db $BACKUP_DIR/media` as the user the app runs as.
 
-The files column reads:
+The files column reads, for the backup as a whole:
 
 | Shown | Meaning |
 |-------|---------|
+| `checking…` | This row's files haven't been read yet: the page has just opened, or you paged to it. |
 | `on disk` | Every file is under `BACKUP_DIR`. |
 | `pruned (retention)` | The application's own retention removed them. |
-| `partly pruned (retention)` | Some files are still here; every missing one was removed by the application's own retention (it ages a backup's dump and media separately). |
+| `partly pruned (retention)` | Some parts of a media set are still here, and every part that's gone was removed by the application's own retention. |
 | `off-site only` | Gone locally, but every missing file has a successful rclone copy. |
-| `expired` | A cron-made backup older than the retention window plus a day; `backup.sh`'s own prune almost certainly removed it. A guess: cron records no prune. |
+| `expired` | `backup.sh prune` on cron removed it. See [Expired, probably expired, missing](#expired-probably-expired-missing). |
+| `probably expired` | Most likely removed by `backup.sh prune`, but cron's `BACKUP_KEEP_DAYS` isn't known here, so the app's own is used. |
 | `missing` | Gone with no recorded reason: deleted by hand, or recorded by another node. |
+| `couldn't check` | Its directory or one of its files couldn't be read (permissions, an I/O error, a stale network mount), so nothing is claimed. Also shown on every row when the read of the backup directory failed outright. |
+| `couldn't check in time` | The read of the backup directory didn't answer within 5 seconds. |
+
+Presence is judged per artifact, so the dump and the media set of one backup
+can differ:
+
+- **Mixed.** When they differ, the row shows one chip per artifact instead,
+  for example `Database: pruned (retention)` `Media: on disk`. Retention ages
+  a backup's dump and media separately, so this is the usual shape of an
+  older backup.
+- **A part of a media set is gone.** When some parts are still here and
+  others aren't, the set reads `missing` and a chip names them:
+  `1 part missing: 02` or `2 parts missing: 02, 05` (hover it for the file
+  names). A part counts as gone even if its off-site copy succeeded: the set
+  on this disk can't be restored as it is.
+- A row whose state needs explaining (`missing`, `expired`,
+  `probably expired`) has a **?** tip ("About these files") saying why, with
+  a link to this section.
 
 "Missing" is worked out when the page is shown, for the 25 rows in view only; it
 is never stored, so a restored file turns back to `on disk`. The reasoning is in [ADR 0033](decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md).
@@ -2473,6 +2506,8 @@ reads `missing` on this one. That is the node's view, not data loss.
 `tar -tzf` passed, the size matches the hash and a SHA-256 was recorded. A
 backup picked up from cron's files reads `unverified (imported)`: nothing is
 hashed or checked on import (a sidecar's hashes are recorded on the row, not re-checked).
+Such a row has a **?** tip ("Made by cron") saying so: run
+`scripts/backup.sh verify` on the server to check the newest backup.
 
 **A failed or refused attempt is history too.** A refusal (for example no
 `pg_dump` in the image) is a `Skipped` row with the reason, and still leaves
@@ -2484,6 +2519,77 @@ the heartbeat could not reach) reads `Failed` ("Interrupted") once it has been
 quiet for 2h15m, measured from the later of its start and its last update.
 Failing to write a row never fails the backup itself.
 
+### Expired, probably expired, missing
+
+The app's own retention records what it deletes (`pruned (retention)`).
+`backup.sh prune` records nothing, so for a backup cron made (an imported
+row), the page works out whether cron's prune would have removed a file that
+is gone, by cron's own rules as far as the app can see them. A gone file is
+`missing`, not expired, when:
+
+- a `kiln-<stamp>.keep` (a recovery point) for its stamp is in `db/` or
+  `media/`, or a `.good` or `.hold` for its stamp is in its own directory:
+  prune keeps those, so something else removed it;
+- no newer complete backup of the same kind (database or media) is in the
+  directory: prune never deletes the newest complete one;
+- it is no older than the retention window plus a day (below), by the
+  run's finish time, else its start;
+- `db/` or `media/` couldn't be listed, so a marker can't be ruled out.
+
+Otherwise it is `expired`. Cron's `BACKUP_KEEP_DAYS` is read from the
+`keep_days` that `backup.sh all` writes into `manifest.json`. When the
+manifest there is the app's own (the last backup was an in-app one) or
+there is none, cron's value is unknown: the app's `BACKUP_KEEP_DAYS` stands
+in, and an old enough file reads `probably expired`. Only the latest
+manifest is read, so a host that changed cron's `BACKUP_KEEP_DAYS` is judged
+by the newer value.
+
+A backup the app made is never `expired`: the app records its own prunes.
+If cron's `backup.sh prune` shares a `BACKUP_DIR` with in-app backups and
+removes the app's files, those rows read `missing`.
+
+### What History reads from disk
+
+What the page shows from `BACKUP_DIR` (the markers, each row's files, and
+whether **Resume** is offered) is read off the page itself, after it
+connects, so a backup directory on a network mount that hangs can't freeze
+the page, its buttons or its refresh. The status panel (`manifest.json`)
+is read the same way; until it answers the page says "Reading this server's
+backup status…".
+
+- **One read at a time.** A refresh while a read is still running waits for
+  it, then reads once more. A read started before you paged fills in nothing
+  on the new page.
+- **Until the first read answers**, the rows say `checking…` and the line
+  under the last-good summary says "Checking this server's backup
+  directory…". **Resume** appears only once a read has answered.
+- **A read that doesn't answer within 5 seconds** turns the page to
+  `couldn't check in time`, with "This server's backup directory didn't
+  answer within 5 seconds, so the files on disk, the markers and Resume
+  aren't shown. Reload the page to check again." The status panel reads
+  "Couldn't read this server's backup status. Reload the page to try again."
+  if it never answered. If the stuck read answers later, the page fills in.
+- **A read that fails outright** turns the page to `couldn't check`, with
+  "Couldn't check this server's backup directory, so the files on disk, the
+  markers and Resume aren't shown. Reload the page to check again." Nothing
+  is retried on its own; the next refresh, page change or reload reads again.
+
+The timeout fixes what the page shows, not the stuck read. A file system
+call that blocks in the kernel holds one of the VM's dirty I/O scheduler
+threads until the mount answers. Because no tab starts a second read while
+its first is out, each open Backups tab adds at most one. A host where this
+happens has a mount problem to fix; the page only stops hiding it.
+
+The budget is an application setting in milliseconds (default `5000`), not
+an environment variable; set it in `config/runtime.exs` of your build:
+
+```elixir
+config :kiln_cms, KilnCMSWeb.BackupLive, disk_timeout_ms: 10_000
+```
+
+It covers the disk read and the status read alike, and the timeout message
+quotes it in whole seconds.
+
 ### Cron's backups appear in History
 
 `KilnCMS.Backups.Importer.run/0` turns files cron wrote into rows. It runs when
@@ -2493,14 +2599,17 @@ default), and on demand:
 
 ```bash
 bin/kiln_cms rpc '{:ok, r} = KilnCMS.Backups.Importer.run(); IO.inspect(r)'
-# %{failed: 0, imported: 2, pending: 0, skipped: 0}
+# %{deferred: 0, failed: 0, imported: 2, pending: 0, skipped: 0}
 ```
 
 It runs on the serving node, as the other commands on this page do; `eval`
 starts no Repo, so the read fails and nothing is imported. When the directory
 cannot be listed or the history cannot be read, the match fails and `rpc` exits
 non-zero. A row that could not be written does not: it is counted in `failed`
-and the call still returns `{:ok, _}`, so read `failed` as well.
+and the call still returns `{:ok, _}`, so read `failed` as well. `deferred`
+counts stamps whose write failed on an earlier call and that wait out a
+backoff before the next try
+([When an import keeps failing](#when-an-import-keeps-failing)).
 
 It scans `$BACKUP_DIR/db` and `$BACKUP_DIR/media` for `kiln-db-<stamp>` and
 `kiln-media-<stamp>` files and creates one row per stamp. The parts of one
@@ -2531,6 +2640,52 @@ older backups already on disk.
 
 If cron runs `backup.sh db` and `backup.sh media` as separate entries, their
 stamps differ and they show as **two** rows, not one. `backup.sh all` is one.
+
+While History has no rows, it says "No backups have been recorded yet." and
+that cron's backups appear there about ten minutes after they finish: that is
+the settle window above, so a backup still being written is never recorded
+half-done.
+
+### When an import keeps failing
+
+The importer runs often (every History mount, marker sync, backup end and
+retention pass), so a stamp whose row can't be written would otherwise be
+retried, and warned about, on every one of them. Instead, a failed write puts
+that stamp in a backoff:
+
+- The first retry waits 15 minutes; each further failure doubles the wait,
+  up to 6 hours. Until then the stamp counts as `deferred` and is neither
+  tried nor logged.
+- Each real attempt that fails logs one warning, with the cause redacted and
+  cut to 300 characters:
+  `Couldn't import backup 20261107-031700 (attempt 2): <cause>. Next try after 2026-11-07T04:02:11Z; KilnCMS.Backups.Importer.retry_failed() retries now`
+- Each also emits `[:kiln_cms, :backups, :import, :failed]` with
+  measurements `%{count: 1}` and metadata `stamp`, `attempt`, `retry_at`
+  (a `DateTime`) and `error` (the redacted cause).
+- A success clears the stamp's entry, and so does a row for it appearing
+  (another node imported it) or its files going.
+
+The backoff is kept per node, in memory, keyed by backup directory and stamp,
+and holds at most 500 stamps (the soonest due are dropped first, which only
+brings their retry forward). A restart forgets it.
+
+Once you have fixed what made the write fail, retry every deferred stamp at
+once on the serving node:
+
+```bash
+bin/kiln_cms rpc 'IO.inspect(KilnCMS.Backups.Importer.retry_failed())'
+# {:ok, %{deferred: 0, failed: 0, imported: 1, pending: 0, skipped: 0}}
+```
+
+`failed: 1` again means the cause is still there; the warning in the log
+says what it is. Waiting is also safe: a deferred stamp has no History row,
+so retention treats its files as **Unrecorded** (rule 6 of
+[What retention deletes and what it keeps](#what-retention-deletes-and-what-it-keeps)) and keeps them until they are older than the component's floor,
+as it does for any stamp whose write fails, and the
+start of an in-app backup removes a stamp's `.partial` files only once the
+stamp has a row. A deferred stamp never makes the importer return
+`{:error, _}`, so it doesn't stop retention or the `.partial` sweep for every
+other stamp.
 
 ### Secrets in history
 

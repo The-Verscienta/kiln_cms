@@ -100,5 +100,34 @@ defmodule KilnCMS.Backups.MarkersTest do
     markers = Markers.read(dir)
     assert Markers.last_good(markers, :db) == nil
     assert Markers.last_good(markers, :media) == "20260802-031700"
+
+    # Unreadable, not empty (#2799): the page says "couldn't read", not "none yet".
+    assert Markers.unreadable(markers) == [:db]
+    refute Markers.readable?(markers, :db)
+    assert Markers.readable?(markers, :media)
+    assert {:error, :enotdir} = Markers.list(dir, :db)
+  end
+
+  test "a missing directory is readable and empty, not unreadable (#2799)", %{dir: dir} do
+    File.rm_rf!(Path.join(dir, "media"))
+
+    assert Markers.list(dir, :media) == {:ok, []}
+    assert Markers.unreadable(Markers.read(dir)) == []
+    assert Markers.readable?(Markers.read(dir), :media)
+    assert Markers.unreadable(Markers.empty()) == []
+  end
+
+  test "from_listing reads what read/1 reads, from listings already taken", %{dir: dir} do
+    touch(dir, "db", "kiln-20260801-031700.keep")
+    touch(dir, "db", "kiln-20260803-031700.good")
+    touch(dir, "media", "kiln-20260802-031700.hold")
+
+    listing = %{db: Markers.list(dir, :db), media: Markers.list(dir, :media)}
+    assert Markers.from_listing(listing) == Markers.read(dir)
+
+    markers = Markers.from_listing(%{db: {:error, :eacces}, media: listing.media})
+    assert Markers.unreadable(markers) == [:db]
+    refute Markers.recovery_point?(markers, "20260801-031700")
+    assert Markers.held_components(markers, "20260802-031700") == [:media]
   end
 end

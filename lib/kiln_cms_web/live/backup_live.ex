@@ -47,7 +47,29 @@ defmodule KilnCMSWeb.BackupLive do
   `?run=<id>` (the Schedule tab's "Last scheduled run" link, #2875) opens the
   page that holds that run (`Backups.history_page_of/3`) and marks its row.
   Whether each run's files are still on disk is computed for the visible page
-  only (`Backups.Presence`).
+  only, artifact by artifact (`Backups.Presence`, #2416).
+
+  ## What is on disk is read off the LiveView process (#2417)
+
+  The markers, each row's presence and which rows can be resumed come from
+  this server's backup directory, which may be a network mount that hangs.
+  `Backups.DiskView` reads all of it in one `start_async/3`, **one at a time**:
+  a refresh while a read is running marks the page dirty, and the read that
+  finishes starts one more. A result is applied only to the rows on the page
+  when it lands, so a read started for another page never shows on this one.
+  Until the first read lands the rows say "checking…"; one that doesn't land
+  within `disk_timeout_ms` (default 5 s) turns the page to "couldn't check in
+  time" and keeps what it knew. That fixes what the page shows, not the stuck
+  read: a blocked `lstat` keeps a dirty I/O scheduler thread until the kernel
+  answers, and no new read starts while it does, so each open tab adds at most
+  one. `Backups.status/0` reads `manifest.json`, so it runs the same way, on
+  mount and on every poll tick, one at a time.
+
+  A directory that can't be listed is said to be unreadable (#2799), never
+  read as "none yet". Every disk and status `handle_async/3` and timeout
+  clause re-checks `platform_admin?` first, as the event handlers do; the
+  import's result reaches the page only through `load_history/1`, which
+  checks too.
 
   ## In flight, Cancel and Resume (#2218)
 
@@ -93,7 +115,7 @@ defmodule KilnCMSWeb.BackupLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Importer, Manifest, Markers, Presence}
+  alias KilnCMS.Backups.{DiskView, Importer, Manifest, Markers}
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.BackupComponents,
@@ -112,6 +134,8 @@ defmodule KilnCMSWeb.BackupLive do
   @poll_interval_ms 3_000
   @max_polls 1_200
   @per_page 25
+  @disk_timeout_ms 5_000
+  @idle_disk %{state: :idle, running?: false, dirty?: false, ref: nil}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -126,6 +150,14 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:runs, [])
        |> assign(:run_count, 0)
        |> assign(:markers, Markers.empty())
+       |> assign(:presence, %{})
+       |> assign(:resumable, %{})
+       |> assign(:disk, @idle_disk)
+       |> assign(:status, nil)
+       |> assign(:status_loading?, false)
+       |> assign(:status_failed?, false)
+       |> assign(:status_ref, nil)
+       |> assign(:importing?, false)
        |> load_status()
        |> load_in_flight()
        |> poll()
@@ -408,7 +440,7 @@ defmodule KilnCMSWeb.BackupLive do
         socket
         |> assign(:poll_timer, nil)
         |> assign(:polls_left, socket.assigns.polls_left - 1)
-        |> assign(:status, Backups.status())
+        |> load_status()
         |> load_in_flight()
         |> load_history()
         |> poll()
@@ -419,18 +451,123 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
+  # A disk read that hasn't answered in time (#2417): the page says so and
+  # keeps what it knew. The read itself is left to finish; no other starts
+  # while it runs. A timer of an earlier read is ignored.
+  def handle_info({:disk_timeout, ref}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      case socket.assigns.disk do
+        %{ref: ^ref, running?: true} = disk ->
+          {:noreply,
+           socket
+           |> assign(:disk, %{disk | state: :timed_out})
+           |> assign(:markers, unreadable_markers())}
+
+        _settled ->
+          {:noreply, socket}
+      end
+    else
+      deny(socket)
+    end
+  end
+
+  # A status read that hasn't answered in time: like the disk read, the page
+  # says so (when it has no earlier status to show) and the read is left to
+  # finish; no other starts while it runs. A timer of an earlier read is
+  # ignored.
+  def handle_info({:status_timeout, ref}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      case socket.assigns do
+        %{status_ref: ^ref, status_loading?: true, status: status} ->
+          {:noreply, assign(socket, :status_failed?, is_nil(status))}
+
+        _settled ->
+          {:noreply, socket}
+      end
+    else
+      deny(socket)
+    end
+  end
+
   # The import (and the stale sweep inside it) finished: show what it found.
   @impl true
-  def handle_async(:import, {:ok, _result}, socket), do: {:noreply, load_history(socket)}
+  def handle_async(:import, {:ok, _result}, socket),
+    do: {:noreply, socket |> assign(:importing?, false) |> load_history()}
 
-  def handle_async(:import, {:exit, _reason}, socket), do: {:noreply, socket}
+  def handle_async(:import, {:exit, _reason}, socket),
+    do: {:noreply, assign(socket, :importing?, false)}
+
+  # What the backup directory holds (#2416, #2417), applied to the rows on the
+  # page NOW: a read started for another page fills nothing here. A refresh
+  # that came in while it ran asks for one more.
+  def handle_async(:disk, {:ok, view}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      %{disk: disk, presence: presence, resumable: resumable} = socket.assigns
+      ids = Enum.map(socket.assigns.runs, fn {run, _cancelable?} -> run.id end)
+      read = Map.keys(view.presence)
+      fresh_resumable = Map.new(read, &{&1, MapSet.member?(view.resumable, &1)})
+
+      socket =
+        socket
+        |> assign(:disk, %{disk | state: :ready, running?: false, dirty?: false})
+        |> assign(:markers, view.markers)
+        |> assign(:presence, presence |> Map.merge(view.presence) |> Map.take(ids))
+        |> assign(:resumable, resumable |> Map.merge(fresh_resumable) |> Map.take(ids))
+
+      {:noreply, if(disk.dirty?, do: start_disk_read(socket), else: socket)}
+    else
+      deny(socket)
+    end
+  end
+
+  # The read crashed. Nothing is retried now, so a read that always crashes
+  # can't loop; the next refresh may start one.
+  def handle_async(:disk, {:exit, _reason}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      disk = socket.assigns.disk
+
+      {:noreply,
+       socket
+       |> assign(:disk, %{disk | state: :failed, running?: false, dirty?: false})
+       |> assign(:markers, unreadable_markers())}
+    else
+      deny(socket)
+    end
+  end
+
+  def handle_async(:status, {:ok, status}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      {:noreply,
+       socket
+       |> assign(:status, status)
+       |> assign(:status_loading?, false)
+       |> assign(:status_failed?, false)}
+    else
+      deny(socket)
+    end
+  end
+
+  # The last status read, if any, stays; the page says so only when it has none.
+  def handle_async(:status, {:exit, _reason}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      {:noreply,
+       socket
+       |> assign(:status_loading?, false)
+       |> assign(:status_failed?, is_nil(socket.assigns.status))}
+    else
+      deny(socket)
+    end
+  end
 
   # CONNECTED mounts only: the disconnected render is a throwaway GET that
   # would run the scan a second time. `Importer.run/0` reconciles stale runs
   # itself, never raises, and writes as `Backups.system/0`.
   defp start_import(socket) do
     if connected?(socket),
-      do: start_async(socket, :import, fn -> Importer.run() end),
+      do:
+        socket
+        |> assign(:importing?, true)
+        |> start_async(:import, fn -> Importer.run() end),
       else: socket
   end
 
@@ -459,11 +596,11 @@ defmodule KilnCMSWeb.BackupLive do
       else: socket
   end
 
+  # The rows from the database, here; what is on disk for them (the `.keep` /
+  # `.good` markers of #2542, presence, Resume), in `check_disk/1`. Read with
+  # the history so a poll that settles a run moves both.
   defp read_history(socket) do
     %{page: page, current_user: user} = socket.assigns
-    # The `.keep` / `.good` markers (#2542): two directory listings, never an
-    # error. Read with the history so a poll that settles a run moves both.
-    socket = assign(socket, :markers, Markers.read(backup_dir()))
 
     case Backups.run_history(
            actor: user,
@@ -471,26 +608,49 @@ defmodule KilnCMSWeb.BackupLive do
          ) do
       {:ok, result} ->
         socket
-        |> assign(:runs, with_presence(result.results, user))
+        |> assign(:runs, Enum.map(result.results, &{&1, cancelable?(&1, user)}))
         |> assign(:run_count, result.count || 0)
+        |> check_disk()
 
       {:error, _error} ->
         socket
         |> assign(:runs, [])
         |> assign(:run_count, 0)
         |> put_flash(:error, gettext("Couldn't load the backup history."))
+        |> check_disk()
     end
   end
 
-  # Stat'ed for the visible page only (<= @per_page rows).
-  defp with_presence(runs, user) do
-    {dir, now} = {backup_dir(), DateTime.utc_now()}
-
-    for run <- runs do
-      {run, Presence.for(run, dir, keep_days(), now), resumable?(run, now),
-       cancelable?(run, user)}
+  # Single-flight (#2417): one disk read per page at a time, so a directory
+  # that hangs costs one stuck read, not one per tick. A read asked for while
+  # one runs is owed, and started when that one answers.
+  defp check_disk(socket) do
+    cond do
+      not connected?(socket) -> socket
+      socket.assigns.disk.running? -> update(socket, :disk, &%{&1 | dirty?: true})
+      true -> start_disk_read(socket)
     end
   end
+
+  defp start_disk_read(socket) do
+    runs = Enum.map(socket.assigns.runs, fn {run, _cancelable?} -> run end)
+    {dir, reader, ref} = {backup_dir(), disk_view(), make_ref()}
+    Process.send_after(self(), {:disk_timeout, ref}, disk_timeout_ms())
+
+    socket
+    |> update(:disk, &%{&1 | running?: true, dirty?: false, ref: ref})
+    |> start_async(:disk, fn -> reader.read(dir, runs, DateTime.utc_now()) end)
+  end
+
+  # Neither directory is known: what a read that timed out or crashed leaves.
+  defp unreadable_markers, do: %{Markers.empty() | unreadable: MapSet.new([:db, :media])}
+
+  # `config :kiln_cms, KilnCMSWeb.BackupLive, disk_timeout_ms: ..., disk_view: ...,
+  # status_reader: ...`; the readers are seams for the tests.
+  defp disk_timeout_ms, do: Keyword.get(live_config(), :disk_timeout_ms, @disk_timeout_ms)
+  defp disk_view, do: Keyword.get(live_config(), :disk_view, DiskView)
+  defp status_reader, do: Keyword.get(live_config(), :status_reader, &Backups.status/0)
+  defp live_config, do: Application.get_env(:kiln_cms, __MODULE__, [])
 
   # A running in-app run, and the policy agrees. Whether it is past the point
   # of no return is the action's to say when clicked.
@@ -499,17 +659,27 @@ defmodule KilnCMSWeb.BackupLive do
 
   defp cancelable?(_run, _user), do: false
 
-  # A cheap status check first, so the one `stat` per row is only paid by the
-  # (few) failed or running rows of the page.
-  defp resumable?(run, now),
-    do: Backups.run_resumable?(run, now) and Backups.work_state?(run.stamp)
-
   defp last_page(count), do: max(div(count + @per_page - 1, @per_page), 1)
 
   defp history_path(1), do: ~p"/editor/backups"
   defp history_path(page), do: ~p"/editor/backups?#{%{page: page}}"
 
-  defp load_status(socket), do: assign(socket, :status, Backups.status())
+  # `Backups.status/0` reads `manifest.json` (#2417): off the LiveView process,
+  # one read at a time, with the disk read's timeout. The page shows a
+  # placeholder until the first lands.
+  defp load_status(socket) do
+    if connected?(socket) and not socket.assigns.status_loading? do
+      ref = make_ref()
+      Process.send_after(self(), {:status_timeout, ref}, disk_timeout_ms())
+
+      socket
+      |> assign(:status_loading?, true)
+      |> assign(:status_ref, ref)
+      |> start_async(:status, status_reader())
+    else
+      socket
+    end
+  end
 
   # Polling rather than PubSub: a backup runs every few hours at most, so one
   # timer on an open admin page is cheaper than a topic, a broadcast and a
@@ -528,6 +698,11 @@ defmodule KilnCMSWeb.BackupLive do
 
   @impl true
   def render(assigns) do
+    assigns =
+      assigns
+      |> assign(:manifest, assigns.status && assigns.status.manifest)
+      |> assign(:busy?, busy?(assigns))
+
     ~H"""
     <%!-- `current_org` was the one console call site not passing it (#1320):
           the top bar's bell scopes its rows by tenant, so a page that omitted
@@ -539,7 +714,13 @@ defmodule KilnCMSWeb.BackupLive do
       page_title={@page_title}
       active={:backups}
     >
-      <div class="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
+      <%!-- `data-busy` is true while a background read (#2417) is still
+            out: what the page shows may be about to change. --%>
+      <div
+        id="backup-page"
+        data-busy={to_string(@busy?)}
+        class="mx-auto max-w-3xl space-y-6 p-4 sm:p-6"
+      >
         <.tabs active={:history} />
 
         <div class="flex flex-wrap items-start justify-between gap-4">
@@ -561,7 +742,7 @@ defmodule KilnCMSWeb.BackupLive do
                   (`Backups.status/0`'s `next_at`); the schedules themselves
                   are on the Schedule tab. --%>
             <p
-              :if={@status.next_at}
+              :if={@status && @status.next_at}
               id="backup-next-scheduled"
               class="mt-1 text-sm text-base-content/70"
             >
@@ -578,8 +759,8 @@ defmodule KilnCMSWeb.BackupLive do
               type="button"
               phx-click="backup_now"
               phx-disable-with={gettext("Requesting…")}
-              disabled={not @status.available?}
-              title={not @status.available? && unavailable_message(@status.reason)}
+              disabled={@status && not @status.available?}
+              title={@status && not @status.available? && unavailable_message(@status.reason)}
               aria-describedby="backup-now-help"
               class="btn btn-primary"
             >
@@ -597,16 +778,32 @@ defmodule KilnCMSWeb.BackupLive do
 
         <.in_flight :if={@in_flight} in_flight={@in_flight} run_id={@in_flight_run_id} />
 
+        <%!-- Until `Backups.status/0` answers (#2417). Neutral: nothing is
+              known yet, good or bad. --%>
+        <section
+          :if={is_nil(@status)}
+          id="backup-status-pending"
+          class="rounded-lg border border-base-content/10 p-4 text-sm text-base-content/70"
+        >
+          <p :if={not @status_failed?}>{gettext("Reading this server's backup status…")}</p>
+          <p :if={@status_failed?} class="text-warning-ink">
+            {gettext("Couldn't read this server's backup status. Reload the page to try again.")}
+          </p>
+        </section>
+
         <%!-- The headline. Stale (or never) is an error tone on purpose: a
               deployment that has not been backed up is the state this whole
               page exists to make impossible to miss. --%>
-        <section class={[
-          "rounded-lg border p-4",
-          if(alarming?(@status),
-            do: "border-error/30 bg-error/5",
-            else: "border-success/30 bg-success/5"
-          )
-        ]}>
+        <section
+          :if={@status}
+          class={[
+            "rounded-lg border p-4",
+            if(alarming?(@status),
+              do: "border-error/30 bg-error/5",
+              else: "border-success/30 bg-success/5"
+            )
+          ]}
+        >
           <div class="flex items-start gap-3">
             <.icon
               name={if alarming?(@status), do: "hero-exclamation-triangle", else: "hero-check-circle"}
@@ -644,15 +841,15 @@ defmodule KilnCMSWeb.BackupLive do
               SUCCESSFUL backup instead would be true and would answer a
               question nobody asked. --%>
         <section
-          :if={@status.manifest && @status.manifest.error}
+          :if={@manifest && @manifest.error}
           class="rounded-lg border border-error/30 bg-error/5 p-4"
         >
           <p class="text-sm font-medium text-error">{gettext("Last run failed")}</p>
-          <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-base-content/80">{@status.manifest.error}</pre>
+          <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs text-base-content/80">{@manifest.error}</pre>
         </section>
 
         <section
-          :if={@status.manifest && @status.manifest.artifacts != []}
+          :if={@manifest && @manifest.artifacts != []}
           class="rounded-lg border border-base-content/10 p-4"
         >
           <h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/50">
@@ -660,7 +857,7 @@ defmodule KilnCMSWeb.BackupLive do
           </h2>
           <ul class="mt-3 space-y-2">
             <li
-              :for={artifact <- @status.manifest.artifacts}
+              :for={artifact <- @manifest.artifacts}
               class="flex items-center gap-3 text-sm"
             >
               <.icon
@@ -711,24 +908,24 @@ defmodule KilnCMSWeb.BackupLive do
             </dd>
             <dt class="text-base-content/60">{gettext("Retention")}</dt>
             <dd>{ngettext("%{count} day", "%{count} days", keep_days(), count: keep_days())}</dd>
-            <dt :if={@status.manifest && @status.manifest.offsite} class="text-base-content/60">
+            <dt :if={@manifest && @manifest.offsite} class="text-base-content/60">
               {gettext("Off-site")}
             </dt>
-            <dd :if={@status.manifest && @status.manifest.offsite} class="font-mono text-xs">
-              {KilnCMS.Backups.Redact.text(@status.manifest.offsite)}
+            <dd :if={@manifest && @manifest.offsite} class="font-mono text-xs">
+              {KilnCMS.Backups.Redact.text(@manifest.offsite)}
             </dd>
             <dt
-              :if={@status.rclone_missing? && !(@status.manifest && @status.manifest.offsite)}
+              :if={@status && @status.rclone_missing? && !(@manifest && @manifest.offsite)}
               class="text-base-content/70"
             >
               {gettext("Off-site")}
             </dt>
             <dd
-              :if={@status.rclone_missing?}
+              :if={@status && @status.rclone_missing?}
               id="backup-rclone-missing"
               class={[
                 "text-xs text-warning-ink",
-                @status.manifest && @status.manifest.offsite && "col-start-2"
+                @manifest && @manifest.offsite && "col-start-2"
               ]}
             >
               <span class="font-mono">{KilnCMS.Backups.Redact.text(rclone_remote())}</span>
@@ -745,7 +942,7 @@ defmodule KilnCMSWeb.BackupLive do
           </p>
         </section>
 
-        <.schedule_summary status={@status} />
+        <.schedule_summary :if={@status} status={@status} />
 
         <.history
           runs={@runs}
@@ -754,7 +951,10 @@ defmodule KilnCMSWeb.BackupLive do
           run_count={@run_count}
           in_flight={@in_flight}
           markers={@markers}
-          expected={@status.expected}
+          presence={@presence}
+          resumable={@resumable}
+          disk={@disk}
+          expected={if @status, do: @status.expected, else: Backups.expected_components()}
         />
       </div>
     </Layouts.console>
@@ -907,6 +1107,9 @@ defmodule KilnCMSWeb.BackupLive do
   attr :run_count, :integer, required: true
   attr :in_flight, :map, default: nil
   attr :markers, :map, required: true
+  attr :presence, :map, required: true, doc: "run id => `Backups.Presence.t()`"
+  attr :resumable, :map, required: true, doc: "run id => whether Resume is offered"
+  attr :disk, :map, required: true, doc: "the disk read's state (#2417)"
   attr :expected, :list, required: true
 
   defp history(assigns) do
@@ -926,8 +1129,13 @@ defmodule KilnCMSWeb.BackupLive do
         <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
           <%= for component <- @expected do %>
             <dt class="text-base-content/70">{component_label(component)}</dt>
-            <dd data-role="last-good" data-component={component} class="font-mono text-xs">
-              {Markers.last_good(@markers, component) || gettext("none yet")}
+            <dd
+              data-role="last-good"
+              data-component={component}
+              data-state={last_good_state(@disk, @markers, component)}
+              class="font-mono text-xs"
+            >
+              {last_good_label(@disk, @markers, component)}
             </dd>
           <% end %>
         </dl>
@@ -938,13 +1146,54 @@ defmodule KilnCMSWeb.BackupLive do
         </p>
       </div>
 
-      <p :if={@runs == []} id="backup-history-empty" class="mt-3 text-sm text-base-content/70">
-        {gettext("No backups have been recorded yet.")}
+      <%!-- One line for the disk read (#2417): checking, or why the page
+            can't say what is on disk. Each replaces the other. --%>
+      <p
+        :if={@disk.state == :idle and @disk.running?}
+        id="backup-disk-checking"
+        class="mt-3 text-xs text-base-content/70"
+      >
+        {gettext("Checking this server's backup directory…")}
       </p>
+      <p
+        :if={@disk.state == :timed_out}
+        id="backup-disk-timeout"
+        role="status"
+        class="mt-3 text-xs text-warning-ink"
+      >
+        {ngettext(
+          "This server's backup directory didn't answer within %{count} second, so the files on disk, the markers and Resume aren't shown. Reload the page to check again.",
+          "This server's backup directory didn't answer within %{count} seconds, so the files on disk, the markers and Resume aren't shown. Reload the page to check again.",
+          disk_timeout_s()
+        )}
+      </p>
+      <p
+        :if={@disk.state == :failed}
+        id="backup-disk-failed"
+        role="status"
+        class="mt-3 text-xs text-warning-ink"
+      >
+        {gettext(
+          "Couldn't check this server's backup directory, so the files on disk, the markers and Resume aren't shown. Reload the page to check again."
+        )}
+      </p>
+
+      <div
+        :if={@runs == []}
+        id="backup-history-empty"
+        class="mt-3 space-y-1 text-sm text-base-content/70"
+      >
+        <p>{gettext("No backups have been recorded yet.")}</p>
+        <p class="text-xs">
+          {gettext(
+            "Backups that cron's scripts/backup.sh makes appear here too, about ten minutes after they finish: the app waits that long so it doesn't record one still being written."
+          )}
+        </p>
+      </div>
 
       <ul :if={@runs != []} class="mt-3 divide-y divide-base-content/10">
         <li
-          :for={{run, presence, resumable?, cancelable?} <- @runs}
+          :for={{run, cancelable?} <- @runs}
           id={"backup-run-#{run.id}"}
           aria-current={@focus_run == run.id && "true"}
           class={[
@@ -999,6 +1248,17 @@ defmodule KilnCMSWeb.BackupLive do
 
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/70">
             <span data-role="verified">{verified_label(run)}</span>
+            <.help_tip
+              :if={unverified_import?(run)}
+              id={"imported-help-#{run.id}"}
+              label={gettext("About imported backups")}
+              title={gettext("Made by cron")}
+              learn_more={docs_url("backups.md#backup-history-2217")}
+            >
+              {gettext(
+                "Cron's scripts/backup.sh made this backup and the app found it on disk. The app didn't check it with pg_restore; run scripts/backup.sh verify on the server to check the newest backup."
+              )}
+            </.help_tip>
             <a
               :for={count <- part_counts(run)}
               data-role="parts"
@@ -1022,9 +1282,11 @@ defmodule KilnCMSWeb.BackupLive do
             >
               {label} · {destination_status_label(status)}
             </span>
-            <span :if={presence != :none} data-role="presence" data-presence={presence}>
-              {presence_label(presence)}
-            </span>
+            <.presence
+              run={run}
+              presence={Map.get(@presence, run.id)}
+              disk={@disk}
+            />
             <%!-- Hidden once the backup is finishing, as on the strip: Cancel is
                   refused from there (#2542). `@in_flight` is read here, not
                   when the row was built, so it doesn't matter which loaded first. --%>
@@ -1042,7 +1304,7 @@ defmodule KilnCMSWeb.BackupLive do
               {gettext("Cancel")}
             </button>
             <button
-              :if={resumable?}
+              :if={resumable?(@disk, @resumable, run)}
               type="button"
               phx-click="resume_run"
               phx-value-id={run.id}
@@ -1055,7 +1317,7 @@ defmodule KilnCMSWeb.BackupLive do
               {gettext("Resume")}
             </button>
             <.help_tip
-              :if={resumable?}
+              :if={resumable?(@disk, @resumable, run)}
               id={"resume-help-#{run.id}"}
               label={gettext("About Resume")}
               title={gettext("Resume")}
@@ -1099,6 +1361,166 @@ defmodule KilnCMSWeb.BackupLive do
       </div>
     </section>
     """
+  end
+
+  attr :run, :map, required: true
+  attr :presence, :map, default: nil, doc: "`Backups.Presence.t()`, nil until read"
+  attr :disk, :map, required: true
+
+  # Whether the run's files are on this server's disk, artifact by artifact
+  # when they differ (#2416), with the parts of a media set that are gone.
+  # Nothing is claimed while the disk read is out or failed (#2417).
+  defp presence(assigns) do
+    ~H"""
+    <span
+      :if={@disk.state == :timed_out}
+      data-role="presence"
+      data-presence="timeout"
+      class="text-warning-ink"
+    >
+      {gettext("couldn't check in time")}
+    </span>
+    <span
+      :if={@disk.state == :failed}
+      data-role="presence"
+      data-presence="unknown"
+      class="text-warning-ink"
+    >
+      {presence_label(:unknown)}
+    </span>
+    <%= if @disk.state in [:idle, :ready] do %>
+      <span :if={is_nil(@presence)} data-role="presence" data-presence="checking">
+        {gettext("checking…")}
+      </span>
+      <%= if @presence && @presence.state != :none do %>
+        <span
+          data-role="presence"
+          data-presence={@presence.state}
+          class={presence_class(@presence.state)}
+        >
+          <%= if @presence.state == :mixed do %>
+            <span
+              :for={artifact <- @presence.artifacts}
+              data-role="artifact-presence"
+              data-kind={artifact.kind}
+              data-presence={artifact.state}
+              class={["mr-2", presence_class(artifact.state)]}
+            >
+              {component_label(artifact.kind)}: {presence_label(artifact.state)}
+            </span>
+          <% else %>
+            {presence_label(@presence.state)}
+          <% end %>
+        </span>
+        <span
+          :for={artifact <- @presence.artifacts}
+          :if={artifact.parts && artifact.gone != []}
+          data-role="parts-missing"
+          data-kind={artifact.kind}
+          title={Enum.join(artifact.gone, ", ")}
+          class="text-warning-ink"
+        >
+          {ngettext(
+            "%{count} part missing: %{parts}",
+            "%{count} parts missing: %{parts}",
+            length(artifact.gone),
+            parts: part_numbers(artifact.gone)
+          )}
+        </span>
+        <.help_tip
+          :if={presence_help(@presence)}
+          id={"presence-help-#{@run.id}"}
+          label={gettext("About these files")}
+          title={presence_label(presence_help(@presence))}
+          learn_more={docs_url("backups.md#backup-history-2217")}
+        >
+          {presence_help_text(presence_help(@presence))}
+        </.help_tip>
+      <% end %>
+    <% end %>
+    """
+  end
+
+  # The state a row's ? tip explains: the worst of its artifacts' that needs
+  # explaining, or nil.
+  defp presence_help(%{artifacts: artifacts}) do
+    states = Enum.map(artifacts, & &1.state)
+    Enum.find([:missing, :probably_expired, :expired], &(&1 in states))
+  end
+
+  defp presence_help_text(:missing),
+    do:
+      gettext(
+        "These files aren't in this server's backup directory, and nothing recorded why: they were deleted outside the app, or the backup was taken on another server. Each server has its own backup directory."
+      )
+
+  defp presence_help_text(:expired),
+    do:
+      gettext(
+        "Cron's scripts/backup.sh prune removed these files: they are older than the BACKUP_KEEP_DAYS it records in manifest.json, and a newer backup of the same kind is on disk."
+      )
+
+  defp presence_help_text(:probably_expired),
+    do:
+      gettext(
+        "Most likely removed by cron's scripts/backup.sh prune: they are older than this app's retention, and a newer backup of the same kind is on disk. Cron hasn't recorded its own BACKUP_KEEP_DAYS here, so this is an estimate."
+      )
+
+  defp presence_class(state) when state in [:missing, :unknown], do: "text-warning-ink"
+  defp presence_class(_state), do: nil
+
+  # "02, 05": the part numbers of the gone files, or their names when a name
+  # isn't a part's.
+  defp part_numbers(names) do
+    Enum.map_join(names, ", ", fn name ->
+      case Backups.Artifact.parse_file(name) do
+        {:ok, %{part: part}} when is_integer(part) -> String.pad_leading("#{part}", 2, "0")
+        _other -> name
+      end
+    end)
+  end
+
+  defp unverified_import?(%{origin: :imported, artifacts: [_ | _] = artifacts}),
+    do: not Enum.all?(artifacts, & &1.verified)
+
+  defp unverified_import?(_run), do: false
+
+  # Resume needs the run's `.work/<stamp>/state.json`, which only a disk read
+  # that answered can vouch for (#2417).
+  defp resumable?(%{state: :ready}, resumable, run), do: Map.get(resumable, run.id, false)
+  defp resumable?(_disk, _resumable, _run), do: false
+
+  # The last-good line of each component (#2542, #2799): a stamp, none, or why
+  # the page can't say.
+  defp last_good_state(%{state: :timed_out}, _markers, _component), do: "timeout"
+  defp last_good_state(%{state: :failed}, _markers, _component), do: "failed"
+  defp last_good_state(%{state: :idle}, _markers, _component), do: "checking"
+
+  defp last_good_state(_ready, markers, component) do
+    cond do
+      not Markers.readable?(markers, component) -> "unreadable"
+      Markers.last_good(markers, component) -> "marked"
+      true -> "none"
+    end
+  end
+
+  defp last_good_label(disk, markers, component) do
+    case last_good_state(disk, markers, component) do
+      "timeout" -> gettext("couldn't check in time")
+      "failed" -> gettext("couldn't check")
+      "checking" -> gettext("checking…")
+      "unreadable" -> gettext("couldn't read this server's backup directory")
+      "marked" -> Markers.last_good(markers, component)
+      "none" -> gettext("none yet")
+    end
+  end
+
+  defp disk_timeout_s, do: max(div(disk_timeout_ms(), 1_000), 1)
+
+  # Anything still out that may change what the page shows.
+  defp busy?(assigns) do
+    is_nil(assigns.status) or assigns.status_loading? or assigns.importing? or
+      assigns.disk.running? or assigns.disk.dirty?
   end
 
   defp finishing?(%{stamp: stamp, phase: :finishing}, %{stamp: stamp}), do: true
@@ -1181,7 +1603,9 @@ defmodule KilnCMSWeb.BackupLive do
   defp presence_label(:pruned), do: gettext("pruned (retention)")
   defp presence_label(:partly_pruned), do: gettext("partly pruned (retention)")
   defp presence_label(:expired), do: gettext("expired")
+  defp presence_label(:probably_expired), do: gettext("probably expired")
   defp presence_label(:off_site_only), do: gettext("off-site only")
+  defp presence_label(:unknown), do: gettext("couldn't check")
 
   # NOT just `stale?`. A backup that failed a minute ago is not stale — it is
   # recent and it is worthless — and tone driven by age alone rendered "The

@@ -79,6 +79,13 @@ defmodule KilnCMS.DataCase do
 
     bust_default_org_aggregates()
 
+    # The backup importer's backoff (#2417) is node-global, like the cache
+    # above: a stamp one test's import failed on must not be deferred in
+    # another that reuses the stamp, whatever order the modules run in. Only
+    # for synchronous tests: they are the ones that point the backup directory
+    # anywhere, and no other test runs beside one.
+    unless tags[:async], do: KilnCMS.Backups.Importer.reset_failures()
+
     on_exit(fn ->
       Ecto.Adapters.SQL.Sandbox.stop_owner(pid)
       bust_default_org_aggregates()
