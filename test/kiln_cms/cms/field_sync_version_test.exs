@@ -28,7 +28,7 @@ defmodule KilnCMS.CMS.FieldSyncVersionTest do
     alias_pattern default_review_after_days description has_excerpt
     has_published_feed icon label name nofollow_default noindex_default
     path_segment plural_label schema_org_type seo_description_pattern
-    seo_title_pattern slug_pattern
+    seo_title_pattern slug_pattern title_template
   )
 
   test "the document is still version 1" do

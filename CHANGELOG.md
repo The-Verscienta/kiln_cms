@@ -73,6 +73,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
 
+- **A content type can build every record's title from its fields with a title template (`{{ field.last_name }}, {{ field.first_name }}`): editors no longer type one, and existing titles are re-derived.**
+  ([long form](docs/changelog/unreleased.md#computed-titles))
+
 ### Fixed
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
