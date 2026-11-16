@@ -199,8 +199,5 @@ defmodule KilnCMS.CMS.FieldWidgets do
 
   defp bare(names), do: Enum.map(names, &{&1, nil})
 
-  defp sub_field?(definition),
-    do:
-      not is_nil(Map.get(definition, :link_of_id)) or
-        not is_nil(Map.get(definition, :group_of_id))
+  defp sub_field?(definition), do: not KilnCMS.CMS.FieldDefinition.top_level?(definition)
 end

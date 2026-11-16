@@ -49,6 +49,10 @@ defmodule KilnCMS.CMS.FieldTypes do
     :media,
     :reference,
     :group,
+    # Mixed typed items (#2282): a list of items, each of one of the field's
+    # item types (`FieldDefinition.flex_of_id` rows). Core for `:group`'s
+    # reason — coercing it recurses into `ApplyCustomFields` per item type.
+    :flexible,
     # A console account of the site (#2044): stored as the user's id, and
     # always private (`KilnCMS.CMS.PrivateFields`).
     :user

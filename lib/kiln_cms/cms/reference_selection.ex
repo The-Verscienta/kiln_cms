@@ -107,8 +107,8 @@ defmodule KilnCMS.CMS.ReferenceSelection do
   @spec equality_field?(map()) :: boolean()
   def equality_field?(definition) do
     Map.get(definition, :field_type) in @equality_types and
-      Map.get(definition, :private) != true and is_nil(Map.get(definition, :link_of_id)) and
-      is_nil(Map.get(definition, :group_of_id))
+      Map.get(definition, :private) != true and
+      KilnCMS.CMS.FieldDefinition.top_level?(definition)
   end
 
   # --- shape ---------------------------------------------------------------

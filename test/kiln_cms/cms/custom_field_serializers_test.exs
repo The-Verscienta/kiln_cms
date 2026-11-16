@@ -90,6 +90,7 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
     ),
     write_path: ~w(
       lib/kiln_cms/cms/dynamic_defaults.ex
+      lib/kiln_cms/cms/flexible_path.ex
       lib/kiln_cms/cms/unique_values.ex
       lib/kiln_cms/cms/changes/apply_custom_fields.ex
       lib/kiln_cms/cms/changes/clear_reference_target.ex

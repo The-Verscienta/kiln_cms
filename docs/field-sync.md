@@ -15,6 +15,14 @@ stay migrations.
 Both directions need an **admin** (the import and export check that the user can
 define fields).
 
+A **flexible field** (`:flexible`, #2282) travels as a field, but its item
+types and their sub-fields do **not** yet: the file format has no child list
+for them, and `item_setting` is not a synced attribute. Importing such a file
+creates the field with no item types (item writes are refused until you define
+some), and neither an import nor `--prune` plans or deletes an item type of an
+existing field. See
+[Define a flexible field from code](extending-content.md#define-a-flexible-field-from-code).
+
 ## Export
 
 ```bash

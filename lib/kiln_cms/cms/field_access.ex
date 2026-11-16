@@ -169,6 +169,5 @@ defmodule KilnCMS.CMS.FieldAccess do
   @spec read_entry_shape?(term()) :: boolean()
   def read_entry_shape?(entry), do: parse(entry) in [:all] or match?({:field, _}, parse(entry))
 
-  defp top_level?(definition),
-    do: is_nil(Map.get(definition, :link_of_id)) and is_nil(Map.get(definition, :group_of_id))
+  defp top_level?(definition), do: KilnCMS.CMS.FieldDefinition.top_level?(definition)
 end

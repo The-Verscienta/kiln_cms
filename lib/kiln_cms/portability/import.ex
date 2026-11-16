@@ -1014,12 +1014,23 @@ defmodule KilnCMS.Portability.Import do
   # write, but a value the source site stored under the same name is the
   # source's, not this field's: it is dropped with the rest.
   #
+  # `custom_fields_items: :strict`: unlike an unknown key, an item of a
+  # flexible field whose `_type` this site does not declare fails the row with
+  # its path (`sections[2]._type`) — dropping it would lose content silently
+  # (#2282).
+  #
   # `shared_fields_check: :skip`: an exported translation carries the value it
   # held, which for a pair exported before a field became shared differs from
   # its source's (#1860). The next shared-field copy settles it, as it does for
   # such a pair already on this site.
   defp create_via_action(kind, attrs, opts) do
-    context = %{custom_fields: :drop, custom_fields_held: :drop, shared_fields_check: :skip}
+    context = %{
+      custom_fields: :drop,
+      custom_fields_held: :drop,
+      custom_fields_items: :strict,
+      shared_fields_check: :skip
+    }
+
     {:ok, ContentTypes.create!(kind, attrs, scope(opts) ++ [context: context])}
   rescue
     error -> {:error, error}

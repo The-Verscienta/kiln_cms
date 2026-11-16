@@ -1203,6 +1203,12 @@ value (see
 `?include=field_definitions.group_fields` adds the sub-fields of
 each `:group` field — the keys each of its rows takes; a sub-field names its
 group in `group_of_id`.
+`?include=field_definitions.item_types` adds the **item types** of each
+`:flexible` field (a `:group`-typed definition whose `flex_of_id` names the
+field; `item_setting` marks a sub-field that is one of the item's settings).
+A flexible field's value in `custom_fields` is a list of objects, each with
+`_id`, `_type`, its item type's keys and optional `_settings`; see
+[Define a flexible field from code](extending-content.md#define-a-flexible-field-from-code).
 
 It is the same read as `/mcp`'s `read_type_definitions`, with the same policy:
 the credential must belong to an **editor or admin of the request's org** (a

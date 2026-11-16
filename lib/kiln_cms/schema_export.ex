@@ -912,6 +912,21 @@ defmodule KilnCMS.SchemaExport do
     |> put_sub_field_names(d)
   end
 
+  # A flexible field (#2282): a list of items, each an object carrying its
+  # `_id` and `_type` beside the keys of its item type. Typed as generic JSON
+  # objects until the typed export (`oneOf` over the item types) lands; the
+  # item types are rows of their own and are not listed as fields.
+  defp base_custom_field_schema(:flexible, d) do
+    %{
+      "type" => ["array", "null"],
+      "items" => %{"type" => "object"},
+      "description" =>
+        "Items of mixed types, in the order the editor arranged them. Each item names " <>
+          "its type in `_type`."
+    }
+    |> put_item_bounds(d)
+  end
+
   # A rich `:text` field (the default `format`) holds sanitized HTML; saying
   # so lets a client pick its renderer without guessing. A plain one is text.
   defp base_custom_field_schema(:text, d) do

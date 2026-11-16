@@ -8897,6 +8897,11 @@ msgstr ""
 msgid "Edit tier"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Edited through the API; item editing arrives with the next release."
+msgstr "Edited through the API; item editing arrives with the next release."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editing"

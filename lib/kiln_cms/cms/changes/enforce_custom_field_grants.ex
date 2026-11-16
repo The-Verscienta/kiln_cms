@@ -169,8 +169,7 @@ defmodule KilnCMS.CMS.Changes.EnforceCustomFieldGrants do
   # Top-level, editor-filled definitions: not a link or group sub-field (they
   # ride on their parent), not computed (the engine's, never supplied).
   defp editable?(definition) do
-    definition.field_type != :computed and is_nil(Map.get(definition, :link_of_id)) and
-      is_nil(Map.get(definition, :group_of_id))
+    definition.field_type != :computed and KilnCMS.CMS.FieldDefinition.top_level?(definition)
   end
 
   defp paths(%{field_type: :group} = definition, new, old) do
