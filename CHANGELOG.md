@@ -60,6 +60,17 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.10.1] - 2026-11-16
+
+Long form: [docs/changelog/v1.10.1.md](docs/changelog/v1.10.1.md) —
+the 1.10.1 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Fixed
+
+- **The second-factor test of an open page reaching its deadline no longer fails on a slow runner: the deadline sat 600 ms after the test started, and a mount that outlasted it redirected first.**
+  ([#2953](https://github.com/The-Verscienta/kiln_cms/pull/2953) · [long form](docs/changelog/v1.10.1.md#sfe-deadline-test-margin))
+
 ## [1.10.0] - 2026-11-15
 
 Long form: [docs/changelog/v1.10.0.md](docs/changelog/v1.10.0.md) —
