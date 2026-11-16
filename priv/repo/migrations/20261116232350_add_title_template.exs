@@ -7,6 +7,12 @@ defmodule KilnCMS.Repo.Migrations.AddTitleTemplate do
 
   use Ecto.Migration
 
+  # The field_definitions snapshot written alongside this one also records
+  # step/prefix/suffix: #2966's migration added those columns, but #2969's
+  # snapshot was generated before it merged, so the latest snapshot on main
+  # lacked them. Only the snapshot is caught up here; re-adding the columns
+  # would fail with duplicate_column.
+
   def up do
     alter table(:type_definitions) do
       add :title_template, :text
