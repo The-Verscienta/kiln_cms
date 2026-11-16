@@ -1370,6 +1370,87 @@ filters and sorting read an index only for a field named in
 otherwise. See
 [Which custom filters use an index](json-api.md#which-custom-filters-use-an-index).
 
+### Build record titles from fields
+
+Some types have no natural title to type: a person is "Smith, Jane", an event
+is its venue and date. A type can carry a **title template** that builds each
+record's `title` from its other fields every time it is saved. It is the
+computed-field language above (`KilnCMS.CMS.Titles` for the rules), so the
+syntax and functions are the ones you already know:
+
+```text
+{{ field.last_name }}, {{ field.first_name }}
+{{ field.last_name }}, {{ field.first_name }} ({{ field.city }})
+```
+
+**Set it on a dynamic type** (admin):
+
+1. Open **Content types** (`/editor/types`) and create the type, or edit it.
+2. Define the fields the template will read first (Custom fields), then fill
+   in **Title template (optional)** with `{{ field.last_name }}, {{ field.first_name }}`.
+3. Save. A syntax error, a reference to `title` or `slug`, a private field or
+   a field the type does not define is refused with a message under the box.
+4. Open or create a record of the type. **Title** is read-only, with
+   "Generated from the template on save". Fill in the last and first name,
+   save, and the title reads "Smith, Jane".
+
+**Set it on a compiled type** in the `use` line (a bad template fails the
+build):
+
+```elixir
+use KilnCMS.CMS.Content,
+  type: :person,
+  title_template: "{{ field.last_name }}, {{ field.first_name }}"
+```
+
+How it behaves:
+
+- **The template always wins.** The title is overwritten on create, update and
+  autosave. A `title` sent over the JSON:API, GraphQL or MCP is accepted and
+  ignored, not refused, so an older client keeps working.
+- **A blank result keeps the title.** When every field the template reads is
+  empty, nothing is derived: a record keeps its title, and a new one keeps
+  the title it was given (the editor's "Untitled").
+- **Not readable:** `title` and `slug` (the title is the output, the slug
+  comes from it), directly or through a computed field that reads them, and
+  private fields, because a title is public.
+- **The slug follows the title.** The scaffold `untitled-…` slug of a new
+  draft is replaced by one derived from the generated title. A slug that is
+  already real, a published page's included, never changes when a source field
+  does.
+- **Working copies.** On a live document the held title is derived when the
+  draft is saved and goes live with *Publish changes*, which derives it once
+  more from the fields that go live.
+- **Existing records.** Saving a changed template on a dynamic type queues a
+  background re-derive of that type's records (published ones are retitled
+  live; ones with a pending working copy are skipped until published).
+  Clearing a template changes no titles. For a compiled type, run this after
+  the deploy that changed the template:
+
+  ```bash
+  mix kiln.titles.regenerate --type person            # --org <uuid> for a specific site
+  #=> Done: 12 retitled, 1 skipped (working copy), 0 failed, 340 scanned.
+  ```
+
+  It is safe to re-run: a record already at its derived title is not written.
+- **Limits.** Field names are checked when the template changes, not when a
+  field is later renamed or deleted (a dangling reference reads as empty); and
+  not when a type is created, nor for a compiled type's fields. A computed
+  field that reads `title` is not re-run when a working copy is promoted.
+- **Unrelated:** `names_record` fields only add words to search; they never
+  touch the title.
+
+The template travels with the type in
+[field sync](field-sync.md#the-file) (`definition.title_template`).
+
+What can go wrong: *"can't read title, slug: the title is built from this
+template and the slug from the title"* (remove the reference);
+*"can't read the private field …: a title is public"*;
+*"reads …, which this type has no field for"* (define the field first, or fix
+the name); *"isn't a valid template: …"* (syntax); *"is too long (at most 500
+characters)"*. A title that stays unchanged after a save usually means every
+field the template reads was empty.
+
 ### Make a field conditional
 
 A field can appear only when another field has a certain value, and be

@@ -86,7 +86,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Color fields can be limited to a palette (`validation["palette"]`, shown as swatches in the editor) and JSON fields can carry a JSON Schema (`validation["json_schema"]`, draft 2020-12, local `$ref` only, bounded, never fetches); both are checked when a value changes. No migration.**
   ([long form](docs/changelog/unreleased.md#color-palette-json-schema))
 
-||||||| b80c95150
+- **A content type can build every record's title from its fields with a title template (`{{ field.last_name }}, {{ field.first_name }}`): editors no longer type one, and existing titles are re-derived.**
+  ([long form](docs/changelog/unreleased.md#computed-titles))
+
 ### Changed
 
 - **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
