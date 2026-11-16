@@ -1152,8 +1152,6 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
-  defp parse_condition(_raw), do: {:error, "every condition must be an object"}
-
   defp operators(name, kind, ops) when is_map(ops) do
     ops =
       ops
