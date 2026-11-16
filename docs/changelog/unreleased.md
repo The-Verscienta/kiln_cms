@@ -154,6 +154,29 @@ carries the reasoning.
   `local`, `rclone` nor another module already has. See *Backup
   destinations* in [plugin-extensibility.md](../plugin-extensibility.md).
 
+## Changed
+
+<a id="sort-reference-media"></a>
+
+- **`custom_sort` (JSON:API) and `customSort` (GraphQL) now sort a single-valued reference or media field, by its target's current title (a media item's current filename).**
+  Before this, both were refused with a `400` (#2354), because the label stored
+  in the referrer can lag a rename and an order over targets the caller cannot
+  read would reveal where they sit. The key is now read from the target, not
+  from the stored label, so a renamed target moves at once. It is `NULL`, which
+  sorts last like an unset field, where the caller may not read the target, so
+  the order of unreadable targets is never revealed. The target must also be in
+  the query's organization, and a preview (shared-draft) grant is not honored:
+  such a target sorts as unreadable. An editor's list still shows the stored
+  label until the referrer is saved again. A `multiple` reference or media field
+  stays refused, now with `custom field "x" (reference) holds a list and is not
+  sortable`. Clients that treated the old `400` as the signal can drop it.
+  Cost: one primary-key lookup per matching row (once per distinct target),
+  about 30-50 ms for a `limit` of 20 over 20,000 referrers and 2,000 targets.
+  No index on the source table can serve this order, so on a large table narrow
+  the read with a filter. No migration; rolling back only brings the refusal
+  back. See [json-api.md](../json-api.md)
+  and the amendment in decision 0014.
+
 ## Fixed
 
 <a id="codeql-embed-origin-hardening"></a>
@@ -172,20 +195,6 @@ carries the reasoning.
     slashes it took about 4 s in Node. Its input is the integrator's own
     `baseUrl` or attribute. Both now trim in a loop, with the same result.
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947))
-
-<a id="sfe-deadline-test-margin"></a>
-
-- **The second-factor test of an open page reaching its deadline no longer fails on a slow runner.**
-  `SecondFactorEnforcementTest` "an open page goes to setup at the deadline"
-  set the grace deadline 600 ms after the test started. Creating the account,
-  signing in and mounting the page outlasted that on a loaded 2-scheduler CI
-  runner (Verscienta's overlay CI, on its 1.10.0 bump), so the mount itself
-  redirected and `live/2` returned `{:error, {:redirect, ...}}`: the test
-  exercised the mount gate rather than the open page's timer, and failed its
-  match. The margin is now 2.5 s and the redirect wait 6 s; with a 1.5 s
-  delay injected before the mount the test still passes on the timer path.
-  Test-only; no change to the release.
-  ([#2953](https://github.com/The-Verscienta/kiln_cms/pull/2953))
 
 ## Security
 
