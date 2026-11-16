@@ -13,7 +13,7 @@
   for how the marker sync reaches each host's directory.
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Upgrade notes and Added, part of
-  #2219 ([long form](../changelog/unreleased.md#backup-schedule-keep)).
+  #2219 ([long form](../changelog/v1.10.0.md#backup-schedule-keep)).
 
 ## The problem
 
