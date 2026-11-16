@@ -3,7 +3,7 @@ defmodule KilnCMS.CMS.CustomFilterGroupsTest do
   Boolean groups over custom fields (#2355) — `custom_filter[_or]` / `[_and]` /
   `[_not]` with `_native` for built-in columns — the mixed order that puts a
   custom sort before a built-in one (`_native:` in `custom_sort`, #2356), and the
-  refusal of a reference / media sort (#2354).
+  sort of a single reference / media field (#2444; a multiple one is refused).
   """
   use KilnCMS.DataCase, async: true
 
@@ -209,17 +209,16 @@ defmodule KilnCMS.CMS.CustomFilterGroupsTest do
     end
   end
 
-  describe "reference and media sorts (#2354)" do
-    test "are refused with the reason", ctx do
+  describe "reference and media sorts (#2444)" do
+    test "a multiple one is refused with the reason", ctx do
       %{admin: admin} = ctx
       ref = name("ref")
       media = name("media")
-      define!(%{name: ref, field_type: :reference, target_type: "page"}, admin)
-      define!(%{name: media, field_type: :media}, admin)
+      define!(%{name: ref, field_type: :reference, target_type: "page", multiple: true}, admin)
+      define!(%{name: media, field_type: :media, multiple: true}, admin)
 
-      assert message(%{custom_sort: ref}, admin) =~ "not sortable: its stored label"
-      assert message(%{custom_sort: ref}, admin) =~ "cannot read"
-      assert message(%{custom_sort: media}, admin) =~ "not sortable: its stored label"
+      assert message(%{custom_sort: ref}, admin) =~ "holds a list and is not sortable"
+      assert message(%{custom_sort: media}, admin) =~ "holds a list and is not sortable"
     end
   end
 end
