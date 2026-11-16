@@ -651,8 +651,28 @@ defmodule KilnCMS.SchemaExport do
         put_bound(acc, annotation, validation[key])
       end)
 
-    if validation["unique"] == true, do: Map.put(schema, "x-kiln-unique", true), else: schema
+    schema =
+      if validation["unique"] == true, do: Map.put(schema, "x-kiln-unique", true), else: schema
+
+    # A color field's palette and a JSON field's schema (#2434): annotations
+    # for the same reason (they govern writes). The schema is the admin's
+    # draft 2020-12 document, whole and local (no remote references).
+    schema
+    |> put_bound("x-kiln-palette", palette_of(definition))
+    |> put_bound("x-kiln-json-schema", json_schema_of(validation))
   end
+
+  defp palette_of(%{field_type: :color} = definition) do
+    case KilnCMS.CMS.FieldTypes.Color.palette(definition) do
+      [] -> nil
+      palette -> palette
+    end
+  end
+
+  defp palette_of(_definition), do: nil
+
+  defp json_schema_of(%{"json_schema" => %{} = schema}) when schema != %{}, do: schema
+  defp json_schema_of(_validation), do: nil
 
   # A reference's link fields (R3): each connection's snapshot carries their
   # values under `"link"`, typed like any custom field and open like the
