@@ -625,6 +625,7 @@ defmodule KilnCMS.SchemaExport do
     |> put_section(Map.get(definition, :section), section_displays)
     |> put_width(Map.get(definition, :width))
     |> put_widget(definition)
+    |> put_number_options(definition)
   end
 
   # A field's value constraints (#2276) as annotations, not as JSON Schema's
@@ -653,6 +654,21 @@ defmodule KilnCMS.SchemaExport do
 
     if validation["unique"] == true, do: Map.put(schema, "x-kiln-unique", true), else: schema
   end
+
+  # A number's editor options (#2432), for a client building its own input:
+  # `x-kiln-step` (the HTML step), `x-kiln-prefix` and `x-kiln-suffix`, each
+  # absent while unset. Annotations like the constraints, not assertions:
+  # the step is never enforced on write. On a `multiple` number they describe
+  # each item.
+  defp put_number_options(schema, definition) do
+    schema
+    |> put_bound("x-kiln-step", Map.get(definition, :step))
+    |> put_text("x-kiln-prefix", Map.get(definition, :prefix))
+    |> put_text("x-kiln-suffix", Map.get(definition, :suffix))
+  end
+
+  defp put_text(schema, _key, text) when text in [nil, ""], do: schema
+  defp put_text(schema, key, text), do: Map.put(schema, key, text)
 
   # A reference's link fields (R3): each connection's snapshot carries their
   # values under `"link"`, typed like any custom field and open like the
@@ -894,6 +910,21 @@ defmodule KilnCMS.SchemaExport do
     |> group_row_schema()
     |> Map.update!("type", &[&1, "null"])
     |> put_sub_field_names(d)
+  end
+
+  # A flexible field (#2282): a list of items, each an object carrying its
+  # `_id` and `_type` beside the keys of its item type. Typed as generic JSON
+  # objects until the typed export (`oneOf` over the item types) lands; the
+  # item types are rows of their own and are not listed as fields.
+  defp base_custom_field_schema(:flexible, d) do
+    %{
+      "type" => ["array", "null"],
+      "items" => %{"type" => "object"},
+      "description" =>
+        "Items of mixed types, in the order the editor arranged them. Each item names " <>
+          "its type in `_type`."
+    }
+    |> put_item_bounds(d)
   end
 
   # A rich `:text` field (the default `format`) holds sanitized HTML; saying

@@ -15,6 +15,8 @@ defmodule KilnCMSWeb.EditorLiveFiltersTest do
     %{name: "born", field_type: :date},
     %{name: "color", field_type: :select, options: ["red", "blue"]},
     %{name: "author_ref", field_type: :reference},
+    %{name: "authors", field_type: :reference, multiple: true},
+    %{name: "owner", field_type: :user},
     %{name: "seen", field_type: :datetime}
   ]
 
@@ -158,11 +160,23 @@ defmodule KilnCMSWeb.EditorLiveFiltersTest do
     end
 
     test "unknown, unsortable and out-of-type fields fall back to updated" do
-      for sort <- ["field:ghost", "field:author_ref", "field:", "-field:", "fieldprice"] do
+      for sort <- [
+            "field:ghost",
+            "field:authors",
+            "field:owner",
+            "field:",
+            "-field:",
+            "fieldprice"
+          ] do
         assert parse(%{"type" => "post", "sort" => sort})["sort"] == "updated", sort
       end
 
       assert parse(%{"type" => "page", "sort" => "field:price"})["sort"] == "updated"
+    end
+
+    test "a single reference field is kept (#2444)" do
+      assert Filters.field_sort(parse(%{"type" => "post", "sort" => "field:author_ref"})) ==
+               {"author_ref", :asc}
     end
 
     test "is not an Ash sort, and cannot be merged across types" do

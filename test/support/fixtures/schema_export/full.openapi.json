@@ -1548,7 +1548,12 @@
                 "type": [
                   "number",
                   "null"
-                ]
+                ],
+                "x-kiln-maximum": 5,
+                "x-kiln-minimum": 0,
+                "x-kiln-step": 0.5,
+                "x-kiln-suffix": "stars",
+                "x-kiln-widget": "slider"
               },
               "read_time": {
                 "type": [

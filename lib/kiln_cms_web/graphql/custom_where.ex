@@ -9,8 +9,10 @@ defmodule KilnCMSWeb.Graphql.CustomWhere do
   definition, by `KilnCMS.CMS.Preparations.CustomFieldQuery`. Operands are real
   GraphQL scalars, so `float: {gt: "abc"}` is refused by validation.
 
-  Conditions are ANDed. At most `KilnCMSWeb.GraphqlLimits.max_custom_conditions/0`
-  of them, and `in` takes at most `KilnCMSWeb.GraphqlLimits.max_custom_in_values/0`
+  Conditions are ANDed. A condition can instead be a group (#2445): `{_or: [...]}`,
+  `{_and: [...]}` or `{_not: {...}}`, nesting the same way `customFilter`'s
+  groups do and under the same limits (4 deep, 50 members in all). At most
+  `KilnCMSWeb.GraphqlLimits.max_custom_conditions/0` of them at the top, and `in` takes at most `KilnCMSWeb.GraphqlLimits.max_custom_in_values/0`
   values.
   """
   use Absinthe.Schema.Notation
@@ -19,19 +21,25 @@ defmodule KilnCMSWeb.Graphql.CustomWhere do
   A condition on one custom field. Give `name` and exactly one of `string`,
   `int`, `float`, `boolean`, `date` or `dateTime`, which must be the kind of
   the field (`customString`, `customInt`, ...). Conditions in a list are ANDed.
+  Instead of `name` and a kind, a condition can be one group: `_or` (any of the
+  conditions in the list), `_and` (all of them) or `_not` (not this one
+  condition); groups nest at most 4 deep and hold at most 50 conditions in all.
   A list of values (a `multiple` field of numbers, dates, text, ...) takes the
   kind of its items with `eq` (contains), `notEq` (does not contain), `in`
   (contains any) and `isNull`; `customFilter` also takes `has`, `has_all`,
   `has_none` and `count` on it.
   """
   input_object :custom_field_condition do
-    field :name, non_null(:string)
+    field :name, :string
     field :string, :string_filter
     field :int, :int_filter
     field :float, :float_filter
     field :boolean, :boolean_filter
     field :date, :date_filter
     field :date_time, :date_time_filter
+    field :_or, list_of(non_null(:custom_field_condition))
+    field :_and, list_of(non_null(:custom_field_condition))
+    field :_not, :custom_field_condition
   end
 
   @desc "Operators for a text-like custom field. `contains` and `startsWith` ignore case and match text, not patterns."

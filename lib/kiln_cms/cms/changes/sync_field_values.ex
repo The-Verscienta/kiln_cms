@@ -56,12 +56,35 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   `"link"` maps. A row left with no keys is dropped, as a write drops a
   blank row; flipping a group's `multiple` reshapes it as it does a gallery.
 
+  ## Flexible content
+
+  An **item type** (`flex_of_id`, #2282) and a **sub-field of one** have no key
+  of their own either: their values live inside the items of a flexible field,
+  which may sit inside the items of another (down to
+  `FieldDefinition.max_flexible_depth/0` levels). Renaming a sub-field renames
+  its key inside every item of that type, destroying one purges it (an item it
+  empties is dropped, as a write drops a blank item), renaming an item type
+  rewrites each item's `_type`, destroying one removes its items.
+  `KilnCMS.CMS.FlexiblePath` finds the path from the owning type's top-level
+  flexible field and builds the statement, qualified by every step: item type
+  names are unique only within one flexible field, so none is matched by name
+  alone.
+
+  Destroying an item type removes its items only because
+  `Validations.ItemTypeInUse` let the destroy through (no items, or
+  `purge_items?: true`). Destroying a whole flexible field, or a nested one, is
+  the group's behavior: the key is purged here. The database cascades from the
+  field to its item types and their sub-fields **without** passing through this
+  module, which is safe because the values went with the key.
+
   It runs `after_transaction` on success only — a write that rolls back syncs
   nothing — and a failure is logged rather than raised: the definition write
   itself has committed, and `ApplyCustomFields` still drops a stray key (with a
   warning) as a backstop.
   """
   use Ash.Resource.Change
+
+  alias KilnCMS.CMS.FlexiblePath
 
   require Logger
 
@@ -138,10 +161,32 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
       nil ->
         result
 
+      %{flex_of_id: flex_id} = item_type when not is_nil(flex_id) ->
+        sync_item(changeset, item_type, definition, result)
+
       parent ->
         changeset
         |> group_operations(parent, definition)
         |> Enum.reduce(result, &run(&1, parent, &2))
+    end
+  end
+
+  # An item type: its items are reached through the path to it, under the
+  # name they still carry (the old one, on a rename).
+  defp sync(changeset, {:ok, %{flex_of_id: flex_id} = definition} = result)
+       when not is_nil(flex_id) do
+    previous = %{definition | name: changeset.data.name}
+
+    case FlexiblePath.item_path(previous, definition.org_id) do
+      {:ok, top, steps} ->
+        changeset
+        |> item_type_operations(steps, definition)
+        |> Enum.reduce(result, &run(&1, top, &2))
+
+      :error ->
+        # The flexible field went first (its destroy cascades to this row) and
+        # took every value with it.
+        result
     end
   end
 
@@ -222,6 +267,45 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp group_operations(_changeset, _parent, _definition), do: []
+
+  # A sub-field of an item type: the path ends at that item type.
+  defp sync_item(changeset, item_type, definition, result) do
+    case FlexiblePath.item_path(item_type, definition.org_id) do
+      {:ok, top, steps} ->
+        changeset
+        |> item_field_operations(steps, definition)
+        |> Enum.reduce(result, &run(&1, top, &2))
+
+      :error ->
+        result
+    end
+  end
+
+  defp item_field_operations(%{action_type: :destroy}, steps, definition),
+    do: [{:item, steps, {:purge_field, definition.name, definition.item_setting}}]
+
+  defp item_field_operations(%{action_type: :update} = changeset, steps, definition) do
+    if changeset.data.name == definition.name,
+      do: [],
+      else: [
+        {:item, steps,
+         {:rename_field, changeset.data.name, definition.name, definition.item_setting}}
+      ]
+  end
+
+  defp item_field_operations(_changeset, _steps, _definition), do: []
+
+  # `steps` end in the item type under its old name.
+  defp item_type_operations(%{action_type: :destroy}, steps, _definition),
+    do: [{:item, steps, :purge_type}]
+
+  defp item_type_operations(%{action_type: :update} = changeset, steps, definition) do
+    if changeset.data.name == definition.name,
+      do: [],
+      else: [{:item, steps, {:rename_type, definition.name}}]
+  end
+
+  defp item_type_operations(_changeset, _steps, _definition), do: []
 
   defp parent(id, org_id) do
     case KilnCMS.CMS.get_field_definition(id,
@@ -422,6 +506,17 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     )
   end
 
+  # An item tree's values (`KilnCMS.CMS.FlexiblePath`): one statement, qualified
+  # by every step of the path.
+  # sobelow_skip ["SQL.Query"]
+  defp execute({:item, steps, op}, table, filter, params) do
+    {sql, bound} = FlexiblePath.update_sql(table, steps, op, {filter, params})
+    query(sql, bound, "rewrote the #{inspect(op_name(op))} items of #{inspect(steps)} in")
+  end
+
+  defp op_name(op) when is_atom(op), do: op
+  defp op_name(op), do: elem(op, 0)
+
   # `item` rewrites one connection `e`; a list is rebuilt item by item, in
   # its order.
   defp link_statement(_field, item, table, filter_sql) do
@@ -483,6 +578,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp execute_links({:reshape, _name, :to_list}, _table, _filter, _params), do: :ok
+
+  # Items are not edges either (a flexible field holds no reference yet).
+  defp execute_links({:item, _steps, _op}, _table, _filter, _params), do: :ok
 
   # A group's rows are not edges.
   defp execute_links({:purge_sub_field, _field, _name}, _table, _filter, _params), do: :ok

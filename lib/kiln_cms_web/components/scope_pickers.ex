@@ -293,7 +293,7 @@ defmodule KilnCMSWeb.ScopePickers do
   defp definition_label(%{name: name}), do: name
 
   defp top_level(definitions),
-    do: Enum.filter(definitions, &(is_nil(&1.link_of_id) and is_nil(&1.group_of_id)))
+    do: Enum.filter(definitions, &KilnCMS.CMS.FieldDefinition.top_level?/1)
 
   # The read picker (#2281): only private top-level fields can be hidden, so
   # only those are offered; the bare key stands for all of them.

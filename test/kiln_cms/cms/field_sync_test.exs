@@ -221,8 +221,10 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       # A new FieldDefinition attribute lands in the document through the create
       # action's accept list. One that is not accepted would be silently left
       # out of every sync, so it must be named here as a decision.
+      # `flex_of_id` and `item_setting` (#2282) join the file with its
+      # `item_types` child list; until then an item type is not in a document.
       not_synced =
-        ~w(id org_id inserted_at updated_at content_type type_definition_id link_of_id group_of_id selection)a
+        ~w(id org_id inserted_at updated_at content_type type_definition_id link_of_id group_of_id flex_of_id item_setting selection)a
 
       stored =
         KilnCMS.CMS.FieldDefinition
@@ -504,6 +506,98 @@ defmodule KilnCMS.CMS.FieldSyncTest do
 
       kind = Enum.find(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "kind"))
       assert kind.widget == "radios" and kind.multiple == false
+    end
+  end
+
+  describe "number options (#2432)" do
+    defp options_field!(admin) do
+      field!(admin, %{
+        name: "dose",
+        label: "Dose",
+        field_type: :float,
+        step: 0.5,
+        prefix: "~",
+        suffix: "mg",
+        validation: %{"min" => 0, "max" => 10},
+        widget: "slider"
+      })
+    end
+
+    defp dose(admin),
+      do: Enum.find(CMS.field_definitions_for!(:post, actor: admin), &(&1.name == "dose"))
+
+    test "the export carries step, prefix and suffix, null when unset", %{admin: admin} do
+      options_field!(admin)
+      field!(admin, %{name: "plain", label: "Plain", field_type: :integer})
+
+      post = Enum.find(export!(admin)["owners"], &(&1["type"] == "post"))
+      by_name = Map.new(post["fields"], &{&1["name"], &1})
+
+      assert %{"step" => 0.5, "prefix" => "~", "suffix" => "mg", "widget" => "slider"} =
+               by_name["dose"]
+
+      assert %{"step" => nil, "prefix" => nil, "suffix" => nil} = by_name["plain"]
+    end
+
+    test "round-trips into an empty site, then is idempotent", %{admin: admin} do
+      options_field!(admin)
+      doc = export!(admin)
+      CMS.destroy_field_definition!(dose(admin), actor: admin)
+
+      assert {:ok, _report} = apply!(doc, admin)
+      restored = dose(admin)
+      assert {restored.step, restored.prefix, restored.suffix} == {0.5, "~", "mg"}
+      assert restored.widget == "slider"
+
+      assert {:ok, again} = apply!(doc, admin)
+      assert Map.keys(again.counts) == [:unchanged]
+    end
+
+    test "a file written before the options existed imports unchanged where none are set",
+         %{admin: admin} do
+      model!(admin)
+
+      old =
+        update_in(
+          export!(admin),
+          ["owners", Access.all(), "fields", Access.all()],
+          &Map.drop(&1, ~w(step prefix suffix))
+        )
+
+      assert {:ok, again} = apply!(old, admin)
+      assert Map.keys(again.counts) == [:unchanged]
+    end
+
+    test "a file without the keys takes their default, so it clears set options",
+         %{admin: admin} do
+      options_field!(admin)
+
+      old =
+        update_in(
+          export!(admin),
+          ["owners", Access.all(), "fields", Access.all()],
+          &Map.drop(&1, ~w(step prefix suffix))
+        )
+
+      # Absent keys take the attribute default (nil), as for any key a file
+      # leaves out, so this reads as clearing the options.
+      assert {:ok, report} = apply!(old, admin)
+
+      assert [%{changes: changes}] = Enum.filter(report.ops, &(&1.op == :update))
+      assert Map.keys(changes) |> Enum.sort() == ~w(prefix step suffix)
+    end
+
+    test "a changed step imports as an update of only that attribute", %{admin: admin} do
+      options_field!(admin)
+      doc = export!(admin) |> with_field("dose", &Map.put(&1, "step", 1.0))
+
+      assert {:ok, report} = apply!(doc, admin)
+
+      assert [%{path: "post.dose", changes: %{"step" => {0.5, 1.0}} = changes}] =
+               Enum.filter(report.ops, &(&1.op == :update))
+
+      assert map_size(changes) == 1
+      assert dose(admin).step == 1.0
     end
   end
 

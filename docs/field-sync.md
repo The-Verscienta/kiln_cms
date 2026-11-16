@@ -15,6 +15,14 @@ stay migrations.
 Both directions need an **admin** (the import and export check that the user can
 define fields).
 
+A **flexible field** (`:flexible`, #2282) travels as a field, but its item
+types and their sub-fields do **not** yet: the file format has no child list
+for them, and `item_setting` is not a synced attribute. Importing such a file
+creates the field with no item types (item writes are refused until you define
+some), and neither an import nor `--prune` plans or deletes an item type of an
+existing field. See
+[Define a flexible field from code](extending-content.md#define-a-flexible-field-from-code).
+
 ## Export
 
 ```bash
@@ -154,7 +162,7 @@ release `rpc` is **not** recorded there.
   "version": 1,
   "owners": [
     { "kind": "compiled", "type": "post",
-      "fields": [ { "name": "rating", "label": "Rating", "field_type": "integer", "section": "Clinical", "width": "half", "validation": {"min": 1, "max": 5}, "…": "…" } ],
+      "fields": [ { "name": "rating", "label": "Rating", "field_type": "integer", "section": "Clinical", "width": "half", "step": null, "prefix": null, "suffix": null, "validation": {"min": 1, "max": 5}, "…": "…" } ],
       "sections": [ { "name": "Clinical", "display": "tab", "initially": "auto" } ] },
     { "kind": "dynamic", "type": "recipe", "definition": { "name": "recipe", "label": "Recipe", "…": "…" }, "fields": [ ], "sections": [ ] }
   ]
@@ -230,6 +238,27 @@ leaves out takes the attribute's default, normally what every field had
 before the attribute existed. The import then sets that attribute back to the
 default on every field that holds something else, and the dry run lists it
 as `~`.
+
+### Number options (`step`, `prefix`, `suffix`)
+
+A number field's export carries `"step"` (a number), `"prefix"` and
+`"suffix"` (text), each `null` when unset. See
+[Show a number as a slider or with a unit](extending-content.md#show-a-number-as-a-slider-or-with-a-unit).
+
+- **A release before this one refuses the file.** These keys first ship
+  after 1.10, so an older build reads an export that has them as unknown keys,
+  one error per field (`unknown key(s) step, prefix, suffix`), the same way it
+  treats `width` (see
+  [Moving a file to an older build](#moving-a-file-to-an-older-build)).
+  Export from the older build, or remove the keys with `jq`, and accept that
+  the target keeps its own values.
+- **An older file still imports, and clears the options.** A file without
+  the keys is read with all three as `null`, so importing it into this
+  release sets them back to `null` on every field that has them, and the dry
+  run lists each as `~`. Keep them in the file if you want to keep them.
+- **`step` follows the field's rules.** A fractional step on an integer
+  field, or one wider than its min-to-max span, fails that field with the
+  field's path and nothing is written.
 
 ### Editor inputs (`widget`)
 

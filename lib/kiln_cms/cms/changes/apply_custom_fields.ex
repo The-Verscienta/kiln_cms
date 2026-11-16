@@ -174,6 +174,12 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   alias KilnCMS.CMS.UniqueValues
   alias KilnCMS.CMS.WorkingCopy
 
+  # How many items one flexible field (#2282) holds when its definition sets no
+  # `max_items`: a value is one JSONB tree that every write re-coerces. Set
+  # `config :kiln_cms, :flexible, max_items: n` to change it (compile time).
+  @flexible_max_items Application.compile_env(:kiln_cms, [:flexible, :max_items], 100)
+  @item_meta ["_id", "_type", "_settings"]
+
   @scalar_list_types ScalarLists.types()
   @typed_list_types ScalarLists.typed()
 
@@ -361,8 +367,13 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # declares: `:strict` (the default) refuses it; `:drop` discards it with a
   # warning. Machinery that copies a stored map wholesale opts in via
   # `context: %{custom_fields: :drop}` — see the module doc.
+  #
+  # `:import` is `:drop` for everything but an item whose `_type` the field does
+  # not declare (#2282): a JSON import fails that row with the item's path,
+  # where a restore or a copy drops the item (its type may simply be gone).
   defp mode(changeset) do
     case changeset.context do
+      %{custom_fields: :drop, custom_fields_items: :strict} -> :import
       %{custom_fields: :drop} -> :drop
       _other -> :strict
     end
@@ -738,7 +749,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         blank_unique? and UniqueValues.unique_def?(def) ->
           acc
 
-        Map.has_key?(supplied, name) and mode == :drop ->
+        Map.has_key?(supplied, name) and mode in [:drop, :import] ->
           {Map.put(cleaned, name, supplied[name]), errors}
 
         Map.has_key?(supplied, name) and supplied[name] != Map.get(stored, name) ->
@@ -866,6 +877,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # tightened since must not reject what the record already holds. Groups
   # check their own rows (`coerce_row`), where the row index is still known.
   defp constrain({:ok, _value} = ok, %{field_type: :group}, _stored, _check?), do: ok
+  defp constrain({:ok, _value} = ok, %{field_type: :flexible}, _stored, _check?), do: ok
   defp constrain({:ok, _value} = ok, _def, _stored, false), do: ok
 
   defp constrain({:ok, value} = ok, def, stored, true) do
@@ -1080,7 +1092,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # A link key no link field declares, the way `undefined/4` treats a
   # top-level one: refused unless it is blank or re-states the stored value.
-  defp undefined_links(_given, _links, _kept, :drop), do: []
+  defp undefined_links(_given, _links, _kept, mode) when mode in [:drop, :import], do: []
 
   defp undefined_links(given, links, kept, :strict) do
     names = Enum.map(links, & &1.name)
@@ -1098,6 +1110,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   defp resolve_field(%{field_type: :group} = def, raw, _read_opts, {mode, held}),
     do: resolve_group(def, raw, mode, held)
+
+  defp resolve_field(%{field_type: :flexible} = def, raw, _read_opts, {mode, held}),
+    do: resolve_flexible(def, raw, def.name, mode, held)
 
   defp resolve_field(def, raw, read_opts, _mode), do: resolve(def, raw, read_opts)
 
@@ -1198,7 +1213,8 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp sub_value(sub, value), do: resolve(sub, value, [])
 
   # A blank key no sub-field declares asks for nothing, as at the top level.
-  defp undefined_sub_fields(_given, _subs, _def, _path, :drop), do: []
+  defp undefined_sub_fields(_given, _subs, _def, _path, mode) when mode in [:drop, :import],
+    do: []
 
   defp undefined_sub_fields(given, subs, def, path, :strict) do
     names = Enum.map(subs, & &1.name)
@@ -1209,6 +1225,297 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     |> Enum.map(fn {key, _value} ->
       {"#{path}.#{key}", def.label,
        "is not a sub-field of this group (sub-fields: #{Enum.join(Enum.sort(names), ", ")})"}
+    end)
+  end
+
+  # --- flexible content (#2282) ------------------------------------------------
+
+  # A flexible field's value from what the caller sent: `:skip` when there are
+  # no items and none are required, else the list of coerced items, or every
+  # problem found, each under its path (`sections[2].headline`). `path` is the
+  # field's own path — its name at the top level, an item's path plus the
+  # sub-field's name when nested. `held` is `:skip` or `{:rows, stored_items}`.
+  defp resolve_flexible(def, raw, path, mode, held) do
+    case flexible_input(raw) do
+      {:ok, items} ->
+        items = Enum.reject(Enum.with_index(items), fn {item, _index} -> blank_item?(item) end)
+
+        cond do
+          items == [] and def.required -> {:error, "is required"}
+          items == [] -> :skip
+          true -> coerce_items(items, def, path, mode, held)
+        end
+
+      :error ->
+        {:error, "must be a list of items"}
+    end
+  end
+
+  defp flexible_input(blank) when blank in [nil, ""], do: {:ok, []}
+  defp flexible_input(items) when is_list(items), do: {:ok, items}
+  defp flexible_input(_other), do: :error
+
+  # An item is blank when everything but its meta keys is: an untouched card
+  # the editor posts is no item at all, as a blank group row is no row.
+  defp blank_item?(%{} = item) when not is_struct(item) do
+    item
+    |> Map.drop(@item_meta ++ [:_id, :_type, :_settings])
+    |> Map.values()
+    |> Enum.all?(&blank_item_value?/1)
+  end
+
+  defp blank_item?(other), do: blank?(other)
+
+  defp blank_item_value?(value) when is_list(value), do: Enum.all?(value, &blank_item?/1)
+  defp blank_item_value?(value), do: blank_item?(value)
+
+  defp coerce_items(items, def, path, mode, held) do
+    types = FieldDefinition.item_types(def)
+    stored = flexible_stored(held)
+
+    stored_by_id =
+      for %{"_id" => id} = item <- stored, is_binary(id), into: %{}, do: {id, item}
+
+    unchanged = unchanged_items(held, stored)
+
+    {kept, problems, _used} =
+      Enum.reduce(items, {[], [], MapSet.new()}, fn {item, index}, {kept, problems, used} ->
+        ctx = %{def: def, types: types, mode: mode, stored: stored_by_id, unchanged: unchanged}
+
+        case coerce_item(item, "#{path}[#{index}]", ctx, used) do
+          {{:ok, cleaned}, used} -> {[cleaned | kept], problems, used}
+          {{:errors, found}, used} -> {kept, problems ++ found, used}
+          {:drop, used} -> {kept, problems, used}
+        end
+      end)
+
+    with [] <- problems,
+         kept = Enum.reverse(kept),
+         {:ok, kept} <- flexible_bounds(kept, def),
+         [] <- type_bounds(kept, types, path) do
+      if kept == [], do: :skip, else: {:ok, kept}
+    else
+      {:error, _message} = error -> error
+      [_ | _] = found -> {:errors, found}
+    end
+  end
+
+  defp flexible_stored({:rows, stored}), do: Enum.filter(stored, &is_map/1)
+  defp flexible_stored(_held), do: []
+
+  # What an item is compared against to be left unchecked: the stored items
+  # minus their ids (an item written before ids existed still matches), or
+  # nothing when constraints are off.
+  defp unchanged_items(:skip, _stored), do: :all
+  defp unchanged_items({:rows, _}, stored), do: MapSet.new(stored, &strip_ids/1)
+
+  defp unchanged?(:all, _item), do: true
+  defp unchanged?(set, item), do: MapSet.member?(set, strip_ids(item))
+
+  defp strip_ids(%{} = map) when not is_struct(map),
+    do: map |> Map.delete("_id") |> Map.new(fn {k, v} -> {k, strip_ids(v)} end)
+
+  defp strip_ids(list) when is_list(list), do: Enum.map(list, &strip_ids/1)
+  defp strip_ids(other), do: other
+
+  defp coerce_item(item, path, ctx, used) when is_map(item) and not is_struct(item) do
+    given = stringify_keys(item)
+    {id, used} = item_id(given["_id"], used)
+
+    result =
+      case Enum.find(ctx.types, &(&1.name == given["_type"])) do
+        nil -> unknown_item_type(given, path, ctx)
+        type -> coerce_typed_item(given, id, type, path, ctx)
+      end
+
+    {result, used}
+  end
+
+  defp coerce_item(_item, path, ctx, used),
+    do: {{:errors, [{path, ctx.def.label, "must be an object"}]}, used}
+
+  # A client's `_id` is kept when it is a UUID this write has not used yet;
+  # otherwise (absent, malformed, a repeat) the item gets a new one.
+  defp item_id(raw, used) do
+    id =
+      case is_binary(raw) && Ecto.UUID.cast(raw) do
+        {:ok, uuid} -> if MapSet.member?(used, uuid), do: Ash.UUID.generate(), else: uuid
+        _ -> Ash.UUID.generate()
+      end
+
+    {id, MapSet.put(used, id)}
+  end
+
+  defp unknown_item_type(_given, path, %{mode: :drop}) do
+    Logger.warning(
+      "flexible custom field: dropped #{path}, an item type this field no longer has"
+    )
+
+    :drop
+  end
+
+  defp unknown_item_type(given, path, %{def: def, types: types}) do
+    names = types |> Enum.map(& &1.name) |> Enum.sort() |> Enum.join(", ")
+
+    problem =
+      case given["_type"] do
+        type when type in [nil, ""] ->
+          "is required (item types: #{names})"
+
+        type ->
+          "#{inspect(to_string_safe(type))} is not an item type of this field (item types: #{names})"
+      end
+
+    {:errors, [{"#{path}._type", def.label, problem}]}
+  end
+
+  defp to_string_safe(value) when is_binary(value) or is_atom(value) or is_number(value),
+    do: to_string(value)
+
+  defp to_string_safe(_value), do: "?"
+
+  defp coerce_typed_item(given, id, type, path, ctx) do
+    subs = FieldDefinition.group_fields(type)
+
+    case item_settings(given["_settings"]) do
+      {:ok, settings_given} ->
+        content_given = Map.drop(given, @item_meta)
+        stored_item = Map.get(ctx.stored, id, %{})
+
+        # An item's conditions see its own fields, content and settings together.
+        subs =
+          Conditions.apply_to(subs, Map.merge(content_given, settings_given),
+            required_when: ctx.mode == :strict
+          )
+
+        {content_subs, setting_subs} = Enum.split_with(subs, &(not &1.item_setting))
+
+        {content, problems} =
+          item_values(content_subs, content_given, stored_item, path, ctx, {%{}, []})
+
+        {settings, problems_s} =
+          item_values(
+            setting_subs,
+            settings_given,
+            Map.get(stored_item, "_settings") || %{},
+            path <> "._settings",
+            ctx,
+            {%{}, []}
+          )
+
+        problems =
+          Enum.reverse(problems) ++
+            Enum.reverse(problems_s) ++
+            undefined_item_keys(content_given, content_subs, path, type, ctx.mode) ++
+            undefined_item_keys(
+              settings_given,
+              setting_subs,
+              path <> "._settings",
+              type,
+              ctx.mode
+            )
+
+        item = assemble_item(content, settings, id, type)
+
+        constraints =
+          if problems == [] and not unchanged?(ctx.unchanged, item),
+            do: FieldConstraints.check_row(type, Map.merge(content, settings), path),
+            else: []
+
+        case problems ++ constraints do
+          [] -> {:ok, item}
+          found -> {:errors, found}
+        end
+
+      :error ->
+        {:errors, [{path <> "._settings", type.label, "must be an object"}]}
+    end
+  end
+
+  defp item_settings(nil), do: {:ok, %{}}
+
+  defp item_settings(%{} = settings) when not is_struct(settings),
+    do: {:ok, stringify_keys(settings)}
+
+  defp item_settings(_other), do: :error
+
+  defp assemble_item(content, settings, id, type) do
+    item = Map.merge(content, %{"_id" => id, "_type" => type.name})
+    if settings == %{}, do: item, else: Map.put(item, "_settings", settings)
+  end
+
+  defp item_values(subs, given, stored, path, ctx, acc) do
+    Enum.reduce(subs, acc, fn sub, acc ->
+      sub_path = "#{path}.#{sub.name}"
+      collect_item_value(item_value(sub, given, stored, sub_path, ctx), sub, sub_path, acc)
+    end)
+  end
+
+  defp collect_item_value(:skip, _sub, _sub_path, acc), do: acc
+
+  defp collect_item_value({:ok, value}, sub, _sub_path, {cleaned, problems}),
+    do: {Map.put(cleaned, sub.name, value), problems}
+
+  defp collect_item_value({:error, message}, sub, sub_path, {cleaned, problems}),
+    do: {cleaned, [{sub_path, sub.label, message} | problems]}
+
+  defp collect_item_value({:errors, found}, _sub, _sub_path, {cleaned, problems}),
+    do: {cleaned, Enum.reverse(found, problems)}
+
+  defp item_value(%{field_type: :flexible} = sub, given, stored, sub_path, ctx) do
+    held =
+      if ctx.unchanged == :all,
+        do: :skip,
+        else: {:rows, List.wrap(Map.get(stored, sub.name))}
+
+    resolve_flexible(sub, Map.get(given, sub.name), sub_path, ctx.mode, held)
+  end
+
+  defp item_value(sub, given, _stored, _sub_path, _ctx),
+    do: sub_value(sub, Map.get(given, sub.name))
+
+  # A blank key no sub-field declares asks for nothing, as at the top level.
+  defp undefined_item_keys(_given, _subs, _path, _type, mode) when mode in [:drop, :import],
+    do: []
+
+  defp undefined_item_keys(given, subs, path, type, :strict) do
+    names = Enum.map(subs, & &1.name)
+
+    given
+    |> Enum.reject(fn {key, value} -> key in names or blank_item_value?(value) end)
+    |> Enum.sort()
+    |> Enum.map(fn {key, _value} ->
+      {"#{path}.#{key}", type.label,
+       "is not a field of the #{type.name} item type (fields: #{Enum.join(Enum.sort(names), ", ")})"}
+    end)
+  end
+
+  # The field's own bounds, with the default cap standing in for a missing
+  # `max_items`.
+  defp flexible_bounds(items, def) do
+    max = Map.get(def, :max_items) || @flexible_max_items
+    within_bounds(items, Map.put(def, :max_items, max))
+  end
+
+  # Per item type: `max_items` (and `min_items`, once the field holds items).
+  defp type_bounds(items, types, path) do
+    counts = Enum.frequencies_by(items, & &1["_type"])
+
+    Enum.flat_map(types, fn type ->
+      count = Map.get(counts, type.name, 0)
+      min = Map.get(type, :min_items)
+      max = Map.get(type, :max_items)
+
+      cond do
+        is_integer(max) and count > max ->
+          [{path, type.label, "can have at most #{max} #{type.name} items (has #{count})"}]
+
+        is_integer(min) and count < min ->
+          [{path, type.label, "needs at least #{min} #{type.name} items (has #{count})"}]
+
+        true ->
+          []
+      end
     end)
   end
 
@@ -1233,6 +1540,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       true -> coerce(raw, def, read_opts)
     end
   end
+
+  # A flexible field (#2282) is a list of items; it is blank when it holds none.
+  defp blank_for?(%{field_type: :flexible}, value), do: value in [nil, []]
 
   # A key/value list (#2278) has no parts: it is empty when it holds no pair,
   # or only pairs with neither key nor value. Never stored as `[]`.

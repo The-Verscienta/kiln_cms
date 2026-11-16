@@ -1814,6 +1814,11 @@ msgstr "Un cuadro que crece con el texto."
 msgid "A box to tick beside every option."
 msgstr "Una casilla para marcar junto a cada opción."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "A box to type the number in, with spin arrows."
+msgstr "Un cuadro para escribir el número, con flechas."
+
 #: lib/kiln_cms/security/posture/checks/breached_passwords.ex
 #, elixir-autogen, elixir-format
 msgid "A breached password is allowed with a warning, administrators included."
@@ -3937,6 +3942,11 @@ msgstr "Se han eliminado la verificación en dos pasos, las claves de acceso y l
 msgid "Any uploader"
 msgstr "Subido por cualquiera"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Any value"
+msgstr "Cualquier valor"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Anyone"
@@ -5763,6 +5773,7 @@ msgstr "Ajustes de comprobación de afirmaciones guardados."
 msgid "Claim released; the release can be retried."
 msgstr "Reserva liberada; el lanzamiento se puede reintentar."
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -5772,6 +5783,11 @@ msgstr "Reserva liberada; el lanzamiento se puede reintentar."
 #, elixir-autogen, elixir-format
 msgid "Clear"
 msgstr "Borrar"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Clear %{field}"
+msgstr "Borrar %{field}"
 
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -8555,6 +8571,11 @@ msgstr "Los borradores nunca publicados no se listan."
 msgid "Drafts-only keys only. Until this date the service can swap the key for a fresh one itself; after it, mint a new key. Other scopes ignore it."
 msgstr "Solo para claves de solo borradores. Hasta esta fecha el servicio puede cambiar la clave por una nueva por sí mismo; después, crea una clave nueva. Los demás alcances lo ignoran."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drag along the range from the minimum to the maximum, with the value beside it."
+msgstr "Arrastra a lo largo del rango, del mínimo al máximo, con el valor al lado."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -8855,6 +8876,11 @@ msgstr "Editar los bloques de este documento como Markdown"
 #, elixir-autogen, elixir-format
 msgid "Edit tier"
 msgstr "Editar nivel"
+
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Edited through the API; item editing arrives with the next release."
+msgstr "Se edita mediante la API; la edición de elementos llegará en la próxima versión."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -10120,13 +10146,18 @@ msgstr "Tipos de campo"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Field: %{field} (↑)"
-msgstr "Campo: %{field} (↑)"
+msgid "Field: %{field} (%{dir})"
+msgstr "Campo: %{field} (%{dir})"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Field: %{field} (↓)"
-msgstr "Campo: %{field} (↓)"
+msgid "Field: %{field} by current filename (%{dir})"
+msgstr "Campo: %{field}, por nombre de archivo actual (%{dir})"
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Field: %{field} by current title (%{dir})"
+msgstr "Campo: %{field}, por título actual (%{dir})"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
@@ -11358,6 +11389,11 @@ msgstr "Cómo indica cada elemento de la lista de contenido si está publicado, 
 msgid "How editors fill this in. The type and text format of the field stay as they are."
 msgstr "Cómo rellenan este campo los editores. El tipo y el formato de texto del campo no cambian."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "How far the editor's arrows and slider move at a time. Not checked on save."
+msgstr "Cuánto avanzan las flechas y el control deslizante del editor cada vez. No se comprueba al guardar."
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "How it works"
@@ -11746,6 +11782,11 @@ msgstr "En una frase:"
 #, elixir-autogen, elixir-format
 msgid "In review"
 msgstr "En revisión"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "In steps of %{step}."
+msgstr "En pasos de %{step}."
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -14934,6 +14975,11 @@ msgstr "Sin resultado utilizable"
 msgid "No user agent"
 msgstr "Sin agente de usuario"
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "No value yet."
+msgstr "Aún sin valor."
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "No versions recorded."
@@ -15459,6 +15505,11 @@ msgstr "Número"
 #, elixir-autogen, elixir-format
 msgid "Number (range)"
 msgstr "Número (rango)"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Number box"
+msgstr "Cuadro numérico"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #, elixir-autogen, elixir-format
@@ -17039,6 +17090,16 @@ msgstr "Desarrollado con KilnCMS."
 #, elixir-autogen, elixir-format
 msgid "Preferred languages"
 msgstr "Idiomas preferidos"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Prefix"
+msgstr "Prefijo"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Prefix %{prefix}."
+msgstr "Prefijo %{prefix}."
 
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -20356,6 +20417,11 @@ msgstr "Establece KILN_CONSOLE_HOST en un host que ninguna organización control
 msgid "Set PRESENTATION_PREVIEW_URL to your front end (e.g. https://site.example.com{path}) to enable side-by-side editing."
 msgstr "Defina PRESENTATION_PREVIEW_URL con la URL de su front-end (p. ej. https://site.example.com{path}) para habilitar la edición en paralelo."
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#, elixir-autogen, elixir-format
+msgid "Set a value"
+msgstr "Establecer un valor"
+
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set by the operator in configuration, and used by any site that has not saved its own chains above."
@@ -20691,6 +20757,11 @@ msgstr "Se muestra después del número"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
+msgid "Shown after the number in the editor."
+msgstr "Se muestra después del número en el editor."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
 msgid "Shown as"
 msgstr "Se muestra como"
 
@@ -20713,6 +20784,11 @@ msgstr "Se muestra como autor del contenido que publica, en sus comentarios y a 
 #, elixir-autogen, elixir-format
 msgid "Shown as the site's account on link previews in X (Twitter), e.g. @kilncms. Leave blank to omit it."
 msgstr "Se muestra como la cuenta del sitio en las vistas previas de enlaces en X (Twitter), p. ej., @kilncms. Déjalo en blanco para omitirla."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown before the number in the editor."
+msgstr "Se muestra antes del número en el editor."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -21154,6 +21230,11 @@ msgstr "Los endpoints de Slack solo reciben alertas de seguridad."
 msgid "Slack webhook added."
 msgstr "Webhook de Slack añadido."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Slider"
+msgstr "Control deslizante"
+
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -21545,6 +21626,7 @@ msgid "Stays open when this publishes"
 msgstr "Sigue abierta al publicarse"
 
 #: lib/kiln_cms_web/live/analytics_live.ex
+#: lib/kiln_cms_web/live/field_definition_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Step"
@@ -21759,6 +21841,16 @@ msgstr "Correcta"
 #, elixir-autogen, elixir-format
 msgid "Success message"
 msgstr "Mensaje de éxito"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Suffix"
+msgstr "Sufijo"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Suffix %{suffix}."
+msgstr "Sufijo %{suffix}."
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -27961,6 +28053,11 @@ msgstr "puede leer: %{grants}"
 msgid "can't be more than the maximum (%{max})"
 msgstr "no puede superar el máximo (%{max})"
 
+#: lib/kiln_cms/cms/validations/number_options.ex
+#, elixir-autogen, elixir-format
+msgid "can't be more than the span between min and max"
+msgstr "no puede ser mayor que la distancia entre el mínimo y el máximo"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "can't be processed — PDF metadata stripping isn't available on this server"
@@ -28928,6 +29025,11 @@ msgstr "más conversiones que impresiones: estos contadores no son fiables"
 #, elixir-autogen, elixir-format
 msgid "must be a whole number from 1 to %{max}"
 msgstr "debe ser un número entero de 1 a %{max}"
+
+#: lib/kiln_cms/cms/validations/number_options.ex
+#, elixir-autogen, elixir-format
+msgid "must be a whole number on an integer field"
+msgstr "debe ser un número entero en un campo de enteros"
 
 #: lib/kiln_cms/cms/validations/form_field_config.ex
 #, elixir-autogen, elixir-format

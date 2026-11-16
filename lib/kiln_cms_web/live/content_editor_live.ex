@@ -38,8 +38,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.CMS.ContentLinks
   alias KilnCMS.CMS.ContentTree
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldDisplay
+  alias KilnCMS.CMS.FieldWidgets
   alias KilnCMS.CMS.HiddenFields
   alias KilnCMS.CMS.Mentions
   alias KilnCMS.CMS.PreviewToken
@@ -3109,6 +3111,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
     {:noreply, update_field_gallery(socket, name, &move_id(&1, id, dir))}
   end
 
+  # A slider number's blank state (#2432): "Set a value" stores the field's
+  # minimum (the value a slider would start on), "Clear" stores none. The
+  # event names only the field, never a value, so a forged one can't write
+  # anything the slider itself couldn't; and only a field whose widget is a
+  # slider answers it.
+  def handle_event("number_field_set", %{"field" => name}, socket) when is_binary(name) do
+    case slider_field(socket, name) do
+      %{validation: %{"min" => min}} -> {:noreply, put_custom_field_param(socket, name, min)}
+      _not_a_slider -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("number_field_clear", %{"field" => name}, socket) when is_binary(name) do
+    case slider_field(socket, name) do
+      %{required: false} -> {:noreply, put_custom_field_param(socket, name, "")}
+      _required_or_not_a_slider -> {:noreply, socket}
+    end
+  end
+
   # The items of a list field — a multiple select's terms, a multiple
   # string's phrases (the `TermPicker` hook, each item's ×, and a drag through
   # the shared `Sortable` hook): server-side edits of the form params, as a
@@ -4492,6 +4513,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
       name,
       &match?(%{field_type: type, multiple: true} when type in [:media, :reference], &1)
     )
+  end
+
+  # The definition of the editable top-level field `name` when it is a number
+  # drawn as a slider, with its `validation` normalized; nil otherwise.
+  defp slider_field(socket, name) do
+    definition =
+      Enum.find(socket.assigns.field_definitions, fn definition ->
+        definition.name == name and definition.field_type in [:integer, :float] and
+          FieldWidgets.effective(definition) == "slider"
+      end)
+
+    if definition && custom_field_editable?(socket, name, &(&1 == definition)),
+      do: %{definition | validation: FieldConstraints.normalize(definition.validation)},
+      else: nil
   end
 
   # The same gate for a single media field (#2054).
