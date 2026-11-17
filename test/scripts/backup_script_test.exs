@@ -915,6 +915,44 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert File.exists?(target)
     end
 
+    # #2849: the app's heartbeat writes these on a host only cron backs up,
+    # which never runs the app's own sweep.
+    test "prune removes a backup-directory id temporary file past the grace, and only that",
+         ctx do
+      old = 120
+      temp = &".kiln-dir-id.#{&1}.tmp"
+
+      gone = abandoned!(ctx, temp.(Ash.UUID.generate()), old)
+
+      kept = [
+        abandoned!(ctx, temp.(Ash.UUID.generate()), 10),
+        abandoned!(ctx, temp.(String.upcase(Ash.UUID.generate())), old),
+        abandoned!(ctx, temp.("notauuid"), old),
+        abandoned!(ctx, ".kiln-dir-id.tmp", old),
+        abandoned!(ctx, ".kiln-dir-id", old),
+        abandoned!(ctx, temp.(Ash.UUID.generate()) <> ".bak", old)
+      ]
+
+      target = abandoned!(ctx, "elsewhere", old)
+      link = Path.join(ctx.backups, temp.(Ash.UUID.generate()))
+      File.ln_s!(target, link)
+      # The link's own mtime old too, so only its type keeps it.
+      {_, 0} = System.cmd("touch", ["-h", "-t", "200001010000", link])
+      directory = Path.join(ctx.backups, temp.(Ash.UUID.generate()))
+      File.mkdir_p!(directory)
+      File.touch!(directory, System.os_time(:second) - old * 60)
+
+      assert {out, 0} = backup(ctx, "prune")
+
+      refute File.exists?(gone)
+      assert out =~ gone
+      refute out =~ "could not remove"
+      for f <- kept, do: assert(File.exists?(f), f)
+      assert {:ok, %{type: :symlink}} = File.lstat(link)
+      assert File.exists?(target)
+      assert File.dir?(directory)
+    end
+
     test "prune keeps a manifest temporary file whose age it can't tell", ctx do
       real_find = System.find_executable("find")
 

@@ -540,6 +540,42 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert File.exists?(odd)
     end
 
+    # What a node stopped between writing its backup-directory id and removing
+    # the temporary file leaves at the directory's root (#2849).
+    @tag :pg_tools
+    test "the start step removes a backup-directory id temporary file past the grace, " <>
+           "and only that",
+         %{dir: dir} do
+      File.mkdir_p!(dir)
+      old = System.os_time(:second) - 2 * 3600
+      temp = &Path.join(dir, ".kiln-dir-id.#{&1}.tmp")
+
+      stale = temp.(Ash.UUID.generate())
+      fresh = temp.(Ash.UUID.generate())
+      upper = temp.(String.upcase(Ash.UUID.generate()))
+      odd = temp.("notauuid")
+      bare = Path.join(dir, ".kiln-dir-id.tmp")
+      link = temp.(Ash.UUID.generate())
+      directory = temp.(Ash.UUID.generate())
+      target = Path.join(dir, "elsewhere")
+
+      for path <- [stale, fresh, upper, odd, bare, target], do: File.write!(path, "x")
+      File.ln_s!(target, link)
+      # The link's own mtime old too, so only its type keeps it.
+      {_, 0} = System.cmd("touch", ["-h", "-t", "200001010000", link])
+      File.mkdir_p!(directory)
+      for path <- [stale, upper, odd, bare, target, directory], do: File.touch!(path, old)
+
+      assert :ok = BackupChain.run()
+      refute File.exists?(stale)
+
+      for path <- [fresh, upper, odd, bare, target, directory],
+          do: assert(File.exists?(path), path)
+
+      assert {:ok, %{type: :symlink}} = File.lstat(link)
+      assert File.dir?(directory)
+    end
+
     @tag :pg_tools
     test "the partials of a stamp with a run go once every file of it is past the grace",
          %{dir: dir} do

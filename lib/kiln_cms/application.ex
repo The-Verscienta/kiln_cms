@@ -145,6 +145,13 @@ defmodule KilnCMS.Application do
       # Running backup steps, by chain (#2218), before Oban so a step can
       # register. `:duplicate`: the heartbeat's self-fence kills every one.
       {Registry, keys: :duplicate, name: KilnCMS.Backups.StepRegistry},
+      # The heartbeat's backup-directory id reads (#2848), each in a task of
+      # its own so a hung BACKUP_DIR can't hold up a beat. Single-flight per
+      # heartbeat, so one at a time on a running node. Before the heartbeat.
+      {Task.Supervisor, name: KilnCMS.Backups.DirIdReaders},
+      # The self-fence's watchdog (#2848): kills this node's steps when the
+      # heartbeat has not beaten for 90 s, even while a tick is stuck.
+      backup_fence(),
       {Oban,
        AshOban.config(
          Application.fetch_env!(:kiln_cms, :ash_domains),
@@ -391,6 +398,12 @@ defmodule KilnCMS.Application do
   defp backup_heartbeat do
     if KilnCMS.Backups.Chain.heartbeat?(),
       do: KilnCMS.Backups.Heartbeat
+  end
+
+  # Started with the heartbeat, whose beats it watches.
+  defp backup_fence do
+    if KilnCMS.Backups.Chain.heartbeat?(),
+      do: KilnCMS.Backups.Fence
   end
 
   # Rescue jobs orphaned in `executing` (#1718). A node stopped mid-deploy

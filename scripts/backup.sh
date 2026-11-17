@@ -1897,7 +1897,8 @@ cmd_verify() {
 # touched here; they age as an incomplete unit like any other.
 #
 # Then the manifest temporary files at BACKUP_DIR's root that a writer stopped
-# between its write and its rename left behind (prune_manifest_partials).
+# between its write and its rename left behind (prune_manifest_partials), and
+# the app's abandoned backup-directory id temporary files (prune_dir_id_temps).
 
 PART_NUM_ERE='(0[1-9]|[1-9][0-9]|[1-9][0-9]{2,})'
 
@@ -2161,6 +2162,33 @@ prune_manifest_partials() {
 # In a variable: bash 3.2 reads a quoted right-hand side of `=~` literally.
 MANIFEST_PARTIAL_ERE='^manifest\.json\.[0-9]+(-[0-9]+)?\.partial$'
 
+# The app's backup-directory id temporary files at BACKUP_DIR's root (#2849)
+# older than PARTIAL_GRACE_MIN: `.kiln-dir-id.<uuid>.tmp`, which the app
+# writes, links to `.kiln-dir-id` and removes in a moment, so one that old was
+# left by a node stopped in between. This script never writes one, but a host
+# that backs up only with cron gets them from each app node's heartbeat and
+# never runs the app's own sweep. Same rules as prune_manifest_partials: only
+# regular files of exactly that name, a file of unknown age is kept, each
+# removal is echoed, and a failure is warned about.
+prune_dir_id_temps() {
+  local path old
+  for path in "$BACKUP_DIR"/.kiln-dir-id.*.tmp; do
+    [[ "${path##*/}" =~ $DIR_ID_TEMP_ERE ]] || continue
+    if ! old="$(find "$path" -prune -type f -mmin "+${PARTIAL_GRACE_MIN}" -print)"; then
+      warn "could not check the age of $path; kept it"
+      continue
+    fi
+    [ -n "$old" ] || continue
+    if rm -f -- "$path"; then
+      echo "$path"
+    else
+      warn "could not remove $path"
+    fi
+  done
+}
+
+DIR_ID_TEMP_ERE='^\.kiln-dir-id\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$'
+
 cmd_prune() {
   echo "==> Pruning backups older than ${KEEP_DAYS} days"
   local kind dir names stamp members newest fresh name db_names="" media_names=""
@@ -2200,6 +2228,7 @@ cmd_prune() {
 
   prune_abandoned_partials "$db_names" "$media_names"
   prune_manifest_partials
+  prune_dir_id_temps
 
   for kind in db media; do
     dir="$BACKUP_DIR/$kind"
