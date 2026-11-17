@@ -15,13 +15,8 @@ stay migrations.
 Both directions need an **admin** (the import and export check that the user can
 define fields).
 
-A **flexible field** (`:flexible`, #2282) travels as a field, but its item
-types and their sub-fields do **not** yet: the file format has no child list
-for them, and `item_setting` is not a synced attribute. Importing such a file
-creates the field with no item types (item writes are refused until you define
-some), and neither an import nor `--prune` plans or deletes an item type of an
-existing field. See
-[Define a flexible field from code](extending-content.md#define-a-flexible-field-from-code).
+A **flexible field** (`:flexible`, #2282) travels with its item types and
+their sub-fields: see [Flexible fields](#flexible-fields) below.
 
 ## Export
 
@@ -283,6 +278,55 @@ default. See
   to the default. See
   [Moving a file to an older build](#moving-a-file-to-an-older-build) and
   [ADR 0047](decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md).
+
+### Flexible fields
+
+A flexible field's item types sit under it as an `"item_types"` list. Each is
+an ordinary `:group` entry with its own `"group_fields"`, and a sub-field that
+is itself flexible nests its own `"item_types"`, down to the depth cap of 3.
+Item types and sub-fields are matched by path (`post.sections.hero.headline`),
+so a rename is a delete plus a create, as for any field.
+
+```json
+{
+  "name": "sections", "field_type": "flexible", "label": "Sections",
+  "item_types": [
+    {
+      "name": "hero", "label": "Hero",
+      "group_fields": [
+        {"name": "headline", "field_type": "string", "required": true},
+        {"name": "background", "field_type": "select",
+         "options": ["dark", "light"], "item_setting": true}
+      ]
+    }
+  ]
+}
+```
+
+A hand-written entry may leave out `field_type` and `multiple` on an item type
+(they import as `group` and `true`); an item type that names another
+`field_type` is refused.
+
+- **`item_setting` is written only when it is `true`.** A sub-field that is
+  not a setting has no such key, so a site with no flexible fields exports the
+  same file as before, and a missing key imports as `false`.
+- **A release before this one refuses a file that has `item_types` or an
+  `item_setting: true`**, as an unknown key (see
+  [Moving a file to an older build](#moving-a-file-to-an-older-build)). 1.10
+  cannot import such a file. Export from the older build, or remove the keys.
+- **Flipping `item_setting` over stored items is blocked** without
+  `--allow-data-loss`, because the stored values stay where they were.
+- **Deleting a whole flexible field that holds items needs `--prune` and
+  `--allow-data-loss`**, like a group.
+- **An import cannot delete an item type that holds items, even with
+  `--allow-data-loss`.** Without the flag the dry run lists it as blocked; with
+  it the delete is refused with a message naming `purge_items?`, and nothing
+  of that type is removed. An import can't pass `purge_items?`, so remove the
+  items first, or delete the item type in the fields admin, which counts the
+  items and removes them with it on confirmation. An item type that no item
+  uses is deleted normally.
+- **A retype to or from `flexible` is refused** by the resource, with or
+  without `--allow-data-loss`: add the new field and delete the old one.
 
 ### What it does not carry
 

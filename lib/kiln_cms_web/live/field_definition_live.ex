@@ -649,7 +649,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         "item_delete_confirm",
         %{"id" => id},
         %{assigns: %{delete_confirm: %{id: id} = pending}} = socket
-      ) do
+      )
+      when is_binary(id) do
     with {kind, definition} <- deletable_items_owner(socket.assigns, id),
          counted when counted == pending.counted <- count_stored(socket.assigns, definition) do
       {:noreply, destroy_with_items(socket, kind, definition, counted)}
@@ -2526,7 +2527,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     ~H"""
     <div :if={@type == :flexible} class="sm:col-span-2">
       <.item_bounds_fieldset form={@form} id={"#{@id}-bounds"} />
-      <p id={"#{@id}-item-types-hint"} class="mt-2 text-xs text-base-content/60">
+      <p id={"#{@id}-item-types-hint"} class="mt-2 text-xs text-base-content/70">
         {gettext(
           "Once the field is saved, add the kinds of item it can hold — a hero, a quote — under it in the list below. Each kind has its own fields and settings."
         )}
@@ -2713,7 +2714,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           placeholder={gettext("No limit")}
         />
       </div>
-      <p class="mt-2 text-xs text-base-content/60">
+      <p class="mt-2 text-xs text-base-content/70">
         {gettext(
           "Leave a box empty for no limit. A field with no maximum is still capped, at 100 items unless the site is configured otherwise."
         )}
@@ -4920,7 +4921,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     <p
                       :if={definition.field_type == :flexible}
                       id={"field-#{definition.id}-item-bounds"}
-                      class="text-xs text-base-content/60"
+                      class="text-xs text-base-content/70"
                     >
                       {items_summary(definition)}
                     </p>
@@ -4965,7 +4966,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       phx-click="item_delete"
                       phx-value-id={definition.id}
                       aria-label={gettext("Delete field")}
-                      class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                      class="rounded px-2 py-1 text-xs text-base-content/70 hover:bg-base-200 hover:text-error"
                     >
                       <.icon name="hero-trash" class="size-4" />
                     </button>
@@ -5346,13 +5347,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           {if @group?, do: gettext("Add a field"), else: gettext("Add a detail")}
         </button>
       </div>
-      <p :if={@item?} class="mt-0.5 text-xs text-base-content/60">
+      <p :if={@item?} class="mt-0.5 text-xs text-base-content/70">
         {gettext(
           "What an editor fills in for each %{type} item. A plain value, or a list of items of its own. Tick Setting on a value that configures the item (a background, a width) rather than content: settings are stored apart from the content.",
           type: @definition.label
         )}
       </p>
-      <p :if={@group? and !@item?} class="mt-0.5 text-xs text-base-content/60">
+      <p :if={@group? and !@item?} class="mt-0.5 text-xs text-base-content/70">
         {if @definition.multiple,
           do:
             gettext(
@@ -5445,7 +5446,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 phx-click="item_delete"
                 phx-value-id={link.id}
                 aria-label={gettext("Delete field %{label}", label: link.label)}
-                class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                class="rounded px-2 py-1 text-xs text-base-content/70 hover:bg-base-200 hover:text-error"
               >
                 <.icon name="hero-trash" class="size-4" />
               </button>
@@ -5546,7 +5547,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           {gettext("Add an item type")}
         </button>
       </div>
-      <p class="mt-0.5 text-xs text-base-content/60">
+      <p class="mt-0.5 text-xs text-base-content/70">
         {gettext(
           "The kinds of item an editor can add to this field — a hero, a quote, a feature grid. Each kind has its own fields and settings. The items are data with settings, not page layout: your theme decides how each kind looks."
         )}
@@ -5561,7 +5562,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           <div :if={!(@open && @open.id == item.id)} class="flex items-center justify-between gap-3">
             <div class="flex min-w-0 flex-wrap items-center gap-2 text-sm">
               <span class="font-medium">{item.label}</span>
-              <code class="text-xs text-base-content/60">{item.name}</code>
+              <code class="text-xs text-base-content/70">{item.name}</code>
               <span
                 :if={item.max_items}
                 id={"item-type-#{item.id}-max"}
@@ -5569,7 +5570,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               >
                 {ngettext("at most one", "at most %{count}", item.max_items)}
               </span>
-              <span :if={item.help_text} class="text-xs text-base-content/60">{item.help_text}</span>
+              <span :if={item.help_text} class="text-xs text-base-content/70">{item.help_text}</span>
             </div>
             <div class="flex shrink-0 items-center gap-1">
               <button
@@ -5609,7 +5610,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 phx-click="item_delete"
                 phx-value-id={item.id}
                 aria-label={gettext("Delete item type %{label}", label: item.label)}
-                class="rounded px-2 py-1 text-xs text-base-content/60 hover:bg-base-200 hover:text-error"
+                class="rounded px-2 py-1 text-xs text-base-content/70 hover:bg-base-200 hover:text-error"
               >
                 <.icon name="hero-trash" class="size-4" />
               </button>
@@ -5637,7 +5638,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           />
         </li>
       </ol>
-      <p :if={@items == [] and !@open} class="mt-2 text-xs text-base-content/50">
+      <p :if={@items == [] and !@open} class="mt-2 text-xs text-base-content/70">
         {gettext("No item types yet — editors can't add anything to this field until you add one.")}
       </p>
       <.item_type_form
@@ -5832,7 +5833,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         />
         <span>
           {gettext("Setting")}
-          <span class="block text-xs text-base-content/60">
+          <span class="block text-xs text-base-content/70">
             {gettext(
               "A value that configures the item — a background, a width, an alignment — rather than content. Settings are stored apart from the content, and a setting is fixed once the field exists."
             )}

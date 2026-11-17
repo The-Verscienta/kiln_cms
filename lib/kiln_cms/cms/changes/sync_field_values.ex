@@ -160,6 +160,10 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   defp purge_requested?(changeset),
     do: Ash.Changeset.get_argument(changeset, :purge_items?) == true
 
+  # `sobelow_skip`: the statement comes from `FlexiblePath.update_sql/4`, whose
+  # only interpolations are the table name and `$n` placeholders; every name
+  # and value is a bound parameter.
+  # sobelow_skip ["SQL.Query"]
   defp purge_type_items(top, steps, definition) do
     with false <- KilnCMS.CMS.FieldDefinition.orphaned?(top),
          {:ok, table, filter, params} <- target(top) do

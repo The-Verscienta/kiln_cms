@@ -148,8 +148,8 @@ added in those two functions and nowhere else.
 | `Graphql.CustomFields` | The top-level map uses `top_level?/1`; the field is served as generic JSON per item until the typed `FlexibleValue`. |
 | `SchemaExport` | The field is `["array", "null"]` of generic objects, with the item bounds; item types are not listed as fields. |
 | `ScopePickers` | Grant and hide pickers list top-level fields only. |
-| `FieldSync` | `flex_of_id` is an owner key and `item_setting` is not synced yet; see "Export and import are lossy" below. |
-| `FieldDefinitionLive` | The type picker leaves `:flexible` out, and the list leaves item types and their sub-fields out, so the Fields screen shows no row it cannot edit. |
+| `FieldSync` | `flex_of_id` is an owner key; item types travel as an `"item_types"` child list and `item_setting` as an attribute; see "Export and import" below. |
+| `FieldDefinitionLive` | The new-field picker offers `:flexible`; an existing flexible field's type select is disabled. Item types and their sub-fields are edited in the field's own panels, not listed as top-level rows. |
 | `BustTypeRegistry`, `SyncFieldValues`, `FlexiblePath` | Walk the owner chain up to the cap; see below. |
 
 ### Owner walks and SQL go through one module
@@ -172,7 +172,7 @@ types and their sub-fields in the database, **bypassing `SyncFieldValues`**
 (true of groups too). So the guard is a validation, not the foreign key:
 `Validations.ItemTypeInUse` refuses `destroy` of an item type while any
 document holds an item of it, unless the destroy passes `purge_items?: true`,
-in which case `SyncFieldValues` removes the items after the commit.
+in which case `SyncFieldValues` removes the items in the destroy's own transaction (an `after_action`), so the type and its items go together or not at all.
 
 - An item type is the one definition whose destroy loses content an editor
   wrote without the admin naming it, hence the guard. Deleting a sub-field
@@ -183,11 +183,14 @@ in which case `SyncFieldValues` removes the items after the commit.
   cap, the table does not resolve), the destroy is refused with a message
   saying so. `purge_items?: true` skips the check entirely. A destroy whose
   owner is already gone is let through, since the items went with it.
-- **Check-then-act window.** The check runs in the validation, the purge runs
-  after the transaction commits. An item of that type saved between the two is
-  removed by the purge along with the type. This is accepted: the type is gone
-  either way, and an item of a type that no longer exists is refused by
-  `ApplyCustomFields` on the next write that names the field.
+- **Check-then-act window.** The check runs in the validation and the purge
+  in the same transaction, but the window is not closed: a save that commits
+  after the purge statement and before the destroy commits can still add an
+  item of the type, which is then an orphan. This is accepted: the type is
+  gone either way, and an item of a type that no longer exists is refused by
+  `ApplyCustomFields` on the next write that names the field (the editor shows
+  it as a locked card and drops it on save, see below). A purge that fails
+  rolls the destroy back.
 
 ### Write strictness: strict, drop, import
 
@@ -239,46 +242,48 @@ Rolling the database back (`down`) drops the two columns. Item-type rows that
 exist then are ownerless groups, as above; delete them first if you want the
 table clean.
 
-### Export and import are lossy until PR 2
+### Export and import
 
-The field-sync file format (`docs/field-sync.md`) has no `item_types` child
-list yet; it arrives with the admin UI in PR 2. Until then:
+The field-sync file carries a flexible field's item types as an
+`"item_types"` child list: each an ordinary `:group` entry with its own
+`"group_fields"`, nested to the depth cap, and `item_setting` as an attribute.
+`item_setting` is left out of the file when it is `false`, so a site with no
+flexible fields exports the same file as before and an older reader (which
+refuses unknown keys) still reads it. A file with `item_types` or
+`item_setting: true` does not import on 1.10.
 
-- `mix kiln.fields.export` writes a `:flexible` field and **no** item types or
-  their sub-fields, and `import` would create a flexible field with no item types,
-  so every item write to it is refused until an admin defines some. An import
-  of a file into a site that already has the field leaves its item types
-  alone, and `--prune` does not plan or delete an item type (it is not in the
-  list the prune walks). Deleting the flexible field in an import deletes its
-  item types by the database cascade.
-- `item_setting` is not in the synced attribute list, so it cannot travel
-  either.
+An import cannot delete an item type that holds items, even with
+`allow_data_loss?`: it cannot pass `purge_items?`, so the resource refuses with
+a message naming it. Data-loss detection for an item type or one of its
+sub-fields asks `FlexiblePath.items_exist?`, failing closed when the read
+fails. Deleting a whole flexible field that holds items is a data-loss change
+like a group's. A retype to or from `:flexible` is refused (below).
 
-### The editor shows a read-only note
+### The editor edits items as cards
 
-Until PR 2, the content editor renders a `:flexible` field as its label, an
-item count and the line "Edited through the API; item editing arrives with the
-next release.", with no input, so a save posts nothing for the key and keeps
-the stored items. The Fields screen does not offer `:flexible` in its type
-picker; an admin defines the field and its item types through the code
-interface (`KilnCMS.CMS.create_field_definition/2`), not the console.
+The content editor renders each item as a card under its field: add (appended
+at the end), duplicate, remove, move, drag, collapse, and a collapsed
+**Settings** section whose inputs are always rendered, because a save replaces
+an item's `_settings` rather than merging them. Events address an item by its
+`_id` path, never by position, so a stale client cannot act on the wrong item.
+The editor posts `_id`, `_type` and `_settings` for each item. An **orphan**
+(an item whose `_type` is no longer an item type of the field) is shown as a
+locked card with only **Remove**; the editor posts only inert `_id` and
+`_type` markers for it, no content, so a save drops it.
 
-### Retyping is not guarded
+### Retyping to or from flexible is refused
 
-`field_type` is accepted by the update action, and nothing in this change
-blocks changing an existing field to or from `:flexible`. Retyping a field to
-`:flexible` re-validates its options (a private field is refused), but its
-stored values stay in the old shape, and (read from `resolve_flexible`, not
-tested) a write that names the field refuses a non-list as "must be a list of
-items". Retyping a flexible field away leaves its item types attached to a
-field that is no longer flexible. It is left open deliberately: a guard that
-refuses a retype while the field has values belongs with the admin UI, which
-is the only place an admin does it.
+`Validations.FlexibleRetype` refuses an update that changes `field_type` to or
+from `:flexible`, on the resource, so the admin form, a field-sync import and
+the code interface are refused alike. A retype in either direction would
+leave values in the wrong shape or item types attached to a non-flexible
+field; to change one into the other, add a new field and delete the old one.
+The admin form disables the type select on a flexible field.
 
-### What the first release does not do
+### What is not done yet
 
-No admin panel, no editor cards, no per-item-type grants, no search of items,
-no per-item diff, no typed GraphQL or client export (PR 2 to PR 7 of the
+No per-item-type grants, no search of items,
+no per-item diff, no typed GraphQL or client export (PR 3 to PR 7 of the
 plan). The values are served as generic JSON objects until then.
 
 ## What was rejected

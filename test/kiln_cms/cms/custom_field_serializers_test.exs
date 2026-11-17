@@ -160,8 +160,10 @@ defmodule KilnCMS.CMS.CustomFieldSerializersTest do
     ),
     console: ~w(
       lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+      lib/kiln_cms_web/components/content_editor/flexible_components.ex
       lib/kiln_cms_web/components/content_editor/inspector_components.ex
       lib/kiln_cms_web/components/content_editor/reference_picker.ex
+      lib/kiln_cms_web/live/content_editor/flexible_items.ex
       lib/kiln_cms_web/live/content_editor/group_rows.ex
       lib/kiln_cms_web/live/content_editor/localization.ex
       lib/kiln_cms_web/live/content_editor/reference_values.ex

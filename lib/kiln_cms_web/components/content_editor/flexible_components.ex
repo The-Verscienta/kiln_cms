@@ -93,7 +93,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
     >
       <div class="mb-1 flex items-baseline justify-between gap-2">
         <span id={"#{@list_id}-label"} class="text-sm font-medium">{@definition.label}</span>
-        <span :if={@items != []} class="text-xs text-base-content/60">
+        <span :if={@items != []} class="text-xs text-base-content/70">
           {items_count(@items, @definition)}
         </span>
       </div>
@@ -122,9 +122,9 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
           at_minimum?={@at_minimum?}
         />
       </ol>
-      <p :if={@items == []} class="text-sm text-base-content/60">{gettext("No items yet.")}</p>
+      <p :if={@items == []} class="text-sm text-base-content/70">{gettext("No items yet.")}</p>
       <%= if @types == [] do %>
-        <p class="mt-2 text-sm text-base-content/60">
+        <p class="mt-2 text-sm text-base-content/70">
           {gettext("This field has no item types yet. An admin adds them under Custom fields.")}
         </p>
       <% else %>
@@ -136,10 +136,10 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
           full?={@full?}
         />
       <% end %>
-      <p :if={@full?} class="mt-1 text-xs text-base-content/60">
+      <p :if={@full?} class="mt-1 text-xs text-base-content/70">
         {gettext("That's the most this field holds.")}
       </p>
-      <p :if={@definition.help_text && @depth == 1} class="mt-1 text-xs text-base-content/60">
+      <p :if={@definition.help_text && @depth == 1} class="mt-1 text-xs text-base-content/70">
         {@definition.help_text}
       </p>
       <.custom_field_errors_list id={"#{@list_id}-errors"} errors={@field_errors} />
@@ -204,12 +204,12 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
           class="rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-base-200 disabled:pointer-events-none disabled:opacity-40"
         >
           <span class="block font-medium">{type.label}</span>
-          <span :if={type.help_text} class="block text-xs text-base-content/60">
+          <span :if={type.help_text} class="block text-xs text-base-content/70">
             {type.help_text}
           </span>
           <span
             :if={FlexibleItems.type_full?(@items, type)}
-            class="block text-xs text-base-content/60"
+            class="block text-xs text-base-content/70"
           >
             {gettext("Full")}
           </span>
@@ -289,7 +289,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
               data-flex-handle={@list_id}
               aria-label={gettext("Drag to reorder item %{position}", position: @index + 1)}
               title={gettext("Drag to reorder")}
-              class="-ml-1 cursor-grab rounded p-1 text-base-content/50 hover:bg-base-200 hover:text-base-content active:cursor-grabbing"
+              class="-ml-1 cursor-grab rounded p-1 text-base-content/70 hover:bg-base-200 hover:text-base-content active:cursor-grabbing"
             >
               <.icon name="hero-bars-2" class="size-4" />
             </button>
@@ -307,7 +307,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
             >
               <.icon
                 name="hero-chevron-down"
-                class="size-4 shrink-0 text-base-content/50 transition-transform group-aria-[expanded=false]:-rotate-90"
+                class="size-4 shrink-0 text-base-content/70 transition-transform group-aria-[expanded=false]:-rotate-90"
               />
               <span class="shrink-0 rounded bg-base-200 px-1.5 py-0.5 text-xs font-medium">
                 {@type.label}
@@ -407,7 +407,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
       <% else %>
         <div class="flex items-center justify-between gap-2">
           <div class="flex min-w-0 items-center gap-2">
-            <.icon name="hero-lock-closed" class="size-4 shrink-0 text-base-content/50" />
+            <.icon name="hero-lock-closed" class="size-4 shrink-0 text-base-content/70" />
             <span class="shrink-0 rounded bg-base-200 px-1.5 py-0.5 text-xs font-medium">
               {@item["_type"] || gettext("Unknown")}
             </span>
@@ -453,7 +453,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
             @definition.min_items
           )
       }
-      class="rounded px-1.5 py-1 text-base-content/60 transition-colors hover:bg-base-200 hover:text-error disabled:pointer-events-none disabled:opacity-40"
+      class="rounded px-1.5 py-1 text-base-content/70 transition-colors hover:bg-base-200 hover:text-error disabled:pointer-events-none disabled:opacity-40"
     >
       <.icon name="hero-trash" class="size-4" />
     </button>

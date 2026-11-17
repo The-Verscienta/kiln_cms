@@ -366,12 +366,12 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
     end
 
     defp drop_item_type(doc, name),
-      do:
-        update_in(doc, ["owners", Access.all(), "fields", Access.all()], fn f ->
-          if f["name"] == "sections",
-            do: Map.update!(f, "item_types", fn ts -> Enum.reject(ts, &(&1["name"] == name)) end),
-            else: f
-        end)
+      do: update_in(doc, ["owners", Access.all(), "fields", Access.all()], &drop_from(&1, name))
+
+    defp drop_from(%{"name" => "sections"} = f, name),
+      do: Map.update!(f, "item_types", fn ts -> Enum.reject(ts, &(&1["name"] == name)) end)
+
+    defp drop_from(f, _name), do: f
 
     defp item_type_names(admin) do
       for f <- CMS.list_field_definitions!(actor: admin),
