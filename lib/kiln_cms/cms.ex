@@ -717,6 +717,7 @@ defmodule KilnCMS.CMS do
       define :schedule_release, action: :schedule
       define :unschedule_release, action: :unschedule
       define :start_release, action: :start
+      define :start_scheduled_release, action: :start_scheduled
       define :start_release_rollback, action: :start_rollback
       define :abandon_release, action: :abandon
       define :reopen_release, action: :reopen

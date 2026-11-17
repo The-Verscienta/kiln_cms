@@ -455,6 +455,31 @@ carries the reasoning.
   No migration; rolling back restores the old import behavior. Guide:
   [A section entry no field carries](../field-sync.md#a-section-entry-no-field-carries).
 
+<a id="scheduled-content-actions-due-only"></a>
+
+- **`:publish_scheduled`, `:unpublish_scheduled` and `:archive_scheduled` now change a record only while it still matches its AshOban trigger's condition. Called on any other record, they return an `Ash.Error.Invalid` holding an `Ash.Error.Changes.StaleRecord` and change nothing.**
+  Each action's `UPDATE` now carries its trigger's `where` as a filter:
+  - `:publish_scheduled`: a `:draft` or `:in_review` record whose
+    `scheduled_at` is set and has passed;
+  - `:unpublish_scheduled`: a `:published` record whose `unpublish_at` has
+    passed and whose `expiry_action` is `:unpublish`;
+  - `:archive_scheduled`: the same, with `expiry_action` `:archive`.
+
+  This is the fix for #2746 (see
+  [the Fixed entry](#scheduled-content-on-the-row)). The scheduler only ever
+  ran these actions on such records, so a site that leaves them to the cron
+  sees no difference.
+
+  Affected: overlay or plugin code, and tests, that call these actions
+  directly through a content type's code interface (`CMS.publish_scheduled_page!`,
+  `CMS.unpublish_scheduled_post!`, `CMS.archive_scheduled_post!`, or an
+  overlay type's own `define`) on a record whose date has not passed. Either
+  set the date in the past first (`scheduled_at`, or `unpublish_at` plus
+  `expiry_action: :archive` for an archive), as Kiln's own tests now do, or
+  call `:publish`, `:unpublish` or `:archive`, the actions for "now". None of
+  the three is routed over JSON:API, GraphQL or MCP, so API clients are not
+  affected. No migration; rolling back is safe. Refs #2746.
+
 ## Known issues
 
 <a id="referrer-breakdowns-differenced"></a>
@@ -2068,6 +2093,99 @@ carries the reasoning.
   No migration or configuration change; rolling back is safe.
   ([#2723](https://github.com/The-Verscienta/kiln_cms/issues/2723),
   [#2835](https://github.com/The-Verscienta/kiln_cms/issues/2835))
+
+<a id="release-transitions-on-the-row"></a>
+
+- **Every release transition now checks the release's state in its own `UPDATE`, so a release page or calendar held open while the release moved can no longer write over it.**
+  `:schedule`, `:unschedule`, `:reopen`, `:archive`, delete, and the
+  worker's `:mark_published`, `:mark_failed`, `:mark_rolled_back` and
+  `:mark_rollback_failed` judged only the copy of the release the caller had
+  read. A release page loaded while the release was scheduled could, after
+  the cron had published it, press **Schedule** with a new date: the release
+  went back to scheduled, the cron shipped it again, and subscribers got a
+  second `release.published`. A stale page could also unschedule or archive
+  a release a worker had claimed, reopen one a retry had already restarted,
+  or delete a published release, and with it the items rollback restores
+  from. Each of these writes now lands only while the row is in a state the
+  transition starts from (delete: not `publishing` or `rolling_back`, and
+  never published).
+
+  On the release page a refused **Schedule**, **Remove schedule**,
+  **Publish now**, **Roll back**, **Reopen for editing**, **Release a stuck
+  claim**, **Archive** or **Delete** reloads the release and says "This
+  release changed since you opened it. It's been reloaded." instead of
+  "That didn't work — try again." Dragging a release's go-live chip on the
+  calendar shows the same message instead of the raw state-machine error. A
+  release deleted meanwhile shows "That release no longer exists." and
+  returns to the list.
+
+  Two races with the go-live itself are closed too:
+  - The minute cron claims through a new action, `:start_scheduled` (code
+    interface `CMS.start_scheduled_release`), filtered on the `:go_live`
+    trigger's `where`. Removing the schedule or moving it to a later date
+    while the cron is claiming the release now wins: AshOban cancels the job
+    and nothing ships. **Publish now** still claims through `:start`. No
+    policy admits a person to `:start_scheduled`, admins included.
+  - **Release a stuck claim** pressed while the go-live is in fact still
+    running now wins as well: the go-live rolls back, nothing ships, the
+    release stays failed, and `release.failed` is sent once. The worker's
+    "could not record the publish failure" line, logged at error before, is
+    now an info line saying the release was abandoned while the worker ran.
+
+  For overlay and plugin code, `KilnCMS.CMS.Releases.stale?/1` says whether
+  a release or item write was refused because someone else moved the
+  release: re-read it rather than retry. No migration; rolling back is safe.
+  See [When the page is out of date](../content-releases.md#when-the-page-is-out-of-date).
+  Fixes #2745.
+
+<a id="release-items-during-go-live"></a>
+
+- **An item added to a release just as its go-live started is refused, instead of being left pending on the published release, where it held its content against every other release.**
+  Adding an item checked that the release was still open with an unlocked
+  read, and the go-live worker reads its item list once. An add that read
+  `open` just before the claim committed inserted an item the worker never
+  saw: the release published without it, and the item stayed `pending`,
+  keeping its record out of every other release with no button that could
+  remove it. Adding, removing and changing an item now read the release
+  inside the item write's own transaction, `FOR SHARE`, so they wait for a
+  claim in progress. An item that commits before the claim is published with
+  the release; one checked after it is refused with "release is no longer
+  open for changes". The content editor's **Release** panel shows that
+  reason and redraws, the content list's bulk **Add to release** counts the
+  record as skipped, and the release page reloads with "This release changed
+  since you opened it. It's been reloaded."
+
+  As a backstop, the go-live re-lists the pending items before it marks the
+  release published. If one it never read is there, the release fails and
+  nothing changes, with the reason "1 item(s) were added after this go-live
+  read its list; nothing was changed. Reopen the release and publish it
+  again." The worker also applies or skips only an item that is still
+  pending. The lock itself is not exercised by the test suite, which shares
+  one database connection; the tests cover the re-check.
+
+  An item stranded this way before this release stays `pending` on its
+  published release. Archiving that release frees it, but also ends the
+  release's group rollback. No migration; rolling back is safe. Fixes #2740.
+
+<a id="scheduled-content-on-the-row"></a>
+
+- **A scheduled publish, unpublish or archive does nothing when the record was archived, published, rescheduled or given a new expiry action as the job fired. It used to overwrite that change.**
+  The minute cron's job reads a due record, then runs the publish checks
+  (required fields, alt text, consent, the collaborative-editing checkpoint)
+  before it writes. Anyone who acted on the record in that window was
+  overwritten: an archived page went live, a page published by hand was
+  published a second time, a page moved to tomorrow went live today, and a
+  page whose embargo end had been extended, or whose expiry action had been
+  switched to `:flag`, was taken down anyway. Each scheduled action's
+  `UPDATE` now carries its trigger's condition, as the manual `:publish` has
+  since #879, so it lands only on a record that is still due. Otherwise
+  AshOban cancels the job and nothing fires: no webhooks, artifact renders
+  or emails, and the new date or expiry action stays. Calling these actions
+  directly on a record that isn't due is now refused; see
+  [Breaking](#scheduled-content-actions-due-only). No migration; rolling
+  back is safe. See
+  [Content lifecycles](../content-lifecycles.md#expiry-one-timestamp-three-outcomes).
+  Fixes #2746.
 
 ## Security
 

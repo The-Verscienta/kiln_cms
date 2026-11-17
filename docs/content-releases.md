@@ -153,6 +153,39 @@ check-then-insert loses.
 
 Removing the item, or archiving the release, frees the record again.
 
+### When the page is out of date
+
+The release page and the calendar show the release as it was when they
+loaded. Meanwhile the minute cron may have claimed it, the go-live worker may
+have published or failed it, or another admin may have rescheduled or
+archived it. Every change you make is checked against the release as it is
+in the database at that moment, not as your page shows it
+([#2745](https://github.com/The-Verscienta/kiln_cms/issues/2745)), so a page
+left open cannot undo what happened since.
+
+| You pressed | And the release had since | What you see |
+| --- | --- | --- |
+| **Schedule**, **Remove schedule**, **Publish now**, **Roll back**, **Reopen for editing**, **Release a stuck claim**, **Archive** or **Delete** | moved to a state that action doesn't start from | *This release changed since you opened it. It's been reloaded.* The page now shows the release as it is; nothing was changed. |
+| **Remove from release**, or a new value in the **Change** column | been claimed by a go-live, or otherwise left the open, scheduled or failed states | The same message and reload. |
+| One of the buttons in the first row | been deleted by someone else | *That release no longer exists.*, and you are back on the list of releases. |
+| A drag of its *Release go-live* chip on the calendar | started going live, gone live, failed, or been archived | The same *This release changed…* message, and the calendar redraws. |
+
+Read the reloaded page before you press again. Before this check, pressing
+**Schedule** on a release the cron had already published set it back to
+scheduled, and the cron then published it a second time.
+
+Your change wins over the cron right up to the minute. If you press
+**Remove schedule**, or move **Go live at** to a later time, while the cron is
+picking the release up, the cron's claim is refused and nothing ships.
+
+Adding content follows the same rule
+([#2740](https://github.com/The-Verscienta/kiln_cms/issues/2740)). Once a
+go-live has claimed the release, an add from the content editor's **Release**
+panel is refused with *Couldn't add it to that release: release is no longer
+open for changes*, and the panel redraws to show the release as it is now. The content
+list's bulk **Add to release** counts that record as skipped. An add that
+lands before the claim is published with the release.
+
 ## What "atomic" means here
 
 The interesting question is what happens when item 7 of 10 fails.
@@ -203,6 +236,16 @@ decision, not another attempt against the same broken item. Scheduling and
 **Publish now** are deliberately not offered on a failed release — reopening is
 the first step, and those transitions don't exist from `failed`.
 
+One failure reason is about the release itself rather than an item:
+*N item(s) were added after this go-live read its list; nothing was changed.
+Reopen the release and publish it again.* The go-live reads its item list
+once, before it starts, and checks again just before it marks the release
+published. An item it finds `pending` that it never read means the list
+changed under it, so it fails rather than publish the release without that
+item. Adding content waits for a go-live claim in progress, so this should not
+happen; it is the backstop. Reopen and publish again, and the item ships with
+the rest.
+
 ### A stuck claim
 
 `publishing` and `rolling_back` mean "a worker owns this release right now".
@@ -215,6 +258,12 @@ go-live to `failed` and a stuck rollback to `published`, after which the normal
 reopen-and-retry path works. Only use it when you know no publish is actually
 running — that is the one thing the system can't determine for you, which is why
 it is a button and not automatic.
+
+If you press it while a go-live is in fact still running, your choice stands:
+the worker's own transaction rolls back when it tries to mark the release
+published, nothing ships, the release stays **Failed**, and `release.failed`
+is sent once. (A running rollback is treated the same way and the release
+stays **Published**.)
 
 ## Preview as of a release
 
@@ -319,9 +368,42 @@ the close-out from anywhere that isn't mid-flight.
 
 `publishing` and `rolling_back` are **claim** states rather than cosmetics: both
 the minute cron and the Publish-now button transition into them before any work
-starts. The claim is a compare-and-**swap**, not a compare-and-hope — the guard
-is in the `UPDATE`'s own `WHERE` clause, so a console page held open since 08:59
-(still showing `scheduled` after the 09:00 cron claimed the release) gets a stale
--record error rather than shipping the bundle a second time. The worker's job is
-enqueued *inside* the claim's transaction, so a claim can never commit without
-one.
+starts. The worker's job is enqueued *inside* the claim's transaction, so a
+claim can never commit without one.
+
+Every transition is a compare-and-**swap**, not a compare-and-hope, and not
+only the claim ([#2745](https://github.com/The-Verscienta/kiln_cms/issues/2745)).
+AshStateMachine judges only the struct it is handed, so each action also
+carries its from-states in the `UPDATE`'s own `WHERE` clause
+(`change filter(expr(state in [...]))`). A console page held open since 08:59,
+still showing `scheduled` after the 09:00 cron claimed the release, gets a
+stale-record error rather than rescheduling a release that has shipped. The
+same holds for the worker: its `mark_published`, `mark_failed`,
+`mark_rolled_back` and `mark_rollback_failed` land only while the release is
+still in its claim state, so an abandon during the run is not overwritten.
+`destroy` lands only on a release that is not mid-flight and never published.
+`KilnCMS.CMS.Releases.stale?/1` tells a caller that a refusal means "someone
+else moved it": re-read the release, don't retry.
+
+The two claims are separate actions. **Publish now** runs `start`, which
+accepts an `open` or `scheduled` release. The `:go_live` AshOban trigger runs
+`start_scheduled`, whose filter is the trigger's own `where`
+(`scheduled`, with a `scheduled_at` that has passed). AshOban reads a due
+release and claims it outside any transaction of its own, so an admin who
+removes the schedule or moves it to tomorrow in between would still match
+`start`. Against `start_scheduled` the claim misses, and AshOban cancels the job
+as `:trigger_no_longer_applies`. No policy admits a person to
+`start_scheduled`, admins included; only the scheduler runs it, through the
+`AshObanInteraction` bypass.
+
+Item writes (`ReleaseItem`'s `add`, `set_action` and `cancel`) check the release
+inside their own transaction, reading it `FOR SHARE`
+([#2740](https://github.com/The-Verscienta/kiln_cms/issues/2740)). That lock
+conflicts with the row lock a claim's `UPDATE` takes, and not with another
+`FOR SHARE`, so concurrent adds don't wait on each other, but an add and a
+claim serialize: an item that commits first is seen by the worker (its job is
+enqueued in the claim's transaction), and an add checked after the claim reads
+`publishing` and is refused. `mark_applied` and `mark_skipped` land only on a
+still-`pending` item. Inside the go-live transaction, `Releases` re-lists the
+`pending` items before marking the release published and rolls back with the
+failure reason above if any remain.

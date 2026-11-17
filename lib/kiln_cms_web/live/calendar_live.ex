@@ -296,7 +296,7 @@ defmodule KilnCMSWeb.CalendarLive do
            ) do
       {:ok, moved_message(event, date)}
     else
-      {:error, error} -> {:error, error_message(error)}
+      {:error, error} -> {:error, release_error_message(error)}
     end
   end
 
@@ -352,6 +352,16 @@ defmodule KilnCMSWeb.CalendarLive do
     else
       error_message(error)
     end
+  end
+
+  # `:schedule` is a compare-and-swap on the release row (#2745): a release the
+  # cron claimed or shipped after this window loaded is refused, and the
+  # caller's `load_events/1` re-reads the grid. Said as that, never as the raw
+  # state-machine or stale-record text.
+  defp release_error_message(error) do
+    if KilnCMS.CMS.Releases.stale?(error),
+      do: gettext("This release changed since you opened it. It's been reloaded."),
+      else: error_message(error)
   end
 
   defp fetch_record(event, socket) do

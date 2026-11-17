@@ -2995,9 +2995,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
       # The reason matters here in a way it doesn't for most adds — "already in
       # another open release", "outside your content-type scope" and "release is
-      # full" are all things the editor can act on.
+      # full" are all things the editor can act on. Re-read the panel too: a
+      # release that went live since it was drawn ("no longer open for
+      # changes", #2740) should leave the picker, not be offered again.
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, release_error_message(error))}
+        {:noreply,
+         socket
+         |> reload_release_state()
+         |> put_flash(:error, release_error_message(error))}
     end
   end
 
@@ -3017,9 +3022,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
              |> reload_release_state()
              |> put_flash(:info, gettext("Removed from the release."))}
 
+          # Most often the release went live since the panel was drawn (#2740):
+          # re-read it so the panel shows where the item stands now.
           {:error, _} ->
             {:noreply,
-             put_flash(socket, :error, gettext("Couldn't remove it from that release."))}
+             socket
+             |> reload_release_state()
+             |> put_flash(:error, gettext("Couldn't remove it from that release."))}
         end
     end
   end

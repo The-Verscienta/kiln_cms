@@ -174,8 +174,12 @@ defmodule KilnCMS.CMS.Releases do
   Returns `{:ok, release}` with the release marked `:published`, or
   `{:error, reason}` with it marked `:failed` and nothing changed on the site.
   Expects the release to have been claimed already (state `:publishing` — see
-  `ContentRelease`'s `:start`), which is what stops the minute cron from starting
-  the same release twice.
+  `ContentRelease`'s `:start` and `:start_scheduled`), which is what stops the
+  minute cron from starting the same release twice.
+
+  Inside its transaction, before marking the release published, it re-lists
+  the `:pending` items (#2740). One it never read fails the release, with
+  nothing changed, rather than shipping without it.
   """
   @spec publish(struct()) :: {:ok, struct()} | {:error, term()}
   def publish(%{state: :publishing} = release) do
@@ -318,6 +322,8 @@ defmodule KilnCMS.CMS.Releases do
         end
       end)
 
+    refuse_unseen_items!(release, opts)
+
     {published, release_notes} =
       case CMS.mark_release_published(release, %{}, notifying(opts)) do
         {:ok, published, notes} -> {published, notes}
@@ -332,6 +338,28 @@ defmodule KilnCMS.CMS.Releases do
     Webhooks.dispatch("release.published", event_payload(published, items), published.org_id)
 
     {published, release_notes ++ item_notes}
+  end
+
+  # Every item this run read is `:applied` or `:skipped` by now, so a `:pending`
+  # item left on the release is one the run never saw (#2740). Shipping past it
+  # would strand it: `:pending` on a `:published` release, which `:cancel` and
+  # `:set_action` refuse, holding its content's reservation against every
+  # other release for good. `ReleaseOpenForEdit`'s row lock is what keeps such
+  # an item out; this is the loud backstop if one gets in anyway. Not a silent
+  # sweep to `:cancelled`, which would drop something an editor asked to ship:
+  # the release fails as a whole, and a reopen-and-retry ships it.
+  defp refuse_unseen_items!(release, opts) do
+    case pending_items(release, opts) do
+      [] ->
+        :ok
+
+      [first | _] = unseen ->
+        Repo.rollback(
+          {first.id,
+           "#{length(unseen)} item(s) were added after this go-live read its list; " <>
+             "nothing was changed. Reopen the release and publish it again."}
+        )
+    end
   end
 
   defp apply_item(item, actor, opts) do
@@ -388,14 +416,28 @@ defmodule KilnCMS.CMS.Releases do
   defp announce_failure({:ok, failed}, _release, items, mode),
     do: dispatch_failure(failed, items, mode)
 
-  # The state write itself failed, so there is no `:failed` row to report. The
-  # release is still in its claim state and only `:abandon` gets it out — which
-  # is precisely the case worth being loud about, so report on the release as we
-  # last knew it rather than staying silent.
+  # The state write itself failed, so there is no `:failed` row to report.
+  #
+  # Usually the release is still in its claim state and only `:abandon` gets
+  # it out — which is precisely the case worth being loud about, so report on
+  # the release as we last knew it rather than staying silent.
+  #
+  # Except a `StaleRecord`: the outcome writes are compare-and-swaps from the
+  # claim state (#2745), so a miss means the release already LEFT it while the
+  # worker ran. `:abandon` is the only way out, and it recorded what is true.
+  # Nothing is stuck, so that is said at info. The failure is still reported
+  # once, on the release as this run knew it.
   defp announce_failure({:error, reason}, release, items, mode) do
-    Logger.error(
-      "Release #{release.id}: could not record the #{mode} failure: #{describe(reason)}"
-    )
+    if stale?(reason) do
+      Logger.info(
+        "Release #{release.id}: the #{mode} failure was not recorded; " <>
+          "the release was abandoned while the worker ran"
+      )
+    else
+      Logger.error(
+        "Release #{release.id}: could not record the #{mode} failure: #{describe(reason)}"
+      )
+    end
 
     dispatch_failure(release, items, mode)
   end
@@ -602,6 +644,24 @@ defmodule KilnCMS.CMS.Releases do
   """
   @spec live_changed() :: String.t()
   def live_changed, do: "live page changed since the draft — review before releasing"
+
+  @doc """
+  Whether a release write was refused because the release (or item) is no
+  longer in the state the caller read (#2745).
+
+  Two shapes say so. A `StaleRecord`: the struct still passed the state
+  machine, but the row had moved and the transition's compare-and-swap filter
+  matched nothing. A `NoMatchingTransition`: the caller's struct was already
+  re-read into a state the transition doesn't leave from. Either way somebody
+  else moved the release, and the answer is to re-read it, not to retry.
+  """
+  @spec stale?(term()) :: boolean()
+  def stale?(%Ash.Error.Invalid{errors: errors}), do: Enum.any?(errors, &stale_error?/1)
+  def stale?(_error), do: false
+
+  defp stale_error?(%Ash.Error.Changes.StaleRecord{}), do: true
+  defp stale_error?(%AshStateMachine.Errors.NoMatchingTransition{}), do: true
+  defp stale_error?(_error), do: false
 
   # --- shared helpers --------------------------------------------------------
 

@@ -40,13 +40,24 @@ defmodule KilnCMS.CMS.ContentRelease do
   `:publishing` and `:rolling_back` are **claim** states, not cosmetics: the
   minute-cron scheduler and the "Publish now" button both transition into them
   before any work starts, so a go-live that outlives its minute can't be picked
-  up twice.
+  up twice. "Publish now" claims through `:start`, which also takes an `:open`
+  release; the `:go_live` trigger claims through `:start_scheduled`, which lands
+  only on a release that is still `:scheduled` and due, so an unschedule or a
+  later date set while the cron was reading the release wins.
+
+  Every transition is a compare-and-swap (#2745): besides the state machine's
+  check of the struct, each action filters its `UPDATE` on its from-states, so
+  a caller holding a stale struct gets an `Ash.Error.Changes.StaleRecord` rather
+  than writing over a release that has moved. `KilnCMS.CMS.Releases.stale?/1`
+  recognizes that refusal.
 
   ## Who may do what
 
   Publishing content is an admin approval step (see `KilnCMS.CMS.Content`'s
   `:publish` policy), so the release actions that *cause* a publish —
-  `:schedule`, `:start`, `:start_rollback` — are admin-only here. Otherwise an
+  `:schedule`, `:start`, `:start_rollback` — are admin-only here.
+  `:start_scheduled` admits no person at all, admins included: only the AshOban
+  scheduler runs it. Otherwise an
   editor could publish content they aren't allowed to publish simply by putting
   it in a release: the worker necessarily runs `authorize?: false`, since it
   publishes on behalf of the release across types the acting user may not
@@ -124,8 +135,11 @@ defmodule KilnCMS.CMS.ContentRelease do
     transitions do
       transition :schedule, from: [:open, :scheduled], to: :scheduled
       transition :unschedule, from: :scheduled, to: :open
-      # The claim: both the minute cron and "Publish now" land here first.
+      # The claim: "Publish now" lands here (`:start`); the minute cron uses
+      # `:start_scheduled`, which also requires the release to still be due.
       transition :start, from: [:open, :scheduled], to: :publishing
+      # The minute cron's claim: only a release that is still due.
+      transition :start_scheduled, from: :scheduled, to: :publishing
       transition :mark_published, from: :publishing, to: :published
       transition :mark_failed, from: :publishing, to: :failed
       transition :reopen, from: :failed, to: :open
@@ -155,7 +169,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       # `KilnCMS.CMS.Workers.ReleaseWorker` so it owns its own transaction
       # boundary rather than nesting inside AshOban's.
       trigger :go_live do
-        action :start
+        action :start_scheduled
         queue :scheduling
         scheduler_cron "* * * * *"
         # Strict-tenancy prep (#419): schedulers scan per org, not globally.
@@ -211,6 +225,12 @@ defmodule KilnCMS.CMS.ContentRelease do
       require_atomic? false
 
       validate present(:scheduled_at)
+      # Compare-and-swap (#2745), like every transition here: the state
+      # machine judges only the struct it was handed, so a console page loaded
+      # while the release was `:scheduled` would otherwise write `:scheduled`
+      # and a new date over a release the cron has since published — and the
+      # cron would then ship it a second time. See `:start`.
+      change filter(expr(state in [:open, :scheduled]))
       change transition_state(:scheduled)
       change KilnCMS.CMS.Changes.StampReleaseTrigger
     end
@@ -220,6 +240,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      change filter(expr(state == :scheduled))
       change set_attribute(:scheduled_at, nil)
       change transition_state(:open)
     end
@@ -242,11 +263,41 @@ defmodule KilnCMS.CMS.ContentRelease do
       change {KilnCMS.CMS.Changes.EnqueueReleaseWorker, mode: :publish}
     end
 
+    update :start_scheduled do
+      description "System: the minute cron claims a due release and enqueues the go-live worker."
+      accept []
+      require_atomic? false
+
+      # Its own action rather than `:start`, which also serves "Publish now"
+      # and so must accept an `:open` release (#2745). The AshOban worker reads
+      # the release, then claims it outside any transaction of its own; an
+      # admin who unschedules (`:open`, no date) or moves the date to tomorrow
+      # in that window would still match `:start`'s filter, and the release
+      # would ship anyway. This filter is the trigger's `where`, word for word,
+      # so the claim lands only on a release that is still due. A miss is a
+      # `StaleRecord`, which AshOban cancels as `:trigger_no_longer_applies`,
+      # as on `KilnCMS.CMS.Content`'s `:publish_scheduled`. No policy admits a
+      # person: only the scheduler, through the `AshObanInteraction` bypass.
+      change filter(
+               expr(state == :scheduled and not is_nil(scheduled_at) and scheduled_at <= now())
+             )
+
+      change transition_state(:publishing)
+      # No actor here, so this keeps the scheduling admin's stamp.
+      change KilnCMS.CMS.Changes.StampReleaseTrigger
+      change {KilnCMS.CMS.Changes.EnqueueReleaseWorker, mode: :publish}
+    end
+
     update :mark_published do
       description "System: the go-live transaction committed."
       accept []
       require_atomic? false
 
+      # The worker's outcome writes are compare-and-swaps too (#2745): an
+      # admin who abandoned the claim while the worker ran has already said
+      # what the release is, and a stale `:publishing` struct must not
+      # overwrite that. `KilnCMS.CMS.Releases` handles the miss.
+      change filter(expr(state == :publishing))
       change transition_state(:published)
       change set_attribute(:published_at, &DateTime.utc_now/0)
       change set_attribute(:failure_reason, nil)
@@ -261,6 +312,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       argument :failure_reason, :string
       argument :failed_item_id, :uuid
 
+      change filter(expr(state == :publishing))
       change set_attribute(:failure_reason, arg(:failure_reason))
       change set_attribute(:failed_item_id, arg(:failed_item_id))
       change transition_state(:failed)
@@ -271,6 +323,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      change filter(expr(state == :failed))
       change transition_state(:open)
       change set_attribute(:failure_reason, nil)
       change set_attribute(:failed_item_id, nil)
@@ -325,6 +378,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      change filter(expr(state == :rolling_back))
       change transition_state(:rolled_back)
       change set_attribute(:rolled_back_at, &DateTime.utc_now/0)
       change set_attribute(:failure_reason, nil)
@@ -339,6 +393,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       argument :failure_reason, :string
       argument :failed_item_id, :uuid
 
+      change filter(expr(state == :rolling_back))
       change set_attribute(:failure_reason, arg(:failure_reason))
       change set_attribute(:failed_item_id, arg(:failed_item_id))
       change transition_state(:published)
@@ -349,6 +404,9 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      # The `transitions` block's from-states, in the UPDATE's WHERE clause: a
+      # stale page must not archive a release a worker now owns.
+      change filter(expr(state in [:open, :scheduled, :failed, :published, :rolled_back]))
       change transition_state(:archived)
       change KilnCMS.CMS.Changes.CancelPendingReleaseItems
     end
@@ -358,6 +416,11 @@ defmodule KilnCMS.CMS.ContentRelease do
       primary? true
       require_atomic? false
       validate KilnCMS.CMS.Validations.ReleaseDeletable
+
+      # `ReleaseDeletable` judges the struct; this judges the row (#2745). A
+      # page loaded while the release was open must not delete it once a worker
+      # has claimed or shipped it — its items are rollback's only record.
+      change filter(expr(state not in [:publishing, :rolling_back] and is_nil(published_at)))
     end
 
     read :editable do

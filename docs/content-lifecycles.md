@@ -58,6 +58,20 @@ publishing, partitioned in SQL by `expiry_action` so neither can pick up the
 other's rows — or a `:flag` row, which belongs to neither. `:flag` needs no
 worker at all: the signal is the calculation.
 
+A change made as the minute fires wins over the schedule
+([#2746](https://github.com/The-Verscienta/kiln_cms/issues/2746)). The job
+reads a due record, then runs the publish checks before it writes, so there is
+a moment in which someone can archive or publish the page by hand, move its
+publish date, extend its `unpublish_at` or switch its `expiry_action`. Each of
+the three scheduled actions (`:publish_scheduled`, `:unpublish_scheduled`,
+`:archive_scheduled`) therefore writes only while the record still matches its
+trigger's condition: the right state, a date that has passed and, for the two
+expiry actions, the matching `expiry_action`. Otherwise AshOban cancels the job
+and nothing happens. No webhook, artifact fire or email goes out, and the new
+date or expiry action stays. Called directly, as an overlay or a test might,
+the actions refuse a record that isn't due with a `StaleRecord`; use
+`:publish`, `:unpublish` or `:archive` to act now.
+
 ## Freshness: the cadence and the attestation
 
 `due_at` is the last attestation plus the cadence — or, for content published
@@ -227,7 +241,7 @@ and the calendar route is editor-gated, so a viewer never reaches it at all.
 The handle rule above only hides moves the policy would refuse; the policy is
 still what refuses them.
 
-What a refused move says. The last three rows are what a stale page sees,
+What a refused move says. The last four rows are what a stale page sees,
 since a chip whose move the policy refuses offers no drag on a fresh one. A
 refused mouse drag can currently leave the chip drawn on the day it was
 dropped on, though nothing moved; reload to see where it is (#2786).
@@ -241,6 +255,7 @@ dropped on, though nothing moved; reload to see where it is (#2786).
 | *Only an admin can move a publish date on this site.* / *Only an admin can move the unpublish date of a live page on this site.* | You are an editor on a site where only admins publish (#2134). |
 | *You can't edit this content type.* | Your role is scoped away from the record's type. |
 | *You don't have permission to do that.* | Any other refusal by the record's policy. |
+| *This release changed since you opened it. It's been reloaded.* | A release go-live chip whose release started going live, went live, failed or was archived after the calendar loaded (#2745). Nothing moved. |
 
 ## Turning staleness into work
 

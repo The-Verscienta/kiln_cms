@@ -48,16 +48,19 @@ defmodule KilnCMS.Collab.PublishCheckpointTest do
     })
   end
 
-  defp draft_page!(actor) do
+  defp draft_page!(actor, attrs \\ %{}) do
     CMS.create_page!(
-      %{
-        title: "Pub",
-        slug: "pubchk-#{System.unique_integer([:positive])}",
-        blocks: [
-          %{"_type" => "heading", "text" => "Keep me"},
-          %{"_type" => "rich_text", "body" => pt("stored")}
-        ]
-      },
+      Map.merge(
+        %{
+          title: "Pub",
+          slug: "pubchk-#{System.unique_integer([:positive])}",
+          blocks: [
+            %{"_type" => "heading", "text" => "Keep me"},
+            %{"_type" => "rich_text", "body" => pt("stored")}
+          ]
+        },
+        attrs
+      ),
       actor: actor
     )
   end
@@ -244,12 +247,12 @@ defmodule KilnCMS.Collab.PublishCheckpointTest do
 
   # The scheduler path is the same publish. "A scheduled publish is never under
   # an open room" is false — schedule for 09:00, keep editing collaboratively,
-  # and the cron fires at 09:00 into a live room. `:publish_scheduled` also
-  # carries no compare-and-swap filter, so the room is even likelier to still be
-  # attached.
+  # and the cron fires at 09:00 into a live room. The page's date has passed,
+  # as the record the scheduler picks has: `:publish_scheduled` refuses any
+  # other (#2746).
   test "a scheduled publish carries the room's prose too" do
     actor = admin()
-    page = draft_page!(actor)
+    page = draft_page!(actor, %{scheduled_at: DateTime.add(DateTime.utc_now(), -60, :second)})
     server = open_room(page)
 
     type_into_room(server, rich_block(page).id, "scheduled prose")

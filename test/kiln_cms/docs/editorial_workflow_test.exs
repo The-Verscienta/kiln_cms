@@ -147,7 +147,9 @@ defmodule KilnCMS.Docs.EditorialWorkflowTest do
     both([
       ctx |> draft!() |> CMS.publish_page(opts(actor, ctx)),
       ctx
-      |> draft!(%{scheduled_at: DateTime.add(DateTime.utc_now(), 1, :day)})
+      # Due, as the scheduler's record is: `:publish_scheduled` refuses a
+      # date still to come (#2746), which would read as neither outcome.
+      |> draft!(%{scheduled_at: DateTime.add(DateTime.utc_now(), -60, :second)})
       |> CMS.publish_scheduled_page(opts(actor, ctx))
     ])
   end

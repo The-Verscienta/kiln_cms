@@ -165,7 +165,9 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
 
     test "a scheduled publish names whoever set the schedule as its approver", %{conn: conn} do
       admin = authed_user(:admin)
-      at = DateTime.add(DateTime.utc_now(), 3600, :second)
+      # Passed, as the scheduler's record's has: `:publish_scheduled` refuses
+      # any other (#2746).
+      at = DateTime.add(DateTime.utc_now(), -60, :second)
 
       post =
         CMS.create_post!(%{title: "Scheduled Note", slug: slug(), scheduled_at: at}, actor: admin)
@@ -334,8 +336,12 @@ defmodule KilnCMSWeb.GovernanceTransitionsTest do
       post = CMS.create_post!(%{title: "Embargo", slug: slug()}, actor: admin)
       post = CMS.publish_post!(post, %{}, actor: admin)
 
+      # A passed embargo end that archives: the record the `:archive_scheduled`
+      # trigger picks, and the only one its action accepts (#2746).
       post =
-        CMS.update_post!(post, %{unpublish_at: DateTime.add(DateTime.utc_now(), 3600)},
+        CMS.update_post!(
+          post,
+          %{unpublish_at: DateTime.add(DateTime.utc_now(), -60), expiry_action: :archive},
           actor: admin
         )
 

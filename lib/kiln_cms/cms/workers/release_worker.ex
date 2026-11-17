@@ -10,8 +10,18 @@ defmodule KilnCMS.CMS.Workers.ReleaseWorker do
 
   AshOban still owns the *schedule*: `ContentRelease`'s `:go_live` trigger runs
   the minute cron per org, claims each due release (`:scheduled` →
-  `:publishing`), and that claim enqueues this worker. The claim is what makes
-  the cron safe — a release already `:publishing` no longer matches the trigger.
+  `:publishing`) through `:start_scheduled`, and that claim enqueues this
+  worker. The claim is what makes the cron safe — a release already
+  `:publishing` no longer matches the trigger. `:start_scheduled` filters its
+  `UPDATE` on the trigger's own `where`, so a release unscheduled or moved to a
+  later date between AshOban's read and the claim is not claimed, and AshOban
+  cancels the job. "Publish now" claims through `:start` and enqueues this same
+  worker.
+
+  The outcome writes (`:mark_published`, `:mark_failed` and the rollback pair)
+  land only while the release is still in its claim state (#2745). An admin
+  who released the claim while this job ran has the last word: the go-live
+  rolls back, and `KilnCMS.CMS.Releases` logs the missed failure write at info.
 
   **`max_attempts: 1`.** A release that aborted is in `:failed` with a reason an
   editor has to act on; silently retrying it a minute later would republish

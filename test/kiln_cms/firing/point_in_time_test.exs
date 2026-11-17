@@ -70,6 +70,16 @@ defmodule KilnCMS.Firing.PointInTimeTest do
     org = KilnCMS.Accounts.default_org_id()
     post = CMS.create_post!(%{title: "Embargoed", slug: slug()}, actor: admin)
     post = CMS.publish_post!(post, %{}, actor: admin)
+
+    # A passed embargo end that archives: the only record `:archive_scheduled`
+    # accepts (#2746).
+    post =
+      CMS.update_post!(
+        post,
+        %{unpublish_at: DateTime.add(DateTime.utc_now(), -60), expiry_action: :archive},
+        actor: admin
+      )
+
     while_live = DateTime.utc_now()
 
     CMS.archive_scheduled_post!(post, %{}, authorize?: false)
