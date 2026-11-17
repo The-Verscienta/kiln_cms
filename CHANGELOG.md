@@ -76,7 +76,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#backup-notices-upgrade))
 
 - **Run `mix ash.migrate` (new table `backup_uploads`, for resumable backup uploads; part of #2223). No new environment variables; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#resumable-backup-uploads-upgrade))
+  ([#3081](https://github.com/The-Verscienta/kiln_cms/pull/3081) · [long form](docs/changelog/unreleased.md#resumable-backup-uploads-upgrade))
 
 - **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release (`:erasure_backfill_on_boot`, default on). No migration; rolling back is safe, and what it deleted stays deleted.**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-backfill-newsletter-upgrade))
@@ -159,7 +159,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
 
 - **Backup uploads can resume: a destination adapter that opts in continues a cut-off upload on the next attempt. Every `put/3` gets `opts[:deadline]` and may answer `{:ok, :already_present}` or a permanent error, which fails that destination at once.**
-  ([long form](docs/changelog/unreleased.md#resumable-backup-uploads))
+  ([#3081](https://github.com/The-Verscienta/kiln_cms/pull/3081) · [long form](docs/changelog/unreleased.md#resumable-backup-uploads))
 
 - **`kiln_plugin` 1.5.0: plugins declare what the staging scrub does to each table their domains own (`c:Kiln.Plugin.staging_scrub/0`): purge, rewrite columns, or keep with a reason, all checked before the scrub changes anything.**
   ([long form](docs/changelog/unreleased.md#plugin-staging-scrub))
