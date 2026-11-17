@@ -189,8 +189,9 @@ defmodule Kiln.Plugin do
   (`t:staging_scrub_entry/0`). Defaults to `[]`, which is right for a plugin
   that owns no tables: a plugin with a table it does not declare makes the
   scrub refuse to run, since that table may hold personal data. Content-type
-  tables and their history are kept without an entry, unless a column name
-  looks personal (`email`, `ip`, `phone`, …). Since 1.5.
+  tables and their history are kept without an entry, unless a column looks
+  personal by name (`email`, `ip`, `phone`, …) or by type (`inet`, `cidr`).
+  Since 1.5.
   """
   @callback staging_scrub() :: [staging_scrub_entry()]
   @callback nav_items() :: [nav_item()]

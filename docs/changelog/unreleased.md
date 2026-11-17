@@ -90,6 +90,34 @@ carries the reasoning.
   See [docs/staging-environments.md](../staging-environments.md#running-the-scrub).
   Refs #2721.
 
+<a id="plugin-staging-scrub-refuses-undeclared"></a>
+
+- **`mix kiln.staging.scrub` and `KilnCMS.Release.scrub_staging/0` now refuse to run, changing nothing, while a plugin's or the overlay's Ash domain owns a table that no `staging_scrub/0` entry names.**
+  Until now the scrub knew only the core's tables, and an overlay's tables
+  reached a staging clone with production's rows in them. Now every table of
+  a plugin's `domains/0`, of a domain in `:ash_domains` that is neither the
+  core's nor a plugin's, and the AshPaperTrail version table of each of
+  them (which counts as a table of its own), must be declared. Content-type
+  tables, their version tables and graduated join tables are kept without
+  an entry, unless a column looks personal (`email`, `ip`, `phone`,
+  `user_agent`, an `inet` column, …). The refusal reads "Refusing to scrub:
+  these tables of installed plugins and of the overlay have no
+  staging_scrub/0 entry" and lists each plugin, resource and table.
+
+  To fix it, add one entry per listed table to the plugin's
+  `staging_scrub/0`: `{:purge, Resource}`, `{:rewrite, Resource, set:
+  [attribute: value]}` or `{:keep, Resource, "reason"}`, and require
+  `{:kiln_plugin, "~> 1.5"}`. A table listed under `(no plugin)` belongs to a
+  domain no plugin claims, and nothing can declare it until you move that
+  domain into a plugin's `domains/0`. `mix kiln.plugins.doctor` notes each
+  undeclared table (it does not fail on one), and
+  `KilnCMS.Staging.PluginScrub.assert_covered!/2` holds a plugin to it in its
+  own tests. A site that never clones production into staging is not
+  affected. No migration; rolling back is safe. See
+  [Plugin tables](../staging-environments.md#plugin-tables) and
+  [ADR 0066](../decisions/0066-every-table-reaching-a-staging-clone-is-scrubbed-or-kept-with-a-reason.md).
+  Refs #2975.
+
 ## Added
 
 <a id="address-field-type"></a>
@@ -258,6 +286,34 @@ carries the reasoning.
   implements the behaviour and has a usable `kind/0` that neither
   `local`, `rclone` nor another module already has. See *Backup
   destinations* in [plugin-extensibility.md](../plugin-extensibility.md).
+
+<a id="plugin-staging-scrub"></a>
+
+- **Plugins declare what the staging scrub does to each table their domains own: `kiln_plugin` 1.5.0 adds `c:Kiln.Plugin.staging_scrub/0`.**
+  Each entry names an Ash resource of the plugin's own domains:
+  `{:purge, Resource}` deletes every row, `{:rewrite, Resource, set:
+  [attribute: value]}` sets each attribute on every row, and
+  `{:keep, Resource, "reason"}` keeps the rows. Entries are plain data, and
+  `KilnCMS.Staging.PluginScrub.plan!/1` checks every one against the clone
+  before the scrub changes anything: a value must cast to the attribute's
+  type, and a primary key, an identity's attribute, the tenant attribute, a
+  `belongs_to` attribute, a generated column, and a column under a unique
+  index (with a non-`nil` value) cannot be rewritten (purge the table
+  instead). It also refuses a foreign key with `ON DELETE RESTRICT` or
+  `NO ACTION` that would stop a purge part-way. The plugin tables are
+  scrubbed first, in one transaction, before any core table, so a
+  constraint the checks cannot see (a `CHECK`, a trigger) rolls them back
+  with nothing else changed. The printed summary lists each purged or
+  rewritten plugin table after the core's counts, as
+  `<plugin> plugin, <table>`; `KilnCMS.Staging.Scrub.dispositions/1` includes
+  them and `Scrub.plugin_kept/1` lists what is kept and why.
+  `mix kiln.plugins.doctor` fails on an unusable declaration; it cannot see
+  the database, so unique indexes, generated columns and constraints are
+  checked only when the scrub runs. `mix kiln.gen.plugin` writes a
+  commented-out example. A dependency plugin owns no tables and is
+  unchanged. See *Staging scrub* in
+  [plugin-extensibility.md](../plugin-extensibility.md#staging-scrub).
+  Refs #2975.
 
 <a id="backup-sub-daily-schedules"></a>
 

@@ -77,6 +77,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
   ([long form](docs/changelog/unreleased.md#staging-scrub-refuses-live-node))
 
+- **`mix kiln.staging.scrub` and `Release.scrub_staging/0` now refuse, changing nothing, while an overlay or plugin domain owns a non-content table with no `staging_scrub/0` entry: add `{:purge, R}`, `{:rewrite, R, set: [...]}` or `{:keep, R, "reason"}` for each and require `{:kiln_plugin, "~> 1.5"}`.**
+  ([long form](docs/changelog/unreleased.md#plugin-staging-scrub-refuses-undeclared))
+
 ### Added
 
 - **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
@@ -98,6 +101,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
+
+- **`kiln_plugin` 1.5.0: plugins declare what the staging scrub does to each table their domains own (`c:Kiln.Plugin.staging_scrub/0`): purge, rewrite columns, or keep with a reason, all checked before the scrub changes anything.**
+  ([long form](docs/changelog/unreleased.md#plugin-staging-scrub))
 
 - **Backup schedules can run every 2, 4, 8 or 12 hours. A schedule that runs more often than daily must set Keep for (days), and its alarm threshold drops to 8 to 18 hours.**
   ([#2219](https://github.com/The-Verscienta/kiln_cms/issues/2219) · [long form](docs/changelog/unreleased.md#backup-sub-daily-schedules))
