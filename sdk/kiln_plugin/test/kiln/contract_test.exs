@@ -15,6 +15,12 @@ defmodule Kiln.ContractTest do
     assert Plugin.plug_routes() == []
     assert Plugin.challenge_providers() == []
     assert Plugin.backup_destinations() == []
+    assert Plugin.staging_scrub() == []
+  end
+
+  test "staging_scrub/0 is part of the plugin contract, defaulted by use Kiln.Plugin" do
+    assert {:staging_scrub, 0} in Kiln.Plugin.behaviour_info(:callbacks)
+    refute {:staging_scrub, 0} in Kiln.Plugin.behaviour_info(:optional_callbacks)
   end
 
   test "use Kiln.Block builds an embedded resource from the DSL" do

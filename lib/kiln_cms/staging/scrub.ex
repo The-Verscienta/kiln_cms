@@ -21,6 +21,15 @@ defmodule KilnCMS.Staging.Scrub do
   every table in the schema against it (or against a reasoned keep-list), so a
   new table holding personal data cannot slip past the scrub unnoticed.
 
+  ## Plugin tables
+
+  A table an installed plugin's (or the overlay's) Ash domains own is scrubbed
+  as the plugin declares in `c:Kiln.Plugin.staging_scrub/0`. That runs first,
+  in one transaction: a constraint the checks could not foresee rolls every
+  plugin table back, before any core table is touched. If a table is
+  undeclared, or a declaration is unusable, `run/1` refuses before it changes
+  anything: see `KilnCMS.Staging.PluginScrub`.
+
   ## Queued jobs
 
   `oban_jobs` is purged in every state, first and last. A cloned job is
@@ -40,12 +49,18 @@ defmodule KilnCMS.Staging.Scrub do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
   alias KilnCMS.Repo
+  alias KilnCMS.Staging.PluginScrub
 
   @typedoc "What the scrub does to a table (see `dispositions/0`)."
   @type disposition ::
           :purged | :anonymized | :via_anonymization | :scrubbed | :deactivated | :paused
 
+  @typedoc """
+  What `run/1` did, by key. A plugin table's count is under
+  `{:plugin, plugin_name, table}` (`t:KilnCMS.Staging.PluginScrub.key/0`).
+  """
   @type summary :: %{
+          optional(PluginScrub.key()) => non_neg_integer(),
           users_anonymized: non_neg_integer(),
           api_keys_purged: non_neg_integer(),
           tokens_purged: non_neg_integer(),
@@ -90,7 +105,8 @@ defmodule KilnCMS.Staging.Scrub do
           admin_provisioned: String.t() | nil
         }
 
-  # Payment credentials go FIRST, before anything else touches billing rows.
+  # Payment credentials go FIRST of the core's tables, before anything else
+  # touches billing rows (only plugin tables, which hold none, go earlier).
   # Nothing in this module contacts the provider today — GDPR erasure cancels
   # memberships locally only — but a clone that holds live API keys is one
   # careless change away from acting on a real payment account, so the keys are
@@ -210,17 +226,34 @@ defmodule KilnCMS.Staging.Scrub do
     * `:admin_email` / `:admin_password` — provision one usable staging admin
       after anonymizing every real account. Both must be present or no admin is
       seeded (and you won't be able to sign in to staging).
+    * `:plugins` / `:ash_domains` — the plugins and domains whose tables are
+      checked and scrubbed (`KilnCMS.Staging.PluginScrub.plan!/1`). Default to
+      the installed plugins and `config :kiln_cms, :ash_domains`.
+
+  Raises, having changed nothing, when a plugin's or the overlay's table has
+  no usable `c:Kiln.Plugin.staging_scrub/0` entry.
 
   Callers are responsible for the safety guards; use `KilnCMS.Staging.scrub!/1`
   unless you have already confirmed the target.
   """
   @spec run(keyword()) :: summary()
   def run(opts \\ []) do
+    # Every declaration is checked before the first row changes: a refusal
+    # half-way would leave a clone neither production's nor scrubbed.
+    plugin_steps = PluginScrub.plan!(Keyword.take(opts, [:plugins, :ash_domains]))
+
+    # The plugin tables go next, all or nothing. The checks above cannot see
+    # every constraint (a CHECK, an expression index, a trigger), and one that
+    # fails here rolls the plugin tables back with nothing else changed yet.
+    # They also go before the core's purges and anonymization, so a plugin
+    # row that references a core row the scrub empties is gone first.
+    {:ok, plugin_counts} = Repo.transaction(fn -> PluginScrub.execute(plugin_steps) end)
+
     {credentials_key, credentials} = @credentials_first
     {credentials_purged, _} = Repo.delete_all(credentials)
 
-    # Queued jobs go before anything else runs, so none of production's work
-    # is left to pick up while the scrub is under way.
+    # Queued jobs go before anything else in the core runs, so none of
+    # production's work is left to pick up while the scrub is under way.
     jobs_purged_first = purge_oban_jobs()
 
     users_anonymized = anonymize_users()
@@ -235,7 +268,8 @@ defmodule KilnCMS.Staging.Scrub do
     # today) would carry that account as production had it.
     jobs_purged_last = purge_oban_jobs()
 
-    purged
+    plugin_counts
+    |> Map.merge(purged)
     |> Map.merge(rewritten)
     |> Map.merge(%{
       credentials_key => credentials_purged,
@@ -247,14 +281,55 @@ defmodule KilnCMS.Staging.Scrub do
 
   @doc """
   Every table the scrub handles, mapped to what it does there and the summary
-  key that counts it.
+  key that counts it: the core's tables (`core_dispositions/0`) and each
+  plugin table a plugin purges (`:purged`) or rewrites (`:scrubbed`).
 
   Derived from the lists `run/1` works through, so the two cannot disagree.
   `test/kiln_cms/staging/scrub_coverage_test.exs` checks it against every table
-  in the schema.
+  in the schema. Takes `run/1`'s `:plugins` and `:ash_domains`, and raises on
+  a declaration `run/1` would refuse.
   """
-  @spec dispositions() :: %{String.t() => {disposition(), atom()}}
-  def dispositions do
+  @spec dispositions(keyword()) :: %{
+          String.t() => {disposition(), atom() | PluginScrub.key()}
+        }
+  def dispositions(opts \\ []) do
+    {plugins, ash_domains} = plugin_opts(opts)
+
+    plugin_tables =
+      for step <- PluginScrub.steps!(plugins, ash_domains),
+          kind = plugin_disposition(step.action),
+          {:plugin, _name, table} = key = PluginScrub.key(step),
+          into: %{},
+          do: {table, {kind, key}}
+
+    Map.merge(core_dispositions(), plugin_tables)
+  end
+
+  defp plugin_disposition(:purge), do: :purged
+  defp plugin_disposition({:rewrite, _set}), do: :scrubbed
+  defp plugin_disposition({:keep, _reason}), do: nil
+
+  @doc """
+  The plugin tables a scrubbed clone keeps, mapped to the reason: the
+  `{:keep, Resource, reason}` entries, and content tables kept without one.
+  Takes `run/1`'s `:plugins` and `:ash_domains`.
+  """
+  @spec plugin_kept(keyword()) :: %{String.t() => String.t()}
+  def plugin_kept(opts \\ []) do
+    {plugins, ash_domains} = plugin_opts(opts)
+    PluginScrub.kept(plugins, ash_domains)
+  end
+
+  defp plugin_opts(opts) do
+    {Keyword.get_lazy(opts, :plugins, &Kiln.Plugins.all/0),
+     Keyword.get_lazy(opts, :ash_domains, fn ->
+       Application.get_env(:kiln_cms, :ash_domains, [])
+     end)}
+  end
+
+  @doc "The core's own tables, as `dispositions/1` maps them."
+  @spec core_dispositions() :: %{String.t() => {disposition(), atom()}}
+  def core_dispositions do
     purges =
       Map.new([@credentials_first | @purges], fn {key, resource} ->
         {table(resource), {:purged, key}}

@@ -51,7 +51,7 @@ you*).
 | The `__kiln_*__/0` functions the macro injects | The seam between a resource and every core registry. The double underscores read private; they are contract |
 | Workflow action names on a content resource | `:read`, `:published`, `:public_by_slug`, `:trashed`, `:create`, `:update`, `:autosave`, `:submit_for_review`, `:return_to_draft`, `:publish`, `:unpublish`, `:archive`, `:unarchive`, `:restore`, `:destroy`. Note `:restore` undoes trashing and `:unarchive` undoes `:archive` — they are not the same inverse |
 | The merge-argument convention | `tag_ids` / `add_tag_ids` / `remove_tag_ids`, and `related_<type>_ids` with the same three forms; `remove_*` stays idempotent |
-| `Kiln.Plugin` callbacks | All twenty (`plug_routes/0`, `challenge_providers/0` and `security_checks/0` since `kiln_plugin` 1.4, `backup_destinations/0` since 1.5), their arities and their return shapes, plus the `nav_item`, `admin_route` and `plug_route` types |
+| `Kiln.Plugin` callbacks | All twenty-one (`plug_routes/0`, `challenge_providers/0` and `security_checks/0` since `kiln_plugin` 1.4, `backup_destinations/0` and `staging_scrub/0` since 1.5), their arities and their return shapes, plus the `nav_item`, `admin_route`, `plug_route` and `staging_scrub_entry` types |
 | `Kiln.Block` and its DSL | The `block`, `field` and `migrate` entities, their options, the declared field-type vocabulary, and the Kiln-to-Ash type mapping |
 | The `_type` and `_version` attributes | Injected on every block, and the discriminator a stored block map is resolved by |
 | `Kiln.Block.Renderer` | The `:web`, `:json` and `:json_ld` surfaces, and that an implementation returning `nil` for an unhandled surface is correct |

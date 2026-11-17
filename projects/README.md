@@ -19,7 +19,10 @@ A subproject is a `projects/<name>/` directory (this path is in
   delivery APIs, search, webhooks and workers follow automatically once the
   domain is registered;
 - a **`Kiln.Plugin`** module declaring the domain (verified by
-  `mix kiln.plugins.doctor`), plus any blocks/nav/routes/children it adds;
+  `mix kiln.plugins.doctor`), plus any blocks/nav/routes/children it adds,
+  and, when the domain has tables other than content types, a
+  `staging_scrub/0` entry for each, or the staging scrub refuses to run
+  ([Staging scrub](../docs/plugin-extensibility.md#staging-scrub));
 - optionally mix tasks, importers, fixtures and tests.
 
 Activation is config-only. `config/config.exs` ends by importing
