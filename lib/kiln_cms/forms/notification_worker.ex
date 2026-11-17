@@ -52,6 +52,12 @@ defmodule KilnCMS.Forms.NotificationWorker do
     end)
   end
 
+  # A job holding neither shape: a legacy job whose `data` was already dropped
+  # (`PrivateArgs.finishing/3` forgets before Oban acks it, so a node lost in
+  # between leaves it executing with no data, and Lifeline re-queues it). The
+  # mail went out; nothing is left to send.
+  def perform(%Oban.Job{}), do: {:cancel, "form submission no longer in the job"}
+
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}), do: Mail.backoff_seconds(attempt)
 
