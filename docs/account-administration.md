@@ -830,10 +830,11 @@ confirm; if any fails, the account is kept:
 - the account is nothing but this application: its account-wide role is
   *Viewer*, it holds no temporary role and no audiences, it has no other
   membership on any site (waiting, rejected or active), and nothing points
-  at it: no paid membership, API key (revoked ones included), newsletter
-  subscription, content, version, comment, task, media item, release,
-  invitation it sent, recorded consent, logged editing event, or
-  notification it caused in someone else's inbox.
+  at it: no paid membership, API key (revoked ones included), content,
+  version, comment, task, media item, release, invitation it sent, recorded
+  consent, logged editing event, or notification it caused in someone else's
+  inbox. A newsletter subscription linked to the account doesn't stop it:
+  the erasure deletes it (#2991).
 
 Erasing is the same [anonymization](#removing-an-account) a platform admin
 runs, done in the rejection's own transaction: if the erasure fails, the
@@ -1629,8 +1630,11 @@ the account was loaded with none), passkeys and IdP links are deleted, every
 token is revoked, paid memberships are canceled locally, and live sockets are
 dropped. It also deletes what reaches only that person: their Web Push
 subscriptions (the device endpoints review notifications go to), their private
-saved views (shared views are the team's and stay), and the notifications
-addressed to them. Nothing personal remains and nothing can sign in
+saved views (shared views are the team's and stay), the notifications
+addressed to them, and the newsletter subscriptions linked to the account on
+every site, so the address stops receiving newsletters (a subscription at the
+same address that was never linked to the account stays; see
+[Newsletter](newsletter.md#when-a-member-account-is-erased)). Nothing personal remains and nothing can sign in
 again. What remains is a referenced id, and the console says so rather than
 claiming a delete it did not do.
 

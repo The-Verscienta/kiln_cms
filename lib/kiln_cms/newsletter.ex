@@ -16,6 +16,9 @@ defmodule KilnCMS.Newsletter do
   """
   use Ash.Domain
 
+  require Ash.Query
+  require Logger
+
   alias KilnCMS.Firing
   alias KilnCMS.Newsletter.NewsletterSend
   alias KilnCMS.Newsletter.Segment
@@ -35,6 +38,8 @@ defmodule KilnCMS.Newsletter do
       define :link_member_subscriber, action: :link_member, args: [:user_id]
       define :resubscribe_subscriber, action: :resubscribe
       define :subscribers_for_user, action: :for_user, args: [:user_id]
+      # System-only (`system/0`) — erasure, see `forget_member/1`.
+      define :forget_member_subscriber, action: :forget_member
     end
 
     resource KilnCMS.Newsletter.Segment do
@@ -71,14 +76,19 @@ defmodule KilnCMS.Newsletter do
   The actor the newsletter's own machinery runs as (#1659): a
   `KilnCMS.SystemActor` labelled `:newsletter`.
 
-  Two callers use it. The send pipeline (`SendWorker`, `MailWorker`) reads
+  Three callers use it. The send pipeline (`SendWorker`, `MailWorker`) reads
   the campaign and its confirmed subscribers and keeps the campaign's
   counters; `TierSync` keeps tier-backed segments and their members in step
-  with billing. Each resource admits it by action name (see
-  `docs/policy-matrix.md`, "The system actor"): on `NewsletterSend` the read
-  and the fan-out bookkeeping, never `destroy` or `mark_failed`; on
-  `Subscriber` the reads (`read`, `confirmed`) and `link_member`, never a
-  consent change.
+  with billing; erasure (`forget_member/1`) deletes an erased account's
+  linked rows, and the data-subject export reads them. Each resource admits
+  it by action name (see `docs/policy-matrix.md`, "The system actor"): on
+  `NewsletterSend` the read and the fan-out bookkeeping, never `destroy` or
+  `mark_failed`; on `Subscriber` the reads (`read`, `confirmed`),
+  `link_member` and `forget_member`, never a consent change. Deleting a
+  member's rows is wider than a consent change, and is admitted only because
+  the account it was linked to has been erased: `forget_member` is the one
+  write keyed on `user_id`, and only `KilnCMS.Accounts.Changes.AnonymizeUser`
+  and `KilnCMS.Accounts.ErasureBackfill` call it.
   """
   @spec system() :: KilnCMS.SystemActor.t() | nil
   def system, do: KilnCMS.SystemActor.resolve(:newsletter)
@@ -91,6 +101,107 @@ defmodule KilnCMS.Newsletter do
   # path calls it.
   @spec with_actor(term(), (-> result)) :: result when result: term()
   def with_actor(actor, fun), do: KilnCMS.SystemActor.with_override(:newsletter, actor, fun)
+
+  @doc """
+  Delete every subscriber row linked to `user_id`, on every org: the
+  newsletter's side of erasure (#2991), called by
+  `KilnCMS.Accounts.Changes.AnonymizeUser` and, for accounts erased before
+  this existed, `KilnCMS.Accounts.ErasureBackfill`.
+
+  Only rows the account was **linked** to (`user_id`, set by billing's
+  `link_member`). A row someone added by hand at the same address, never
+  linked, is kept: it was not given through the account, and matching on the
+  address would delete a stranger's row at a reused one. Segment memberships
+  go with each row; a campaign's ledger holds counts, not recipients; and a
+  queued delivery to a deleted row cancels as "subscriber not found"
+  (`MailWorker`).
+
+  One org at a time: subscribers are tenant-scoped, and `:for_user` (the one
+  cross-org read) is the member's own. Each delete runs as `system/0`, which
+  `:forget_member` admits by name; its query is the plain `:read`, which
+  that actor already holds. Both are authorized with `:error`, so a refused
+  read raises rather than matching no rows and answering `:ok` with the
+  address still on the list.
+
+  How a failure is reported depends on where the call runs:
+
+    * **Inside a transaction** (erasure's own): the first org that fails
+      stops the sweep; it is logged with that org, and the failure travels
+      on unchanged to roll the erasure back. A failed statement aborts the
+      Postgres transaction, so going on would only log every later org as
+      failed too.
+    * **Outside one** (`KilnCMS.Accounts.ErasureBackfill`): every org is
+      tried, each failure is logged with its org, and the call raises at the
+      end naming them all.
+
+  `forget_member/2` limits the sweep to `org_ids`, for a caller that already
+  knows where the rows are; `forget_member/1` covers every org.
+  """
+  @spec forget_member(Ash.UUID.t()) :: :ok
+  def forget_member(user_id) when is_binary(user_id),
+    do: forget_member(user_id, KilnCMS.Accounts.list_org_ids())
+
+  @doc "`forget_member/1`, over the given orgs only."
+  @spec forget_member(Ash.UUID.t(), [Ash.UUID.t()]) :: :ok
+  def forget_member(user_id, org_ids) when is_binary(user_id) and is_list(org_ids) do
+    if KilnCMS.Repo.in_transaction?(),
+      do: Enum.each(org_ids, &forget_in_org!(user_id, &1)),
+      else: forget_everywhere(user_id, org_ids)
+  end
+
+  # Outside a transaction each org stands alone, so one failure does not stop
+  # the rest; `forget_in_org!/2` has logged it with its org.
+  defp forget_everywhere(user_id, org_ids) do
+    failed =
+      Enum.reject(org_ids, fn org_id ->
+        try do
+          forget_in_org!(user_id, org_id)
+        rescue
+          _error -> false
+        end
+      end)
+
+    if failed != [] do
+      raise "newsletter forget_member failed for orgs: #{Enum.join(failed, ", ")}"
+    end
+
+    :ok
+  end
+
+  # Logs a failure with the org it happened in, then re-raises it unchanged.
+  # Inside a transaction Ash reports a failed bulk write by rolling back (a
+  # throw, not an exception), and that has to keep travelling up to the
+  # transaction it unwinds; catching it here is only to say where it began.
+  defp forget_in_org!(user_id, org_id) do
+    KilnCMS.Newsletter.Subscriber
+    |> Ash.Query.filter(user_id == ^user_id)
+    |> forget_member_subscriber!(
+      actor: system(),
+      tenant: org_id,
+      bulk_options: [
+        authorize_with: :error,
+        strategy: [:atomic, :atomic_batches, :stream],
+        return_records?: false,
+        return_errors?: true
+      ]
+    )
+
+    true
+  catch
+    kind, reason ->
+      Logger.error(
+        "newsletter forget_member failed for org #{org_id}: #{describe_failure(kind, reason)}"
+      )
+
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp describe_failure(:error, error) when is_exception(error), do: Exception.message(error)
+
+  defp describe_failure(:throw, {_conn, _ref, error}) when is_exception(error),
+    do: Exception.message(error)
+
+  defp describe_failure(_kind, reason), do: inspect(reason, limit: 5)
 
   @doc """
   Send a published document to subscribers as a newsletter.

@@ -94,11 +94,23 @@ defmodule KilnCMS.Newsletter.Subscriber do
     end
 
     # Every subscriber row linked to one account, across organizations — the
-    # member's own newsletter state on each site they belong to.
+    # member's own newsletter state on each site they belong to. Self-only
+    # (#2991): see the blanket policy.
     read :for_user do
       multitenancy :bypass
       argument :user_id, :uuid, allow_nil?: false
       filter expr(user_id == ^arg(:user_id))
+    end
+
+    # Erasure (#2991): delete the rows linked to an account being erased
+    # (`KilnCMS.Newsletter.forget_member/1`, called from
+    # `KilnCMS.Accounts.Changes.AnonymizeUser`). Deleted rather than detached:
+    # the row is the person's address and consent, and a detached row would
+    # keep mailing the address the erasure was asked to forget. Segment
+    # memberships go with it (`on_delete: :delete` on the join table).
+    # System-only; see the policy below.
+    destroy :forget_member do
+      description "Delete an erased account's linked subscriber rows (system-only)."
     end
 
     # Double opt-in: the subscriber clicked the confirmation link.
@@ -174,6 +186,14 @@ defmodule KilnCMS.Newsletter.Subscriber do
       forbid_if always()
     end
 
+    # Erasure deletes a member's linked rows (#2991). Like `:link_member`, the
+    # one other write keyed on `user_id`: closed to every person, admin
+    # included, and open to the newsletter's own actor by name.
+    policy action(:forget_member) do
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :newsletter}
+      forbid_if always()
+    end
+
     # A signed-in member manages their OWN newsletter consent from `/account`.
     # Scoped to their linked row, so this grants nothing over anyone else's.
     #
@@ -184,7 +204,8 @@ defmodule KilnCMS.Newsletter.Subscriber do
     # on the write policies warns about, one level up: repeating the admin grant
     # here doesn't help, because the *self* grant is the one being ANDed away.
     # A passing bypass short-circuits the rest; a failing one falls through, so
-    # an admin still reaches these actions via the blanket policy.
+    # an admin still reaches `:resubscribe` and `:unsubscribe` via the blanket
+    # policy. `:for_user` stops there (#2991, see below).
     #
     # `not is_nil(user_id)` is load-bearing: without it an actor-less caller
     # templates `^actor(:id)` to nil and the check reduces to `user_id == nil`,
@@ -196,6 +217,13 @@ defmodule KilnCMS.Newsletter.Subscriber do
     # Admin-only management. Public subscribe/confirm/unsubscribe still run
     # `authorize?: false` behind token checks.
     policy always() do
+      # `:for_user` is the member's own lookup and nobody else's (#2991). It is
+      # `multitenancy :bypass`, so the tenant does not narrow it: an admin
+      # admitted below would read the account's rows on EVERY site, not only
+      # the one they administer. The self bypass above has already admitted
+      # the member; everyone else stops here.
+      forbid_if action(:for_user)
+
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
 
       # Ash ANDs policies, so the `:link_member` grant above is not enough on
@@ -203,10 +231,11 @@ defmodule KilnCMS.Newsletter.Subscriber do
       # read `TierSync` makes to find an existing subscriber before linking.
       # The send pipeline (`KilnCMS.Newsletter.system/0`, #1659) reads the
       # campaign's recipients (`:confirmed`) and re-reads each one before
-      # delivery (`:read`). Narrowed to those rather than widened: managing a
-      # subscriber list by hand, and every consent change, stays an admin act
-      # (or the subscriber's own).
-      forbid_unless action([:read, :confirmed, :link_member])
+      # delivery (`:read`). Erasure deletes a member's linked rows
+      # (`:forget_member`, #2991). Narrowed to those rather than widened:
+      # managing a subscriber list by hand, and every consent change, stays an
+      # admin act (or the subscriber's own).
+      forbid_unless action([:read, :confirmed, :link_member, :forget_member])
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :newsletter}
     end
   end

@@ -85,6 +85,28 @@ carries the reasoning.
   summary
   ([docs/staging-environments.md](../staging-environments.md#the-scrub)).
 
+<a id="erasure-backfill-newsletter-upgrade"></a>
+
+- **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release. No migration; rolling back is safe, and what it deleted stays deleted.**
+  Erasure now deletes an account's linked newsletter subscriptions (see
+  *Erasure deletes the account's newsletter subscriptions* under Fixed). For
+  accounts erased earlier, `KilnCMS.Accounts.ErasureBackfill` does the same:
+  it finds every erased account (`anonymized_at` set) that still has a row
+  in `newsletter_subscribers` with its `user_id`, and deletes those rows,
+  with their segment memberships, on the sites where they are. Each boot
+  queues it on the `default` queue, 10 minutes out, deduplicated for a day; it
+  is idempotent, so a second run finds nothing. An account whose rows can't be
+  deleted is logged at warning and counted under `failed`, and the job ends in
+  error so Oban retries it, up to 3 attempts. After the last one, the next
+  boot queues a fresh job.
+  `config :kiln_cms, :erasure_backfill_on_boot, false` turns the boot enqueue
+  off, and `bin/kiln_cms rpc "KilnCMS.Accounts.ErasureBackfill.run()"` runs it
+  by hand. Rolling back is safe: the job only deletes rows, and the previous
+  release works without them. They are not restored, and they were what the
+  erasure should have removed.
+  See [docs/newsletter.md](../newsletter.md#accounts-erased-before-this-release).
+  ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -757,6 +779,50 @@ carries the reasoning.
   ([#2543](https://github.com/The-Verscienta/kiln_cms/issues/2543)). Part of
   [issue 2419](https://github.com/The-Verscienta/kiln_cms/issues/2419). No
   migration.
+
+<a id="erasure-deletes-newsletter-subscriptions"></a>
+
+- **Erasure deletes the account's newsletter subscriptions, so the person's address stops receiving newsletters, and the self-service data export lists them.**
+  Erasing an account (`:anonymize`, `KilnCMS.Accounts.anonymize_user/2`, or
+  rejecting an unconfirmed applicant on a site set to erase) replaced the
+  account's email with a tombstone but left its newsletter subscriber rows,
+  which hold the real address. A confirmed subscription kept mailing that
+  address after the person asked to be forgotten. Erasure now
+  (`KilnCMS.Newsletter.forget_member/1`):
+  - deletes every subscriber row linked to the account (`user_id`), on every
+    site and in any status, with its segment memberships. A newsletter mail
+    job already queued to one of them is canceled when it comes to run. If any
+    site's delete fails, the whole erasure rolls back and can be retried;
+  - keeps a row that was never linked to the account, even at the same
+    address. Erasure works on the account, and matching on the address would
+    delete a stranger's row wherever an address was reused. A site admin can
+    remove such a row on **Newsletter** (`/editor/newsletter`);
+  - stops the billing sync from ever linking an erased account to a list
+    again, even if a late webhook or the nightly reconcile still finds an
+    entitlement for it.
+
+  A linked subscription no longer stops a rejected applicant's account from
+  being erased, since the erasure now deletes it.
+
+  The data-subject export (**Export my data** on `/account` and
+  `/editor/settings`, `KilnCMS.Accounts.export_user_data/1`) gains
+  `newsletter_subscriptions`: one entry per linked row on every site, with
+  `org_id`, `email`, `name`, `status`, `confirmed_at`, `unsubscribed_at`,
+  `subscribed_at` and the names of its `segments`. The confirm and
+  unsubscribe tokens are left out. A site that can't be read is logged as an
+  error and left out of the export rather than failing it.
+
+  The subscriber resource's `:for_user` read (`Newsletter.subscribers_for_user`,
+  which backs the newsletter card on `/account`) is now the member's own and
+  nobody else's. It reads across every site, so it now refuses every caller
+  but the member, site and platform admins included. It is not exposed over HTTP;
+  the member-facing card is unchanged.
+
+  Accounts erased before this release are handled by a background job; see
+  the Upgrade notes entry. No migration. See
+  [docs/newsletter.md](../newsletter.md#when-a-member-account-is-erased) and
+  [docs/data-flows.md](../data-flows.md#subject-rights-workflows).
+  ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991))
 
 ## Security
 

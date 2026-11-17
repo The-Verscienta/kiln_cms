@@ -671,6 +671,13 @@ config :kiln_cms, :sync_exposure_backfill_on_boot, true
 # day; a redundant run writes nothing.
 config :kiln_cms, :totp_secret_backfill_on_boot, true
 
+# Whether booting enqueues the erasure backfill
+# (`KilnCMS.Accounts.ErasureBackfill`): accounts erased by an earlier release
+# get the erasure steps added since (#2991: their linked newsletter
+# subscriptions are deleted). Ten minutes after boot, deduplicated for a day;
+# a redundant run writes nothing.
+config :kiln_cms, :erasure_backfill_on_boot, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero
