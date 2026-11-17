@@ -256,6 +256,22 @@ defmodule KilnCMS.Backups.StepWorkerTest do
       assert {:snooze, 30} = perform_job(StepWorker, start_args(run.stamp))
     end
 
+    test "a source whose id read is held up still counts: the copy waits", %{dir: dir} do
+      # The source's beat carries no id (its read is stuck, #2848) but the
+      # last id it read.
+      source = Ash.UUID.generate()
+
+      Backups.beat_node!(
+        %{node: "a@host", boot_id: Ash.UUID.generate(), dir_id: nil, last_dir_id: source},
+        actor: Backups.system()
+      )
+
+      run = run!(source)
+      state!(dir, run.stamp)
+
+      assert {:snooze, 30} = perform_job(StepWorker, start_args(run.stamp))
+    end
+
     test "a source beat 181 s old is not live: the copy resumes here", %{dir: dir} do
       source = Ash.UUID.generate()
       BackupCluster.backdate_beat!(source_beat!(source), 181)
@@ -305,6 +321,51 @@ defmodule KilnCMS.Backups.StepWorkerTest do
                "Backup resume of #{run.stamp}: couldn't read the node heartbeats " <>
                  "(:connection_refused); waiting for the server with its backup directory " <>
                  "(id #{source}) rather than resuming from the files here"
+    end
+
+    # The run's row can't be read (here: its table is off the search path, so
+    # the read fails in the database, as on a blip). A copy must not win then.
+    defp break_run_reads!, do: KilnCMS.Repo.query!("SET LOCAL search_path TO pg_catalog")
+
+    test "a run that can't be read: with a copy here the start waits, and says so", %{dir: dir} do
+      run = run!(Ash.UUID.generate())
+      state!(dir, run.stamp)
+      break_run_reads!()
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:snooze, 30} = perform_job(StepWorker, start_args(run.stamp))
+        end)
+
+      assert log =~ "Backup resume of #{run.stamp}: couldn't read where its files are ("
+      assert log =~ "); waiting rather than resuming from the files here"
+    end
+
+    test "a run that can't be read: a spent budget fails the attempt, and the last one too",
+         %{dir: dir} do
+      run = run!(Ash.UUID.generate())
+      state!(dir, run.stamp)
+      break_run_reads!()
+
+      # No id: nothing to write the snooze base to on the broken connection.
+      job = %Oban.Job{args: start_args(run.stamp), meta: %{"snoozed" => 20}, max_attempts: 4}
+
+      assert {:error, :run_unreadable} = StepWorker.perform(%{job | attempt: 3})
+      assert {:error, :run_unreadable} = StepWorker.perform(%{job | attempt: 4})
+    end
+
+    test "a run that can't be read: with no files here the start runs and refuses on them" do
+      run = run!(Ash.UUID.generate())
+      break_run_reads!()
+
+      log =
+        capture_log([level: :warning], fn ->
+          # Past the affinity check (the lock check then fails on the same
+          # broken read).
+          refute match?({:snooze, _}, perform_job(StepWorker, start_args(run.stamp)))
+        end)
+
+      assert log =~ "); starting it here"
     end
 
     test "the heartbeats are read only when there are files here to win with", %{local: local} do

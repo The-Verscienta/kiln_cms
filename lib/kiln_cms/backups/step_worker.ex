@@ -48,8 +48,9 @@ defmodule KilnCMS.Backups.StepWorker do
   When the last attempt has used its budget too, the resume is given up
   (`Chain.abandon_start/2`): the lock is released, the waiting request
   promoted, and the run's row says why. A run with no directory id
-  (imported, from before #2539) runs anywhere, as does a start whose run
-  can't be read. The 180 s window is the lock's, not the last-good marker
+  (imported, from before #2539) runs anywhere. A start whose run can't be
+  read runs on a node without the files (the start step there refuses
+  visibly) and waits, with the same budget, on one with them. The 180 s window is the lock's, not the last-good marker
   sync's 600 s routing window (`KilnCMS.Backups.MarkerSyncWorker`).
 
   Oban counts a job's snoozes in `meta["snoozed"]` across all its attempts. The
@@ -147,7 +148,7 @@ defmodule KilnCMS.Backups.StepWorker do
 
   # A resume's start (#2539, #2817): the node whose directory the run records,
   # then local files that no live node's directory id claims. A run with no
-  # id, or one that can't be read, isn't pinned. A legacy `Worker` job's
+  # id isn't pinned. A legacy `Worker` job's
   # snoozes (`Steps`) also count in `meta["snoozed"]`, so they can spend this
   # budget: that needs a node from before #2218 still running next to a run
   # pinned by #2539, and the outcome is a visible refusal.
@@ -161,12 +162,7 @@ defmodule KilnCMS.Backups.StepWorker do
         resume_dir(job, stamp, dir_id)
 
       {:error, error} ->
-        Logger.warning(
-          "Backup resume of #{stamp}: couldn't read where its files are " <>
-            "(#{inspect(error, limit: 5)}); starting it here"
-        )
-
-        :ok
+        run_unreadable(job, stamp, error)
     end
   end
 
@@ -208,6 +204,28 @@ defmodule KilnCMS.Backups.StepWorker do
     end
   end
 
+  # The run can't be read, so neither can the directory it records. With
+  # files here the start waits, like a live source (a copy must not win on a
+  # database blip). With none it starts here: the start step reads the files
+  # first and refuses visibly (`:no_state`) when they are missing.
+  defp run_unreadable(job, stamp, error) do
+    if Backups.local_resume_state?(stamp) do
+      Logger.warning(
+        "Backup resume of #{stamp}: couldn't read where its files are " <>
+          "(#{inspect(error, limit: 5)}); waiting rather than resuming from the files here"
+      )
+
+      wait(job, :run_unreadable, fn -> {:error, :run_unreadable} end)
+    else
+      Logger.warning(
+        "Backup resume of #{stamp}: couldn't read where its files are " <>
+          "(#{inspect(error, limit: 5)}); starting it here"
+      )
+
+      :ok
+    end
+  end
+
   defp describe(error) when is_exception(error), do: Exception.message(error)
   defp describe(error), do: inspect(error, limit: 5)
 
@@ -215,16 +233,21 @@ defmodule KilnCMS.Backups.StepWorker do
   # gives up on its last attempt (`give_up`); every other step's last attempt
   # fails like any other, and the reaper closes the chain.
   defp pinned(job, dir_id, give_up) do
-    cond do
-      DirId.current() == {:ok, dir_id} ->
-        rebase_snoozes(job)
+    if DirId.current() == {:ok, dir_id},
+      do: rebase_snoozes(job),
+      else: wait(job, :backup_dir_elsewhere, give_up)
+  end
 
+  # Snoozes, or (budget spent) fails the attempt with `reason`, or on the
+  # last attempt gives up.
+  defp wait(job, reason, give_up) do
+    cond do
       snoozes_this_attempt(job) < @affinity_max_snoozes ->
         {:snooze, @affinity_snooze_s}
 
       job.attempt < job.max_attempts ->
         rebase_snoozes(job)
-        {:error, :backup_dir_elsewhere}
+        {:error, reason}
 
       true ->
         rebase_snoozes(job)

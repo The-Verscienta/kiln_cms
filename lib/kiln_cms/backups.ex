@@ -520,12 +520,14 @@ defmodule KilnCMS.Backups do
 
   @doc false
   # Whether a live node, one whose beat is under `within_s` seconds old on the
-  # database's clock, reports backup directory `dir_id` (#2817). Fails closed:
-  # a refused or failed read is an error, never "no".
+  # database's clock, reports backup directory `dir_id` (#2817): as the id it
+  # read this beat, or as the last one it read while its read is held up
+  # (`last_dir_id`). Fails closed: a refused or failed read is an error,
+  # never "no".
   @spec dir_id_live?(String.t(), pos_integer()) :: {:ok, boolean()} | {:error, term()}
   def dir_id_live?(dir_id, within_s) do
     with {:ok, beats} <- live_beats(within_s) do
-      {:ok, Enum.any?(beats, &(&1.dir_id == dir_id))}
+      {:ok, Enum.any?(beats, &(dir_id in [&1.dir_id, &1.last_dir_id]))}
     end
   end
 
