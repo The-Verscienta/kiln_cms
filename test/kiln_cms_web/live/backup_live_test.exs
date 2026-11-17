@@ -1551,6 +1551,44 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert has_element?(lv, ~s|#backup-in-flight button[data-role="cancel"]|)
     end
 
+    # A stale record that isn't the resume starting: the run is `running`
+    # but not stale, under its own chain, so the Cancel's pinned UPDATE
+    # matches nothing while the lock still holds the waiting resume.
+    @tag :pg_tools
+    test "a Cancel that finds the backup changed otherwise says so, neutrally (#2816)",
+         %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-131314")
+      set_run!(run.stamp, status: "running", finished_at: nil)
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      html = render_hook(lv, "cancel_resume", %{"id" => run.id})
+
+      assert html =~ "The backup changed meanwhile. Try again."
+      refute html =~ "The resume started meanwhile"
+      assert %{chain: ^chain, step: :start} = Backups.in_flight()
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    # The race a LiveView test can't time: the Cancel read the run, then the
+    # start re-opened it before the Cancel's UPDATE (a stale record). The run
+    # and the lock as they are now decide the message.
+    @tag :pg_tools
+    test "a stale-record Cancel says the resume started only when it did (#2816)", %{dir: dir} do
+      admin = authed_user(:admin)
+      stale = %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}
+
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-131315")
+
+      assert KilnCMSWeb.BackupLive.cancel_resume_message(stale, run.id, admin) ==
+               "The backup changed meanwhile. Try again."
+
+      Backups.resume_run!(run, %{chain_id: chain}, actor: Backups.system())
+
+      assert KilnCMSWeb.BackupLive.cancel_resume_message(stale, run.id, admin) ==
+               "The resume started meanwhile. Cancel it again to stop the backup."
+    end
+
     @tag :pg_tools
     test "a forged resume cancel of a running or finished backup is refused", %{dir: dir} do
       done = app_run!(dir, 2, :succeeded)

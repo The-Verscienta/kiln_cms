@@ -1096,8 +1096,14 @@ defmodule KilnCMS.Backups.Chain do
 
   defp waiting_for(_row), do: nil
 
-  defp snoozed_for_files?(%{state: state, meta: meta, errors: errors}) do
-    (meta["snoozed"] || 0) > 0 and (state != "retryable" or last_error_elsewhere?(errors))
+  # `meta["snoozed"]` counts across all attempts; this attempt's snoozes are
+  # those since `meta["affinity_base"]` (`StepWorker.snoozes_this_attempt/1`).
+  # An attempt that failed with `:backup_dir_elsewhere` was rebased before it
+  # failed, so its retry (retryable, then available) says so through its last
+  # error instead. Snoozes of an earlier attempt that got past the check, then
+  # failed or was retried for another reason, count for nothing.
+  defp snoozed_for_files?(%{meta: meta, errors: errors}) do
+    (meta["snoozed"] || 0) - (meta["affinity_base"] || 0) > 0 or last_error_elsewhere?(errors)
   end
 
   defp last_error_elsewhere?(errors) do

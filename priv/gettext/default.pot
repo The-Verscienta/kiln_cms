@@ -23307,6 +23307,11 @@ msgstr ""
 msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The backup changed meanwhile. Try again."
+msgstr ""
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block could not be saved."

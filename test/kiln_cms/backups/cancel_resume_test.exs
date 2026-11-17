@@ -15,7 +15,7 @@ defmodule KilnCMS.Backups.CancelResumeTest do
 
   alias KilnCMS.Accounts.{OrgMembership, User}
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, DirId, Heartbeat, Recorder, StepWorker, WorkState}
+  alias KilnCMS.Backups.{Chain, DirId, Heartbeat, Recorder, Steps, StepWorker, WorkState}
   alias KilnCMS.Backups.Run.Changes.CancelResume
   alias KilnCMS.Repo
   alias KilnCMS.Security
@@ -266,6 +266,71 @@ defmodule KilnCMS.Backups.CancelResumeTest do
     end
   end
 
+  describe "what a waiting resume waits for (waiting_for)" do
+    defp set_job!(id, fields) do
+      {1, _} = Repo.update_all(from(j in Oban.Job, where: j.id == ^id), set: fields)
+    end
+
+    defp waiting_for, do: Backups.in_flight(details: true).waiting_for
+
+    defp error_entry(error),
+      do: %{"at" => DateTime.to_iso8601(DateTime.utc_now()), "attempt" => 1, "error" => error}
+
+    test "a start snoozing for its files this attempt waits for the files server", ctx do
+      stamp = "20261101-010201"
+      failed_run!(ctx.dir, stamp)
+      waiting_for_files!(ctx, stamp)
+
+      assert waiting_for() == :files_server
+    end
+
+    # `meta["snoozed"]` counts across attempts: snoozes an earlier attempt
+    # rebased (`affinity_base`) say nothing about this one.
+    test "an earlier attempt's snoozes don't count once rebased", ctx do
+      stamp = "20261101-010202"
+      failed_run!(ctx.dir, stamp)
+      waiting_for_files!(ctx, stamp)
+      id = lock().step_job_id
+      rebased = %{"snoozed" => 3, "affinity_base" => 3}
+
+      set_job!(id, state: "available", meta: rebased, errors: [])
+      assert waiting_for() == nil
+
+      set_job!(id,
+        state: "retryable",
+        meta: rebased,
+        errors: [error_entry("** (RuntimeError) the database went away")]
+      )
+
+      assert waiting_for() == nil
+
+      set_job!(id,
+        state: "available",
+        meta: rebased,
+        errors: [error_entry("** (RuntimeError) the database went away")]
+      )
+
+      assert waiting_for() == nil
+    end
+
+    # Its last attempt spent the snooze budget and failed with
+    # `:backup_dir_elsewhere` (rebased first): its retry still waits.
+    test "a retry after an attempt found no server with its files still waits for one", ctx do
+      stamp = "20261101-010203"
+      failed_run!(ctx.dir, stamp)
+      waiting_for_files!(ctx, stamp)
+      id = lock().step_job_id
+      rebased = %{"snoozed" => 6, "affinity_base" => 6}
+      elsewhere = [error_entry("{:error, :backup_dir_elsewhere}")]
+
+      set_job!(id, state: "retryable", meta: rebased, errors: elsewhere)
+      assert waiting_for() == :files_server
+
+      set_job!(id, state: "available", meta: rebased, errors: elsewhere)
+      assert waiting_for() == :files_server
+    end
+  end
+
   describe "refusals" do
     test "anyone but a platform admin is refused, and nothing changes", ctx do
       stamp = "20261101-020101"
@@ -423,6 +488,33 @@ defmodule KilnCMS.Backups.CancelResumeTest do
       assert {:error, :superseded} = Chain.while_holding(lease, fn -> :ok end)
       assert %{status: :failed} = run_of(stamp)
       refute run_of(stamp).chain_id == chain
+    end
+
+    # A Cancel that commits after the start's last lease check, before its
+    # refusal: the refusal's release finds the lease gone, so the Cancel's
+    # note stays and the chain settles once, as canceled.
+    test "c: the Cancel lands before the start's refusal; the refusal writes nothing",
+         %{admin: admin} = ctx do
+      stamp = "20261101-030105"
+      {chain, job} = started_resume!(ctx, stamp)
+      {:ok, lease} = Chain.begin_step(job)
+      failed = run_of(stamp)
+
+      # The start will find no work files here, and refuse.
+      File.rename!(WorkState.path(ctx.dir, stamp), Path.join(ctx.base, "aside-#{stamp}"))
+
+      BackupChain.listen(fn ->
+        assert {:ok, _} = Backups.cancel_run_resume(failed, actor: admin)
+        assert {:error, :canceled} = BackupChain.settled(chain)
+
+        assert {:cancel, :superseded} = Steps.perform(lease, job)
+        assert {:error, :unsettled} = BackupChain.settled(chain)
+      end)
+
+      run = run_of(stamp)
+      assert run.error == @note <> "\n" <> failed.error
+      refute Enum.any?(run.log, &(&1.message =~ "Resume refused"))
+      assert Backups.in_flight() == nil
     end
 
     # Critic change 1/5 and the `chain_id` pin: a run the resume already took

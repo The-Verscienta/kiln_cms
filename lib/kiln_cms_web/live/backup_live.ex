@@ -401,29 +401,52 @@ defmodule KilnCMSWeb.BackupLive do
        |> refresh()}
     else
       {:error, error} ->
-        {:noreply, socket |> put_flash(:error, cancel_resume_message(error)) |> refresh()}
+        {:noreply,
+         socket |> put_flash(:error, cancel_resume_message(error, id, user)) |> refresh()}
     end
   end
 
-  defp cancel_resume_message(%Ash.Error.Forbidden{}),
+  @doc false
+  # Public for the test of a Cancel that loses the race with the start's
+  # re-open, which a LiveView test can't time.
+  def cancel_resume_message(%Ash.Error.Forbidden{}, _id, _user),
     do: gettext("Only a platform admin can cancel a backup.")
 
   # The resume re-opened the run first: it is a running backup now, with its
   # own Cancel. Before this read the run (`CancelResume.started/0`), or while
-  # the Cancel ran (a stale record).
-  defp cancel_resume_message(%Ash.Error.Invalid{errors: errors}) do
-    started? =
-      Enum.any?(errors, fn error ->
-        match?(%Ash.Error.Changes.StaleRecord{}, error) or
-          Exception.message(error) =~ CancelResume.started()
-      end)
+  # the Cancel ran: a stale record, which anything else that moved the run
+  # (another Cancel, a Resume refused) also gives, so the run and the lock as
+  # they are now decide.
+  def cancel_resume_message(%Ash.Error.Invalid{errors: errors}, id, user) do
+    cond do
+      Enum.any?(errors, &(Exception.message(&1) =~ CancelResume.started())) ->
+        started_message()
 
-    if started?,
-      do: gettext("The resume started meanwhile. Cancel it again to stop the backup."),
-      else: gettext("That resume can't be canceled.")
+      Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)) ->
+        if resume_started?(id, user),
+          do: started_message(),
+          else: gettext("The backup changed meanwhile. Try again.")
+
+      true ->
+        gettext("That resume can't be canceled.")
+    end
   end
 
-  defp cancel_resume_message(_error), do: gettext("That resume can't be canceled.")
+  def cancel_resume_message(_error, _id, _user), do: gettext("That resume can't be canceled.")
+
+  defp started_message,
+    do: gettext("The resume started meanwhile. Cancel it again to stop the backup.")
+
+  # The run is running under the chain the lock holds, as a resume of it.
+  defp resume_started?(id, user) do
+    with {:ok, %{status: :running, stamp: stamp, chain_id: chain}} when is_binary(chain) <-
+           Backups.get_run(id, actor: user),
+         %{chain: ^chain, resume: ^stamp} <- Backups.in_flight() do
+      true
+    else
+      _ -> false
+    end
+  end
 
   defp resume_backup(socket, id) do
     with {:ok, %{stamp: stamp}} <- Backups.get_run(id, actor: socket.assigns.current_user),

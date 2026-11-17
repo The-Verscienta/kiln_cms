@@ -489,15 +489,30 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   # A resume that can't run here (#2539) closes visibly: the run says why on
-  # its row before the lock is released, as `fail/5` does, so a Resume can't
-  # re-open a run this chain is still about to write. Nothing was started: no
-  # manifest.
+  # its row. Nothing was started: no manifest.
+  #
+  # The lock is released first, under the lease, and only a release that held
+  # it writes the note, as `Chain.abandon_start/2` does. A resume canceled
+  # before it started (#2816) frees the lock and notes the run in one
+  # transaction, so it may commit after this start's last lease check: the
+  # release then finds the lease gone (`:superseded`) and the start stops
+  # quietly, leaving the Cancel's note and its settle as they are. A Resume
+  # requested once the lock is free can't lose its run to the note: the note
+  # pins the run's status as loaded, and never touches a live one
+  # (`Run.Changes.ResumeRefused`). A release that fails otherwise still notes
+  # the run; the reaper frees the lock.
   defp refuse_resume(lease, reason) do
-    Logger.warning("Backup resume refused: #{inspect(reason)}")
-    note_resume_refused(lease.resume, lease.chain, reason)
-    _ = Chain.release(lease)
-    settled(lease, {:error, reason})
-    {:cancel, reason}
+    case Chain.release(lease) do
+      {:error, :superseded} ->
+        Logger.info("Backup resume of #{lease.resume} stopped: it was canceled meanwhile")
+        {:cancel, :superseded}
+
+      _released ->
+        Logger.warning("Backup resume refused: #{inspect(reason)}")
+        note_resume_refused(lease.resume, lease.chain, reason)
+        settled(lease, {:error, reason})
+        {:cancel, reason}
+    end
   end
 
   @doc false

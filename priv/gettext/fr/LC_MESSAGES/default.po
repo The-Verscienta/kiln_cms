@@ -23307,6 +23307,11 @@ msgstr "L'icône de l'application a été enregistrée mais n'est pas encore ins
 msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
 msgstr "La réponse automatique utilise désormais [field:%{new}] là où elle utilisait [field:%{old}]."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The backup changed meanwhile. Try again."
+msgstr "La sauvegarde a changé entre-temps. Réessayez."
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "The block could not be saved."
