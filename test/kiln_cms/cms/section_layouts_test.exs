@@ -154,6 +154,51 @@ defmodule KilnCMS.CMS.SectionLayoutsTest do
     end
   end
 
+  describe "a write built from a stale struct" do
+    # Another admin moved the field after this write's struct was read: the
+    # write decides from where the field is now, read in its transaction.
+    test "a rename carries and prunes the section the field is in now", %{admin: admin} do
+      stale = field!(admin, "slay_latin", "Slay Identity")
+      layout!(admin, "Slay Identity")
+
+      CMS.update_field_definition!(stale, %{section: "Slay Moved"}, actor: user(:admin))
+      layout!(admin, "Slay Moved", %{display: :fieldset})
+
+      rename!(admin, stale, "Slay Names")
+
+      assert CMS.get_field_definition!(stale.id, actor: admin).section == "Slay Names"
+      assert %{"Slay Names" => %{display: :fieldset}} = layouts()
+      assert Map.keys(layouts()) == ["Slay Names"]
+    end
+
+    test "a destroy prunes the section the field is in now", %{admin: admin} do
+      stale = field!(admin, "slay_latin", "Slay Identity")
+      field!(admin, "slay_pinyin", "Slay Identity")
+      layout!(admin, "Slay Identity")
+
+      CMS.update_field_definition!(stale, %{section: "Slay Moved"}, actor: user(:admin))
+      layout!(admin, "Slay Moved", %{display: :fieldset})
+
+      :ok = CMS.destroy_field_definition!(stale, actor: admin)
+
+      assert Map.keys(layouts()) == ["Slay Identity"]
+    end
+
+    test "a write that sets no section or owner reads nothing and moves nothing",
+         %{admin: admin} do
+      stale = field!(admin, "slay_latin", "Slay Identity")
+      layout!(admin, "Slay Identity")
+
+      CMS.update_field_definition!(stale, %{section: "Slay Moved"}, actor: user(:admin))
+      layout!(admin, "Slay Moved", %{display: :fieldset})
+
+      CMS.update_field_definition!(stale, %{label: "Latin name"}, actor: admin)
+
+      assert CMS.get_field_definition!(stale.id, actor: admin).section == "Slay Moved"
+      assert %{"Slay Moved" => %{display: :fieldset}} = layouts()
+    end
+  end
+
   describe "carrying a layout on a rename" do
     test "to a name with no row: the layout moves", %{admin: admin} do
       latin = field!(admin, "slay_latin", "Slay Identity")

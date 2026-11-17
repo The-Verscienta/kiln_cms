@@ -64,9 +64,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Changes.ClearMultiple
   alias KilnCMS.CMS.Computed
-  alias KilnCMS.CMS.Errors.SectionLayoutNotKept
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.DynamicDefaults
+  alias KilnCMS.CMS.Errors.SectionLayoutNotKept
   alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldSection

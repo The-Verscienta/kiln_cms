@@ -368,6 +368,37 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       refute has_element?(lv, ~s([data-field-section="Identity"]))
     end
 
+    test "a rename from a form opened before another admin moved the field keeps no orphan",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "latin", 0, "Identity")
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      # Another admin, with the form open: latin moves to Dosing, alone
+      # there, and Dosing gets a layout.
+      other = authed_user(:admin)
+      CMS.update_field_definition!(latin, %{section: "Dosing"}, actor: other)
+
+      CMS.create_field_section!(%{content_type: :page, name: "Dosing", display: :fieldset},
+        actor: other
+      )
+
+      lv
+      |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(latin.id, actor: admin).section == "Names"
+      # Dosing's layout went with its only field, carried to Names.
+      assert %{"Names" => %{display: :fieldset}} = layouts()
+      assert Map.keys(layouts()) == ["Names"]
+    end
+
     test "renaming a section on its last field takes its layout along", %{conn: conn} do
       admin = authed_user(:admin)
       latin = field!(admin, "latin", 0, "Identity")
