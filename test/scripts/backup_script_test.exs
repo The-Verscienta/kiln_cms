@@ -25,8 +25,12 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
   alias KilnCMS.Backups.{Checksum, MediaArchive, Retention}
   alias KilnCMS.Backups.Retention.Policy
+  alias KilnCMS.Test.ShellTools
 
   @moduletag :capture_log
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
 
   @mb 1_048_576
   @script Path.expand("../../scripts/backup.sh", __DIR__)
@@ -1164,19 +1168,12 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       end
     end
 
-    # bash 3.2 is what macOS ships as /bin/bash; CI (Linux) has 5.x, so this
-    # only runs on a Mac.
-    bash3? =
-      File.exists?("/bin/bash") and
-        match?(
-          {"3\n", 0},
-          System.cmd("/bin/bash", ["-c", "echo ${BASH_VERSINFO[0]}"], stderr_to_stdout: true)
-        )
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
 
-    unless bash3?, do: @tag(skip: "needs /bin/bash 3.x (macOS)")
-
-    test "the eleven-part run also works under /bin/bash 3.2", ctx do
-      eleven_part_run!(ctx, "/bin/bash")
+    test "the eleven-part run also works under bash 3.2", ctx do
+      eleven_part_run!(ctx, ShellTools.bash32())
     end
   end
 
@@ -1272,6 +1269,44 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert manifest["error"] =~ "bad"
       assert manifest["error"] =~ ~s("q")
       assert KilnCMS.Backups.Manifest.read(ctx.backups).ok == false
+    end
+  end
+
+  # The tar probe (#2479): every part is built with `--null -T`, so a tar that
+  # cannot read a NUL-separated list is refused before any part is written.
+  # In `all` the probe runs in the media phase, after the dump, so a busybox
+  # host still keeps a verified database backup (the app's order, ADR 0042).
+  describe "a tar that cannot read a NUL-separated list" do
+    setup do
+      %{real_tar: System.find_executable("tar")}
+    end
+
+    test "media is refused before any part is written", ctx do
+      stub_tar_without_null!(ctx)
+      assert_media_refused!(ctx)
+    end
+
+    test "all keeps the verified dump and records the refusal", ctx do
+      stub_tar_without_null!(ctx)
+      assert_all_keeps_the_dump!(ctx)
+    end
+
+    unless ShellTools.busybox?(),
+      do: @tag(skip: "needs busybox on PATH (KILN_REQUIRE_BUSYBOX=1 fails instead)")
+
+    @tag :busybox_tar
+    test "busybox tar: media is refused before any part is written", ctx do
+      File.ln_s!(ShellTools.busybox!(), Path.join(ctx.bin, "tar"))
+      assert_media_refused!(ctx)
+    end
+
+    unless ShellTools.busybox?(),
+      do: @tag(skip: "needs busybox on PATH (KILN_REQUIRE_BUSYBOX=1 fails instead)")
+
+    @tag :busybox_tar
+    test "busybox tar: all keeps the verified dump and records the refusal", ctx do
+      File.ln_s!(ShellTools.busybox!(), Path.join(ctx.bin, "tar"))
+      assert_all_keeps_the_dump!(ctx)
     end
   end
 
@@ -1660,24 +1695,22 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       refute manifest!(ctx)["ok"]
     end
 
-    # bash 3.2 is what macOS ships as /bin/bash; CI (Linux) has 5.x, so this
-    # only runs on a Mac.
-    bash3? =
-      File.exists?("/bin/bash") and
-        match?(
-          {"3\n", 0},
-          System.cmd("/bin/bash", ["-c", "echo ${BASH_VERSINFO[0]}"], stderr_to_stdout: true)
-        )
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
 
-    unless bash3?, do: @tag(skip: "needs /bin/bash 3.x (macOS)")
-
-    test "the split also works under /bin/bash 3.2", ctx do
+    test "the split also works under bash 3.2", ctx do
       # An encoded backslash before `c` (which `%b` would read as "stop
       # here"), an `@`, and a trailing newline (which `$(…)` would drop).
       url = "ecto://kiln:hun%5Cct%40er2%0A@db/kiln_prod?sslmode=require"
 
       assert {_out, 0} =
-               backup(ctx, "db", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}], "/bin/bash")
+               backup(
+                 ctx,
+                 "db",
+                 [{"DATABASE_URL", url}, {"PGPASSWORD", nil}],
+                 ShellTools.bash32()
+               )
 
       args = File.read!(ctx.log <> ".args")
       assert args =~ "\npostgres://kiln@db/kiln_prod?sslmode=require\n"
@@ -1989,6 +2022,43 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   defp norm(name) when is_binary(name) do
     name = if String.valid?(name), do: name, else: :unicode.characters_to_binary(name, :latin1)
     String.replace(name, ~r{GNUSparseFile\.\d+/}, "")
+  end
+
+  @no_null_list "tar cannot read a NUL-separated file list (--null -T); install GNU tar or bsdtar"
+
+  # A tar that rejects `--null` the way busybox does, and is the real one
+  # otherwise.
+  defp stub_tar_without_null!(ctx) do
+    stub!(ctx.bin, "tar", """
+    #!/bin/sh
+    for a in "$@"; do
+      if [ "$a" = "--null" ]; then echo "tar: unrecognized option '--null'" >&2; exit 1; fi
+    done
+    exec #{ctx.real_tar} "$@"
+    """)
+  end
+
+  defp assert_media_refused!(ctx) do
+    assert {out, 1} = backup(ctx, "media")
+    assert out =~ @no_null_list
+    # No part, no sidecar, no in-progress marker, no scratch left over.
+    assert media_dir_listing(ctx) == []
+    assert File.ls!(ctx.scratch) == []
+  end
+
+  defp assert_all_keeps_the_dump!(ctx) do
+    assert {out, 1} = backup(ctx, "all")
+    assert out =~ @no_null_list
+
+    assert [dump] = Path.wildcard(Path.join(ctx.backups, "db/kiln-db-*.dump"))
+    {:ok, hex, _} = Checksum.file(dump)
+    assert {:ok, [{^hex, _}]} = Checksum.parse_sidecar(sidecar(dump))
+    assert media_dir_listing(ctx) == []
+
+    manifest = manifest!(ctx)
+    refute manifest["ok"]
+    assert manifest["error"] =~ @no_null_list
+    assert [%{"kind" => "db", "sha256" => ^hex}] = manifest["artifacts"]
   end
 
   defp stub!(bin, name, body) do

@@ -2930,12 +2930,22 @@ it on a host:
 
 **What it needs.** GNU tar or bsdtar: every part is built from a NUL-separated
 file list (`--null -T`), and a tar that cannot read one (busybox) is refused
-before anything is written: "tar cannot read a NUL-separated file list". Also
+before any media part is written: "tar cannot read a NUL-separated file list".
+In `backup.sh all` the database dump runs first, so it is kept and verified,
+the run exits 1, and `manifest.json` records the refusal as the run's error
+with the dump as its one artifact. Also
 `stat` (GNU or BSD), `xargs`, `mktemp`, `head`, `gzip`, and `sha256sum` or
 `shasum`; bash 3.2 or later. `iconv` is used when present to keep error text in
 the manifest valid UTF-8. The file lists are built in `TMPDIR` (default `/tmp`)
 and removed when the script exits. Planning a very large library in shell takes
 longer than the app does, and grows with the number of files.
+
+CI runs the script tests under bash 5 with GNU tar, bash 3.2.57 with GNU tar,
+and bash 5 with bsdtar, and checks that busybox tar is refused. BSD
+`stat -f %z`, BSD `xargs` and AppleDouble (`._*`) members are checked only on
+macOS, which CI does not run;
+[system-requirements.md](system-requirements.md#running-the-backup-scripts-on-the-host)
+has the details.
 
 **Permissions.** Parts and the sidecar are 0600 from their first byte (the
 media phase runs under `umask 077`). If the script creates `$BACKUP_DIR/media`,

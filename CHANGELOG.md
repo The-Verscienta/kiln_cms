@@ -151,8 +151,13 @@ Every summary line below that was shortened links to its own entry there.
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
 - **Telemetry: `[:kiln_cms, :backups, :retention, :skipped | :stopped]` now also fire for destinations (`scope: :destination`); local events carry `scope: :local`. Match on `scope` to count local only.**
   ([long form](docs/changelog/unreleased.md#backup-retention-telemetry-scope))
+- **Contributors: the backup script tests also run in CI under bash 3.2.57 and under bsdtar, and check that busybox tar is refused. The docs now say `backup.sh all` keeps its verified database dump when it refuses a tar.**
+  ([long form](docs/changelog/unreleased.md#backup-scripts-portability-ci))
 
 ### Fixed
+
+- **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
+  ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020) · [long form](docs/changelog/unreleased.md#staging-up-stops-on-a-failed-copy))
 
 - **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
   ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))

@@ -672,7 +672,39 @@ carries the reasoning.
   metadata are unchanged. See
   [When retention is skipped or stops](../backups.md#when-retention-is-skipped-or-stops).
 
+<a id="backup-scripts-portability-ci"></a>
+
+- **For contributors: the host backup script tests also run in CI under bash 3.2.57 with GNU tar and under bash 5 with bsdtar, and check that busybox tar is refused (#2479, #2420). The backup docs now say what `backup.sh all` keeps when it refuses a tar.**
+  `scripts/backup.sh`, `restore.sh` and `staging.sh` claim bash 3.2 (macOS's
+  `/bin/bash`) and bsdtar as well as bash 5 and GNU tar, but the `test` shards
+  only ever ran bash 5 and GNU tar, so the other combinations were checked on
+  developers' Macs or not at all. The new `backup_scripts_portability` job
+  runs the test files tagged `:shell_portability` under each, with bash 3.2.57
+  built from a SHA-256-pinned GNU tarball (`scripts/ci/build_bash32.sh`). It is
+  not a required check until its pass rate is known. BSD `stat`, BSD `xargs`
+  and AppleDouble members stay checked on Macs only: setup-beam has no macOS
+  builds. No change to the scripts.
+
+  The docs said a busybox tar is "refused before anything is written". That
+  holds for `backup.sh media`. In `backup.sh all` the database dump runs
+  first, so it is kept with a verified checksum; the media phase is then
+  refused before any part is written, the run exits 1, and `manifest.json`
+  records the refusal with the dump as its artifact. See
+  [Cron backups in parts](../backups.md#cron-backups-in-parts) and, for
+  running the CI legs locally,
+  [Contributing](../../CONTRIBUTING.md#run-the-backup-script-tests-under-every-shell-and-tar).
+
 ## Fixed
+
+<a id="staging-up-stops-on-a-failed-copy"></a>
+
+- **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too.**
+  The copy is a pipeline of two subshells. bash 3.2 as built on Linux does
+  not apply `set -e` to a pipeline that ends in a subshell, so a failed dump
+  went on to migrate and scrub an empty staging database and reported
+  success. The script now checks the pipeline's status itself and exits with
+  "copying production into <db> failed; nothing was migrated or scrubbed".
+  Found by the new bash 3.2 CI leg. ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020))
 
 <a id="staging-scrub-personal-data"></a>
 

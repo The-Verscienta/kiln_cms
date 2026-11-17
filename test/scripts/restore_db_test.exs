@@ -14,6 +14,10 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
   """
   use ExUnit.Case, async: false
 
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
+
   @script Path.expand("../../scripts/restore.sh", __DIR__)
 
   unless System.find_executable("bash"), do: @moduletag(skip: "needs bash on PATH")
