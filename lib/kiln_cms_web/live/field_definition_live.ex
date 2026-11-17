@@ -1506,7 +1506,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         socket
         |> assign(:delete_confirm, nil)
         |> assign(:edit, nil)
-        |> drop_section_layout(definition)
         |> load_definitions()
         |> put_flash(
           :info,
