@@ -72,7 +72,7 @@ your deployment.
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
 | Newsletter subscribers | `newsletter_subscribers`, `newsletter_segment_memberships` | Yes | One row per address on a site's list: the **email address**, an optional name, the opt-in status and when it was confirmed or unsubscribed, the tokens behind the confirm and unsubscribe links, and the segments it is on. A paying member's row is linked to their account (`user_id`) by the billing sync. Linked rows are in the account's self-export (without the tokens) and are deleted, with their segment memberships, when the account is erased (#2991). A row at the same address that was never linked is not the account's and stays. No retention purge: an unsubscribed row is kept, with its status, so the address is not mailed again, and a pending row that was never confirmed is kept too. A site admin deletes a row on **Newsletter** (`/editor/newsletter`). Purged by the staging scrub. See [Newsletter](newsletter.md#when-a-member-account-is-erased). |
 | Form submissions | `form_submissions` | Yes | One row per accepted submission: what the visitor typed (`data`, keyed by field name, so whatever the form asked for, names and addresses included), the page's locale, the moderation status and spam score, the human-verification outcome and when it arrived. No IP address or user agent: rate limiting uses the IP in memory only. A submission with status spam is deleted 30 days after it arrived (nightly, see the retention table below). Others (new, reviewed) are kept until an admin deletes them (**Delete submission** on the form's **Entries** tab) or deletes the form, which deletes its submissions; there is no retention setting for them yet ([#2265](https://github.com/The-Verscienta/kiln_cms/issues/2265)). Copies leave in the staff notification and the autoresponder mail, and in the webhook delivery log of an endpoint subscribed to `form.submitted`. Not touched by erasure: a submission is not linked to an account. Purged by the staging scrub. See [Forms](forms.md#spam-moderation-477). |
-| Mail suppression lists | `suppressed_recipients`, `site_suppressed_recipients` | Yes | One row per address a relay hard-bounced: the **email address**, the bounce reason with addresses redacted, and when it last failed; a site's list also names the site. The instance list (the operator's relay) stops the address for every site and for account mail; a site's list (its own relay) stops only that site's mail. No retention: a row stays until an admin removes it, on `/editor/mail` for the instance list or on the site's `/editor/site-mail`. Not touched by erasure, so an erased person's bounced address stays listed ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)). Purged by the staging scrub. |
+| Mail suppression lists | `suppressed_recipients`, `site_suppressed_recipients` | Yes | One row per address a relay hard-bounced: the **email address**, the bounce reason with addresses redacted, and when it last failed; a site's list also names the site. The instance list (the operator's relay) stops the address for every site and for account mail; a site's list (its own relay) stops only that site's mail. Consulted when mail is queued through the mail pipeline (account mail and site mail), by the newsletter worker, and by workflow and task mail when it is sent (#3036); form mail and automation email do not consult them. No retention: a row stays until an admin removes it, on `/editor/mail` for the instance list or on the site's `/editor/site-mail`. Not touched by erasure, so an erased person's bounced address stays listed ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)). Purged by the staging scrub. |
 | Fediverse followers | `federation_followers` | Yes | One row per remote account following a site (#491): its actor URI, its inbox and shared inbox URIs, when it followed and its delivery counters. An actor URI names a person on another server. Removed when that account sends `Undo{Follow}`, when an admin blocks it or its instance, and after 12 deliveries to it fail in a row; at most 50,000 per site. Published only as a count (`GET /actor/followers`). Not touched by erasure: a follower is not an account here. Purged by the staging scrub. The block list (`federation_blocks`: an actor URI or a host, and a reason) is moderation data and is kept by the scrub. See [ActivityPub federation](federation.md#delivery). |
 | Fediverse delivery log | `federation_deliveries` | Pseudonymous | One row per activity per follower inbox: the inbox URI, the activity as sent (published content), the document's id, the state, the attempts and the last error. Deleted 30 days after it was written (fixed). Not touched by erasure. Purged by the staging scrub. |
 | Webhook delivery log | `webhook_deliveries` | Yes | One row per delivery: the event, a snapshot of the endpoint URL, and the **payload as sent**, which for `form.submitted` is the submission, for `membership.*` the member's email address and user id, and for `security.*` user ids and an IP network or address (see [Webhooks](#webhooks-opt-in-per-endpoint)). Deleted 30 days after it was written; the window is `config :kiln_cms, :webhooks, delivery_retention_days:`, read at compile time, so changing it needs a rebuild. A failed retraction (#1926) is kept, and its payload is cut to the document's identity at the same age. No row can be deleted before then ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)), and erasure does not rewrite the log. Purged by the staging scrub. |
@@ -183,7 +183,9 @@ These kinds of email leave the system via the configured Swoosh adapter:
   comment or task when it sends (#3019): mail queued before the account was
   erased is not sent, mail goes to the address the account holds at that
   moment, and nothing is sent for content trashed or deleted, a comment
-  deleted, or a task completed, deleted or reassigned in the meantime.
+  deleted, or a task completed, deleted or reassigned in the meantime. See
+  [Who workflow and task mail goes to](#who-workflow-and-task-mail-goes-to)
+  for the rule each event re-checks when it sends.
 - **Registration email** (#2251), about a site's registration approval queue:
   - to each of the site's admins, "Registrations are waiting for approval on
     (site)", once an applicant has confirmed their address. It names the site
@@ -221,6 +223,47 @@ Platform security alerts and silencing notices cannot be muted.
 
 Configure the sender and adapter in `config/runtime.exs`
 (`config :kiln_cms, KilnCMS.Mailer, …` and `:email_from`).
+
+### Who workflow and task mail goes to
+
+The recipients of a workflow or task mail are chosen when the event happens,
+and the job can wait or retry for about 15 hours before it is sent. When it
+runs, each job re-checks its own event's rule, through the same function
+that chose the recipient, and sends nothing if the rule no longer holds
+(#3037):
+
+| Mail | Sent only if, when it is sent, the recipient is |
+|------|------|
+| Review requested | an admin of the site: a member admin, a platform admin, or someone with a live temporary admin grant |
+| Published, returned to draft | the content's author |
+| Comment added, comment resolved | someone with a comment on the comment's thread, or the content's author |
+| Mentioned | on the site's mention roster (an active member, or an account with no site memberships at all), or on the comment's thread, or the content's author |
+| Task assigned | the task's assignee, with the task still open |
+| Task digest | sent with only the lines whose task is still open and still theirs, each with the task's due date now; not sent if no line is left |
+
+Then the address is checked against the instance suppression list and the
+site's own (`KilnCMS.Mail.suppressed?/2`, #3036): an address on either is
+sent nothing, and a list that cannot be read fails the job, which retries.
+A mail stopped by any of these completes its job and logs one `info` line
+with the job id and the reason, never the address.
+
+Each event re-checks its own rule and no other. Being removed from a site
+stops a review request, but not a comment notice to someone still on the
+thread, a notice to the content's author, or task mail to the assignee
+([#3048](https://github.com/The-Verscienta/kiln_cms/issues/3048)). Someone
+removed from the only site they belonged to has no membership left, which
+the mention roster reads as belonging to every site, so they can still be
+mentioned and mailed
+([#3047](https://github.com/The-Verscienta/kiln_cms/issues/3047)).
+
+A job queued by v1.10.1 (it carries the address, not an id) is checked
+against the rules its args still allow: review requests and mentions by the
+site, published and returned-to-draft mail by the content's author, a task
+assignment by its task, and a digest by whether an open task of the
+reader's is still on each line's content. A comment-added or
+comment-resolved job of that shape is sent unchecked, because it names
+neither the comment nor, reliably, the thread. The suppression lists apply
+to every job.
 
 ### Optional subprocessors
 
@@ -326,7 +369,7 @@ not:
   returned-to-draft mail, comment and mention mail, task assignments and
   task digests carry ids: the recipient (`user_id`), the site, the content,
   the acting account (`actor_id`), the comment or task, and for a digest the
-  content ids and due dates it lists. The worker reads the address, the
+  task ids, content ids and due dates it lists. The worker reads the address, the
   names, the title and the comment excerpt or task note when it runs, so
   none of them is in the row, Oban's log lines or a Sentry event. A job
   queued by the release before this one carries the address, title, actor

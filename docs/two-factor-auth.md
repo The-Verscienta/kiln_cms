@@ -376,7 +376,8 @@ lines as the email for a factor added, and never the passkey's name.
   the email gives the same two steps: reset your password, then ask an
   administrator of your site to check your account's sign-in methods.
 - **When a platform admin removed it**, the email says "It was removed by an
-  administrator," followed by that admin's email address, and suggests asking
+  administrator," followed by that admin's display name ("an administrator"
+  alone when they have none; never their email address), and suggests asking
   an administrator of your site why.
 
 No email is sent when the removal is refused (the last factor a site

@@ -19,8 +19,16 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   goes to the address the account holds now. An assignment reads the task
   back, and sends nothing for a task deleted, completed or reassigned since;
   the note and due date are the task's now, and an assigner erased since is
-  "An editor". A digest whose content is gone keeps its line, titled by the
-  content type, as before.
+  "An editor". A digest lists only the lines whose task is still open and
+  still the assignee's when it runs (#3037): each line names its task
+  (`task_id`), the open tasks are read once, and a digest with no line left
+  is not sent; its subject and body count the lines it lists, and each line
+  shows its task's due date now. A line whose
+  content is gone keeps its place, titled by the content type, as before.
+
+  An address on the instance-wide suppression list, or on the site's own
+  (`KilnCMS.Mail.suppressed?/2`, #3036), is sent nothing. A list that cannot
+  be read fails the job, which retries.
 
   A skip finishes the job (`:ok`, logged with the job id and the reason), not
   a cancel, so it is not listed as a delivery failure on `/editor/mail`. A
@@ -34,7 +42,11 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   A job queued by the release before this one carries `"kind"`, the address,
   the note and the actor's name. It is delivered only while an account that
   existed when it was queued still holds that address, and those keys are
-  dropped from its row once it finishes (`KilnCMS.Jobs.PrivateArgs`).
+  dropped from its row once it finishes (`KilnCMS.Jobs.PrivateArgs`). The
+  same rules apply to it: an assignment goes only while its task (`task_id`,
+  which it carries) is open and still the assignee's, a digest lists only
+  the lines on content where an open task of theirs still is (its lines name
+  no task), and the suppression lists are asked.
   """
   use Oban.Worker, queue: :mail, max_attempts: 8
   use KilnCMSWeb, :verified_routes
@@ -61,7 +73,8 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
     tenant = args["org_id"]
 
     with {:ok, user} <- Notifications.mail_recipient(user_id, nil),
-         {:ok, task} <- open_task(task_id, user_id, tenant) do
+         {:ok, task} <- open_task(task_id, user_id, tenant),
+         :ok <- not_suppressed(to_string(user.email), tenant) do
       %{
         "to" => to_string(user.email),
         "task_id" => task.id,
@@ -82,8 +95,15 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
 
   def perform(%Oban.Job{args: %{"event" => "digest", "user_id" => user_id} = args} = job)
       when is_binary(user_id) do
-    case Notifications.mail_recipient(user_id, nil) do
-      {:ok, user} -> args |> Map.put("to", to_string(user.email)) |> deliver_digest(job)
+    tenant = args["org_id"]
+
+    with {:ok, user} <- Notifications.mail_recipient(user_id, nil),
+         {:ok, items} <- open_items(args["items"], user_id, tenant),
+         :ok <- not_suppressed(to_string(user.email), tenant) do
+      args
+      |> Map.merge(%{"to" => to_string(user.email), "items" => items})
+      |> deliver_digest(job)
+    else
       {:skip, reason} -> skip(job, reason)
       {:error, error} -> {:error, error}
     end
@@ -95,10 +115,14 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   # within a day.
   def perform(%Oban.Job{args: %{"kind" => kind, "to" => to} = args} = job)
       when kind in ["assigned", "digest"] and is_binary(to) do
+    tenant = args["org_id"]
+
     PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
-      case Notifications.mail_recipient_by_address(to, job.inserted_at, nil) do
-        {:ok, _user} when kind == "assigned" -> deliver_assigned(args, job)
-        {:ok, _user} -> deliver_digest(args, job)
+      with {:ok, user} <- Notifications.mail_recipient_by_address(to, job.inserted_at, nil),
+           {:ok, args} <- legacy_entitled(kind, args, user.id, tenant),
+           :ok <- not_suppressed(to, tenant) do
+        deliver(kind, args, job)
+      else
         {:skip, reason} -> skip(job, reason)
         {:error, error} -> {:error, error}
       end
@@ -114,6 +138,9 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
     Logger.info("task mail job #{id}: notification no longer in the job, nothing sent")
     :ok
   end
+
+  defp deliver("assigned", args, job), do: deliver_assigned(args, job)
+  defp deliver("digest", args, job), do: deliver_digest(args, job)
 
   defp deliver_assigned(args, %Oban.Job{id: id}) do
     args
@@ -147,6 +174,74 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
       {:ok, _reassigned} -> {:skip, :task_reassigned}
       {:error, error} -> {:error, error}
     end
+  end
+
+  # The legacy job's own rule (#3037): an assignment goes only while its task
+  # is still open and still this account's, and a digest lists only what is
+  # still open and assigned to it, as for a job of the current shape.
+  defp legacy_entitled("assigned", %{"task_id" => task_id} = args, user_id, tenant)
+       when is_binary(task_id) do
+    with {:ok, _task} <- open_task(task_id, user_id, tenant), do: {:ok, args}
+  end
+
+  defp legacy_entitled("assigned", _args, _user_id, _tenant), do: {:skip, :task_gone}
+
+  defp legacy_entitled("digest", args, user_id, tenant) do
+    with {:ok, items} <- open_items(args["items"], user_id, tenant),
+         do: {:ok, Map.put(args, "items", items)}
+  end
+
+  # The digest's lines that are still the assignee's (#3037): one read of
+  # their open tasks now, as the notifier's system actor with
+  # `authorize_with: :error` (a refused read fails the job rather than
+  # reading as "no tasks"). A line names its task (`task_id`); a line queued
+  # before it did names only the content, and is kept while an open task of
+  # theirs is on that content. Each line kept shows its task's due date now,
+  # not the one it was queued with. Nothing left is a skip. Filtered before
+  # the email is built, so its count is of the lines it lists.
+  defp open_items(items, user_id, tenant) do
+    case CMS.list_tasks_for_assignee(user_id,
+           actor: Notifications.system(),
+           authorize_with: :error,
+           tenant: tenant
+         ) do
+      {:ok, tasks} ->
+        by_id = Map.new(tasks, &{&1.id, &1})
+        # The tasks come sorted by due date, so a legacy line on content with
+        # two open tasks takes the earlier one's.
+        by_target =
+          tasks |> Enum.reverse() |> Map.new(&{{&1.content_type, &1.content_id}, &1})
+
+        items
+        |> List.wrap()
+        |> Enum.flat_map(&with_due_now(&1, matching_task(&1, by_id, by_target)))
+        |> case do
+          [] -> {:skip, :no_open_tasks}
+          open -> {:ok, open}
+        end
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  # A line kept, with its task's due date now; no open task, no line.
+  defp with_due_now(_item, nil), do: []
+
+  defp with_due_now(item, task),
+    do: [Map.put(item, "due_on", task.due_on && Date.to_iso8601(task.due_on))]
+
+  defp matching_task(%{"task_id" => task_id}, by_id, _by_target) when is_binary(task_id),
+    do: Map.get(by_id, task_id)
+
+  defp matching_task(item, _by_id, by_target),
+    do: Map.get(by_target, {item["content_type"], item["content_id"]})
+
+  # The suppression lists (#3036), as `WorkflowMailWorker` asks them: an
+  # address on the instance-wide list or the site's own is a skip, and a list
+  # that cannot be read raises, which retries the job.
+  defp not_suppressed(address, tenant) do
+    if Mail.suppressed?(address, org_id: tenant), do: {:skip, :suppressed}, else: :ok
   end
 
   # A fixed reason and the job id: never the address.

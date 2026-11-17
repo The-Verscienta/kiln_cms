@@ -184,6 +184,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Workflow and task mail checks again when it sends: an event muted since it was queued is not sent, nor is mail about content trashed or deleted, a comment deleted, or a task completed, deleted or reassigned in the meantime.**
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-send-time-checks))
 
+- **Workflow and task mail is not sent to an address on the instance suppression list or the site's own, checked when it sends; a list that can't be read retries the job.**
+  ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036) · [long form](docs/changelog/unreleased.md#workflow-task-mail-suppression))
+
 - **The "Someone tried to create a (site) account with your address" notice is not sent if no account holds the address by the time it is queued.**
   ([long form](docs/changelog/unreleased.md#registration-notice-needs-account))
 
@@ -192,6 +195,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`backup.sh` stops at once on `HUP`, `INT` or `TERM`: it stops the running `pg_dump`, `tar` or `rclone` (`TERM`, then `KILL` after 5 s) and cleans up, instead of waiting for it to finish; a second signal no longer cuts the cleanup short.**
   ([long form](docs/changelog/unreleased.md#backup-sh-signals-stop-child))
+
+- **The email telling someone a platform admin removed their passkey or authenticator app names that admin by display name ("an administrator" when they have none) instead of their email address.**
+  ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044) · [long form](docs/changelog/unreleased.md#factor-removed-notice-names-admin))
 
 ### Fixed
 
@@ -245,6 +251,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Workflow and task mail queued before an erasure is no longer sent to the erased person; the jobs carry ids, not the address, title or names, and erasure strips the address from finished mail jobs.**
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-erased-recipient))
+
+- **Workflow and task mail re-checks each event's own rule when it sends (a review request goes only to a current site admin, a publish notice only to the author, comment mail only to the thread or the author), and a task digest lists only the tasks still open and assigned.**
+  ([#3037](https://github.com/The-Verscienta/kiln_cms/issues/3037) · [long form](docs/changelog/unreleased.md#workflow-task-mail-event-rule))
 
 - **Account mail (password resets, sign-in links, alerts) queued before an erasure is no longer sent to the erased person: it is sent only while its account holds the address, and erasure withholds it.**
   ([long form](docs/changelog/unreleased.md#account-mail-erased-recipient))

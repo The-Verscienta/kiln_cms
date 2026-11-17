@@ -214,7 +214,10 @@ carries the reasoning.
   retries it on the mail backoff (eight attempts, the last about 15 hours 21
   minutes after the first) until a node of this release delivers it. A job
   queued by an old node is delivered by a new one, but only to an account
-  that existed when the job was queued and still holds its address. A task
+  that existed when the job was queued and still holds its address, and
+  only if it passes its event's rule and the suppression lists (see the
+  Fixed entry *Workflow and task mail re-checks each event's own rule when
+  it sends*). A task
   digest may go out twice across the deploy: the old-shape and new-shape
   digests for one person have different args, so the 20-hour uniqueness
   does not merge them. That takes a digest run that failed part-way and
@@ -981,11 +984,39 @@ carries the reasoning.
   `info` line with the job id and the reason, never the address; it is not a
   delivery failure on `/editor/mail`. A read that fails, a refused one
   included, fails the job, which retries. A job queued by the previous
-  release is checked against the recipient's erasure and preference, not
-  against the content, comment or task, and is sent with what it carries.
+  release is checked against the recipient's erasure and preference, and is
+  sent with the title and names it carries. Each mail also re-checks its
+  event's own rule and the suppression lists when it sends: see the Fixed
+  entry *Workflow and task mail re-checks each event's own rule when it
+  sends* and the entry *Workflow and task mail is not sent to an address on
+  the instance suppression list* below, which also cover jobs of the
+  previous shape.
 
   No migration.
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019))
+
+<a id="workflow-task-mail-suppression"></a>
+
+- **Workflow and task mail is not sent to an address on the instance suppression list or on the site's own, checked when it sends.**
+  Review requests, published and returned-to-draft mail, comment and
+  mention mail, task assignments and task digests build their own message
+  when the job runs, so they never passed the suppression check that other
+  mail gets when it is queued. An address a relay had hard-bounced kept
+  being mailed, and kept bouncing, which is the signal the list exists to
+  stop.
+
+  Each job now asks `KilnCMS.Mail.suppressed?/2` with its site just before
+  it sends: an address on the instance-wide list (`/editor/mail`) or on that
+  site's list (`/editor/site-mail`) is sent nothing, and another site's list
+  is not consulted. The job completes and logs one `info` line with the job
+  id and the reason `suppressed`, never the address; it is not a delivery
+  failure on `/editor/mail`. A list that cannot be read fails the job, which
+  retries, as the newsletter worker does. Jobs queued by v1.10.1 are checked
+  the same way. To mail a suppressed address again, remove it from the list.
+
+  Suppression rows are kept as before, with no retention, and erasure does
+  not remove them. No migration.
+  Refs #3036.
 
 <a id="registration-notice-needs-account"></a>
 
@@ -1030,6 +1061,19 @@ carries the reasoning.
   cleanup waits with it. See
   [Cron backups in parts](../backups.md#cron-backups-in-parts), "When a run fails".
   ([#2847](https://github.com/The-Verscienta/kiln_cms/issues/2847))
+
+<a id="factor-removed-notice-names-admin"></a>
+
+- **The email telling someone a platform admin removed their passkey or authenticator app names that admin by display name ("an administrator" when they have none) instead of their email address.**
+  The "A second factor was removed from your (site) account" email said
+  "It was removed by an administrator," followed by the admin's email
+  address, so the owner's mail held another person's contact data. It now
+  names the admin as invitations name their inviter: by display name,
+  escaped, or as "an administrator" alone when the admin has no name or has
+  been erased. The admin is still recorded in the security log's
+  `two_factor_disabled` event. A notice already queued keeps the wording it
+  was written with.
+  ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044))
 
 ## Fixed
 
@@ -1481,8 +1525,8 @@ carries the reasoning.
   - A workflow mail job now carries `user_id`, `org_id`, the content's
     `kind` and `id`, `actor_id` and, for a comment event, `block_id` and
     `comment_id`; a task assignment `user_id`, `org_id`, `task_id` and
-    `actor_id`; a digest `user_id`, `org_id` and its list of content ids and
-    due dates. The worker reads the account when it runs
+    `actor_id`; a digest `user_id`, `org_id` and its list of task ids,
+    content ids and due dates. The worker reads the account when it runs
     (`KilnCMS.Notifications.mail_recipient/2`) and sends nothing to one
     erased since, or with no address left. See the Changed entry for the
     other checks it makes then.
@@ -1506,10 +1550,13 @@ carries the reasoning.
   the Fixed entry *Account mail queued before an erasure is no longer sent
   to the erased person*
   ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035)).
-  Not covered yet: workflow and task mail does not consult the suppression lists
-  ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)) or check
-  at send time that the recipient may still see the content
-  ([#3037](https://github.com/The-Verscienta/kiln_cms/issues/3037)). See
+  Whether the recipient is still who the event is for, and whether the
+  address is on a suppression list, is checked when the mail is sent too:
+  see the Fixed entry *Workflow and task mail re-checks each event's own
+  rule when it sends*
+  ([#3037](https://github.com/The-Verscienta/kiln_cms/issues/3037)) and the
+  Changed entry *Workflow and task mail is not sent to an address on the
+  instance suppression list*. See
   [Job args retention](../data-flows.md#job-args-retention) and
   [What erasure does not reach](../data-flows.md#what-erasure-does-not-reach).
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019))
@@ -1564,6 +1611,73 @@ carries the reasoning.
   and
   [What erasure does not reach](../data-flows.md#what-erasure-does-not-reach).
   ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035))
+
+<a id="workflow-task-mail-event-rule"></a>
+
+- **Workflow and task mail re-checks each event's own rule when it sends, so mail queued for someone who is no longer who the event is for is not sent, and a task digest lists only the tasks still open and assigned to its reader.**
+  The recipients of a workflow mail are chosen when the event happens. The
+  job could then wait or retry for up to about 15 hours, and was sent even
+  if the reason for choosing that person no longer held. Each job now asks
+  the rule that chose its recipient again, through the same function, when
+  it runs:
+
+  - **Review requested**: the recipient must still be an admin of the site:
+    a member admin, a platform admin, or someone with a live temporary admin
+    grant (`KilnCMS.Accounts.Scoping.has_tier?/3`). A grant that has expired,
+    a demotion, or removal from the site stops it.
+  - **Published**, **Returned to draft**: the recipient must still be the
+    content's author. After the content is reassigned, the old author is
+    not mailed.
+  - **Comment added**, **Comment resolved**: the recipient must still have a
+    comment on the comment's thread, or be the content's author
+    (`KilnCMS.Notifications.comment_audience_ids/2`).
+  - **Mentioned**: the recipient must still be on the site's mention roster
+    (an active member, or an account with no site memberships at all;
+    `KilnCMS.Notifications.mention_roster_member?/2`), or still on the
+    comment's thread or the author, since a mention replaces the thread
+    notice they would otherwise have had.
+  - **Task assigned**: unchanged since #3019. The task must still be open
+    and assigned to the recipient.
+  - **Task digest**: each line now names its task (`task_id`), and the
+    worker reads the reader's open tasks once when it runs. It lists only
+    the lines whose task is still open and still theirs, with each task's
+    due date now; the subject and body count the lines it lists. A digest
+    with no line left is not sent.
+
+  A mail stopped by its rule completes its job and logs one `info` line
+  with the job id and a reason (`not_an_admin`, `not_the_author`,
+  `not_on_the_thread`, `not_on_the_roster`, `task_gone`, `no_open_tasks`),
+  never the address; it is not a delivery failure on `/editor/mail`. A read
+  that fails fails the job, which retries.
+
+  Jobs queued by v1.10.1 carry the recipient's address instead of an id.
+  For those, review requests and mentions are checked against the site
+  they name, published and returned-to-draft mail against the content's
+  author, and a task assignment against its task. A digest of that shape
+  lists only the lines on content where an open task of the reader's still
+  is. A comment-added or comment-resolved job of that shape is sent
+  unchecked: it names the content by the mail's type name, which is not
+  always the thread's own, and has no comment id, so its thread cannot be
+  found reliably. Jobs of that shape run or are discarded within about a
+  day of the upgrade (eight attempts, the last about 15 hours after the
+  first).
+
+  The rule checked is each event's own, and no other. Being removed from a
+  site stops a review request, but not a comment notice to someone still on
+  the thread, a notice to the content's author, or task mail to the
+  assignee
+  ([#3048](https://github.com/The-Verscienta/kiln_cms/issues/3048)).
+  Someone removed from the only site they belonged to has no membership
+  left, which the mention roster reads as "on every site", so a mention of
+  them is still sent
+  ([#3047](https://github.com/The-Verscienta/kiln_cms/issues/3047)).
+
+  The mention roster (who an `@` mention can name, in the editor's
+  suggestions and in the notices) no longer lists every account when the
+  read of who belongs to which site fails: it is then empty, as on any
+  other failed read, so a mention written at that moment notifies nobody.
+  No migration.
+  ([#3037](https://github.com/The-Verscienta/kiln_cms/issues/3037))
 
 <a id="data-flows-personal-data-rows"></a>
 
