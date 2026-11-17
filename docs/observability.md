@@ -484,14 +484,31 @@ move it to an API key. The sign-ins themselves are in the security log as
 ## Backups
 
 In-app backups, the last-good and hold markers, retention and the in-app
-backup schedules emit `[:kiln_cms, :backups, …]` events. None is in
-`KilnCMSWeb.Telemetry.metrics/0`, so none reaches Prometheus: attach a
-`:telemetry` handler to count them. Each is documented beside the behavior it
+backup schedules emit `[:kiln_cms, :backups, …]` events. Four of them are in
+`KilnCMSWeb.Telemetry.metrics/0` (#2487, #2931), each labeled by a small
+enumeration and nothing else:
+
+| Metric | Type | Label | Counts |
+|--------|------|-------|--------|
+| `kiln_cms_backups_retention_skipped_count` | counter | `scope` (`local`, `destination`) | Retention passes that deleted nothing because they couldn't start. Backups build up while it rises. |
+| `kiln_cms_backups_retention_stopped_count` | counter | `scope` | Retention passes that stopped part-way through deleting. |
+| `kiln_cms_backups_hold_deleted_outside_count` | sum of `count` | `scope` (`local`) | Backups a schedule keeps found deleted outside the app, usually by a host `scripts/backup.sh` older than the hold markers. |
+| `kiln_cms_backups_notice_failed_count` | counter | `kind` (`retention`, `held_deleted`) | Warnings that couldn't be recorded, so the Backups page and Home don't show them. The log line and the events above still fire. |
+
+The events also carry the reason and, on a destination, its key; neither is
+a label. Useful alert: `increase(kiln_cms_backups_retention_skipped_count[1d]) > 0`.
+
+The rest are not metrics: attach a `:telemetry` handler to count them.
+Each is documented beside the behavior it
 reports in [backups.md](backups.md): the run's chain, folded requests and
 reclaimed steps under
 [How an in-app backup runs](backups.md#how-an-in-app-backup-runs-2218), the
 marker events under [The last-good marker](backups.md#the-last-good-marker)
-and [The hold markers](backups.md#the-hold-markers), retention's under
+and [The hold markers](backups.md#the-hold-markers) (a held backup deleted
+outside the app under
+[its own section](backups.md#when-a-backup-a-schedule-keeps-is-deleted-outside-the-app)),
+retention's, `[:kiln_cms, :backups, :notice, :failed]` and
+`[:kiln_cms, :backups, :status, :notices_unreadable]` under
 [When retention is skipped or stops](backups.md#when-retention-is-skipped-or-stops),
 and the schedules'
 `[:kiln_cms, :backups, :schedule, …]` and
@@ -590,8 +607,8 @@ Every label is bounded:
 - **`route`** is the router pattern (`/api/content/:type/:slug`), never the
   request path.
 - **`queue` and `worker`** are Oban's.
-- **`result`, `status`, `surface`, `mode`, `action`, `event`, `class` and
-  `reason`** are small enumerations.
+- **`result`, `status`, `surface`, `mode`, `action`, `event`, `class`,
+  `scope` and `reason`** are small enumerations.
 - **`enforced` and `read`** are booleans, exported as `"true"` or `"false"`.
 - **The content-type label (`type`, `kind`)** keeps a compiled type's name but
   folds every admin-defined type into `dynamic`. Admin-defined types are

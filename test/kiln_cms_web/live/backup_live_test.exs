@@ -3001,4 +3001,289 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute html =~ "off-site destinations"
     end
   end
+
+  # #2487: retention that was skipped or stopped is a dated alarm line on the
+  # Backups page and on Home, until a clean pass clears it.
+  describe "retention notices (#2487)" do
+    alias KilnCMS.Backups.DestinationConfig
+
+    @stamp "20261116-020000"
+
+    # A good database backup an hour ago, so the only alarm is the notice's.
+    defp good_backup! do
+      offsite_run!(%{"local" => %{"status" => "ok"}}, [], nil)
+    end
+
+    defp notice!(attrs) do
+      Backups.report_backup_notice!(
+        Map.merge(
+          %{
+            kind: :retention,
+            scope: "local",
+            outcome: :skipped,
+            reason: "couldn't read the backup history",
+            stamp: @stamp,
+            at: DateTime.utc_now()
+          },
+          attrs
+        ),
+        actor: Backups.system()
+      )
+    end
+
+    test "a skip is a dated line in the alarm tone, with the guide", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-local[data-role=retention-notice]",
+               "Retention was skipped on the backup of 2026-11-16 02:00 UTC: " <>
+                 "couldn't read the backup history. Nothing was deleted, so local backups " <>
+                 "will build up until this is fixed."
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-retention-docs[href$="backups.md#when-retention-is-skipped-or-stops"]|
+             )
+
+      assert has_element?(lv, "section.border-error\\/30")
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+    end
+
+    test "a stop says what it hadn't reached stays", %{conn: conn} do
+      good_backup!()
+      notice!(%{outcome: :stopped, deleted: 2, reason: "it crashed (RuntimeError)"})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-local",
+               "Retention stopped part-way on the backup of 2026-11-16 02:00 UTC: it crashed " <>
+                 "(RuntimeError). What it hadn't reached stays until this is fixed."
+             )
+    end
+
+    test "two backup directories: one line each, own ids, each naming its directory",
+         %{conn: conn} do
+      good_backup!()
+      a = Ash.UUID.generate()
+      b = Ash.UUID.generate()
+
+      # Both directories are reported by a live node, so both lines show.
+      for id <- [a, b] do
+        Backups.beat_node!(
+          %{
+            node: "node-#{System.unique_integer([:positive])}",
+            boot_id: Ash.UUID.generate(),
+            dir_id: id
+          },
+          actor: Backups.system()
+        )
+
+        notice!(%{scope: "local:" <> id, dir_id: id})
+      end
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      for id <- [a, b] do
+        assert has_element?(
+                 lv,
+                 "#backup-headline-retention-local-#{id}",
+                 "(backup directory #{String.slice(id, 0, 8)})"
+               )
+      end
+
+      html = render(lv)
+      assert length(Regex.scan(~r/data-role="retention-notice"/, html)) == 2
+      assert length(Regex.scan(~r/id="backup-headline-retention-local/, html)) == 2
+
+      refute has_element?(lv, "#backup-headline-retention-local")
+    end
+
+    test "a destination's line names it; one no longer pruned shows nothing", %{conn: conn} do
+      good_backup!()
+
+      pruned =
+        Ash.Seed.seed!(DestinationConfig, %{
+          name: "Offsite NAS",
+          kind: "local",
+          settings: %{},
+          enabled: true,
+          prune: true
+        })
+
+      off =
+        Ash.Seed.seed!(DestinationConfig, %{
+          name: "Archive",
+          kind: "local",
+          settings: %{},
+          enabled: true,
+          prune: false
+        })
+
+      notice!(%{
+        scope: DestinationConfig.key(pruned),
+        label: "NAS",
+        reason: "it overlaps BACKUP_RCLONE_REMOTE"
+      })
+
+      notice!(%{scope: DestinationConfig.key(off), label: "Archive"})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-dest-#{pruned.id}",
+               "Retention on Offsite NAS was skipped on the backup of 2026-11-16 02:00 UTC: " <>
+                 "it overlaps BACKUP_RCLONE_REMOTE. Nothing was deleted there"
+             )
+
+      refute has_element?(lv, "#backup-headline-retention-dest-#{off.id}")
+      refute has_element?(lv, "#backup-headline-retention-local")
+    end
+
+    test "a clean run: no line, no alarm", %{conn: conn} do
+      good_backup!()
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "[data-role=retention-notice]")
+      refute has_element?(lv, "#backup-retention-docs")
+      refute has_element?(lv, "section.border-error\\/30")
+    end
+
+    test "Home's alarm strip shows a platform admin the line", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning [data-role=backup-headline]",
+               "Retention was skipped on the backup of 2026-11-16 02:00 UTC"
+             )
+    end
+
+    test "Home: no strip for a clean run", %{conn: conn} do
+      good_backup!()
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-backup-warning"
+    end
+
+    test "Home: an org admin who is not a platform admin sees nothing", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      for user <- [org_admin(), authed_user(:editor)] do
+        {:ok, _lv, html} = conn |> log_in(user) |> live(~p"/editor/overview")
+
+        refute html =~ "overview-backup-warning"
+        refute html =~ "Retention was skipped"
+      end
+    end
+  end
+
+  # #2931: backups a schedule keeps that were deleted outside the app are a
+  # warning under the headline for eight days, never the alarm, and never on
+  # Home.
+  describe "held backups deleted outside the app (#2931)" do
+    defp held_deleted!(attrs) do
+      Backups.report_backup_notice!(
+        Map.merge(
+          %{
+            kind: :held_deleted,
+            scope: "local",
+            units: ["db:20261110-020000"],
+            total: 1,
+            at: ~U[2026-11-15 09:30:00.000000Z]
+          },
+          attrs
+        ),
+        actor: Backups.system()
+      )
+    end
+
+    defp good_db_backup! do
+      offsite_run!(%{"local" => %{"status" => "ok"}}, [], nil)
+    end
+
+    test "one backup: a dated warning naming it, with the guide; no alarm", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.utc_now()})
+      today = Calendar.strftime(DateTime.utc_now(), "%Y-%m-%d")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "On #{today}"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "a backup a schedule keeps was deleted outside the app: " <>
+                 "Database backup of 2026-11-10 02:00 UTC."
+             )
+
+      assert has_element?(lv, "#backup-held-deleted", "Replace it with this release's copy.")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-held-deleted-docs[href$="backups.md#the-hold-markers"]|
+             )
+
+      assert has_element?(lv, "section.border-warning\\/30 #backup-held-deleted")
+      refute has_element?(lv, "section.border-error\\/30")
+    end
+
+    test "many: counted, ten named, and the rest as \"and N more\"", %{conn: conn} do
+      good_db_backup!()
+      units = for n <- 10..19, do: "media:20261110-0200#{n}"
+      held_deleted!(%{units: units, total: 12, at: DateTime.utc_now()})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "12 backups a schedule keeps were deleted outside the app: " <>
+                 "Media backup of 2026-11-10 02:00 UTC"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "Media backup of 2026-11-10 02:00 UTC and 2 more."
+             )
+    end
+
+    test "older than eight days, or none: nothing", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.add(DateTime.utc_now(), -9 * 86_400, :second)})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "#backup-held-deleted")
+    end
+
+    test "not on Home", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.utc_now()})
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-backup-warning"
+      refute html =~ "deleted outside the app"
+    end
+  end
 end

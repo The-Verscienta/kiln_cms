@@ -44,8 +44,13 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   and, when the schedule would keep backups past `BACKUP_KEEP_DAYS` while
   host cron backs a component up here too (`Backups.cron_backs_up?/1`), that
   the host's `scripts/backup.sh` must be this release's, since an older copy
-  deletes what the schedule holds. Deleting a schedule says that its backups
-  then age out under `BACKUP_KEEP_DAYS`, never sooner.
+  deletes what the schedule holds. Whatever the preview says, the fieldset
+  always says that a host whose cron prunes this directory needs this
+  release's `scripts/backup.sh` (`#schedule-keep-host-hint`, #2931), and the
+  warnings above the list say when a backup a schedule keeps was found
+  deleted outside the app (`Backups.status/0`'s `held_deleted`). Deleting a
+  schedule says that its backups then age out under `BACKUP_KEEP_DAYS`,
+  never sooner.
 
   A schedule that runs more often than daily must set `keep_days`
   (`Schedule.Validations.SubDailyKeepsDays`): the form marks the field
@@ -930,7 +935,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     <div
       :if={
         not @status.scheduler_enabled? or not @status.available? or @stale_tick != nil or
-          @media_without_dir?
+          @media_without_dir? or @status.held_deleted != []
       }
       class="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-4 text-sm text-warning-ink"
     >
@@ -958,6 +963,11 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       <p :if={@media_without_dir?} id="schedule-media-missing">
         {gettext("Media isn't archived on this deployment, so a schedule can't include it.")}
       </p>
+      <.held_deleted_warning
+        :if={@status.held_deleted != []}
+        id="schedule-held-deleted"
+        notices={@status.held_deleted}
+      />
     </div>
     """
   end
@@ -1251,6 +1261,22 @@ defmodule KilnCMSWeb.BackupScheduleLive do
                   )
             }
           />
+          <%!-- Always shown (#2931): the keep rules reach host cron only
+                through the hold markers, which an older script ignores. --%>
+          <p id="schedule-keep-host-hint" class="text-xs text-base-content/70">
+            {gettext(
+              "If host cron prunes this backup directory, its scripts/backup.sh must be from this release: an older copy deletes the backups these settings keep."
+            )}
+            <a
+              href={docs_url("backups.md#the-hold-markers")}
+              target="_blank"
+              rel="noopener"
+              class="link inline-flex items-center gap-1 text-primary-ink"
+            >
+              {gettext("About the hold markers")}
+              <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+            </a>
+          </p>
         </fieldset>
 
         <div

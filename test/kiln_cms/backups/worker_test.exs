@@ -360,6 +360,46 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert message ==
                "Retention skipped: the retention policy is invalid (BACKUP_KEEP_DAYS must " <>
                  "be a whole number of days, 1 or more); nothing was deleted"
+
+      # #2487: and it is a notice the Backups page and Home show.
+      assert [
+               %{
+                 scope: :local,
+                 outcome: :skipped,
+                 stamp: ^stamp,
+                 reason:
+                   "the retention policy is invalid (BACKUP_KEEP_DAYS must be a whole " <>
+                     "number of days, 1 or more)"
+               }
+             ] = Backups.status().retention
+    end
+
+    # #2487: the notice lasts until a pass over the same directory is clean.
+    @tag :pg_tools
+    test "a skipped retention's notice is cleared by the next clean pass", %{dir: dir} do
+      old = Path.join([dir, "db", "kiln-db-20190101-000000.dump"])
+      File.mkdir_p!(Path.dirname(old))
+      File.write!(old, "older")
+      File.touch!(old, System.os_time(:second) - 365 * 24 * 3600)
+      set_config(keep_days: 0)
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :retention, :skipped]
+        ])
+
+      assert :ok = BackupChain.run()
+      assert [%{outcome: :skipped}] = Backups.status().retention
+
+      assert_received {[:kiln_cms, :backups, :retention, :skipped], ^ref, %{count: 1},
+                       %{scope: :local}}
+
+      set_config(keep_days: 14)
+      assert :ok = BackupChain.run()
+
+      refute File.exists?(old)
+      assert Backups.status().retention == []
+      assert Backups.list_backup_notices!(actor: Backups.system()) == []
     end
 
     @tag :pg_tools

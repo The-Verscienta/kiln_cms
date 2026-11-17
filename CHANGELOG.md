@@ -72,6 +72,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
   ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
 
+- **Run `mix ash.migrate` (new table `backup_notices`, for the backup warnings under Added). Nothing to backfill; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#backup-notices-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -119,6 +122,12 @@ Every summary line below that was shortened links to its own entry there.
 - **Backups → History badges each backup a schedule's keep settings hold: "Kept by a schedule: Database" or "… Media".**
   ([#2933](https://github.com/The-Verscienta/kiln_cms/issues/2933) · [long form](docs/changelog/unreleased.md#backup-history-held-badge))
 
+- **Retention skipped or stopped part-way, locally or on a destination, now shows on the Backups page and turns Home's backup strip red until a clean pass clears it. Four backup metrics are registered.**
+  ([long form](docs/changelog/unreleased.md#backup-retention-warnings))
+
+- **The Backups page and the Schedule tab warn for eight days when a backup a schedule keeps was deleted outside the app, usually by a host `backup.sh` older than the hold markers.**
+  ([long form](docs/changelog/unreleased.md#backup-held-deleted-warning))
+
 - **Color fields can be limited to a palette (`validation["palette"]`, shown as swatches in the editor) and JSON fields can carry a JSON Schema (`validation["json_schema"]`, draft 2020-12, local `$ref` only, bounded, never fetches); both are checked when a value changes. No migration.**
   ([long form](docs/changelog/unreleased.md#color-palette-json-schema))
 
@@ -131,6 +140,8 @@ Every summary line below that was shortened links to its own entry there.
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
 - **The content list can sort by a single-valued reference or media field too (Sort by → Field), by the target's current title or filename.**
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
+- **Telemetry: `[:kiln_cms, :backups, :retention, :skipped | :stopped]` now also fire for destinations (`scope: :destination`); local events carry `scope: :local`. Match on `scope` to count local only.**
+  ([long form](docs/changelog/unreleased.md#backup-retention-telemetry-scope))
 
 ### Fixed
 

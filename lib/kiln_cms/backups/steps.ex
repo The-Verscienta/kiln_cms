@@ -124,6 +124,7 @@ defmodule KilnCMS.Backups.Steps do
     Lock,
     Manifest,
     MediaArchive,
+    Notices,
     PgUrl,
     RcloneRemote,
     Recorder,
@@ -1379,10 +1380,14 @@ defmodule KilnCMS.Backups.Steps do
   # `.work/<stamp>` exists, so `Retention` counts it in flight and never
   # touches it (nor counts it toward a schedule's keep count: N kept plus
   # this one until the next prune, #2219). A retention that can't see the backup history deletes nothing
-  # and says so on the run; the backup's own outcome does not change.
+  # and says so on the run; the backup's own outcome does not change. A skip
+  # or a stop is also a notice the Backups page and Home show until a clean
+  # pass here clears it (#2487, `Notices`).
   defp prune_step(ctx, state, rec) do
+    result = Retention.run(ctx.dir)
+
     rec =
-      case Retention.run(ctx.dir) do
+      case result do
         {:ok, %{deleted: [], stopped: nil}} ->
           rec
 
@@ -1406,6 +1411,8 @@ defmodule KilnCMS.Backups.Steps do
           )
       end
 
+    Notices.retention({:local, ctx.dir}, retention_outcome(result), stamp: ctx.stamp)
+
     # One `offsite` job per destination (#2220), part k for the k-th. With
     # none, the one no-op `offsite` it always had (part nil), so the step
     # sequence of a backup without a remote is unchanged.
@@ -1415,6 +1422,14 @@ defmodule KilnCMS.Backups.Steps do
 
   defp removed(names, units),
     do: "Retention removed #{length(names)} file(s) from #{units} backup(s)"
+
+  # A retention pass's result as `Notices.retention/3` takes it.
+  defp retention_outcome({:ok, %{stopped: nil}}), do: :ok
+
+  defp retention_outcome({:ok, %{deleted: names, stopped: reason}}),
+    do: {:stopped, reason, length(names)}
+
+  defp retention_outcome({:error, reason}), do: {:skipped, reason}
 
   ## offsite (one job per destination, #2220)
 
@@ -1706,6 +1721,11 @@ defmodule KilnCMS.Backups.Steps do
   # a pass that can't start deletes nothing and says so on the run. It runs
   # in the step's body, outside the lock's transaction (ADR 0045), so the
   # Run writes marking other runs' files `pruned` hold no lock.
+  #
+  # A skip or a stop is also the destination's notice (#2487, `Notices`),
+  # cleared by a clean pass, or when the destination is no longer pruned
+  # here (prune off, disabled or deleted, or an adapter that can't list and
+  # delete): there is no retention left there to warn about.
   defp prune_destination(
          rec,
          ctx,
@@ -1715,11 +1735,18 @@ defmodule KilnCMS.Backups.Steps do
        when is_binary(id) do
     if Destination.supports?(config, [:list, :delete]) do
       case prune_enabled(id) do
-        {:ok, true} -> prune_on(rec, ctx, entry, config, dest.deadline)
-        {:ok, false} -> rec
-        {:error, reason} -> prune_skipped(rec, entry, reason)
+        {:ok, true} ->
+          prune_on(rec, ctx, entry, config, dest.deadline)
+
+        {:ok, false} ->
+          Notices.retention(notice_scope(entry), :ok)
+          rec
+
+        {:error, reason} ->
+          prune_skipped(rec, ctx, entry, reason)
       end
     else
+      Notices.retention(notice_scope(entry), :ok)
       rec
     end
   end
@@ -1741,23 +1768,49 @@ defmodule KilnCMS.Backups.Steps do
 
     case Retention.run_on_destination(ctx.dir, config, deadline: deadline) do
       {:ok, result} ->
+        destination_pass(ctx, entry, result)
+
         rec
         |> log_pruned(label, result)
         |> log_not_sent_here(label, result.unowned)
         |> Recorder.put_run_destination(entry["key"], %{pruned: result.units})
 
       {:error, reason} ->
-        prune_skipped(rec, entry, reason)
+        prune_skipped(rec, ctx, entry, reason)
     end
   end
 
-  defp prune_skipped(rec, entry, reason) do
+  # The same events local retention emits (#2487), told apart by `scope`.
+  defp prune_skipped(rec, ctx, entry, reason) do
     message =
       "Retention on #{entry["label"]} skipped: #{Retention.describe(reason)}; nothing was deleted"
 
     Logger.error("Backup " <> message)
+
+    :telemetry.execute([:kiln_cms, :backups, :retention, :skipped], %{count: 1}, %{
+      scope: :destination,
+      destination: entry["key"],
+      reason: reason
+    })
+
+    Notices.retention(notice_scope(entry), {:skipped, reason}, stamp: ctx.stamp)
     Recorder.log(rec, :error, "offsite", message)
   end
+
+  defp destination_pass(ctx, entry, %{stopped: nil}),
+    do: Notices.retention(notice_scope(entry), :ok, stamp: ctx.stamp)
+
+  defp destination_pass(ctx, entry, %{deleted: names, stopped: reason}) do
+    :telemetry.execute(
+      [:kiln_cms, :backups, :retention, :stopped],
+      %{count: 1, deleted: length(names)},
+      %{scope: :destination, destination: entry["key"], reason: reason}
+    )
+
+    Notices.retention(notice_scope(entry), {:stopped, reason, length(names)}, stamp: ctx.stamp)
+  end
+
+  defp notice_scope(entry), do: {:destination, entry["key"], entry["label"]}
 
   defp log_pruned(rec, _label, %{deleted: [], stopped: nil}), do: rec
 

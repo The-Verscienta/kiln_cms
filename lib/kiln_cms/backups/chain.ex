@@ -63,6 +63,7 @@ defmodule KilnCMS.Backups.Chain do
   """
   import Ecto.Query
 
+  alias KilnCMS.AfterCommit
   alias KilnCMS.Backups
 
   alias KilnCMS.Backups.{
@@ -675,6 +676,12 @@ defmodule KilnCMS.Backups.Chain do
   Nothing bounds how long a stalled filesystem keeps it there; the
   transaction's timeout applies to its queries, not to the file calls.
 
+  A held backup the sync finds deleted outside the app (#2931, see
+  `Retention`'s "The hold markers") is logged and counted under the lock, and
+  its notice is written once the lock transaction commits
+  (`KilnCMS.AfterCommit.deferring/1`), so a failed notice write can't abort
+  it.
+
   `{:ok, %{db: stamp | nil, media: stamp | nil}}`, `:busy`, or
   `{:error, reason}` with no marker written or removed (logged, with a
   `[:kiln_cms, :backups, :last_good, :failed]` event). Never raises.
@@ -686,10 +693,9 @@ defmodule KilnCMS.Backups.Chain do
 
     result =
       with {:ok, _summary} <- import_for_sync(dir) do
-        with_lock(fn
-          %{chain_id: nil} -> locked_sync(dir, opts)
-          _held -> {:ok, :busy}
-        end)
+        # The held-deleted notice (#2931) is written after COMMIT, so a failed
+        # write can't abort the lock transaction.
+        AfterCommit.deferring(fn -> with_lock(&sync_unless_held(&1, dir, opts)) end)
       end
 
     case result do
@@ -707,6 +713,9 @@ defmodule KilnCMS.Backups.Chain do
     # and try again next time, not crash.
     kind, _reason -> Retention.sync_failed({:crashed, kind})
   end
+
+  defp sync_unless_held(%{chain_id: nil}, dir, opts), do: locked_sync(dir, opts)
+  defp sync_unless_held(_held, _dir, _opts), do: {:ok, :busy}
 
   defp locked_sync(dir, opts) do
     case Retention.sync_last_good(dir, opts) do

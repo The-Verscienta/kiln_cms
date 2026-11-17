@@ -161,6 +161,17 @@ defmodule KilnCMS.Backups do
       define :get_node_beat, action: :read, get_by: [:node], not_found_error?: false
       define :prune_node_beats, action: :prune, require_reference?: false
     end
+
+    resource KilnCMS.Backups.Notice do
+      # System-only (#2487): `KilnCMS.Backups.Notices` writes, `status/0` reads.
+      define :list_backup_notices, action: :read
+      define :report_backup_notice, action: :report
+
+      define :clear_backup_notices,
+        action: :clear,
+        args: [:kind, :scope],
+        require_reference?: false
+    end
   end
 
   # See `with_actor/2`.
@@ -510,7 +521,36 @@ defmodule KilnCMS.Backups do
           scheduler_enabled?: boolean(),
           schedules: :none | :unreadable | [schedule_entry()],
           next_at: DateTime.t() | nil,
-          offsite: offsite_status()
+          offsite: offsite_status(),
+          retention: [retention_notice()],
+          held_deleted: [held_deleted_notice()]
+        }
+
+  @typedoc """
+  Retention that was skipped or stopped part-way over one place (#2487), as
+  `status/0`'s `retention` lists it. See `KilnCMS.Backups.Notice`.
+  """
+  @type retention_notice :: %{
+          scope: :local | {:destination, String.t()},
+          label: String.t() | nil,
+          outcome: :skipped | :stopped,
+          reason: String.t() | nil,
+          deleted: non_neg_integer() | nil,
+          stamp: String.t() | nil,
+          at: DateTime.t(),
+          dir_id: String.t() | nil
+        }
+
+  @typedoc """
+  Backups a schedule keeps that were found deleted outside the app (#2931),
+  as `status/0`'s `held_deleted` lists them: up to ten `"<kind>:<stamp>"`
+  units, and how many in all.
+  """
+  @type held_deleted_notice :: %{
+          dir_id: String.t() | nil,
+          units: [String.t()],
+          total: non_neg_integer(),
+          at: DateTime.t()
         }
 
   @typedoc """
@@ -695,6 +735,27 @@ defmodule KilnCMS.Backups do
   reached and tried (skipped ones left out); `destinations` lists each with
   its redacted `label`, `status` and `error`, and `failed` those that failed.
   Read as `system/0`; a read that fails is `:unknown`, never a crash.
+
+  ## Notices (#2487, #2931)
+
+  `retention` lists each place where retention was skipped or stopped
+  part-way on its last pass (`KilnCMS.Backups.Notice`): the local backup
+  directory first, then destinations, newest first. Each says its `scope`
+  (`:local` or `{:destination, key}`), `label` (the destination's current
+  name), `outcome`, `reason` (English), `deleted` (a stop's count), `stamp`
+  (the backup whose prune it was) and `at`. A notice that would pin the alarm
+  on a place nobody backs up to any more is left out: a local one whose
+  directory id no live node (heartbeat in the last day, or this node) reports,
+  and a destination's that is gone, disabled or no longer pruned. When those
+  can't be read, the notices are shown.
+
+  `held_deleted` lists, per backup directory, the backups a schedule keeps
+  that were found deleted outside the app in the last eight days: `units`
+  (at most ten `"<kind>:<stamp>"`), `total` and `at`, newest first.
+
+  Both are `[]` when the notices can't be read: counted
+  (`[:kiln_cms, :backups, :status, :notices_unreadable]`) and logged now and
+  then.
   """
   @spec status() :: status()
   def status do
@@ -732,6 +793,146 @@ defmodule KilnCMS.Backups do
       next_at: components |> Enum.map(fn {_c, cs} -> cs.next_at end) |> earliest(),
       offsite: status_offsite()
     }
+    |> Map.merge(status_notices(now))
+  end
+
+  # The notices (#2487, #2931) as `status/0` says them: `retention` and
+  # `held_deleted`, both `[]` when the notices can't be read (counted, and
+  # logged now and then).
+  defp status_notices(now) do
+    case list_backup_notices(actor: system(), authorize_with: :error) do
+      {:ok, notices} ->
+        %{
+          retention:
+            notices
+            |> Enum.filter(&(&1.kind == :retention and &1.outcome in [:skipped, :stopped]))
+            |> retention_entries(),
+          held_deleted:
+            notices
+            |> Enum.filter(&(&1.kind == :held_deleted))
+            |> held_deleted_entries(now)
+        }
+
+      {:error, error} ->
+        notices_unreadable(error)
+        %{retention: [], held_deleted: []}
+    end
+  end
+
+  # A notice for a place nobody backs up to any more must not pin the alarm:
+  # a local one whose directory no live node reports (a directory with no id
+  # is always shown), and a destination's that is gone, disabled or no longer
+  # pruned. Each check reads its table only when there is something to check,
+  # and a read that fails shows the notices rather than hiding a problem.
+  defp retention_entries([]), do: []
+
+  defp retention_entries(notices) do
+    {local, destination} = Enum.split_with(notices, &local_scope?(&1.scope))
+    live_dirs = live_dir_ids(local)
+    destinations = pruned_destinations(destination)
+
+    local =
+      for n <- local, is_nil(n.dir_id) or is_nil(live_dirs) or n.dir_id in live_dirs do
+        retention_entry(n, :local, nil)
+      end
+
+    destination =
+      for n <- destination,
+          is_nil(destinations) or Map.has_key?(destinations, n.scope) do
+        label = if destinations, do: Map.fetch!(destinations, n.scope), else: n.label
+        retention_entry(n, {:destination, n.scope}, label || n.label || n.scope)
+      end
+
+    local ++ Enum.sort_by(destination, & &1.at, {:desc, DateTime})
+  end
+
+  defp local_scope?("local"), do: true
+  defp local_scope?("local:" <> _id), do: true
+  defp local_scope?(_other), do: false
+
+  defp retention_entry(notice, scope, label) do
+    %{
+      scope: scope,
+      label: label,
+      outcome: notice.outcome,
+      reason: notice.reason,
+      deleted: notice.deleted,
+      stamp: notice.stamp,
+      at: notice.at,
+      dir_id: notice.dir_id
+    }
+  end
+
+  # The directory ids live nodes report in their heartbeats over the last
+  # day, and this node's own; nil (show everything) when they can't be read
+  # or nothing needs them.
+  defp live_dir_ids(local) do
+    if Enum.any?(local, & &1.dir_id) do
+      case list_live_node_beats(86_400, actor: system(), authorize_with: :error) do
+        {:ok, beats} ->
+          own =
+            case KilnCMS.Backups.DirId.current(dir()) do
+              {:ok, id} -> [id]
+              {:error, _none} -> []
+            end
+
+          MapSet.new(Enum.map(beats, & &1.dir_id) ++ own)
+
+        {:error, error} ->
+          notices_unreadable(error)
+          nil
+      end
+    end
+  end
+
+  # `%{key => label}` of the destinations retention still runs on; nil when
+  # they can't be read or nothing needs them.
+  defp pruned_destinations([]), do: nil
+
+  defp pruned_destinations(_notices) do
+    case list_backup_destinations(actor: system(), authorize_with: :error) do
+      {:ok, rows} ->
+        for row <- rows,
+            row.enabled and row.prune,
+            into: %{},
+            do: {DestinationConfig.key(row), KilnCMS.Backups.Redact.text(row.name)}
+
+      {:error, error} ->
+        notices_unreadable(error)
+        nil
+    end
+  end
+
+  defp held_deleted_entries(notices, now) do
+    since = DateTime.add(now, -KilnCMS.Backups.Notices.held_deleted_days() * 86_400, :second)
+
+    for n <- notices, DateTime.compare(n.at, since) != :lt do
+      %{dir_id: n.dir_id, units: n.units, total: n.total || length(n.units), at: n.at}
+    end
+    |> Enum.sort_by(& &1.at, {:desc, DateTime})
+  end
+
+  @notices_warned {__MODULE__, :notices_warned_at}
+  @notices_warn_every_ms :timer.minutes(15)
+
+  defp notices_unreadable(error) do
+    :telemetry.execute([:kiln_cms, :backups, :status, :notices_unreadable], %{count: 1}, %{
+      error: error.__struct__
+    })
+
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get(@notices_warned, nil)
+
+    if is_nil(last) or now - last >= @notices_warn_every_ms do
+      :persistent_term.put(@notices_warned, now)
+
+      Logger.warning(
+        "Backup status may leave out a retention or held-backup notice: a read failed " <>
+          "(#{inspect(error.__struct__)})"
+      )
+    end
+
+    :ok
   end
 
   @offsite_none %{
