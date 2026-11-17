@@ -108,6 +108,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new `users.notify_on_webhook_failure`, default `true`). Rolling back is safe; 1.10 shows the new webhook notices as a neutral line.**
   ([long form](docs/changelog/unreleased.md#webhook-failure-alerts-upgrade))
 
+- **Run `mix ash.migrate` (new nullable `backup_node_beats.last_dir_id`). Until every node runs this release, a node on the previous one still resumes a backup from a copy of its files while the source host is alive. Rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#backup-resume-source-host-first-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -328,6 +331,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A scheduled publish, unpublish or archive does nothing when the record was archived, published, rescheduled or given a new expiry action as the job fired; it used to overwrite that change.**
   ([long form](docs/changelog/unreleased.md#scheduled-content-on-the-row))
+
+- **A resume no longer runs from a copy of the backup's files on another host while the host that holds its directory is alive; the copy resumes once that host has stopped beating for 180 s.**
+  ([long form](docs/changelog/unreleased.md#backup-resume-source-host-first))
 
 ### Security
 

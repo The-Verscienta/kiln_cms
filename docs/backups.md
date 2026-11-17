@@ -1619,7 +1619,7 @@ all that time. A platform admin can cancel it (#2816).
 
    | Strip label | The resume is waiting for |
    |---|---|
-   | "Waiting for the server that has this backup's files" | A node whose backup directory has the backup's `.work/<stamp>/`. Other nodes keep putting the step back. |
+   | "Waiting for the server that has this backup's files" | The node whose backup directory the run records or, for a copy of the backup's `.work/<stamp>/` on another host, the source host to stop beating for 180 seconds ([why](#several-nodes-and-the-backup-lock)). Other nodes keep putting the step back. Also shown while a node with a copy waits for the run's row to be readable. |
    | "Waiting for the canceled backup's step to stop" | The window after the backup's Cancel to pass. |
    | "Starting a resume" | Nothing the page can name: its start step is about to run, or is running. |
 
@@ -1765,43 +1765,97 @@ step after `start` runs only on a node that reads the same id:
   If that host is gone, the backup ends up failed; take a new one.
 - **A copied backup directory** (restored onto a new host, or cloned) carries
   the old host's id. Delete `.kiln-dir-id` on the copy, or leave it out of the
-  copy (`rsync --exclude .kiln-dir-id`), so it gets its own. A
-  resume follows the files, not the id, so a backup whose `.work/<stamp>/`
-  came along with the copy can still be resumed there.
+  copy (`rsync --exclude .kiln-dir-id`), so it gets its own. A backup whose
+  `.work/<stamp>/` came along with the copy can be resumed there once the
+  host it was copied from has stopped (**A resume runs on the host that holds
+  its directory**, below).
 
 Why each step runs where its backup directory is, and the bounded wait, is argued in [ADR 0040](decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md).
 
-**A resume runs on the host with the files (#2539).** The Resume button shows
-only on a node that can see the backup's `.work/<stamp>/`. Each run records
-the id of the directory its files are in (its `dir_id`, set when it starts and
-again each time it is resumed), and the resume's `start` step runs only on a
-node that either:
+**A resume runs on the host that holds its directory (#2539, #2817).** The
+Resume button shows only on a node that can see the backup's `.work/<stamp>/`.
+Each run records the id of the directory its files are in (its `dir_id`, set
+when it starts and again each time it is resumed). The resume's `start` step
+runs on:
 
-- has `.work/<stamp>/state.json` in its own backup directory, or
-- reads the run's recorded id in its `.kiln-dir-id`.
+1. **The node that reads the run's recorded id** in its `.kiln-dir-id`, files
+   or not. If `.work/<stamp>/state.json` is gone from that directory, the
+   resume is refused there, visibly: "Resume refused: its work files
+   (.work/`<stamp>`/state.json) are not on the server that picked it up".
+2. **A node with a readable `.work/<stamp>/state.json` of its own, only when no
+   live node reports the recorded id.** Live means a heartbeat in the last
+   180 seconds, on the database's clock: the threshold at which a stopped
+   node's step is taken back. So a copy of the directory, or one given a new
+   `.kiln-dir-id`, resumes only once the host it came from has stopped. The
+   resume then records the copy's directory as the run's `dir_id`, and its
+   later steps run there.
+3. **Nowhere else.** Any other node that picks up the start waits 30 seconds
+   and puts it back.
 
-The local files win, so a directory that was copied, or given a new
-`.kiln-dir-id`, still resumes where its files are. A run with no recorded id
-(imported from cron, or last run before this release) is resumed by whichever
-node picks it up, and records an id when it does.
+While the source host runs, the copy waits; the source host takes the start
+and either resumes the backup or refuses it as above. A source host whose id
+read is held up by a hung mount (beats report no id then, see
+[The backup-directory id read](#the-backup-directory-id-read-2848)) still
+counts as live: each beat also reports the last id it read, until a read
+finds no id file. One gap remains: a source host that restarts and whose
+first id read hangs reports no id at all, so a copy elsewhere can resume
+while it runs.
 
-Any other node that picks up the start waits 30 seconds and puts it back, up
-to 20 times per attempt, like every other step, across the job's four attempts
-and the 1-, 5- and 15-minute pauses between them. When the last attempt has
-waited too, the resume is given up:
+The start waits, rather than trust the copy, in three more cases:
+
+- the `state.json` in the copy can't be read or parsed: it counts as no copy;
+- the node heartbeats can't be read: the start waits, and logs why;
+- the run's own row can't be read on a node with a copy: the start waits
+  too, and each attempt that uses up its 20 waits fails with
+  `:run_unreadable`. A node with no copy starts the resume anyway, and the
+  resume is refused there if the files are not there either.
+
+A run with no recorded id (imported from cron, or last run before #2539) is
+resumed by whichever node picks it up, and records an id when it does.
+
+A node that is not allowed to start the resume puts it back up to 20 times per
+attempt, like every other step, across the job's four attempts and the 1-, 5-
+and 15-minute pauses between them. When the last attempt has waited too, the
+resume is given up:
 
 - the lock is released, and a queued backup starts;
 - the History row keeps its status and its **Resume** button, and reads
   "Resume refused: no server with its backup directory (id `<id>`) picked it
   up; every attempt waited about 10 minutes for one", above its original
-  error.
+  error. A resume whose run couldn't be read ends instead when the lock's
+  reap finds its job gone, and the row reads "Resume refused: Interrupted:
+  the backup's step job ended without finishing its step".
 
 That is about an hour in which the resume holds the lock, and a backup asked
 for meanwhile [queues behind it](#back-up-while-another-backup-runs): the price of not refusing a resume just
 because the wrong nodes happened to pick it up first. Bring the host with the
 files back, wait for the give-up, or
 [cancel the resume](#cancel-a-resume-that-is-waiting-to-start) to let other
-backups run.
+backups run. To resume from a copy while the source host still runs, stop
+the app on the source host: the copy can take the start 180 seconds after its
+last beat.
+
+**180 seconds here, 10 minutes for the marker sync.** The
+[last-good marker sync](#the-last-good-marker) routes to every directory a
+node reported in the last 10 minutes (600 seconds). The two windows answer
+different questions. The marker sync asks where a sync might still be picked
+up, and a host that missed a few beats is worth a sync job that waits for it.
+A resume asks whether the source host might still be writing to its copy of
+the backup, and that is the question the backup lock answers at 180 seconds,
+when it takes a stopped node's step back. A longer window would only keep a
+copy waiting after the lock already treats the source host as gone.
+
+**During a rolling deploy** a node still on the previous release keeps the
+old rule: a copy of the files there resumes at once, whether or not the
+source host is alive. The new rule holds once every node runs this release.
+
+What the server log says:
+
+| Log line | Level | Meaning |
+|---|---|---|
+| "Backup resume of `<stamp>`: couldn't read the node heartbeats (…); waiting for the server with its backup directory (id `<id>`) rather than resuming from the files here" | warning | This node has a copy of the files but can't tell whether the source host is alive, so it puts the start back. If it lasts, the give-up names the directory id; this line says why no copy took over. |
+| "Backup resume of `<stamp>`: couldn't read where its files are (…); waiting rather than resuming from the files here" | warning | The run's row can't be read on a node with a copy, so it puts the start back. Check the database connection. |
+| "Backup resume of `<stamp>`: couldn't read where its files are (…); starting it here" | warning | The run's row can't be read on a node with no copy. The start runs, and refuses the resume if the files are missing here too. |
 
 **The lock is a Postgres advisory lock.** Every decision about the chain
 (a request, a hand-over, a take-back, a Cancel, a step's rename of a file
@@ -1835,6 +1889,14 @@ self-fence included. Now:
   The heartbeat starts no second read until the first one ends (a process
   blocked on a hung mount can't be killed, so one per tick would pile up).
   Once it ends, the next beat reads the id afresh.
+- **Each beat also reports the last id it read** (`last_dir_id`, #2817),
+  kept while a read is held up, crashes or can't start. Only a resume's
+  start uses it, so a copy of the directory elsewhere doesn't resume while
+  this host is alive but its read is stuck
+  ([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)).
+  The marker sync routes by the current id only. A read that finds no id
+  file clears it, and a node that restarts has none until its first read
+  answers.
 - **The beat always goes out.** A read that crashes, or that answers with
   something other than an id or an error, is logged and the beat reports no
   id.

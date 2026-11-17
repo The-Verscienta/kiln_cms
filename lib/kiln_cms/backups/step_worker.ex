@@ -50,8 +50,9 @@ defmodule KilnCMS.Backups.StepWorker do
   promoted, and the run's row says why. A run with no directory id
   (imported, from before #2539) runs anywhere. A start whose run can't be
   read runs on a node without the files (the start step there refuses
-  visibly) and waits, with the same budget, on one with them. The 180 s window is the lock's, not the last-good marker
-  sync's 600 s routing window (`KilnCMS.Backups.MarkerSyncWorker`).
+  visibly) and waits, with the same budget, on one with them. The 180 s
+  window is the lock's, not the last-good marker sync's 600 s routing window
+  (`KilnCMS.Backups.MarkerSyncWorker`).
 
   Oban counts a job's snoozes in `meta["snoozed"]` across all its attempts. The
   per-attempt count is the snoozes since `meta["affinity_base"]`, which is

@@ -2,16 +2,21 @@
 
 - **Status** — accepted (2026-11-13). Records the choice that shipped with the
   backup step chain (#2537) in 1.9.0; a resume's routing (#2539) and the
-  marker sync's use of the same id (#2554, #2789) came after it.
+  marker sync's use of the same id (#2554, #2789) came after it. Amended
+  2026-11-17 by [#2817](https://github.com/The-Verscienta/kiln_cms/issues/2817)
+  (a copy of a run's files resumes only once the source host stops beating;
+  see "Amendment (2026-11-17, #2817)").
 - **References** — [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218)
   (owner decision 1 of 2026-11-09, in its comments; PR #2537),
   [#2539](https://github.com/The-Verscienta/kiln_cms/issues/2539),
+  [#2817](https://github.com/The-Verscienta/kiln_cms/issues/2817) (owner
+  decision of 2026-11-17, in its comments),
   [#2424](https://github.com/The-Verscienta/kiln_cms/issues/2424);
   [ADR 0039](0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md)
   for the heartbeat that carries each node's id.
 - **Changelog** — [1.9.0](../changelog/v1.9.0.md#backup-step-chain) (Added:
   "Several hosts", #2218), and the Unreleased section of
-  [CHANGELOG.md](../../CHANGELOG.md) (#2539, #2789).
+  [CHANGELOG.md](../../CHANGELOG.md) (#2539, #2789, #2817).
 
 ## The problem
 
@@ -51,12 +56,13 @@ What a step needs is the directory.
   minutes, counted from `meta["affinity_base"]`), then fails the attempt with
   `:backup_dir_elsewhere`, and the step's four attempts and their backoff
   take over.
-- **A resume's `start` runs where the run's files are (#2539)**: on a node
-  that has `.work/<stamp>/state.json` itself, or whose id is the one the run
-  records (`KilnCMS.Backups.Run`'s `dir_id`). Local files win over the
-  recorded id. When the last attempt has spent its snoozes too, the resume is
-  given up (`Chain.abandon_start/2`): the lock is released and the run's row
-  says why. A run with no recorded id runs anywhere.
+- **A resume's `start` runs where the run's files are (#2539)**: on the node
+  whose id is the one the run records (`KilnCMS.Backups.Run`'s `dir_id`), or
+  on a node that has `.work/<stamp>/state.json` itself while no live node
+  reports that id (#2817; see the amendment). When the last attempt has spent
+  its snoozes too, the resume is given up (`Chain.abandon_start/2`): the lock
+  is released and the run's row says why. A run with no recorded id runs
+  anywhere.
 
 ## Rejected
 
@@ -81,8 +87,8 @@ What a step needs is the directory.
   then starts, on whichever host its `start` lands.
 - A copied backup directory carries its id, and two directories with one id
   look like one. The copy needs `.kiln-dir-id` deleted or left out
-  (`rsync --exclude .kiln-dir-id`). A resume follows the files, not the id, so
-  a copied `.work/<stamp>/` still resumes.
+  (`rsync --exclude .kiln-dir-id`). A copied `.work/<stamp>/` resumes only
+  once the host it came from has stopped beating (#2817; see the amendment).
 - A node whose `BACKUP_DIR` cannot hold an id (read-only, or a file there
   that is not an id) runs no step: its `start` fails the attempt when it
   cannot create the id, and every later step snoozes there.
@@ -97,3 +103,52 @@ What a step needs is the directory.
 - If deployments with a volume per host turn out to lose backups to the
   one-hour give-up, a shorter budget, or one that adapts to how many nodes
   report the id, is worth having.
+
+## Amendment (2026-11-17, #2817): a copy resumes only once the source host stops beating
+
+The Decision's last point let local files win over the recorded id: a node
+holding `.work/<stamp>/state.json` took a resume's `start` whatever the run
+recorded. A copy of the source host's backup directory, made while the run was
+there and with `.kiln-dir-id` left out (the practice this ADR recommends),
+then resumed beside a source host that was still running, and both directories
+went on to hold the same backup. The issue first proposed letting the files
+win only when the copied `state.json`'s own `dir_id` matched the run's. That
+clause doesn't catch the case: `state.json` records the directory of the
+start that wrote it, which is always the run's, copy or not.
+
+- **The run's recorded directory comes first.** `KilnCMS.Backups.StepWorker`
+  runs the `start` on a node whose `DirId.current/0` is the run's `dir_id`,
+  files or not; the start step there refuses visibly (`:no_state`) when
+  `.work/<stamp>/state.json` is gone.
+- **A local copy wins only when no live node reports the recorded id.** Live
+  is a beat within `Chain.stale_after_s/0` (180 seconds, on the database's
+  clock), read through `Backups.dir_id_live?/2`. A node counts as reporting
+  the id through its beat's `dir_id` or its `last_dir_id`, the id its last
+  answered read gave, which a held-up, crashed or busy read leaves in place.
+  Without it, a source host whose read is stuck on a hung mount (its `dir_id`
+  goes nil, see ADR 0039's #2848 amendment) would look gone. A copy that
+  resumes records its own directory as the run's `dir_id`, as any resume
+  does.
+- **It fails closed.** Heartbeats that can't be read count as a live source:
+  the start snoozes and logs a warning. A run that can't be read makes a node
+  with a copy snooze too (the attempt fails with `:run_unreadable` when its
+  snoozes run out); a node with no copy starts and refuses visibly on the
+  missing files. A `state.json` that can't be parsed (`Backups.local_resume_state?/1`)
+  counts as no copy. The heartbeats are read only on a node with a copy.
+- **180 seconds, not the marker sync's 600.** The question is whether the
+  source host may still write its copy of the backup. The lock answers it at
+  180 seconds, when it takes a stopped node's step back; the marker sync's
+  longer window asks where a queued sync might still be picked up.
+
+Rejected: keeping the files-first rule and documenting the gap; and comparing
+`state.json`'s `chain` with the run's `chain_id`, which catches a copy taken
+before a later resume but not one taken mid-run of a run never resumed.
+
+Consequences: on a live source host whose `.work/<stamp>/` was moved away,
+the resume is now refused there instead of running from the copy. A copy
+resumes once the source host has been silent for 180 seconds; to use it
+sooner, stop the app on the source host. A restarted source host whose first
+id read hangs reports neither id, so a copy can resume beside it. During a
+rolling deploy, a node on an older release keeps the files-first rule. A
+deployment with one shared volume, where every node reads the same id, is
+unaffected. Every other rule above is unchanged.
