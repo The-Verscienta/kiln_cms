@@ -15,6 +15,7 @@ config :kiln_cms, :occurrence_backfill_on_boot, false
 config :kiln_cms, :legacy_audiences_migration_on_boot, false
 config :kiln_cms, :sync_exposure_backfill_on_boot, false
 config :kiln_cms, :totp_secret_backfill_on_boot, false
+config :kiln_cms, :erasure_backfill_on_boot, false
 
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.
@@ -507,3 +508,8 @@ config :kiln_cms, KilnCMS.CrawlerVerification.Ranges,
 # Test-only; nothing else sets this key.
 config :kiln_cms, KilnCMS.Backups.Destination,
   extra_adapters: [KilnCMS.Test.BackupDestinations.Fake]
+
+# No boot-time job-args scrub (#2992), for the boot-enqueue reason at the top
+# of this file. Down here so docs/environment-variables.md's line anchor into
+# this file stays put.
+config :kiln_cms, :private_args_scrub_on_boot, false

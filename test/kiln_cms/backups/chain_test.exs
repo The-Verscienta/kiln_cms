@@ -502,6 +502,57 @@ defmodule KilnCMS.Backups.ChainTest do
       assert {:error, :superseded} = Chain.while_holding(stale, fn -> flunk("ran") end)
     end
 
+    test "fenced_rename moves a file only while the lease holds (#2819)" do
+      {:ok, %{status: :started}} = request()
+      {:ok, lease} = Chain.begin_step(current_job())
+      dir = Backups.dir()
+      File.mkdir_p!(dir)
+      [ours, final] = for name <- ["f.1-1.partial", "f"], do: Path.join(dir, name)
+      File.write!(ours, "ours")
+
+      assert :ok = Chain.fenced_rename(lease, ours, final)
+      assert File.read!(final) == "ours"
+      refute File.exists?(ours)
+
+      # Its own error is returned as it is.
+      assert {:error, :enoent} = Chain.fenced_rename(lease, ours, final)
+
+      # The chain moved on: the rename is refused and both files stay.
+      :ok = Chain.advance(lease, "dump")
+      File.write!(ours, "late")
+      assert {:error, :superseded} = Chain.fenced_rename(lease, ours, final)
+      assert File.read!(final) == "ours"
+      assert File.read!(ours) == "late"
+    end
+
+    test "fenced_rename is refused once a Cancel released the lock (#2819)" do
+      {:ok, %{status: :started}} = request()
+      {:ok, lease} = Chain.begin_step(current_job())
+      %{stamp: stamp} = lock()
+      dir = Backups.dir()
+      File.mkdir_p!(dir)
+      [ours, final] = for name <- ["g.2-1.partial", "g"], do: Path.join(dir, name)
+      File.write!(ours, "late")
+      File.write!(final, "theirs")
+
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", chain_id: lease.chain},
+          actor: Backups.system()
+        )
+
+      admin = %KilnCMS.Accounts.User{
+        id: Ash.UUID.generate(),
+        role: :admin,
+        email: "a@example.com"
+      }
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run, actor: admin)
+
+      assert {:error, :superseded} = Chain.fenced_rename(lease, ours, final)
+      assert File.read!(final) == "theirs"
+      assert {:error, :superseded} = Chain.fenced(lease, fn -> flunk("ran") end)
+    end
+
     test "an advance whose next job already exists rolls back and leaves the lock alone" do
       {:ok, %{status: :started, chain: chain}} = request()
       {:ok, lease} = Chain.begin_step(current_job())
@@ -632,6 +683,8 @@ defmodule KilnCMS.Backups.ChainTest do
       assert row.step_job_id == new_id and row.step == :archive and row.part == 2
       assert row.epoch > epoch
       assert row.stamp == stamp
+      # Only a finishing step stays finishing across a reclaim (#3012).
+      assert row.phase == :running
 
       # The zombie wakes up: it can't move the chain on.
       assert {:error, :superseded} = Chain.advance(zombie, "archive", 3)
@@ -916,6 +969,126 @@ defmodule KilnCMS.Backups.ChainTest do
 
       assert Backups.in_flight() == nil
       assert [%{status: :failed}] = runs()
+    end
+  end
+
+  # Issue 2419: a failure before the last attempt is only retried. Nothing
+  # says the backup failed in between: the manifest keeps the previous good
+  # backup until the retry settles it.
+  describe "failures a retry can fix" do
+    test "a failed attempt leaves the manifest alone and the run open; the retry succeeds", %{
+      dir: dir
+    } do
+      assert :ok = BackupChain.run()
+      assert [%{stamp: good}] = runs()
+      before = File.read!(Manifest.path(dir))
+
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups)[:database_url]
+      set_config(database_url: "postgres://nobody:nope@127.0.0.1:1/nope")
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      job = step_until("dump")
+      %{stamp: stamp} = lock()
+      assert stamp != good
+
+      assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+      assert %Oban.Job{state: "retryable", attempt: 1} = Repo.get!(Oban.Job, job.id)
+      assert File.read!(Manifest.path(dir)) == before
+      assert %{step: :dump, step_job_id: job_id} = lock()
+      assert job_id == job.id
+
+      assert %{status: :running, log: log} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert Enum.any?(log, &(&1.step == "dump" and &1.level == :error))
+
+      set_config(database_url: original)
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert %Oban.Job{state: "completed", attempt: 2} = Repo.get!(Oban.Job, job.id)
+
+      assert %{status: :succeeded} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert %Manifest{ok: true, stamp: ^stamp} = Manifest.read(dir)
+    end
+  end
+
+  # #2543: during an upgrade, a legacy `Worker` job from an older node may
+  # still be running the whole pipeline without the lock. The start step
+  # waits for it (`Steps.start/2`).
+  describe "an upgrade while a legacy Worker job runs" do
+    defp legacy_executing! do
+      {:ok, job} = Oban.insert(Worker.new(%{"trigger" => "manual"}))
+
+      {1, _} =
+        Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id),
+          set: [state: "executing", attempted_at: DateTime.utc_now(), attempt: 1]
+        )
+
+      job
+    end
+
+    test "the start step snoozes without spending an attempt, then runs once the job is done" do
+      legacy = legacy_executing!()
+      {:ok, %{status: :started, chain: chain}} = request()
+      start = current_job()
+
+      assert %{snoozed: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+      assert %Oban.Job{state: "scheduled", attempt: 0, meta: %{"snoozed" => 1}} =
+               Repo.get!(Oban.Job, start.id)
+
+      # Nothing started: no run, no work directory, the lock still on start.
+      assert runs() == []
+      %{stamp: stamp} = row = lock()
+      assert row.step == :start and row.step_job_id == start.id
+      refute File.exists?(Backups.work_dir(stamp))
+
+      # A snoozed step is a job that will run again, not an orphan.
+      assert {:ok, :none} = Chain.reap()
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^legacy.id),
+        set: [state: "completed", completed_at: DateTime.utc_now()]
+      )
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded}] = runs()
+    end
+
+    # Pins today's behavior (owner question on #2543): past the bound every
+    # attempt fails at once, since `meta["snoozed"]` counts across attempts;
+    # the job is discarded with no run, and the reaper frees the lock.
+    test "past three hours of waiting each attempt fails at once; the reaper frees the lock" do
+      legacy_executing!()
+      {:ok, %{status: :started}} = request()
+      start = current_job()
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^start.id),
+        set: [meta: %{"snoozed" => 180}]
+      )
+
+      assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+      assert %Oban.Job{state: "retryable", attempt: 1, errors: [error]} =
+               Repo.get!(Oban.Job, start.id)
+
+      assert error["error"] =~ "legacy_backup_running"
+      assert runs() == []
+
+      assert %{failure: 2, discard: 1} = BackupChain.drain()
+      assert %Oban.Job{state: "discarded", attempt: 4} = Repo.get!(Oban.Job, start.id)
+      assert runs() == []
+
+      assert {:ok, {:orphaned, _}} = Chain.reap()
+      assert Backups.in_flight() == nil
     end
   end
 

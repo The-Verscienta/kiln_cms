@@ -114,7 +114,9 @@ Full flow, recipe, and the serve step live in
 - [ ] Before sharing the clone, read
       [what the scrub keeps](staging-environments.md#what-the-scrub-keeps):
       media storage settings, the content-signing key, staff free text, and
-      plugin tables.
+      the plugin tables a plugin keeps. An overlay whose domains own a table
+      with no `staging_scrub/0` entry makes the scrub refuse, with nothing
+      changed ([Plugin tables](staging-environments.md#plugin-tables)).
 - [ ] A **distinct staging `SECRET_KEY_BASE`** is what invalidates cloned session
       cookies and prod-signed preview tokens — generate a fresh one, don't reuse
       prod's.

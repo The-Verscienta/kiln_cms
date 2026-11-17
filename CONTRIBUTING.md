@@ -293,6 +293,57 @@ green "No vulnerabilities found" — a pass that verified nothing.
   `KILN_UPDATE_CONTRAST_BASELINE=1 mix test test/kiln_cms_web/muted_text_contrast_test.exs`.
   See [Muted text](docs/design-language.md#muted-text).
 
+### Run the backup script tests under every shell and tar
+
+`scripts/backup.sh`, `restore.sh` and `staging.sh` support bash 3.2 (macOS's
+`/bin/bash`) and bsdtar as well as bash 5 and GNU tar, and refuse busybox tar.
+The required `test` shards run them under bash 5 and GNU tar only, so the
+`backup_scripts_portability` CI job runs the test files tagged
+`:shell_portability` twice more: under bash 3.2.57 with GNU tar, and under
+bash 5 with bsdtar. To run those legs yourself:
+
+- **On a Mac**, `mix test test/scripts` already uses `/bin/bash` 3.2 for the
+  bash 3.2 tests and bsdtar as `tar`. It is also the only place BSD
+  `stat -f %z`, BSD `xargs` and bsdtar's AppleDouble (`._`) members are
+  exercised; CI has no macOS leg.
+- **On Linux, bash 3.2**: build it with `scripts/ci/build_bash32.sh <prefix>`
+  (needs a C compiler, `make`, `curl` and `bison`; it downloads bash 3.2.57,
+  checks its pinned SHA-256 and prints the built version). Then point the
+  tests at it and put it first on `PATH`, so the scripts' own `bash` children
+  run under it too:
+
+  ```bash
+  scripts/ci/build_bash32.sh "$HOME/.cache/kiln-bash32"
+  mkdir -p /tmp/kiln-shim
+  ln -sf "$HOME/.cache/kiln-bash32/bin/bash" /tmp/kiln-shim/bash
+  KILN_BASH32="$HOME/.cache/kiln-bash32/bin/bash" KILN_EXPECT_BASH=3.2.57 \
+    PATH="/tmp/kiln-shim:$PATH" mix test test/scripts --only shell_portability
+  ```
+
+- **On Linux, bsdtar**: install it (`libarchive-tools` on Debian and Ubuntu),
+  link it as `tar` in a shim directory first on `PATH`, and set
+  `KILN_EXPECT_TAR=bsdtar`.
+
+The variables:
+
+| Variable | Effect |
+|---|---|
+| `KILN_BASH32` | The bash 3.2 the bash 3.2 tests run. Unset, they use `/bin/bash` when it is 3.x and skip otherwise; set, a wrong path fails the tests instead of skipping them |
+| `KILN_REQUIRE_BUSYBOX=1` | The busybox tar tests (tagged `:busybox_tar`) fail, rather than skip, when `busybox` is not on `PATH` |
+| `KILN_EXPECT_BASH` | A version prefix, such as `3.2.57`. `test/scripts/shell_portability_test.exs` fails unless `bash` on `PATH` reports it and, with `KILN_BASH32` set, is that bash (a symlink to it counts) |
+| `KILN_EXPECT_TAR` | Text that `tar --version` on `PATH` must contain, such as `bsdtar` |
+
+The last two are there so a leg cannot pass while running the wrong tools.
+Unset, those two tests skip. The busybox tests link busybox as `tar` in their
+own stub directory, so any leg with `busybox` installed runs them; select
+them alone with `mix test test/scripts --only busybox_tar`.
+
+A new script test file whose script claims bash 3.2 joins these legs with
+`@moduletag :shell_portability`; `.github/workflows/ci.yml` selects by the
+tag, not by a file list. Gate a bash 3.2 test on `ShellTools.bash32()` and a
+busybox test on `ShellTools.busybox?()` (`test/support/shell_tools.ex`), as
+`test/scripts/backup_script_test.exs` does.
+
 ### Coverage
 
 CI runs the suite under line coverage

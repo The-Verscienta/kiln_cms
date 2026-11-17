@@ -1370,6 +1370,274 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
       assert Backups.in_flight() != nil
     end
+
+    # A failed run with a resume of it holding the lock at its start, not
+    # re-opened yet (#2816). Its files are recorded in another backup
+    # directory, so with `snooze?: true` the start, run once, snoozes waiting
+    # for the server that has them; else it hasn't run. `fields` change the
+    # run first.
+    defp waiting_resume!(dir, stamp, opts \\ []) do
+      run =
+        Backups.start_run!(
+          %{
+            stamp: stamp,
+            trigger: "manual",
+            chain_id: Ash.UUID.generate(),
+            dir_id: Ash.UUID.generate()
+          },
+          actor: Backups.system()
+        )
+
+      run = Backups.fail_run!(run, %{error: "tar exited 2"}, actor: Backups.system())
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+
+      case Keyword.get(opts, :fields, []) do
+        [] -> :ok
+        fields -> set_run!(stamp, fields)
+      end
+
+      {:ok, %{status: :started, chain: chain}} =
+        Backups.request([resume: stamp], Backups.system())
+
+      if Keyword.get(opts, :snooze?, true) do
+        File.rename!(work, Path.join(dir, "aside-#{stamp}"))
+        %{snoozed: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      end
+
+      %{run: Backups.get_run!(run.id, actor: Backups.system()), chain: chain}
+    end
+
+    defp set_run!(stamp, fields) do
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          Ecto.Query.from(r in "backup_runs", where: r.stamp == ^stamp),
+          set: fields
+        )
+    end
+
+    @strip_cancel_resume ~s|#backup-in-flight button[data-role="cancel-resume"]|
+
+    @tag :pg_tools
+    test "a resume waiting for the server with its files says so; its Cancel frees the lock, " <>
+           "and the row keeps its status (#2816)",
+         %{dir: dir} do
+      %{run: run} = waiting_resume!(dir, "20261103-101010")
+      {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Waiting for the server that has this backup"
+             )
+
+      assert has_element?(
+               lv,
+               @strip_cancel_resume <>
+                 ~s|[data-confirm*="Cancel this resume? The backup stays as it was"]| <>
+                 ~s|[data-confirm*="A queued backup will start next"]|
+             )
+
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="cancel"]|)
+      row = "#backup-run-#{run.id}"
+      refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
+
+      html = lv |> element(@strip_cancel_resume) |> render_click()
+
+      assert html =~ "Resume canceled. The backup stays as it was, so it can be resumed later."
+      assert %{trigger: "schedule", resume: nil} = Backups.in_flight()
+      assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Starting a backup")
+      refute has_element?(lv, @strip_cancel_resume)
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Failed")
+
+      assert %{error: "Resume canceled by a platform admin before it started\ntar exited 2"} =
+               Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    @tag :pg_tools
+    test "the strip says what a waiting resume waits for (#2816)", %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-111111", snooze?: false)
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      # Its start hasn't run yet.
+      assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Starting a resume")
+
+      assert has_element?(
+               lv,
+               @strip_cancel_resume <>
+                 ~s|[data-confirm="Cancel this resume? The backup stays as it was, so it can be resumed later."]|
+             )
+
+      # Its start runs, inside the settle window of the run's Cancel.
+      set_run!(run.stamp, status: "canceled", finished_at: DateTime.utc_now())
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          Ecto.Query.from(j in Oban.Job, where: j.id == ^lock_row().step_job_id),
+          set: [state: "executing"]
+        )
+
+      send(lv.pid, :refresh)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Waiting for the canceled backup"
+             )
+
+      assert has_element?(lv, @strip_cancel_resume)
+      assert %{chain: ^chain} = Backups.in_flight()
+    end
+
+    # Critic change 1: a stale `running` run that a resume is about to re-open
+    # gets only the resume's Cancel; the plain one would leave the resume
+    # holding the lock.
+    @tag :pg_tools
+    test "a stale running run being resumed offers only the resume's Cancel (#2816)", %{
+      dir: dir
+    } do
+      quiet = DateTime.add(DateTime.utc_now(), -5 * 3600, :second)
+
+      %{run: run} =
+        waiting_resume!(dir, "20261103-121212",
+          fields: [
+            status: "running",
+            finished_at: nil,
+            error: nil,
+            started_at: quiet,
+            updated_at: quiet
+          ]
+        )
+
+      assert run.status == :running
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Running")
+      refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="cancel"]|)
+
+      html = lv |> element(@strip_cancel_resume) |> render_click()
+
+      assert html =~ "Resume canceled."
+      assert Backups.in_flight() == nil
+      assert %{status: :failed} = Backups.get_run!(run.id, actor: Backups.system())
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Failed")
+    end
+
+    @tag :pg_tools
+    test "a resume that started meanwhile: the click says so, and the plain Cancel is offered",
+         %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-131313")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+      assert has_element?(lv, @strip_cancel_resume)
+
+      # The start re-opens the run before the click lands.
+      Backups.resume_run!(Backups.get_run!(run.id, actor: Backups.system()), %{chain_id: chain},
+        actor: Backups.system()
+      )
+
+      html = lv |> element(@strip_cancel_resume) |> render_click()
+
+      assert html =~ "The resume started meanwhile. Cancel it again to stop the backup."
+      assert %{chain: ^chain} = Backups.in_flight()
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+      refute has_element?(lv, @strip_cancel_resume)
+      assert has_element?(lv, ~s|#backup-in-flight button[data-role="cancel"]|)
+    end
+
+    # A stale record that isn't the resume starting: the run is `running`
+    # but not stale, under its own chain, so the Cancel's pinned UPDATE
+    # matches nothing while the lock still holds the waiting resume.
+    @tag :pg_tools
+    test "a Cancel that finds the backup changed otherwise says so, neutrally (#2816)",
+         %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-131314")
+      set_run!(run.stamp, status: "running", finished_at: nil)
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      html = render_hook(lv, "cancel_resume", %{"id" => run.id})
+
+      assert html =~ "The backup changed meanwhile. Try again."
+      refute html =~ "The resume started meanwhile"
+      assert %{chain: ^chain, step: :start} = Backups.in_flight()
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    # The race a LiveView test can't time: the Cancel read the run, then the
+    # start re-opened it before the Cancel's UPDATE (a stale record). The run
+    # and the lock as they are now decide the message.
+    @tag :pg_tools
+    test "a stale-record Cancel says the resume started only when it did (#2816)", %{dir: dir} do
+      admin = authed_user(:admin)
+      stale = %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}
+
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-131315")
+
+      assert KilnCMSWeb.BackupLive.cancel_resume_message(stale, run.id, admin) ==
+               "The backup changed meanwhile. Try again."
+
+      Backups.resume_run!(run, %{chain_id: chain}, actor: Backups.system())
+
+      assert KilnCMSWeb.BackupLive.cancel_resume_message(stale, run.id, admin) ==
+               "The resume started meanwhile. Cancel it again to stop the backup."
+    end
+
+    @tag :pg_tools
+    test "a forged resume cancel of a running or finished backup is refused", %{dir: dir} do
+      done = app_run!(dir, 2, :succeeded)
+      %{run: running} = started!()
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+      refute has_element?(lv, @strip_cancel_resume)
+
+      for id <- [done.id, running.id, Ecto.UUID.generate()] do
+        assert render_hook(lv, "cancel_resume", %{"id" => id}) =~
+                 "That resume can&#39;t be canceled."
+      end
+
+      render_hook(lv, "cancel_resume", %{"id" => 7})
+
+      assert %{status: :succeeded} = Backups.get_run!(done.id, actor: Backups.system())
+      assert %{status: :running} = Backups.get_run!(running.id, actor: Backups.system())
+      assert %{step: :dump} = Backups.in_flight()
+    end
+
+    @tag :pg_tools
+    test "the resume cancel handler re-checks platform admin (#2816)", %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-141414")
+
+      org_admin = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: org_admin.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      for user <- [
+            authed_user(:editor),
+            org_admin,
+            authed_user(:viewer),
+            expired_grant_user(),
+            nil
+          ] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+
+        assert_denied(
+          KilnCMSWeb.BackupLive.handle_event("cancel_resume", %{"id" => run.id}, socket)
+        )
+      end
+
+      assert Backups.get_run!(run.id, actor: Backups.system()) == run
+      assert %{chain: ^chain, step: :start} = Backups.in_flight()
+    end
   end
 
   describe "one headline line per component (#2219)" do
@@ -2999,6 +3267,291 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       refute html =~ "overview-backup-warning"
       refute html =~ "off-site destinations"
+    end
+  end
+
+  # #2487: retention that was skipped or stopped is a dated alarm line on the
+  # Backups page and on Home, until a clean pass clears it.
+  describe "retention notices (#2487)" do
+    alias KilnCMS.Backups.DestinationConfig
+
+    @stamp "20261116-020000"
+
+    # A good database backup an hour ago, so the only alarm is the notice's.
+    defp good_backup! do
+      offsite_run!(%{"local" => %{"status" => "ok"}}, [], nil)
+    end
+
+    defp notice!(attrs) do
+      Backups.report_backup_notice!(
+        Map.merge(
+          %{
+            kind: :retention,
+            scope: "local",
+            outcome: :skipped,
+            reason: "couldn't read the backup history",
+            stamp: @stamp,
+            at: DateTime.utc_now()
+          },
+          attrs
+        ),
+        actor: Backups.system()
+      )
+    end
+
+    test "a skip is a dated line in the alarm tone, with the guide", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-local[data-role=retention-notice]",
+               "Retention was skipped on the backup of 2026-11-16 02:00 UTC: " <>
+                 "couldn't read the backup history. Nothing was deleted, so local backups " <>
+                 "will build up until this is fixed."
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-retention-docs[href$="backups.md#when-retention-is-skipped-or-stops"]|
+             )
+
+      assert has_element?(lv, "section.border-error\\/30")
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+    end
+
+    test "a stop says what it hadn't reached stays", %{conn: conn} do
+      good_backup!()
+      notice!(%{outcome: :stopped, deleted: 2, reason: "it crashed (RuntimeError)"})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-local",
+               "Retention stopped part-way on the backup of 2026-11-16 02:00 UTC: it crashed " <>
+                 "(RuntimeError). What it hadn't reached stays until this is fixed."
+             )
+    end
+
+    test "two backup directories: one line each, own ids, each naming its directory",
+         %{conn: conn} do
+      good_backup!()
+      a = Ash.UUID.generate()
+      b = Ash.UUID.generate()
+
+      # Both directories are reported by a live node, so both lines show.
+      for id <- [a, b] do
+        Backups.beat_node!(
+          %{
+            node: "node-#{System.unique_integer([:positive])}",
+            boot_id: Ash.UUID.generate(),
+            dir_id: id
+          },
+          actor: Backups.system()
+        )
+
+        notice!(%{scope: "local:" <> id, dir_id: id})
+      end
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      for id <- [a, b] do
+        assert has_element?(
+                 lv,
+                 "#backup-headline-retention-local-#{id}",
+                 "(backup directory #{String.slice(id, 0, 8)})"
+               )
+      end
+
+      html = render(lv)
+      assert length(Regex.scan(~r/data-role="retention-notice"/, html)) == 2
+      assert length(Regex.scan(~r/id="backup-headline-retention-local/, html)) == 2
+
+      refute has_element?(lv, "#backup-headline-retention-local")
+    end
+
+    test "a destination's line names it; one no longer pruned shows nothing", %{conn: conn} do
+      good_backup!()
+
+      pruned =
+        Ash.Seed.seed!(DestinationConfig, %{
+          name: "Offsite NAS",
+          kind: "local",
+          settings: %{},
+          enabled: true,
+          prune: true
+        })
+
+      off =
+        Ash.Seed.seed!(DestinationConfig, %{
+          name: "Archive",
+          kind: "local",
+          settings: %{},
+          enabled: true,
+          prune: false
+        })
+
+      notice!(%{
+        scope: DestinationConfig.key(pruned),
+        label: "NAS",
+        reason: "it overlaps BACKUP_RCLONE_REMOTE"
+      })
+
+      notice!(%{scope: DestinationConfig.key(off), label: "Archive"})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-dest-#{pruned.id}",
+               "Retention on Offsite NAS was skipped on the backup of 2026-11-16 02:00 UTC: " <>
+                 "it overlaps BACKUP_RCLONE_REMOTE. Nothing was deleted there"
+             )
+
+      refute has_element?(lv, "#backup-headline-retention-dest-#{off.id}")
+      refute has_element?(lv, "#backup-headline-retention-local")
+    end
+
+    test "a clean run: no line, no alarm", %{conn: conn} do
+      good_backup!()
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "[data-role=retention-notice]")
+      refute has_element?(lv, "#backup-retention-docs")
+      refute has_element?(lv, "section.border-error\\/30")
+    end
+
+    test "Home's alarm strip shows a platform admin the line", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning [data-role=backup-headline]",
+               "Retention was skipped on the backup of 2026-11-16 02:00 UTC"
+             )
+    end
+
+    test "Home: no strip for a clean run", %{conn: conn} do
+      good_backup!()
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-backup-warning"
+    end
+
+    test "Home: an org admin who is not a platform admin sees nothing", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      for user <- [org_admin(), authed_user(:editor)] do
+        {:ok, _lv, html} = conn |> log_in(user) |> live(~p"/editor/overview")
+
+        refute html =~ "overview-backup-warning"
+        refute html =~ "Retention was skipped"
+      end
+    end
+  end
+
+  # #2931: backups a schedule keeps that were deleted outside the app are a
+  # warning under the headline for eight days, never the alarm, and never on
+  # Home.
+  describe "held backups deleted outside the app (#2931)" do
+    defp held_deleted!(attrs) do
+      Backups.report_backup_notice!(
+        Map.merge(
+          %{
+            kind: :held_deleted,
+            scope: "local",
+            units: ["db:20261110-020000"],
+            total: 1,
+            at: ~U[2026-11-15 09:30:00.000000Z]
+          },
+          attrs
+        ),
+        actor: Backups.system()
+      )
+    end
+
+    defp good_db_backup! do
+      offsite_run!(%{"local" => %{"status" => "ok"}}, [], nil)
+    end
+
+    test "one backup: a dated warning naming it, with the guide; no alarm", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.utc_now()})
+      today = Calendar.strftime(DateTime.utc_now(), "%Y-%m-%d")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "On #{today}"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "a backup a schedule keeps was deleted outside the app: " <>
+                 "Database backup of 2026-11-10 02:00 UTC."
+             )
+
+      assert has_element?(lv, "#backup-held-deleted", "Replace it with this release's copy.")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-held-deleted-docs[href$="backups.md#the-hold-markers"]|
+             )
+
+      assert has_element?(lv, "section.border-warning\\/30 #backup-held-deleted")
+      refute has_element?(lv, "section.border-error\\/30")
+    end
+
+    test "many: counted, ten named, and the rest as \"and N more\"", %{conn: conn} do
+      good_db_backup!()
+      units = for n <- 10..19, do: "media:20261110-0200#{n}"
+      held_deleted!(%{units: units, total: 12, at: DateTime.utc_now()})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "12 backups a schedule keeps were deleted outside the app: " <>
+                 "Media backup of 2026-11-10 02:00 UTC"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "Media backup of 2026-11-10 02:00 UTC and 2 more."
+             )
+    end
+
+    test "older than eight days, or none: nothing", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.add(DateTime.utc_now(), -9 * 86_400, :second)})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "#backup-held-deleted")
+    end
+
+    test "not on Home", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.utc_now()})
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-backup-warning"
+      refute html =~ "deleted outside the app"
     end
   end
 end

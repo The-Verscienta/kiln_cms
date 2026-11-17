@@ -215,6 +215,20 @@ defmodule KilnCMS.Newsletter.TierSync do
   # strategy does not require confirmation to sign in, so this is checked here
   # rather than assumed — adding an unverified address would let someone sign up
   # with a stranger's email and subscribe them to mail.
+  #
+  # An erased account is never linked either (#2991): its address is a
+  # tombstone, and erasure deleted the rows it had. A late webhook or the
+  # nightly reconcile reaching it with a stale entitlement must not put a row
+  # back.
+  #
+  # That holds against an erasure running at the same moment too (#3006),
+  # with no lock of its own here: the only caller is a membership transition
+  # (`Billing.Changes.RecordTransition`), whose transaction holds the
+  # account's row `FOR KEY SHARE` from the entitlement recompute (and, first,
+  # from `LockAccount`) before this reads it. So the erasure either committed
+  # before, and the read sees the tombstone, or waits for this transaction
+  # and then deletes the row it linked.
+  defp verified?(%{anonymized_at: %DateTime{}}), do: false
   defp verified?(%{confirmed_at: nil}), do: false
   defp verified?(_user), do: true
 

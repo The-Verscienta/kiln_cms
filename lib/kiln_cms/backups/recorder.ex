@@ -163,21 +163,34 @@ defmodule KilnCMS.Backups.Recorder do
   @spec from_run(String.t() | nil, String.t()) :: t()
   def from_run(nil, chain_id), do: %__MODULE__{chain_id: chain_id}
 
-  def from_run(stamp, chain_id) do
-    case own_run(stamp, chain_id) do
-      nil ->
-        %__MODULE__{chain_id: chain_id}
+  def from_run(stamp, chain_id), do: seeded(own_run(stamp, chain_id), chain_id)
 
-      run ->
-        %__MODULE__{
-          run: run,
-          chain_id: chain_id,
-          components: run.components,
-          artifacts: Enum.map(run.artifacts, &Map.take(&1, @artifact_fields)),
-          log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message])),
-          destinations: Enum.map(run.destinations, &stored_destination/1)
-        }
+  @doc """
+  As `from_run/2`, but a read that fails is `{:error, reason}` rather than a
+  recorder with no run: for a caller that must tell "no run of this chain"
+  from "couldn't tell" (`KilnCMS.Backups.Steps`, a finish interrupted after
+  it closed the run, #2419).
+  """
+  @spec fetch_run(String.t(), String.t()) :: {:ok, t()} | {:error, term()}
+  def fetch_run(stamp, chain_id) do
+    case Backups.get_run_by_stamp(stamp, actor: Backups.system(), authorize_with: :error) do
+      {:ok, %{chain_id: ^chain_id} = run} -> {:ok, seeded(run, chain_id)}
+      {:ok, _none_or_another_chains} -> {:ok, seeded(nil, chain_id)}
+      {:error, _} = error -> error
     end
+  end
+
+  defp seeded(nil, chain_id), do: %__MODULE__{chain_id: chain_id}
+
+  defp seeded(run, chain_id) do
+    %__MODULE__{
+      run: run,
+      chain_id: chain_id,
+      components: run.components,
+      artifacts: Enum.map(run.artifacts, &Map.take(&1, @artifact_fields)),
+      log: Enum.map(run.log, &Map.take(&1, [:at, :level, :step, :message])),
+      destinations: Enum.map(run.destinations, &stored_destination/1)
+    }
   end
 
   # A loaded entry back into the accumulator's shape. A status this release
@@ -326,11 +339,27 @@ defmodule KilnCMS.Backups.Recorder do
         end
       end)
 
-    case result do
-      {:ok, %{} = run} -> {:ok, resumed(run, chain_id)}
-      _ -> {:error, :not_resumable}
-    end
+    reopened_result(result, chain_id)
   end
+
+  @doc """
+  `reopen/3` with the run the caller already loaded, not read again (#2816):
+  the `:resume` action's UPDATE is pinned to that struct's `updated_at`, so
+  anything that wrote the row since (a resume canceled before it started,
+  `Run :cancel_resume`) refuses it with `{:error, :not_resumable}`.
+  """
+  @spec reopen_run(Backups.Run.t(), String.t() | nil, String.t() | nil) ::
+          {:ok, t()} | {:error, :not_resumable}
+  def reopen_run(%Backups.Run{} = run, chain_id, dir_id) do
+    "reopen"
+    |> safely(fn ->
+      Backups.resume_run(run, resume_params(chain_id, dir_id), actor: Backups.system())
+    end)
+    |> reopened_result(chain_id)
+  end
+
+  defp reopened_result({:ok, %{} = run}, chain_id), do: {:ok, resumed(run, chain_id)}
+  defp reopened_result(_result, _chain_id), do: {:error, :not_resumable}
 
   # A nil `dir_id` keeps the run's own: it is not evidence of anything.
   defp resume_params(chain_id, nil), do: %{chain_id: chain_id}
@@ -411,8 +440,12 @@ defmodule KilnCMS.Backups.Recorder do
   @spec add_artifact(t(), map()) :: t()
   def add_artifact(%__MODULE__{} = rec, artifact) do
     case Artifact.from_manifest(artifact) do
-      {:ok, attrs} -> %{rec | artifacts: rec.artifacts ++ [attrs]}
-      :error -> rec
+      # A retried step adds the same artifact again (#2419): replace it.
+      {:ok, attrs} ->
+        %{rec | artifacts: Enum.reject(rec.artifacts, &(&1.name == attrs.name)) ++ [attrs]}
+
+      :error ->
+        rec
     end
   end
 

@@ -9,6 +9,7 @@ defmodule KilnCMS.Accounts do
   use Ash.Domain,
     otp_app: :kiln_cms
 
+  require Ash.Query
   require Logger
 
   resources do
@@ -126,6 +127,9 @@ defmodule KilnCMS.Accounts do
       # the hourly sweep's write and takes no input.
       define :grant_membership_temporary_role, action: :grant_temporary_role
       define :expire_membership_role_grant, action: :expire_role_grant
+
+      # Erasure's write (#2774), system-only: see `Changes.AnonymizeUser`.
+      define :erase_org_membership, action: :erase
 
       # Registration approval (#2251) — see `KilnCMS.Accounts.Registrations`.
       # `queue_registration` is system-only (`Changes.QueueRegistration`); the
@@ -453,9 +457,43 @@ defmodule KilnCMS.Accounts do
   def has_second_factor?(%{totp?: totp?, passkeys: passkeys}), do: totp? or passkeys > 0
 
   @doc """
+  Whether mail may still go to the account `user` (an account or its id)
+  names, now (#3019, #3035): `{:ok, user}` with the account as it is now,
+  `{:skip, reason}` when nothing is to be sent to it, or `{:error, error}`
+  when it could not be read.
+
+  An account erased since (`:erased`), gone (`:no_account`) or holding no
+  address (`:no_address`) is skipped. A mail job can wait hours for a retry,
+  so the workers that send account mail ask this when they run, not only the
+  code that queued them. Preferences are not this function's business:
+  `KilnCMS.Notifications.mail_recipient/2` adds them for the mail they govern.
+  """
+  @spec mail_recipient(KilnCMS.Accounts.User.t() | String.t()) ::
+          {:ok, KilnCMS.Accounts.User.t()}
+          | {:skip, :erased | :no_account | :no_address}
+          | {:error, term()}
+  def mail_recipient(%KilnCMS.Accounts.User{anonymized_at: %DateTime{}}), do: {:skip, :erased}
+  def mail_recipient(%KilnCMS.Accounts.User{email: nil}), do: {:skip, :no_address}
+  def mail_recipient(%KilnCMS.Accounts.User{} = user), do: {:ok, user}
+
+  def mail_recipient(user_id) when is_binary(user_id) do
+    # authorize?: false — an `Accounts.User` read (self-only policy) of the one
+    # account a mail job already names, only to decide whether it still goes:
+    # a system grant would cover every account on the deployment.
+    case get_user(user_id, authorize?: false, not_found_error?: false) do
+      {:ok, %KilnCMS.Accounts.User{} = user} -> mail_recipient(user)
+      {:ok, nil} -> {:skip, :no_account}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  @doc """
   A JSON-serializable snapshot of a user's own data for an access/portability
-  request (GDPR Art. 15/20, #212): profile fields and notification preferences.
-  No secrets (password hash, tokens) are included.
+  request (GDPR Art. 15/20, #212): profile fields and notification preferences,
+  paid memberships, the newsletter subscriptions linked to the account
+  (#2991), and its site memberships in any status, with what each grants
+  (#3010). No secrets (password hash, tokens, the subscriber's confirm and
+  unsubscribe tokens) are included.
   """
   @spec export_user_data(KilnCMS.Accounts.User.t()) :: map()
   def export_user_data(%KilnCMS.Accounts.User{} = user) do
@@ -481,7 +519,141 @@ defmodule KilnCMS.Accounts do
       # identifiers a subprocessor holds about this person, so GDPR Art. 15/20
       # covers them, and having them lets the subject exercise their rights
       # against the provider directly. They are not credentials.
-      memberships: membership_export(user)
+      memberships: membership_export(user),
+      newsletter_subscriptions: newsletter_export(user),
+      site_memberships: site_membership_export(user)
+    }
+  end
+
+  # The account's site memberships (#3010), on every site and in any status:
+  # a registration waiting for approval, or a rejected one kept, is data about
+  # the person too. Read as the account itself, because memberships are global
+  # (not tenant-scoped) and their only read grant is the member's own rows; no
+  # system actor is admitted, so a system read would export nothing.
+  # `authorize_with: :error`, as `membership_export/1`. The site names come
+  # from the system's org read; when that fails the rows still go out, with no
+  # name.
+  defp site_membership_export(user) do
+    case list_memberships_for_user(user.id, actor: user, authorize_with: :error) do
+      {:ok, memberships} ->
+        names = site_names(user, memberships)
+
+        memberships
+        |> Enum.sort_by(&{DateTime.to_unix(&1.inserted_at, :microsecond), &1.organization_id})
+        |> Enum.map(&site_membership_entry(&1, names))
+
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not read site memberships for #{user.id}: " <>
+            Exception.message(error)
+        )
+
+        []
+    end
+  end
+
+  defp site_names(_user, []), do: %{}
+
+  defp site_names(user, memberships) do
+    ids = Enum.map(memberships, & &1.organization_id)
+    query = KilnCMS.Accounts.Organization |> Ash.Query.filter(id in ^ids)
+
+    case list_organizations(
+           actor: system(),
+           authorize_with: :error,
+           query: Ash.Query.select(query, [:id, :name])
+         ) do
+      {:ok, orgs} ->
+        Map.new(orgs, &{&1.id, &1.name})
+
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not read the site names for #{user.id}: " <>
+            Exception.message(error)
+        )
+
+        %{}
+    end
+  end
+
+  defp site_membership_entry(membership, names) do
+    %{
+      org_id: membership.organization_id,
+      site: Map.get(names, membership.organization_id),
+      status: membership.status,
+      role: membership.role,
+      granted_role: membership.granted_role,
+      granted_role_expires_at: membership.granted_role_expires_at,
+      audiences: membership.audiences,
+      editable_types: membership.editable_types,
+      readable_types: membership.readable_types,
+      field_grants: membership.field_grants,
+      field_read_grants: membership.field_read_grants,
+      inserted_at: membership.inserted_at,
+      decided_at: membership.decided_at
+    }
+  end
+
+  # The subscriber rows linked to the account (#2991), on every site, with the
+  # names of the segments each is on. Read org by org as the newsletter's own
+  # actor (`KilnCMS.Newsletter.system/0`, admitted for the plain `:read` and
+  # the segment reads), because `:for_user`, the one cross-org read, is the
+  # member's own. `authorize_with: :error`, as `membership_export/1`: a refusal
+  # is logged, not mistaken for "no subscriptions". Only the linked rows: a
+  # row added by hand at the same address was not given through the account.
+  # The confirm and unsubscribe tokens are left out; they are working links,
+  # not data about the person. The org list is read without raising, for the
+  # same reason: one refused read must not take down the rest of the export.
+  defp newsletter_export(user) do
+    case list_organizations(actor: system(), authorize_with: :error, query: [select: [:id]]) do
+      {:ok, orgs} ->
+        Enum.flat_map(orgs, &newsletter_export(user, &1.id))
+
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not list sites for newsletter subscriptions of " <>
+            "#{user.id}: " <> Exception.message(error)
+        )
+
+        []
+    end
+  end
+
+  defp newsletter_export(user, org_id) do
+    query =
+      KilnCMS.Newsletter.Subscriber
+      |> Ash.Query.filter(user_id == ^user.id)
+      |> Ash.Query.load(:segments)
+
+    case KilnCMS.Newsletter.list_subscribers(
+           query: query,
+           actor: KilnCMS.Newsletter.system(),
+           authorize_with: :error,
+           tenant: org_id
+         ) do
+      {:ok, subscribers} ->
+        Enum.map(subscribers, &subscription_entry/1)
+
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not read newsletter subscriptions for #{user.id} " <>
+            "on org #{org_id}: " <> Exception.message(error)
+        )
+
+        []
+    end
+  end
+
+  defp subscription_entry(subscriber) do
+    %{
+      org_id: subscriber.org_id,
+      email: to_string(subscriber.email),
+      name: subscriber.name,
+      status: subscriber.status,
+      confirmed_at: subscriber.confirmed_at,
+      unsubscribed_at: subscriber.unsubscribed_at,
+      subscribed_at: subscriber.inserted_at,
+      segments: subscriber.segments |> Enum.map(& &1.name) |> Enum.sort()
     }
   end
 

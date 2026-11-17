@@ -134,6 +134,140 @@ defmodule KilnCMS.SentryFilterTest do
     end
   end
 
+  describe "private job args (#2992)" do
+    # `extra` exactly as Sentry's Oban integration builds it:
+    # `Map.take(job, [:args, :attempt, :id, :max_attempts, :meta, :queue, :tags, :worker])`.
+    defp job_extra(worker, args) do
+      %Oban.Job{
+        id: 7,
+        args: args,
+        attempt: 1,
+        max_attempts: 5,
+        meta: %{},
+        queue: "default",
+        tags: [],
+        worker: worker
+      }
+      |> Map.take([:args, :attempt, :id, :max_attempts, :meta, :queue, :tags, :worker])
+    end
+
+    defp frames(vars) do
+      %Sentry.Interfaces.Stacktrace{
+        frames: [
+          %Sentry.Interfaces.Stacktrace.Frame{
+            module: "KilnCMS.Automation.RuleWorker",
+            function: "run/3",
+            vars: vars
+          }
+        ]
+      }
+    end
+
+    test "a registered worker's private keys leave extra.args; the ids stay" do
+      for {worker, args} <- [
+            {"KilnCMS.Automation.RuleWorker",
+             %{"rule_id" => "r1", "payload" => %{"title" => "LEAKED"}, "sealed" => "LEAKED"}},
+            {"KilnCMS.Forms.AutoresponderWorker",
+             %{"form_id" => "f1", "to" => "LEAKED@example.com", "data" => %{"m" => "LEAKED"}}}
+          ] do
+        scrubbed = SentryFilter.before_send(event(extra: job_extra(worker, args)))
+
+        refute inspect(scrubbed) =~ "LEAKED"
+        assert scrubbed.extra.worker == worker
+        assert map_size(scrubbed.extra.args) == 1
+      end
+    end
+
+    # Queued before #3019: the recipient's address and what the mail quoted.
+    test "a workflow or task mail job's address, title, name, excerpt and note leave extra.args" do
+      for {worker, args, kept} <- [
+            {"KilnCMS.Notifications.WorkflowMailWorker",
+             %{
+               "id" => "p1",
+               "to" => "LEAKED@example.com",
+               "title" => "LEAKED",
+               "actor_name" => "LEAKED",
+               "excerpt" => "LEAKED"
+             }, %{"id" => "p1"}},
+            {"KilnCMS.Notifications.TaskMailWorker",
+             %{
+               "task_id" => "t1",
+               "to" => "LEAKED@example.com",
+               "note" => "LEAKED",
+               "actor_name" => "LEAKED"
+             }, %{"task_id" => "t1"}}
+          ] do
+        scrubbed = SentryFilter.before_send(event(extra: job_extra(worker, args)))
+
+        refute inspect(scrubbed) =~ "LEAKED"
+        assert scrubbed.extra.args == kept
+      end
+    end
+
+    # A current-shape mail job reads the recipient's account back; a failure
+    # in its helpers would quote it in the frames.
+    test "a workflow mail job's stack frames lose their variables" do
+      vars = %{"arg0" => ~s(%{email: "LEAKED@example.com"})}
+
+      exception = %Sentry.Interfaces.Exception{
+        type: "FunctionClauseError",
+        value: "no function clause matching",
+        stacktrace: frames(vars)
+      }
+
+      scrubbed =
+        SentryFilter.before_send(
+          event(
+            extra: job_extra("KilnCMS.Notifications.WorkflowMailWorker", %{"user_id" => "u1"}),
+            exception: [exception]
+          )
+        )
+
+      refute inspect(scrubbed) =~ "LEAKED"
+      assert [%{stacktrace: %{frames: [%{vars: nil}]}}] = scrubbed.exception
+    end
+
+    test "an unregistered worker's args keep their keys" do
+      args = %{"data" => "kept", "payload" => "kept"}
+      scrubbed = SentryFilter.before_send(event(extra: job_extra("KilnCMS.Other.Worker", args)))
+
+      assert scrubbed.extra.args == args
+    end
+
+    test "a registered worker's stack frames lose their variables" do
+      vars = %{"arg0" => ~s(%{"payload" => %{"title" => "LEAKED"}})}
+
+      exception = %Sentry.Interfaces.Exception{
+        type: "FunctionClauseError",
+        value: "no function clause matching",
+        stacktrace: frames(vars)
+      }
+
+      thread = %Sentry.Interfaces.Thread{id: 1, stacktrace: frames(vars)}
+
+      scrubbed =
+        SentryFilter.before_send(
+          event(
+            extra: job_extra("KilnCMS.Automation.RuleWorker", %{"rule_id" => "r1"}),
+            exception: [exception],
+            threads: [thread]
+          )
+        )
+
+      refute inspect(scrubbed) =~ "LEAKED"
+      assert [%{stacktrace: %{frames: [%{vars: nil, function: "run/3"}]}}] = scrubbed.exception
+      assert [%{stacktrace: %{frames: [%{vars: nil}]}}] = scrubbed.threads
+
+      # Any other worker's frames are left as Sentry built them.
+      other =
+        SentryFilter.before_send(
+          event(extra: job_extra("KilnCMS.Other.Worker", %{}), exception: [exception])
+        )
+
+      assert [%{stacktrace: %{frames: [%{vars: ^vars}]}}] = other.exception
+    end
+  end
+
   describe "URLs and process dumps" do
     @secret "T0kenSecretValue123"
 

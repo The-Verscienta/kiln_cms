@@ -92,6 +92,7 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Admin, editor and public routes | Only for a LiveView that depends on `phoenix_live_view` directly; one that does `use KilnCMSWeb, :live_view` or renders `Layouts.app` needs the core, so it stays an overlay |
 | Plug routes (`plug_routes/0`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). A route is `{verb, path, plug_module, plug_opts}` or `{:forward, path, plug, opts}`, so the dependency needs `plug` and nothing else |
 | Content types (`use KilnCMS.CMS.Content`), Ash domains (`domains/0`) | No: they need the core's repo, domains and policies. Overlay only |
+| Staging scrub (`staging_scrub/0`) | Not needed: it declares what the staging scrub does to the tables a plugin's domains own, and a dependency owns none. An overlay with tables must declare every one, from 1.5 (`{:kiln_plugin, "~> 1.5"}`), or the scrub refuses to run |
 | Advisory checks (`advisories/0`, `Kiln.Advisory`) | Yes, from 1.1 (`{:kiln_plugin, "~> 1.1"}`). The core walks the blocks and fills `%Kiln.Advisory.Body{}`; a check only reads it |
 | Outbound HTTP to a URL the plugin didn't write (`Kiln.SafeFetch`) | Yes, from 1.3 (`{:kiln_plugin, "~> 1.3"}`). The core does the fetch; with no core loaded (a plugin's own test suite) every call is an error unless `config :kiln_plugin, :safe_fetch` names a stand-in |
 

@@ -100,6 +100,33 @@ defmodule Kiln.Plugins do
       else: []
   end
 
+  @doc """
+  What `plugin` declares for the staging scrub (`c:Kiln.Plugin.staging_scrub/0`,
+  #2975), for display: none for a plugin compiled against a `kiln_plugin`
+  older than 1.5, and none for a callback that raises or returns something
+  other than a list. The scrub itself reads the callback strictly
+  (`KilnCMS.Staging.PluginScrub`) and refuses on any of those.
+  """
+  @spec staging_scrub_of(module()) :: [Kiln.Plugin.staging_scrub_entry()]
+  def staging_scrub_of(plugin) do
+    with true <- Code.ensure_loaded?(plugin),
+         true <- function_exported?(plugin, :staging_scrub, 0),
+         list when is_list(list) <- safely(fn -> plugin.staging_scrub() end) do
+      list
+    else
+      _none -> []
+    end
+  end
+
+  # A display read must not take the console's plugin list down with it.
+  defp safely(fun) do
+    fun.()
+  rescue
+    _error -> :raised
+  catch
+    _kind, _reason -> :raised
+  end
+
   @doc "Every plugin-declared admin nav item."
   @spec nav_items() :: [Kiln.Plugin.nav_item()]
   def nav_items, do: Enum.flat_map(all(), & &1.nav_items())
@@ -156,6 +183,11 @@ defmodule Kiln.Plugins do
           challenge_providers: [module()],
           security_checks: [module()],
           backup_destinations: [module()],
+          staging_scrub: %{
+            purge: non_neg_integer(),
+            rewrite: non_neg_integer(),
+            keep: non_neg_integer()
+          },
           nav_items: non_neg_integer(),
           admin_routes: non_neg_integer(),
           editor_routes: non_neg_integer(),
@@ -174,8 +206,10 @@ defmodule Kiln.Plugins do
   @spec manifests() :: [manifest()]
   def manifests, do: Enum.map(all(), &manifest/1)
 
+  @doc false
+  # Public so a test can read the manifest of a plugin it does not configure.
   @spec manifest(module()) :: manifest()
-  defp manifest(plugin) do
+  def manifest(plugin) do
     %{
       module: plugin,
       name: plugin.name(),
@@ -191,6 +225,7 @@ defmodule Kiln.Plugins do
       challenge_providers: KilnCMS.Challenge.Registry.of_plugin(plugin),
       security_checks: KilnCMS.Security.Posture.Registry.of_plugin(plugin),
       backup_destinations: backup_destinations_of(plugin),
+      staging_scrub: staging_scrub_counts(plugin),
       nav_items: length(plugin.nav_items()),
       admin_routes: length(plugin.admin_routes()),
       editor_routes: length(plugin.editor_routes()),
@@ -199,5 +234,24 @@ defmodule Kiln.Plugins do
       oban_queues: plugin.oban_queues(),
       children: length(plugin.children())
     }
+  end
+
+  # How many tables the plugin purges, rewrites and keeps in a staging scrub.
+  # Counts only: whether each entry is valid is `mix kiln.plugins.doctor`'s job.
+  defp staging_scrub_counts(plugin) do
+    counts = %{purge: 0, rewrite: 0, keep: 0}
+
+    plugin
+    |> staging_scrub_of()
+    |> Enum.reduce(counts, fn
+      {:purge, _resource}, acc ->
+        Map.update!(acc, :purge, &(&1 + 1))
+
+      {kind, _resource, _}, acc when kind in [:rewrite, :keep] ->
+        Map.update!(acc, kind, &(&1 + 1))
+
+      _malformed, acc ->
+        acc
+    end)
   end
 end

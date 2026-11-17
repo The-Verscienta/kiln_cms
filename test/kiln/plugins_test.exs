@@ -97,6 +97,37 @@ defmodule Kiln.PluginsTest do
     assert fixture.backup_destinations == []
   end
 
+  describe "a plugin's staging scrub declaration (#2975)" do
+    defmodule ScrubRaisingPlugin do
+      use Kiln.Plugin
+      def staging_scrub, do: raise("boom")
+    end
+
+    defmodule ScrubMapPlugin do
+      use Kiln.Plugin
+      def staging_scrub, do: %{}
+    end
+
+    test "the display read is tolerant: a raise or a non-list reads as nothing" do
+      assert Kiln.Plugins.staging_scrub_of(ScrubRaisingPlugin) == []
+      assert Kiln.Plugins.staging_scrub_of(ScrubMapPlugin) == []
+
+      assert Kiln.Plugins.manifest(ScrubRaisingPlugin).staging_scrub == %{
+               purge: 0,
+               rewrite: 0,
+               keep: 0
+             }
+    end
+
+    test "the manifest counts each kind of entry" do
+      assert Kiln.Plugins.manifest(KilnCMS.PluginScrubFixtures.DeclaringPlugin).staging_scrub ==
+               %{purge: 2, rewrite: 1, keep: 1}
+
+      fixture = Enum.find(Kiln.Plugins.manifests(), &(&1.module == FixturePlugin))
+      assert fixture.staging_scrub == %{purge: 0, rewrite: 0, keep: 0}
+    end
+  end
+
   describe "a plugin compiled against kiln_plugin before 1.4" do
     # No `plug_routes/0` at all: the behaviour is implemented by hand, as a
     # plugin built against the 1.3 package would be.
@@ -118,6 +149,11 @@ defmodule Kiln.PluginsTest do
       assert Kiln.Plugins.backup_destinations_of(NotLoadedAnywhere) == []
     end
 
+    test "declares no staging scrub (#2975)" do
+      assert Kiln.Plugins.staging_scrub_of(OldPlugin) == []
+      assert Kiln.Plugins.staging_scrub_of(NotLoadedAnywhere) == []
+    end
+
     test "contributes no challenge providers (#2249)" do
       assert KilnCMS.Challenge.Registry.of_plugin(OldPlugin) == []
       assert KilnCMS.Challenge.Registry.of_plugin(NotLoadedAnywhere) == []
@@ -133,6 +169,8 @@ defmodule Kiln.PluginsTest do
       assert DefaultsPlugin.challenge_providers() == []
       assert DefaultsPlugin.security_checks() == []
       assert DefaultsPlugin.backup_destinations() == []
+      assert DefaultsPlugin.staging_scrub() == []
+      assert Kiln.Plugins.staging_scrub_of(DefaultsPlugin) == []
       assert KilnCMS.Challenge.Registry.of_plugin(DefaultsPlugin) == []
     end
   end
@@ -431,6 +469,35 @@ defmodule Kiln.PluginsTest do
 
     test "passes for the fixture plugin" do
       assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok
+    end
+
+    # #2975: the declaration checks `mix kiln.staging.scrub` refuses on, heard
+    # at precommit instead. Undeclared tables are only a note: a site that
+    # never stages is not broken by one.
+    test "flags an unusable staging scrub declaration, and notes undeclared tables" do
+      alias KilnCMS.PluginScrubFixtures, as: F
+      alias Mix.Tasks.Kiln.Plugins.Doctor
+
+      defmodule ScrubTypoPlugin do
+        use Kiln.Plugin
+        def name, do: "scrub_typo"
+        def domains, do: [KilnCMS.PluginScrubFixtures.Domain]
+        def staging_scrub, do: [{:purge, KilnCMS.PluginScrubFixtures.Venue}, {:wipe, nil}]
+      end
+
+      core = KilnCMS.Staging.PluginScrub.core_domains()
+
+      assert Doctor.staging_scrub_problems([F.DeclaringPlugin], core) == []
+
+      assert [problem] = Doctor.staging_scrub_problems([ScrubTypoPlugin], core)
+      assert problem =~ "scrub_typo: staging_scrub/0 entry {:wipe, nil} is not"
+
+      undeclared = Doctor.undeclared_scrub_tables([F.DeclaringPlugin], core)
+
+      assert "booking: KilnCMS.PluginScrubFixtures.Undeclared (table psf_undeclared)" in undeclared
+
+      refute Enum.any?(undeclared, &(&1 =~ "psf_events"))
+      refute Enum.any?(undeclared, &(&1 =~ "psf_venues"))
     end
 
     # #1909: the core overrides `kiln_plugin` so a plugin's Hex requirement

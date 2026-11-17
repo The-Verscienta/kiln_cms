@@ -42,6 +42,14 @@ defmodule KilnCMS.Backups.MediaArchive do
   an interrupted run resumes with the same parts. Files created after planning
   are not in the set (the next backup has them).
 
+  A backup step plans with a `:tag` (its job and attempt, #2819): its lists are
+  `partNN.<tag>.list`, named in `plan.json` like any list, and `plan.json` is
+  written as `plan.json.<tag>.partial` and put into place by the `:rename`
+  function it passes (a rename under its lease, #2818). Nothing of an earlier
+  plan is removed then: a step that lost its lease must not delete the lists
+  of the one that took over, and the committed `plan.json` names the lists
+  that count.
+
   ## Archiving
 
   `archive_part/4` does one part: it drops list entries that no longer exist
@@ -49,10 +57,14 @@ defmodule KilnCMS.Backups.MediaArchive do
 
       tar -czf <part>.partial --null -C <media_dir> -T <list>
 
-  (only flags GNU tar and bsdtar share), lists the result with `tar -tzf`,
-  renames it into place, sets mode 0600 and hashes it with `Checksum`. No
+  (only flags GNU tar and bsdtar share), lists the result with `tar -tzf`, sets
+  mode 0600, hashes it with `Checksum` and renames it into place, last. No
   archive bytes pass through the VM, and the list is read in chunks, so memory
-  does not grow with the size of the media directory.
+  does not grow with the size of the media directory. With a `:tag` the
+  temporary files are `<part>.<tag>.partial` and `partNN.<tag>.run.list`, and
+  the rename is the `:rename` function's: a backup step's rename under its
+  lease, refused (`{:error, :superseded}`) once another step took over, so a
+  part already in place is never replaced or removed by a step that lost it.
 
   **The exit code alone is never trusted.** bsdtar exits 1 for every problem and
   GNU tar exits 1 or 2 depending on the kind; neither number says whether a
@@ -60,8 +72,10 @@ defmodule KilnCMS.Backups.MediaArchive do
   part succeeds only if tar exited 0 *and* its archive lists cleanly. Anything
   else removes the `.partial`, re-filters the same list (so files that vanished
   are dropped and counted) and tries once more; a second failure is the part's
-  error, with tar's own output. A failed part never leaves a `.partial`, and the
-  parts finished before it stay on disk for a resume.
+  error, with tar's own output. A refused rename is not retried. A failed part
+  never leaves a `.partial`, the parts finished before it stay on disk for a
+  resume, and a file already under the part's final name is left as it was
+  (nothing trusts it without a recorded digest).
 
   ## Checksums
 
@@ -120,7 +134,9 @@ defmodule KilnCMS.Backups.MediaArchive do
   `work_dir` (created 0700; stale lists of an earlier plan are removed first).
 
   Options: `:stamp` (required), `:part_bytes` (default `Backups.media_part_bytes/0`),
-  `:exclude` (default `Backups.media_exclude/0`).
+  `:exclude` (default `Backups.media_exclude/0`), `:tag` and `:rename` (see
+  "Planning" above; without a tag the stale lists are removed first and the
+  plan renamed with `File.rename/2`, as before).
 
   The tree is listed with `:file.list_dir_all/1`, which also returns the names
   the VM's file-name encoding cannot decode (raw binaries, e.g. a Latin-1 name
@@ -145,38 +161,48 @@ defmodule KilnCMS.Backups.MediaArchive do
       lstat: opts[:lstat] || (&File.lstat/1)
     }
 
-    with :ok <- media_dir_exists(media_dir),
-         :ok <- mkdir_private(work_dir),
-         :ok <- clear_plan(work_dir),
-         {:ok, state} <- walk(media_dir, work_dir, cap, compile_globs(globs), fs) do
-      plan = %{
-        stamp: stamp,
-        media_dir: media_dir,
-        work_dir: work_dir,
-        parts: state.parts,
-        files: state.files,
-        bytes: state.bytes,
-        excluded: state.excluded,
-        unreadable_names: state.unreadable,
-        unreadable_examples: Enum.reverse(state.unreadable_examples),
-        part_bytes: cap
-      }
+    tag = opts[:tag]
 
-      if state.unreadable > 0 do
-        Logger.warning(
-          "Media backup could not archive #{state.unreadable} file name(s) the file-name " <>
-            "encoding cannot represent, e.g. #{Enum.join(plan.unreadable_examples, ", ")}"
-        )
+    result =
+      with :ok <- media_dir_exists(media_dir),
+           :ok <- mkdir_private(work_dir),
+           :ok <- clear_plan(work_dir, tag),
+           {:ok, state} <- walk(media_dir, work_dir, cap, compile_globs(globs), fs, tag) do
+        commit_plan(stamp, media_dir, work_dir, cap, globs, state, opts)
       end
 
-      if globs != [] do
-        Logger.info(
-          "Media backup excludes #{length(globs)} pattern(s): #{state.excluded} entr(ies) left out"
-        )
-      end
+    with {:error, _} <- result, do: drop_tagged_lists(work_dir, tag)
+    result
+  end
 
-      with :ok <- write_plan(plan), do: {:ok, plan}
+  defp commit_plan(stamp, media_dir, work_dir, cap, globs, state, opts) do
+    plan = %{
+      stamp: stamp,
+      media_dir: media_dir,
+      work_dir: work_dir,
+      parts: state.parts,
+      files: state.files,
+      bytes: state.bytes,
+      excluded: state.excluded,
+      unreadable_names: state.unreadable,
+      unreadable_examples: Enum.reverse(state.unreadable_examples),
+      part_bytes: cap
+    }
+
+    if state.unreadable > 0 do
+      Logger.warning(
+        "Media backup could not archive #{state.unreadable} file name(s) the file-name " <>
+          "encoding cannot represent, e.g. #{Enum.join(plan.unreadable_examples, ", ")}"
+      )
     end
+
+    if globs != [] do
+      Logger.info(
+        "Media backup excludes #{length(globs)} pattern(s): #{state.excluded} entr(ies) left out"
+      )
+    end
+
+    with :ok <- write_plan(plan, opts), do: {:ok, plan}
   end
 
   @doc """
@@ -230,12 +256,17 @@ defmodule KilnCMS.Backups.MediaArchive do
   @spec names(plan()) :: [String.t()]
   def names(%{stamp: stamp, parts: parts}), do: Artifact.set_names(stamp, length(parts))
 
+  # A list is a bare `partNN.list` (an untagged plan, an older release's) or
+  # `partNN.<tag>.list`; nothing else is joined to the work directory.
+  @list_name ~r/\Apart\d{2,}(?:\.\d+(?:-\d+)?)?\.list\z/
+
   defp decode_parts(parts, work_dir) do
     decoded =
       for {%{"index" => index, "list" => list, "files" => files, "bytes" => bytes} = p, i} <-
             Enum.with_index(parts, 1),
           index == i,
           is_binary(list),
+          Regex.match?(@list_name, list),
           is_integer(files) and is_integer(bytes) do
         %{index: index, list: list, files: files, bytes: bytes, oversize: p["oversize"] == true}
       end
@@ -247,8 +278,10 @@ defmodule KilnCMS.Backups.MediaArchive do
   end
 
   # sobelow_skip ["Traversal.FileModule"]
-  defp write_plan(plan) do
+  defp write_plan(plan, opts) do
     path = Path.join(plan.work_dir, "plan.json")
+    tmp = Artifact.partial_name(path, opts[:tag])
+    rename = opts[:rename] || (&File.rename/2)
 
     map = %{
       "version" => 1,
@@ -270,17 +303,37 @@ defmodule KilnCMS.Backups.MediaArchive do
     }
 
     with {:ok, json} <- Jason.encode(map),
-         :ok <- File.write(path <> ".partial", json),
-         :ok <- File.chmod(path <> ".partial", 0o600),
-         do: File.rename(path <> ".partial", path)
+         :ok <- File.write(tmp, json),
+         :ok <- File.chmod(tmp, 0o600),
+         :ok <- rename.(tmp, path) do
+      :ok
+    else
+      {:error, _} = error ->
+        File.rm(tmp)
+        error
+    end
   end
 
+  # Untagged (the script parity path, tests): an earlier plan's lists go
+  # first, as before. Tagged: nothing is removed (see "Planning").
   # sobelow_skip ["Traversal.FileModule"]
-  defp clear_plan(work_dir) do
+  defp clear_plan(work_dir, nil) do
     for file <-
           Path.wildcard(Path.join(work_dir, "part*.list")) ++ [Path.join(work_dir, "plan.json")],
         do: File.rm(file)
 
+    :ok
+  end
+
+  defp clear_plan(_work_dir, _tag), do: :ok
+
+  # A tagged plan that failed or was refused leaves no lists behind: they are
+  # this writer's alone (their names carry its tag).
+  defp drop_tagged_lists(_work_dir, nil), do: :ok
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp drop_tagged_lists(work_dir, tag) do
+    for file <- Path.wildcard(Path.join(work_dir, "part*.#{tag}.list")), do: File.rm(file)
     :ok
   end
 
@@ -293,14 +346,19 @@ defmodule KilnCMS.Backups.MediaArchive do
     with :ok <- File.mkdir_p(dir), do: File.chmod(dir, 0o700)
   end
 
-  defp list_name(index), do: "part#{pad(index)}.list"
+  defp list_name(index, nil), do: "part#{pad(index)}.list"
+  defp list_name(index, tag), do: "part#{pad(index)}.#{tag}.list"
+
+  defp run_list_name(index, nil), do: "part#{pad(index)}.run.list"
+  defp run_list_name(index, tag), do: "part#{pad(index)}.#{tag}.run.list"
   defp pad(n), do: n |> Integer.to_string() |> String.pad_leading(2, "0")
 
   # The walk. `stack` holds directories still to list (paths relative to the
   # media dir, "" for the root); `state` the open list and the finished parts.
-  defp walk(media_dir, work_dir, cap, matcher, fs) do
+  defp walk(media_dir, work_dir, cap, matcher, fs, tag) do
     state = %{
       work_dir: work_dir,
+      tag: tag,
       cap: cap,
       matcher: matcher,
       fs: fs,
@@ -416,11 +474,11 @@ defmodule KilnCMS.Backups.MediaArchive do
     if state.oversize, do: close_part(state), else: state
   end
 
-  # `path` is the work dir plus a generated `partNN.list` name.
+  # `path` is the work dir plus a generated `partNN[.<tag>].list` name.
   # sobelow_skip ["Traversal.FileModule"]
   defp open_part(state, oversize) do
     index = state.index + 1
-    path = Path.join(state.work_dir, list_name(index))
+    path = Path.join(state.work_dir, list_name(index, state.tag))
 
     with {:ok, io} <- :file.open(path, [:write, :raw, :binary, :delayed_write]),
          :ok <- chmod_or_close(path, io) do
@@ -451,7 +509,7 @@ defmodule KilnCMS.Backups.MediaArchive do
 
     part = %{
       index: state.index,
-      list: list_name(state.index),
+      list: list_name(state.index, state.tag),
       files: state.count,
       bytes: state.bytes,
       oversize: state.oversize
@@ -560,10 +618,12 @@ defmodule KilnCMS.Backups.MediaArchive do
   @doc """
   Archive part `index` of `plan` into `target_dir`; see the moduledoc.
 
-  Options: `:tar` (executable; default the `tar` on `PATH`).
+  Options: `:tar` (executable; default the `tar` on `PATH`), `:tag` and
+  `:rename` (see "Archiving"; `KilnCMS.Backups.WorkState.write/3` documents
+  the two).
 
   The result carries the final `name` (from `Artifact.set_names/2`), its `bytes`
-  and `sha256` as measured on disk after the rename, `dropped` (list entries
+  and `sha256` as measured on disk before the rename, `dropped` (list entries
   that had vanished and were left out) and `verified`: `tar -tzf` passed AND
   the size on disk equals the size hashed AND a digest is recorded.
   """
@@ -577,7 +637,7 @@ defmodule KilnCMS.Backups.MediaArchive do
          {:ok, tar} <- tar_executable(opts),
          :ok <- mkdir_private(target_dir) do
       final = Path.join(target_dir, name)
-      build(plan, part, final, tar, name, 1)
+      build(plan, part, {final, name}, tar, opts, 1)
     end
   end
 
@@ -592,22 +652,26 @@ defmodule KilnCMS.Backups.MediaArchive do
   end
 
   # Attempt 1; on any failure remove the partial and attempt 2 from a freshly
-  # filtered copy of the same list. The second failure is the part's error.
+  # filtered copy of the same list. The second failure is the part's error; a
+  # refused rename (`{:error, :superseded}`) is returned at once. The rename is
+  # the last step, so a failure never touches the file under the final name.
   # Every path is the target dir plus a name from `Artifact.set_names/2`, or a
   # generated file in the work dir; none comes from request input.
   # sobelow_skip ["Traversal.FileModule"]
-  defp build(plan, part, final, tar, name, attempt) do
-    partial = final <> ".partial"
-    filtered = Path.join(plan.work_dir, "part#{pad(part.index)}.run.list")
+  defp build(plan, part, {final, name}, tar, opts, attempt) do
+    tag = opts[:tag]
+    rename = opts[:rename] || (&File.rename/2)
+    partial = Artifact.partial_name(final, tag)
+    filtered = Path.join(plan.work_dir, run_list_name(part.index, tag))
 
     result =
       with {:ok, kept, dropped} <- filter_list(plan, part, filtered),
            :ok <- run_archive(tar, plan.media_dir, filtered, partial, kept),
            :ok <- run_tar(tar, ["-tzf", partial]),
-           :ok <- File.rename(partial, final),
-           :ok <- File.chmod(final, 0o600),
-           {:ok, sha256, hashed} <- Checksum.file(final),
-           {:ok, %{size: size}} <- File.stat(final) do
+           :ok <- File.chmod(partial, 0o600),
+           {:ok, sha256, hashed} <- Checksum.file(partial),
+           {:ok, %{size: size}} <- File.stat(partial),
+           :ok <- rename.(partial, final) do
         {:ok,
          %{
            index: part.index,
@@ -629,17 +693,17 @@ defmodule KilnCMS.Backups.MediaArchive do
       {:ok, finished} ->
         {:ok, finished}
 
-      {:error, reason} when attempt == 1 ->
-        File.rm(final)
+      {:error, :superseded} = superseded ->
+        superseded
 
+      {:error, reason} when attempt == 1 ->
         Logger.warning(
           "Media archive part #{part.index} failed (#{inspect(reason, limit: 5, printable_limit: 200)}); retrying once from a re-filtered list"
         )
 
-        build(plan, part, final, tar, name, 2)
+        build(plan, part, {final, name}, tar, opts, 2)
 
       {:error, _reason} = error ->
-        File.rm(final)
         error
     end
   end
@@ -758,12 +822,12 @@ defmodule KilnCMS.Backups.MediaArchive do
 
   Returns the digest and size of all parts concatenated and the sidecar's file
   name. A part that changed since it was hashed, or a failed sidecar write, is
-  an error.
+  an error. `opts` are `Checksum.write_sidecar/3`'s (`:tag`, `:rename`).
   """
-  @spec checksum(plan(), [finished()], Path.t()) ::
+  @spec checksum(plan(), [finished()], Path.t(), keyword()) ::
           {:ok, %{sha256: String.t(), bytes: non_neg_integer(), sidecar: String.t()}}
           | {:error, term()}
-  def checksum(plan, finished, target_dir) do
+  def checksum(plan, finished, target_dir, opts \\ []) do
     paths = Enum.map(finished, & &1.path)
 
     with {:ok, %{files: files, sha256: sha256, bytes: bytes}} <- Checksum.concat(paths),
@@ -772,7 +836,8 @@ defmodule KilnCMS.Backups.MediaArchive do
          :ok <-
            Checksum.write_sidecar(
              Path.join(target_dir, sidecar),
-             Enum.map(finished, &{&1.name, &1.sha256})
+             Enum.map(finished, &{&1.name, &1.sha256}),
+             opts
            ) do
       {:ok, %{sha256: sha256, bytes: bytes, sidecar: sidecar}}
     end

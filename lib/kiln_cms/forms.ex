@@ -27,7 +27,10 @@ defmodule KilnCMS.Forms do
       scored against the `Kiln.Forms.SpamCheck` registry (#477);
     * **notification** — when the form has a `notify_email` and the
       submission wasn't scored `:spam`, an Oban job on the `:mail` queue
-      delivers a summary;
+      delivers a summary. The job carries the submission's id, never its
+      data (#2992): the worker reads the submission back when it runs
+      (`delivery_submission/2`), so a submission deleted or marked spam in
+      the meantime sends nothing;
     * **autoresponder** (#468) — when the form has one turned on and declares
       an `:email` field the submission filled in, a token-templated
       confirmation email goes back to the *submitter* — see
@@ -43,9 +46,10 @@ defmodule KilnCMS.Forms do
   A visitor has no actor, so everything the pipeline does past the policy-
   checked `get_active/2` runs as `system/0` (#1659): a `KilnCMS.SystemActor`
   admitted by name to `Form`'s `read`, `FormField`'s `for_form`,
-  `FormSubmission`'s `create` and `SiteEmbedSettings`' `read` — see
-  `docs/policy-matrix.md`, "The system actor". It cannot edit or delete a
-  form, or read a submission back.
+  `FormSubmission`'s `create` and `for_delivery` and `SiteEmbedSettings`'
+  `read` — see `docs/policy-matrix.md`, "The system actor". It cannot edit or
+  delete a form, and reads a submission back only by the id a mail job
+  names; it cannot list, re-mark or delete one.
   """
 
   alias KilnCMS.Challenge.Gate
@@ -373,8 +377,8 @@ defmodule KilnCMS.Forms do
     # an integration on payload that was never worth acting on. A submission
     # held by human verification (#2249) is scored as spam for this reason.
     unless submission.status == :spam do
-      notify(form, data)
-      autorespond(form, form_fields, data)
+      notify(form, submission)
+      autorespond(form, form_fields, submission)
       count_experiment_conversion(params, form)
       KilnCMS.Webhooks.dispatch("form.submitted", %{form: form.slug, data: data}, form.org_id)
     end
@@ -396,26 +400,63 @@ defmodule KilnCMS.Forms do
     |> KilnCMS.Experiments.Delivery.record_conversion(form.org_id, form_id: form.id)
   end
 
-  defp notify(%{notify_email: email} = form, data) when is_binary(email) and email != "" do
-    # `org_id` scopes the worker's form re-fetch to the form's site (epic #336).
-    %{form_id: form.id, org_id: form.org_id, data: data}
+  # Both mail jobs carry ids only (#2992): job args sit in `oban_jobs`, in
+  # Oban's log lines and in a failing job's Sentry event, and a visitor's
+  # submission belongs in none of them. The worker reads the submission back
+  # (`delivery_submission/2`). `org_id` scopes the worker's re-fetches to the
+  # form's site (epic #336).
+  defp notify(%{notify_email: email} = form, submission) when is_binary(email) and email != "" do
+    form
+    |> delivery_args(submission)
     |> KilnCMS.Forms.NotificationWorker.new()
     |> Oban.insert!()
   end
 
-  defp notify(_form, _data), do: :ok
+  defp notify(_form, _submission), do: :ok
 
   # #468: the submitter's confirmation email — `Autoresponder.eligible?/3` is
-  # the single place that decides whether there's anyone to send it to.
-  defp autorespond(form, form_fields, data) do
-    case Autoresponder.eligible?(form, data, form_fields) do
-      {true, to} ->
-        %{form_id: form.id, org_id: form.org_id, to: to, data: data}
+  # the single place that decides whether there's anyone to send it to. Asked
+  # here so a submission with no one to confirm queues no job, and asked again
+  # by the worker, which mails the address the submission holds when it runs.
+  defp autorespond(form, form_fields, submission) do
+    case Autoresponder.eligible?(form, submission.data, form_fields) do
+      {true, _to} ->
+        form
+        |> delivery_args(submission)
         |> KilnCMS.Forms.AutoresponderWorker.new()
         |> Oban.insert!()
 
       false ->
         :ok
+    end
+  end
+
+  defp delivery_args(form, submission),
+    do: %{form_id: form.id, org_id: form.org_id, submission_id: submission.id}
+
+  @doc """
+  The submission a form mail job names (#2992), read as `system/0` through
+  `KilnCMS.CMS.FormSubmission`'s `:for_delivery`, for
+  `KilnCMS.Forms.NotificationWorker` and `KilnCMS.Forms.AutoresponderWorker`:
+
+    * `{:ok, submission}` — mail it;
+    * `:skip` — deleted since the job was queued, or marked spam: nothing
+      to send, and the job is done;
+    * `{:error, error}` — the read failed. `authorize_with: :error`, so a
+      withdrawn grant is a `Forbidden` here rather than reading as
+      "deleted" and dropping the mail; the job fails and retries.
+  """
+  @spec delivery_submission(Ecto.UUID.t(), Ash.ToTenant.t()) ::
+          {:ok, KilnCMS.CMS.FormSubmission.t()} | :skip | {:error, term()}
+  def delivery_submission(submission_id, tenant) do
+    case CMS.get_form_submission_for_delivery(submission_id,
+           actor: system(),
+           authorize_with: :error,
+           tenant: tenant
+         ) do
+      {:ok, %{status: status} = submission} when status != :spam -> {:ok, submission}
+      {:ok, _deleted_or_spam} -> :skip
+      {:error, error} -> {:error, error}
     end
   end
 

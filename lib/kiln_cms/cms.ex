@@ -825,6 +825,12 @@ defmodule KilnCMS.CMS do
     resource KilnCMS.CMS.FormSubmission do
       define :create_form_submission, action: :create
       define :get_form_submission, action: :read, get_by: [:id]
+
+      define :get_form_submission_for_delivery,
+        action: :for_delivery,
+        args: [:id],
+        not_found_error?: false
+
       define :recent_form_submissions, action: :recent_for_form, args: [:form_id]
       define :export_form_submissions, action: :for_export, args: [:form_id]
       define :mark_form_submission_spam, action: :mark_spam

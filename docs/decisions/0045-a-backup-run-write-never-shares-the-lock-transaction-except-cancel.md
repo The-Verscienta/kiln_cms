@@ -1,7 +1,10 @@
 # 0045. A backup Run write never shares the lock transaction, except Cancel's
 
 - **Status** — accepted (2026-11-13). Records the choice that shipped with the
-  backup step chain (#2537) in 1.9.0.
+  backup step chain (#2537) in 1.9.0. Amended 2026-11-17 by
+  [#2816](https://github.com/The-Verscienta/kiln_cms/issues/2816) (a resume
+  canceled before it started is a second Cancel-shaped write; see
+  "Amendment").
 - **References** — [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218)
   (PR #2537), [#2538](https://github.com/The-Verscienta/kiln_cms/issues/2538),
   [#2424](https://github.com/The-Verscienta/kiln_cms/issues/2424);
@@ -94,3 +97,37 @@ returns `Ash.Error.Changes.StaleRecord` (a row filtered away by
 - If History becomes something a backup's correctness depends on (a resume
   that reads its progress from the Run row rather than `state.json`), its
   writes would need the same guarantees as the lock's.
+
+## Amendment (2026-11-17, #2816): canceling a resume before it starts is a second such write
+
+A resume holds the lock from its request, and its `start` step may wait up
+to about an hour for the server with its files before it re-opens its run.
+`Run`'s `:cancel_resume` action lets a platform admin stop it. It is built
+like `:cancel` and for the same reason: the person's request and its result
+on the row commit together or not at all. Its `before_action` hook
+(`Run.Changes.CancelResume`) takes `Chain.locked_row/0`, checks that the lock
+still holds a resume of this run at its `start` step under a chain the run
+has not moved to, cancels that chain's jobs (`Chain.cancel_chain_jobs/1`)
+and releases the lock (`Chain.release_in_txn/1`); the Run UPDATE that notes
+the run rides in the same transaction. So "The one Run write that does share
+the lock is Cancel's" now reads: the two that do are the person's Cancels,
+`:cancel` and `:cancel_resume`. Every other rule above is unchanged.
+
+**A stale record rolls this one back.** "The problem" says a stale record
+leaves the enclosing transaction alone. That holds for a transaction the
+caller opened and that goes on after the error. Here the transaction is the
+action's own, opened by Ash, and Ash rolls it back when the action returns
+an error, `StaleRecord` included. `:cancel_resume` relies on that. Its UPDATE
+is pinned to the run as it was loaded (in-app, its status, its `chain_id`),
+so when the start re-opened the run first, the UPDATE matches nothing and
+the job cancel, the release and the audit event roll back with it: the
+resume carries on, and the admin is told it started meanwhile. In the other
+order, the start is fenced instead: it checks its lease after reading the
+run, and its re-open (`Run.Changes.Resume`) is pinned to that read's
+`updated_at`, so a Cancel that lands in between makes the re-open match
+nothing, and the start stops without writing to the run.
+
+**Also since (#3013).** The finish step's marker sync, which writes no Run
+row, runs in a lock transaction only while the step still holds its lease;
+the importer, which does write Run rows, runs before it, outside the lock,
+as the Decision's second point requires.

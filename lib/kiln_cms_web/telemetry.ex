@@ -349,6 +349,35 @@ defmodule KilnCMSWeb.Telemetry do
             "other). Anything but ok keeps the list held before until it goes stale."
       ),
 
+      # Backup retention (#2487). The events carry the reason and, on a
+      # destination, its key: neither is a tag (unbounded). `scope` is local
+      # or destination.
+      counter("kiln_cms.backups.retention.skipped.count",
+        tags: [:scope],
+        description:
+          "Backup retention passes that deleted nothing because they could not start " <>
+            "(history, policy or directory unreadable), by scope (local / destination). " <>
+            "Backups keep building up while this rises."
+      ),
+      counter("kiln_cms.backups.retention.stopped.count",
+        tags: [:scope],
+        description:
+          "Backup retention passes that stopped part-way through deleting, by scope " <>
+            "(local / destination)"
+      ),
+      sum("kiln_cms.backups.hold.deleted_outside.count",
+        tags: [:scope],
+        description:
+          "Backups a schedule keeps (a .hold marker) found deleted outside the app, " <>
+            "usually by a host scripts/backup.sh older than this release (#2931)"
+      ),
+      counter("kiln_cms.backups.notice.failed.count",
+        tags: [:kind],
+        description:
+          "Backup notices (retention / held_deleted) that could not be recorded, so the " <>
+            "Backups page and Home don't show them; the log line and the events above still fire"
+      ),
+
       # Oban job Metrics (emitted by Oban) — queue throughput, latency, failures
       distribution("oban.job.stop.duration",
         unit: {:native, :millisecond},

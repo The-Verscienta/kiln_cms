@@ -42,6 +42,11 @@ defmodule KilnCMS.Notifications.Tasks do
     # deployment to learn one address the assignment already decided (#1659).
     task = Ash.load!(task, [:assignee], authorize?: false)
 
+    # An erased assignee is told nothing (#2774): no inbox row, no mail to the
+    # tombstone address. The `task.assigned` event below still fires — it is
+    # the task's, not the person's.
+    task = if erased?(task.assignee), do: %{task | assignee: nil}, else: task
+
     if task.assignee do
       Notifications.record_in_app(%{
         user_id: task.assignee_id,
@@ -61,19 +66,15 @@ defmodule KilnCMS.Notifications.Tasks do
     end
 
     if task.assignee && task.assignee.email do
+      # Ids only (#3019): the worker reads the assignee, the task (its note,
+      # due date and block) and the assigner's name back when it runs. See
+      # `TaskMailWorker` for why there is no `"kind"` and no `"to"` here.
       %{
-        "kind" => "assigned",
-        "to" => to_string(task.assignee.email),
+        "event" => "assigned",
+        "user_id" => task.assignee_id,
         "task_id" => task.id,
-        "content_type" => task.content_type,
-        "content_id" => task.content_id,
-        # Which block, when the task is anchored to one — the assignee opens
-        # straight onto the paragraph rather than onto a document and a hunt.
-        "block_id" => task.block_id,
         "org_id" => task.org_id,
-        "due_on" => task.due_on && Date.to_iso8601(task.due_on),
-        "note" => task.note,
-        "actor_name" => actor_name(actor)
+        "actor_id" => actor_id(actor)
       }
       |> TaskMailWorker.new()
       |> Oban.insert!()
@@ -109,6 +110,9 @@ defmodule KilnCMS.Notifications.Tasks do
       "due_on" => task.due_on && Date.to_iso8601(task.due_on)
     }
   end
+
+  defp erased?(%{anonymized_at: %DateTime{}}), do: true
+  defp erased?(_assignee), do: false
 
   defp actor_name(%{name: name}) when is_binary(name) and name != "", do: name
   defp actor_name(_actor), do: nil

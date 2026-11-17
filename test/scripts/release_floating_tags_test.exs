@@ -9,6 +9,10 @@ defmodule KilnCMS.Scripts.ReleaseFloatingTagsTest do
   """
   use ExUnit.Case, async: true
 
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
+
   @script Path.expand("../../scripts/release/floating_tags.sh", __DIR__)
 
   defp decide(ref, tags) do

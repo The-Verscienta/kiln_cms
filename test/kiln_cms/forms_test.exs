@@ -210,12 +210,75 @@ defmodule KilnCMS.FormsTest do
         ]
       )
 
-    assert {:ok, _} = Forms.submit(form, %{"name" => "Ada", "email" => "ada@example.com"})
+    assert {:ok, submission} =
+             Forms.submit(form, %{"name" => "Ada", "email" => "ada@example.com"})
 
+    # The address is not in the job (#2992): the worker reads the submission
+    # back and finds it there.
     assert_enqueued(
       worker: KilnCMS.Forms.AutoresponderWorker,
-      args: %{"to" => "ada@example.com"}
+      args: %{"form_id" => form.id, "org_id" => form.org_id, "submission_id" => submission.id}
     )
+  end
+
+  test "both mail jobs carry ids only, and still mail what was submitted (#2992)" do
+    form =
+      autoresponder_form!(
+        %{
+          autoresponder_enabled: true,
+          autoresponder_subject: "Thanks, [field:name]!",
+          autoresponder_body: "<p>We got [field:message].</p>"
+        },
+        [
+          %{name: "name", label: "Name", field_type: :string},
+          %{name: "email", label: "Email", field_type: :email},
+          %{name: "message", label: "Message", field_type: :text}
+        ]
+      )
+
+    CMS.update_form!(
+      CMS.get_form!(form.id, authorize?: false),
+      %{notify_email: "team@example.com"},
+      authorize?: false
+    )
+
+    form = Forms.get_active(form.slug)
+
+    assert {:ok, submission} =
+             Forms.submit(form, %{
+               "name" => "Ada",
+               "email" => "visitor-secret@example.com",
+               "message" => "a private note"
+             })
+
+    ids = %{"form_id" => form.id, "org_id" => form.org_id, "submission_id" => submission.id}
+
+    jobs =
+      for worker <- [KilnCMS.Forms.NotificationWorker, KilnCMS.Forms.AutoresponderWorker] do
+        assert [job] = all_enqueued(worker: worker)
+        assert job.args == ids
+        refute inspect(job.args) =~ "visitor-secret"
+        refute inspect(job.args) =~ "a private note"
+        job
+      end
+
+    Oban.drain_queue(queue: :mail)
+
+    Swoosh.TestAssertions.assert_email_sent(fn email ->
+      assert email.to == [{"", "team@example.com"}]
+      assert email.html_body =~ "a private note"
+    end)
+
+    Swoosh.TestAssertions.assert_email_sent(fn email ->
+      assert email.to == [{"", "visitor-secret@example.com"}]
+      assert email.html_body =~ "a private note"
+    end)
+
+    for job <- jobs do
+      row = KilnCMS.Repo.get!(Oban.Job, job.id)
+      assert row.state == "completed"
+      assert row.args == ids
+    end
   end
 
   test "the autoresponder stays quiet when off, when there's no email field, or when it's blank" do

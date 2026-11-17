@@ -44,7 +44,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendPasswordResetEmail do
       |> to(address)
       |> subject("Reset your #{site} password")
       |> html_body(body(token: token))
-      |> Mail.enqueue!()
+      |> Mail.enqueue!(user_id: user.id)
     else
       # Silently, and identically to the address-doesn't-exist path: the request
       # action already answers `:ok` either way so it can't be used to probe for

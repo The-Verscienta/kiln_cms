@@ -39,7 +39,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendRegistrationPending do
     |> to(to_string(admin.email))
     |> subject("Registrations are waiting for approval on #{site}")
     |> html_body(body(escape(site), link, settings))
-    |> Mail.enqueue!(org_id: org.id)
+    |> Mail.enqueue!(org_id: org.id, user_id: admin.id)
   rescue
     # Boundary: the confirmation that caused this has committed; a mail fault
     # must not reach it. The module only: the message can carry the address.

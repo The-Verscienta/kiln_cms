@@ -1,6 +1,7 @@
 defmodule KilnCMS.Scripts.StagingScriptTest do
   @moduledoc """
-  `scripts/staging.sh up` and the connections it hands libpq (#2719, #2726):
+  `scripts/staging.sh up` and the connections it hands libpq (#2719, #2726,
+  #2831, #2833):
   `pg_dump` reads `PROD_DATABASE_URL` and `psql` writes `STAGING_DATABASE_URL`,
   each as a `postgres://` URI with no password in argv, and each with its own
   URL's password as `PGPASSWORD`. The two may differ, and neither may reach the
@@ -14,6 +15,10 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
   but shares the tmp namespace with the other script tests.
   """
   use ExUnit.Case, async: false
+
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
 
   @script Path.expand("../../scripts/staging.sh", __DIR__)
 
@@ -123,6 +128,43 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
 
     assert status != 0
     refute Enum.any?(calls(ctx), &(hd(&1) == "kiln"))
+  end
+
+  test "a key=value string with a password is refused before anything is created (#2831)", ctx do
+    for {prod, staging, var} <- [
+          {"host=prod password=prod-pw dbname=kiln_prod", "ecto://stage@stage-db/kiln_staging",
+           "PROD_DATABASE_URL"},
+          {"ecto://prod@prod-db/kiln_prod", "host=stage password=stage-pw dbname=kiln_staging",
+           "STAGING_DATABASE_URL"}
+        ] do
+      assert {out, status} = up(ctx, prod: prod, staging: staging)
+
+      assert status != 0
+      assert out =~ "#{var} is not a postgres:// URL"
+      refute out =~ "prod-pw"
+      refute out =~ "stage-pw"
+      refute File.exists?(ctx.log), "a tool ran for #{var}"
+    end
+  end
+
+  test "libpq gets Ecto's ssl=false as sslmode=disable; the printed DATABASE_URL keeps it as written (#2833)",
+       ctx do
+    assert {out, 0} =
+             up(ctx,
+               prod: "ecto://prod:prod-pw@prod-db/kiln_prod?ssl=false&pool_size=5",
+               staging: "ecto://stage:stage-pw@stage-db/kiln_staging?ssl=false&pool_size=5"
+             )
+
+    calls = calls(ctx)
+    assert ["pg_dump", _ | dump_args] = Enum.find(calls, &(hd(&1) == "pg_dump"))
+    assert List.last(dump_args) == "postgres://prod@prod-db/kiln_prod?sslmode=disable"
+    assert ["psql", _ | psql_args] = Enum.find(calls, &(hd(&1) == "psql"))
+    assert List.last(psql_args) == "postgres://stage@stage-db/kiln_staging?sslmode=disable"
+
+    # Printed for a Kiln instance, whose Ecto reads `ssl=false` and
+    # `pool_size` itself and libpq's `sslmode` not at all.
+    assert out =~ "DATABASE_URL=postgres://stage@stage-db/kiln_staging?ssl=false&pool_size=5"
+    refute out =~ "stage-pw"
   end
 
   defp calls(ctx) do

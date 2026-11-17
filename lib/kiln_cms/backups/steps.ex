@@ -54,15 +54,22 @@ defmodule KilnCMS.Backups.Steps do
   Each step reads `.work/<stamp>/state.json` (`KilnCMS.Backups.WorkState`),
   does its work, writes the state back (mandatory: a failed write retries the
   step), records progress on the Run (best-effort, outside the lock) and moves
-  the chain on (`KilnCMS.Backups.Chain.advance/3`). The state write happens
-  under the lock, in its transaction, and only while the step's lease still
-  holds it (`Chain.while_holding/2`, #2538): a step that outlived its Cancel,
-  on a node that missed the signal, can't overwrite the state a resume of the
-  same stamp has written since. It stops there, writing nothing else. The cost
-  is that the file write holds the cluster-wide advisory lock: on a backup
-  directory that stalls (a hung NFS mount), Cancel, new requests and the
-  heartbeat sweep wait behind it until their query timeout. `fail/5` already
-  wrote under the lock the same way. The work directory exists
+  the chain on (`KilnCMS.Backups.Chain.advance/3`). The state is written
+  outside the lock, to `state.json.<job>-<attempt>.partial`, a name no other
+  step uses, and only its rename into place runs under the lock, while the
+  step's lease still holds it (`Chain.fenced_rename/3`, #2538, #2818): a step
+  that outlived its Cancel, on a node that missed the signal, can't overwrite
+  the state a resume of the same stamp has written since. It stops there,
+  writing nothing else, and removes its temporary file. The failure manifest
+  and the finish's manifest are written the same way. A rename is still a
+  file-system call in the lock transaction, so a backup directory that stalls
+  between a step's write and its rename still makes Cancel, new requests and
+  the heartbeat sweep wait until their query timeout; the writing itself no
+  longer can. Something of the chain's a step must delete (a stale work
+  directory, an earlier plan's media files) is moved aside, with one fenced
+  rename, into a trash directory on its own file system (`.work/.trash`, or
+  `.kiln-trash` beside it in `db/` or `media/`) and deleted after the lock is
+  released; the start step clears what a crash left there. The work directory exists
   for every backup, database-only ones included, so any failed backup can be
   resumed. A step after `start` that finds no state (deleted, or another
   chain's) fails the backup without writing a manifest: it has nothing to say
@@ -80,10 +87,16 @@ defmodule KilnCMS.Backups.Steps do
 
   ## Nothing is a backup until it verifies
 
-  Every artifact is written to `<name>.partial` and renamed only after it
-  passes (`pg_restore --list` for a dump, `tar -tzf` for an archive part). An
-  aborted or corrupt run leaves a `.partial` that nothing will ever mistake
-  for a backup.
+  Every artifact is written to `<name>.<job>-<attempt>.partial`
+  (`Artifact.partial_name/2`), verified (`pg_restore --list` for a dump,
+  `tar -tzf` for an archive part) and hashed there, and only then renamed into
+  place, under the step's lease (#2819). Two steps of the same stamp, a resumed
+  chain and a step that outlived its Cancel, never write the same file, and
+  the superseded one's rename is refused, so it can't replace the file the
+  resumed chain wrote. An aborted or corrupt run leaves a `.partial` that
+  nothing will ever mistake for a backup. A part or dump that fails leaves any
+  file already under its final name as it was: nothing trusts one without a
+  digest in `state.json`, and a resume rebuilds it.
 
   ## Nothing leaves the host unverified
 
@@ -110,6 +123,7 @@ defmodule KilnCMS.Backups.Steps do
   """
   import Ecto.Query
 
+  alias KilnCMS.AfterCommit
   alias KilnCMS.Backups
 
   alias KilnCMS.Backups.{
@@ -124,6 +138,7 @@ defmodule KilnCMS.Backups.Steps do
     Lock,
     Manifest,
     MediaArchive,
+    Notices,
     PgUrl,
     RcloneRemote,
     Recorder,
@@ -158,6 +173,9 @@ defmodule KilnCMS.Backups.Steps do
         if WorkState.chain(state) == lease.chain,
           do: run_step(lease, job, state),
           else: lost_state(lease, :foreign_state)
+
+      {:error, :no_state} when lease.step == "finish" ->
+        finish_interrupted(lease)
 
       {:error, :no_state} ->
         lost_state(lease, :no_state)
@@ -201,6 +219,7 @@ defmodule KilnCMS.Backups.Steps do
 
     %{
       dir: dir,
+      lease: lease,
       stamp: lease.stamp,
       chain: lease.chain,
       work_dir: lease.stamp && WorkState.path(dir, lease.stamp),
@@ -219,6 +238,21 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   defp parse_time(_), do: DateTime.utc_now()
+
+  # How a step writes a file of the chain's (#2818, #2819): under a temporary
+  # name tagged with its job and attempt, outside the lock, then renamed into
+  # place only while its lease holds (`Chain.fenced_rename/3`). The options
+  # of `WorkState.write/3`, `Manifest.write/3`, `Checksum.write_sidecar/3` and
+  # `MediaArchive`'s writers.
+  defp fence(lease) do
+    [tag: tag(lease), rename: &Chain.fenced_rename(lease, &1, &2)]
+  end
+
+  # Oban counts attempts from 1; a job run by hand (tests) may carry 0.
+  defp tag(%{job_id: job_id, attempt: attempt}) when is_integer(attempt) and attempt > 0,
+    do: Artifact.tag(job_id, attempt)
+
+  defp tag(%{job_id: job_id}), do: job_id
 
   ## start
 
@@ -312,6 +346,7 @@ defmodule KilnCMS.Backups.Steps do
     reconcile_stale_runs()
     import_then_sweep_partials(dir)
     sweep_work_dirs(dir)
+    sweep_trash(dir)
 
     case WorkState.read(work_dir) do
       # The start step retried after its state landed: carry on from it.
@@ -322,13 +357,24 @@ defmodule KilnCMS.Backups.Steps do
       _other ->
         # A leftover directory under this stamp is not this chain's: it must not
         # lend its frozen plan or recorded hashes to a backup that has nothing
-        # to do with them.
-        File.rm_rf(work_dir)
+        # to do with them. Moved aside under the lease, deleted outside it.
+        case discard(lease, dir, "work", existing([work_dir])) do
+          :ok ->
+            open_components(lease, job, work_dir)
 
-        case effective_components(job.args) do
-          [] -> unavailable(lease, :no_media_dir, job.args)
-          components -> open_fresh(lease, job, work_dir, components)
+          {:error, :superseded} ->
+            {:cancel, :superseded}
+
+          {:error, reason} ->
+            retry_or_fail(context(lease, nil), lease, job, nil, %Recorder{}, {:discard, reason})
         end
+    end
+  end
+
+  defp open_components(lease, job, work_dir) do
+    case effective_components(job.args) do
+      [] -> unavailable(lease, :no_media_dir, job.args)
+      components -> open_fresh(lease, job, work_dir, components)
     end
   end
 
@@ -439,6 +485,7 @@ defmodule KilnCMS.Backups.Steps do
           reconcile_stale_runs()
           import_then_sweep_partials(dir)
           sweep_work_dirs(dir)
+          sweep_trash(dir)
 
           rec =
             run_destinations
@@ -472,6 +519,11 @@ defmodule KilnCMS.Backups.Steps do
           {:error, :destinations_unreadable = reason} ->
             retry_or_fail(context(lease, nil), lease, job, nil, %Recorder{}, reason)
 
+          # The resume was canceled before it re-opened the run (#2816; see
+          # `reopen/1`): the Cancel said so on the run and freed the lock.
+          {:error, :superseded} ->
+            {:cancel, :superseded}
+
           {:error, reason} ->
             refuse_resume(lease, reason)
         end
@@ -479,15 +531,30 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   # A resume that can't run here (#2539) closes visibly: the run says why on
-  # its row before the lock is released, as `fail/5` does, so a Resume can't
-  # re-open a run this chain is still about to write. Nothing was started: no
-  # manifest.
+  # its row. Nothing was started: no manifest.
+  #
+  # The lock is released first, under the lease, and only a release that held
+  # it writes the note, as `Chain.abandon_start/2` does. A resume canceled
+  # before it started (#2816) frees the lock and notes the run in one
+  # transaction, so it may commit after this start's last lease check: the
+  # release then finds the lease gone (`:superseded`) and the start stops
+  # quietly, leaving the Cancel's note and its settle as they are. A Resume
+  # requested once the lock is free can't lose its run to the note: the note
+  # pins the run's status as loaded, and never touches a live one
+  # (`Run.Changes.ResumeRefused`). A release that fails otherwise still notes
+  # the run; the reaper frees the lock.
   defp refuse_resume(lease, reason) do
-    Logger.warning("Backup resume refused: #{inspect(reason)}")
-    note_resume_refused(lease.resume, lease.chain, reason)
-    _ = Chain.release(lease)
-    settled(lease, {:error, reason})
-    {:cancel, reason}
+    case Chain.release(lease) do
+      {:error, :superseded} ->
+        Logger.info("Backup resume of #{lease.resume} stopped: it was canceled meanwhile")
+        {:cancel, :superseded}
+
+      _released ->
+        Logger.warning("Backup resume refused: #{inspect(reason)}")
+        note_resume_refused(lease.resume, lease.chain, reason)
+        settled(lease, {:error, reason})
+        {:cancel, reason}
+    end
   end
 
   @doc false
@@ -574,16 +641,50 @@ defmodule KilnCMS.Backups.Steps do
   # Either way the run is bound to this node's backup directory (#2539), which
   # just read the run's `state.json`: `Recorder.reopen/3` writes it, and a run
   # already re-opened records it with its next progress write.
+  #
+  # A resume canceled before it started (#2816, `Run :cancel_resume`) releases
+  # this chain's lock and writes the run without re-opening it, while this
+  # start may be in `settled_resumable/2`'s wait or between its read and the
+  # re-open. So the lease is checked after the read, and the re-open is the
+  # struct that read loaded, its UPDATE pinned to that struct's `updated_at`
+  # (`Run.Changes.Resume`): a Cancel that commits before the check stops this
+  # start there, and one that commits between the check and the UPDATE makes
+  # the UPDATE match nothing. Either way the lease is gone, and the start
+  # stops quietly (`{:error, :superseded}`): no refusal note, no release, no
+  # settle, since the Cancel did all three. A refusal with the lease still
+  # held is the run's own.
   defp reopen(lease) do
     case Recorder.reopened(lease.stamp, lease.chain) do
       {:ok, rec} ->
         {:ok, %{rec | dir_id: lease.dir_id}}
 
       {:error, _} ->
-        with {:ok, run, waited_ms} <- settled_resumable(lease.stamp, 0),
-             {:ok, rec} <- Recorder.reopen(run.stamp, lease.chain, lease.dir_id) do
-          {:ok, log_settle_wait(rec, waited_ms)}
+        case reopen_settled(lease) do
+          {:ok, _rec} = ok -> ok
+          {:error, :superseded} = superseded -> superseded
+          {:error, reason} -> refused_while_holding(lease, reason)
         end
+    end
+  end
+
+  # A refusal counts only while the lease still holds: a lost lease is the
+  # Cancel's, which said so on the run (`{:error, :superseded}`).
+  defp refused_while_holding(lease, reason) do
+    with :ok <- holding(lease), do: {:error, reason}
+  end
+
+  defp reopen_settled(lease) do
+    with {:ok, run, waited_ms} <- settled_resumable(lease.stamp, 0),
+         :ok <- holding(lease),
+         {:ok, rec} <- Recorder.reopen_run(run, lease.chain, lease.dir_id) do
+      {:ok, log_settle_wait(rec, waited_ms)}
+    end
+  end
+
+  defp holding(lease) do
+    case Chain.while_holding(lease, fn -> :ok end) do
+      {:ok, :ok} -> :ok
+      {:error, _} = error -> error
     end
   end
 
@@ -773,15 +874,111 @@ defmodule KilnCMS.Backups.Steps do
     {:cancel, reason}
   end
 
-  # The state write is fenced (#2538): it runs under the lock, and only while
-  # this step's lease still holds it. A step that outlived its Cancel (its node
-  # missed the signal) must not overwrite the `state.json` a resume of the same
-  # stamp has since written; it stops here, with no Run write and no advance.
+  # A finish step with no state may be one that got past `succeed/4`'s
+  # `File.rm_rf/1` and died before releasing the lock (issue 2419): the
+  # backup is done, and only the tail is left (`finish_verdict/2`). A Run that
+  # couldn't be read is retried: Oban runs this again, and a last attempt that
+  # fails leaves the lock to `Chain.reap/0`, which asks the same question
+  # (`interrupt_finish/4`).
+  defp finish_interrupted(lease) do
+    case finish_verdict(lease.stamp, lease.chain) do
+      {:done, _rec} ->
+        finish_tail(lease, interrupted_done(lease))
+
+      {:close, rec} ->
+        close_finished(rec, lease.stamp, lease.chain)
+        finish_tail(lease, interrupted_done(lease))
+
+      :lost ->
+        lost_state(lease, :no_state)
+
+      {:error, reason} ->
+        Logger.warning(
+          "Backup #{lease.stamp}: its finish found no work state and couldn't read the run, " <>
+            "retrying: #{inspect(reason, limit: 5)}"
+        )
+
+        {:error, {:run_read, reason}}
+    end
+  end
+
+  # Whether a finish that can't be checked against its state (it is gone, or
+  # its step ended from outside) had in fact finished. It had when this
+  # chain's Run says succeeded (`:done`), or when the manifest says ok for
+  # this stamp (`succeed/4` writes it first) and the Run is still running, its
+  # best-effort close having failed, or absent (`:close`). A Run that failed
+  # or was canceled contradicts an ok manifest; that, and anything else, is
+  # `:lost`. `{:error, reason}`: the Run couldn't be read, so nothing is known.
+  defp finish_verdict(stamp, chain) do
+    with {:ok, rec} <- Recorder.fetch_run(stamp, chain) do
+      cond do
+        match?(%{status: :succeeded}, rec.run) -> {:done, rec}
+        not manifest_ok?(Backups.dir(), stamp) -> :lost
+        rec.run == nil or rec.run.status == :running -> {:close, rec}
+        true -> :lost
+      end
+    end
+  end
+
+  defp manifest_ok?(dir, stamp),
+    do: match?(%Manifest{stamp: ^stamp, ok: true}, Manifest.read(dir))
+
+  # `succeed/4`'s close of the run, from what the Run row holds: a destination
+  # still pending was never sent to (every destination the Run lists counts,
+  # as `state.json`'s list is gone), and a partial off-site copy is said.
+  defp close_finished(rec, stamp, chain) do
+    rec
+    |> settle_unsent(Enum.map(rec.destinations, & &1.key))
+    |> note_partial(stamp, chain)
+    |> Recorder.log(:info, "done", "Backup complete (finished after an interruption)")
+    |> Recorder.finish()
+  end
+
+  defp interrupted_done(lease) do
+    "Backup complete (#{lease.trigger || "manual"}): #{lease.stamp} in #{Backups.dir()} " <>
+      "(finished after an interruption)"
+  end
+
+  # Every finish ends here once the work directory is gone: `succeed/4`, and
+  # a finish that found it gone (`finish_interrupted/1`). The importer runs
+  # first, outside the lock (it writes Run rows); the marker sync runs under
+  # the lock and only while this finish still holds it (#3013: two syncs on
+  # different stamps can remove each other's markers), as the lease-checked
+  # release after it does. A finish whose lease was superseded meanwhile
+  # writes no marker, releases nothing and settles nothing: the step that
+  # took over does. A lock write that fails is retried. `done` is the log
+  # line, the one thing that tells the two callers apart.
+  defp finish_tail(lease, done) do
+    dir = Backups.dir()
+    import_best_effort(dir, "Backup import before the marker sync")
+
+    synced =
+      AfterCommit.deferring(fn ->
+        Chain.while_holding(lease, fn -> Retention.sync_last_good(dir, import: false) end)
+      end)
+
+    with {:ok, _sync} <- synced,
+         {:ok, _promoted} <- Chain.release(lease) do
+      Logger.info(done)
+      settled(lease, :ok)
+      :ok
+    else
+      {:error, :superseded} -> {:cancel, :superseded}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # The state write is fenced (#2538, #2818): written outside the lock under
+  # this step's own temporary name, and renamed into place under the lock only
+  # while this step's lease still holds it. A step that outlived its Cancel
+  # (its node missed the signal) must not overwrite the `state.json` a resume
+  # of the same stamp has since written; it stops here, with no Run write and
+  # no advance.
   defp conclude(ctx, lease, job, {:next, step, part, state, rec}) do
     state = Map.put(state, "rec", Recorder.to_state(rec))
 
-    case Chain.while_holding(lease, fn -> WorkState.write(ctx.work_dir, state) end) do
-      {:ok, :ok} ->
+    case WorkState.write(ctx.work_dir, state, fence(lease)) do
+      :ok ->
         # Best-effort, and outside the lock: a failed Run write costs history,
         # never the backup.
         _ = Recorder.progress(rec)
@@ -792,11 +989,11 @@ defmodule KilnCMS.Backups.Steps do
           {:error, reason} -> retry_or_fail(ctx, lease, job, state, rec, reason)
         end
 
-      {:ok, {:error, reason}} ->
-        retry_or_fail(ctx, lease, job, state, rec, {:state_write, reason})
-
       {:error, :superseded} ->
         {:cancel, :superseded}
+
+      {:error, reason} ->
+        retry_or_fail(ctx, lease, job, state, rec, {:state_write, reason})
     end
   end
 
@@ -833,13 +1030,10 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   defp keep_log(ctx, lease, state, rec) do
-    if state && ctx.work_dir do
-      Chain.while_holding(lease, fn ->
-        WorkState.write(ctx.work_dir, Map.put(state, "rec", Recorder.to_state(rec)))
-      end)
-    else
-      {:ok, :ok}
-    end
+    if state && ctx.work_dir,
+      do:
+        WorkState.write(ctx.work_dir, Map.put(state, "rec", Recorder.to_state(rec)), fence(lease)),
+      else: :ok
   end
 
   # The backup is over. A failure manifest only when the state is there to say
@@ -849,9 +1043,10 @@ defmodule KilnCMS.Backups.Steps do
     Logger.error("Backup FAILED (#{ctx.trigger}): #{inspect(reason)}")
     error = describe_failure(reason)
 
-    # Under the lock, and only while this chain still holds it: a Cancel that
-    # committed first (decision 4: no manifest on cancel) or a reclaim that
-    # superseded this job leaves the previous manifest standing.
+    # Written outside the lock and renamed into place only while this chain
+    # still holds it (#2818): a Cancel that committed first (decision 4: no
+    # manifest on cancel) or a reclaim that superseded this job leaves the
+    # previous manifest standing.
     if state && ctx.work_dir && WorkState.exists?(ctx.work_dir) do
       partial = state |> outputs() |> unverify(reason)
 
@@ -860,17 +1055,16 @@ defmodule KilnCMS.Backups.Steps do
       _ = if match?({:offsite, _}, reason), do: keep_log(ctx, lease, state, rec)
 
       _ =
-        Chain.while_holding(lease, fn ->
-          record_failure(
-            ctx.dir,
-            ctx.stamp,
-            ctx.trigger,
-            ctx.started_at,
-            error,
-            partial,
-            components(state)
-          )
-        end)
+        record_failure(
+          ctx.dir,
+          ctx.stamp,
+          ctx.trigger,
+          ctx.started_at,
+          error,
+          partial,
+          components(state),
+          fence(lease)
+        )
     end
 
     Recorder.fail(rec, error)
@@ -917,7 +1111,8 @@ defmodule KilnCMS.Backups.Steps do
           parse_time(state["started_at"]),
           message,
           outputs(state),
-          components(state)
+          components(state),
+          []
         )
 
         Recorder.load(stamp, chain, state["rec"])
@@ -927,6 +1122,59 @@ defmodule KilnCMS.Backups.Steps do
 
     rec |> Recorder.log(:error, "interrupt", message) |> Recorder.fail(message)
     :ok
+  end
+
+  @doc """
+  Record a chain that was interrupted from outside at its finish step
+  (`Chain.reap/0`, or a reclaim with no attempts left), once the lock is
+  released. A finish that had in fact finished (`finish_verdict/2`, the rule
+  a retried finish follows too) is completed rather than failed: its Run
+  closed if still running, its work directory removed when this node has it,
+  the markers synced (`Chain.sync_last_good/2`: skipped while another chain
+  holds the lock, which syncs them itself), and the chain settled `:ok`;
+  that returns `:finished`. Anything else is `interrupt/4`, as is a Run that
+  couldn't be read: the lock is gone, so nothing would retry this, and
+  `interrupt/4` closes only a Run it can read.
+  """
+  @spec interrupt_finish(String.t(), String.t(), String.t() | nil, String.t()) ::
+          :ok | :finished
+  def interrupt_finish(stamp, chain, dir_id, message) do
+    case finish_verdict(stamp, chain) do
+      {:done, _rec} ->
+        finished_from_outside(stamp, chain, dir_id)
+
+      {:close, rec} ->
+        close_finished(rec, stamp, chain)
+        finished_from_outside(stamp, chain, dir_id)
+
+      :lost ->
+        interrupt(stamp, chain, dir_id, message)
+
+      {:error, reason} ->
+        Logger.warning(
+          "Backup #{stamp}: couldn't read the run of its interrupted finish, recording it " <>
+            "as interrupted: #{inspect(reason, limit: 5)}"
+        )
+
+        interrupt(stamp, chain, dir_id, message)
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp finished_from_outside(stamp, chain, dir_id) do
+    dir = Backups.dir()
+    work_dir = WorkState.path(dir, stamp)
+
+    # Killed before `succeed/4` removed it: while it is there the backup is in
+    # flight, and the markers can't name it.
+    if dir_id != nil and DirId.current(dir) == {:ok, dir_id} and
+         match?({:ok, %{"chain" => ^chain}}, WorkState.read(work_dir)),
+       do: File.rm_rf(work_dir)
+
+    _ = Chain.sync_last_good(dir)
+    Logger.info("Backup complete: #{stamp} in #{dir} (finished after an interruption)")
+    settled(%{chain: chain, stamp: stamp}, :ok)
+    :finished
   end
 
   @doc false
@@ -948,8 +1196,19 @@ defmodule KilnCMS.Backups.Steps do
     end
   end
 
-  defp put_outputs(state, entries),
-    do: Map.put(state, "outputs", Enum.map(outputs(state) ++ entries, &stringify/1))
+  # A step retried after its state landed (its hand-over failed, or its node
+  # stopped right after the write) adds the same outputs again: keep one entry
+  # per path, the latest, or the manifest and the sidecars list it twice and
+  # off-site refuses the sidecar as changed (#2419).
+  defp put_outputs(state, entries) do
+    outputs =
+      (outputs(state) ++ entries)
+      |> Enum.reverse()
+      |> Enum.uniq_by(& &1.path)
+      |> Enum.reverse()
+
+    Map.put(state, "outputs", Enum.map(outputs, &stringify/1))
+  end
 
   defp stringify(map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
 
@@ -1005,8 +1264,11 @@ defmodule KilnCMS.Backups.Steps do
 
         {:next, next, nil, put_outputs(state, [db]), rec}
 
+      {:error, :superseded} ->
+        {:result, {:cancel, :superseded}}
+
       :build ->
-        case dump_database(ctx.dir, ctx.stamp) do
+        case dump_database(ctx.dir, ctx.stamp, ctx.lease) do
           {:ok, db} ->
             state =
               state
@@ -1024,6 +1286,14 @@ defmodule KilnCMS.Backups.Steps do
               |> Recorder.log(:info, "dump", "Database dump verified (#{db.bytes} bytes)")
 
             {:next, next, nil, state, rec}
+
+          {:error, :superseded} ->
+            {:result, {:cancel, :superseded}}
+
+          # The connection string itself is refused (#2831): no retry can
+          # change that, so the run fails now with the reason.
+          {:error, :refused_conninfo = reason} ->
+            {:fatal, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
 
           {:error, reason} ->
             {:retry, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
@@ -1048,10 +1318,12 @@ defmodule KilnCMS.Backups.Steps do
          :ok <-
            Checksum.write_sidecar(
              Path.join(Path.dirname(target), Artifact.sidecar_name(:db, ctx.stamp)),
-             [{name, sha256}]
+             [{name, sha256}],
+             fence(ctx.lease)
            ) do
       {:ok, artifact("db", ctx.dir, target, sha256, bytes), entry["at"]}
     else
+      {:error, :superseded} = superseded -> superseded
       _ -> :build
     end
   end
@@ -1089,10 +1361,16 @@ defmodule KilnCMS.Backups.Steps do
           {:ok, plan, state, log_plan(rec, plan)}
 
         {:error, :no_plan} ->
-          discard_media_files(target_dir, ctx.stamp)
           state = WorkState.clear_parts(state)
+          fence = fence(ctx.lease)
 
-          with {:ok, plan} <- MediaArchive.plan(ctx.media_dir, ctx.work_dir, stamp: ctx.stamp) do
+          with :ok <- discard_media_files(ctx, target_dir),
+               {:ok, plan} <-
+                 MediaArchive.plan(ctx.media_dir, ctx.work_dir,
+                   stamp: ctx.stamp,
+                   tag: fence[:tag],
+                   rename: fence[:rename]
+                 ) do
             {:ok, plan, state, log_plan(rec, plan)}
           end
       end
@@ -1107,15 +1385,19 @@ defmodule KilnCMS.Backups.Steps do
 
         {:next, "archive", 1, state, rec}
 
+      {:error, :superseded} ->
+        {:result, {:cancel, :superseded}}
+
       {:error, reason} ->
         {:retry, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
     end
   end
 
-  # sobelow_skip ["Traversal.FileModule"]
-  defp discard_media_files(target_dir, stamp) do
-    for path <- Path.wildcard(Path.join(target_dir, "kiln-media-#{stamp}*")), do: File.rm(path)
-    :ok
+  # An earlier set's files under this stamp, moved aside under the lease and
+  # deleted outside it (`discard/4`).
+  defp discard_media_files(ctx, target_dir) do
+    paths = Path.wildcard(Path.join(target_dir, "kiln-media-#{ctx.stamp}*"))
+    discard(ctx.lease, ctx.dir, "media", paths)
   end
 
   defp log_plan(rec, plan) do
@@ -1189,18 +1471,26 @@ defmodule KilnCMS.Backups.Steps do
           next_part(state, rec, index, total)
 
         :build ->
-          build_part(plan, part, target_dir, {index, total}, state, rec)
+          build_part(ctx, {plan, part, target_dir}, {index, total}, state, rec)
       end
     else
       _lost -> {:fatal, :plan_lost, state, rec}
     end
   end
 
-  defp build_part(plan, part, target_dir, {index, total}, state, rec) do
-    case MediaArchive.archive_part(plan, part.index, target_dir) do
+  defp build_part(ctx, {plan, part, target_dir}, {index, total}, state, rec) do
+    fence = fence(ctx.lease)
+
+    case MediaArchive.archive_part(plan, part.index, target_dir,
+           tag: fence[:tag],
+           rename: fence[:rename]
+         ) do
       {:ok, finished} ->
         state = WorkState.put_part(state, finished)
         next_part(state, log_dropped(rec, [finished]), index, total)
+
+      {:error, :superseded} ->
+        {:result, {:cancel, :superseded}}
 
       {:error, reason} ->
         {:retry, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
@@ -1293,7 +1583,7 @@ defmodule KilnCMS.Backups.Steps do
 
     with {:ok, plan} <- load_plan(ctx),
          {:ok, parts} <- recorded_parts(plan, state, target_dir) do
-      case MediaArchive.checksum(plan, parts, target_dir) do
+      case MediaArchive.checksum(plan, parts, target_dir, fence(ctx.lease)) do
         {:ok, set} ->
           state =
             state
@@ -1312,6 +1602,9 @@ defmodule KilnCMS.Backups.Steps do
             )
 
           {:fatal, reason, state, rec}
+
+        {:error, :superseded} ->
+          {:result, {:cancel, :superseded}}
 
         {:error, reason} ->
           {:retry, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
@@ -1365,8 +1658,12 @@ defmodule KilnCMS.Backups.Steps do
 
     bytes = Enum.sum(Enum.map(parts, & &1.bytes))
 
+    # A retried checksum step adds the same set again (#2419): replace it.
+    names = MapSet.new(attrs, & &1.name)
+    kept = Enum.reject(rec.artifacts, &MapSet.member?(names, &1.name))
+
     Recorder.log(
-      %{rec | artifacts: rec.artifacts ++ attrs},
+      %{rec | artifacts: kept ++ attrs},
       :info,
       "media",
       "Media archive verified (#{length(parts)} part(s), #{bytes} bytes)"
@@ -1379,10 +1676,14 @@ defmodule KilnCMS.Backups.Steps do
   # `.work/<stamp>` exists, so `Retention` counts it in flight and never
   # touches it (nor counts it toward a schedule's keep count: N kept plus
   # this one until the next prune, #2219). A retention that can't see the backup history deletes nothing
-  # and says so on the run; the backup's own outcome does not change.
+  # and says so on the run; the backup's own outcome does not change. A skip
+  # or a stop is also a notice the Backups page and Home show until a clean
+  # pass here clears it (#2487, `Notices`).
   defp prune_step(ctx, state, rec) do
+    result = Retention.run(ctx.dir)
+
     rec =
-      case Retention.run(ctx.dir) do
+      case result do
         {:ok, %{deleted: [], stopped: nil}} ->
           rec
 
@@ -1406,6 +1707,8 @@ defmodule KilnCMS.Backups.Steps do
           )
       end
 
+    Notices.retention({:local, ctx.dir}, retention_outcome(result), stamp: ctx.stamp)
+
     # One `offsite` job per destination (#2220), part k for the k-th. With
     # none, the one no-op `offsite` it always had (part nil), so the step
     # sequence of a backup without a remote is unchanged.
@@ -1415,6 +1718,14 @@ defmodule KilnCMS.Backups.Steps do
 
   defp removed(names, units),
     do: "Retention removed #{length(names)} file(s) from #{units} backup(s)"
+
+  # A retention pass's result as `Notices.retention/3` takes it.
+  defp retention_outcome({:ok, %{stopped: nil}}), do: :ok
+
+  defp retention_outcome({:ok, %{deleted: names, stopped: reason}}),
+    do: {:stopped, reason, length(names)}
+
+  defp retention_outcome({:error, reason}), do: {:skipped, reason}
 
   ## offsite (one job per destination, #2220)
 
@@ -1706,6 +2017,11 @@ defmodule KilnCMS.Backups.Steps do
   # a pass that can't start deletes nothing and says so on the run. It runs
   # in the step's body, outside the lock's transaction (ADR 0045), so the
   # Run writes marking other runs' files `pruned` hold no lock.
+  #
+  # A skip or a stop is also the destination's notice (#2487, `Notices`),
+  # cleared by a clean pass, or when the destination is no longer pruned
+  # here (prune off, disabled or deleted, or an adapter that can't list and
+  # delete): there is no retention left there to warn about.
   defp prune_destination(
          rec,
          ctx,
@@ -1715,11 +2031,18 @@ defmodule KilnCMS.Backups.Steps do
        when is_binary(id) do
     if Destination.supports?(config, [:list, :delete]) do
       case prune_enabled(id) do
-        {:ok, true} -> prune_on(rec, ctx, entry, config, dest.deadline)
-        {:ok, false} -> rec
-        {:error, reason} -> prune_skipped(rec, entry, reason)
+        {:ok, true} ->
+          prune_on(rec, ctx, entry, config, dest.deadline)
+
+        {:ok, false} ->
+          Notices.retention(notice_scope(entry), :ok)
+          rec
+
+        {:error, reason} ->
+          prune_skipped(rec, ctx, entry, reason)
       end
     else
+      Notices.retention(notice_scope(entry), :ok)
       rec
     end
   end
@@ -1741,23 +2064,49 @@ defmodule KilnCMS.Backups.Steps do
 
     case Retention.run_on_destination(ctx.dir, config, deadline: deadline) do
       {:ok, result} ->
+        destination_pass(ctx, entry, result)
+
         rec
         |> log_pruned(label, result)
         |> log_not_sent_here(label, result.unowned)
         |> Recorder.put_run_destination(entry["key"], %{pruned: result.units})
 
       {:error, reason} ->
-        prune_skipped(rec, entry, reason)
+        prune_skipped(rec, ctx, entry, reason)
     end
   end
 
-  defp prune_skipped(rec, entry, reason) do
+  # The same events local retention emits (#2487), told apart by `scope`.
+  defp prune_skipped(rec, ctx, entry, reason) do
     message =
       "Retention on #{entry["label"]} skipped: #{Retention.describe(reason)}; nothing was deleted"
 
     Logger.error("Backup " <> message)
+
+    :telemetry.execute([:kiln_cms, :backups, :retention, :skipped], %{count: 1}, %{
+      scope: :destination,
+      destination: entry["key"],
+      reason: reason
+    })
+
+    Notices.retention(notice_scope(entry), {:skipped, reason}, stamp: ctx.stamp)
     Recorder.log(rec, :error, "offsite", message)
   end
+
+  defp destination_pass(ctx, entry, %{stopped: nil}),
+    do: Notices.retention(notice_scope(entry), :ok, stamp: ctx.stamp)
+
+  defp destination_pass(ctx, entry, %{deleted: names, stopped: reason}) do
+    :telemetry.execute(
+      [:kiln_cms, :backups, :retention, :stopped],
+      %{count: 1, deleted: length(names)},
+      %{scope: :destination, destination: entry["key"], reason: reason}
+    )
+
+    Notices.retention(notice_scope(entry), {:stopped, reason, length(names)}, stamp: ctx.stamp)
+  end
+
+  defp notice_scope(entry), do: {:destination, entry["key"], entry["label"]}
 
   defp log_pruned(rec, _label, %{deleted: [], stopped: nil}), do: rec
 
@@ -1948,16 +2297,17 @@ defmodule KilnCMS.Backups.Steps do
   # sobelow_skip ["Traversal.FileModule"]
   defp succeed(ctx, lease, state, rec) do
     artifacts = outputs(state)
-    rec = settle_unsent(rec, destinations(state))
+    rec = settle_unsent(rec, Enum.map(destinations(state), & &1["key"]))
     # The env remote, redacted, only when it was reached (`destination_ok/4`);
     # a raw remote only from a chain an older release ran this far.
     offsite = state["offsite"]
-    rec = note_partial(rec, ctx, lease)
+    rec = note_partial(rec, ctx.stamp, lease.chain)
 
     # The manifest FIRST: it has no database dependency, and cron-era
     # consumers read it. The run is closed after. On a resume this
-    # overwrites the failed run's manifest with `ok: true` (atomic rename).
-    write_manifest(ctx.dir, %Manifest{
+    # overwrites the failed run's manifest with `ok: true` (atomic rename,
+    # under the lease: a finish that lost it stops here, #2818).
+    manifest = %Manifest{
       stamp: ctx.stamp,
       started_at: ctx.started_at,
       finished_at: DateTime.utc_now(),
@@ -1968,40 +2318,58 @@ defmodule KilnCMS.Backups.Steps do
       offsite: offsite && Redact.text(offsite),
       destinations: manifest_destinations(rec),
       keep_days: Backups.keep_days()
-    })
+    }
 
+    case write_manifest(ctx.dir, manifest, fence(lease)) do
+      :ok -> close_and_finish(ctx, lease, rec, artifacts)
+      {:error, :superseded} -> {:cancel, :superseded}
+    end
+  end
+
+  defp close_and_finish(ctx, lease, rec, artifacts) do
     rec
     |> Recorder.log(:info, "done", "Backup complete: #{length(artifacts)} artifact(s)")
     |> Recorder.finish()
 
     # After the run is closed: a node that dies between the two leaves at most
-    # a stale `.work/<stamp>`, which `sweep_work_dirs/2` removes in time.
-    File.rm_rf(ctx.work_dir)
+    # a stale `.work/<stamp>`, which `sweep_work_dirs/2` removes in time. One
+    # that dies after this, before the lock is released, has its retried or
+    # reclaimed finish find no state: `finish_interrupted/1` runs what is left
+    # below (step_boundary_test.exs, "finish interrupted after it closed the
+    # run", replays this function's steps up to here by hand). Moved aside
+    # under the lease and deleted outside it (`discard/4`); a finish that lost
+    # its lease meanwhile leaves it to the step that took over.
+    case discard(lease, ctx.dir, "work", [ctx.work_dir]) do
+      {:error, :superseded} ->
+        {:cancel, :superseded}
 
-    # Once `.work/<stamp>` is gone this run is no longer in flight, so it can
-    # be the newest verified backup, and count toward its schedules' keep
-    # count: its `.good` markers (and the `.hold` markers, #2219) are written now,
-    # under the lock, so a later run that fails leaving a newer complete set
-    # can't get the cron prune to take this one. Total; nothing it does
-    # changes the backup's outcome. It runs the importer first, so a
-    # cron-made backup sitting next to this one is picked up too.
-    _ = Retention.sync_last_good(ctx.dir)
-    _ = Chain.release(lease)
+      discarded ->
+        with {:error, reason} <- discarded do
+          Logger.warning(
+            "Couldn't remove the backup work directory #{ctx.stamp}: #{inspect(reason)}; " <>
+              "the work directory sweep removes it in time"
+          )
+        end
 
-    Logger.info(
-      "Backup complete (#{ctx.trigger}): #{length(artifacts)} artifact(s) in #{ctx.dir}"
-    )
-
-    settled(lease, :ok)
-    :ok
+        # Once `.work/<stamp>` is gone this run is no longer in flight, so it can
+        # be the newest verified backup, and count toward its schedules' keep
+        # count: its `.good` markers (and the `.hold` markers, #2219) are written now,
+        # under the lock and only while this finish still holds it (#3013), so a
+        # later run that fails leaving a newer complete set can't get the cron
+        # prune to take this one. The importer runs first, so a cron-made backup
+        # sitting next to this one is picked up too. A sync that fails changes
+        # nothing about the backup's outcome.
+        finish_tail(
+          lease,
+          "Backup complete (#{ctx.trigger}): #{length(artifacts)} artifact(s) in #{ctx.dir}"
+        )
+    end
   end
 
   # A destination still pending at finish was never sent to: its part ran on
   # a node from before #2220 (which copies to the env remote only), or never
   # ran. It counts as failed, so the run reads partly off-site, never complete.
-  defp settle_unsent(rec, destinations) do
-    keys = Enum.map(destinations, & &1["key"])
-
+  defp settle_unsent(rec, keys) do
     Enum.reduce(rec.destinations, rec, fn
       %{key: key, status: :pending}, rec ->
         if key in keys,
@@ -2019,7 +2387,7 @@ defmodule KilnCMS.Backups.Steps do
 
   # Partly off-site (#2220, decision E1): the backup succeeded, and says on
   # every surface that some destination wasn't reached.
-  defp note_partial(rec, ctx, lease) do
+  defp note_partial(rec, stamp, chain) do
     if Recorder.offsite_outcome(rec.destinations) == :partial do
       counted = Enum.reject(rec.destinations, &(&1.status == :skipped))
       reached = Enum.filter(counted, &(&1.status == :ok))
@@ -2029,12 +2397,12 @@ defmodule KilnCMS.Backups.Steps do
         "Partly off-site: reached #{length(reached)} of #{length(counted)} destination(s); " <>
           "not reached: #{missed}"
 
-      Logger.error("Backup #{ctx.stamp} " <> message)
+      Logger.error("Backup #{stamp} " <> message)
 
       :telemetry.execute(
         [:kiln_cms, :backups, :offsite, :partial],
         %{count: 1, reached: length(reached), total: length(counted)},
-        %{stamp: ctx.stamp, chain: lease.chain, missed: Enum.map(counted -- reached, & &1.key)}
+        %{stamp: stamp, chain: chain, missed: Enum.map(counted -- reached, & &1.key)}
       )
 
       Recorder.log(rec, :error, "offsite", message)
@@ -2363,10 +2731,16 @@ defmodule KilnCMS.Backups.Steps do
 
   ## The database dump
 
+  # Written, verified, made private and hashed under this step's own
+  # temporary name, outside the lock; renamed into place last, under the lease
+  # (#2819), so a dump that outlived its Cancel can't replace the resumed
+  # chain's. A refused rename removes the temporary file and stops the step.
   # sobelow_skip ["Traversal.FileModule"]
-  defp dump_database(dir, stamp) do
+  defp dump_database(dir, stamp, lease) do
     name = "kiln-db-#{stamp}.dump"
     target = Path.join([dir, "db", name])
+    fence = fence(lease)
+    tmp = Artifact.partial_name(target, fence[:tag])
 
     with :ok <- File.mkdir_p(Path.dirname(target)),
          # Identical flags to scripts/backup.sh: custom format so `pg_restore`
@@ -2376,7 +2750,9 @@ defmodule KilnCMS.Backups.Steps do
          # .pgpass, libpq would prompt, and with no terminal it reads the
          # port's stdin, which never ends: the step hangs until its job
          # timeout. Failing at once reports the real cause.
-         {url, env} = split_credentials(Backups.database_url()),
+         # `--lock-wait-timeout`: a dump behind a migration's or VACUUM FULL's
+         # ACCESS EXCLUSIVE lock gives up instead of waiting for it (#2844).
+         {:ok, {url, env}} <- Backups.pg_connection(),
          :ok <-
            Command.cmd(
              "pg_dump",
@@ -2385,37 +2761,44 @@ defmodule KilnCMS.Backups.Steps do
                "--format=custom",
                "--no-owner",
                "--no-privileges",
-               "--file=#{target}.partial",
+               "--lock-wait-timeout=#{Backups.lock_wait_ms()}",
+               "--file=#{tmp}",
                url
              ],
              env
            ),
-         :ok <- Command.cmd("pg_restore", ["--list", "#{target}.partial"]),
-         :ok <- File.rename("#{target}.partial", target),
-         :ok <- File.chmod(target, 0o600) do
-      checksummed(dir, stamp, name, target)
+         :ok <- Command.cmd("pg_restore", ["--list", tmp]),
+         :ok <- File.chmod(tmp, 0o600),
+         {:ok, sha256, hashed} <- Checksum.file(tmp),
+         :ok <- fence[:rename].(tmp, target) do
+      checksummed(dir, {stamp, name, target}, {sha256, hashed}, lease)
     else
       error ->
-        File.rm("#{target}.partial")
+        File.rm(tmp)
         fail_tuple(error)
     end
   end
 
   # A dump with no checksum on record is not a backup the panel can vouch for;
-  # don't leave one lying beside a failed run.
-  # sobelow_skip ["Traversal.FileModule"]
-  defp checksummed(dir, stamp, name, target) do
-    with {:ok, sha256, hashed} <- Checksum.file(target),
-         :ok <-
-           Checksum.write_sidecar(
-             Path.join(Path.dirname(target), Artifact.sidecar_name(:db, stamp)),
-             [{name, sha256}]
-           ) do
-      {:ok, artifact("db", dir, target, sha256, hashed)}
-    else
-      error ->
-        File.rm(target)
-        fail_tuple(error)
+  # don't leave one lying beside a failed run. It is moved aside under the
+  # lease and deleted outside it (`discard/4`), like every delete of a step.
+  defp checksummed(dir, {stamp, name, target}, {sha256, hashed}, lease) do
+    case Checksum.write_sidecar(
+           Path.join(Path.dirname(target), Artifact.sidecar_name(:db, stamp)),
+           [{name, sha256}],
+           fence(lease)
+         ) do
+      :ok ->
+        {:ok, artifact("db", dir, target, sha256, hashed)}
+
+      {:error, :superseded} = superseded ->
+        superseded
+
+      {:error, _} = error ->
+        case discard(lease, dir, "db", [target]) do
+          {:error, :superseded} = superseded -> superseded
+          _discarded -> error
+        end
     end
   end
 
@@ -2469,16 +2852,17 @@ defmodule KilnCMS.Backups.Steps do
   # swept. A `.partial` named like no stamp (or with a stamp no Importer will
   # ever record) can never get a row, so it is swept by age alone, as before.
   defp import_then_sweep_partials(dir) do
-    import_best_effort(dir)
+    import_best_effort(dir, "Backup import before the partial sweep")
     sweep_stale_partials(dir)
   end
 
-  # Best effort, never a gate: see above. `Importer.run/1` already turns a
-  # raise into an error; this boundary also catches an exit (a call into a
-  # process that died) or a throw, so the start step carries on to the sweep,
-  # which fails closed on its own. `config :kiln_cms, KilnCMS.Backups,
-  # importer:` swaps the module in tests only.
-  defp import_best_effort(dir) do
+  # Best effort, never a gate: see above, and the finish's marker sync
+  # (`finish_tail/2`). `Importer.run/1` already turns a raise into an error;
+  # this boundary also catches an exit (a call into a process that died) or a
+  # throw, so the step carries on to what follows, which fails closed on its
+  # own. `what` names the import in the warning. `config :kiln_cms,
+  # KilnCMS.Backups, importer:` swaps the module in tests only.
+  defp import_best_effort(dir, what) do
     importer =
       Keyword.get(Application.get_env(:kiln_cms, KilnCMS.Backups, []), :importer, Importer)
 
@@ -2486,12 +2870,10 @@ defmodule KilnCMS.Backups.Steps do
     :ok
   rescue
     error ->
-      Logger.warning(
-        "Backup import before the partial sweep crashed: #{Exception.message(error)}"
-      )
+      Logger.warning("#{what} crashed: #{Exception.message(error)}")
   catch
     kind, reason ->
-      Logger.warning("Backup import before the partial sweep failed: #{inspect({kind, reason})}")
+      Logger.warning("#{what} failed: #{inspect({kind, reason})}")
   end
 
   # sobelow_skip ["Traversal.FileModule"]
@@ -2519,6 +2901,25 @@ defmodule KilnCMS.Backups.Steps do
         String.ends_with?(name, ".partial"),
         not MapSet.member?(stamped, entry),
         path = Path.join([dir, sub, name]),
+        older?(path, cutoff),
+        do: remove_partial(path)
+
+    sweep_manifest_partials(dir, cutoff)
+  end
+
+  # A step's tagged `manifest.json.<tag>.partial` at the directory's root,
+  # left when its node stopped between the write and the rename
+  # (`Manifest.write/3`). The untagged `manifest.json.partial` is
+  # `backup.sh`'s, which removes its own.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp sweep_manifest_partials(dir, cutoff) do
+    for path <- Path.wildcard(Path.join(dir, "manifest.json.*.partial")),
+        tag =
+          path
+          |> Path.basename()
+          |> String.replace_prefix("manifest.json.", "")
+          |> String.replace_suffix(".partial", ""),
+        Artifact.tag?(tag),
         older?(path, cutoff),
         do: remove_partial(path)
 
@@ -2661,6 +3062,111 @@ defmodule KilnCMS.Backups.Steps do
     end
   end
 
+  ## Deleting under the lease
+
+  # Delete `paths` (files or directories of the chain's under `dir`) without a
+  # delete inside the lock transaction (#2818): under the lease, ONE fenced
+  # transaction renames each into a trash entry `<stamp>.<tag>.<label>/` on the
+  # path's own file system, since rename(2) can't cross one and an operator may
+  # mount `db/` or `media/` from another disk: a file of `db/` or `media/` goes
+  # into `.kiln-trash/` beside it, a work directory into `.work/.trash/`. The
+  # entries are deleted after the lock is released, whatever the rename's
+  # outcome (only this step ever writes to them). A path that vanished
+  # meanwhile is skipped. `{:error, :superseded}` when the lease no longer
+  # holds: nothing was moved. With nothing to move the lock isn't taken.
+  #
+  # Every reader of `db/` and `media/` (the Importer, Retention, Presence,
+  # the partial sweep, `backup.sh`, `restore.sh`) matches names against the
+  # artifact patterns and never descends, so a dot-directory there is ignored.
+  # `.kiln-trash` itself is left in place once emptied: removing it could race
+  # another chain's step making its own entry in it.
+  defp discard(_lease, _dir, _label, []), do: :ok
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp discard(lease, dir, label, paths) do
+    name = "#{lease.stamp}.#{tag(lease)}.#{label}"
+    moves = for path <- paths, do: {path, Path.join(trash_dir(dir, label, path), name)}
+    entries = moves |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+
+    with :ok <- make_trash(dir, label, entries) do
+      result = Chain.fenced(lease, fn -> move_aside(moves) end)
+      Enum.each(entries, &File.rm_rf/1)
+      result
+    end
+  end
+
+  @trash ".kiln-trash"
+
+  defp trash_dir(dir, "work", _path), do: Path.join([dir, ".work", ".trash"])
+  defp trash_dir(_dir, _label, path), do: Path.join(Path.dirname(path), @trash)
+
+  # The trash directories and the entries in them, private. `.work` is made
+  # private too, as the work directories' parent; `db/` and `media/` keep
+  # whatever mode the operator gave them.
+  defp make_trash(dir, label, entries) do
+    parents = if label == "work", do: [Path.join(dir, ".work")], else: []
+
+    (parents ++ Enum.flat_map(entries, &[Path.dirname(&1), &1]))
+    |> Enum.uniq()
+    |> Enum.reduce_while(:ok, fn path, :ok ->
+      case mkdir_private(path) do
+        :ok -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  @doc false
+  # Inside the fenced call: rename each `{path, entry}` into its entry. A
+  # rename that still fails with `:exdev` (a file that is a mount point of its
+  # own, a bind-mounted single file) is deleted in place instead, in the same
+  # fenced call: a rare unlink under the lock, the one place a step still
+  # deletes inside it. `rename` is `File.rename/2`, swapped in tests.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec move_aside([{Path.t(), Path.t()}], (Path.t(), Path.t() -> :ok | {:error, term()})) ::
+          :ok | {:error, term()}
+  def move_aside(moves, rename \\ &File.rename/2) do
+    Enum.reduce_while(moves, :ok, fn {path, entry}, :ok ->
+      case rename.(path, Path.join(entry, Path.basename(path))) do
+        :ok -> {:cont, :ok}
+        {:error, :enoent} -> {:cont, :ok}
+        {:error, :exdev} -> remove_in_place(path)
+        {:error, reason} -> {:halt, {:error, {:move_aside, Path.basename(path), reason}}}
+      end
+    end)
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp remove_in_place(path) do
+    case File.rm_rf(path) do
+      {:ok, _removed} -> {:cont, :ok}
+      {:error, reason, _file} -> {:halt, {:error, {:move_aside, Path.basename(path), reason}}}
+    end
+  end
+
+  # The paths of `paths` that exist (lstat: a dangling symlink is one).
+  # sobelow_skip ["Traversal.FileModule"]
+  defp existing(paths), do: Enum.filter(paths, &match?({:ok, _}, File.lstat(&1)))
+
+  @doc false
+  # Clear the trash `discard/4` leaves (`.work/.trash`, `db/.kiln-trash` and
+  # `media/.kiln-trash`): an entry is left there only when a node stopped
+  # between moving something aside and deleting it. Run by the start step,
+  # when the chain holds the lock and no other step of it runs. Best-effort;
+  # returns the entries removed.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec sweep_trash(Path.t()) :: [String.t()]
+  def sweep_trash(dir) do
+    for trash <- [
+          Path.join([dir, ".work", ".trash"])
+          | for(sub <- ["db", "media"], do: Path.join([dir, sub, @trash]))
+        ],
+        path <- Path.wildcard(Path.join(trash, "*"), match_dot: true),
+        match?({:ok, _}, File.rm_rf(path)) do
+      Path.basename(path)
+    end
+  end
+
   ## Manifest
 
   # A run that STARTED and failed writes a manifest. Leaving the previous,
@@ -2673,27 +3179,36 @@ defmodule KilnCMS.Backups.Steps do
   # `stamp` is the run's, written so the importer keys this manifest by it: the
   # stamp is taken at lease time and `started_at` a moment later, so the
   # second of `started_at` is not always the run's (a duplicate failed run).
-  defp record_failure(dir, stamp, trigger, started_at, error, partial, components) do
-    write_manifest(dir, %Manifest{
-      stamp: stamp,
-      started_at: started_at,
-      finished_at: DateTime.utc_now(),
-      trigger: trigger,
-      ok: false,
-      components: components,
-      artifacts: partial,
-      keep_days: Backups.keep_days(),
-      error: error
-    })
+  defp record_failure(dir, stamp, trigger, started_at, error, partial, components, opts) do
+    write_manifest(
+      dir,
+      %Manifest{
+        stamp: stamp,
+        started_at: started_at,
+        finished_at: DateTime.utc_now(),
+        trigger: trigger,
+        ok: false,
+        components: components,
+        artifacts: partial,
+        keep_days: Backups.keep_days(),
+        error: error
+      },
+      opts
+    )
   end
 
-  defp write_manifest(dir, manifest) do
-    case Manifest.write(dir, manifest) do
+  # `{:error, :superseded}` when a fenced rename was refused (`fence/1`): the
+  # step lost its lease and stops. Any other failure is never fatal (see
+  # `Manifest.write/3`).
+  defp write_manifest(dir, manifest, opts) do
+    case Manifest.write(dir, manifest, opts) do
       :ok ->
         :ok
 
+      {:error, :superseded} = superseded ->
+        superseded
+
       {:error, reason} ->
-        # Never fatal — see `Manifest.write/2`.
         Logger.warning("Couldn't write the backup manifest to #{dir}: #{inspect(reason)}")
         :ok
     end
@@ -2706,7 +3221,7 @@ defmodule KilnCMS.Backups.Steps do
 
   @doc """
   Splits a connection URL into a password-free URL plus a `PGPASSWORD`
-  environment entry.
+  environment entry, or refuses it (`{:error, :refused_conninfo}`, #2831).
 
   The password must not be an **argv** element. There is no injection risk
   (no shell) — but argv is not private: `/proc/<pid>/cmdline` is
@@ -2719,10 +3234,12 @@ defmodule KilnCMS.Backups.Steps do
   and a query `password=` is moved as well; see `KilnCMS.Backups.PgUrl.split/1`
   for the exact rules.
 
-  Returns the URL unchanged with an empty env when there is no password to
-  move — `pg_dump` then falls back to `PGPASSFILE`/peer auth as it always did.
+  Returns `{:ok, {url, []}}` when there is no password to move — `pg_dump`
+  then falls back to `PGPASSFILE`/peer auth as it always did. The TLS
+  settings are not added here; `KilnCMS.Backups.pg_connection/1` does both.
   """
-  @spec split_credentials(String.t() | nil) :: {String.t() | nil, [{String.t(), String.t()}]}
+  @spec split_credentials(String.t() | nil) ::
+          {:ok, {String.t() | nil, [{String.t(), String.t()}]}} | {:error, PgUrl.refusal()}
   defdelegate split_credentials(url), to: PgUrl, as: :split
 
   # 0700/0600 throughout. A `.dump` is a complete logical copy of the database
@@ -2739,8 +3256,17 @@ defmodule KilnCMS.Backups.Steps do
   # this is the only shape the `else` can see.
   defp fail_tuple({:error, reason}), do: {:error, reason}
 
-  defp describe({:exit_status, executable, status, output}),
-    do: "#{executable} exited #{status}: #{output}"
+  defp describe(:refused_conninfo), do: Backups.describe_refused_conninfo()
 
+  defp describe({:exit_status, "pg_dump", _status, output} = reason) do
+    if Backups.lock_timeout?(output),
+      do: Backups.describe_lock_timeout(output),
+      else: describe_exit(reason)
+  end
+
+  defp describe({:exit_status, _executable, _status, _output} = reason), do: describe_exit(reason)
   defp describe(reason), do: inspect(reason)
+
+  defp describe_exit({:exit_status, executable, status, output}),
+    do: "#{executable} exited #{status}: #{output}"
 end

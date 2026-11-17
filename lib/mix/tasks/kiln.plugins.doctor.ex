@@ -54,6 +54,13 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       a list of machine-name atoms or `{name, label}` pairs, with no name
       twice. The host drops a malformed entry without a word, so the fields
       admin would simply not offer it;
+    * a plugin's staging scrub declaration (`c:Kiln.Plugin.staging_scrub/0`,
+      #2975) is usable: a list of well-formed entries, each naming an
+      AshPostgres resource of the plugin's own domains (not a core table, not
+      another plugin's, not one with `:context` multitenancy, no table
+      declared twice), a rewrite only of attributes it may change with values
+      that cast, and a keep with a reason. `mix kiln.staging.scrub` refuses
+      to run on any of these;
     * every dependency that requires `kiln_plugin` (a plugin shipped as a
       Hex, git or `path:` dependency, #1909) accepts the version this core
       bundles. The core takes the package with `override: true`, which is
@@ -77,7 +84,11 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       contributions, but not why it's installed;
     * a plugin installed through the overlay's `config/project_deps.exs`
       (#1967) but missing from `config :kiln_cms, :plugins`. It compiled, but
-      nothing it contributes is active until it is listed there.
+      nothing it contributes is active until it is listed there;
+    * a table of a plugin's or the overlay's domains that no
+      `c:Kiln.Plugin.staging_scrub/0` entry names and that is not kept as
+      content (#2975). `mix kiln.staging.scrub` refuses to run while it
+      exists, but a site that never stages is not broken by it.
 
   The final line names where each plugin came from: `projects/` (an overlay
   compiled inside the core), `project_deps` (the overlay's dependency list),
@@ -118,6 +129,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         backup_destination_problems(plugins) ++
         challenge_provider_problems(plugins, selected_challenge_provider()) ++
         security_check_problems(plugins) ++
+        staging_scrub_problems(plugins, Application.get_env(:kiln_cms, :ash_domains, [])) ++
         block_schema_problems(plugins, blocks_by_plugin) ++
         field_type_schema_problems(plugins, field_types_by_plugin) ++
         field_type_hook_problems(plugins, field_types_by_plugin) ++
@@ -140,6 +152,16 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       Mix.shell().info(
         "note: #{inspect(plugin)} is installed from config/project_deps.exs but not " <>
           "listed in config :kiln_cms, :plugins, so nothing it contributes is active"
+      )
+    end)
+
+    plugins
+    |> undeclared_scrub_tables(Application.get_env(:kiln_cms, :ash_domains, []))
+    |> Enum.each(fn table ->
+      Mix.shell().info(
+        "note: no staging_scrub/0 entry for #{table}. mix kiln.staging.scrub refuses " <>
+          "to run while the table exists: declare it {:purge, ...}, " <>
+          "{:rewrite, ..., set: [...]} or {:keep, ..., reason}"
       )
     end)
 
@@ -665,6 +687,25 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       end)
 
     contract ++ kinds ++ taken ++ collisions
+  end
+
+  # ── staging scrub (#2975) ────────────────────────────────────────────────
+  #
+  # The same checks `KilnCMS.Staging.PluginScrub.plan!/1` refuses on, minus
+  # the ones that need the database (which tables exist, foreign keys), so a
+  # bad declaration is heard about at precommit rather than mid-staging.
+  @doc false
+  def staging_scrub_problems(plugins, ash_domains) do
+    plugins
+    |> Enum.filter(&Code.ensure_loaded?/1)
+    |> KilnCMS.Staging.PluginScrub.problems(ash_domains)
+  end
+
+  @doc false
+  def undeclared_scrub_tables(plugins, ash_domains) do
+    plugins
+    |> Enum.filter(&Code.ensure_loaded?/1)
+    |> KilnCMS.Staging.PluginScrub.undeclared(ash_domains)
   end
 
   defp selected_backend_problems(nil, _backends), do: []

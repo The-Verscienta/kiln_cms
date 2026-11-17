@@ -12,8 +12,9 @@ defmodule KilnCMS.Backups.Run do
   The backup directory belongs to the instance, so there is no `multitenancy`
   block and the read gate is `KilnCMS.Accounts.Checks.PlatformAdmin` — never
   `OrgAdmin`, which would resolve a tenant-less subject to the default org (the
-  hazard `KilnCMS.Mail.Settings` documents). **No person writes a Run**, with one
-  exception: a platform admin may `:cancel` a running backup (#2218). The
+  hazard `KilnCMS.Mail.Settings` documents). **No person writes a Run**, with two
+  exceptions: a platform admin may `:cancel` a running backup (#2218), or
+  `:cancel_resume` a resume of it that has not started yet (#2816). The
   worker, the importer, retention and the stale-run sweep write as
   `KilnCMS.Backups.system/0` (subsystem `:backups`), through exactly the actions
   named in the write policy. There is no `destroy`: retention (#2219) deletes
@@ -39,7 +40,14 @@ defmodule KilnCMS.Backups.Run do
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer]
 
-  alias KilnCMS.Backups.Run.Changes.{Cancel, Normalize, OwnChain, Resume, ResumeRefused}
+  alias KilnCMS.Backups.Run.Changes.{
+    Cancel,
+    CancelResume,
+    Normalize,
+    OwnChain,
+    Resume,
+    ResumeRefused
+  }
 
   # `:canceled` (#2218) comes last: a platform admin stopped the run. Widening
   # the check constraint is expand-safe; an older node READING a canceled row
@@ -231,6 +239,28 @@ defmodule KilnCMS.Backups.Run do
               end}
     end
 
+    # A platform admin cancels a resume of this run that holds the backup
+    # lock but has not re-opened the run yet (#2816): waiting for the server
+    # with its files, or for a Cancel to settle. The guard, the job/lock side
+    # effects and the WHERE are the `CancelResume` change; the run keeps its
+    # status (a stale `running` one is failed) and gains a note. Audited in
+    # the same transaction as the Cancel it is, with `"resume" => true`.
+    update :cancel_resume do
+      accept []
+      require_atomic? false
+      change CancelResume
+      change Normalize
+
+      change {KilnCMS.Security.Changes.Record,
+              type: :backup_canceled,
+              scope: :instance,
+              mode: :in_transaction,
+              target: fn record, _changeset -> {"backup_run", record.id} end,
+              metadata: fn record, _changeset ->
+                %{"stamp" => record.stamp, "step" => "start", "resume" => true}
+              end}
+    end
+
     # A cron-made backup becomes a row, once. `upsert_fields []` makes a
     # conflict on the stamp do nothing, so an existing run — the app's own,
     # still `running`, or a previous import — is never touched.
@@ -292,6 +322,12 @@ defmodule KilnCMS.Backups.Run do
     # The one write a person makes (#2218): a platform admin cancels a running
     # backup. Not the system actor: nothing in the pipeline cancels a run.
     policy action(:cancel) do
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+    end
+
+    # The same Cancel for a resume that has not started yet (#2816): the
+    # platform admin's alone, as `:cancel`.
+    policy action(:cancel_resume) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 

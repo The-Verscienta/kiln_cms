@@ -108,13 +108,18 @@ defmodule KilnCMS.Analytics.Export do
   exported file — the exact `views` off the view row, every referrer cell off
   the referrer rows — and asserts no suppressed count in a *partially*
   published breakdown is uniquely determined, for a reader who re-runs this
-  algorithm on every candidate. It reproduces the four breakdowns #1073 found
-  exactly recoverable, and all four go red against the pre-#1073 algorithm; it
-  also carries the shapes #2752 found recoverable. A breakdown hidden whole
-  is checked only against a reader who does not know the algorithm; one who
-  does can sometimes pin it at a small view total, which is tracked in #2981.
-  That the *function* is sound is a separate claim, tested separately; this one
-  is about the file, which is what #777 was filed about and what a recipient
+  algorithm on every candidate (a `"hidden"` partner that can only be `0`
+  aside: that says what a published `0` would). It reproduces the four
+  breakdowns #1073 found exactly recoverable, and all four go red against the
+  pre-#1073 algorithm; it also carries the shapes #2752 found recoverable. A
+  breakdown hidden whole is checked against the same reader, who keeps every
+  candidate the algorithm would also have hidden whole: each category must
+  take at least two values across them (#2981). All of this is about one
+  breakdown on its own; a reader holding the per-day file *and* the
+  dashboard's span, or two overlapping files, can difference them — see the
+  warning on `Analytics.suppress_referrer_group/1` and #2989. That the
+  *function* is sound is a separate claim, tested separately; this one is
+  about the file, which is what #777 was filed about and what a recipient
   actually holds.
 
   ## Why this is still a stream

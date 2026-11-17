@@ -22,8 +22,10 @@ defmodule KilnCMS.Mail.SiteSuppressedRecipient do
   Written only by the delivery pipeline (`KilnCMS.Mail.deliver_for_worker/2`),
   as the system, when the site's relay rejected a recipient; never by a caller.
   Consulted, for mail sent *for this site*, alongside the instance-wide list
-  (`KilnCMS.Mail.suppressed?/2`): by `KilnCMS.Mail.enqueue!/2` and the
-  newsletter worker. Listed, and removable, on the site's `/editor/site-mail`
+  (`KilnCMS.Mail.suppressed?/2`): by `KilnCMS.Mail.enqueue!/2`, the
+  newsletter worker, and the workflow and task notification workers
+  (`KilnCMS.Notifications.WorkflowMailWorker`,
+  `KilnCMS.Notifications.TaskMailWorker`, #3036). Listed, and removable, on the site's `/editor/site-mail`
   page by the site's admins.
 
   The address is a `ci_string`, so suppression and lookup are case-insensitive.

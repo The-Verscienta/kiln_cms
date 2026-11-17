@@ -94,7 +94,7 @@ what it contributes:
 | Shape | How it's installed | What it can contribute |
 |---|---|---|
 | **Mix dependency** — Hex, `git:` or `path:` | Depends on [`kiln_plugin`](https://github.com/The-Verscienta/kiln_cms/blob/main/sdk/kiln_plugin/README.md), the package the plugin contract ships in (#1909); the site lists it in the overlay's `config/project_deps.exs` (#1967) | Blocks, field types (no colocated client hooks), spam checks, advisory checks, image backends, human-verification providers (`challenge_providers/0`, from `kiln_plugin` 1.4), security posture checks (`security_checks/0`, from `kiln_plugin` 1.4), backup destinations (`backup_destinations/0`, from `kiln_plugin` 1.5), nav items, supervision children, Oban queues; routes only to a LiveView that doesn't `use KilnCMSWeb`; plug routes (`plug_routes/0`, from `kiln_plugin` 1.4) to any Plug, needing only `plug` |
-| **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, and LiveViews built on `KilnCMSWeb` |
+| **`projects/<name>/` overlay** | Vendored into the overlay and compiled inside the core | Everything above, plus content types (`KilnCMS.CMS.Content`), Ash domains, and LiveViews built on `KilnCMSWeb`. A plugin whose domains own tables declares what the staging scrub does to each (`staging_scrub/0`, from `kiln_plugin` 1.5) |
 
 A dependency compiles before the core and sees only its own dependencies, so
 it can build on `kiln_plugin` but not on anything that lives in the core.
@@ -601,6 +601,135 @@ What the core holds an adapter to:
 Cron (`scripts/backup.sh`) never sends to a plugin's destination. A plugin
 built against `kiln_plugin` older than 1.5 has no `backup_destinations/0`;
 the core treats it as declaring none.
+
+<a id="staging-scrub"></a>
+
+#### Staging scrub (`staging_scrub/0`, #2975)
+
+When an operator clones production into staging, `mix kiln.staging.scrub`
+removes personal data from every core table
+([staging-environments.md](staging-environments.md#plugin-tables)). It cannot
+know what a plugin's own tables hold, so the plugin says, in
+`staging_scrub/0` (`kiln_plugin` 1.5; require `{:kiln_plugin, "~> 1.5"}`).
+**A table the plugin leaves out stops the scrub**, with nothing changed,
+until it is declared
+([ADR 0066](decisions/0066-every-table-reaching-a-staging-clone-is-scrubbed-or-kept-with-a-reason.md)).
+
+This is for overlays only. The tables in question are those of the Ash
+domains in `domains/0`, and a dependency plugin can't have any (its domains
+would need the core's repo), so it leaves the default `[]`.
+
+**Declare every table your domains own.** Starting from an overlay plugin
+whose `domains/0` lists a domain with AshPostgres resources:
+
+1. List each resource in `staging_scrub/0` on the plugin's entry module, as
+   one of three entries:
+   - `{:purge, Resource}` deletes every row. Use it for anything about
+     people that staging doesn't need: bookings, messages, logs.
+   - `{:rewrite, Resource, set: [attribute: value, ...]}` keeps the rows and
+     sets each attribute to the value on every row (`nil` clears it). Use it
+     when staging needs the rows but not who they were about.
+   - `{:keep, Resource, "reason"}` keeps the rows as they are. The reason
+     says why a production clone may hold them, and must not be blank.
+
+   ```elixir
+   # projects/bookings/plugin.ex
+   @impl Kiln.Plugin
+   def domains, do: [Bookings.Catalog]
+
+   @impl Kiln.Plugin
+   def staging_scrub,
+     do: [
+       {:purge, Bookings.Catalog.Note},
+       {:rewrite, Bookings.Catalog.Booking, set: [email: nil, name: "Scrubbed guest", guests: 0]},
+       {:purge, Bookings.Catalog.Booking.Version},
+       {:keep, Bookings.Catalog.Venue, "venue opening hours, no visitors"}
+     ]
+   ```
+
+   A resource with AshPaperTrail has a version resource (`Booking.Version`
+   above) on a table of its own, holding every past value. Declare it too:
+   a rewrite of `Booking` alone leaves the cleared addresses in its history.
+2. Leave out the content types. A content type's table, its version table
+   and a graduated join table are kept without an entry, unless a column
+   name or type looks personal (`email`, `ip`, `phone`, `user_agent`,
+   `contact`, an `inet` column, …): then the table needs an entry like any
+   other.
+3. Run `mix kiln.plugins.doctor`. It fails on an entry it can't use and
+   notes each table still undeclared:
+   `note: no staging_scrub/0 entry for bookings: Bookings.Catalog.Guest (table guests)`.
+   When it prints `plugin(s) OK` with no note about your tables, every one
+   is declared.
+4. Add a test, so the next table you add can't slip past. It needs no
+   database:
+
+   ```elixir
+   # projects/bookings/test/staging_scrub_test.exs
+   defmodule Bookings.StagingScrubTest do
+     use ExUnit.Case, async: true
+
+     test "every table is declared for the staging scrub" do
+       assert :ok = KilnCMS.Staging.PluginScrub.assert_covered!(Bookings.Plugin)
+     end
+   end
+   ```
+
+   `KilnCMS.Staging.PluginScrub.assert_covered!/2` raises listing every
+   unusable entry and every undeclared table of that plugin.
+
+What a rewrite can't change. Each value must cast to the attribute's type,
+and `nil` is refused where the attribute doesn't allow it. These columns
+can't be rewritten at all, because one value on every row would collide or
+point at nothing; purge the table instead:
+
+- the primary key;
+- an attribute in an identity;
+- the tenant attribute;
+- the source attribute of a `belongs_to`;
+- a column the database generates, and any column a unique index covers,
+  unless the value is `nil`.
+
+A resource with `:context` multitenancy (a schema per tenant) can't be
+scrubbed at all, and is refused wherever it is.
+
+The doctor and `assert_covered!/2` read your code, not a database, so they
+can't see unique indexes, generated columns, `NOT NULL` or `CHECK`
+constraints, or foreign keys. The scrub checks the first three and the
+foreign keys against the clone before it changes anything. It refuses a kept
+or rewritten table whose `ON DELETE RESTRICT` / `NO ACTION` key points at a
+table the scrub empties, and a purge listed before the purge of a table
+that references it: put the child's `{:purge, …}` first. A `CHECK`
+constraint or a trigger can still fail a step; the plugin steps run first,
+in one transaction, so that rolls them back with no core table touched.
+
+What can go wrong when the scrub runs:
+
+- **`Refusing to scrub: these tables of installed plugins and of the overlay have no staging_scrub/0 entry`**:
+  each line under it names a plugin, a resource and its table. Add an
+  entry for each.
+- **`(no plugin): … No plugin's domains/0 claims its domain`**: the domain is
+  in `:ash_domains` but no plugin lists it. Move it into a plugin's
+  `domains/0` and declare its tables there.
+- **`Refusing to scrub: these staging_scrub/0 declarations are not usable`**:
+  an entry of the wrong shape, a core table (`is the core table …`), a
+  resource of another plugin or of no plugin's domains
+  (`is not a resource of …'s domains/0`), a rewrite of a primary key, an
+  identity, the tenant or a `belongs_to` attribute (`cannot be rewritten:
+  it is the primary key; purge the table instead`), a value that doesn't
+  cast, a blank keep reason, a table declared twice, a `:context`
+  multitenant resource, or a callback that raised or returned something
+  other than a list.
+- **`Refusing to scrub: a rewrite would break a database constraint`**: a
+  generated column, a non-`nil` value under a unique index, or `nil` on a
+  `NOT NULL` column.
+- **`Refusing to scrub: a foreign key would stop the scrub half-way`**: the
+  message names the key and the fix, either an order of purges or
+  `ON DELETE CASCADE` / `SET NULL`.
+
+A plugin built against `kiln_plugin` older than 1.5 has no
+`staging_scrub/0`; the core treats it as declaring nothing, so its tables,
+if it has any, are undeclared. `Kiln.Plugins.manifests/0` counts each
+plugin's purge, rewrite and keep entries.
 
 ### 2b. Catalog metadata (the "registry")
 

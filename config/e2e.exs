@@ -75,7 +75,8 @@ config :kiln_cms,
   security_log_prune_cron: false,
   backup_marker_sync_cron: false,
   backup_scheduler_cron: false,
-  crawler_ranges_cron: false
+  crawler_ranges_cron: false,
+  private_args_scrub_cron: false
 
 # No journey checks a crawler against a published range list, and a browser
 # run must make no outbound request to a search engine (#2586): nothing
@@ -90,6 +91,8 @@ config :kiln_cms, :occurrence_backfill_on_boot, false
 config :kiln_cms, :legacy_audiences_migration_on_boot, false
 config :kiln_cms, :sync_exposure_backfill_on_boot, false
 config :kiln_cms, :totp_secret_backfill_on_boot, false
+config :kiln_cms, :erasure_backfill_on_boot, false
+config :kiln_cms, :private_args_scrub_on_boot, false
 
 config :kiln_cms, token_signing_secret: "e2eTokenSigningSecretForBrowserTests0"
 

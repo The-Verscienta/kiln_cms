@@ -206,7 +206,7 @@ defmodule KilnCMS.Newsletter.ConfirmationMailTest do
                Newsletter.unsubscribe_subscriber(orphan, actor: nil, tenant: orphan.org_id)
     end
 
-    test "an admin still reaches these actions through the blanket policy" do
+    test "an admin still reaches the consent writes through the blanket policy" do
       # A failing bypass falls through to the remaining policies, so admin
       # management of anyone's subscription is unaffected.
       admin = user(:admin)
@@ -218,7 +218,9 @@ defmodule KilnCMS.Newsletter.ConfirmationMailTest do
                  tenant: subscriber.org_id
                )
 
-      assert {:ok, [_row]} = Newsletter.subscribers_for_user(subscriber.user_id, actor: admin)
+      # ...but not the member's cross-org lookup (#2991): it ignores the
+      # tenant, so the admin grant would reach every site's rows.
+      assert {:ok, []} = Newsletter.subscribers_for_user(subscriber.user_id, actor: admin)
     end
   end
 

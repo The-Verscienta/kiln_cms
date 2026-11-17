@@ -25,10 +25,15 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
   alias KilnCMS.Backups.{Checksum, MediaArchive, Retention}
   alias KilnCMS.Backups.Retention.Policy
+  alias KilnCMS.Test.ShellTools
 
   @moduletag :capture_log
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
 
   @mb 1_048_576
+  @lock_parity_var "KILN_BACKUP_SCRIPT_LOCK_WAIT_PARITY"
   @script Path.expand("../../scripts/backup.sh", __DIR__)
   @restore Path.expand("../../scripts/restore.sh", __DIR__)
 
@@ -130,6 +135,28 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "sha256: ok (kiln-media-#{stamp}.sha256)"
     end
 
+    # A newer set moved aside by the app (#2818) is not the newest set.
+    test "never reads into .kiln-trash", ctx do
+      stamp = "20260805-031700"
+      app_set!(ctx, stamp)
+      dump!(ctx, stamp)
+
+      newer = "20260806-031700"
+
+      for {sub, name} <- [
+            {"db", "kiln-db-#{newer}.dump"},
+            {"media", "kiln-media-#{newer}.part01.tar.gz"}
+          ] do
+        entry = Path.join([ctx.backups, sub, ".kiln-trash", "#{newer}.48211-2.#{sub}"])
+        File.mkdir_p!(entry)
+        File.write!(Path.join(entry, name), "garbage")
+      end
+
+      assert {out, 0} = backup(ctx, "verify")
+      assert out =~ "Newest media backup: #{stamp}"
+      refute out =~ newer
+    end
+
     test "catches a corrupted part that is not the newest file", ctx do
       stamp = "20260805-031700"
       [p1, p2 | _] = app_set!(ctx, stamp)
@@ -222,6 +249,20 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "sha256: ok (kiln-media-#{old}.sha256)"
     end
 
+    test "a set with a part the app is still writing (#2819) is skipped too", ctx do
+      old = "20260101-000000"
+      new = "20260805-031700"
+      app_set!(ctx, old)
+      dump!(ctx, old)
+      [_p1, p2 | _] = app_set!(ctx, new)
+      dump!(ctx, new)
+      File.rename!(p2, p2 <> ".48211-2.partial")
+
+      assert {out, 0} = backup(ctx, "verify")
+      assert out =~ "Skipping media set #{new}: still being written, or interrupted"
+      assert out =~ "Newest media backup: #{old}"
+    end
+
     test "fails when the only media set is an interrupted one", ctx do
       stamp = "20260805-031700"
       app_set!(ctx, stamp)
@@ -295,6 +336,32 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert {_out, 0} = backup(ctx, "prune")
       assert Enum.all?([other, stray, notes, manifest], &File.exists?/1)
       assert {:ok, %{type: :symlink}} = File.lstat(link)
+    end
+
+    # Where the app's backup step moves a file aside before deleting it
+    # (#2818): prune never lists into it, so what is in it is no unit of its.
+    test "leaves a .kiln-trash directory and what is in it alone", ctx do
+      old = "20260101-000000"
+      newest = "20260301-000000"
+      age!(set_files!(ctx, newest), 400)
+
+      inside =
+        for {sub, name} <- [
+              {"db", "kiln-db-#{old}.dump"},
+              {"media", "kiln-media-#{old}.part01.tar.gz.48211-2.partial"}
+            ] do
+          entry = Path.join([ctx.backups, sub, ".kiln-trash", "#{old}.48211-2.#{sub}"])
+          File.mkdir_p!(entry)
+          path = Path.join(entry, name)
+          File.write!(path, "moved aside")
+          path
+        end
+
+      age!(inside, 400)
+
+      assert {out, 0} = backup(ctx, "prune")
+      refute out =~ ".kiln-trash"
+      assert Enum.all?(inside, &File.exists?/1)
     end
 
     test "the newest complete unit of each kind is kept however old", ctx do
@@ -440,6 +507,40 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert File.exists?(fresh)
       # Every file of its stamp is days old: a killed run's leftover (#2478).
       refute File.exists?(old)
+    end
+
+    test "the app's tagged partials (#2819) keep their unit while fresh and go when abandoned",
+         ctx do
+      [writing_db, writing_media, stale, newest] =
+        ~w(20260101-000000 20260201-000000 20260301-000000 20260401-000000)
+
+      files = Map.new([writing_db, writing_media, stale, newest], &{&1, set_files!(ctx, &1)})
+      age!(Enum.flat_map(Map.values(files), & &1), 400)
+      fresh_db = Path.join(ctx.backups, "db/kiln-db-#{writing_db}.dump.48211-2.partial")
+      fresh_media = Path.join(ctx.backups, "media/kiln-media-#{writing_media}.sha256.7.partial")
+      old = Path.join(ctx.backups, "media/kiln-media-#{stale}.part09.tar.gz.48211-1.partial")
+
+      # Not a partial of either shape: never counted, never removed.
+      untagged_tail = Path.join(ctx.backups, "db/kiln-db-#{stale}.dump.48211")
+      not_digits = Path.join(ctx.backups, "db/kiln-db-#{stale}.dump.4a1.partial")
+
+      for f <- [fresh_db, fresh_media, old, untagged_tail, not_digits], do: File.write!(f, "")
+      age!([old, untagged_tail, not_digits], 2)
+
+      assert {_out, 0} = backup(ctx, "prune")
+
+      {db, media} = Enum.split_with(files[writing_db], &String.contains?(&1, "/db/"))
+      assert Enum.all?(db, &File.exists?/1)
+      assert Enum.all?(media, &(not File.exists?(&1)))
+      {db, media} = Enum.split_with(files[writing_media], &String.contains?(&1, "/db/"))
+      assert Enum.all?(media, &File.exists?/1)
+      assert Enum.all?(db, &(not File.exists?(&1)))
+      assert Enum.all?(files[stale], &(not File.exists?(&1)))
+      assert File.exists?(fresh_db)
+      assert File.exists?(fresh_media)
+      refute File.exists?(old)
+      assert File.exists?(untagged_tail)
+      assert File.exists?(not_digits)
     end
 
     test "a run in flight never takes the newest-complete slot from the last finished one",
@@ -629,7 +730,12 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       # The one intended difference: cron removes an abandoned run's partials
       # (#2478); the app's plan never deletes a `.partial` (its start step
       # sweeps them, and only once the stamp has a run row).
-      cron_only = MapSet.new(["media/kiln-media-20250201-000000.part03.tar.gz.partial"])
+      cron_only =
+        MapSet.new([
+          "media/kiln-media-20250201-000000.part03.tar.gz.partial",
+          "media/kiln-media-20250201-000000.part02.tar.gz.48211-2.partial"
+        ])
+
       assert MapSet.subset?(cron_only, app_survivors)
       assert listing(ctx) == MapSet.difference(app_survivors, cron_only)
 
@@ -813,6 +919,8 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     for i <- 1..2, do: put.("media/kiln-media-20250201-000000.part0#{i}.tar.gz", 400, "p")
     put.("media/kiln-media-20250201-000000.sha256", 400, "s")
     put.("media/kiln-media-20250201-000000.part03.tar.gz.partial", 2, "p")
+    # The same, as the app's backup step names it (#2819).
+    put.("media/kiln-media-20250201-000000.part02.tar.gz.48211-2.partial", 2, "p")
     put.("db/kiln-db-20250201-000000.dump", 400, "d")
 
     # S3: a symlinked dump (never deleted) with a regular sidecar (goes); parts
@@ -860,6 +968,9 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     put.("db/kiln-db-20251001-000000.dump", 400, "")
     put.("db/kiln-db-20251101-000000.dump", 400, "")
     put.("db/kiln-db-20251101-000000.sha256.partial", 0, "")
+    # S16: a fresh tagged partial (#2819) keeps its unit like an untagged one.
+    put.("db/kiln-db-20251102-000000.dump", 400, "")
+    put.("db/kiln-db-20251102-000000.dump.48211-2.partial", 0, "")
     put.("db/kiln-db-20251001-000000.dump.partial", 400, "")
 
     # S13: a future-dated complete dump and an impossible-stamp (month 13)
@@ -1164,19 +1275,12 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       end
     end
 
-    # bash 3.2 is what macOS ships as /bin/bash; CI (Linux) has 5.x, so this
-    # only runs on a Mac.
-    bash3? =
-      File.exists?("/bin/bash") and
-        match?(
-          {"3\n", 0},
-          System.cmd("/bin/bash", ["-c", "echo ${BASH_VERSINFO[0]}"], stderr_to_stdout: true)
-        )
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
 
-    unless bash3?, do: @tag(skip: "needs /bin/bash 3.x (macOS)")
-
-    test "the eleven-part run also works under /bin/bash 3.2", ctx do
-      eleven_part_run!(ctx, "/bin/bash")
+    test "the eleven-part run also works under bash 3.2", ctx do
+      eleven_part_run!(ctx, ShellTools.bash32())
     end
   end
 
@@ -1272,6 +1376,44 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert manifest["error"] =~ "bad"
       assert manifest["error"] =~ ~s("q")
       assert KilnCMS.Backups.Manifest.read(ctx.backups).ok == false
+    end
+  end
+
+  # The tar probe (#2479): every part is built with `--null -T`, so a tar that
+  # cannot read a NUL-separated list is refused before any part is written.
+  # In `all` the probe runs in the media phase, after the dump, so a busybox
+  # host still keeps a verified database backup (the app's order, ADR 0042).
+  describe "a tar that cannot read a NUL-separated list" do
+    setup do
+      %{real_tar: System.find_executable("tar")}
+    end
+
+    test "media is refused before any part is written", ctx do
+      stub_tar_without_null!(ctx)
+      assert_media_refused!(ctx)
+    end
+
+    test "all keeps the verified dump and records the refusal", ctx do
+      stub_tar_without_null!(ctx)
+      assert_all_keeps_the_dump!(ctx)
+    end
+
+    unless ShellTools.busybox?(),
+      do: @tag(skip: "needs busybox on PATH (KILN_REQUIRE_BUSYBOX=1 fails instead)")
+
+    @tag :busybox_tar
+    test "busybox tar: media is refused before any part is written", ctx do
+      File.ln_s!(ShellTools.busybox!(), Path.join(ctx.bin, "tar"))
+      assert_media_refused!(ctx)
+    end
+
+    unless ShellTools.busybox?(),
+      do: @tag(skip: "needs busybox on PATH (KILN_REQUIRE_BUSYBOX=1 fails instead)")
+
+    @tag :busybox_tar
+    test "busybox tar: all keeps the verified dump and records the refusal", ctx do
+      File.ln_s!(ShellTools.busybox!(), Path.join(ctx.bin, "tar"))
+      assert_all_keeps_the_dump!(ctx)
     end
   end
 
@@ -1561,7 +1703,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
   # --- helpers ---------------------------------------------------------------
 
-  describe "the database connection (#2719, #2726)" do
+  describe "the database connection (#2719, #2726, #2830, #2831, #2833, #2844)" do
     # `pg_dump` logs its argv and whether PGPASSWORD reached it. argv is
     # world-readable (/proc/<pid>/cmdline, `ps`); the environment is not.
     setup ctx do
@@ -1571,6 +1713,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       #!/bin/sh
       printf '%s\\n' "$@" > "#{log}.args"
       if [ -n "${PGPASSWORD+set}" ]; then printf 'set:%s' "$PGPASSWORD"; else printf unset; fi > "#{log}.env"
+      printf '%s|%s' "${PGSSLMODE-unset}" "${PGSSLROOTCERT-unset}" > "#{log}.tls"
       for a in "$@"; do
         case "$a" in --file=*) printf 'PGDMP pretend dump' > "${a#--file=}" ;; esac
       done
@@ -1660,29 +1803,277 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       refute manifest!(ctx)["ok"]
     end
 
-    # bash 3.2 is what macOS ships as /bin/bash; CI (Linux) has 5.x, so this
-    # only runs on a Mac.
-    bash3? =
-      File.exists?("/bin/bash") and
-        match?(
-          {"3\n", 0},
-          System.cmd("/bin/bash", ["-c", "echo ${BASH_VERSINFO[0]}"], stderr_to_stdout: true)
-        )
+    test "Ecto's own query parameters are translated for pg_dump (#2833)", ctx do
+      assert {_out, 0} =
+               backup(ctx, "db", [
+                 {"DATABASE_URL", "ecto://kiln:hunter2@db/kiln_prod?ssl=false&pool_size=5"},
+                 {"PGPASSWORD", nil}
+               ])
 
-    unless bash3?, do: @tag(skip: "needs /bin/bash 3.x (macOS)")
+      args = File.read!(ctx.log <> ".args")
 
-    test "the split also works under /bin/bash 3.2", ctx do
+      assert List.last(String.split(args, "\n", trim: true)) ==
+               "postgres://kiln@db/kiln_prod?sslmode=disable"
+    end
+
+    test "the script sets no TLS of its own: the URL's sslmode, or the operator's PGSSLMODE (#2830)",
+         ctx do
+      # DATABASE_SSL is the app's setting; cron is told to put sslmode in
+      # DATABASE_URL instead, and the script does not guess.
+      assert {_out, 0} =
+               backup(ctx, "db", [
+                 {"DATABASE_URL", "postgres://kiln@db/kiln_prod"},
+                 {"DATABASE_SSL", "true"},
+                 {"DATABASE_SSL_CACERTFILE", "/etc/ca.pem"}
+               ])
+
+      assert File.read!(ctx.log <> ".tls") == "unset|unset"
+
+      assert {_out, 0} =
+               backup(ctx, "db", [
+                 {"DATABASE_URL", "postgres://kiln@db/kiln_prod?sslmode=verify-full"},
+                 {"PGSSLMODE", "require"},
+                 {"PGSSLROOTCERT", "/etc/ca.pem"}
+               ])
+
+      assert File.read!(ctx.log <> ".tls") == "require|/etc/ca.pem"
+
+      assert File.read!(ctx.log <> ".args") =~
+               "\npostgres://kiln@db/kiln_prod?sslmode=verify-full\n"
+    end
+
+    test "a key=value string with a password is refused before pg_dump runs (#2831)", ctx do
+      for url <- [
+            "host=db user=kiln password=hunter2 dbname=kiln_prod",
+            "mysql://kiln:hunter2@db/x"
+          ] do
+        File.rm(ctx.log <> ".args")
+
+        assert {out, status} = backup(ctx, "all", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}])
+
+        assert status != 0, url
+        refute File.exists?(ctx.log <> ".args"), "pg_dump ran for #{url}"
+        assert out =~ "DATABASE_URL is not a postgres:// URL", url
+        refute out =~ "hunter2", url
+
+        manifest = manifest!(ctx)
+        refute manifest["ok"]
+        assert manifest["error"] =~ "DATABASE_URL is not a postgres:// URL"
+        refute manifest["error"] =~ "hunter2"
+      end
+    end
+
+    test "a passwordless key=value string still reaches pg_dump unchanged", ctx do
+      url = "host=/run/postgresql dbname=kiln_prod"
+
+      assert {_out, 0} = backup(ctx, "db", [{"DATABASE_URL", url}])
+      assert List.last(String.split(File.read!(ctx.log <> ".args"), "\n", trim: true)) == url
+    end
+
+    test "pg_dump gets --lock-wait-timeout from BACKUP_LOCK_WAIT_SECONDS (#2844)", ctx do
+      assert {_out, 0} = backup(ctx, "db")
+      assert "--lock-wait-timeout=600000" in String.split(File.read!(ctx.log <> ".args"), "\n")
+
+      assert {_out, 0} = backup(ctx, "db", [{"BACKUP_LOCK_WAIT_SECONDS", "5"}])
+      assert "--lock-wait-timeout=5000" in String.split(File.read!(ctx.log <> ".args"), "\n")
+    end
+
+    test "BACKUP_LOCK_WAIT_SECONDS is read like the app reads it", ctx do
+      on_exit(fn -> System.delete_env(@lock_parity_var) end)
+
+      for raw <- [
+            nil,
+            "",
+            " 30 ",
+            "+30",
+            "030",
+            "1",
+            "3600",
+            "0",
+            "-1",
+            "3601",
+            "abc",
+            "1.5",
+            "10s"
+          ] do
+        {seconds, warns?} = app_lock_wait(raw)
+
+        assert {out, 0} = backup(ctx, "db", [{"BACKUP_LOCK_WAIT_SECONDS", raw}])
+
+        assert "--lock-wait-timeout=#{seconds * 1000}" in String.split(
+                 File.read!(ctx.log <> ".args"),
+                 "\n"
+               ),
+               inspect(raw)
+
+        assert out =~ "is not a whole number of seconds from 1 to 3600; using 600" == warns?,
+               inspect(raw)
+      end
+    end
+
+    test "a dump that waited too long for a lock says so in the failure manifest", ctx do
+      # pg_dump's real words: it implements --lock-wait-timeout as a
+      # statement_timeout around each LOCK TABLE (checked with pg_dump 17).
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: query failed: ERROR:  canceling statement due to statement timeout" >&2
+      echo "pg_dump: detail: Query was: LOCK TABLE public.pages IN ACCESS SHARE MODE" >&2
+      exit 1
+      """)
+
+      assert {out, status} =
+               backup(ctx, "all", [
+                 {"DATABASE_URL", "ecto://kiln:hunter2@db/kiln_prod"},
+                 {"BACKUP_LOCK_WAIT_SECONDS", "30"},
+                 {"PGPASSWORD", nil}
+               ])
+
+      assert status != 0
+      # pg_dump's own stderr still reaches the log.
+      assert out =~ "canceling statement due to statement timeout"
+
+      manifest = manifest!(ctx)
+      refute manifest["ok"]
+
+      assert manifest["error"] =~
+               "pg_dump waited longer than BACKUP_LOCK_WAIT_SECONDS (30 s) for a table lock"
+
+      assert manifest["error"] =~ "LOCK TABLE public.pages"
+      refute manifest["error"] =~ "hunter2"
+      refute out =~ "hunter2"
+      assert Path.wildcard(Path.join(ctx.scratch, "kiln-pg_dump.*")) == []
+    end
+
+    test "any other failed dump records pg_dump's words, scrubbed of the password", ctx do
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: connection failed: password hunter2xyz rejected" >&2
+      echo "pg_dump: error: SSL was required" >&2
+      exit 2
+      """)
+
+      assert {_out, status} =
+               backup(ctx, "all", [
+                 {"DATABASE_URL", "ecto://kiln:hunter2xyz@db/kiln_prod"},
+                 {"PGPASSWORD", nil}
+               ])
+
+      assert status != 0
+      error = manifest!(ctx)["error"]
+      assert error =~ "pg_dump exited 2: pg_dump: error: connection failed: password *** rejected"
+      assert error =~ "SSL was required"
+      refute error =~ "hunter2xyz"
+    end
+
+    # As KilnCMS.Backups.Redact: a password under 6 characters is not
+    # scrubbed, or every `e` in the message would become `***`.
+    test "a password under 6 characters leaves pg_dump's words as they are", ctx do
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: connection to server failed: SSL was required" >&2
+      exit 2
+      """)
+
+      assert {_out, status} =
+               backup(ctx, "all", [
+                 {"DATABASE_URL", "ecto://kiln:e@db/kiln_prod"},
+                 {"PGPASSWORD", nil}
+               ])
+
+      assert status != 0
+
+      assert manifest!(ctx)["error"] =~
+               "pg_dump exited 2: pg_dump: error: connection to server failed: SSL was required"
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
+
+    test "the refusal, the lock wait and the failure record also work under bash 3.2", ctx do
+      bash = ShellTools.bash32()
+
+      assert {out, status} =
+               backup(ctx, "db", [{"DATABASE_URL", "host=db password=hunter2"}], bash)
+
+      assert status != 0
+      assert out =~ "DATABASE_URL is not a postgres:// URL"
+
+      assert {_out, 0} =
+               backup(
+                 ctx,
+                 "db",
+                 [
+                   {"DATABASE_URL", "postgres://kiln@db/kiln?ssl=false"},
+                   {"BACKUP_LOCK_WAIT_SECONDS", "07"}
+                 ],
+                 bash
+               )
+
+      args = String.split(File.read!(ctx.log <> ".args"), "\n", trim: true)
+      assert "--lock-wait-timeout=7000" in args
+      assert List.last(args) == "postgres://kiln@db/kiln?sslmode=disable"
+
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: query failed: ERROR:  canceling statement due to statement timeout" >&2
+      echo "pg_dump: detail: Query was: LOCK TABLE public.t IN ACCESS SHARE MODE" >&2
+      printf '%s\\n' 'secret: hun\\ct*er2' >&2
+      exit 1
+      """)
+
+      assert {_out, status} =
+               backup(
+                 ctx,
+                 "all",
+                 [{"DATABASE_URL", "ecto://kiln:hun%5Cct*er2@db/kiln_prod"}, {"PGPASSWORD", nil}],
+                 bash
+               )
+
+      assert status != 0
+      error = manifest!(ctx)["error"]
+      assert error =~ "BACKUP_LOCK_WAIT_SECONDS (600 s)"
+      assert error =~ "secret: ***"
+      refute error =~ "hun\\ct"
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
+
+    test "the split also works under bash 3.2", ctx do
       # An encoded backslash before `c` (which `%b` would read as "stop
       # here"), an `@`, and a trailing newline (which `$(…)` would drop).
       url = "ecto://kiln:hun%5Cct%40er2%0A@db/kiln_prod?sslmode=require"
 
       assert {_out, 0} =
-               backup(ctx, "db", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}], "/bin/bash")
+               backup(
+                 ctx,
+                 "db",
+                 [{"DATABASE_URL", url}, {"PGPASSWORD", nil}],
+                 ShellTools.bash32()
+               )
 
       args = File.read!(ctx.log <> ".args")
       assert args =~ "\npostgres://kiln@db/kiln_prod?sslmode=require\n"
       refute args =~ "hun"
       assert File.read!(ctx.log <> ".env") == "set:hun\\ct@er2\n"
+    end
+  end
+
+  # What the app makes of `raw` as BACKUP_LOCK_WAIT_SECONDS
+  # (config/runtime/prod/backups.exs): `{seconds, warned?}`.
+  defp app_lock_wait(raw) do
+    if raw, do: System.put_env(@lock_parity_var, raw), else: System.delete_env(@lock_parity_var)
+
+    {parsed, warning} =
+      ExUnit.CaptureIO.with_io(:stderr, fn ->
+        KilnCMS.Config.Env.integer_in(@lock_parity_var, 1, 3600)
+      end)
+
+    case parsed do
+      {:ok, seconds} -> {seconds, warning != ""}
+      _unset_or_unrecognized -> {600, warning != ""}
     end
   end
 
@@ -1991,6 +2382,43 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     String.replace(name, ~r{GNUSparseFile\.\d+/}, "")
   end
 
+  @no_null_list "tar cannot read a NUL-separated file list (--null -T); install GNU tar or bsdtar"
+
+  # A tar that rejects `--null` the way busybox does, and is the real one
+  # otherwise.
+  defp stub_tar_without_null!(ctx) do
+    stub!(ctx.bin, "tar", """
+    #!/bin/sh
+    for a in "$@"; do
+      if [ "$a" = "--null" ]; then echo "tar: unrecognized option '--null'" >&2; exit 1; fi
+    done
+    exec #{ctx.real_tar} "$@"
+    """)
+  end
+
+  defp assert_media_refused!(ctx) do
+    assert {out, 1} = backup(ctx, "media")
+    assert out =~ @no_null_list
+    # No part, no sidecar, no in-progress marker, no scratch left over.
+    assert media_dir_listing(ctx) == []
+    assert File.ls!(ctx.scratch) == []
+  end
+
+  defp assert_all_keeps_the_dump!(ctx) do
+    assert {out, 1} = backup(ctx, "all")
+    assert out =~ @no_null_list
+
+    assert [dump] = Path.wildcard(Path.join(ctx.backups, "db/kiln-db-*.dump"))
+    {:ok, hex, _} = Checksum.file(dump)
+    assert {:ok, [{^hex, _}]} = Checksum.parse_sidecar(sidecar(dump))
+    assert media_dir_listing(ctx) == []
+
+    manifest = manifest!(ctx)
+    refute manifest["ok"]
+    assert manifest["error"] =~ @no_null_list
+    assert [%{"kind" => "db", "sha256" => ^hex}] = manifest["artifacts"]
+  end
+
   defp stub!(bin, name, body) do
     path = Path.join(bin, name)
     File.write!(path, body)
@@ -2008,6 +2436,11 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       {"S3_BUCKET", nil},
       {"BACKUP_MEDIA_PART_MB", nil},
       {"BACKUP_MEDIA_EXCLUDE", nil},
+      {"BACKUP_LOCK_WAIT_SECONDS", nil},
+      {"PGSSLMODE", nil},
+      {"PGSSLROOTCERT", nil},
+      {"DATABASE_SSL", nil},
+      {"DATABASE_SSL_CACERTFILE", nil},
       {"TMPDIR", ctx.scratch},
       {"COPYFILE_DISABLE", "1"},
       {"PATH", ctx.bin <> ":" <> System.get_env("PATH")}

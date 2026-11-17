@@ -17,6 +17,8 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
   import Ecto.Query
   import ExUnit.CaptureLog
   import KilnCMS.Test.BackupCluster
+  import Phoenix.ConnTest, only: [get: 2]
+  import Phoenix.LiveViewTest
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Chain, DirId, Heartbeat, MarkerSyncWorker}
@@ -523,6 +525,29 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       end
     end
 
+    # #2543: the beat's upsert writes a nil id too, so the fan-out stops
+    # queueing syncs for a directory that is gone ("no node with that
+    # directory" every slot).
+    test "a node whose directory lost its id stops reporting it; no job is queued for the old id" do
+      a = host!("a", "20260801-031700")
+      b = host!("b", "20260801-041700")
+
+      tick_as(a, "a@host")
+      state_b = tick_as(b, "b@host")
+      assert {:ok, id_b} = DirId.current(b)
+      assert beat_of("b@host").dir_id == id_b
+
+      # B's volume is replaced by an empty one: no backups, no id file.
+      for entry <- File.ls!(b), do: File.rm_rf!(Path.join(b, entry))
+      tick_as(b, state_b)
+
+      refute File.exists?(DirId.path(b))
+      assert beat_of("b@host").dir_id == nil
+
+      assert :ok = as_node(a, fn -> perform_job(MarkerSyncWorker, %{}) end)
+      assert routed_jobs() == []
+    end
+
     # The mutation check: without the heartbeat's ids (the job turned off
     # here, so no tick creates one) the test above fails. B is never reached.
     test "without the heartbeat's ids, a host whose node never fetches the cron job stays " <>
@@ -801,6 +826,83 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       assert MarkerSyncWorker.enabled?()
       put_cron("not a cron")
       refute MarkerSyncWorker.enabled?()
+    end
+  end
+
+  # #2931's acceptance: a backup a schedule keeps, deleted by a host prune
+  # that ignores `.hold` (a `backup.sh` older than the hold markers), is
+  # logged and reported at the next sync, and both Backups pages warn.
+  describe "a held backup deleted outside the app (#2931)" do
+    @endpoint KilnCMSWeb.Endpoint
+
+    defp signed_in_conn(user) do
+      strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
+
+      {:ok, user} =
+        AshAuthentication.Strategy.action(
+          strategy,
+          :sign_in,
+          %{"email" => to_string(user.email), "password" => "password123456"},
+          []
+        )
+
+      KilnCMSWeb.ConnCase.build_conn()
+      |> Phoenix.ConnTest.init_test_session(%{})
+      |> AshAuthentication.Plug.Helpers.store_in_session(user)
+    end
+
+    # The Backups page reads its status in the background (#2417).
+    defp await_status(lv, tries \\ 20) do
+      render_async(lv, 2_000)
+
+      cond do
+        has_element?(lv, ~s|#backup-page[data-busy="false"]|) -> :ok
+        tries == 0 -> flunk("the Backups page was still busy")
+        true -> await_status(lv, tries - 1)
+      end
+    end
+
+    test "is reported, and both pages warn", %{dir: dir} do
+      cron_backup!(dir, @old)
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+      cron_backup!(dir, @cron)
+      BackupSchedules.schedule!(%{keep_count: 2})
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+      assert holds(dir) == ["db/kiln-#{@old}.hold", "db/kiln-#{@cron}.hold"]
+
+      ref = attach([[:kiln_cms, :backups, :hold, :deleted_outside]])
+      File.rm!(Path.join([dir, "db", "kiln-db-#{@old}.dump"]))
+
+      log =
+        capture_log([level: :warning], fn -> assert :ok = perform_job(MarkerSyncWorker, %{}) end)
+
+      assert log =~
+               "deleted outside the app although their .hold markers kept them: " <>
+                 "db backup #{@old}."
+
+      assert_received {[:kiln_cms, :backups, :hold, :deleted_outside], ^ref, %{count: 1},
+                       %{scope: :local}}
+
+      assert holds(dir) == ["db/kiln-#{@cron}.hold"]
+
+      line =
+        "a backup a schedule keeps was deleted outside the app: " <>
+          "Database backup of 2026-07-01 03:17 UTC."
+
+      conn = signed_in_conn(BackupSchedules.platform_admin())
+
+      {:ok, lv, _html} = live(conn, "/editor/backups")
+      await_status(lv)
+      assert has_element?(lv, "#backup-held-deleted", line)
+      assert has_element?(lv, ~s|#backup-held-deleted-docs[href$="backups.md#the-hold-markers"]|)
+
+      {:ok, lv, _html} = live(conn, "/editor/backups/schedules")
+      assert has_element?(lv, "#schedule-held-deleted", line)
+      assert has_element?(lv, "#schedule-held-deleted", "scripts/backup.sh is older than this")
+
+      # The next sync has nothing more to say.
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+      refute_received {[:kiln_cms, :backups, :hold, :deleted_outside], ^ref, _, _}
     end
   end
 end

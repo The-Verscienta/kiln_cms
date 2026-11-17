@@ -63,7 +63,6 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
     {"billing_memberships", "user_id"},
     {"billing_membership_events", "user_id"},
     {"billing_membership_events", "actor_id"},
-    {"newsletter_subscribers", "user_id"},
     {"newsletter_sends", "sent_by_id"},
     # Content history beyond each type's own versions
     {"document_events", "actor_id"},
@@ -93,6 +92,9 @@ defmodule KilnCMS.Accounts.Registrations.Erasure do
     {"push_subscriptions", "user_id"},
     {"saved_views", "owner_id"},
     {"user_identities", "user_id"},
+    # Deleted by `KilnCMS.Newsletter.forget_member/1` (#2991). It used to
+    # block, conservatively, while erasure left the rows behind.
+    {"newsletter_subscribers", "user_id"},
     {"security_events", "actor_id"},
     {"security_events", "target_id"},
     {"instance_security_events", "actor_id"},

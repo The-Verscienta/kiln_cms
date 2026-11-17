@@ -12,9 +12,10 @@ defmodule KilnCMS.Backups.Run.Changes.ResumeRefused do
   "Interrupted: ..." line.
 
   The error becomes `"Resume refused: <reason>"`, then the previous error on
-  the next line. A previous error that already starts with a refusal loses that
-  first line, so refusals never stack and the original failure is kept. The
-  log gains the same line.
+  the next line. A previous error that already starts with such a note (a
+  refusal, or a resume canceled before it started, #2816) loses that first
+  line, so notes never stack and the original failure is kept. The log gains
+  the same line (`Run.Changes.ResumeNote`).
 
   The UPDATE's WHERE requires an in-app run with the status the caller loaded
   (and, for a `running` one, still stale), so a live run, an imported run, or
@@ -27,9 +28,9 @@ defmodule KilnCMS.Backups.Run.Changes.ResumeRefused do
   require Ash.Expr
 
   alias KilnCMS.Backups
+  alias KilnCMS.Backups.Run.Changes.ResumeNote
 
   @prefix "Resume refused: "
-  @interrupted "Interrupted: the job was killed or the node stopped"
 
   @impl true
   def change(changeset, _opts, _context) do
@@ -61,7 +62,7 @@ defmodule KilnCMS.Backups.Run.Changes.ResumeRefused do
         )
         |> Ash.Changeset.force_change_attribute(:status, :failed)
         |> Ash.Changeset.force_change_attribute(:finished_at, now)
-        |> note(reason, run.error || @interrupted, now)
+        |> note(reason, run.error || ResumeNote.interrupted(), now)
 
       _other ->
         Ash.Changeset.add_error(changeset,
@@ -71,28 +72,6 @@ defmodule KilnCMS.Backups.Run.Changes.ResumeRefused do
     end
   end
 
-  defp note(changeset, reason, previous, now) do
-    message = @prefix <> reason
-    entry = %{at: now, level: :error, step: "resume", message: message}
-
-    changeset
-    |> Ash.Changeset.force_change_attribute(:error, error(message, previous))
-    |> Ash.Changeset.force_change_attribute(:log, (changeset.data.log || []) ++ [entry])
-  end
-
-  defp error(message, nil), do: message
-
-  defp error(message, previous) do
-    previous =
-      if String.starts_with?(previous, @prefix) do
-        previous |> String.split("\n", parts: 2) |> Enum.at(1)
-      else
-        previous
-      end
-
-    case previous do
-      blank when blank in [nil, ""] -> message
-      previous -> message <> "\n" <> previous
-    end
-  end
+  defp note(changeset, reason, previous, now),
+    do: ResumeNote.put(changeset, @prefix <> reason, :error, previous, now)
 end
