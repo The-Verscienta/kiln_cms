@@ -29,6 +29,11 @@ defmodule KilnCMS.Media.AVStripWorker do
 
   The strip's outcomes are the sync path's, applied one step later:
 
+    * The private blob cannot be read at all. If it is definitely missing
+      (`:enoent`, a `404`), there is nothing to strip: the job completes and
+      the reaper takes the row. Any other read error (a timeout, a `5xx`, a
+      full temp disk) is returned as `{:error, _}` so Oban retries (#2723);
+      if every attempt fails, the row stays quarantined for the reaper.
     * `{:ok, stripped}` — promoted, released, derived. The stripped copy is
       re-checked against the item's size cap first, as `Ingest.persist/4`
       does: a remux is not size-preserving in the safe direction.
@@ -39,11 +44,13 @@ defmodule KilnCMS.Media.AVStripWorker do
     * `{:error, :unavailable}` (no ffmpeg) or another remux failure — a
       standing property of the host or the file, so retrying is pointless.
       Under `require_av_metadata_strip: true` the upload is **refused**: row
-      purged, private blob deleted, an error logged naming the item — the same
-      answer the sync path gives at upload time, delivered late. Otherwise the
-      upload is promoted **as it arrived**, with the same warning the sync path
-      logs, because "can never be uploaded at all" is the worse of the two bad
-      answers for a host that will never remux.
+      purged, then its private blob deleted, an error logged naming the item —
+      the same answer the sync path gives at upload time, delivered late. If
+      the purge fails the blob is kept and the job fails, so Oban redoes the
+      refusal (#2835). Otherwise the upload is promoted **as it arrived**,
+      with the same warning the sync path logs, because "can never be
+      uploaded at all" is the worse of the two bad answers for a host that
+      will never remux.
     * The item is gone, or no longer quarantined — someone deleted it, or a
       duplicate job ran — nothing to do.
 
@@ -112,16 +119,46 @@ defmodule KilnCMS.Media.AVStripWorker do
 
         {:error, reason}
 
-      # The private blob is not there to strip. Nothing this job can do; the
-      # reaper takes the row.
-      {:error, reason} ->
-        Logger.error(
-          "Deferred metadata strip for media #{item.id}: private blob unreadable (#{inspect(reason)})"
-        )
+      # The private blob is definitely not there to strip. Nothing this job
+      # can do; the reaper takes the row.
+      {:error, reason} = error ->
+        if missing_blob?(reason) do
+          Logger.error(
+            "Deferred metadata strip for media #{item.id}: private blob unreadable (#{inspect(reason)})"
+          )
 
-        :ok
+          :ok
+        else
+          # Anything else may pass (#2723): a timeout or 5xx from the object
+          # store, a full temp disk. Completing here would leave a good upload
+          # to the reaper; retrying costs a few attempts at most, and if they
+          # all fail the row ends with the reaper exactly as before, just later.
+          Logger.warning(
+            "Deferred metadata strip for media #{item.id}: could not read its private blob " <>
+              "(#{inspect(reason)}); will retry."
+          )
+
+          error
+        end
     end
   end
+
+  # The shapes that mean the blob is not there: the Local adapter's `:enoent`
+  # from `File.stat/1`, S3's `404`, and a `:not_found` from a backend that
+  # normalizes it. Everything else retries.
+  #
+  # Two near misses, both accepted. S3 answers `403`, not `404`, for a missing
+  # key when the credentials lack `s3:ListBucket`; that retries, which is the
+  # safe direction. And `File.open/2` on the temp file answers `:enoent` if the
+  # temp directory itself is gone; that is read as a missing blob, but a host
+  # whose tmp dir vanished has bigger problems than one quarantined upload.
+  # Shapes that cannot succeed on a retry either (`:invalid_key`,
+  # `:private_storage_not_configured`, a malformed range reply) also retry,
+  # then end with the reaper, as they did before.
+  defp missing_blob?(:enoent), do: true
+  defp missing_blob?(:not_found), do: true
+  defp missing_blob?({:http_error, 404, _response}), do: true
+  defp missing_blob?(_reason), do: false
 
   defp strip_downloaded(item, key, original, ext, max_bytes, tenant) do
     case AVProcessor.strip_metadata(original, ext) do
@@ -205,28 +242,45 @@ defmodule KilnCMS.Media.AVStripWorker do
 
   # Row and blob both go: a refused upload must not linger as a quarantined
   # row (the reaper would take it eventually, but "refused" should mean now).
+  #
+  # Row first, blob only once the row is gone (#2835), as the admin purge in
+  # `MediaLive` does. The pipeline may purge an item only while it is
+  # quarantined (#1659), through `:purge_quarantined` (#2610). A purge that
+  # fails, for any reason, keeps the blob with its row and fails the job, so
+  # Oban redoes the refusal within minutes; the reaper is the backstop if it
+  # never succeeds.
   defp refuse(item, key, tenant, why) do
     Logger.error(
       "Media #{item.id} (#{item.filename}) refused: #{why}. Re-export and upload again."
     )
 
-    Storage.delete_private(key, item)
-
-    # The pipeline may purge an item only while it is quarantined (#1659),
-    # through `:purge_quarantined` (#2610), which this one still is. A
-    # failure leaves a blob-less quarantined row, which the reaper takes; it
-    # is logged rather than retried, because a retry would find the private
-    # blob gone and could not strip again.
     case CMS.purge_quarantined_media_item(item, actor: Media.system(), tenant: tenant) do
+      :ok ->
+        delete_private(item, key)
+        broadcast(item.id)
+        :ok
+
+      {:error, reason} = error ->
+        Logger.error(
+          "Refused media #{item.id} could not be purged: #{inspect(reason)}; its private blob is kept."
+        )
+
+        error
+    end
+  end
+
+  # After a purge: a failure here leaves a private blob with no row, which
+  # nothing sweeps. Logged with the key so an operator can remove it.
+  defp delete_private(item, key) do
+    case Storage.delete_private(key, item) do
       :ok ->
         :ok
 
       {:error, reason} ->
-        Logger.error("Refused media #{item.id} could not be purged: #{inspect(reason)}")
+        Logger.error(
+          "Purged media #{item.id} left its private blob #{key} behind: #{inspect(reason)}"
+        )
     end
-
-    broadcast(item.id)
-    :ok
   end
 
   defp release(item, byte_size, tenant) do
