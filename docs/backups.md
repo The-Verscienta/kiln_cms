@@ -463,6 +463,11 @@ slots its own node happens to pick up the job:
 - **The job is off** (`KILN_BACKUP_MARKER_SYNC_CRON=false`). The heartbeat
   then creates no id; only an in-app backup does.
 
+For as long as reading `BACKUP_DIR` hangs (a hard-mounted NFS export that
+stopped answering, say), the node also reports no id, so the queued syncs
+stop going to it until the directory answers again
+([The backup-directory id read](#the-backup-directory-id-read-2848)).
+
 **A cloned directory now always carries an id.** Copying a backup directory to
 another host (`rsync`, a volume snapshot) copies its `.kiln-dir-id`, and two
 directories with one id look like one: the sync for that id is queued once and
@@ -1034,6 +1039,16 @@ and `manifest.json.<digits>-<digits>.partial`. The plain
 `manifest.json.partial` that an older `backup.sh` writes is never removed by
 either; delete one by hand once no older script is running.
 
+The same two remove a `.kiln-dir-id.<uuid>.tmp` at the top of `BACKUP_DIR`
+once it is more than 60 minutes old (#2849). The app writes the
+[backup-directory id](#several-nodes-and-the-backup-lock) to that name and
+links it to `.kiln-dir-id` a moment later, so one that old was left by a node
+stopped in between. Nothing reads it. `backup.sh` never writes one, but a
+host that backs up only with cron gets them from each node's heartbeat, which
+is why `backup.sh prune` removes them too and prints each one it removes.
+Both remove only regular files with exactly that name (a lowercase UUID);
+`prune` keeps a file whose age it can't read, with a warning.
+
 A step writes, checks (`pg_restore --list`, `tar -tzf`) and hashes its file
 under that name, outside the backup lock. Only the rename into place runs
 under the lock, and only while the step still holds the backup
@@ -1437,7 +1452,7 @@ at all (`BACKUP_ENABLED=false`, no `pg_dump` in the image on the node that
 picked up the start step) is a `Skipped` row and leaves `manifest.json` alone,
 as before.
 
-**Telemetry.** The chain emits, each with measurements `%{count: 1}`:
+**Telemetry.** The chain and the heartbeat emit, each with measurements `%{count: 1}`:
 
 | Event | Metadata | When |
 |---|---|---|
@@ -1446,6 +1461,7 @@ as before.
 | `[:kiln_cms, :backups, :lock, :reclaimed]` | `chain`, `stamp`, `step`, `node`, `outcome` (`:requeued` or `:interrupted`) | A step was taken back from a node that stopped responding ([below](#several-nodes-and-the-backup-lock)). |
 | `[:kiln_cms, :backups, :status, :history_unreadable]` | `error` (the error's module) | The status could not read History and fell back to the manifest ([above](#check-the-last-backup-of-each-component)). |
 | `[:kiln_cms, :backups, :offsite, :partial]` | `stamp`, `chain`, `missed` (the keys of the destinations not reached); measurements also `reached` and `total` | A backup finished having reached some of its off-site destinations but not all ([below](#when-a-backup-reaches-only-some-destinations)). |
+| `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]` | `node`; measurements also `waited_ms` | A heartbeat beat with no backup-directory id because reading `.kiln-dir-id` is held up, once per beat while it is ([below](#the-backup-directory-id-read-2848)). |
 
 The in-app schedules emit their own events,
 `[:kiln_cms, :backups, :schedule, …]` and
@@ -1563,8 +1579,8 @@ What can go wrong:
 | "That backup can't be canceled." | Anything else, for example a run that is not an in-app backup. |
 
 **Resume waits about two and a half minutes after a Cancel (#2538).** A node
-that lost the database misses the Cancel, and stops its step only once its
-heartbeat has failed for 90 seconds. A resume that started sooner could run
+that lost the database misses the Cancel, and stops its step only once it
+has gone 90 seconds without a successful heartbeat. A resume that started sooner could run
 beside that step: its file writes are fenced, but an off-site copy or a prune
 is not ([below](#what-a-step-that-outlives-its-cancel-can-write)). So for 150 seconds after the Cancel (counted from
 the time the row was canceled), **Resume** on that row is refused with "That
@@ -1686,8 +1702,21 @@ looks at the lock:
   the lock is released.
 - Either way, a `finish` step that had already closed the run is completed,
   not failed ([When a step is interrupted](#how-an-in-app-backup-runs-2218)).
-- A node that cannot write its beat for 90 seconds (it lost the database)
-  stops its own backup steps before the others take them over.
+- A node with no successful beat for 90 seconds stops its own backup steps
+  before the others take them over. That covers a node that lost the
+  database, and also one whose heartbeat is stuck, for example on a
+  `BACKUP_DIR` mount that hangs (#2848). The stop is made by a watchdog
+  process of its own (`KilnCMS.Backups.Fence`) that does no file or database
+  work: every 5 seconds it checks how long ago the heartbeat last beat, so it
+  fires within 5 seconds of the 90 even while the heartbeat waits on a hung
+  directory. The server log says "Backup heartbeat: no successful beat for
+  N s; stopping N backup step(s) on this node before another node takes them
+  over". It counts from the end of the last successful beat, so a heartbeat
+  that is only slow can trip it too: the next beat starts 30 seconds after
+  the previous round (beat, sweep and prune) ends, and a round that takes
+  more than about a minute stops this node's steps. While no beat succeeds,
+  it stops every step that starts on the node, every 5 seconds. If the
+  watchdog itself restarts, it counts from its own start.
 - A node that missed a Cancel or a take-back while it couldn't reach the
   database (it got the connection back before the 90 seconds were up, say)
   stops that step after its next successful beat: it looks up the job of each
@@ -1704,7 +1733,8 @@ never makes a request queue behind it for good. The heartbeat is on by
 default (`config :kiln_cms, KilnCMS.Backups, heartbeat?: true`). Leave it on:
 it is off only in the test build. With it off, a stopped node's step is never
 reclaimed and holds the lock until Oban's Lifeline rescues it (about 3 hours)
-or a platform admin cancels it.
+or a platform admin cancels it. The self-fence's watchdog starts only with
+the heartbeat.
 
 **Node names must be unique.** A beat is keyed by the Oban node name: the
 Erlang node name when the release runs distributed (`kiln_cms@<hostname>` by
@@ -1720,7 +1750,10 @@ earlier by the node's heartbeat when the
 holds backups. It is written to a temporary file, synced, and hard-linked into
 place, so no node ever reads an empty or half-written id, and two nodes racing
 on a shared volume settle on the first one linked. (On a filesystem without
-hard links it is created in place with an exclusive create instead.) Every
+hard links it is created in place with an exclusive create instead.) The
+temporary file is `.kiln-dir-id.<uuid>.tmp`, removed a moment after the link;
+one left behind by a node stopped in between is removed once it is an hour
+old ([Temporary files](#temporary-files-and-the-trash-directories)). Every
 step after `start` runs only on a node that reads the same id:
 
 - **One shared volume** mounted on every node: every node reads the same id,
@@ -1785,6 +1818,50 @@ If you size `POOL_SIZE` as the sum of queue limits plus web traffic
 does not take the lock, so a cron backup and an in-app backup can run at the
 same time. They write different stamps; schedule them apart to keep the load
 down.
+
+### The backup-directory id read (#2848)
+
+Every beat reports the id in `<BACKUP_DIR>/.kiln-dir-id` (and, with the
+[last-good marker sync](#the-last-good-marker) on, creates it in a directory
+that holds backups). On a hard-mounted NFS export that stops answering, that
+read blocks, and before #2848 it blocked the whole heartbeat with it, its
+self-fence included. Now:
+
+- **The read runs in a task of its own**, which the heartbeat waits on for
+  at most 5 seconds. A read that takes longer is left running, and the beat
+  goes out without an id.
+- **While it is held up, every beat reports no id.** The directory is hung,
+  so the last-good marker sync stops routing to this node until it answers.
+  The heartbeat starts no second read until the first one ends (a process
+  blocked on a hung mount can't be killed, so one per tick would pile up).
+  Once it ends, the next beat reads the id afresh.
+- **The beat always goes out.** A read that crashes, or that answers with
+  something other than an id or an error, is logged and the beat reports no
+  id.
+- **At most four reads run on a node at once.** If heartbeats restarted on a
+  hung mount have left four stuck, a tick starts none and beats with no id.
+
+What the server log says:
+
+| Log line | Level | Meaning |
+|---|---|---|
+| "Backup heartbeat: reading the id of the backup directory `<dir>` has taken more than N s (a hung mount?). Beating with no id, so the last-good marker sync stops routing here; no other read starts until this one finishes." | warning | A read passed the 5-second wait. Once per stall. |
+| "Backup heartbeat: the backup-directory id read of `<dir>` finished after N s" | info | The stalled read ended. The next beat reads the id again. |
+| "Backup heartbeat couldn't start the backup-directory id read: … (earlier reads of `<dir>` are still hung?). Beating with no id." | warning | Four reads are already stuck. Once, until a read starts again. |
+| "Backup heartbeat: the backup-directory id read failed, beating with no id: …" | warning | The read raised, exited, or gave an unexpected answer. |
+
+Each beat that a read holds up also emits
+`[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]`, with measurements
+`%{count: 1, waited_ms: ms}` (how long the read has run so far) and metadata
+`%{node: node}` (the node's Oban node name). Alert on it: a node that emits it
+for minutes has a backup directory that isn't answering, and anything else
+that reads or writes it there, an in-app backup step included, waits on it
+too.
+
+The wait is `config :kiln_cms, KilnCMS.Backups, dir_id_timeout_ms: 5000`.
+There is no reason to change it; the stall doesn't stop the self-fence,
+which runs apart from the heartbeat
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)).
 
 ### What a step that outlives its Cancel can write
 
@@ -3446,7 +3523,8 @@ backup stamp is removed once it is an hour old, as before, and so is a
 manifest temporary file left at the top of `BACKUP_DIR`: a step's
 `manifest.json.<job>-<attempt>.partial`, the app's
 `manifest.json.<random digits>.partial`, or `backup.sh`'s
-`manifest.json.<pid>-<random>.partial` (#2832). `backup.sh prune` removes the
+`manifest.json.<pid>-<random>.partial` (#2832), and the app's leftover
+`.kiln-dir-id.<uuid>.tmp` (#2849). `backup.sh prune` removes the
 same files once they are an hour old. The plain `manifest.json.partial` of an
 older `backup.sh` is removed by neither
 ([Temporary files](#temporary-files-and-the-trash-directories)). The start of

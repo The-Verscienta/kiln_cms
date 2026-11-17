@@ -47,7 +47,8 @@ defmodule KilnCMS.Backups.Heartbeat do
   One that takes longer is left running, and this heartbeat starts no other
   until it has finished: a process blocked in a file operation on a hung
   mount can't be killed, so one per tick would pile up. A read that answers
-  by the next tick is used by that tick's beat. Every beat a read holds up
+  after the tick stopped waiting ends the stall, and the next tick reads
+  afresh. Every beat a read holds up
   reports no id: the directory is hung, so the marker sync stops routing to
   this node until it answers again. A stall logs one warning when it starts
   and a line when it clears, and each beat it holds up emits

@@ -282,6 +282,12 @@ Every summary line below that was shortened links to its own entry there.
 - **`restore.sh db` and `drill` verify the dump against its `kiln-db-<stamp>.sha256` before touching the database and refuse a mismatch; with no sidecar they warn and continue.**
   ([long form](docs/changelog/unreleased.md#restore-db-verifies-checksum))
 
+- **A node whose heartbeat hangs on `BACKUP_DIR` still stops its backup steps after 90 s without a successful beat, and a hung `.kiln-dir-id` read no longer holds up the beat.**
+  ([#2848](https://github.com/The-Verscienta/kiln_cms/issues/2848) · [long form](docs/changelog/unreleased.md#backup-self-fence-watchdog))
+
+- **A `.kiln-dir-id.<uuid>.tmp` left by a node stopped mid-publish is removed after an hour, by the next in-app backup and by `backup.sh prune`.**
+  ([#2849](https://github.com/The-Verscienta/kiln_cms/issues/2849) · [long form](docs/changelog/unreleased.md#backup-dir-id-temp-sweep))
+
 ### Security
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**

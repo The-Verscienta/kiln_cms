@@ -1848,6 +1848,46 @@ carries the reasoning.
   [ADR 0035](../decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
   ([#2877](https://github.com/The-Verscienta/kiln_cms/issues/2877))
 
+<a id="backup-self-fence-watchdog"></a>
+
+- **A node whose heartbeat is stuck on a hung `BACKUP_DIR` now still stops its own backup steps at 90 seconds, and the backup-directory id read can no longer hold up a beat.**
+  Since #2789 every beat reads (and with the last-good marker sync on, may
+  create) `.kiln-dir-id`. On a hard-mounted NFS export that hangs, that read
+  blocked the heartbeat, and with it the self-fence, while the other nodes
+  still took the step back at 180 seconds: two nodes could write the same
+  backup. Now a watchdog process, `KilnCMS.Backups.Fence`, which does no
+  file or database work, checks every 5 seconds and kills this node's
+  registered steps once the last successful beat is 90 seconds old. It
+  starts with the heartbeat (`heartbeat?: true`). It counts from the end of
+  the last successful beat, so a heartbeat round that is only slow (about a
+  minute of beat, sweep and prune) also stops this node's steps; a restarted
+  watchdog counts from its own start. The id read runs in a supervised task
+  (`KilnCMS.Backups.DirIdReaders`, at most four at a time) that the beat
+  waits on for 5 seconds (`config :kiln_cms, KilnCMS.Backups,
+  dir_id_timeout_ms:`). While it is held up, each beat reports no id, so the
+  marker sync stops routing to that node; the log warns once per stall and
+  says when it clears, and each held-up beat emits
+  `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]` (measurements
+  `count`, `waited_ms`; metadata `node`). A read that crashes is logged and
+  the beat still goes out. See
+  [The backup-directory id read](../backups.md#the-backup-directory-id-read-2848),
+  [Several nodes and the backup lock](../backups.md#several-nodes-and-the-backup-lock)
+  and the amendment to
+  [ADR 0039](../decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md).
+  ([#2848](https://github.com/The-Verscienta/kiln_cms/issues/2848))
+
+<a id="backup-dir-id-temp-sweep"></a>
+
+- **A `.kiln-dir-id.<uuid>.tmp` left in `BACKUP_DIR` by a node stopped while it published the directory id is now removed once it is an hour old.**
+  The app writes the id to that temporary file, links it to `.kiln-dir-id`
+  and removes it; a node killed in between left it for good. The start of
+  every in-app backup and `backup.sh prune` (which prints each one it
+  removes) now remove such files older than 60 minutes, regular files with
+  exactly that name only. `prune` covers hosts that back up only with cron
+  and still get the file from an app node's heartbeat. See
+  [Temporary files and the trash directories](../backups.md#temporary-files-and-the-trash-directories).
+  ([#2849](https://github.com/The-Verscienta/kiln_cms/issues/2849))
+
 ## Security
 
 <a id="backup-state-json-remote"></a>
