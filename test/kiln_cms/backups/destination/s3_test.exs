@@ -154,6 +154,30 @@ defmodule KilnCMS.Backups.Destination.S3Test do
                ])
     end
 
+    test "a listing names the host connected to: a virtual-hosted bucket needs its own name" do
+      settings = fn endpoint, path_style ->
+        config(%{"endpoint" => endpoint, "bucket" => "vault", "path_style" => path_style}).settings
+      end
+
+      assert {:error, _} =
+               Endpoint.parse(settings.("http://corp.internal", false), ["corp.internal"])
+
+      assert {:error, _} =
+               Endpoint.parse(settings.("https://corp.internal", false), ["corp.internal"])
+
+      assert {:ok, _} = Endpoint.parse(settings.("http://corp.internal", true), ["corp.internal"])
+
+      assert {:ok, %Endpoint{path_style?: false}} =
+               Endpoint.parse(settings.("http://corp.internal", false), ["vault.corp.internal"])
+    end
+
+    test "no listing opens link-local reached through NAT64 or 6to4" do
+      refute Endpoint.allowed_address?({0x64, 0xFF9B, 0, 0, 0, 0, 0xA9FE, 0xA9FE}, true)
+      refute Endpoint.allowed_address?({0x2002, 0xA9FE, 0xA9FE, 0, 0, 0, 0, 1}, true)
+      assert Endpoint.allowed_address?({0x64, 0xFF9B, 0, 0, 0, 0, 0x0A00, 0x0005}, true)
+      refute Endpoint.allowed_address?({0x64, 0xFF9B, 0, 0, 0, 0, 0x0A00, 0x0005}, false)
+    end
+
     test "checks the bucket, region and prefix" do
       assert {:error, "the bucket name must be" <> _} = S3.validate(config(%{"bucket" => "Kiln"}))
 
@@ -327,6 +351,74 @@ defmodule KilnCMS.Backups.Destination.S3Test do
       assert FakeS3.count(fake, :create_multipart) == 2
       assert FakeS3.uploads(fake) == %{}
       assert FakeS3.object(fake, key(file)) == nil
+    end
+
+    test "every part sent but Complete failed: the next attempt only completes", %{
+      tmp_dir: dir
+    } do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+      # Six failures: Retry gives up on the first attempt's Complete.
+      FakeS3.inject(fake, :complete, {:error, 500, "InternalError"}, times: 6)
+
+      assert {:error, _transient} = put(file, resume: resume())
+      checkpoint = last_saved()
+      assert checkpoint["parts_done"] == 5
+      [upload_id] = Map.keys(FakeS3.uploads(fake))
+      assert checkpoint["upload_id"] == upload_id
+
+      assert put(file, resume: resume(checkpoint)) == :ok
+      assert parts_sent(fake) == [1, 2, 3, 4, 5]
+      assert FakeS3.count(fake, :create_multipart) == 1
+      assert FakeS3.count(fake, :complete) == 7
+      assert saved() == []
+      assert sha256(FakeS3.object(fake, key(file)).body) == file.sha256
+    end
+
+    test "an unusable checkpoint's upload is aborted before a new one starts", %{tmp_dir: dir} do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+      FakeS3.inject(fake, :upload_part, :drop, skip: 2, times: 6)
+      {:error, _reason} = put(file, resume: resume())
+      [old] = Map.keys(FakeS3.uploads(fake))
+
+      assert put(file, resume: resume(%{last_saved() | "part_size" => 0})) == :ok
+
+      assert [{:abort_multipart, _key, %{"uploadId" => ^old}}] =
+               Enum.filter(FakeS3.requests(fake), &(elem(&1, 0) == :abort_multipart))
+
+      assert FakeS3.count(fake, :create_multipart) == 2
+      assert FakeS3.uploads(fake) == %{}
+    end
+
+    test "a replaced upload that can't be aborted keeps its checkpoint: no new upload", %{
+      tmp_dir: dir
+    } do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+      FakeS3.inject(fake, :upload_part, :drop, skip: 2, times: 6)
+      {:error, _reason} = put(file, resume: resume())
+      checkpoint = %{last_saved() | "parts_digest" => String.duplicate("0", 64)}
+      FakeS3.inject(fake, :abort_multipart, {:error, 500, "InternalError"}, times: :infinity)
+
+      assert {:error, message} = put(file, resume: resume(checkpoint))
+      assert message =~ "couldn't abort the earlier upload"
+      assert message =~ "the next attempt tries again"
+      assert FakeS3.count(fake, :create_multipart) == 1
+      assert saved() == []
+      assert map_size(FakeS3.uploads(fake)) == 1
+    end
+
+    test "without a Resume, a failed Complete aborts the upload this call started", %{
+      tmp_dir: dir
+    } do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+      FakeS3.inject(fake, :complete, {:error, 400, "InvalidPart"})
+
+      assert {:error, {:permanent, _message}} = put(file)
+      assert FakeS3.uploads(fake) == %{}
+      assert FakeS3.count(fake, :abort_multipart) == 1
     end
 
     test "lists parts page by page", %{tmp_dir: dir} do
@@ -782,6 +874,30 @@ defmodule KilnCMS.Backups.Destination.S3Test do
       assert File.read!(to) == ""
     end
 
+    test "an oversize answer is cut off and classified, not buffered", %{tmp_dir: dir} do
+      fake = FakeS3.start()
+      oversize = :binary.copy("x", 8 * 1024 * 1024 + 1)
+      FakeS3.inject(fake, :list_objects, {:raw, 200, oversize}, times: :infinity)
+
+      assert {:error, message} = S3.list(config())
+      assert message =~ "larger than the 8388608 bytes expected"
+
+      name = "kiln-db-20261117-000000.dump"
+      FakeS3.put_object(fake, "site/a/db/#{name}", :crypto.strong_rand_bytes(3_000))
+      FakeS3.inject(fake, :get_object, {:raw, 206, :binary.copy("y", 70_000)}, times: :infinity)
+      to = Path.join(dir, "restored.dump")
+
+      assert {:error, message} = S3.get(config(), %{subdir: "db", name: name}, to)
+      assert message =~ "larger than the 65536 bytes expected"
+      refute File.exists?(to)
+    end
+
+    test "a ranged read may be as large as its range, an error document always fits" do
+      assert Client.body_limit([{"range", "bytes=0-16777215"}]) == 16_777_216
+      assert Client.body_limit([{"range", "bytes=0-1499"}]) == 65_536
+      assert Client.body_limit([]) == 8 * 1024 * 1024
+    end
+
     test "refuses names that are not a backup's" do
       FakeS3.start()
 
@@ -838,6 +954,16 @@ defmodule KilnCMS.Backups.Destination.S3Test do
 
       assert {:error, {:permanent, "checking the bucket: the bucket does not exist"}} =
                S3.test(config())
+    end
+
+    test "a probe that can't be read back says so, not that the bucket is missing" do
+      fake = FakeS3.start()
+      FakeS3.inject(fake, :get_object, {:error, 404, "NoSuchKey"})
+
+      assert {:error, message} = S3.test(config())
+      assert message =~ "reading the test file back"
+      refute message =~ "bucket does not exist"
+      assert FakeS3.keys(fake) == []
     end
 
     test "removes the probe when reading it back fails" do

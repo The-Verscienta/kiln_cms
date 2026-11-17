@@ -274,7 +274,9 @@ defmodule KilnCMS.Backups.Destination.S3 do
 
   defp step(_what, {:ok, _response} = ok), do: ok
 
-  defp step(what, {:error, %Error{class: :not_found}}),
+  # A HEAD on the bucket has no body: its 404 is the bucket missing. Any
+  # other step's 404 is that step's own (a probe read back as NoSuchKey).
+  defp step("checking the bucket" = what, {:error, %Error{class: :not_found}}),
     do: {:error, {:permanent, "#{what}: the bucket does not exist"}}
 
   defp step(what, {:error, %Error{} = error}) do

@@ -23,6 +23,7 @@ defmodule KilnCMS.Backups.Destination.S3EndpointTest do
     ~c"s3.test" => [{93, 184, 216, 34}],
     ~c"kiln-backups.s3.test" => [{93, 184, 216, 35}],
     ~c"minio.lan" => [{10, 0, 0, 5}],
+    ~c"vault.minio.lan" => [{10, 0, 0, 6}],
     ~c"sneaky.example" => [{93, 184, 216, 34}, {10, 0, 0, 5}],
     ~c"metadata.lan" => [{169, 254, 169, 254}],
     ~c"mapped.lan" => [{0, 0, 0, 0, 0, 0xFFFF, 0xA9FE, 0xA9FE}]
@@ -92,6 +93,13 @@ defmodule KilnCMS.Backups.Destination.S3EndpointTest do
     assert message =~ "BACKUP_S3_PRIVATE_HOSTS"
 
     assert Endpoint.pin(endpoint("http://minio.lan:9000")) == {:ok, {10, 0, 0, 5}}
+  end
+
+  test "a listed host opens none of its subdomains: a virtual-hosted bucket on it is refused" do
+    virtual = endpoint("https://minio.lan", %{"bucket" => "vault", "path_style" => false})
+
+    assert {:error, {:permanent, message}} = Endpoint.pin(virtual)
+    assert message =~ "BACKUP_S3_PRIVATE_HOSTS"
   end
 
   test "a listed name still never reaches link-local or metadata, mapped or not" do

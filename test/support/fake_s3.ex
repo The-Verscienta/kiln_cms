@@ -58,6 +58,8 @@ defmodule KilnCMS.Test.FakeS3 do
     * `{:error, status, code}` — an S3 error body with that `<Code>`;
     * `{:status, status, headers}` — an empty body;
     * `:drop` — the connection closes;
+    * `{:raw, status, body}` — that status and body, whatever was asked;
+    * `{:ok_error, code}` — a `200` whose body is an S3 error with that code;
     * `{:after, response}` — the operation is done, then `response` answered.
 
   `opts`: `:times` (1, or `:infinity`) and `:skip` (let this many matching
@@ -141,6 +143,10 @@ defmodule KilnCMS.Test.FakeS3 do
     |> date(pid)
     |> then(&Enum.reduce(headers, &1, fn {k, v}, c -> put_resp_header(c, k, v) end))
     |> send_resp(status, "")
+  end
+
+  defp injected(pid, conn, {:raw, status, body}) do
+    conn |> date(pid) |> send_resp(status, body)
   end
 
   defp injected(pid, conn, {:ok_error, code}) do

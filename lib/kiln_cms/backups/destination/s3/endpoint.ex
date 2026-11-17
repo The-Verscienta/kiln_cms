@@ -15,7 +15,10 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
     * an unlisted host is no `localhost`, `.local`, `.internal` or metadata
       name, and no private, loopback or link-local IP literal. A listed one
       (an exact, case-insensitive name) may be any of those but a metadata
-      name or a link-local address, which no listing opens;
+      name or a link-local address, which no listing opens. The name that
+      must be listed is the one connected to: `<bucket>.<host>` when the
+      bucket is addressed virtual-hosted, so a private store needs either
+      that name listed or `path_style` on;
     * the bucket follows S3's naming rules; one with a dot, or an endpoint
       that is an IP literal, is addressed path-style (a wildcard
       certificate covers no dotted bucket);
@@ -87,26 +90,45 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
   @spec parse(map(), [String.t()]) :: {:ok, t()} | {:error, String.t()}
   def parse(settings, listed \\ private_hosts()) when is_map(settings) do
     with {:ok, uri} <- endpoint_uri(settings["endpoint"]),
-         listed? = String.downcase(uri.host) in listed,
-         :ok <- scheme(uri.scheme, listed?),
-         :ok <- host(String.downcase(uri.host), listed?),
          {:ok, bucket} <- bucket(settings["bucket"]),
          {:ok, region} <- region(settings["region"]),
          {:ok, prefix} <- prefix(settings["prefix"]) do
-      host = String.downcase(uri.host)
+      host = uri.host |> String.downcase() |> String.trim_trailing(".")
 
-      {:ok,
-       %__MODULE__{
-         scheme: uri.scheme,
-         host: host,
-         port: uri.port,
-         bucket: bucket,
-         region: region,
-         prefix: prefix,
-         path_style?:
-           settings["path_style"] == true or String.contains?(bucket, ".") or ip_literal?(host)
-       }}
+      endpoint = %__MODULE__{
+        scheme: uri.scheme,
+        host: host,
+        port: uri.port,
+        bucket: bucket,
+        region: region,
+        prefix: prefix,
+        path_style?:
+          settings["path_style"] == true or String.contains?(bucket, ".") or ip_literal?(host)
+      }
+
+      # The name connected to is what must be listed: `bucket.host` when
+      # virtual-hosted, so listing a host opens none of its subdomains.
+      listed? = listed?(endpoint, listed)
+
+      with :ok <- scheme(uri.scheme, listed?),
+           :ok <- metadata(host),
+           :ok <- host(connect_host(endpoint), listed?),
+           do: {:ok, endpoint}
     end
+  end
+
+  @doc """
+  Whether `BACKUP_S3_PRIVATE_HOSTS` lists the exact name `endpoint`'s
+  requests connect to (`connect_host/1`).
+  """
+  @spec listed?(t(), [String.t()]) :: boolean()
+  def listed?(%__MODULE__{} = endpoint, listed \\ private_hosts()),
+    do: connect_host(endpoint) in listed
+
+  defp metadata(host) do
+    if host in @metadata_names,
+      do: {:error, "the endpoint must not be a metadata host"},
+      else: :ok
   end
 
   @doc "The host requests connect to: the bucket's own name, unless path-style."
@@ -156,13 +178,14 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
   The address to connect to for `endpoint`: `{:ok, address}`, `{:ok, nil}`
   when DNS resolution is off and the host is a name,
   `{:error, {:permanent, message}}` when any address it resolves to is not
-  allowed, or `{:error, message}` when it doesn't resolve (which may pass).
-  See the moduledoc.
+  allowed, or `{:error, message}` when it doesn't resolve or the lookup
+  times out. A call answers that last one as a transient error; saving a
+  destination refuses it. See the moduledoc.
   """
   @spec pin(t(), [String.t()]) ::
           {:ok, :inet.ip_address() | nil} | {:error, String.t() | {:permanent, String.t()}}
   def pin(%__MODULE__{} = endpoint, listed \\ private_hosts()) do
-    listed? = endpoint.host in listed
+    listed? = listed?(endpoint, listed)
     target = connect_host(endpoint)
 
     case SafeUrl.lookup(target) do
@@ -213,6 +236,11 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
   defp never?({0xFD00, 0xEC2, 0, 0, 0, 0, 0, 0x254}), do: true
   defp never?({g1, _, _, _, _, _, _, _}) when Bitwise.band(g1, 0xFFC0) == 0xFE80, do: true
 
+  # NAT64 64:ff9b::/96 and 6to4 2002::/16 carry an IPv4 address that a
+  # translator or relay delivers to.
+  defp never?({0x64, 0xFF9B, 0, 0, 0, 0, g7, g8}), do: never?(v4(g7, g8))
+  defp never?({0x2002, g2, g3, _, _, _, _, _}), do: never?(v4(g2, g3))
+
   defp never?({0, 0, 0, 0, 0, mapped, g7, g8}) when mapped in [0, 0xFFFF],
     do:
       never?(
@@ -220,6 +248,11 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
       )
 
   defp never?(_address), do: false
+
+  defp v4(high, low),
+    do:
+      {Bitwise.bsr(high, 8), Bitwise.band(high, 0xFF), Bitwise.bsr(low, 8),
+       Bitwise.band(low, 0xFF)}
 
   ## Settings
 

@@ -56,6 +56,12 @@ defmodule KilnCMS.Backups.Destination.S3.Client do
 
   @event [:kiln_cms, :backups, :s3, :request]
 
+  # Response bodies: 8 MiB for an XML answer (a 1,000-key listing is well
+  # under 1 MiB), and a ranged read's own length, never under 64 KiB so an
+  # error document still fits.
+  @max_body 8 * 1024 * 1024
+  @min_body_limit 64 * 1024
+
   @doc "The telemetry event each request emits."
   @spec event() :: [atom()]
   def event, do: @event
@@ -166,7 +172,7 @@ defmodule KilnCMS.Backups.Destination.S3.Client do
 
     with {:ok, signed} <- sign(method, url, client.aws, signed, body) do
       method
-      |> ReqClient.request(url, body, signed, http_opts(client))
+      |> ReqClient.request(url, body, signed, http_opts(client, body_limit(headers)))
       |> response()
     end
   end
@@ -182,7 +188,7 @@ defmodule KilnCMS.Backups.Destination.S3.Client do
     end
   end
 
-  defp http_opts(client) do
+  defp http_opts(client, limit) do
     timeout =
       case client.deadline do
         nil -> client.receive_timeout
@@ -193,8 +199,47 @@ defmodule KilnCMS.Backups.Destination.S3.Client do
       pinned: true,
       pinned_address: client.pinned,
       receive_timeout: timeout,
-      req_options: Keyword.get(config(), :req_options, [])
+      req_options: Keyword.put(Keyword.get(config(), :req_options, []), :into, capped(limit))
     ]
+  end
+
+  @doc """
+  The most bytes a response body to a request with `headers` may have: the
+  asked range (with room for an error document), else 8 MiB. A store that
+  sends more is cut off there, not buffered (see `capped/1`).
+  """
+  @spec body_limit([{String.t(), String.t()}]) :: pos_integer()
+  def body_limit(headers) do
+    with "bytes=" <> range <- Errors.header(headers, "range"),
+         [from, to] <- String.split(range, "-"),
+         {from, ""} <- Integer.parse(from),
+         {to, ""} <- Integer.parse(to),
+         true <- to >= from do
+      max(to - from + 1, @min_body_limit)
+    else
+      _ -> @max_body
+    end
+  end
+
+  # Streams the body in, stopping (and marking it) past `limit` bytes, so
+  # an admin-chosen host can't make a backup buffer what it likes.
+  defp capped(limit) do
+    fn {:data, data}, {request, response} ->
+      body = response.body <> data
+
+      if byte_size(body) > limit,
+        do: {:halt, {request, %{response | body: {:too_large, limit}}}},
+        else: {:cont, {request, %{response | body: body}}}
+    end
+  end
+
+  defp response({:ok, %{status_code: status, body: {:too_large, limit}}}) do
+    {:error,
+     %Error{
+       class: :transient,
+       status: status,
+       message: "the store's answer was larger than the #{limit} bytes expected; it was cut off"
+     }}
   end
 
   defp response({:ok, %{status_code: status, headers: headers, body: body}}) do

@@ -2949,6 +2949,11 @@ msgstr "Añadir un formulario"
 msgid "Add a funnel"
 msgstr "Añadir un embudo"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add a lifecycle rule to the bucket that aborts incomplete multipart uploads after a few days: Kiln aborts the uploads it recorded, but not one a crash left before it could record it."
+msgstr "Añade al bucket una regla de ciclo de vida que cancele las subidas multiparte incompletas al cabo de unos días: Kiln cancela las subidas que registró, pero no una que un fallo dejó antes de poder registrarla."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Add a link"

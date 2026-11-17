@@ -17,14 +17,17 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
       The checkpoint is `upload_id`, `key`, `part_size`, `parts_done`,
       `parts_digest`, `md5_etags` and `bytes_done`.
     * **Resuming** trusts nothing in the checkpoint until the store confirms
-      it: `ListParts` (paginated) must list parts `1..parts_done` with the
+      it (a checkpoint with every part sent only retries the Complete): `ListParts` (paginated) must list parts `1..parts_done` with the
       expected sizes, and their `(number, etag, size)` must reproduce
       `parts_digest`, a running sha256 over exactly those. A part's ETag is
       compared with the local part's MD5 only when every ETag of the upload
       was one (`md5_etags`): a store that encrypts with KMS, or MinIO with
       SSE, answers ETags that are no MD5, and such an upload must still
       resume. Anything that doesn't match aborts that upload and starts a
-      new one; an upload the store no longer has starts a new one.
+      new one; an upload the store no longer has starts a new one. When the
+      abort fails, no new upload is started (its first `save` would orphan
+      the recorded one): the put answers a transient error and the next
+      attempt tries again.
     * **Before completing**, the whole file's sha256, computed in the same
       read as the parts' MD5s (on a resume, the parts already sent are read
       again, not sent), must equal the verified one (ADR 0043).
@@ -157,7 +160,6 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
       with {:ok, _response} <- Client.call(client, :put_object, :put, key, [], headers, body),
            do: :ok
     else
-      {:error, %Error{}} = error -> error
       {:error, :changed} -> changed(file)
       {:error, reason} -> {:error, "couldn't read #{file.name}: #{inspect(reason)}"}
     end
@@ -178,9 +180,30 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
     case resumed(ctx) do
       {:ok, state} -> with_file(ctx, state)
       :fresh -> fresh(ctx)
+      {:replace, upload_id} -> with :ok <- abort_replaced(ctx, upload_id), do: fresh(ctx)
       {:error, _reason} = error -> error
     end
   end
+
+  # A recorded upload that is about to be replaced by a new one is aborted
+  # first. If that fails, no new upload is created: its first `save` would
+  # overwrite the recorded upload id, and nothing would ever abort the old
+  # one. The error is transient; the next attempt tries again.
+  defp abort_replaced(ctx, upload_id) do
+    case abort(ctx.client, ctx.key, upload_id) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error,
+         "couldn't abort the earlier upload of #{ctx.file.name} before starting over " <>
+           "(#{reason_text(reason)}); the next attempt tries again"}
+    end
+  end
+
+  defp reason_text({:permanent, message}), do: message
+  defp reason_text(message) when is_binary(message), do: message
+  defp reason_text(reason), do: inspect(reason)
 
   defp fresh(ctx) do
     with {:ok, state} <- create(ctx), do: with_file(ctx, state)
@@ -191,7 +214,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
     case File.open(ctx.file.path, [:read, :binary, :raw]) do
       {:ok, io} ->
         try do
-          send_file(ctx, state, io)
+          send_from(ctx, state, io)
         after
           File.close(io)
         end
@@ -201,14 +224,15 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
     end
   end
 
-  defp send_file(ctx, state, io) do
+  defp send_from(ctx, state, io) do
     case hash_sent(ctx, state, io) do
       {:ok, sha} ->
         send_parts(ctx, state, io, sha, state.done + 1)
 
       :mismatch ->
-        abort(ctx.client, ctx.key, state.upload_id)
-        with {:ok, state} <- create(ctx), do: send_parts(ctx, state, io, sha_init(), 1)
+        with :ok <- abort_replaced(ctx, state.upload_id),
+             {:ok, state} <- create(ctx),
+             do: send_parts(ctx, state, io, sha_init(), 1)
 
       {:error, _reason} = error ->
         give_up(ctx, state, error)
@@ -238,7 +262,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
 
   defp send_parts(ctx, state, io, sha, number) do
     if number > parts(ctx.file.bytes, state.part_size) do
-      finish(ctx, state, sha)
+      with {:error, _reason} = error <- finish(ctx, state, sha), do: give_up(ctx, state, error)
     else
       with :ok <- time_left(ctx, state),
            {:ok, data} <- read_part(io, ctx.file, state.part_size, number),
@@ -379,6 +403,9 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
       :fresh ->
         :fresh
 
+      {:replace, _upload_id} = replace ->
+        replace
+
       {:error, %Error{class: :upload_gone}} ->
         :fresh
 
@@ -399,7 +426,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
          }
          when is_binary(id) and id != "" and key == ctx.key and is_integer(size) and size > 0 and
                 is_integer(done) and done >= 0 and is_binary(digest) <- checkpoint,
-         true <- parts(ctx.file.bytes, size) <= @max_parts and done < parts(ctx.file.bytes, size) do
+         true <- parts(ctx.file.bytes, size) <= @max_parts and done <= parts(ctx.file.bytes, size) do
       {:ok,
        %{
          upload_id: id,
@@ -413,9 +440,13 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
          created?: false
        }}
     else
-      _unusable -> :fresh
+      _unusable -> unusable(checkpoint)
     end
   end
+
+  # A checkpoint that can't be resumed still names an upload to abort.
+  defp unusable(%{"upload_id" => id}) when is_binary(id) and id != "", do: {:replace, id}
+  defp unusable(_checkpoint), do: :fresh
 
   # Parts 1..done, as the store lists them, must reproduce the digest.
   defp verify(ctx, state, listed) do
@@ -432,8 +463,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
       etags = for number <- 1..state.done//1, into: %{}, do: {number, by_number[number].etag}
       {:ok, %{state | etags: etags}}
     else
-      abort(ctx.client, ctx.key, state.upload_id)
-      :fresh
+      {:replace, state.upload_id}
     end
   end
 
