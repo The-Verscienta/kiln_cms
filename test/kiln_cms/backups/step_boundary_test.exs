@@ -26,7 +26,7 @@ defmodule KilnCMS.Backups.StepBoundaryTest do
   import KilnCMS.Test.BackupDestinations, only: [destination!: 1]
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Chain, Manifest, Recorder, StepWorker, WorkState}
+  alias KilnCMS.Backups.{Artifact, Chain, Manifest, Recorder, Steps, StepWorker, WorkState}
   alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
 
@@ -354,8 +354,11 @@ defmodule KilnCMS.Backups.StepBoundaryTest do
 
   # What `Steps.succeed/4` does before the lock is released, by hand: the
   # steps in `done` (`:manifest` written ok, `:run` closed), then the work
-  # directory removed. The finish job's node then dies, and it is reclaimed.
-  defp finish_until(ctx, done) do
+  # directory removed (kept with `:keep_work`). The finish job's node then
+  # dies, and `kill` ends it: reclaimed and requeued by default. Setups that
+  # `succeed/4` never makes, to pin the rule's guards: `:pending` leaves the
+  # destination pending on the Run, `:failed_run` closes the Run failed.
+  defp finish_until(ctx, done, kill \\ &requeue!/1) do
     {:ok, %{status: :started, chain: chain}} = request()
     job = step_until("finish", nil)
     %{stamp: stamp} = lock()
@@ -365,14 +368,61 @@ defmodule KilnCMS.Backups.StepBoundaryTest do
     {:ok, lease} = Chain.begin_step(job)
     :ok = Chain.mark_finishing(lease)
 
-    if :manifest in done, do: ok_manifest!(ctx.dir, stamp, state)
-    if :run in done, do: stamp |> Recorder.load(chain, state["rec"]) |> Recorder.finish()
+    rec = Recorder.load(stamp, chain, state["rec"])
 
-    File.rm_rf!(work_dir)
-    executing!(job, "dead@node", 600)
-    assert {:ok, {:requeued, _}} = Chain.reclaim_stale()
+    if :pending in done do
+      [%{key: key}] = rec.destinations
+      rec |> Recorder.put_run_destination(key, %{status: :pending}) |> Recorder.progress()
+    end
+
+    if :manifest in done, do: ok_manifest!(ctx.dir, stamp, state)
+    if :run in done, do: Recorder.finish(rec)
+    if :failed_run in done, do: Recorder.fail(rec, "failed elsewhere")
+
+    unless :keep_work in done, do: File.rm_rf!(work_dir)
+    kill.(job)
 
     {chain, stamp}
+  end
+
+  defp requeue!(job) do
+    executing!(job, "dead@node", 600)
+    assert {:ok, {:requeued, _}} = Chain.reclaim_stale()
+  end
+
+  # Reclaimed on its last attempt: the lock is released, nothing is requeued.
+  defp last_attempt!(job) do
+    job = executing!(job, "dead@node", 600)
+
+    {1, _} =
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id),
+        set: [max_attempts: job.attempt]
+      )
+
+    assert {:ok, {:interrupted, _}} = Chain.reclaim_stale()
+  end
+
+  # The job ended without finishing its step (its timeout, Lifeline).
+  defp reaped!(job) do
+    {1, _} =
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: "discarded"])
+
+    assert {:ok, {:orphaned, _}} = Chain.reap()
+  end
+
+  # `finish_until/3` with a kill that settles the chain itself.
+  defp finish_killed(ctx, done, kill) do
+    {{chain, stamp}, log} =
+      ExUnit.CaptureLog.with_log([level: :info], fn ->
+        BackupChain.listen(fn -> finish_until(ctx, done, kill) end)
+      end)
+
+    {chain, stamp, BackupChain.settled(chain), log}
+  end
+
+  defp marked?(dir, stamp) do
+    File.exists?(Path.join([dir, "db", Artifact.good_name(stamp)])) and
+      File.exists?(Path.join([dir, "media", Artifact.good_name(stamp)]))
   end
 
   defp ok_manifest!(dir, stamp, state) do
@@ -450,6 +500,123 @@ defmodule KilnCMS.Backups.StepBoundaryTest do
       assert error =~ "state.json"
       refute match?(%Manifest{ok: true}, Manifest.read(ctx.dir))
       refute File.exists?(Path.join([ctx.dir, "db", Artifact.good_name(stamp)]))
+    end
+
+    test "an ok manifest for an older stamp doesn't count: lost state", ctx do
+      assert :ok = BackupChain.run()
+      assert [%{stamp: older}] = runs()
+
+      {chain, stamp} = finish_until(ctx, [])
+      assert %Manifest{ok: true, stamp: ^older} = Manifest.read(ctx.dir)
+
+      {outcome, log} = drain_logged(chain)
+
+      assert outcome == {:error, :no_state}
+      assert log =~ "Backup FAILED"
+      assert %{status: :failed} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      refute marked?(ctx.dir, stamp)
+    end
+
+    test "an ok manifest for this stamp but a run closed failed: lost state", ctx do
+      {chain, stamp} = finish_until(ctx, [:manifest, :failed_run])
+
+      {outcome, log} = drain_logged(chain)
+
+      assert outcome == {:error, :no_state}
+      assert log =~ "Backup FAILED"
+      refute log =~ "finished after an interruption"
+      assert %{status: :failed} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      refute marked?(ctx.dir, stamp)
+    end
+
+    test "a destination still pending on the run is settled failed when it is closed", ctx do
+      {chain, stamp} = finish_until(ctx, [:pending, :manifest])
+
+      assert {:ok, _log} = drain_logged(chain)
+
+      assert %{status: :succeeded, offsite_status: :failed, destinations: [destination]} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert %{status: :failed, error: error} = destination
+      assert error =~ "not attempted"
+    end
+
+    test "the run can't be read: the finish is retried, and nothing is written", ctx do
+      {chain, stamp} = finish_until(ctx, [:manifest, :run])
+      job = current_job()
+      {:ok, lease} = Chain.begin_step(job)
+
+      assert {:error, {:run_read, _}} =
+               Backups.with_actor(nil, fn -> Steps.perform(lease, job) end)
+
+      assert %{chain: ^chain} = Backups.in_flight()
+      refute marked?(ctx.dir, stamp)
+    end
+  end
+
+  describe "finish interrupted after it closed the run, then ended from outside" do
+    setup do
+      level = Logger.level()
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: level) end)
+    end
+
+    test "reclaimed on its last attempt: completed, not failed", ctx do
+      {_chain, stamp, outcome, log} = finish_killed(ctx, [:manifest, :run], &last_attempt!/1)
+
+      assert outcome == :ok
+      refute log =~ "the backup failed"
+      assert log =~ "finished after an interruption"
+      assert Backups.in_flight() == nil
+      assert %{status: :succeeded} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert marked?(ctx.dir, stamp)
+    end
+
+    test "reaped: completed, not failed", ctx do
+      {_chain, stamp, outcome, log} = finish_killed(ctx, [:manifest, :run], &reaped!/1)
+
+      assert outcome == :ok
+      refute log =~ "the backup failed"
+      assert Backups.in_flight() == nil
+      assert %{status: :succeeded} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert marked?(ctx.dir, stamp)
+    end
+
+    test "reaped with the run still open and the work directory still there", ctx do
+      {_chain, stamp, outcome, _log} =
+        finish_killed(ctx, [:manifest, :keep_work], &reaped!/1)
+
+      assert outcome == :ok
+
+      assert %{status: :succeeded, log: run_log} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert Enum.any?(run_log, &(&1.message =~ "finished after an interruption"))
+      refute File.exists?(WorkState.path(ctx.dir, stamp))
+      assert marked?(ctx.dir, stamp)
+    end
+
+    test "reaped with no ok manifest for this stamp: failed, as before", ctx do
+      {_chain, stamp, outcome, log} = finish_killed(ctx, [], &reaped!/1)
+
+      assert outcome == {:error, :unsettled}
+      assert log =~ "the backup failed"
+      assert %{status: :failed} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      refute marked?(ctx.dir, stamp)
+    end
+
+    test "a run that can't be read is recorded as interrupted, never completed", ctx do
+      {chain, stamp} = finish_until(ctx, [:manifest, :run])
+
+      BackupChain.listen(fn ->
+        assert :ok =
+                 Backups.with_actor(nil, fn ->
+                   Steps.interrupt_finish(stamp, chain, nil, "Interrupted: test")
+                 end)
+      end)
+
+      assert BackupChain.settled(chain) == {:error, :unsettled}
+      refute marked?(ctx.dir, stamp)
     end
   end
 end
