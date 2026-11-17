@@ -72,6 +72,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
   ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
 
+### Known issues
+
+- **An all-hidden referrer breakdown can still be recovered at a small view total (five 1s at the default threshold).**
+  ([#2981](https://github.com/The-Verscienta/kiln_cms/issues/2981) · [long form](docs/changelog/unreleased.md#all-hidden-referrer-breakdown-recoverable))
+
 ### Added
 
 - **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
@@ -111,6 +116,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
+
+- **A referrer breakdown with `"< n"` and one `"hidden"` category no longer lets a reader who knows the rule recover the suppressed counts; such breakdowns now show every category hidden.**
+  ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752) · [long form](docs/changelog/unreleased.md#referrer-suppression-partner-bounds))
 
 ### Security
 

@@ -106,11 +106,16 @@ defmodule KilnCMS.Analytics.Export do
   So #777 is closed, and closed **here** rather than only in the algorithm:
   `test/kiln_cms/analytics/export_recovery_test.exs` brute-forces an actual
   exported file — the exact `views` off the view row, every referrer cell off
-  the referrer rows — and asserts no suppressed count is uniquely determined.
-  It reproduces the four breakdowns #1073 found exactly recoverable, and all
-  four go red against the pre-#1073 algorithm. That the *function* is sound is a
-  separate claim, tested separately; this one is about the file, which is what
-  #777 was filed about and what a recipient actually holds.
+  the referrer rows — and asserts no suppressed count in a *partially*
+  published breakdown is uniquely determined, for a reader who re-runs this
+  algorithm on every candidate. It reproduces the four breakdowns #1073 found
+  exactly recoverable, and all four go red against the pre-#1073 algorithm; it
+  also carries the shapes #2752 found recoverable. A breakdown hidden whole
+  is checked only against a reader who does not know the algorithm; one who
+  does can sometimes pin it at a small view total, which is tracked in #2981.
+  That the *function* is sound is a separate claim, tested separately; this one
+  is about the file, which is what #777 was filed about and what a recipient
+  actually holds.
 
   ## Why this is still a stream
 
