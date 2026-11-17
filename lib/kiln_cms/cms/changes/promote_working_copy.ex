@@ -96,7 +96,16 @@ defmodule KilnCMS.CMS.Changes.PromoteWorkingCopy do
     |> promote_text(:blocks, "blocks" in keys, data.working_blocks || [])
     |> promote_attributes(attributes, context)
     |> promote_relationships(relationships)
+    |> derive_title()
     |> clear()
+  end
+
+  # A held title was derived from the held fields it was saved with; a
+  # conflict resolved "theirs" for the fields but "mine" for the text can leave
+  # the two apart, so the title follows the fields that actually go live (#2287).
+  defp derive_title(changeset) do
+    fields = Ash.Changeset.get_attribute(changeset, :custom_fields) || %{}
+    KilnCMS.CMS.Changes.DeriveTitle.derive(changeset, :title, fields)
   end
 
   defp promote_text(changeset, name, true, value),

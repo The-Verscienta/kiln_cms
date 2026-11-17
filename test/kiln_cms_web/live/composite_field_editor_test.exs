@@ -41,7 +41,12 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
   end
 
   defp editor(conn, admin, fields) do
-    for {name, type} <- [{"band", :range}, {"specs", :key_value}, {"source", :link}] do
+    for {name, type} <- [
+          {"band", :range},
+          {"specs", :key_value},
+          {"source", :link},
+          {"venue", :address}
+        ] do
       CMS.create_field_definition!(
         %{content_type: :page, name: name, label: String.capitalize(name), field_type: type},
         actor: admin
@@ -115,6 +120,55 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
     assert html =~ "address must be an http(s) URL"
     assert html =~ "javascript:alert(1)"
     assert html =~ "the minimum must not be greater than the maximum"
+  end
+
+  test "the address widget: a country select over every country, then the text parts" do
+    {_lv, html, _page} =
+      editor(Phoenix.ConnTest.build_conn(), authed_admin(), %{
+        "venue" => %{"country" => "GB", "locality" => "London", "postal_code" => "SW1A 1AA"}
+      })
+
+    assert html =~ ~r/<select[^>]*name="form\[custom_fields\]\[venue\]\[country\]"/
+    assert html =~ ~r/<option[^>]*value="GB"[^>]*selected/
+    assert html =~ ~r/<option[^>]*value="JP"/
+    assert html =~ ~r/<option[^>]*value=""/
+    assert length(Regex.scan(~r/<option /, html)) > 249
+
+    assert html =~
+             ~r/<input[^>]*name="form\[custom_fields\]\[venue\]\[locality\]"[^>]*value="London"/ or
+             html =~
+               ~r/<input[^>]*value="London"[^>]*name="form\[custom_fields\]\[venue\]\[locality\]"/
+  end
+
+  test "an address saves normalised, refuses a bad postal code, and an untouched one saves nothing",
+       %{conn: conn} do
+    admin = authed_admin()
+    {lv, _html, page} = editor(conn, admin, %{})
+
+    lv |> form("#page-editor") |> render_submit()
+    saved = CMS.get_page!(page.id, actor: admin)
+    refute Map.has_key?(saved.custom_fields, "venue")
+
+    html =
+      change(lv, %{"venue" => %{"country" => "US", "postal_code" => "ABC"}})
+
+    assert html =~ "postal code is not a valid United States postal code"
+    assert html =~ "ABC"
+
+    lv
+    |> form("#page-editor", %{
+      "form" => %{
+        "custom_fields" => %{
+          "venue" => %{"country" => "CA", "locality" => "Ottawa", "postal_code" => "k1a0b1"}
+        }
+      }
+    })
+    |> render_submit()
+
+    saved = CMS.get_page!(page.id, actor: admin)
+
+    assert saved.custom_fields["venue"] ==
+             %{"country" => "CA", "locality" => "Ottawa", "postal_code" => "K1A 0B1"}
   end
 
   test "an untouched editor saves none of the three", %{conn: conn} do

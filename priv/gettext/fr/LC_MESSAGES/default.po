@@ -2146,6 +2146,11 @@ msgstr "Un plugin présentant un problème de sécurité connu ou un paquet modi
 msgid "A point on a map: latitude, longitude and zoom. For a shop, a venue or where a photo was taken."
 msgstr "Un point sur une carte : latitude, longitude et zoom. Pour une boutique, un lieu ou l'endroit où une photo a été prise."
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "A postal address: country, lines, city, region and postal code. For an office, a venue or a clinic. Cannot be filtered or sorted."
+msgstr "Une adresse postale : pays, lignes, ville, région et code postal. Pour un bureau, un lieu ou une clinique. Ne peut être ni filtrée ni triée."
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "A preview. Nothing is sent, posted or saved."
@@ -3271,6 +3276,16 @@ msgstr "Adresse bloquée automatiquement"
 #, elixir-autogen, elixir-format
 msgid "Address blocked."
 msgstr "Adresse bloquée."
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Address line 1"
+msgstr "Adresse, ligne 1"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Address line 2"
+msgstr "Adresse, ligne 2"
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
@@ -5026,6 +5041,11 @@ msgstr "Créez une formule pour voir ce qu’elle donne."
 msgid "Build public forms, place them on content with the form block, and review submissions here."
 msgstr "Créez des formulaires publics, placez-les dans votre contenu avec le bloc formulaire, et consultez les soumissions ici."
 
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Builds each record's title from its fields when it is saved, so editors don't type one. Use {{ field.<name> }}; the title and slug can't be read. Blank = titles are typed by hand."
+msgstr "Construit le titre de chaque enregistrement à partir de ses champs à l’enregistrement, pour que les éditeurs n’aient pas à en saisir un. Utilisez {{ field.<nom> }} ; le titre et le slug ne peuvent pas être lus. Vide = titres saisis à la main."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Built"
@@ -5788,6 +5808,11 @@ msgstr "Termes choisis"
 #, elixir-autogen, elixir-format
 msgid "Citation"
 msgstr "Source"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "City or town"
+msgstr "Ville"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -7257,6 +7282,11 @@ msgstr "Compté à partir du plus récent de ces moments : la création du compt
 #, elixir-autogen, elixir-format
 msgid "Counting…"
 msgstr "Décompte…"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Country"
+msgstr "Pays"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -10922,6 +10952,11 @@ msgstr "Générer une clé"
 #, elixir-autogen, elixir-format
 msgid "Generate key"
 msgstr "Générer une clé"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Generated from the template on save"
+msgstr "Généré à partir du modèle à l’enregistrement"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -17216,6 +17251,11 @@ msgstr "Publie sur Bluesky ou Mastodon quand un article est publié."
 msgid "Post to social media"
 msgstr "Publier sur les réseaux sociaux"
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Postal code"
+msgstr "Code postal"
+
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
 msgid "PostgreSQL client tools aren't installed in this image, so a backup can't run here. Cron backups on the host are unaffected."
@@ -20333,6 +20373,11 @@ msgstr "Sélectionner %{name}"
 msgid "Select %{title}"
 msgstr "Sélectionner %{title}"
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Select a country"
+msgstr "Sélectionnez un pays"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select a field on the canvas to edit it, or add one from the palette."
@@ -21763,6 +21808,11 @@ msgstr "Au départ"
 #, elixir-autogen, elixir-format
 msgid "State"
 msgstr "État"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "State, province or region"
+msgstr "État, province ou région"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -25209,6 +25259,11 @@ msgstr "Titre (A–Z)"
 msgid "Title contains “%{text}”"
 msgstr "Le titre contient « %{text} »"
 
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Title template (optional)"
+msgstr "Modèle de titre (facultatif)"
+
 #: lib/kiln_cms/cms/field_types/range.ex
 #, elixir-autogen, elixir-format
 msgid "To"
@@ -28366,6 +28421,16 @@ msgstr "impossible de laisser les éditeurs créer des enregistrements %{type} :
 msgid "can't let editors create %{type} records: the field's owner condition cannot be met by a new record"
 msgstr "impossible de laisser les éditeurs créer des enregistrements %{type} : la condition de propriétaire du champ ne peut pas être remplie par un nouvel enregistrement"
 
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "can't read %{refs}: the title is built from this template and the slug from the title"
+msgstr "ne peut pas lire %{refs} : le titre est construit à partir de ce modèle et le slug à partir du titre"
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "can't read the private field %{names}: a title is public"
+msgstr "ne peut pas lire le champ privé %{names} : un titre est public"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "category"
@@ -29055,6 +29120,11 @@ msgstr "repasse en brouillon"
 msgid "is submitted for review"
 msgstr "est soumis à relecture"
 
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "is too long (at most %{count} characters)"
+msgstr "est trop long (%{count} caractères au maximum)"
+
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "is unpublished"
@@ -29074,6 +29144,11 @@ msgstr "est utilisé par la sélection de %{fields} ; retirez-le d'abord de là"
 #, elixir-autogen, elixir-format
 msgid "is used in the conditions of %{fields}; remove those conditions first"
 msgstr "est utilisé dans les conditions de %{fields} ; supprimez d'abord ces conditions"
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "isn't a valid template: %{message}"
+msgstr "n’est pas un modèle valide : %{message}"
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -29355,6 +29430,7 @@ msgstr "aucune gagnante — simplement arrêter"
 msgid "none"
 msgstr "aucun"
 
+#: lib/kiln_cms/cms/titles.ex
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "none yet"
@@ -29623,6 +29699,11 @@ msgstr "lecture"
 #, elixir-autogen, elixir-format
 msgid "readable"
 msgstr "lisible"
+
+#: lib/kiln_cms/cms/titles.ex
+#, elixir-autogen, elixir-format
+msgid "reads %{names}, which this type has no field for (fields: %{defined})"
+msgstr "lit %{names}, pour lesquels ce type n’a pas de champ (champs : %{defined})"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format

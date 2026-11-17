@@ -706,10 +706,11 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp condition(%{field_type: :json, name: name}, _op, _raw),
     do: {:error, "custom field #{inspect(name)} (json) only supports null"}
 
-  # A range, key/value list or link (#2278) is a composite value with no
-  # scalar to compare, so `null` above is the one question it answers.
+  # A range, key/value list, link or address (#2278, #2279) is a composite
+  # value with no scalar to compare, so `null` above is the one question it
+  # answers.
   defp condition(%{field_type: type, name: name}, _op, _raw)
-       when type in [:range, :key_value, :link],
+       when type in [:range, :key_value, :link, :address],
        do: {:error, "custom field #{inspect(name)} (#{type}) only supports null"}
 
   # A group is an object or a list of them, for the same reason: `null` above
@@ -1321,7 +1322,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       # then key/value text, which is meaningless for a coordinate or a
       # snapshot — refuse rather than return a 200 in nonsense order.
       {:ok, %{field_type: type}}
-      when type in [:geolocation, :group, :flexible, :json, :range, :key_value, :link] ->
+      when type in [:geolocation, :group, :flexible, :json, :range, :key_value, :link, :address] ->
         invalid(query, :custom_sort, "custom field #{inspect(name)} (#{type}) is not sortable")
 
       {:ok, %{field_type: type, multiple: true}} when type in @scalar_list_types ->

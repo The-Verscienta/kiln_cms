@@ -29,7 +29,8 @@ UI" workflow, scoped to fields.
   `:datetime_range`, `:recurrence`, `:computed`, the six format types
   `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (see
   "Built-in format types" below) and the composite `:range`, `:key_value` and
-  `:link` (see "Range and key-value and link fields") — plus
+  `:link` (see "Range and key-value and link fields") and the structured
+  `:address` (see "Address fields") — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
 - **Required fields (`required: true`)**: every create or save that sends
@@ -546,7 +547,7 @@ indexed (not the keys), so flag only a field whose contents are prose worth
 finding.
 
 **Names are reserved.** `email`, `telephone`, `color`, `slug`, `time`,
-`json`, `range`, `key_value` and `link` can no longer be used for a type an overlay or plugin registers; rename
+`json`, `range`, `key_value`, `link` and `address` can no longer be used for a type an overlay or plugin registers; rename
 it (`mix kiln.plugins.doctor` fails otherwise). A stored field definition
 that already used one of these names as its `field_type` is now cast by the
 built-in type: values that do not pass its check are refused on the next save.
@@ -621,6 +622,57 @@ not be greater than the maximum*; *each line must be key=value*; *every value
 needs a key*; *has a repeated key (x)*; *a key may not contain "="*; *address
 must be an http(s) URL, a mailto: address, a /path or a #fragment*; *rel must be
 one or more of: noopener, noreferrer, nofollow, sponsored, ugc, external*.
+
+### Address fields
+
+An `:address` field holds one postal address as a single object, checked the
+same way in the editor, the API and imports, and served through GraphQL as the
+generic JSON value. Pick it in `/editor/fields` (an admin task). The editor
+shows a **Country** select (every ISO 3166-1 country, blank first), then
+**Address line 1**, **Address line 2**, **City or town**, **State, province or
+region** and **Postal code**.
+
+```json
+{
+  "country": "GB",
+  "address_line1": "10 Downing Street",
+  "locality": "London",
+  "postal_code": "SW1A 1AA"
+}
+```
+
+- **Country** is an ISO 3166-1 alpha-2 code, upper-cased (`gb` is stored as
+  `GB`); a name such as "United Kingdom" is refused. It is required as soon as
+  any other part is filled in. A form where every part is blank is an empty
+  field, not an address.
+- **Text parts** are trimmed, single-line, and capped (200 characters for each
+  line, 100 for the city and the region, 16 for the postal code). Blank parts
+  are not stored, and a key other than the six above is refused.
+- **Postal code** is upper-cased with its spacing made canonical. For US, CA,
+  GB, DE, FR, NL, AU, ES, IT, JP, CH, SE, BR and IN the format is checked too
+  (`k1a0b1` is stored as `K1A 0B1`, `1234ab` as `1234 AB`, and a five-digit US
+  code with a letter in it is refused). Every other country takes free text, so
+  a code is never refused for a country Kiln has no rule for. This is a format
+  check, not a lookup: it cannot tell a real postcode from a well-formed one.
+- **No licensed dataset ships.** The country list is the public ISO 3166-1
+  assignment (English names) and the postal formats are a small hand-written
+  table.
+- **Search.** A `searchable` flag indexes the lines, city, region and postal
+  code, not the country code.
+- **Lists and queries.** Like the other composite types, an address is not a
+  Columns picker column and cannot be sorted; a `custom_filter` answers only
+  "Empty or not" (`null`). `multiple` is cleared and validation constraints
+  are refused.
+
+**Not yet:** labels and required parts that follow the country (a US "State"
+and "ZIP code", a UK "County"), administrative-area lists, a schema.org
+`PostalAddress` in the JSON-LD output, and looking up coordinates for a
+`:geolocation` field.
+
+**What can go wrong.** *needs a country* (a part is given without one);
+*country must be an ISO 3166-1 alpha-2 code (like GB or US)*; *postal code is
+not a valid United States postal code* (the country is named); *address line 1
+must be a single line*; *locality is too long (at most 100)*.
 
 ### Make a field hold a list of values
 
@@ -1311,6 +1363,87 @@ filters and sorting read an index only for a field named in
 `config :kiln_cms, :indexed_custom_fields`, and scan the type's rows
 otherwise. See
 [Which custom filters use an index](json-api.md#which-custom-filters-use-an-index).
+
+### Build record titles from fields
+
+Some types have no natural title to type: a person is "Smith, Jane", an event
+is its venue and date. A type can carry a **title template** that builds each
+record's `title` from its other fields every time it is saved. It is the
+computed-field language above (`KilnCMS.CMS.Titles` for the rules), so the
+syntax and functions are the ones you already know:
+
+```text
+{{ field.last_name }}, {{ field.first_name }}
+{{ field.last_name }}, {{ field.first_name }} ({{ field.city }})
+```
+
+**Set it on a dynamic type** (admin):
+
+1. Open **Content types** (`/editor/types`) and create the type, or edit it.
+2. Define the fields the template will read first (Custom fields), then fill
+   in **Title template (optional)** with `{{ field.last_name }}, {{ field.first_name }}`.
+3. Save. A syntax error, a reference to `title` or `slug`, a private field or
+   a field the type does not define is refused with a message under the box.
+4. Open or create a record of the type. **Title** is read-only, with
+   "Generated from the template on save". Fill in the last and first name,
+   save, and the title reads "Smith, Jane".
+
+**Set it on a compiled type** in the `use` line (a bad template fails the
+build):
+
+```elixir
+use KilnCMS.CMS.Content,
+  type: :person,
+  title_template: "{{ field.last_name }}, {{ field.first_name }}"
+```
+
+How it behaves:
+
+- **The template always wins.** The title is overwritten on create, update and
+  autosave. A `title` sent over the JSON:API, GraphQL or MCP is accepted and
+  ignored, not refused, so an older client keeps working.
+- **A blank result keeps the title.** When every field the template reads is
+  empty, nothing is derived: a record keeps its title, and a new one keeps
+  the title it was given (the editor's "Untitled").
+- **Not readable:** `title` and `slug` (the title is the output, the slug
+  comes from it), directly or through a computed field that reads them, and
+  private fields, because a title is public.
+- **The slug follows the title.** The scaffold `untitled-…` slug of a new
+  draft is replaced by one derived from the generated title. A slug that is
+  already real, a published page's included, never changes when a source field
+  does.
+- **Working copies.** On a live document the held title is derived when the
+  draft is saved and goes live with *Publish changes*, which derives it once
+  more from the fields that go live.
+- **Existing records.** Saving a changed template on a dynamic type queues a
+  background re-derive of that type's records (published ones are retitled
+  live; ones with a pending working copy are skipped until published).
+  Clearing a template changes no titles. For a compiled type, run this after
+  the deploy that changed the template:
+
+  ```bash
+  mix kiln.titles.regenerate --type person            # --org <uuid> for a specific site
+  #=> Done: 12 retitled, 1 skipped (working copy), 0 failed, 340 scanned.
+  ```
+
+  It is safe to re-run: a record already at its derived title is not written.
+- **Limits.** Field names are checked when the template changes, not when a
+  field is later renamed or deleted (a dangling reference reads as empty); and
+  not when a type is created, nor for a compiled type's fields. A computed
+  field that reads `title` is not re-run when a working copy is promoted.
+- **Unrelated:** `names_record` fields only add words to search; they never
+  touch the title.
+
+The template travels with the type in
+[field sync](field-sync.md#the-file) (`definition.title_template`).
+
+What can go wrong: *"can't read title, slug: the title is built from this
+template and the slug from the title"* (remove the reference);
+*"can't read the private field …: a title is public"*;
+*"reads …, which this type has no field for"* (define the field first, or fix
+the name); *"isn't a valid template: …"* (syntax); *"is too long (at most 500
+characters)"*. A title that stays unchanged after a save usually means every
+field the template reads was empty.
 
 ### Make a field conditional
 

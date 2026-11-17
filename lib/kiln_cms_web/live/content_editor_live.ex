@@ -7425,8 +7425,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
         <.input
           field={@form[:title]}
           label={gettext("Title")}
-          required
-          autofocus
+          required={is_nil(@content_type.title_template)}
+          autofocus={is_nil(@content_type.title_template)}
+          readonly={not is_nil(@content_type.title_template)}
+          hint={@content_type.title_template && gettext("Generated from the template on save")}
           phx-debounce="300"
         />
       </.form>
@@ -7739,7 +7741,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
                   field={@form[:title]}
                   label={gettext("Title")}
                   required
-                  readonly={field_locked?(@locked_fields, "title")}
+                  readonly={
+                    field_locked?(@locked_fields, "title") or
+                      not is_nil(@content_type.title_template)
+                  }
+                  hint={
+                    @content_type.title_template && gettext("Generated from the template on save")
+                  }
                   class="w-full rounded-lg border border-base-content/15 bg-base-100 px-3 py-2.5 text-xl font-semibold text-base-content transition placeholder:text-base-content/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 read-only:cursor-default"
                   {field_attrs("title")}
                 />

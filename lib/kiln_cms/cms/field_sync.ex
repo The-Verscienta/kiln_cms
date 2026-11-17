@@ -421,7 +421,7 @@ defmodule KilnCMS.CMS.FieldSync do
 
   defp parse_definition("dynamic", %{} = definition, path) do
     case Map.keys(definition) -- type_keys() do
-      [] -> {fill(definition, TypeDefinition, type_keys()), []}
+      [] -> {definition |> fill(TypeDefinition, type_keys()) |> keep_absent(definition), []}
       unknown -> {nil, ["#{path}.definition: unknown key(s) #{Enum.join(unknown, ", ")}"]}
     end
   end
@@ -574,6 +574,15 @@ defmodule KilnCMS.CMS.FieldSync do
         :error -> {key, jsonify(default(resource, key))}
       end
     end)
+  end
+
+  # `title_template` (#2287) arrived after version 1 shipped, so a document from
+  # an older build never carries it. Its absence means "unchanged", not "clear":
+  # filling it with the attribute default would null every template on a re-import.
+  defp keep_absent(filled, definition) do
+    if Map.has_key?(definition, "title_template"),
+      do: filled,
+      else: Map.delete(filled, "title_template")
   end
 
   defp default(resource, key) do

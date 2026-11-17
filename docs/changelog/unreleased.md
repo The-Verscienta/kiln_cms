@@ -7,6 +7,19 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="address-field-type-name-upgrade"></a>
+
+- **The field type name `address` is reserved (#2279).**
+  Kiln now ships a built-in `:address` type, and a name can be registered only
+  once. An overlay or plugin `Kiln.FieldType` that registers `address` must be
+  renamed, in the module's `name/0` and in any stored field definition;
+  `mix kiln.plugins.doctor` fails otherwise. A stored definition that already
+  used the name is cast by the built-in type. No migration. Rolling back to
+  1.8.0 or older needs the `address` fields removed first, like `key_value`
+  and `telephone`; see
+  [docs/releasing.md](../releasing.md#new-values-in-an-atom-column).
+
+
 <a id="flexible-item-types-upgrade"></a>
 
 - **Run `mix ash.migrate` (new `field_definitions.flex_of_id`, nullable, and `item_setting`, default `false`; part of #2282). Nothing changes for existing fields; rolling back is safe.**
@@ -59,6 +72,26 @@ carries the reasoning.
   See [docs/releasing.md](../releasing.md#rolling-back-past-backup-destinations).
 
 ## Added
+
+<a id="address-field-type"></a>
+
+- **A built-in `:address` custom field type: a postal address stored as one object (country, administrative area, locality, postal code, two address lines), with a country select in the editor (#2279).**
+  The country is an ISO 3166-1 alpha-2 code and is required once any other
+  part is given; parts are trimmed, single-line and capped, and unknown keys
+  are refused. The postal code is upper-cased and given its canonical spacing,
+  and its format is checked for US, CA, GB, DE, FR, NL, AU, ES, IT, JP, CH, SE,
+  BR and IN; any other country takes free text. No licensed dataset ships: the
+  country list is the public ISO assignment and the formats are a small
+  hand-written table. Served as generic JSON, never sortable, filterable only
+  for "Empty or not"; a `searchable` flag indexes the lines, locality, region
+  and postal code. Guide:
+  [Address fields](../extending-content.md#address-fields).
+  - **Not yet.** Labels and required parts that follow the country,
+    administrative-area lists, a schema.org `PostalAddress` in the JSON-LD
+    output, and a geocode hand-off to `:geolocation`.
+
+
+
 
 <a id="number-field-options"></a>
 
@@ -206,6 +239,64 @@ carries the reasoning.
   implements the behaviour and has a usable `kind/0` that neither
   `local`, `rclone` nor another module already has. See *Backup
   destinations* in [plugin-extensibility.md](../plugin-extensibility.md).
+
+<a id="computed-titles"></a>
+
+- **A content type can build every record's title from its other fields: set a title template such as `{{ field.last_name }}, {{ field.first_name }}` and editors stop typing titles.**
+  `TypeDefinition` gains a nullable `title_template` (migration
+  `add_title_template`, additive: one `text` column, so rolling back to 1.10
+  leaves it unused and titles stay as they were written). A compiled type
+  declares it with `use KilnCMS.CMS.Content, title_template: "..."`. The
+  template is the computed-field language, so there is one syntax. On a
+  dynamic type, admins set it under **Content types** (*Title template
+  (optional)*). The rules:
+
+  - The template always wins. On `:create`, `:update` and autosave the title
+    is overwritten, and a `title` an API client sends is accepted and ignored
+    rather than refused, so clients written before the template keep working.
+    The editor shows the Title as read-only, with "Generated from the template
+    on save".
+  - A template that yields nothing (every field it reads is empty) derives
+    nothing: a record keeps the title it has, and a create keeps the one it was
+    given (the editor's "Untitled" scaffold).
+  - A template may read custom fields and the document scalars other than
+    `title` and `slug` (the title is its output, and the slug derives from
+    it). It may not read a private field, because a title is public. All
+    three are refused when the template is saved, including through a computed
+    field that reads `title` or `slug`; for a dynamic type, so is a field the
+    type does not define. A result is trimmed and cut to 1,000 characters (the title limit); the
+    template itself is at most 500.
+  - The slug follows the derived title. The editor's `untitled-…` scaffold
+    slug is replaced once the template yields a title. Any other slug, a
+    published page's included, never moves when a source field changes.
+  - A live document's working copy derives its held title when the draft is
+    saved, so the live title does not move until *Publish changes*; promotion
+    derives once more from the fields that go live.
+  - Existing records: saving a changed template on a dynamic type enqueues a
+    re-derive sweep (`KilnCMS.CMS.Workers.TitleRegenerationWorker`, one job
+    per 100 records, on the `default` queue). Clearing the template enqueues
+    nothing and leaves titles as they are. A compiled type's template changes
+    with a deploy, so run `mix kiln.titles.regenerate --type <name>` after it
+    (`--org <uuid>` for a site other than the sole one). Each rewrite is a
+    normal `:update`, so search, the change feed, webhooks and versions fire;
+    a published record is retitled live; a record with a pending working copy
+    is skipped and re-derives when it is published; a record already at its
+    derived title is not written.
+  - Field sync: `title_template` is part of a dynamic type's `definition`. An
+    import whose definition leaves the key out leaves the stored template
+    unchanged (it does not clear it), so a file from before this release
+    cannot wipe templates.
+
+  **Known limits.** Which fields a template reads is checked when the
+  template changes, not when a field is later renamed or deleted: a reference
+  that no longer resolves reads as empty. The check does not run when a type
+  is created (it has no fields yet) or for a compiled type (its fields live in
+  the registry), only the syntax and the `title`/`slug` rule do. A computed
+  field that reads `title` sees the template's title when the record is saved,
+  but is not re-run when a working copy is promoted. Name fields
+  (`names_record`) are unrelated: they only add words to search.
+  How to set one up:
+  [Build record titles from fields](../extending-content.md#build-record-titles-from-fields).
 
 ## Changed
 
