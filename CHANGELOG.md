@@ -80,7 +80,15 @@ Every summary line below that was shortened links to its own entry there.
 - **`mix kiln.staging.scrub` and `Release.scrub_staging/0` now refuse, changing nothing, while an overlay or plugin domain owns a non-content table with no `staging_scrub/0` entry: add `{:purge, R}`, `{:rewrite, R, set: [...]}` or `{:keep, R, "reason"}` for each and require `{:kiln_plugin, "~> 1.5"}`.**
   ([long form](docs/changelog/unreleased.md#plugin-staging-scrub-refuses-undeclared))
 
+### Known issues
+
+- **An all-hidden referrer breakdown can still be recovered at a small view total (five 1s at the default threshold).**
+  ([#2981](https://github.com/The-Verscienta/kiln_cms/issues/2981) · [long form](docs/changelog/unreleased.md#all-hidden-referrer-breakdown-recoverable))
+
 ### Added
+
+- **A new custom field type, Flexible content: an ordered list of items of different kinds (a hero, a quote), defined under Fields (Item types panel) and edited as cards in the content editor. Field-sync files now carry `item_types`, which 1.10 refuses.**
+  ([long form](docs/changelog/unreleased.md#flexible-content))
 
 - **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
   Served as generic JSON, filterable only for "Empty or not", not sortable. Country-driven labels, region lists and schema.org output are not yet.
@@ -131,6 +139,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
+
+- **A referrer breakdown with `"< n"` and one `"hidden"` category no longer lets a reader who knows the rule recover the suppressed counts; such breakdowns now show every category hidden.**
+  ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752) · [long form](docs/changelog/unreleased.md#referrer-suppression-partner-bounds))
 
 - **A backup schedule change made while a marker sync is running now reaches the `.hold` markers right after that sync, not at the next 15-minute slot.**
   ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932) · [long form](docs/changelog/unreleased.md#backup-hold-sync-after-change))

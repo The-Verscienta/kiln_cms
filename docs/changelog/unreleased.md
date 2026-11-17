@@ -24,11 +24,11 @@ carries the reasoning.
 
 - **Run `mix ash.migrate` (new `field_definitions.flex_of_id`, nullable, and `item_setting`, default `false`; part of #2282). Nothing changes for existing fields; rolling back is safe.**
   Both are additions with a default or null, so the previous release keeps
-  working against them. They are the first step of flexible content (a custom
-  field holding mixed typed items), which reaches the API only: there is no
-  admin screen or editor input yet, so no site has one until an admin defines
-  it from code (`docs/extending-content.md`, "Define a flexible field from
-  code"). After a rollback, such a field reads on the previous release as a
+  working against them. They carry flexible content (a custom
+  field holding mixed typed items). A site has none until an admin defines
+  one, in the fields admin or from code (see the *Flexible content* entry
+  under Added, and `docs/extending-content.md`, "Build flexible content in
+  the admin"). After a rollback, such a field reads on the previous release as a
   field of an unknown type (hidden, its items kept; delete it from the
   Fields screen) and its item types as ownerless groups that nothing loads.
   Details in [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
@@ -118,7 +118,55 @@ carries the reasoning.
   [ADR 0066](../decisions/0066-every-table-reaching-a-staging-clone-is-scrubbed-or-kept-with-a-reason.md).
   Refs #2975.
 
+## Known issues
+
+<a id="all-hidden-referrer-breakdown-recoverable"></a>
+
+- **An all-hidden referrer breakdown can still be recovered at a small view total.** Affects sites with referrer attribution on
+  (`KILN_ANALYTICS_REFERRERS`), on the analytics dashboard and in the export. A reader who knows the suppression rule can rule
+  out every split it would have published partially, and for some small totals one split is left: at the default threshold
+  of 5, an item with 5 views shown as five `"hidden"` categories had exactly one view from each source. There is no
+  workaround short of turning referrer attribution off. ([#2981](https://github.com/The-Verscienta/kiln_cms/issues/2981))
+
 ## Added
+
+<a id="flexible-content"></a>
+
+- **A new custom field type, Flexible content: an ordered list of items of different kinds (a hero, a quote), each kind with its own fields and settings, defined in the fields admin and edited as cards in the content editor (#2282).**
+  The model and write path came in the *Run `mix ash.migrate`* upgrade note
+  above (no new migration here). What this adds:
+  - **Admin.** Under `/editor/fields`, **Flexible content** is a field type.
+    A flexible field has an **Item types** panel: add, edit, reorder (arrows
+    only) and delete item types, each with a label, machine name, help text
+    and a per-type maximum. Each item type has **Fields in each item**, with
+    a **Setting** checkbox for values that configure the item (stored apart
+    from its content) and, to 3 levels deep, nested flexible sub-fields.
+    The checkbox is fixed once the field exists. Renaming an item type keeps
+    its items. Deleting an item type or a flexible field shows how many stored
+    items go with it and recounts on confirm.
+  - **Editor.** The field shows its items as cards: **Add item** (appends at
+    the end, respects the field's and each type's maximum), drag or move
+    up/down, **Duplicate**, **Remove**, collapse, and a collapsed **Settings**
+    section. An item whose type was deleted shows as a locked card that only
+    **Remove** works on, and saving drops it. This replaces the read-only
+    "Edited through the API" note from the first release.
+  - **Field sync.** An export carries `"item_types"` (each with its
+    `"group_fields"`, nested to the depth cap); `item_setting` is written
+    only when `true`. **A file with `item_types` or `item_setting: true` does
+    not import on 1.10**; a site with no flexible fields exports the same file
+    as before. An import cannot delete an item type that still holds items,
+    even with `--allow-data-loss`: it is refused with a message naming
+    `purge_items?`.
+  - **Retyping.** A field can no longer be changed to or from `flexible`
+    (admin, import or code): add a new field and delete the old one.
+  - **Purge.** Deleting an item type with `purge_items?: true` removes its
+    items in the destroy's own transaction. An item saved between the guard
+    and the purge is still removed with the type.
+  Guide:
+  [Build flexible content in the admin](../extending-content.md#build-flexible-content-in-the-admin);
+  record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+  Not yet: per-item-type grants, search of items, typed GraphQL and client
+  export (later PRs of the plan).
 
 <a id="address-field-type"></a>
 
@@ -556,6 +604,33 @@ carries the reasoning.
     slashes it took about 4 s in Node. Its input is the integrator's own
     `baseUrl` or attribute. Both now trim in a loop, with the same result.
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947))
+
+<a id="referrer-suppression-partner-bounds"></a>
+
+- **A referrer breakdown published with `"< n"` and one `"hidden"` category no longer lets a reader recover the suppressed counts exactly; breakdowns that would have done so are now hidden whole.**
+  The analytics dashboard and the CSV export both print an item's exact view
+  total beside its referrer breakdown, so the categories form one equation. A
+  breakdown is published partially (low counts as `"< n"`, plus the largest
+  other category as a `"hidden"` partner) only when more than one split fits
+  that equation for a reader who knows the rule. That count let the partner be
+  `0` when it could not be: it is the largest of the categories that are not
+  naturally low, and on a tie it is the first in source order, so a published
+  `5` beside it, or a published `0` listed before it, rules `0` out. At the
+  default threshold of 5, `direct: 1, search: 1, social: 5, other: 5`
+  (12 views) was published as `< 5`, `0`, `< 5`, `hidden`, `5`, and only
+  `direct: 1, search: 1` fits that (#2752). The count now models both bounds,
+  and breakdowns like this one are published as five `"hidden"` values.
+
+  What you'll see: on low-traffic items and days, some referrer breakdowns that
+  used to show a `"< n"` label now show every category as hidden, on the
+  dashboard and in the export alike (both use
+  `Analytics.suppress_referrer_group/1`). Breakdowns with nothing below the
+  threshold, and those of busier items, publish as before. An export file
+  written before this release keeps what it published. No configuration or
+  migration.
+
+  This does not cover the all-hidden case, which is listed under Known issues.
+  ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752))
 
 <a id="backup-hold-sync-after-change"></a>
 

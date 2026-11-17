@@ -59,6 +59,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Slug
   alias KilnCMS.Unsplash
   alias KilnCMSWeb.ContentEditor.FieldEvents
+  alias KilnCMSWeb.ContentEditor.FlexibleItems
   alias KilnCMSWeb.ContentEditor.GroupRows
   alias KilnCMSWeb.ContentEditor.InlineTerms
   alias KilnCMSWeb.ContentEditor.NewDraft
@@ -2211,6 +2212,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> drop_blank_related(socket)
       |> ReferenceValues.normalize(socket.assigns.field_definitions)
       |> GroupRows.normalize(socket.assigns.field_definitions)
+      |> FlexibleItems.normalize(socket.assigns.field_definitions)
 
     {params, socket} = sync_slug(params, event["_target"], socket)
     socket = assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))
@@ -3187,6 +3189,37 @@ defmodule KilnCMSWeb.ContentEditorLive do
      update_group_rows(socket, name, fn rows, _def -> GroupRows.reorder(rows, order) end)}
   end
 
+  # A flexible field's items (`FlexibleItems`, #2282): add, remove, move,
+  # duplicate and a dragged order. Each names its target by `_id` path, never
+  # by position, so a stale page acts on the item it showed, not on whatever
+  # now sits at that index; each is a rewrite of the posted items through the
+  # same params-then-validate path a group takes.
+  def handle_event("flex_add", %{"at" => at, "type" => type}, socket)
+      when is_binary(at) and is_binary(type),
+      do: {:noreply, update_flexible(socket, at, &FlexibleItems.add(&1, &2, type))}
+
+  def handle_event("flex_remove", %{"at" => at}, socket) when is_binary(at),
+    do:
+      {:noreply,
+       update_flexible_item(socket, at, fn items, _def, id -> FlexibleItems.remove(items, id) end)}
+
+  def handle_event("flex_move", %{"at" => at, "dir" => dir}, socket)
+      when is_binary(at) and dir in ["up", "down"] do
+    {:noreply,
+     update_flexible_item(socket, at, fn items, _def, id -> FlexibleItems.move(items, id, dir) end)}
+  end
+
+  def handle_event("flex_duplicate", %{"at" => at}, socket) when is_binary(at),
+    do: {:noreply, update_flexible_item(socket, at, &FlexibleItems.duplicate/3)}
+
+  # Pushed by the `Sortable` hook (`data-sort-event`) with the list's address
+  # and the items' `_id`s in their new order.
+  def handle_event("flex_reorder", %{"field" => at, "order" => order}, socket)
+      when is_binary(at) and is_list(order),
+      do:
+        {:noreply,
+         update_flexible(socket, at, fn items, _def -> FlexibleItems.reorder(items, order) end)}
+
   def handle_event("add_picked_images", %{"bid" => bid}, socket) when is_binary(bid) do
     case socket.assigns.picked do
       [] ->
@@ -3627,6 +3660,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
       |> drop_blank_related(socket)
       |> ReferenceValues.normalize(socket.assigns.field_definitions)
       |> GroupRows.normalize(socket.assigns.field_definitions)
+      |> FlexibleItems.normalize(socket.assigns.field_definitions)
 
     if socket.assigns.record.state == :published,
       do: save_live(socket, params),
@@ -4722,15 +4756,55 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # Rewrite the flexible list at `address` through `fun` — given the items as
+  # posted (blank cards included) and the definition that governs that list —
+  # and re-validate. Only a flexible field this view may change
+  # (`custom_field_editable?/3`, which carries the write grant of #2281), as
+  # for a group. An address that names no list, or a `fun` that refuses
+  # (`:error`: full, unknown type, not a permutation), changes nothing.
+  defp update_flexible(socket, address, fun) do
+    {name, segments} = FlexibleItems.parse(address)
+
+    editable? =
+      custom_field_editable?(socket, name, &match?(%{field_type: :flexible}, &1))
+
+    with true <- editable?,
+         %{} = definition <- Enum.find(socket.assigns.field_definitions, &(&1.name == name)),
+         items = FlexibleItems.posted(socket.assigns.form, name),
+         {:ok, updated} <- FlexibleItems.update_list(items, definition, segments, fun) do
+      put_custom_field_param(socket, name, updated)
+    else
+      _unchanged -> socket
+    end
+  end
+
+  # The same for one item: `address` ends in the item's `_id`, and `fun`
+  # also gets that id.
+  defp update_flexible_item(socket, address, fun) do
+    {name, segments} = FlexibleItems.parse(address)
+
+    case Enum.split(segments, -1) do
+      {list_segments, [id]} when rem(length(list_segments), 2) == 0 ->
+        list_address = Enum.join([name | list_segments], "/")
+        update_flexible(socket, list_address, fn items, def -> fun.(items, def, id) end)
+
+      _not_an_item ->
+        socket
+    end
+  end
+
   # An autosave rebuilds the form from the saved record, and the save dropped
   # every blank row (`ApplyCustomFields`) — so a row added a moment ago, and
   # not typed into yet, would vanish. Each repeating group that posted a
   # blank row has its rows validated back onto the rebuilt form, which is
   # the same value the save just stored, plus the rows on screen.
   defp keep_blank_group_rows(socket, previous_form) do
-    case GroupRows.pending(
-           AshPhoenix.Form.params(previous_form),
-           socket.assigns.field_definitions
+    params = AshPhoenix.Form.params(previous_form)
+    definitions = socket.assigns.field_definitions
+
+    case Map.merge(
+           GroupRows.pending(params, definitions),
+           FlexibleItems.pending(params, definitions)
          ) do
       pending when map_size(pending) == 0 ->
         socket

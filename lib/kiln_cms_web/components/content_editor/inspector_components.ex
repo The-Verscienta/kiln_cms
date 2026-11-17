@@ -942,28 +942,6 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       else: group_input(assign(assigns, :row, GroupRows.row(assigns.value)))
   end
 
-  # A `:flexible` field (#2282). Until the items UI lands this is read-only:
-  # it renders a note and a count and no input, so the form posts nothing for
-  # the key and a save keeps the stored items.
-  def custom_field_input(%{definition: %{field_type: :flexible}} = assigns) do
-    assigns = assign(assigns, :item_count, flexible_item_count(assigns.value))
-
-    ~H"""
-    <div id={cf_id(@definition)}>
-      <span class="mb-1 block text-sm font-medium">{@definition.label}</span>
-      <p class="text-sm text-base-content/80">
-        {ngettext("%{count} item", "%{count} items", @item_count)}
-      </p>
-      <p class="mt-1 text-xs text-base-content/70">
-        {gettext("Edited through the API; item editing arrives with the next release.")}
-      </p>
-      <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
-        {@definition.help_text}
-      </p>
-    </div>
-    """
-  end
-
   # A `:key_value` field (#2278): one `key=value` per line. The stored pairs
   # are shown as lines; after a failed save, the text that was posted.
   def custom_field_input(%{definition: %{field_type: :key_value}} = assigns) do
@@ -1780,8 +1758,19 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # A checkbox posts nothing when cleared — no hidden `"false"` — because a
   # posted `"false"` is not blank, and would turn every untouched row into a
   # filled-in one that its other required sub-fields then refuse.
-  defp group_cell_input(%{sub: %{field_type: :boolean}} = assigns) do
-    assigns = assign(assigns, :id, group_cell_id(assigns.group, assigns.index, assigns.sub))
+  #
+  # A flexible item's cell (`FlexibleComponents`, #2282) passes `key`, the id
+  # chain of its item, so the cell's id follows the item, not its position.
+  attr :group, :map, default: nil
+  attr :sub, :map, required: true
+  attr :index, :any, default: nil
+  attr :key, :string, default: nil
+  attr :name, :string, required: true
+  attr :value, :any, required: true
+  attr :errors, :list, required: true
+
+  def group_cell_input(%{sub: %{field_type: :boolean}} = assigns) do
+    assigns = assign(assigns, :id, "custom-field-" <> cell_key(assigns))
 
     ~H"""
     <div class="self-end">
@@ -1804,10 +1793,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
-  defp group_cell_input(assigns) do
+  def group_cell_input(assigns) do
     definition = %{
       assigns.sub
-      | name: group_cell_key(assigns.group, assigns.index, assigns.sub),
+      | name: cell_key(assigns),
         required: false,
         # Said once, on the first row, rather than on every one.
         help_text: if(assigns.index in [nil, 0], do: assigns.sub.help_text)
@@ -1820,9 +1809,11 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  defp cell_key(%{key: key}) when is_binary(key), do: key
+  defp cell_key(assigns), do: group_cell_key(assigns.group, assigns.index, assigns.sub)
+
   defp group_cell_key(group, nil, sub), do: "#{group.name}-#{sub.name}"
   defp group_cell_key(group, index, sub), do: "#{group.name}-#{index}-#{sub.name}"
-  defp group_cell_id(group, index, sub), do: "custom-field-" <> group_cell_key(group, index, sub)
 
   defp group_row_errors?(problems, index) do
     Map.has_key?(problems.rows, index) or
@@ -1834,9 +1825,6 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
 
   defp rows_count(rows, _definition),
     do: ngettext("%{count} row", "%{count} rows", length(rows))
-
-  defp flexible_item_count(items) when is_list(items), do: length(items)
-  defp flexible_item_count(_other), do: 0
 
   defp bare_custom_field_input(assigns) do
     case field_type_parts(assigns.definition) do

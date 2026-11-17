@@ -149,24 +149,23 @@ defmodule KilnCMS.CMS.FlexibleAuditTest do
                []
     end
 
-    test "FieldSync exports a flexible field without its item types or their sub-fields", ctx do
+    test "FieldSync exports a flexible field with its item types and their sub-fields", ctx do
       assert {:ok, doc} = FieldSync.export(actor: ctx.admin)
       names = names_in(doc)
 
       assert "sections" in names
-      refute "hero" in names
-      refute "headline" in names
+      assert "hero" in names
+      assert "headline" in names
     end
 
-    test "a pruning import neither plans nor deletes an item type", ctx do
+    test "a pruning import of the site's own export changes nothing", ctx do
       %{admin: admin, flexible: flexible, item: item, sub: sub} = ctx
       {:ok, doc} = FieldSync.export(actor: admin)
 
       assert {:ok, report} =
                FieldSync.import_doc(doc, actor: admin, apply?: true, prune?: true)
 
-      refute Enum.any?(report.ops, &String.contains?(&1.path, "hero"))
-      refute Enum.any?(report.ops, &String.contains?(&1.path, "headline"))
+      assert Map.keys(report.counts) == [:unchanged]
       assert report.untouched == []
 
       for id <- [flexible.id, item.id, sub.id],

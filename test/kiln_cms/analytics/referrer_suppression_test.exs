@@ -10,10 +10,20 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
   right next to it.
 
   So the tests brute-force it. `consistent/2` reconstructs what a reader who
-  knows the algorithm can construct — every assignment of counts to the hidden
-  categories consistent with the published exacts, the announced ranges, and the
-  total — and asserts there is more than one. That is how the old algorithm was
-  caught, and reasoning about it is how it shipped.
+  knows the algorithm can construct — every breakdown with the same view total
+  that `Analytics.suppress_referrer_group/1` would have published *identically* —
+  and asserts there is more than one. That is how the old algorithm was caught,
+  and reasoning about it is how it shipped.
+
+  An earlier version of this search let a `"hidden"` cell range over the whole
+  residual, a weaker reader than a real one: it did not know the partner is the
+  first largest of the categories that are not naturally low, so it agreed with
+  `ambiguous?/3` when both were wrong (#2752). Re-running the algorithm on every
+  candidate is the reader's whole knowledge, with nothing left to restate.
+
+  Only **partial** publications are checked this way. Whether an all-hidden
+  breakdown is recoverable by a reader who knows the algorithm is a separate
+  question, tracked in #2981.
   """
   use ExUnit.Case, async: false
 
@@ -29,59 +39,103 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
 
   defp suppressed?(rows), do: Enum.any?(rows, fn {_s, _h, display} -> is_binary(display) end)
 
-  # Every assignment a reader could construct, given the published projection
-  # and the item's own view total. Deliberately re-derived here rather than
-  # calling `Analytics.ambiguous?/3`: that function is the claim, so a test
-  # sharing its arithmetic would agree with it about being wrong.
+  defp displays(rows), do: Enum.map(rows, fn {source, _hits, display} -> {source, display} end)
+
+  defp all_hidden?(rows), do: Enum.all?(rows, fn {_s, _h, display} -> display == "hidden" end)
+
+  # Every breakdown a reader could construct for a partial publication, given
+  # the item's own view total: the same exacts, each `"< n"` somewhere in
+  # `1..n-1`, the `"hidden"` partner taking whatever is left — kept only when
+  # the algorithm, run on it, publishes exactly what the reader sees.
   #
-  # Lazy, and that is not an optimisation. A `"hidden"` category ranges over
-  # `0..residual`, so a busy document's breakdown has millions of candidate
-  # tuples — and every caller here only ever asks whether there are two.
+  # Deliberately not calling `Analytics.ambiguous?/3` for the verdict: that
+  # function is the claim, so a test sharing its arithmetic would agree with it
+  # about being wrong. Running the whole algorithm on each candidate is what
+  # the reader can do, and it carries every rule they know — the partner's
+  # bounds, its tie-break — without this file restating any of them.
   defp consistent(totals, rows) do
     total = totals |> Map.values() |> Enum.sum()
-    exact = for {_s, _h, d} <- rows, is_integer(d), do: d
-    residual = total - Enum.sum(exact)
-
-    ranges =
-      for {source, _hits, display} <- rows, is_binary(display) do
-        case display do
-          "hidden" -> {source, 0..residual//1}
-          "< " <> n -> {source, 1..(String.to_integer(n) - 1)//1}
-        end
-      end
-
-    residual |> assignments(ranges) |> Enum.take(2)
+    readings(total, displays(rows), &displays(Analytics.suppress_referrer_group(&1)))
   end
 
-  defp assignments(0, []), do: [[]]
-  defp assignments(_residual, []), do: []
+  # Candidates for `displays` over `total`, filtered by `project`, the
+  # function the reader believes produced them. Lazy and truncated at two:
+  # "more than one" is the whole question.
+  defp readings(total, displays, project) do
+    exact = for {source, display} <- displays, is_integer(display), do: {source, display}
+    lows = for {source, "< " <> n} <- displays, do: {source, String.to_integer(n)}
+    partner = for {source, "hidden"} <- displays, do: source
+    residual = total - (exact |> Enum.map(&elem(&1, 1)) |> Enum.sum())
 
-  defp assignments(residual, [{source, range} | rest]) do
-    range
-    |> Stream.take_while(&(&1 <= residual))
-    |> Stream.flat_map(fn value ->
-      residual
-      |> Kernel.-(value)
-      |> assignments(rest)
-      |> Stream.map(&[{source, value} | &1])
+    lows
+    |> low_values()
+    |> Stream.flat_map(fn assigned ->
+      slack = residual - (assigned |> Enum.map(&elem(&1, 1)) |> Enum.sum())
+
+      case partner do
+        [] when slack == 0 -> [Map.new(exact ++ assigned)]
+        [source] when slack >= 0 -> [Map.new([{source, slack} | exact ++ assigned])]
+        _other -> []
+      end
+    end)
+    |> Stream.filter(&(project.(&1) == displays))
+    |> Enum.take(2)
+  end
+
+  defp low_values([]), do: [[]]
+
+  defp low_values([{source, n} | rest]) do
+    Stream.flat_map(1..(n - 1)//1, fn value ->
+      Stream.map(low_values(rest), &[{source, value} | &1])
     end)
   end
 
   defp assert_not_recoverable(totals) do
     rows = published(totals)
 
-    if suppressed?(rows) do
+    # An all-hidden breakdown is out of reach of this search — see the
+    # moduledoc and #2981.
+    if suppressed?(rows) and not all_hidden?(rows) do
       assignments = consistent(totals, rows)
 
       assert length(assignments) > 1,
              """
-             #{inspect(totals)} publishes as #{inspect(Enum.map(rows, fn {s, _h, d} -> {s, d} end))}
-             and exactly one assignment is consistent with it plus the view total
+             #{inspect(totals)} publishes as #{inspect(displays(rows))}
+             and exactly one breakdown is consistent with it plus the view total
              (#{Enum.sum(Map.values(totals))}) — the suppressed value is recoverable.
              """
     end
 
     rows
+  end
+
+  # The shape a breakdown with something naturally low would take if published
+  # partially: its own ranges, the partner `"hidden"`, the rest exact. This is
+  # the documented rule a reader knows — the partner is the FIRST largest of
+  # the categories that are not naturally low, in source order — restated so
+  # `ambiguous?/3` can be checked against it in the direction where the
+  # algorithm itself publishes nothing to compare with: the breakdowns it hid
+  # entirely.
+  defp partial_form(totals, threshold) do
+    raw = Enum.map(Analytics.referrer_sources(), &{&1, Map.get(totals, &1, 0)})
+
+    partner =
+      raw
+      |> Enum.reject(fn {_source, hits} -> hits > 0 and hits < threshold end)
+      |> case do
+        [] -> nil
+        candidates -> candidates |> Enum.max_by(&elem(&1, 1)) |> elem(0)
+      end
+
+    Enum.map(raw, fn
+      {^partner, _hits} -> {partner, "hidden"}
+      {source, hits} when hits > 0 and hits < threshold -> {source, "< #{threshold}"}
+      {source, hits} -> {source, hits}
+    end)
+  end
+
+  defp put_threshold(threshold) do
+    Application.put_env(:kiln_cms, :analytics_referrers, low_count_threshold: threshold)
   end
 
   describe "the breakdowns #1073 brute-forced" do
@@ -119,6 +173,69 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
     end
   end
 
+  describe "a partner that cannot be zero (#2752)" do
+    # The issue's breakdown. It was published as `< 5, 0, < 5, hidden, 5` with
+    # 12 views, and the published `5` means the partner — the largest — is at
+    # least 5, so the two lows hold 2 views and the partner exactly 5.
+    test "two low categories beside two at the threshold" do
+      totals = %{direct: 1, search: 1, social: 5, other: 5}
+      rows = assert_not_recoverable(totals)
+
+      refute displays(rows) == [
+               direct: "< 5",
+               internal: 0,
+               search: "< 5",
+               social: "hidden",
+               other: 5
+             ]
+
+      # No other partner is open to it, so nothing partial can be published.
+      assert all_hidden?(rows)
+    end
+
+    # The tie-break: `social` and an equal `other` are both largest, and the
+    # first wins, so a published exact before the partner bounds it strictly.
+    test "the breakdowns the tie-break pins" do
+      assert_not_recoverable(%{search: 1, social: 5, other: 1})
+
+      put_threshold(3)
+      assert_not_recoverable(%{direct: 3, internal: 1, search: 1, social: 4, other: 1})
+      assert_not_recoverable(%{direct: 1, search: 1, social: 1, other: 3})
+    end
+
+    # Every five-category breakdown with values up to just past the threshold:
+    # small enough to enumerate, and it holds what the older sweeps missed —
+    # two or more lows beside published exacts at or near the threshold, and
+    # ties between those exacts and the partner.
+    test "no partial publication is recoverable, and ambiguous?/3 agrees" do
+      for threshold <- [3, 5] do
+        put_threshold(threshold)
+        values = 0..(threshold + 2)
+
+        cache =
+          for direct <- values,
+              internal <- values,
+              search <- values,
+              social <- values,
+              other <- values,
+              reduce: %{} do
+            cache ->
+              totals = %{
+                direct: direct,
+                internal: internal,
+                search: search,
+                social: social,
+                other: other
+              }
+
+              check_breakdown(totals, threshold, cache)
+          end
+
+        assert map_size(cache) > 0
+      end
+    end
+  end
+
   describe "across the shape of a real breakdown" do
     # The systematic version: small totals are where the export lives, because
     # its grain is per day.
@@ -138,7 +255,7 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
 
     test "no breakdown is recoverable at a tighter or looser threshold" do
       for threshold <- [2, 3, 10] do
-        Application.put_env(:kiln_cms, :analytics_referrers, low_count_threshold: threshold)
+        put_threshold(threshold)
 
         for direct <- 0..12, internal <- [0, 1, threshold, threshold + 3, 40] do
           assert_not_recoverable(%{direct: direct, internal: internal})
@@ -214,6 +331,43 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
           assert length(consistent(totals, rows)) > 1
         end
       end
+    end
+  end
+
+  # One breakdown of the sweep above. `cache` holds the reader's count per
+  # `{total, partial form}` — every breakdown in that class sees the same
+  # candidates, so it is computed once.
+  defp check_breakdown(totals, threshold, cache) do
+    raw = Enum.map(Analytics.referrer_sources(), &{&1, Map.get(totals, &1, 0)})
+    rows = published(totals)
+
+    if suppressed?(rows) do
+      total = totals |> Map.values() |> Enum.sum()
+      form = partial_form(totals, threshold)
+      key = {total, form}
+
+      cache =
+        Map.put_new_lazy(cache, key, fn ->
+          length(readings(total, form, &partial_form(&1, threshold)))
+        end)
+
+      reader = Map.fetch!(cache, key)
+      suppressed = for {source, display} <- form, is_binary(display), do: source
+
+      # Both directions: published partially only when the reader is left
+      # with two or more, and hidden entirely only when they would not be.
+      assert Analytics.ambiguous?(raw, suppressed, threshold) == reader >= 2,
+             "#{inspect(totals)} at #{threshold}: ambiguous?/3 disagrees with " <>
+               "the #{reader} breakdown(s) a reader finds for #{inspect(form)}"
+
+      if not all_hidden?(rows) do
+        assert displays(rows) == form
+        assert length(consistent(totals, rows)) > 1, "#{inspect(totals)} is recoverable"
+      end
+
+      cache
+    else
+      cache
     end
   end
 end
