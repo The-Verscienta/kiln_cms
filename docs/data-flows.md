@@ -261,13 +261,72 @@ smallest window in which year-over-year comparisons always resolve. The all-time
 `content_views` counter is never purged, so totals stay correct as buckets age
 out — which is also why the two will not sum to the same number.
 
-### Mail job retention
+### Job args retention
 
-Every mail is queued as an Oban job whose args hold the rendered message,
-recipient included. Oban's Pruner deletes finished jobs after 7 days
-(`config/config.exs`). Until then the job holds any link the mail carried: a
-magic link, a password reset, a sign-in unlock link (#2250), or a site
-invitation (#2135), whose token is otherwise stored only as a hash. Backups taken in that window hold them too.
+Background work is queued as Oban jobs, and a job's args are kept in three
+places: the `oban_jobs` row, which Oban's Pruner deletes 7 days after the job
+finishes (`config/config.exs`); the `job:start`, `job:stop` and
+`job:exception` lines Oban's logger prints at `info` for every run; and the
+`extra` of a Sentry event the job raises. Most jobs carry only ids. These do
+not:
+
+- **Mail** (#1843). A mail job carries the message's addresses in the clear,
+  for the delivery panel, and its subject and bodies **sealed** (encrypted
+  with a key derived from `SECRET_KEY_BASE`), because a magic link, a
+  password reset, a sign-in unlock link (#2250) or a site invitation (#2135)
+  is a credential. The sealed message is dropped from the row when the job
+  finishes, and from a Sentry event's `extra.args`. The recipient's address
+  stays in the row until the Pruner deletes it. Workflow, task and
+  task-digest mail put the address in the args when the job is queued, so a
+  job queued before the account is erased still sends to it
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019)).
+- **Form notifications and autoresponders** (#2992). Jobs queued by this
+  release carry the form's, site's and submission's ids only, and the worker
+  reads the submission when it runs. A job queued by an earlier release
+  carries the submitted `data`, and the autoresponder's `to` address. It is
+  still delivered, Oban's logger prints them once more when it runs, and
+  both are dropped from the row when the job finishes.
+- **Automation** (#2992). `DispatchWorker` and `RuleWorker` jobs carry the
+  event's `payload`: the serialized document as it was when the event fired,
+  drafts included (an `in_review` or `returned_to_draft` event carries the
+  draft). It is dropped from the row when the job finishes. **In this
+  release the payload is still written in plain text**, so until a job
+  finishes it is readable in its pending row, and every run prints it in
+  Oban's `job:start` and `job:stop` log lines (and `job:exception` when the
+  run fails). The workers already read a sealed payload; a later release
+  writes it sealed, which leaves only ciphertext in the row and the log
+  lines. See [#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992).
+
+For a Sentry event raised by any of these form or automation jobs, the keys
+above are dropped from `extra.args`, and so are the variables of every stack
+frame, which can quote the same data.
+
+"Finishes" means completed, canceled, discarded or failed for the last time.
+A job that fails with attempts left keeps its args, because it runs again. A
+job killed mid-run (past the shutdown grace period, or by its timeout) runs
+none of its own code when `Oban.Lifeline` later discards it, so it keeps its
+args; `KilnCMS.Jobs.PrivateArgsScrub` drops the form and automation keys from
+such rows, and from rows finished under an earlier release. It runs ten
+minutes after each boot and daily at 04:50 UTC (`KILN_PRIVATE_ARGS_SCRUB_CRON`;
+see [environment-variables.md](environment-variables.md)).
+To run it by hand, for instance after restoring a backup taken before the
+upgrade:
+
+```bash
+bin/kiln_cms eval 'KilnCMS.Release.scrub_job_args()'
+```
+
+`KilnCMS.Release.scrub_mail_jobs()` does the same for mail jobs' messages.
+
+What is not covered:
+
+- A **backup** taken while a job held its args holds them too, until it is
+  deleted.
+- A **`form.submitted` webhook** keeps the whole submission in its delivery
+  ledger row (`webhook_deliveries`) until that is pruned (30 days by
+  default), and there is no way to delete one row before then
+  ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)). The
+  webhook's job itself carries only the delivery's id.
 
 ### Security log retention (#2241)
 
@@ -331,7 +390,7 @@ A sign-in unlock link (#2250) is a stored token with `purpose:
 of addresses without the server secret. It expires 15 minutes after it is
 minted, is revoked when redeemed or when the password is changed or reset, and is
 removed by the same nightly sweep. The mailed link itself also sits in the
-mail job's args (see *Mail job retention*).
+mail job's args, sealed, until the job finishes (see *Job args retention*).
 
 Without cleanup these rows would accumulate forever, so the nightly
 `:expunge_expired` trigger (`lib/kiln_cms/accounts/token.ex`) deletes every token

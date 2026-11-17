@@ -78,6 +78,9 @@ Every summary line below that was shortened links to its own entry there.
 - **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release (`:erasure_backfill_on_boot`, default on). No migration; rolling back is safe, and what it deleted stays deleted.**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-backfill-newsletter-upgrade))
 
+- **About 10 minutes after boot and daily, a job drops form submission data and automation payloads from finished jobs (`KILN_PRIVATE_ARGS_SCRUB_CRON`). No migration. Drain the `mail` queue before rolling back: form mail queued by this release fails on the previous one and is lost.**
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#private-job-args-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -90,6 +93,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Two referrer breakdowns of overlapping traffic (dashboard span vs. the export's days, site chart vs. item bars, 7 vs. 30 days, today read twice) can be differenced to recover a suppressed count. No workaround short of turning off `KILN_ANALYTICS_REFERRERS`.**
   ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989) · [long form](docs/changelog/unreleased.md#referrer-breakdowns-differenced))
+
+- **Automation jobs still hold the event's document, drafts included, in plain text while pending and in Oban's `job:start` / `job:stop` log lines, until the next release seals it. No workaround short of logging above `info`.**
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#automation-payload-plain-in-pending-jobs))
 
 ### Added
 
@@ -146,6 +152,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Telemetry: `[:kiln_cms, :backups, :retention, :skipped | :stopped]` now also fire for destinations (`scope: :destination`); local events carry `scope: :local`. Match on `scope` to count local only.**
   ([long form](docs/changelog/unreleased.md#backup-retention-telemetry-scope))
 
+- **Form mail built from the stored submission when the job runs: a submission deleted or marked spam before then sends nothing, and no confirmation goes out if its email field was removed or renamed, or the autoresponder switched off, since.**
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-mail-reads-stored-submission))
+
 ### Fixed
 
 - **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
@@ -171,6 +180,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Erasure now deletes the account's linked newsletter subscriptions on every site, so the person's real address stops receiving newsletters, and Export my data lists them (without tokens).**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-deletes-newsletter-subscriptions))
+
+- **Form mail jobs carry only ids, and form data and automation payloads are dropped from a job's row when it finishes and from Sentry events. Automation payloads stay plain while pending (Known issues).**
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-automation-job-args))
 
 ### Security
 

@@ -107,6 +107,36 @@ carries the reasoning.
   See [docs/newsletter.md](../newsletter.md#accounts-erased-before-this-release).
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991))
 
+<a id="private-job-args-upgrade"></a>
+
+- **About 10 minutes after boot, and daily at 04:50 UTC, a job drops form submission data and automation payloads from finished jobs. No migration. Drain the `mail` queue before rolling back: a form notification or confirmation queued by this release fails on the previous one and is lost.**
+  Form notification and autoresponder jobs now carry the submission's id
+  instead of its data (see *Form mail and automation jobs no longer keep
+  submission data* under Fixed). `KilnCMS.Jobs.PrivateArgsScrub` drops the
+  submitted `data` and the autoresponder's `to` from finished form mail
+  jobs, and the `payload` from finished automation jobs, that still hold
+  them: rows finished before the upgrade, and jobs killed mid-run that
+  `Oban.Lifeline` later discarded. Jobs still waiting to run keep their
+  args. It runs on the `default` queue ten minutes after each boot
+  (`config :kiln_cms, :private_args_scrub_on_boot, false` turns that off)
+  and daily (`KILN_PRIVATE_ARGS_SCRUB_CRON`, default `50 4 * * *`; `false`
+  turns it off). It is idempotent. By hand, for instance after restoring a
+  backup from before the upgrade:
+  `bin/kiln_cms eval 'KilnCMS.Release.scrub_job_args()'`.
+
+  During a rolling deploy, a node of the previous release that picks up a
+  form mail job queued by this one fails it, and Oban retries it on the mail
+  backoff (five attempts over about 81 minutes); a node of this release
+  then sends it, so the mail is delayed, not lost. The boot-time scrub may
+  also land on an old node and fail there; that is harmless, as the daily
+  run does the same work. **Rolling back** to the previous release is safe
+  for the data, but every form mail job this release queued that has not
+  run yet fails all its attempts and is discarded: those staff
+  notifications and confirmations are never sent. Let the `mail` queue drain
+  first, or accept that. See
+  [Rolling back past form mail jobs that carry ids](../releasing.md#rolling-back-past-form-mail-jobs-that-carry-ids).
+  Refs #2992.
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -164,6 +194,23 @@ carries the reasoning.
   item's bars, the 7-day window beside the 30-day one, and today read twice as it fills. A reader holding two of them
   can subtract one from the other. There is no workaround short of turning referrer attribution off.
   ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989))
+
+<a id="automation-payload-plain-in-pending-jobs"></a>
+
+- **An automation event's document snapshot, drafts included, is still in plain text in a pending automation job's row and in Oban's `job:start` / `job:stop` log lines.**
+  Affects every site with automation rules. `DispatchWorker` and
+  `RuleWorker` jobs carry the event's serialized document, and a reaction
+  needs that snapshot, so it can't be replaced by an id. This release drops
+  it from the job's row when the job finishes and from Sentry events, and
+  its workers read a sealed payload, but it still writes the plain one:
+  sealing it in the writers now would make a node of the previous release,
+  mid-deploy, fail every automation job. The next release writes it sealed.
+  Until then, treat the `info`-level Oban log lines and the `oban_jobs` rows
+  of pending automation jobs as holding draft content. The only workaround
+  for the log lines is raising `:logger`'s level above `info` in your
+  config, which hides every job's lines. See
+  [Job args retention](../data-flows.md#job-args-retention).
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992))
 
 ## Added
 
@@ -635,6 +682,22 @@ carries the reasoning.
   metadata are unchanged. See
   [When retention is skipped or stops](../backups.md#when-retention-is-skipped-or-stops).
 
+<a id="form-mail-reads-stored-submission"></a>
+
+- **Form notifications and confirmations are built from the stored submission when the job runs: a submission deleted or marked spam before then sends nothing, and a confirmation is not sent if its email field was removed or renamed, or the autoresponder switched off, since the submit.**
+  The jobs carry ids now (see *Form mail and automation jobs no longer keep
+  submission data* under Fixed), so each worker reads the submission back,
+  through `FormSubmission`'s new `:for_delivery` read as the form
+  pipeline's system actor, and the autoresponder asks
+  `KilnCMS.Forms.Autoresponder.eligible?/3` again against the form and its
+  fields as they are then. Before, the job carried the data and the
+  confirmation address from the moment of the submit and sent them
+  whatever had changed. A job normally runs within seconds, so the
+  difference shows mostly for mail that is retrying after a failed
+  delivery. A job queued by the previous release still sends what it
+  carries. See [Side effects](../forms.md#side-effects).
+  Refs #2992.
+
 ## Fixed
 
 <a id="staging-scrub-personal-data"></a>
@@ -848,6 +911,48 @@ carries the reasoning.
   [docs/newsletter.md](../newsletter.md#when-a-member-account-is-erased) and
   [docs/data-flows.md](../data-flows.md#subject-rights-workflows).
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991))
+
+<a id="form-automation-job-args"></a>
+
+- **Form mail and automation jobs no longer keep submission data after they finish: form notification and autoresponder jobs carry only ids, and automation payloads are dropped from the job's row when it finishes.**
+  A job's args are kept in `oban_jobs` for 7 days after it finishes,
+  printed by Oban's logger on every run, and attached to a failing job's
+  Sentry event. Form notification and autoresponder jobs carried everything
+  the visitor submitted, and the confirmation address; automation jobs
+  carry the event's serialized document, drafts included.
+
+  - Form notification and autoresponder jobs now carry `form_id`, `org_id`
+    and `submission_id`, and the worker reads the submission when it runs
+    (see the Changed entry *Form notifications and confirmations are built
+    from the stored submission*). The forms system actor is admitted to the
+    new `FormSubmission` `:for_delivery` read, a get by the job's id, and
+    still cannot list, re-mark or delete a submission
+    ([policy matrix](../policy-matrix.md#the-system-actor)).
+  - The keys that hold private data (`data` and `to` of a form job queued
+    by the previous release, `payload` and `sealed` of an automation job)
+    are dropped from the job's row once it finishes: completed, canceled,
+    discarded, or failed for the last time (`KilnCMS.Jobs.PrivateArgs`).
+    A job with retries left keeps them. A form job queued by the previous
+    release is still delivered from what it carries.
+  - `KilnCMS.SentryFilter` drops those keys from a Sentry event's
+    `extra.args`, and the variables of every stack frame, for these four
+    workers.
+  - `KilnCMS.Jobs.PrivateArgsScrub` drops them from finished rows that
+    still hold them; see the Upgrade notes entry.
+  - A form mail job that carries neither the ids nor the data (a previous
+    release's job whose data was dropped after it sent, then rescued by
+    Lifeline) is canceled with "form submission no longer in the job"
+    instead of crashing.
+
+  Not covered yet: this release still writes automation payloads in plain
+  text, so they are in pending job rows and Oban's log lines until the next
+  release seals them (see Known issues). A `form.submitted` webhook keeps
+  the submission in its delivery row for 30 days
+  ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)), and
+  workflow and task mail jobs keep the recipient's address
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019)). No
+  migration. See [Job args retention](../data-flows.md#job-args-retention).
+  Refs #2992.
 
 ## Security
 

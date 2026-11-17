@@ -914,7 +914,13 @@ Wiring (all gated on the DSN):
   credential-named key (`token: "…"`, `"token" => "…"`).
 - **Background jobs** — Oban job failures are captured via Sentry's built-in
   integration (`config :sentry, integrations: [oban: [capture_errors: true]]` in
-  `config/config.exs`).
+  `config/config.exs`), which puts the job's `args` and `worker` in the
+  event's `extra`. `KilnCMS.SentryFilter` drops from `extra.args` what a job
+  must not send out: a mail job's message (#1843), and the submitted form
+  data, autoresponder address or automation payload of the workers
+  `KilnCMS.Jobs.PrivateArgs` registers (#2992). For those workers it also
+  drops every stack frame's variables, which can quote the same data. See
+  [Job args retention](data-flows.md#job-args-retention).
 - **Transport** — the default `Sentry.FinchClient`. Finch is already in the tree
   via Req, so no extra HTTP client (e.g. hackney) is pulled in.
 - **Source context** — `mix sentry.package_source_code` runs in the
