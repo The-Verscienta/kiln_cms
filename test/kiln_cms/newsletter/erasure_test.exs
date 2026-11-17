@@ -164,6 +164,61 @@ defmodule KilnCMS.Newsletter.ErasureTest do
     end
   end
 
+  describe "forget_member/1 fails closed" do
+    # A refused read under the default `:filter` would match no rows, delete
+    # nothing and answer `:ok`: an erasure reported done with the address
+    # still on the list.
+    test "a withdrawn grant raises instead of deleting nothing" do
+      member = user()
+      row = linked(member, default_org())
+
+      for actor <- [nil, KilnCMS.SystemActor.new(:automation)] do
+        capture_log(fn ->
+          assert_raise RuntimeError, ~r/newsletter forget_member failed for org/, fn ->
+            Newsletter.with_actor(actor, fn -> Newsletter.forget_member(member.id) end)
+          end
+        end)
+
+        assert subscriber_exists?(row)
+      end
+    end
+
+    test "a failure rolls the whole erasure back" do
+      admin = user(:admin)
+      member = user()
+      row = linked(member, default_org())
+      linked(member, org("nl-erase-rollback").id)
+
+      {:ok, key} =
+        Accounts.mint_api_key(member.id, "ci", DateTime.add(DateTime.utc_now(), 1, :day),
+          authorize?: false
+        )
+
+      {result, log} =
+        with_log(fn ->
+          Newsletter.with_actor(nil, fn -> Accounts.anonymize_user(member, actor: admin) end)
+        end)
+
+      assert {:error, _error} = result
+
+      reloaded = Accounts.get_user!(member.id, authorize?: false)
+      assert reloaded.anonymized_at == nil
+      assert to_string(reloaded.email) == to_string(member.email)
+      assert subscriber_exists?(row)
+
+      # Revoked earlier in the same after_action, so rolled back with it.
+      assert [%{revoked_at: nil}] =
+               Enum.filter(
+                 Accounts.list_api_keys!(member.id, authorize?: false),
+                 &(&1.id == key.id)
+               )
+
+      # Inside the erasure's transaction the first failure stops the sweep,
+      # so the log names the org that failed and no other.
+      assert length(Regex.scan(~r/newsletter forget_member failed for org/, log)) == 1
+    end
+  end
+
   describe "the billing sync after an erasure" do
     test "links no new row for an erased account, even with an entitlement left behind" do
       member = user()

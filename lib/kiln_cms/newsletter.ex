@@ -116,39 +116,48 @@ defmodule KilnCMS.Newsletter do
   queued delivery to a deleted row cancels as "subscriber not found"
   (`MailWorker`).
 
-  One org at a time, as `KilnCMS.Notifications.forget_recipient/1` does:
-  subscribers are tenant-scoped, and `:for_user` (the one cross-org read) is
-  the member's own. Each delete runs as `system/0`, which `:forget_member`
-  admits by name; its query is the plain `:read`, which that actor already
-  holds. A failed org is logged and the call raises once every org was
-  tried, so the erasure around it rolls back rather than leaving the address
-  on a list.
+  One org at a time: subscribers are tenant-scoped, and `:for_user` (the one
+  cross-org read) is the member's own. Each delete runs as `system/0`, which
+  `:forget_member` admits by name; its query is the plain `:read`, which
+  that actor already holds. Both are authorized with `:error`, so a refused
+  read raises rather than matching no rows and answering `:ok` with the
+  address still on the list.
+
+  How a failure is reported depends on where the call runs:
+
+    * **Inside a transaction** (erasure's own): the first org that fails
+      stops the sweep; it is logged with that org, and the failure travels
+      on unchanged to roll the erasure back. A failed statement aborts the
+      Postgres transaction, so going on would only log every later org as
+      failed too.
+    * **Outside one** (`KilnCMS.Accounts.ErasureBackfill`): every org is
+      tried, each failure is logged with its org, and the call raises at the
+      end naming them all.
+
+  `forget_member/2` limits the sweep to `org_ids`, for a caller that already
+  knows where the rows are; `forget_member/1` covers every org.
   """
   @spec forget_member(Ash.UUID.t()) :: :ok
-  def forget_member(user_id) when is_binary(user_id) do
+  def forget_member(user_id) when is_binary(user_id),
+    do: forget_member(user_id, KilnCMS.Accounts.list_org_ids())
+
+  @doc "`forget_member/1`, over the given orgs only."
+  @spec forget_member(Ash.UUID.t(), [Ash.UUID.t()]) :: :ok
+  def forget_member(user_id, org_ids) when is_binary(user_id) and is_list(org_ids) do
+    if KilnCMS.Repo.in_transaction?(),
+      do: Enum.each(org_ids, &forget_in_org!(user_id, &1)),
+      else: forget_everywhere(user_id, org_ids)
+  end
+
+  # Outside a transaction each org stands alone, so one failure does not stop
+  # the rest; `forget_in_org!/2` has logged it with its org.
+  defp forget_everywhere(user_id, org_ids) do
     failed =
-      Enum.reject(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+      Enum.reject(org_ids, fn org_id ->
         try do
-          KilnCMS.Newsletter.Subscriber
-          |> Ash.Query.filter(user_id == ^user_id)
-          |> forget_member_subscriber!(
-            actor: system(),
-            tenant: org_id,
-            bulk_options: [
-              strategy: [:atomic, :atomic_batches, :stream],
-              return_records?: false,
-              return_errors?: true
-            ]
-          )
-
-          true
+          forget_in_org!(user_id, org_id)
         rescue
-          error ->
-            Logger.error(
-              "newsletter forget_member failed for org #{org_id}: " <> Exception.message(error)
-            )
-
-            false
+          _error -> false
         end
       end)
 
@@ -158,6 +167,41 @@ defmodule KilnCMS.Newsletter do
 
     :ok
   end
+
+  # Logs a failure with the org it happened in, then re-raises it unchanged.
+  # Inside a transaction Ash reports a failed bulk write by rolling back (a
+  # throw, not an exception), and that has to keep travelling up to the
+  # transaction it unwinds; catching it here is only to say where it began.
+  defp forget_in_org!(user_id, org_id) do
+    KilnCMS.Newsletter.Subscriber
+    |> Ash.Query.filter(user_id == ^user_id)
+    |> forget_member_subscriber!(
+      actor: system(),
+      tenant: org_id,
+      bulk_options: [
+        authorize_with: :error,
+        strategy: [:atomic, :atomic_batches, :stream],
+        return_records?: false,
+        return_errors?: true
+      ]
+    )
+
+    true
+  catch
+    kind, reason ->
+      Logger.error(
+        "newsletter forget_member failed for org #{org_id}: #{describe_failure(kind, reason)}"
+      )
+
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp describe_failure(:error, error) when is_exception(error), do: Exception.message(error)
+
+  defp describe_failure(:throw, {_conn, _ref, error}) when is_exception(error),
+    do: Exception.message(error)
+
+  defp describe_failure(_kind, reason), do: inspect(reason, limit: 5)
 
   @doc """
   Send a published document to subscribers as a newsletter.

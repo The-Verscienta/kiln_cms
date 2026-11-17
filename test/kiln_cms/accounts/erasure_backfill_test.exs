@@ -7,6 +7,8 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
   use KilnCMS.DataCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
 
+  import Ecto.Query, only: [from: 2]
+  import ExUnit.CaptureLog
   import KilnCMS.OrgFixtures, only: [org: 1]
 
   alias KilnCMS.Accounts
@@ -51,6 +53,44 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
     user.id
     |> Newsletter.link_member_subscriber!(%{email: to_string(user.email)}, opts)
     |> Newsletter.confirm_subscriber!(opts)
+  end
+
+  # Every backfill job row, whatever its state (`all_enqueued/1` lists only
+  # the ones waiting to run).
+  defp jobs do
+    KilnCMS.Repo.all(from(j in Oban.Job, where: j.worker == "KilnCMS.Accounts.ErasureBackfill"))
+  end
+
+  # How many DELETEs on `newsletter_subscribers` `fun` sends, in this process.
+  defp count_subscriber_deletes(fun) do
+    id = {__MODULE__, make_ref()}
+    parent = self()
+
+    :telemetry.attach(
+      id,
+      [:kiln_cms, :repo, :query],
+      fn _event, _measurements, %{query: query}, _config ->
+        if self() == parent and query =~ ~r/^DELETE FROM "newsletter_subscribers"/,
+          do: send(parent, {id, :delete})
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(id)
+    end
+
+    Stream.repeatedly(fn ->
+      receive do
+        {^id, :delete} -> 1
+      after
+        0 -> nil
+      end
+    end)
+    |> Enum.take_while(& &1)
+    |> length()
   end
 
   defp exists?(subscriber) do
@@ -99,6 +139,55 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
     assert :ok = ErasureBackfill.enqueue()
 
     assert [_one] = all_enqueued(worker: ErasureBackfill)
+  end
+
+  test "deletes only in the orgs where the account has rows" do
+    {_tombstone, rows} = pre_fix_tombstone()
+    # Sites where it has nothing must not each cost a DELETE.
+    for n <- 1..3, do: org("erasure-backfill-empty-#{n}")
+
+    deletes = count_subscriber_deletes(fn -> ErasureBackfill.run() end)
+
+    assert deletes == length(rows)
+  end
+
+  test "a failed run fails the job, so Oban retries it, and the retry finishes the pass" do
+    {_tombstone, rows} = pre_fix_tombstone()
+
+    log =
+      capture_log(fn ->
+        Newsletter.with_actor(nil, fn ->
+          assert {:error, message} = perform_job(ErasureBackfill, %{})
+          assert message =~ "failed for 1 account"
+        end)
+      end)
+
+    assert log =~ "erasure backfill could not forget newsletter rows"
+    assert Enum.all?(rows, &exists?/1)
+
+    assert :ok = perform_job(ErasureBackfill, %{})
+    refute Enum.any?(rows, &exists?/1)
+  end
+
+  test "a job waiting to retry is not shadowed by uniqueness, nor duplicated by a boot" do
+    {_tombstone, rows} = pre_fix_tombstone()
+    assert :ok = ErasureBackfill.enqueue()
+
+    capture_log(fn ->
+      Newsletter.with_actor(nil, fn ->
+        assert %{failure: 1} = Oban.drain_queue(queue: :default, with_scheduled: true)
+      end)
+    end)
+
+    assert [%{state: "retryable", attempt: 1}] = jobs()
+
+    # A node booting meanwhile queues nothing new: the retry is the job.
+    assert :ok = ErasureBackfill.enqueue()
+    assert [%{state: "retryable"}] = jobs()
+
+    assert %{success: 1} = Oban.drain_queue(queue: :default, with_scheduled: true)
+    assert [%{state: "completed"}] = jobs()
+    refute Enum.any?(rows, &exists?/1)
   end
 
   test "the test build does not enqueue it on boot" do
