@@ -146,6 +146,91 @@ defmodule KilnCMSWeb.BackupComponents do
   end
 
   @doc """
+  The warning for backups a schedule keeps that were found deleted outside
+  the app (#2931): one sentence per notice of `Backups.status/0`'s
+  `held_deleted` (one per backup directory), what it usually means, and a
+  link to the guide's "The hold markers". The Backups page and the Schedule
+  tab both show it; `id` is the element's id. Each sentence is dated by the
+  detection and names up to ten backups by component and date, with "and N
+  more" past that.
+  """
+  attr :id, :string, required: true
+  attr :notices, :list, required: true
+
+  def held_deleted_warning(assigns) do
+    ~H"""
+    <div id={@id} class="space-y-1">
+      <p :for={{notice, n} <- Enum.with_index(@notices)} id={"#{@id}-#{n}"} class="font-medium">
+        {held_deleted_line(notice)}
+      </p>
+      <p>
+        {gettext(
+          "This usually means the host's scripts/backup.sh is older than this release and ignores .hold markers. Replace it with this release's copy."
+        )}
+        <a
+          id={"#{@id}-docs"}
+          href={docs_url("backups.md#the-hold-markers")}
+          target="_blank"
+          rel="noopener"
+          class="link inline-flex items-center gap-1"
+        >
+          {gettext("About the hold markers")}
+          <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+        </a>
+      </p>
+    </div>
+    """
+  end
+
+  @doc """
+  One held-deleted notice (`Backups.status/0`'s `held_deleted`) in words:
+  when it was found, how many backups, and which (up to ten listed).
+  """
+  @spec held_deleted_line(map()) :: String.t()
+  def held_deleted_line(%{units: units, at: at} = notice) do
+    total = max(notice[:total] || 0, length(units))
+    listed = Enum.map_join(units, ", ", &held_unit_label/1)
+
+    named =
+      case total - length(units) do
+        more when more > 0 ->
+          ngettext("%{units} and %{count} more", "%{units} and %{count} more", more,
+            units: listed
+          )
+
+        _none ->
+          listed
+      end
+
+    ngettext(
+      "On %{date}, a backup a schedule keeps was deleted outside the app: %{units}.",
+      "On %{date}, %{count} backups a schedule keeps were deleted outside the app: %{units}.",
+      total,
+      date: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC"),
+      units: named
+    )
+  end
+
+  # `"<kind>:<stamp>"`: the component and the backup's date; anything else
+  # (a kind or stamp a newer release wrote) as stored.
+  defp held_unit_label(unit) do
+    with [kind, stamp] <- String.split(unit, ":", parts: 2),
+         {:ok, component} <- held_component(kind),
+         {:ok, at} <- KilnCMS.Backups.Artifact.parse_stamp(stamp) do
+      gettext("%{component} backup of %{date}",
+        component: component,
+        date: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
+      )
+    else
+      _unknown -> unit
+    end
+  end
+
+  defp held_component("db"), do: {:ok, component_label(:db)}
+  defp held_component("media"), do: {:ok, component_label(:media)}
+  defp held_component(_other), do: :error
+
+  @doc """
   What a run's off-site destination is called: the label the run recorded,
   or, for the entry a run records when the stored destinations couldn't be
   read (`KilnCMS.Backups.RunDestination.unreadable_key/0`), a sentence.

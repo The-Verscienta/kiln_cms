@@ -120,6 +120,14 @@ defmodule KilnCMSWeb.BackupLive do
   (`Backups.status/0`'s `retention`) adds a dated headline line in the alarm
   tone, with a link to the guide, until a clean pass there clears it.
 
+  ## Held backups deleted outside the app (#2931)
+
+  A backup a schedule keeps that the host's own prune deleted (an older
+  `scripts/backup.sh` ignoring its `.hold` marker) is a warning under the
+  headline (`Backups.status/0`'s `held_deleted`, shown for 8 days after it
+  was found), with what to do and a link to the guide. It doesn't raise the
+  alarm: the backups themselves still run.
+
   ## Tabs (part of #2219)
 
   This is the Backups tab; the in-app schedules and their forms are the
@@ -144,6 +152,7 @@ defmodule KilnCMSWeb.BackupLive do
     only: [
       tabs: 1,
       component_label: 1,
+      held_deleted_warning: 1,
       offsite_headline: 1,
       retention_lines: 1,
       run_destination_label: 2,
@@ -891,6 +900,17 @@ defmodule KilnCMSWeb.BackupLive do
               </p>
             </div>
           </div>
+        </section>
+
+        <%!-- Backups a schedule keeps, deleted by the host's own prune
+              (#2931): the backups still run, so it is a warning, not the
+              alarm. --%>
+        <section
+          :if={@status && @status.held_deleted != []}
+          class="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 p-4 text-sm text-warning-ink"
+        >
+          <.icon name="hero-exclamation-triangle" class="mt-0.5 size-5 shrink-0" />
+          <.held_deleted_warning id="backup-held-deleted" notices={@status.held_deleted} />
         </section>
 
         <%!-- A failed run keeps its own error visible. Showing the previous

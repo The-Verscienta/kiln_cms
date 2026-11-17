@@ -3153,4 +3153,100 @@ defmodule KilnCMSWeb.BackupLiveTest do
       end
     end
   end
+
+  # #2931: backups a schedule keeps that were deleted outside the app are a
+  # warning under the headline for eight days, never the alarm, and never on
+  # Home.
+  describe "held backups deleted outside the app (#2931)" do
+    defp held_deleted!(attrs) do
+      Backups.report_backup_notice!(
+        Map.merge(
+          %{
+            kind: :held_deleted,
+            scope: "local",
+            units: ["db:20261110-020000"],
+            total: 1,
+            at: ~U[2026-11-15 09:30:00.000000Z]
+          },
+          attrs
+        ),
+        actor: Backups.system()
+      )
+    end
+
+    defp good_db_backup! do
+      offsite_run!(%{"local" => %{"status" => "ok"}}, [], nil)
+    end
+
+    test "one backup: a dated warning naming it, with the guide; no alarm", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.utc_now()})
+      today = Calendar.strftime(DateTime.utc_now(), "%Y-%m-%d")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "On #{today}"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "a backup a schedule keeps was deleted outside the app: " <>
+                 "Database backup of 2026-11-10 02:00 UTC."
+             )
+
+      assert has_element?(lv, "#backup-held-deleted", "Replace it with this release's copy.")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-held-deleted-docs[href$="backups.md#the-hold-markers"]|
+             )
+
+      assert has_element?(lv, "section.border-warning\\/30 #backup-held-deleted")
+      refute has_element?(lv, "section.border-error\\/30")
+    end
+
+    test "many: counted, ten named, and the rest as \"and N more\"", %{conn: conn} do
+      good_db_backup!()
+      units = for n <- 10..19, do: "media:20261110-0200#{n}"
+      held_deleted!(%{units: units, total: 12, at: DateTime.utc_now()})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "12 backups a schedule keeps were deleted outside the app: " <>
+                 "Media backup of 2026-11-10 02:00 UTC"
+             )
+
+      assert has_element?(
+               lv,
+               "#backup-held-deleted-0",
+               "Media backup of 2026-11-10 02:00 UTC and 2 more."
+             )
+    end
+
+    test "older than eight days, or none: nothing", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.add(DateTime.utc_now(), -9 * 86_400, :second)})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "#backup-held-deleted")
+    end
+
+    test "not on Home", %{conn: conn} do
+      good_db_backup!()
+      held_deleted!(%{at: DateTime.utc_now()})
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-backup-warning"
+      refute html =~ "deleted outside the app"
+    end
+  end
 end
