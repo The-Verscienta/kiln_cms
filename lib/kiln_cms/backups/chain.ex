@@ -53,8 +53,9 @@ defmodule KilnCMS.Backups.Chain do
   (`fenced_rename/3`). A superseded step's rename is refused, so its files never
   replace the chain's that took over, and its temporary file is its alone to
   remove. A step that must delete something of the chain's (a work directory, a
-  stale plan's media) moves it aside into `.work/.trash` with one fenced rename
-  and deletes it after the lock is released (`fenced/2`). The finish step's
+  stale plan's media) moves it aside into a trash directory on its own file
+  system with one fenced rename and deletes it after the lock is released
+  (`fenced/2`). The finish step's
   marker sync (#3013) still runs under the lease, so a superseded finish writes
   no `.good` or `.hold` marker and leaves them to the step that took over.
 

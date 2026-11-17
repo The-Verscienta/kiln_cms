@@ -446,7 +446,8 @@ defmodule KilnCMS.Backups.CancelTest do
   # fenced. The zombie is the job the chain held before the Cancel, run by
   # hand in a Task as its first attempt; its tool blocks on a gate file only
   # when it writes the zombie's temporary name, so the resumed chain's run of
-  # the same tool goes through.
+  # the same tool goes through. The gate opens on exit, and the wait ends if
+  # the test's directory is gone, so no stand-in outlives its test.
   describe "#2819: a step that outlives its Cancel writes only its own files" do
     test "a zombie dump released after a resume leaves the resumed chain's dump intact", %{
       base: base,
@@ -457,13 +458,15 @@ defmodule KilnCMS.Backups.CancelTest do
       job = %{step_until("dump") | attempt: 1}
       %{stamp: stamp} = lock()
       gate = Path.join(base, "pg_dump.gate")
+      # A failing assertion must not leave the stand-in sleeping: open the gate.
+      on_exit(fn -> File.write(gate, "") end)
       tmp = "kiln-db-#{stamp}.dump.#{job.id}-1.partial"
 
       fake_tool!(base, "pg_dump", """
       case "$*" in
         *".#{job.id}-1.partial"*)
           echo "$*" > "#{gate}.started"
-          while [ ! -f "#{gate}" ]; do sleep 0.05; done ;;
+          while [ ! -f "#{gate}" ] && [ -d "#{base}" ]; do sleep 0.05; done ;;
       esac
       """)
 
@@ -507,13 +510,15 @@ defmodule KilnCMS.Backups.CancelTest do
       job = %{step_until("archive", 2) | attempt: 1}
       %{stamp: stamp} = lock()
       gate = Path.join(base, "tar.gate")
+      # A failing assertion must not leave the stand-in sleeping: open the gate.
+      on_exit(fn -> File.write(gate, "") end)
       tag = "#{job.id}-1"
 
       fake_tool!(base, "tar", """
       case "$*" in
         *-czf*".#{tag}.partial"*)
           touch "#{gate}.started"
-          while [ ! -f "#{gate}" ]; do sleep 0.05; done ;;
+          while [ ! -f "#{gate}" ] && [ -d "#{base}" ]; do sleep 0.05; done ;;
       esac
       """)
 

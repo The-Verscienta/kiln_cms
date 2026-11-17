@@ -222,6 +222,30 @@ defmodule KilnCMS.Backups.ResumeTest do
       refute File.exists?(work)
     end
 
+    # With its plan gone, a resume re-plans, and the earlier set's files under
+    # the stamp are moved aside into `media/.kiln-trash` under the lease, on
+    # media/'s own file system, and deleted after (#2818).
+    test "a resume whose plan is gone discards the earlier set through media/.kiln-trash", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, work: work, parts: [p1, _p2, p3]} = fail_at_part_3(dir, tools)
+
+      File.rm!(Path.join(work, "plan.json"))
+      leftover = Path.join([dir, "media", Artifact.part_name(stamp, 9)])
+      File.write!(leftover, "an earlier partition's part")
+      aged_p1 = aged(p1)
+
+      assert :ok = BackupChain.resume(stamp)
+
+      refute File.exists?(leftover)
+      assert File.exists?(p3)
+      assert mtime(p1) != aged_p1
+      assert File.ls!(Path.join([dir, "media", ".kiln-trash"])) == []
+      assert %{status: :succeeded} = hd(runs())
+    end
+
     test "a part whose bytes no longer match its recorded hash is rebuilt", %{
       base: base,
       dir: dir

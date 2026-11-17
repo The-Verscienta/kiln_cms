@@ -163,6 +163,27 @@ defmodule KilnCMS.Backups.ManifestTest do
       refute File.exists?(tmp)
     end
 
+    # A fenced rename raises when its lock query times out: the temporary file
+    # must not outlive it at the directory's root.
+    test "a rename that raises leaves no temporary file, and the raise goes on", %{dir: dir} do
+      parent = self()
+
+      raising = fn from, _to ->
+        send(parent, {:tmp, from})
+        raise DBConnection.ConnectionError, "timed out"
+      end
+
+      manifest = %Manifest{finished_at: DateTime.utc_now(), trigger: "manual", ok: true}
+
+      assert_raise DBConnection.ConnectionError, fn ->
+        Manifest.write(dir, manifest, tag: "48211-2", rename: raising)
+      end
+
+      assert_received {:tmp, tmp}
+      refute File.exists?(tmp)
+      refute File.exists?(Manifest.path(dir))
+    end
+
     test "a tagged write lands through its rename function", %{dir: dir} do
       manifest = %Manifest{finished_at: DateTime.utc_now(), trigger: "manual", ok: true}
       assert :ok = Manifest.write(dir, manifest, tag: 5, rename: &File.rename/2)

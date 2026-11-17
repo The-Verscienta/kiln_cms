@@ -66,9 +66,10 @@ defmodule KilnCMS.Backups.Steps do
   between a step's write and its rename still makes Cancel, new requests and
   the heartbeat sweep wait until their query timeout; the writing itself no
   longer can. Something of the chain's a step must delete (a stale work
-  directory, an earlier plan's media files) is moved aside into `.work/.trash`
-  with one fenced rename and deleted after the lock is released; the start
-  step clears what a crash left there. The work directory exists
+  directory, an earlier plan's media files) is moved aside, with one fenced
+  rename, into a trash directory on its own file system (`.work/.trash`, or
+  `.kiln-trash` beside it in `db/` or `media/`) and deleted after the lock is
+  released; the start step clears what a crash left there. The work directory exists
   for every backup, database-only ones included, so any failed backup can be
   resumed. A step after `start` that finds no state (deleted, or another
   chain's) fails the backup without writing a manifest: it has nothing to say
@@ -2895,6 +2896,25 @@ defmodule KilnCMS.Backups.Steps do
         older?(path, cutoff),
         do: remove_partial(path)
 
+    sweep_manifest_partials(dir, cutoff)
+  end
+
+  # A step's tagged `manifest.json.<tag>.partial` at the directory's root,
+  # left when its node stopped between the write and the rename
+  # (`Manifest.write/3`). The untagged `manifest.json.partial` is
+  # `backup.sh`'s, which removes its own.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp sweep_manifest_partials(dir, cutoff) do
+    for path <- Path.wildcard(Path.join(dir, "manifest.json.*.partial")),
+        tag =
+          path
+          |> Path.basename()
+          |> String.replace_prefix("manifest.json.", "")
+          |> String.replace_suffix(".partial", ""),
+        Artifact.tag?(tag),
+        older?(path, cutoff),
+        do: remove_partial(path)
+
     :ok
   end
 
@@ -3038,36 +3058,82 @@ defmodule KilnCMS.Backups.Steps do
 
   # Delete `paths` (files or directories of the chain's under `dir`) without a
   # delete inside the lock transaction (#2818): under the lease, ONE fenced
-  # transaction renames each into `.work/.trash/<stamp>.<tag>.<label>/`; the
-  # entry is deleted after the lock is released, whatever the rename's outcome
-  # (only this step ever writes to it). A path that vanished meanwhile is
-  # skipped. `{:error, :superseded}` when the lease no longer holds: nothing
-  # was moved. With nothing to move the lock isn't taken.
+  # transaction renames each into a trash entry `<stamp>.<tag>.<label>/` on the
+  # path's own file system, since rename(2) can't cross one and an operator may
+  # mount `db/` or `media/` from another disk: a file of `db/` or `media/` goes
+  # into `.kiln-trash/` beside it, a work directory into `.work/.trash/`. The
+  # entries are deleted after the lock is released, whatever the rename's
+  # outcome (only this step ever writes to them). A path that vanished
+  # meanwhile is skipped. `{:error, :superseded}` when the lease no longer
+  # holds: nothing was moved. With nothing to move the lock isn't taken.
+  #
+  # Every reader of `db/` and `media/` (the Importer, Retention, Presence,
+  # the partial sweep, `backup.sh`, `restore.sh`) matches names against the
+  # artifact patterns and never descends, so a dot-directory there is ignored.
+  # `.kiln-trash` itself is left in place once emptied: removing it could race
+  # another chain's step making its own entry in it.
   defp discard(_lease, _dir, _label, []), do: :ok
 
   # sobelow_skip ["Traversal.FileModule"]
   defp discard(lease, dir, label, paths) do
-    trash = Path.join([dir, ".work", ".trash"])
-    entry = Path.join(trash, "#{lease.stamp}.#{tag(lease)}.#{label}")
+    name = "#{lease.stamp}.#{tag(lease)}.#{label}"
+    moves = for path <- paths, do: {path, Path.join(trash_dir(dir, label, path), name)}
+    entries = moves |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
 
-    with :ok <- mkdir_private(Path.join(dir, ".work")),
-         :ok <- mkdir_private(trash),
-         :ok <- mkdir_private(entry) do
-      result = Chain.fenced(lease, fn -> move_aside(paths, entry) end)
-      File.rm_rf(entry)
+    with :ok <- make_trash(dir, label, entries) do
+      result = Chain.fenced(lease, fn -> move_aside(moves) end)
+      Enum.each(entries, &File.rm_rf/1)
       result
     end
   end
 
+  @trash ".kiln-trash"
+
+  defp trash_dir(dir, "work", _path), do: Path.join([dir, ".work", ".trash"])
+  defp trash_dir(_dir, _label, path), do: Path.join(Path.dirname(path), @trash)
+
+  # The trash directories and the entries in them, private. `.work` is made
+  # private too, as the work directories' parent; `db/` and `media/` keep
+  # whatever mode the operator gave them.
+  defp make_trash(dir, label, entries) do
+    parents = if label == "work", do: [Path.join(dir, ".work")], else: []
+
+    (parents ++ Enum.flat_map(entries, &[Path.dirname(&1), &1]))
+    |> Enum.uniq()
+    |> Enum.reduce_while(:ok, fn path, :ok ->
+      case mkdir_private(path) do
+        :ok -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  @doc false
+  # Inside the fenced call: rename each `{path, entry}` into its entry. A
+  # rename that still fails with `:exdev` (a file that is a mount point of its
+  # own, a bind-mounted single file) is deleted in place instead, in the same
+  # fenced call: a rare unlink under the lock, the one place a step still
+  # deletes inside it. `rename` is `File.rename/2`, swapped in tests.
   # sobelow_skip ["Traversal.FileModule"]
-  defp move_aside(paths, entry) do
-    Enum.reduce_while(paths, :ok, fn path, :ok ->
-      case File.rename(path, Path.join(entry, Path.basename(path))) do
+  @spec move_aside([{Path.t(), Path.t()}], (Path.t(), Path.t() -> :ok | {:error, term()})) ::
+          :ok | {:error, term()}
+  def move_aside(moves, rename \\ &File.rename/2) do
+    Enum.reduce_while(moves, :ok, fn {path, entry}, :ok ->
+      case rename.(path, Path.join(entry, Path.basename(path))) do
         :ok -> {:cont, :ok}
         {:error, :enoent} -> {:cont, :ok}
+        {:error, :exdev} -> remove_in_place(path)
         {:error, reason} -> {:halt, {:error, {:move_aside, Path.basename(path), reason}}}
       end
     end)
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp remove_in_place(path) do
+    case File.rm_rf(path) do
+      {:ok, _removed} -> {:cont, :ok}
+      {:error, reason, _file} -> {:halt, {:error, {:move_aside, Path.basename(path), reason}}}
+    end
   end
 
   # The paths of `paths` that exist (lstat: a dangling symlink is one).
@@ -3075,14 +3141,19 @@ defmodule KilnCMS.Backups.Steps do
   defp existing(paths), do: Enum.filter(paths, &match?({:ok, _}, File.lstat(&1)))
 
   @doc false
-  # Clear `.work/.trash` (`discard/4`): an entry is left there only when a
-  # node stopped between moving something aside and deleting it. Run by the
-  # start step, when the chain holds the lock and no other step of it runs.
-  # Best-effort; returns the entries removed.
+  # Clear the trash `discard/4` leaves (`.work/.trash`, `db/.kiln-trash` and
+  # `media/.kiln-trash`): an entry is left there only when a node stopped
+  # between moving something aside and deleting it. Run by the start step,
+  # when the chain holds the lock and no other step of it runs. Best-effort;
+  # returns the entries removed.
   # sobelow_skip ["Traversal.FileModule"]
   @spec sweep_trash(Path.t()) :: [String.t()]
   def sweep_trash(dir) do
-    for path <- Path.wildcard(Path.join([dir, ".work", ".trash", "*"]), match_dot: true),
+    for trash <- [
+          Path.join([dir, ".work", ".trash"])
+          | for(sub <- ["db", "media"], do: Path.join([dir, sub, @trash]))
+        ],
+        path <- Path.wildcard(Path.join(trash, "*"), match_dot: true),
         match?({:ok, _}, File.rm_rf(path)) do
       Path.basename(path)
     end

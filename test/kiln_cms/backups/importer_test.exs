@@ -370,6 +370,22 @@ defmodule KilnCMS.Backups.ImporterTest do
       assert all_runs() == []
     end
 
+    # Where a backup step moves a file aside before deleting it (#2818).
+    test "a .kiln-trash directory, and the artifacts in it, are not imported", %{dir: dir} do
+      for {sub, name} <- [
+            {"db", "kiln-db-20260801-031700.dump"},
+            {"media", Artifact.part_name("20260801-031700", 1)}
+          ] do
+        entry = Path.join([dir, sub, ".kiln-trash", "20260801-031700.7-1.#{sub}"])
+        File.mkdir_p!(entry)
+        File.write!(Path.join(entry, name), "x")
+        File.touch!(Path.join(entry, name), System.os_time(:second) - 7200)
+      end
+
+      assert {:ok, %{imported: 0, pending: 0}} = Importer.run()
+      assert all_runs() == []
+    end
+
     test "a kind/extension mismatch and stray files are ignored", %{dir: dir} do
       File.write!(Path.join([dir, "db", "kiln-db-20260801-031700.tar.gz"]), "x")
       File.write!(Path.join([dir, "db", "notes.txt"]), "x")

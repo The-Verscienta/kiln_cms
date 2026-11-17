@@ -134,6 +134,28 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "sha256: ok (kiln-media-#{stamp}.sha256)"
     end
 
+    # A newer set moved aside by the app (#2818) is not the newest set.
+    test "never reads into .kiln-trash", ctx do
+      stamp = "20260805-031700"
+      app_set!(ctx, stamp)
+      dump!(ctx, stamp)
+
+      newer = "20260806-031700"
+
+      for {sub, name} <- [
+            {"db", "kiln-db-#{newer}.dump"},
+            {"media", "kiln-media-#{newer}.part01.tar.gz"}
+          ] do
+        entry = Path.join([ctx.backups, sub, ".kiln-trash", "#{newer}.48211-2.#{sub}"])
+        File.mkdir_p!(entry)
+        File.write!(Path.join(entry, name), "garbage")
+      end
+
+      assert {out, 0} = backup(ctx, "verify")
+      assert out =~ "Newest media backup: #{stamp}"
+      refute out =~ newer
+    end
+
     test "catches a corrupted part that is not the newest file", ctx do
       stamp = "20260805-031700"
       [p1, p2 | _] = app_set!(ctx, stamp)
@@ -313,6 +335,32 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert {_out, 0} = backup(ctx, "prune")
       assert Enum.all?([other, stray, notes, manifest], &File.exists?/1)
       assert {:ok, %{type: :symlink}} = File.lstat(link)
+    end
+
+    # Where the app's backup step moves a file aside before deleting it
+    # (#2818): prune never lists into it, so what is in it is no unit of its.
+    test "leaves a .kiln-trash directory and what is in it alone", ctx do
+      old = "20260101-000000"
+      newest = "20260301-000000"
+      age!(set_files!(ctx, newest), 400)
+
+      inside =
+        for {sub, name} <- [
+              {"db", "kiln-db-#{old}.dump"},
+              {"media", "kiln-media-#{old}.part01.tar.gz.48211-2.partial"}
+            ] do
+          entry = Path.join([ctx.backups, sub, ".kiln-trash", "#{old}.48211-2.#{sub}"])
+          File.mkdir_p!(entry)
+          path = Path.join(entry, name)
+          File.write!(path, "moved aside")
+          path
+        end
+
+      age!(inside, 400)
+
+      assert {out, 0} = backup(ctx, "prune")
+      refute out =~ ".kiln-trash"
+      assert Enum.all?(inside, &File.exists?/1)
     end
 
     test "the newest complete unit of each kind is kept however old", ctx do
