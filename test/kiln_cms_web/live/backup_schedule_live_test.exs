@@ -1003,7 +1003,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       assert has_element?(
                lv,
                "#schedule-form",
-               "The first backup of the day; the others follow every 4 hours."
+               "One backup at this time, and the others every 4 hours around the clock."
              )
 
       preview_of(lv, %{"interval" => "weekly"})

@@ -15738,6 +15738,11 @@ msgstr ""
 msgid "One %{type}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "One backup at this time, and the others every %{hours} hours around the clock."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "One choice"
@@ -23182,11 +23187,6 @@ msgid "The file converts to %{count} block."
 msgid_plural "The file converts to %{count} blocks."
 msgstr[0] ""
 msgstr[1] ""
-
-#: lib/kiln_cms_web/live/backup_schedule_live.ex
-#, elixir-autogen, elixir-format
-msgid "The first backup of the day; the others follow every %{hours} hours."
-msgstr ""
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format

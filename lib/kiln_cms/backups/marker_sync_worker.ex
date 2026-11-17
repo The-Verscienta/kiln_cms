@@ -66,8 +66,15 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   before a change committed, so a change made while it runs queues one more
   job behind it. That job's sync waits on the backup lock (a waiting advisory
   lock, `Chain.with_lock/1`) until the running one is done, then reads the
-  schedules afresh. So each directory has at most one running job and one
-  waiting behind it.
+  schedules afresh. So each directory normally has one running job and at
+  most one waiting behind it (a per-directory job that snoozes while a
+  fan-out inserts can briefly leave two waiting, which costs one redundant
+  sync).
+
+  While an in-app backup holds the lock, a sync returns `:busy` and writes
+  nothing; the backup's finish step syncs the markers itself with the
+  schedules as they are then. So a change made during a running in-app
+  backup reaches the `.hold` markers when that backup finishes.
   """
   use Oban.Worker,
     queue: :default,

@@ -1194,7 +1194,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           value={hhmm(@form[:time_of_day].value)}
           hint={
             @sub_daily_hours &&
-              gettext("The first backup of the day; the others follow every %{hours} hours.",
+              gettext(
+                "One backup at this time, and the others every %{hours} hours around the clock.",
                 hours: @sub_daily_hours
               )
           }
