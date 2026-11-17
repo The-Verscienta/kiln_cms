@@ -447,6 +447,49 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
       assert audiences_of(u.id) == []
     end
 
+    # #2774: erasure cancels the membership locally and drops its provider
+    # ids; the provider still renews the subscription every period, and the
+    # event still resolves the row by its metadata.
+    test "a renewal for an erased account revives nothing", %{conn: conn} do
+      u = member()
+      m = membership(u, tier(), :active)
+      {:ok, _delta} = KilnCMS.Billing.Entitlements.recompute(u.id)
+
+      Accounts.anonymize_user!(u, authorize?: false)
+      KilnCMS.DataCase.drain_oban()
+      events = length(membership_events(m.id))
+
+      event =
+        subscription_event("customer.subscription.updated", m, %{
+          "status" => "active",
+          "id" => "sub_renewed",
+          "customer" => "cus_renewed"
+        })
+
+      assert post_event(conn, event).status == 200
+      KilnCMS.DataCase.drain_oban()
+
+      reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: default_org_id())
+      assert reloaded.status == :canceled
+      assert reloaded.provider_subscription_id == nil
+      assert reloaded.provider_customer_id == nil
+
+      # No audit row, no outbound `membership.activated`, no audience.
+      assert length(membership_events(m.id)) == events
+
+      refute Enum.any?(
+               KilnCMS.Repo.all(Oban.Job),
+               &(&1.worker == "KilnCMS.Billing.MembershipWebhookWorker" and
+                   &1.args["membership_id"] == m.id and &1.args["to_status"] == "active")
+             )
+
+      assert audiences_of(u.id) == []
+
+      # Settled, not left to retry.
+      assert [%{status: :processed, error: nil}] =
+               Enum.filter(event_rows(), &(&1.provider_event_id == event["id"]))
+    end
+
     test "cancel_at_period_end keeps access while the provider says active", %{conn: conn} do
       u = member()
       m = membership(u, tier(), :active)

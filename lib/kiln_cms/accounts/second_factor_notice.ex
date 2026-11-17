@@ -43,9 +43,12 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
   Removing a passkey needs only a signed-in session, so the same thief can
   narrow the owner's own ways back in: remove their passkeys and keep the one
   they added. The removal mail says which kind went, when, from what browser
-  and site, and, when an administrator removed it rather than the owner, which
-  administrator (their account's address: chosen at registration, not typed
-  into this request). Still no passkey name. It needs no throttle of its own:
+  and site, and, when an administrator removed it rather than the owner, that
+  administrator by display name ("an administrator" when they have none),
+  never by address (#3044): the mail goes to someone else, and an address is
+  contact data, while the display name is what the administrator chose to
+  show. The name is typed by the administrator, the acting operator rather
+  than an attacker, and escaped like every other value. Still no passkey name. It needs no throttle of its own:
   an account holds at most `KilnCMS.Accounts.Passkey.max_per_account/0`
   passkeys, each added one already mailed, and turning the authenticator app
   off spends the second-factor code budget.
@@ -166,7 +169,7 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
     |> to(to_string(user.email))
     |> subject("A second factor was added to your #{site} account")
     |> html_body(body(escape(site), factor, details))
-    |> Mail.enqueue!(org_id: relay_org(user))
+    |> Mail.enqueue!(org_id: relay_org(user), user_id: user.id)
   end
 
   # `nil` (the instance relay) when the instance has one, or when no site
@@ -189,14 +192,20 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
     |> to(to_string(user.email))
     |> subject("A second factor was removed from your #{site} account")
     |> html_body(removed_body(escape(site), factor, remover, details))
-    |> Mail.enqueue!()
+    |> Mail.enqueue!(user_id: user.id)
   end
 
   # `:owner` when the account's owner removed it (or nobody we can name did),
-  # else the administrator's address.
+  # else `{:admin, name}`: the administrator's display name, or nil for none.
+  # Never their address (#3044), as the invitation names its inviter.
   defp remover(%User{id: id}, %User{id: id}), do: :owner
-  defp remover(_owner, %User{email: email}) when not is_nil(email), do: {:admin, to_string(email)}
+  defp remover(_owner, %User{} = admin), do: {:admin, admin_name(admin)}
   defp remover(_owner, _system_or_none), do: :owner
+
+  defp admin_name(%User{name: name, anonymized_at: nil}) when name not in [nil, ""],
+    do: to_string(name)
+
+  defp admin_name(_admin), do: nil
 
   defp removed_body(site, factor, remover, details) do
     reset = url(~p"/reset")
@@ -210,6 +219,9 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
     """
   end
 
+  defp removed_by_whom(nil), do: "an administrator"
+  defp removed_by_whom(name), do: "an administrator, #{escape(name)}"
+
   defp removed_lead(site, :totp),
     do:
       "The authenticator app was turned off for two-step sign-in on your #{site} account. " <>
@@ -218,9 +230,9 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
   defp removed_lead(site, :passkey),
     do: "A passkey was removed from your #{site} account. It can no longer be used to sign in."
 
-  defp removed_by({:admin, email}, _reset) do
+  defp removed_by({:admin, name}, _reset) do
     """
-    <p>It was removed by an administrator, #{escape(email)}.</p>
+    <p>It was removed by #{removed_by_whom(name)}.</p>
     <p><strong>If you didn't expect this</strong>, ask an administrator of your site why, and
     check your account's sign-in methods.</p>
     """

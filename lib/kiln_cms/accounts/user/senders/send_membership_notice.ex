@@ -37,7 +37,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendMembershipNotice do
       |> to(address)
       |> subject("You were added to #{site}")
       |> html_body(body(escape(site), ConsoleHost.tier_url("/sign-in", org, role), role))
-      |> Mail.enqueue!(org_id: org.id)
+      |> Mail.enqueue!(org_id: org.id, user_id: user.id)
     else
       :ok
     end

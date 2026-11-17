@@ -21,14 +21,20 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
   longer `running` and the lock moved on (its advance is superseded). Its Run
   writes get a `StaleRecord` error before and after a Resume: they are
   filtered to `running` and to its own chain (`Changes.OwnChain`, #2538), and
-  its `state.json` write to its lease (`Chain.while_holding/2`).
+  its `state.json` write to its lease (its rename into place is
+  `Chain.fenced_rename/3`, #2818).
 
   The run is logged as canceled by the actor, with the step it was on in the
   audit event's metadata (`changeset.context[:backup_step]`).
+
+  A resume that holds the lock but has not re-opened its run yet is not what
+  this action is for. While its start snoozes for the server with the run's
+  files, the lock holds a chain the run is not on and no stamp yet, so a stale
+  `running` row is just marked canceled and the resume carries on. Its own
+  Cancel is `Run`'s `:cancel_resume` (`Run.Changes.CancelResume`, #2816),
+  which the Backups page offers instead.
   """
   use Ash.Resource.Change
-
-  import Ecto.Query
 
   alias KilnCMS.Backups.{Chain, Steps}
 
@@ -78,7 +84,7 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
         )
 
       true ->
-        cancel_jobs(row.chain_id)
+        :ok = Chain.cancel_chain_jobs(row.chain_id)
 
         case Chain.release_in_txn(row) do
           {:ok, promoted} ->
@@ -104,16 +110,6 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
 
   defp holds?(row, run),
     do: (run.chain_id != nil and row.chain_id == run.chain_id) or row.stamp == run.stamp
-
-  defp cancel_jobs(chain) do
-    query =
-      from(j in Oban.Job,
-        where: j.queue == "backup_steps" and fragment("?->>'chain' = ?", j.args, ^chain)
-      )
-
-    {:ok, _canceled} = Oban.cancel_all_jobs(query)
-    :ok
-  end
 
   defp step_label(%{step: nil}), do: nil
   defp step_label(%{step: :archive, part: part}) when is_integer(part), do: "archive part #{part}"

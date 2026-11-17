@@ -473,6 +473,9 @@ objects — not merely read and write them.
    the user and password at the first `@` before the first `/`, as libpq
    does, and hand the decoded password to `pg_dump`/`psql` as `PGPASSWORD`
    ([backups.md](backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726)).
+   Keep each one a URL: a `key=value` string that carries the password is
+   refused
+   ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
 4. **Restart the application** so `runtime.exs` re-evaluates. With more than
    one instance behind the proxy, restart them one at a time — the old role is
    still valid, so instances on either side of the cutover both work, and this

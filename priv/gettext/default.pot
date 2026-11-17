@@ -71,6 +71,11 @@ msgstr ""
 msgid "%{comments} on this block"
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{component} backup of %{date}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} OK"
@@ -1020,6 +1025,16 @@ msgstr ""
 msgid "%{label}: %{message}"
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{line} (backup directory %{id})"
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{line} (backup directory without an id)"
+msgstr ""
+
 #: lib/kiln_cms_web/promotion_warning.ex
 #, elixir-autogen, elixir-format
 msgid "%{list} and %{last}"
@@ -1445,6 +1460,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "%{type} records that connect to this one through their %{field} field."
 msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{units} and %{count} more"
+msgid_plural "%{units} and %{count} more"
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -2617,6 +2639,12 @@ msgstr ""
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
 msgid "About task anchoring"
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "About the hold markers"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
@@ -5219,6 +5247,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Cancel this backup? Its files are kept, so it can be resumed later. A queued backup will start next."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel this resume? The backup stays as it was, so it can be resumed later."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel this resume? The backup stays as it was, so it can be resumed later. A queued backup will start next."
 msgstr ""
 
 #: lib/kiln_cms_web/live/media_live.ex
@@ -9604,6 +9642,7 @@ msgid "Erase the account if the email address was never confirmed"
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Erased"
 msgstr ""
@@ -11776,6 +11815,11 @@ msgstr ""
 #: lib/kiln_cms_web/controllers/sign_in_unlock_html/new.html.heex
 #, elixir-autogen, elixir-format
 msgid "If an account with that address is paused after too many sign-in attempts, we've emailed it a link to lift the pause. The link works once, within %{minutes} minutes."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "If host cron prunes this backup directory, its scripts/backup.sh must be from this release: an older copy deletes the backups these settings keep."
 msgstr ""
 
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
@@ -15865,6 +15909,13 @@ msgstr ""
 msgid "Older posts →"
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "On %{date}, a backup a schedule keeps was deleted outside the app: %{units}."
+msgid_plural "On %{date}, %{count} backups a schedule keeps were deleted outside the app: %{units}."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "On %{owner}, of type %{type}."
@@ -19106,6 +19157,11 @@ msgid "Resume"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Resume canceled. The backup stays as it was, so it can be resumed later."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
@@ -19117,9 +19173,29 @@ msgstr ""
 msgid "Retention here deletes only backups this installation sent to this destination, by the same rules as on this server, and only on destinations that can list and delete."
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Retention on %{name} stopped part-way on the backup of %{date}: %{reason}. What it hadn't reached stays until this is fixed."
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Retention on %{name} was skipped on the backup of %{date}: %{reason}. Nothing was deleted there, so backups will build up there until this is fixed."
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Retention saved."
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Retention stopped part-way on the backup of %{date}: %{reason}. What it hadn't reached stays until this is fixed."
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Retention was skipped on the backup of %{date}: %{reason}. Nothing was deleted, so local backups will build up until this is fixed."
 msgstr ""
 
 #: lib/kiln_cms_web/live/billing_live.ex
@@ -21853,6 +21929,11 @@ msgstr ""
 msgid "Starting a backup"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Starting a resume"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "Starting on"
@@ -23049,6 +23130,11 @@ msgstr ""
 msgid "That release no longer exists."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That resume can't be canceled."
+msgstr ""
+
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "That rule is no longer listed."
@@ -23219,6 +23305,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The backup changed meanwhile. Try again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
@@ -23811,6 +23902,11 @@ msgstr ""
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The resume started meanwhile. Cancel it again to stop the backup."
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "The retention window could not be saved."
@@ -24365,6 +24461,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "This account was erased on %{when}. Nothing personal remains on it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account was erased. It holds no tier here and cannot be given one; the row is kept as a record until you remove it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
@@ -25191,6 +25292,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "This upload's metadata is being stripped in the background. It is not visible on the site or in the API until that finishes."
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "This usually means the host's scripts/backup.sh is older than this release and ignores .hold markers. Replace it with this release's copy."
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_components.ex
@@ -26664,6 +26770,16 @@ msgstr ""
 msgid "Waiting for review: one %{kind}."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for the canceled backup's step to stop"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for the server that has this backup's files"
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
@@ -27245,6 +27361,11 @@ msgstr ""
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "Whole years since a date, like a person's age. Refreshed daily."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Why retention skips"
 msgstr ""
 
 #: lib/kiln_cms_web/live/ip_block_live.ex

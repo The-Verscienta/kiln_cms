@@ -46,7 +46,8 @@ defmodule KilnCMS.Demo.Restore do
       months later.
   """
 
-  alias KilnCMS.Backups.Worker
+  alias KilnCMS.Backups
+  alias KilnCMS.Backups.Redact
 
   @excluded_data ~w(tokens oban_jobs oban_peers)
 
@@ -264,26 +265,28 @@ defmodule KilnCMS.Demo.Restore do
   """
   @spec run(work(), String.t()) :: :ok | {:error, {:restore_failed, String.t()}}
   def run(%{wipe: wipe, restore: restore}, url) do
-    {url, env} = Worker.split_credentials(url)
-    env = [{"PGOPTIONS", "-c client_min_messages=warning"} | env]
+    # The password as PGPASSWORD, and TLS as the app connects (#2830).
+    with {:ok, {url, env}} <- connection(url, :restore_failed) do
+      env = [{"PGOPTIONS", "-c client_min_messages=warning"} | env]
 
-    # `--no-password`, here and in `dump/2`: a missing password fails at once
-    # instead of prompting on the port's stdin, which never answers.
-    args = [
-      "--no-password",
-      "--no-psqlrc",
-      "--quiet",
-      "--output=/dev/null",
-      "--set=ON_ERROR_STOP=1",
-      "--single-transaction",
-      "--file=#{wipe}",
-      "--file=#{restore}",
-      "--dbname=#{url}"
-    ]
+      # `--no-password`, here and in `dump/2`: a missing password fails at once
+      # instead of prompting on the port's stdin, which never answers.
+      args = [
+        "--no-password",
+        "--no-psqlrc",
+        "--quiet",
+        "--output=/dev/null",
+        "--set=ON_ERROR_STOP=1",
+        "--single-transaction",
+        "--file=#{wipe}",
+        "--file=#{restore}",
+        "--dbname=#{url}"
+      ]
 
-    case cmd("psql", args, env) do
-      {:ok, _output} -> :ok
-      {:error, reason} -> {:error, {:restore_failed, describe(reason)}}
+      case cmd("psql", args, env) do
+        {:ok, _output} -> :ok
+        {:error, reason} -> {:error, {:restore_failed, describe(reason)}}
+      end
     end
   end
 
@@ -294,7 +297,13 @@ defmodule KilnCMS.Demo.Restore do
   # sobelow_skip ["Traversal.FileModule"]
   @spec dump(String.t(), Path.t()) :: :ok | {:error, {:dump_failed, String.t()}}
   def dump(url, path) do
-    {url, env} = Worker.split_credentials(url)
+    with {:ok, {url, env}} <- connection(url, :dump_failed) do
+      write_dump(url, env, path)
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_dump(url, env, path) do
     partial = path <> ".partial"
 
     with :ok <- File.mkdir_p(Path.dirname(path)),
@@ -306,6 +315,7 @@ defmodule KilnCMS.Demo.Restore do
                "--format=custom",
                "--no-owner",
                "--no-privileges",
+               "--lock-wait-timeout=#{Backups.lock_wait_ms()}",
                "--file=#{partial}",
                url
              ],
@@ -330,9 +340,17 @@ defmodule KilnCMS.Demo.Restore do
     :ok
   end
 
+  # `KilnCMS.Backups.pg_connection/1`, or the refusal as this module's error.
+  defp connection(url, kind) do
+    case Backups.pg_connection(url) do
+      {:ok, _url_and_env} = ok -> ok
+      {:error, :refused_conninfo} -> {:error, {kind, Backups.describe_refused_conninfo()}}
+    end
+  end
+
   # argv, never a shell — the URL carries a host and a database name, and its
-  # password travels as PGPASSWORD (`Worker.split_credentials/1`) rather than
-  # sitting in world-readable argv for the length of a restore.
+  # password travels as PGPASSWORD (`KilnCMS.Backups.pg_connection/1`) rather
+  # than sitting in world-readable argv for the length of a restore.
   # sobelow_skip ["CI.System"]
   defp cmd(executable, args, env \\ []) do
     case System.cmd(executable, args, env: env, stderr_to_stdout: true) do
@@ -344,22 +362,19 @@ defmodule KilnCMS.Demo.Restore do
   end
 
   # These messages reach the job's cancel reason and the operator's console, and
-  # `psql`/`pg_dump` echo connection details on failure. Same two passes as
-  # `KilnCMS.Backups.Worker`: the known secret literally, then any URL userinfo.
-  defp redact(output, env) do
-    env
-    |> Enum.reduce(output, fn {_var, secret}, acc ->
-      if String.length(secret) >= 6, do: String.replace(acc, secret, "***"), else: acc
-    end)
-    |> String.replace(~r{([a-z][a-z0-9+.-]*://)[^@\s/]+@}i, "\\1***@")
-    |> String.slice(0, 500)
+  # `psql`/`pg_dump` echo connection details on failure. The one scrubbing path
+  # every backup text takes (`KilnCMS.Backups.Redact`), which leaves the TLS
+  # settings readable: "SSL was required" must not turn into "SSL was ***d".
+  defp redact(output, env), do: Redact.text(output, env, 500)
+
+  defp describe({:error, {:exit_status, _executable, _status, _output} = reason}),
+    do: describe(reason)
+
+  defp describe({:exit_status, executable, status, output}) do
+    if executable == "pg_dump" and Backups.lock_timeout?(output),
+      do: Backups.describe_lock_timeout(output),
+      else: "#{executable} exited #{status}: #{String.trim(output)}"
   end
-
-  defp describe({:error, {:exit_status, executable, status, output}}),
-    do: "#{executable} exited #{status}: #{String.trim(output)}"
-
-  defp describe({:exit_status, executable, status, output}),
-    do: "#{executable} exited #{status}: #{String.trim(output)}"
 
   defp describe({:error, {executable, message}}) when is_binary(message),
     do: "#{executable}: #{message}"

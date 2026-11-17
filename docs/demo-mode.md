@@ -166,9 +166,13 @@ same residue production has.
   production node given a demo `DATABASE_URL` by copy-paste still refuses.
 - **The tools connect where the app does.** `pg_restore`/`psql` use a URL, which
   `BACKUP_DATABASE_URL` can point anywhere, so that URL's host and database
-  must match the Repo's. It is the in-app backup's URL, so `ecto://` works and
-  the password travels as `PGPASSWORD`
+  must match the Repo's. It is the in-app backup's URL, so `ecto://` works,
+  the password travels as `PGPASSWORD`, and a `key=value` string with a
+  password is refused
   ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
+  The tools' TLS follows the app's `DATABASE_SSL` and
+  `DATABASE_SSL_CACERTFILE` unless that URL sets `sslmode`
+  ([backups.md](backups.md#how-the-backup-tools-choose-tls-2830)).
 - **The snapshot came from a demo database.** Its archive header names the
   database it was dumped from, and that name must contain `demo`. Restoring a
   production backup here would publish production's accounts, password hashes
@@ -252,6 +256,11 @@ verified:
 ```bash
 /app/bin/kiln_cms rpc 'KilnCMS.Demo.capture_golden!()'
 ```
+
+The capture's `pg_dump` gives up on a table lock after
+`BACKUP_LOCK_WAIT_SECONDS` (default 600), and the error then reads "pg_dump
+waited longer than BACKUP_LOCK_WAIT_SECONDS (600 s) for a table lock"
+([backups.md](backups.md#when-pg_dump-waits-for-a-table-lock-2844)).
 
 Upgrading Kiln does **not** require a new snapshot, because every reset migrates
 it forward. Recapture when you want the demo content itself to change.

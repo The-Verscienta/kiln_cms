@@ -6,8 +6,10 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
   Written by the delivery pipeline on a permanent reject whose enhanced status
   says the address is dead — never on the relay refusing our own AUTH, TLS or
   sender (`KilnCMS.Mail.deliver_for_worker/2`) — and consulted by
-  `KilnCMS.Mail.enqueue!/1`, which drops suppressed recipients before queuing
-  — so a dead address isn't re-attempted on every future send, which wastes
+  `KilnCMS.Mail.enqueue!/1`, which drops suppressed recipients before queuing,
+  and by the workers that build their own mail when they run (the newsletter
+  worker, `KilnCMS.Notifications.WorkflowMailWorker` and
+  `KilnCMS.Notifications.TaskMailWorker`, #3036) — so a dead address isn't re-attempted on every future send, which wastes
   retries and signals spamminess to receivers. Admin-managed (viewable and
   removable from `/editor/mail`).
 

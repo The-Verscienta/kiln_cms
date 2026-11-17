@@ -105,6 +105,7 @@ defmodule KilnCMS.Backups do
       define :list_running_runs, action: :running
       define :mark_run_pruned, action: :mark_pruned
       define :cancel_run, action: :cancel
+      define :cancel_run_resume, action: :cancel_resume
     end
 
     resource KilnCMS.Backups.Lock do
@@ -160,6 +161,17 @@ defmodule KilnCMS.Backups do
       define :list_live_node_beats, action: :live, args: [:within_s]
       define :get_node_beat, action: :read, get_by: [:node], not_found_error?: false
       define :prune_node_beats, action: :prune, require_reference?: false
+    end
+
+    resource KilnCMS.Backups.Notice do
+      # System-only (#2487): `KilnCMS.Backups.Notices` writes, `status/0` reads.
+      define :list_backup_notices, action: :read
+      define :report_backup_notice, action: :report
+
+      define :clear_backup_notices,
+        action: :clear,
+        args: [:kind, :scope],
+        require_reference?: false
     end
   end
 
@@ -435,8 +447,9 @@ defmodule KilnCMS.Backups do
 
   # A Cancel reaches the step's node through Oban's notifier, which a node cut
   # off from the database misses; that node stops the step itself, by its
-  # heartbeat, within `Heartbeat.settled_after_ms/0` (#2538). A resume before
-  # then could share the step's files with it. A nil `finished_at` (a row
+  # heartbeat, within `Heartbeat.settled_after_ms/0` (#2538). Its file writes
+  # are fenced (#2818, #2819), but its off-site copies and prune are not, so a
+  # resume waits until then. A nil `finished_at` (a row
   # canceled before it was recorded) is not evidence of a recent Cancel.
   defp check_settled(%Run{status: :canceled, finished_at: %DateTime{} = at}, now) do
     %{canceled: cutoff} = resume_cutoffs(now)
@@ -510,7 +523,36 @@ defmodule KilnCMS.Backups do
           scheduler_enabled?: boolean(),
           schedules: :none | :unreadable | [schedule_entry()],
           next_at: DateTime.t() | nil,
-          offsite: offsite_status()
+          offsite: offsite_status(),
+          retention: [retention_notice()],
+          held_deleted: [held_deleted_notice()]
+        }
+
+  @typedoc """
+  Retention that was skipped or stopped part-way over one place (#2487), as
+  `status/0`'s `retention` lists it. See `KilnCMS.Backups.Notice`.
+  """
+  @type retention_notice :: %{
+          scope: :local | {:destination, String.t()},
+          label: String.t() | nil,
+          outcome: :skipped | :stopped,
+          reason: String.t() | nil,
+          deleted: non_neg_integer() | nil,
+          stamp: String.t() | nil,
+          at: DateTime.t(),
+          dir_id: String.t() | nil
+        }
+
+  @typedoc """
+  Backups a schedule keeps that were found deleted outside the app (#2931),
+  as `status/0`'s `held_deleted` lists them: up to ten `"<kind>:<stamp>"`
+  units, and how many in all.
+  """
+  @type held_deleted_notice :: %{
+          dir_id: String.t() | nil,
+          units: [String.t()],
+          total: non_neg_integer(),
+          at: DateTime.t()
         }
 
   @typedoc """
@@ -605,6 +647,91 @@ defmodule KilnCMS.Backups do
   def media_exclude, do: config(:media_exclude, [])
 
   @doc """
+  How long, in **milliseconds**, `pg_dump` waits for each table lock before it
+  gives up (`BACKUP_LOCK_WAIT_SECONDS`, default 600 s; #2844), passed as
+  `--lock-wait-timeout`. `scripts/backup.sh` reads the same variable the same
+  way.
+
+  Without it a dump that starts behind a migration or a `VACUUM FULL` waits
+  for as long as that lock is held. The bound applies to each `LOCK TABLE`
+  separately, so a dump blocked on several tables can wait several times over.
+  Milliseconds internally so a test can use a fraction of a second.
+  """
+  @spec lock_wait_ms() :: pos_integer()
+  def lock_wait_ms, do: config(:lock_wait_ms, 600_000)
+
+  @doc """
+  The TLS option the database tools follow (#2830): the Repo's effective
+  `:ssl` (after Ecto merged the URL's `ssl=` into it). A test sets `:ssl` in
+  this module's config to stand in for a production Repo.
+  """
+  @spec pg_ssl() :: term()
+  def pg_ssl do
+    case config(:ssl, :repo) do
+      :repo -> KilnCMS.Repo.config()[:ssl]
+      ssl -> ssl
+    end
+  end
+
+  @doc """
+  What `pg_dump`, `pg_restore` and `psql` connect to `url` with
+  (default: `database_url/0`): `{:ok, {url, env}}`, the URL for argv and the
+  environment for the child alone.
+
+  The password moves from the URL to `PGPASSWORD`
+  (`KilnCMS.Backups.PgUrl.split/1`), and the TLS settings follow the app's own
+  connection (`KilnCMS.Backups.PgUrl.tls_env/3`): with `DATABASE_SSL` on (the
+  default) the tools require TLS, or verify the server against
+  `DATABASE_SSL_CACERTFILE` when one is set, unless the URL or the
+  operator's `PGSSLMODE`/`PGSSLROOTCERT` already decides.
+
+  `{:error, :refused_conninfo}` when the string is not a URL libpq reads as
+  one and would leave a password in argv (#2831).
+  """
+  @spec pg_connection(String.t() | nil) ::
+          {:ok, {String.t() | nil, [{String.t(), String.t()}]}} | {:error, PgUrl.refusal()}
+  def pg_connection(url \\ database_url()) do
+    with {:ok, {url, password_env}} <- PgUrl.split(url) do
+      ambient = Map.new(["PGSSLMODE", "PGSSLROOTCERT"], &{&1, System.get_env(&1)})
+      {url, tls_env} = PgUrl.tls_env(url, pg_ssl(), ambient)
+      {:ok, {url, password_env ++ tls_env}}
+    end
+  end
+
+  @doc "What to tell an operator when `pg_connection/1` refused the string."
+  @spec describe_refused_conninfo() :: String.t()
+  def describe_refused_conninfo do
+    "BACKUP_DATABASE_URL (or DATABASE_URL) is not a postgres:// URL and holds a password " <>
+      "or another URL, which would sit in the command line of pg_dump, pg_restore and psql " <>
+      "for every process on the host to read. Write it as a postgres:// URL, password " <>
+      "included (postgres:///database?host=/socket/dir for a Unix socket), or put the " <>
+      "password in PGPASSWORD or ~/.pgpass."
+  end
+
+  @doc """
+  Whether `pg_dump`'s output is its lock-wait timeout (#2844). pg_dump
+  implements `--lock-wait-timeout` as a `statement_timeout` around each
+  `LOCK TABLE`, so that is the error it reports.
+  """
+  @spec lock_timeout?(String.t()) :: boolean()
+  def lock_timeout?(output) when is_binary(output),
+    do: output =~ ~r/statement timeout/i and output =~ "LOCK TABLE"
+
+  @doc """
+  `pg_dump`'s lock-wait timeout as a sentence an operator can act on, with
+  pg_dump's own (already redacted) `output` after it.
+  """
+  @spec describe_lock_timeout(String.t()) :: String.t()
+  def describe_lock_timeout(output) when is_binary(output) do
+    "pg_dump waited longer than BACKUP_LOCK_WAIT_SECONDS (#{wait_label(lock_wait_ms())}) " <>
+      "for a table lock and gave up: another session held a conflicting lock (a migration, " <>
+      "VACUUM FULL, a long transaction). pg_dump said: #{String.trim(output)}"
+  end
+
+  defp wait_label(ms) when rem(ms, 1000) == 0, do: "#{div(ms, 1000)} s"
+  defp wait_label(ms), do: "#{ms} ms"
+
+  @doc """
   Whether running a backup **from the app** is possible here.
 
   Three things have to be true, and they fail independently, so the reason is
@@ -695,6 +822,27 @@ defmodule KilnCMS.Backups do
   reached and tried (skipped ones left out); `destinations` lists each with
   its redacted `label`, `status` and `error`, and `failed` those that failed.
   Read as `system/0`; a read that fails is `:unknown`, never a crash.
+
+  ## Notices (#2487, #2931)
+
+  `retention` lists each place where retention was skipped or stopped
+  part-way on its last pass (`KilnCMS.Backups.Notice`): the local backup
+  directory first, then destinations, newest first. Each says its `scope`
+  (`:local` or `{:destination, key}`), `label` (the destination's current
+  name), `outcome`, `reason` (English), `deleted` (a stop's count), `stamp`
+  (the backup whose prune it was) and `at`. A notice that would pin the alarm
+  on a place nobody backs up to any more is left out: a local one whose
+  directory id no live node (heartbeat in the last day, or this node) reports,
+  and a destination's that is gone, disabled or no longer pruned. When those
+  can't be read, the notices are shown.
+
+  `held_deleted` lists, per backup directory, the backups a schedule keeps
+  that were found deleted outside the app in the last eight days: `units`
+  (at most ten `"<kind>:<stamp>"`), `total` and `at`, newest first.
+
+  Both are `[]` when the notices can't be read: counted
+  (`[:kiln_cms, :backups, :status, :notices_unreadable]`) and logged now and
+  then.
   """
   @spec status() :: status()
   def status do
@@ -732,6 +880,146 @@ defmodule KilnCMS.Backups do
       next_at: components |> Enum.map(fn {_c, cs} -> cs.next_at end) |> earliest(),
       offsite: status_offsite()
     }
+    |> Map.merge(status_notices(now))
+  end
+
+  # The notices (#2487, #2931) as `status/0` says them: `retention` and
+  # `held_deleted`, both `[]` when the notices can't be read (counted, and
+  # logged now and then).
+  defp status_notices(now) do
+    case list_backup_notices(actor: system(), authorize_with: :error) do
+      {:ok, notices} ->
+        %{
+          retention:
+            notices
+            |> Enum.filter(&(&1.kind == :retention and &1.outcome in [:skipped, :stopped]))
+            |> retention_entries(),
+          held_deleted:
+            notices
+            |> Enum.filter(&(&1.kind == :held_deleted))
+            |> held_deleted_entries(now)
+        }
+
+      {:error, error} ->
+        notices_unreadable(error)
+        %{retention: [], held_deleted: []}
+    end
+  end
+
+  # A notice for a place nobody backs up to any more must not pin the alarm:
+  # a local one whose directory no live node reports (a directory with no id
+  # is always shown), and a destination's that is gone, disabled or no longer
+  # pruned. Each check reads its table only when there is something to check,
+  # and a read that fails shows the notices rather than hiding a problem.
+  defp retention_entries([]), do: []
+
+  defp retention_entries(notices) do
+    {local, destination} = Enum.split_with(notices, &local_scope?(&1.scope))
+    live_dirs = live_dir_ids(local)
+    destinations = pruned_destinations(destination)
+
+    local =
+      for n <- local, is_nil(n.dir_id) or is_nil(live_dirs) or n.dir_id in live_dirs do
+        retention_entry(n, :local, nil)
+      end
+
+    destination =
+      for n <- destination,
+          is_nil(destinations) or Map.has_key?(destinations, n.scope) do
+        label = if destinations, do: Map.fetch!(destinations, n.scope), else: n.label
+        retention_entry(n, {:destination, n.scope}, label || n.label || n.scope)
+      end
+
+    local ++ Enum.sort_by(destination, & &1.at, {:desc, DateTime})
+  end
+
+  defp local_scope?("local"), do: true
+  defp local_scope?("local:" <> _id), do: true
+  defp local_scope?(_other), do: false
+
+  defp retention_entry(notice, scope, label) do
+    %{
+      scope: scope,
+      label: label,
+      outcome: notice.outcome,
+      reason: notice.reason,
+      deleted: notice.deleted,
+      stamp: notice.stamp,
+      at: notice.at,
+      dir_id: notice.dir_id
+    }
+  end
+
+  # The directory ids live nodes report in their heartbeats over the last
+  # day, and this node's own; nil (show everything) when they can't be read
+  # or nothing needs them.
+  defp live_dir_ids(local) do
+    if Enum.any?(local, & &1.dir_id) do
+      case list_live_node_beats(86_400, actor: system(), authorize_with: :error) do
+        {:ok, beats} ->
+          own =
+            case KilnCMS.Backups.DirId.current(dir()) do
+              {:ok, id} -> [id]
+              {:error, _none} -> []
+            end
+
+          MapSet.new(Enum.map(beats, & &1.dir_id) ++ own)
+
+        {:error, error} ->
+          notices_unreadable(error)
+          nil
+      end
+    end
+  end
+
+  # `%{key => label}` of the destinations retention still runs on; nil when
+  # they can't be read or nothing needs them.
+  defp pruned_destinations([]), do: nil
+
+  defp pruned_destinations(_notices) do
+    case list_backup_destinations(actor: system(), authorize_with: :error) do
+      {:ok, rows} ->
+        for row <- rows,
+            row.enabled and row.prune,
+            into: %{},
+            do: {DestinationConfig.key(row), KilnCMS.Backups.Redact.text(row.name)}
+
+      {:error, error} ->
+        notices_unreadable(error)
+        nil
+    end
+  end
+
+  defp held_deleted_entries(notices, now) do
+    since = DateTime.add(now, -KilnCMS.Backups.Notices.held_deleted_days() * 86_400, :second)
+
+    for n <- notices, DateTime.compare(n.at, since) != :lt do
+      %{dir_id: n.dir_id, units: n.units, total: n.total || length(n.units), at: n.at}
+    end
+    |> Enum.sort_by(& &1.at, {:desc, DateTime})
+  end
+
+  @notices_warned {__MODULE__, :notices_warned_at}
+  @notices_warn_every_ms :timer.minutes(15)
+
+  defp notices_unreadable(error) do
+    :telemetry.execute([:kiln_cms, :backups, :status, :notices_unreadable], %{count: 1}, %{
+      error: error.__struct__
+    })
+
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get(@notices_warned, nil)
+
+    if is_nil(last) or now - last >= @notices_warn_every_ms do
+      :persistent_term.put(@notices_warned, now)
+
+      Logger.warning(
+        "Backup status may leave out a retention or held-backup notice: a read failed " <>
+          "(#{inspect(error.__struct__)})"
+      )
+    end
+
+    :ok
   end
 
   @offsite_none %{
@@ -1391,15 +1679,24 @@ defmodule KilnCMS.Backups do
   node has the chain's backup directory; else nil), phase (`:running`, or
   `:finishing` once Cancel is refused), when it took the lock, and the queued
   request (`%{trigger, resume, components, requested_at, folds}`, where nil
-  `components` is everything) or `nil`.
+  `components` is everything) or `nil`. `resume` (#2816) is the stamp a
+  resume chain resumes, or nil for a fresh backup.
+
+  `details: true` (the Backups page) adds `waiting_for` (#2816): what a
+  resume's start step waits for before it re-opens its run, `:files_server`
+  (the server that has the run's files), `:cancel_settle` (the run's Cancel
+  to settle) or nil. It reads the start job and the run, so the
+  `await/2` poll leaves it out.
   """
-  @spec in_flight() :: map() | nil
-  def in_flight, do: Chain.in_flight()
+  @spec in_flight(keyword()) :: map() | nil
+  def in_flight(opts \\ []), do: Chain.in_flight(opts)
 
   @doc """
   Wait for the chain `chain` to settle: `:ok` when its run succeeded, else
   `{:error, reason}` (the run's error, `:canceled`, `{:skipped, error}`,
-  `:no_run` when it ended without one, or `:timeout`). Polls the database, so it
+  `:no_run` when it ended without one, as a resume chain does when it was
+  refused or canceled before it re-opened its run (#2539, #2816), or
+  `:timeout`). Polls the database, so it
   works from any node. Options: `:timeout` (ms, default 3 hours), `:interval`
   (ms, default 2 s).
   """
@@ -1462,7 +1759,11 @@ defmodule KilnCMS.Backups do
 
   Always a URI libpq reads as one (#2719): whichever source wins, a leading
   `ecto://` (the form `DATABASE_URL` is documented in) becomes `postgres://`,
-  and nothing else about the string changes (`KilnCMS.Backups.PgUrl.normalize/1`).
+  and the query parameters only Ecto reads are translated (`ssl=false`
+  becomes `sslmode=disable`, `pool_size`, `timeout` and `idle_interval` go;
+  #2833). Nothing else about the string changes
+  (`KilnCMS.Backups.PgUrl.normalize/1`). The password is still in it: connect
+  through `pg_connection/1`, which moves it out of argv.
   """
   @spec database_url() :: String.t() | nil
   def database_url do

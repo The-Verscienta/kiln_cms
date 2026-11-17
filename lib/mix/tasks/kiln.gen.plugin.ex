@@ -191,6 +191,16 @@ if Code.ensure_loaded?(Igniter) do
             # verifies) — content types, admin CRUD, webhooks and Oban workers
             # then flow automatically.
             # def domains, do: [#{camel}.Catalog]
+
+            # What the staging scrub does to each table those domains own, when
+            # production is cloned into staging. A table left out stops the scrub
+            # (content-type tables are kept without an entry):
+            # def staging_scrub,
+            #   do: [
+            #     {:purge, #{camel}.Catalog.Booking},
+            #     {:rewrite, #{camel}.Catalog.Guest, set: [email: nil]},
+            #     {:keep, #{camel}.Catalog.Venue, "opening hours, no visitors"}
+            #   ]
           """
 
       """

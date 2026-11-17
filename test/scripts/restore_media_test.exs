@@ -18,6 +18,10 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
 
   alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive}
 
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
+
   @script Path.expand("../../scripts/restore.sh", __DIR__)
   @stamp "20260805-031700"
 
@@ -284,6 +288,16 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
       assert nothing_extracted?(ctx)
     end
 
+    test "a part the app is still writing beside the set (#2819) is refused", ctx do
+      parts = build_set!(ctx, @stamp, 700)
+      File.write!(List.last(parts) <> ".48211-2.partial", "in flight")
+
+      assert {out, status} = restore(ctx, [hd(parts)])
+      assert status != 0
+      assert out =~ ".tar.gz.48211-2.partial is beside the set"
+      assert nothing_extracted?(ctx)
+    end
+
     test "no sidecar with RESTORE_REQUIRE_CHECKSUM=1 aborts", ctx do
       [p1 | _] = build_set!(ctx, @stamp, 700)
       File.rm!(Path.join(ctx.backups, "kiln-media-#{@stamp}.sha256"))
@@ -316,8 +330,9 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
       tar!(Path.join(ctx.backups, name), [{"a/../../evil", "pwned"}])
       write_sidecar!(ctx.backups, [name])
 
-      assert {_out, status} = restore(ctx, [Path.join(ctx.backups, name)])
+      assert {out, status} = restore(ctx, [Path.join(ctx.backups, name)])
       assert status != 0
+      assert out =~ "refusing to extract"
       refute File.exists?(Path.join(Path.dirname(ctx.dest), "evil"))
       assert nothing_extracted?(ctx)
     end

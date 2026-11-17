@@ -26,8 +26,12 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Chain, Checksum, Importer, Manifest}
+  alias KilnCMS.Test.ShellTools
 
   @moduletag :capture_log
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
 
   @mb 1_048_576
   @script Path.expand("../../scripts/backup.sh", __DIR__)
@@ -416,34 +420,36 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       wait_until(fn -> Enum.all?(sleepers, &gone?/1) end)
     end
 
-    if match?({:unix, :darwin}, :os.type()) and File.exists?("/bin/bash") do
-      test "the heartbeat touches the partials under /bin/bash 3.2 too", ctx do
-        {version, 0} = System.cmd("/bin/bash", ["-c", "echo $BASH_VERSION"])
-        assert version =~ ~r/\A3\.2\./
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
 
-        log = Path.join(ctx.tmp, "touches")
-        real_touch = System.find_executable("touch")
+    test "the heartbeat touches the partials under bash 3.2 too", ctx do
+      {version, 0} = System.cmd(ShellTools.bash32(), ["-c", "echo $BASH_VERSION"])
+      assert version =~ ~r/\A3\.2\./
 
-        stub!(ctx.bin, "touch", """
-        #!/bin/sh
-        [ "$1" = "-c" ] && echo "$3" >> "#{log}"
-        exec #{real_touch} "$@"
-        """)
+      log = Path.join(ctx.tmp, "touches")
+      real_touch = System.find_executable("touch")
 
-        # A dump that takes a while: the heartbeat runs meanwhile.
-        stub!(ctx.bin, "pg_dump", """
-        #!/bin/sh
-        for a in "$@"; do
-          case "$a" in --file=*) printf 'PGDMP pretend dump' > "${a#--file=}" ;; esac
-        done
-        #{@real_sleep} 0.6
-        """)
+      stub!(ctx.bin, "touch", """
+      #!/bin/sh
+      [ "$1" = "-c" ] && echo "$3" >> "#{log}"
+      exec #{real_touch} "$@"
+      """)
 
-        assert {_, 0} = backup(ctx, "/bin/bash")
-        touched = log |> File.read!() |> String.split("\n", trim: true)
-        assert Enum.count(touched, &String.ends_with?(&1, ".dump.partial")) >= 2
-        assert Enum.count(touched, &String.ends_with?(&1, ".sha256.partial")) >= 2
-      end
+      # A dump that takes a while: the heartbeat runs meanwhile.
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      for a in "$@"; do
+        case "$a" in --file=*) printf 'PGDMP pretend dump' > "${a#--file=}" ;; esac
+      done
+      #{@real_sleep} 0.6
+      """)
+
+      assert {_, 0} = backup(ctx, ShellTools.bash32())
+      touched = log |> File.read!() |> String.split("\n", trim: true)
+      assert Enum.count(touched, &String.ends_with?(&1, ".dump.partial")) >= 2
+      assert Enum.count(touched, &String.ends_with?(&1, ".sha256.partial")) >= 2
     end
   end
 

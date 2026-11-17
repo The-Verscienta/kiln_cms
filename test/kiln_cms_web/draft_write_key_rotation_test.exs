@@ -252,7 +252,15 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
       assert [] = live_in(ctx.key.id)
       drain_oban()
 
-      assert_email_sent(fn mail -> mail.subject =~ "was used after it was rotated" end)
+      # The owner is named by account, never by address (#3035): the mail is
+      # queued to each admin, and must not hold anybody else's.
+      owner = Accounts.get_user!(ctx.key.user_id, authorize?: false)
+
+      assert_email_sent(fn mail ->
+        mail.subject =~ "was used after it was rotated" and
+          mail.html_body =~ "acting as account #{owner.id}" and
+          not (mail.html_body =~ to_string(owner.email))
+      end)
     end
 
     test "a dead lineage alarms nobody: repeats send no more mail", ctx do

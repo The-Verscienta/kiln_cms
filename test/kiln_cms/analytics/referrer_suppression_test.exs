@@ -21,9 +21,16 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
   `ambiguous?/3` when both were wrong (#2752). Re-running the algorithm on every
   candidate is the reader's whole knowledge, with nothing left to restate.
 
-  Only **partial** publications are checked this way. Whether an all-hidden
-  breakdown is recoverable by a reader who knows the algorithm is a separate
-  question, tracked in #2981.
+  That search fills in a partial publication's cells one at a time, so it
+  cannot reach an all-hidden one, whose reader has only the total. Those are
+  checked by enumerating every breakdown of each small total and grouping them
+  by what the algorithm publishes (#2981): every category of an all-hidden
+  group must take at least two values, and no suppressed category of a partial
+  group may be pinned to a nonzero one. A `"hidden"` partner pinned to `0` is
+  allowed — it says what a published `0` would.
+
+  None of this covers a reader holding two publications of overlapping traffic
+  (#2989).
   """
   use ExUnit.Case, async: false
 
@@ -93,8 +100,8 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
   defp assert_not_recoverable(totals) do
     rows = published(totals)
 
-    # An all-hidden breakdown is out of reach of this search — see the
-    # moduledoc and #2981.
+    # An all-hidden breakdown is out of reach of this search; the class sweep
+    # in "an all-hidden breakdown (#2981)" covers it.
     if suppressed?(rows) and not all_hidden?(rows) do
       assignments = consistent(totals, rows)
 
@@ -264,6 +271,42 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
     end
   end
 
+  describe "an all-hidden breakdown (#2981)" do
+    # The issue's case: at a threshold of 5, a total of 5 was hidden whole only
+    # as five 1s, so a reader who knows the algorithm read every category off
+    # five "hidden" labels and the view total.
+    test "five views at a threshold of 5 leave every category open" do
+      put_threshold(5)
+
+      hidden_whole =
+        for breakdown <- breakdowns(5), all_hidden?(published(breakdown)), do: breakdown
+
+      assert %{direct: 1, internal: 1, search: 1, social: 1, other: 1} in hidden_whole
+      assert %{direct: 2, internal: 1, search: 1, social: 1, other: 0} in hidden_whole
+
+      for {source, values} <- values_by_category(hidden_whole) do
+        assert length(values) >= 2, "#{source} is pinned to #{inspect(values)}"
+      end
+    end
+
+    # The reader's whole view of one publication is its total and its labels,
+    # so every breakdown of a total, grouped by what the algorithm publishes,
+    # is every candidate class there is. Totals run to the threshold plus
+    # four to keep the test fast; that covers the classes the rule was built
+    # around (threshold 5, total 5) but not every total. Larger totals rest on
+    # the wider search described in `Analytics.suppress_referrer_group/1`.
+    test "no small total leaves a suppressed category pinned" do
+      for threshold <- [2, 3, 5, 10], total <- 0..(threshold + 4) do
+        put_threshold(threshold)
+
+        total
+        |> breakdowns()
+        |> Enum.group_by(&displays(published(&1)))
+        |> Enum.each(fn {form, members} -> check_class(form, members, threshold, total) end)
+      end
+    end
+  end
+
   describe "what is still published" do
     # The cost has to be bounded, or "suppress everything" would pass every
     # test above and make the feature pointless.
@@ -287,6 +330,22 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
       exact = for {_s, _h, display} <- rows, is_integer(display), do: display
 
       assert length(exact) == 3
+    end
+
+    # The #2981 rule hides a handful of views only when they are spread over
+    # all but one category. Each of these sits just outside it, and goes
+    # all-hidden if the rule is loosened by one category or one view.
+    test "a small breakdown over fewer categories stays partial" do
+      rows = published(%{direct: 3, internal: 1, search: 1})
+      assert suppressed?(rows) and not all_hidden?(rows)
+
+      for threshold <- [3, 5] do
+        put_threshold(threshold)
+        rows = published(%{direct: 2, internal: 2, search: 1, social: 1})
+
+        assert suppressed?(rows) and not all_hidden?(rows),
+               "six views over four categories at #{threshold}: #{inspect(displays(rows))}"
+      end
     end
 
     test "every category is present, including ones with no hits" do
@@ -334,6 +393,53 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
     end
   end
 
+  # Every breakdown of `total` over `Analytics.referrer_sources/0`, as totals
+  # maps — so a change to the category list re-runs the #2981 sweep over it.
+  defp breakdowns(total) do
+    total
+    |> compositions(length(Analytics.referrer_sources()))
+    |> Enum.map(&Map.new(Enum.zip(Analytics.referrer_sources(), &1)))
+  end
+
+  defp compositions(total, 1), do: [[total]]
+
+  defp compositions(total, parts) do
+    for value <- 0..total, rest <- compositions(total - value, parts - 1), do: [value | rest]
+  end
+
+  defp values_by_category(members) do
+    Map.new(Analytics.referrer_sources(), fn source ->
+      {source, members |> Enum.map(&Map.fetch!(&1, source)) |> Enum.uniq() |> Enum.sort()}
+    end)
+  end
+
+  # One class of the #2981 sweep: every breakdown of `total` the algorithm
+  # publishes as `form`.
+  defp check_class(form, members, threshold, total) do
+    where = "#{inspect(form)} at threshold #{threshold}, total #{total}"
+    values = values_by_category(members)
+    suppressed = for {source, display} <- form, is_binary(display), do: source
+
+    cond do
+      suppressed == [] ->
+        :ok
+
+      Enum.all?(form, fn {_source, display} -> display == "hidden" end) ->
+        for {source, seen} <- values do
+          assert length(seen) >= 2, "#{where} pins #{source} to #{inspect(seen)}"
+        end
+
+      true ->
+        assert length(members) >= 2, "#{where} is consistent with one breakdown only"
+
+        # A partner pinned to 0 is allowed: it says what a published 0 would.
+        for source <- suppressed do
+          seen = Map.fetch!(values, source)
+          refute match?([n] when n > 0, seen), "#{where} pins #{source} to #{inspect(seen)}"
+        end
+    end
+  end
+
   # One breakdown of the sweep above. `cache` holds the reader's count per
   # `{total, partial form}` — every breakdown in that class sees the same
   # candidates, so it is computed once.
@@ -354,8 +460,10 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
       reader = Map.fetch!(cache, key)
       suppressed = for {source, display} <- form, is_binary(display), do: source
 
-      # Both directions: published partially only when the reader is left
-      # with two or more, and hidden entirely only when they would not be.
+      # Both directions: ambiguous?/3 says yes exactly when the reader of the
+      # partial form is left with two or more. A breakdown it calls ambiguous
+      # can still be hidden whole — the #2981 rule hides some ambiguous ones
+      # too — so the published rows are compared only when they are partial.
       assert Analytics.ambiguous?(raw, suppressed, threshold) == reader >= 2,
              "#{inspect(totals)} at #{threshold}: ambiguous?/3 disagrees with " <>
                "the #{reader} breakdown(s) a reader finds for #{inspect(form)}"

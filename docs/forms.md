@@ -737,6 +737,26 @@ included, above) optionally mails
 the submitter (below), and fires the `form.submitted` webhook event
 (selectable per endpoint at `/editor/webhooks`) with `{form: slug, data: {...}}`; values are typed per the table under [Field types](#field-types), so a `checkboxes` answer is a list and a `number` or `rating` a number.
 
+The two mails are background jobs that carry the form's, site's and
+submission's ids, never what the visitor typed (#2992). Each worker reads the
+stored submission when it runs, through `FormSubmission`'s `:for_delivery`
+read as the form pipeline's system actor, so the mail always shows the
+submission as it is stored. That also means:
+
+- A submission **deleted**, or **marked spam** on the Entries tab, before its
+  job runs sends no notification and no confirmation. The job completes
+  without sending.
+- The notification goes to the form's `notify_email` as it is when the job
+  runs, and none goes if it was cleared in the meantime (as before).
+- If the read is refused (the system actor lost its grant), the job fails and
+  retries rather than treating the submission as deleted.
+
+A job usually runs within seconds of the submit, so these matter mostly when
+mail is retrying after a failed delivery (up to five attempts over about 81
+minutes). Jobs queued by the release before this one carry the submitted data
+themselves and are delivered from it; that data is dropped from the job's row
+once it finishes. See [Job args retention](data-flows.md#job-args-retention).
+
 ### Autoresponder (#468)
 
 The builder's **Confirmations** tab can turn on a confirmation email back to
@@ -746,6 +766,14 @@ submission filled it in (`KilnCMS.Forms.Autoresponder.eligible?/3` is the one
 place that decides this, so the send path and the config-time validation
 below can't drift on it); a `:spam`-scored submission is excluded the same as
 `notify_email` and the webhook.
+
+It is asked twice: when the submission is accepted, so a submission with no
+one to confirm queues no job, and again when the job runs, against the form
+and its fields as they are then (#2992). So a confirmation is not sent if,
+between the submit and the job, the autoresponder was switched off, or the
+`:email` field was deleted or renamed (the stored submission keeps the old
+field name, so it no longer has a value under the new one). It goes to the
+address stored in the submission, never one carried in the job.
 
 Subject and body are `Kiln.Tokens` patterns using the same `[token]` bracket
 syntax as slug/alias patterns (`KilnCMS.Slug.Pattern`), not `{{field}}`

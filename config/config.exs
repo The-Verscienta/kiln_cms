@@ -671,6 +671,13 @@ config :kiln_cms, :sync_exposure_backfill_on_boot, true
 # day; a redundant run writes nothing.
 config :kiln_cms, :totp_secret_backfill_on_boot, true
 
+# Whether booting enqueues the erasure backfill
+# (`KilnCMS.Accounts.ErasureBackfill`): accounts erased by an earlier release
+# get the erasure steps added since (#2991: their linked newsletter
+# subscriptions are deleted). Ten minutes after boot, deduplicated for a day;
+# a redundant run writes nothing.
+config :kiln_cms, :erasure_backfill_on_boot, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero
@@ -1046,6 +1053,14 @@ config :kiln_cms, :backup_scheduler_cron, "* * * * *"
 # Down here so the line anchors
 # docs/environment-variables.md keeps into this file stay put.
 config :kiln_cms, :crawler_ranges_cron, "17 */6 * * *"
+
+# Private job arguments (#2992, `KilnCMS.Jobs.PrivateArgsScrub`): drops form
+# submission data and automation payloads from finished jobs that still hold
+# them, once ten minutes after boot (deduplicated for an hour) and daily.
+# `false` on either turns that run off. Down here for the same line-anchor
+# reason as the entry above.
+config :kiln_cms, :private_args_scrub_on_boot, true
+config :kiln_cms, :private_args_scrub_cron, "50 4 * * *"
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

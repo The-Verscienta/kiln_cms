@@ -57,6 +57,29 @@ defmodule KilnCMS.Notifications do
   is absent from their inbox as well as from their mail and their phone. There
   is no second preference lookup and no second recipient list to drift.
 
+  An erased account (`anonymized_at` set) is never a recipient on any
+  channel (#2774): `wants?/2` refuses it first, whatever its preferences say,
+  and the rosters it would be found on leave it out
+  (`KilnCMS.Accounts.Scoping.users_with_tier/2`). The task mail paths that
+  do not go through `wants?/2` (`KilnCMS.Notifications.Tasks`,
+  `KilnCMS.Notifications.TaskDigestWorker`) skip it themselves.
+
+  Mail takes that decision twice (#3019): once when the job is queued, and
+  again when it runs (`mail_recipient/2`), because a mail job can wait hours
+  for a retry. The job carries ids only, and the worker reads the recipient,
+  their address, the actor's name, the title and the comment back, so an
+  account erased or an event muted in the meantime gets nothing, and an actor
+  erased in the meantime is "An editor". The second decision only narrows the
+  first.
+
+  It re-checks each event's own rule too (#3037, `entitled/3`), through the
+  same functions the enqueue used (`KilnCMS.Accounts.Scoping.has_tier?/3`,
+  `comment_audience_ids/2`, `mention_roster_member?/2`), so the two sides
+  cannot drift: a review request goes only to someone still an admin of the
+  site, a published or returned-to-draft notice only to the content's author
+  now, a comment notice only to someone still on the thread or the author,
+  and a mention only to someone still on the mention roster.
+
   Best-effort, like the other two: a notification that cannot be written is
   logged and dropped, never raised into the editorial action that caused it.
   The triggering changes (`KilnCMS.CMS.Changes.NotifyWorkflowEmail`,
@@ -409,9 +432,18 @@ defmodule KilnCMS.Notifications do
   system-only policy deciding, and any failed org raising at the end.
   """
   @spec forget_recipient(String.t()) :: :ok
-  def forget_recipient(user_id) when is_binary(user_id) do
+  def forget_recipient(user_id) when is_binary(user_id),
+    do: forget_recipient(user_id, KilnCMS.Accounts.list_org_ids())
+
+  @doc """
+  `forget_recipient/1`, over the given orgs only: the erasure backfill
+  (`KilnCMS.Accounts.ErasureBackfill`) visits just the orgs where an account
+  erased before #2514 still has notifications.
+  """
+  @spec forget_recipient(String.t(), [Ash.UUID.t()]) :: :ok
+  def forget_recipient(user_id, org_ids) when is_binary(user_id) and is_list(org_ids) do
     failed =
-      Enum.reject(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+      Enum.reject(org_ids, fn org_id ->
         try do
           Notification
           |> Ash.Query.filter(user_id == ^user_id)
@@ -550,20 +582,35 @@ defmodule KilnCMS.Notifications do
   # `:for_document` branch instead — `:for_block`'s `block_id` argument is
   # `allow_nil? false` and would raise given nil.
   defp thread_audience(comment, record) do
-    participants =
-      thread_participants(comment)
-      |> Enum.map(& &1.author_id)
-
-    # authorize?: false — an `Accounts.User` read (self-only policy) — a system
-    # grant there would cover every account on the deployment, for one name.
-    author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
-
-    [author_id(author) | participants]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
+    comment
+    |> comment_audience_ids(Map.get(record, :author_id))
     |> Enum.map(&user_by_id/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.filter(&wants?(&1, :comment))
+  end
+
+  @doc """
+  The ids of the accounts a comment event on `comment`'s thread is for:
+  everyone with a comment on that block's thread, plus `content_author_id`,
+  the author of the content it is on (nil for none).
+
+  The one rule for both sides of a comment mail (#3037): `dispatch_comment/4`
+  builds its thread audience from it when the comment is written, and
+  `KilnCMS.Notifications.WorkflowMailWorker` asks it again when the mail is
+  sent, so a recipient is mailed only while they are still on the thread or
+  still the author. Preferences and erasure are not part of it: each caller
+  takes those from `wants?/2` (through `mail_recipient/2` at send time).
+
+  The thread is read as `system/0` and fails closed: a refused read raises
+  rather than answering "nobody".
+  """
+  @spec comment_audience_ids(struct(), String.t() | nil) :: [String.t()]
+  def comment_audience_ids(comment, content_author_id) do
+    participants = comment |> thread_participants() |> Enum.map(& &1.author_id)
+
+    [content_author_id | participants]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
   end
 
   # As `system/0`, which `CMS.Comment` admits for reads (#1659). Fails CLOSED:
@@ -579,9 +626,6 @@ defmodule KilnCMS.Notifications do
       tenant: comment.org_id
     )
   end
-
-  defp author_id(%{id: id}), do: id
-  defp author_id(_author), do: nil
 
   defp user_by_id(id) do
     # authorize?: false — an `Accounts.User` read (self-only policy): a system
@@ -636,8 +680,11 @@ defmodule KilnCMS.Notifications do
     User
     |> Ash.read!(authorize?: false)
     |> Enum.filter(fn user ->
-      (MapSet.member?(member_ids, user.id) or not MapSet.member?(assigned_ids, user.id)) and
-        wants?(user, :comment)
+      on_mention_roster?(
+        user,
+        MapSet.member?(member_ids, user.id),
+        MapSet.member?(assigned_ids, user.id)
+      )
     end)
   rescue
     # A mention that cannot resolve its candidate list simply does not fire —
@@ -645,22 +692,54 @@ defmodule KilnCMS.Notifications do
     _error -> []
   end
 
-  # Every user who is scoped to at least one org.
-  #
-  # One `MapSet.new/1` call, on a list built by the function below: constructing
-  # a MapSet on two branches (the read and its rescue) gives dialyzer two
-  # different internal representations for the same opaque type and it rejects
-  # the later `member?/2`.
-  defp assigned_user_ids, do: MapSet.new(assigned_ids())
+  @doc """
+  Whether `user` is on `mention_roster(org)` now, decided from that one
+  account's membership rows rather than by loading the roster (#3037): the
+  mention mail asks it when the job runs, so a person who has since left the
+  roster (their membership on the site deactivated, a membership on another
+  site added, comment mail muted) is not mailed.
 
-  defp assigned_ids do
+  The same rule as `mention_roster/1`, through the same predicate. That
+  includes the roster's reading of an account with no membership rows at
+  all as unscoped, so on every org's roster: a person removed from the only
+  site they belonged to (removal deletes the row) is on every roster again.
+
+  Unlike `mention_roster/1`, a read that fails raises: a caller deciding
+  whether to send must not read a failure as either answer.
+  """
+  @spec mention_roster_member?(struct() | String.t() | nil, User.t()) :: boolean()
+  def mention_roster_member?(org, %User{id: user_id} = user) do
+    org_id = KilnCMS.Accounts.org_id(org)
+
+    # authorize?: false — this account's membership rows, every status: the
+    # policy is self-only, and the roster's own reads above skip it for the
+    # same reason. Every row, as `assigned_ids/0` reads them, because any row
+    # at all scopes the account.
+    rows = KilnCMS.Accounts.list_memberships_for_user!(user_id, authorize?: false)
+    member? = Enum.any?(rows, &(&1.organization_id == org_id and &1.status == :active))
+
+    on_mention_roster?(user, member?, rows != [])
+  end
+
+  # The mention roster's rule, for `mention_roster/1` and
+  # `mention_roster_member?/2` alike: an active member of the org, or an
+  # account scoped to no org at all, that has not muted comment mail.
+  defp on_mention_roster?(user, member?, scoped?),
+    do: (member? or not scoped?) and wants?(user, :comment)
+
+  # Every user who is scoped to at least one org: a membership row on any
+  # org, of any status.
+  #
+  # Raises when the read fails, and `mention_roster/1` turns that into an
+  # empty roster. It used to answer an empty set itself, which read as
+  # "nobody is scoped to any org" and put every account on every roster
+  # (#3037).
+  defp assigned_user_ids do
     # authorize?: false — a membership read for the mention roster: its policy
     # is self-only, and a system grant would read the whole account graph.
     KilnCMS.Accounts.OrgMembership
     |> Ash.read!(authorize?: false)
-    |> Enum.map(& &1.user_id)
-  rescue
-    _error -> []
+    |> MapSet.new(& &1.user_id)
   end
 
   # The comment channels, from the one already-filtered audience — the
@@ -677,19 +756,14 @@ defmodule KilnCMS.Notifications do
       actor: actor
     )
 
-    %{
-      "to" => email_of(user),
-      "event" => to_string(event),
-      "kind" => kind(record),
-      "title" => record.title,
-      "id" => record.id,
-      "actor_name" => actor_name(actor),
-      "block_id" => comment.block_id,
-      "excerpt" => snippet(comment.body),
-      # Which site's relay the mail goes out through (#1322).
-      "org_id" => comment.org_id
-    }
-    |> then(fn args -> if args["to"], do: enqueue_args(args), else: :ok end)
+    if email_of(user) do
+      record
+      |> mail_args(event, user, actor)
+      |> Map.merge(%{"block_id" => comment.block_id, "comment_id" => comment.id})
+      |> enqueue_args()
+    else
+      :ok
+    end
   end
 
   defp enqueue_args(args) do
@@ -697,14 +771,42 @@ defmodule KilnCMS.Notifications do
     :ok
   end
 
+  # A workflow mail job's args: ids only (#3019). The worker reads the
+  # recipient, their address and preferences, the actor's name, the title and
+  # the comment back when it runs, so a person erased or a preference turned
+  # off in the meantime is honoured, and nobody's address, name or words sit
+  # in `oban_jobs` (or in Oban's logs and Sentry) while the job waits.
+  #
+  # No `"to"` and no `"title"`, on purpose: the previous release's worker
+  # needs both to build its email, so a job of this shape picked up by an old
+  # node during a rolling deploy fails and retries, and a new node delivers
+  # it, instead of the old node sending it somewhere wrong. `"kind"` is the
+  # content type here and stays.
+  defp mail_args(record, event, recipient, actor) do
+    %{
+      "event" => to_string(event),
+      "kind" => kind(record),
+      "id" => record.id,
+      "user_id" => recipient.id,
+      "actor_id" => actor_id(actor),
+      # Which site's relay the mail goes out through (#1322).
+      "org_id" => Map.get(record, :org_id)
+    }
+  end
+
   # A taste of the comment, not the comment. Enough to know whether it needs
   # attention now; short enough that the email is not a copy of a conversation
   # that lives in the editor (and that a private review note is not fanned out
   # in full to everyone's inbox).
+  #
+  # Public for `WorkflowMailWorker`, which reads the comment back when it runs
+  # (#3019) and must quote it exactly as the inbox row does.
   @snippet_max 140
-  defp snippet(nil), do: ""
+  @doc false
+  @spec snippet(String.t() | nil) :: String.t()
+  def snippet(nil), do: ""
 
-  defp snippet(body) do
+  def snippet(body) do
     flat = body |> to_string() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
     if String.length(flat) > @snippet_max,
@@ -738,7 +840,7 @@ defmodule KilnCMS.Notifications do
     Push.notify(recipients, push_payload(event, record))
 
     Enum.each(recipients, fn recipient ->
-      enqueue(email_of(recipient), event, record, actor)
+      enqueue(recipient, event, record, actor)
       persist(recipient, event, record, block_id: nil, actor: actor)
     end)
   end
@@ -909,29 +1011,165 @@ defmodule KilnCMS.Notifications do
     }
 
   # Per-user opt-out (issue #46). Unknown/legacy users default to opted-in.
+  #
+  # An erased account wants nothing (#2774). Erasure resets every preference
+  # to its default (on), and its address is a tombstone, so without this an
+  # author or thread participant erased since would still get an inbox row
+  # and a mail job.
+  defp wants?(%{anonymized_at: %DateTime{}}, _event), do: false
   defp wants?(%{notify_on_review_request: enabled?}, :submitted_for_review), do: enabled?
   defp wants?(%{notify_on_publish: enabled?}, :published), do: enabled?
   defp wants?(%{notify_on_return_to_draft: enabled?}, :returned_to_draft), do: enabled?
   defp wants?(%{notify_on_comment: enabled?}, :comment), do: enabled?
   defp wants?(_user, _event), do: true
 
-  defp enqueue(nil, _event, _record, _actor), do: :ok
+  @doc """
+  Whether a queued notification mail may still go to `user` (an account or
+  its id) now, when the job runs (#3019): `{:ok, user}` with the account as it
+  is now, `{:skip, reason}` when nothing is to be sent, or `{:error, error}`
+  when the account could not be read.
 
-  defp enqueue(to, event, record, actor) do
-    %{
-      "to" => to,
-      "event" => to_string(event),
-      "kind" => kind(record),
-      "title" => record.title,
-      "id" => record.id,
-      "actor_name" => actor_name(actor),
-      # Which site's relay the mail goes out through (#1322).
-      "org_id" => Map.get(record, :org_id)
-    }
-    |> WorkflowMailWorker.new()
-    |> Oban.insert!()
+  The same decision `dispatch/3` and `dispatch_comment/4` took when the job
+  was queued, taken again, because a job can wait hours for a retry: an
+  account erased since (#2774) is skipped, whatever its preferences now say,
+  and so is one with no address left or one that turned `preference` off
+  since (`nil`: no preference governs the mail, as for task mail). It only
+  narrows: a recipient the enqueue left out is never added here.
+  """
+  @spec mail_recipient(User.t() | String.t(), atom() | nil) ::
+          {:ok, User.t()} | {:skip, atom()} | {:error, term()}
+  def mail_recipient(user_or_id, preference) do
+    # The account half is `Accounts.mail_recipient/1`, which account mail
+    # (`KilnCMS.Mail.DeliveryWorker`) asks too (#3035); this adds preferences.
+    with {:ok, user} <- Accounts.mail_recipient(user_or_id) do
+      if is_nil(preference) or wants?(user, preference),
+        do: {:ok, user},
+        else: {:skip, :muted}
+    end
+  end
 
-    :ok
+  @doc """
+  `mail_recipient/2` for a job queued before #3019, which names its
+  recipient by `address` rather than by account: the account holding that
+  address now, if it already existed at `queued_at` (the job's
+  `inserted_at`), and `{:skip, reason}` otherwise.
+
+  Erasure replaces the address with a tombstone, so an erased recipient has
+  no account here. An account registered since with the freed address is
+  somebody else, and is skipped. No action changes an account's address once
+  it exists (only a create sets it, and erasure replaces it), so the
+  account's age is the whole test.
+  """
+  @spec mail_recipient_by_address(String.t(), DateTime.t() | nil, atom() | nil) ::
+          {:ok, User.t()} | {:skip, atom()} | {:error, term()}
+  def mail_recipient_by_address(address, queued_at, preference) when is_binary(address) do
+    # authorize?: false — an `Accounts.User` read by address (self-only
+    # policy), as `KilnCMS.Security.AuthEvents` does: the job already names
+    # the address, and the account only decides whether the mail still goes.
+    case Accounts.get_user_by_email(address, authorize?: false, not_found_error?: false) do
+      {:ok, %User{} = user} ->
+        if predates?(user, queued_at),
+          do: mail_recipient(user, preference),
+          else: {:skip, :address_reassigned}
+
+      {:ok, nil} ->
+        {:skip, :no_account}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  @doc """
+  Whether a queued workflow mail for `event` may still go to `user` (#3037):
+  `:ok`, or `{:skip, reason}` when they are no longer who the event is for.
+
+  `mail_recipient/2` asks whether the account may be mailed at all; this asks
+  whether it is still entitled to *this* mail. Each event re-checks its own
+  rule, the one its enqueue applied, through the same function:
+
+    * `"submitted_for_review"`: still an admin of the site
+      (`KilnCMS.Accounts.Scoping.has_tier?/3`, as `users_with_tier/2` chose);
+    * `"published"`, `"returned_to_draft"`: still the content's author;
+    * `"comment_added"`, `"comment_resolved"`: still on the comment's thread,
+      or the content's author (`comment_audience_ids/2`);
+    * `"comment_mention"`: still on the site's mention roster
+      (`mention_roster_member?/2`), or still on the comment's thread or the
+      author (the thread notice a mention replaces).
+
+  `context` carries what the rule needs: `:org_id` (the site), `:author_id`
+  (the content's author now) and `:comment` (the comment, as it is now).
+  Event names are the job's strings, matched explicitly and never turned into
+  atoms. A read that fails raises: it is never read as either answer.
+  """
+  @spec entitled(String.t(), User.t(), map()) :: :ok | {:skip, atom()}
+  def entitled("submitted_for_review", %User{id: user_id}, %{org_id: org_id}) do
+    if Scoping.has_tier?(org_id, user_id, [:admin]), do: :ok, else: {:skip, :not_an_admin}
+  end
+
+  def entitled(event, %User{id: user_id}, %{author_id: author_id})
+      when event in ["published", "returned_to_draft"] do
+    if author_id == user_id, do: :ok, else: {:skip, :not_the_author}
+  end
+
+  def entitled(event, %User{id: user_id}, %{comment: comment, author_id: author_id})
+      when event in ["comment_added", "comment_resolved"] do
+    if user_id in comment_audience_ids(comment, author_id),
+      do: :ok,
+      else: {:skip, :not_on_the_thread}
+  end
+
+  # A mention is also a thread notice: `dispatch_comment/4` takes the people
+  # it names out of the thread audience, so a participant who was mentioned
+  # has only this job. Off the roster but still on the thread or the author,
+  # they are still sent it, as the thread notice they would otherwise have
+  # had. A legacy job's context has no comment, so only the roster counts.
+  def entitled("comment_mention", %User{} = user, %{org_id: org_id} = context) do
+    cond do
+      mention_roster_member?(org_id, user) -> :ok
+      on_the_thread?(user, context) -> :ok
+      true -> {:skip, :not_on_the_roster}
+    end
+  end
+
+  def entitled(_event, _user, _context), do: {:skip, :unknown_event}
+
+  defp on_the_thread?(%User{id: user_id}, %{comment: %{} = comment} = context),
+    do: user_id in comment_audience_ids(comment, Map.get(context, :author_id))
+
+  defp on_the_thread?(_user, _context), do: false
+
+  defp predates?(%User{inserted_at: %DateTime{} = created}, %DateTime{} = queued_at),
+    do: DateTime.compare(created, queued_at) != :gt
+
+  defp predates?(_user, _queued_at), do: false
+
+  @doc """
+  The display name of the account `actor_id` names, as it is now, for a mail
+  job's body (#3019): nil, which the mail renders as a neutral "An editor",
+  for an account erased since, one with no name, or no account at all.
+  Never the address (#214).
+  """
+  @spec actor_name_now(String.t() | nil) :: String.t() | nil
+  def actor_name_now(actor_id) when is_binary(actor_id) do
+    # authorize?: false — an `Accounts.User` read (self-only policy), for one
+    # display name: the same read the notifier made when it queued the job.
+    case Accounts.get_user(actor_id, authorize?: false, not_found_error?: false) do
+      {:ok, %User{anonymized_at: nil} = user} -> actor_name(user)
+      _no_name -> nil
+    end
+  end
+
+  def actor_name_now(_actor_id), do: nil
+
+  defp enqueue(recipient, event, record, actor) do
+    if email_of(recipient) do
+      record
+      |> mail_args(event, recipient, actor)
+      |> enqueue_args()
+    else
+      :ok
+    end
   end
 
   # Resolve the human-facing content-type name from the registry rather than

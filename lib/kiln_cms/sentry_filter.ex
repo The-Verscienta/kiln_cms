@@ -57,16 +57,28 @@ defmodule KilnCMS.SentryFilter do
   rather than falling through to a function clause; until then this is the
   cheapest thing that does not lie.
 
-  ## Mail bodies (#1843)
+  ## Job arguments: mail bodies (#1843) and private args (#2992)
 
-  Every event that passes is scrubbed of a mail job's message before it
-  leaves. Sentry's Oban integration attaches the failing job's `args` as the
-  event's `extra`, and a mail job's args hold the message — sealed since 1.0
-  (`KilnCMS.Mail.open_args/1`), in the clear in a job queued earlier — which
-  for a password reset or a newsletter confirmation is a live sign-in link.
-  The body keys are dropped from `extra.args`, and a message or exception
-  value that quotes a rendered `%Swoosh.Email{}` (an adapter crash, before the
-  delivery path stopped recording them) is replaced whole.
+  Every event that passes is scrubbed of what a job's args must not carry out
+  of the deployment. Sentry's Oban integration attaches the failing job's
+  `args` as the event's `extra`:
+
+    * a mail job's args hold the message — sealed since 1.0
+      (`KilnCMS.Mail.open_args/1`), in the clear in a job queued earlier —
+      which for a password reset or a newsletter confirmation is a live
+      sign-in link. The body keys are dropped from `extra.args`, and a
+      message or exception value that quotes a rendered `%Swoosh.Email{}` (an
+      adapter crash, before the delivery path stopped recording them) is
+      replaced whole;
+    * a job of a worker `KilnCMS.Jobs.PrivateArgs` registers (form mail
+      jobs queued before #2992, automation jobs, workflow and task mail jobs
+      queued before #3019) holds a visitor's submission, a document snapshot,
+      or a recipient's address and what the mail quoted. Its registered
+      keys are dropped from `extra.args`, named by `extra.worker`. The
+      variables of every stack frame are dropped too: a `FunctionClauseError`
+      in the worker's own helpers quotes their arguments there, and those are
+      the same payload (or, for a mail job of the current shape, the
+      recipient's account it read back).
 
   ## URLs and process dumps
 
@@ -76,6 +88,7 @@ defmodule KilnCMS.SentryFilter do
   quoted path or query string in them, and every quoted value under a
   credential-named key.
   """
+  alias KilnCMS.Jobs.PrivateArgs
   alias KilnCMS.Mail
   alias KilnCMS.Mail.TransientDeliveryError
   alias KilnCMSWeb.UrlRedaction
@@ -108,6 +121,8 @@ defmodule KilnCMS.SentryFilter do
   @withheld "[mail message withheld]"
 
   defp scrub_mail(%Sentry.Event{} = event) do
+    event = scrub_frames(event)
+
     %{
       event
       | extra: scrub_extra(event.extra),
@@ -141,14 +156,49 @@ defmodule KilnCMS.SentryFilter do
   defp scrub_url(url), do: url
 
   defp scrub_extra(%{} = extra) do
+    private = Mail.body_keys() ++ PrivateArgs.keys(worker(extra))
+
     Map.new(extra, fn
-      {key, %{} = args} when key in [:args, "args"] -> {key, Map.drop(args, Mail.body_keys())}
+      {key, %{} = args} when key in [:args, "args"] -> {key, Map.drop(args, private)}
       {key, value} when key in @process_dumps -> {key, scrub_dump(value)}
       other -> other
     end)
   end
 
   defp scrub_extra(extra), do: extra
+
+  # The failing job's worker, as Sentry's Oban integration records it
+  # (`"KilnCMS.Automation.RuleWorker"`); nil for any other event.
+  defp worker(%{worker: worker}) when is_binary(worker), do: worker
+  defp worker(%{"worker" => worker}) when is_binary(worker), do: worker
+  defp worker(_extra), do: nil
+
+  # A registered worker's frames lose their variables: Sentry fills them from
+  # the arguments an exception's stacktrace carries, and a clause error in the
+  # worker's helpers is called with the job's payload.
+  defp scrub_frames(%Sentry.Event{extra: extra} = event) when is_map(extra) do
+    if PrivateArgs.registered?(worker(extra)) do
+      %{
+        event
+        | exception: map_list(event.exception, &drop_vars/1),
+          threads: map_list(event.threads, &drop_vars/1)
+      }
+    else
+      event
+    end
+  end
+
+  defp scrub_frames(event), do: event
+
+  defp map_list(items, fun) when is_list(items), do: Enum.map(items, fun)
+  defp map_list(items, _fun), do: items
+
+  defp drop_vars(%{stacktrace: %Sentry.Interfaces.Stacktrace{frames: frames} = stacktrace} = item)
+       when is_list(frames) do
+    %{item | stacktrace: %{stacktrace | frames: Enum.map(frames, &%{&1 | vars: nil})}}
+  end
+
+  defp drop_vars(item), do: item
 
   # A crashed process's state and last message, inspected by Sentry's logger
   # handler. A LiveView's state holds the URL it joined with and its assigns,

@@ -19,8 +19,13 @@ your deployment.
   *Transport & at-rest notes* below), and
   [sticky A/B assignment](#sticky-assignment-cookie-984) is an opt-in that is off
   unless you turn it on.
-- The only personal data we store is **operator/editor account data** (email,
-  optional display name, RBAC role, notification preferences) and **auth tokens**.
+- Most of the personal data we store is **account data** (email, optional
+  display name, RBAC role, notification preferences) and **auth tokens**. Some
+  is about people who have no account: newsletter subscribers, form
+  submissions, addresses on the mail suppression lists, fediverse followers,
+  and what the webhook and federation delivery logs and queued jobs carry.
+  [What personal data we store](#what-personal-data-we-store) lists each, with
+  its retention and what erasure does to it.
 - Data only leaves the system through integrations you explicitly enable
   (webhooks, optional Meilisearch/S3), through transactional email, or through
   the few checks that are on by default (see
@@ -34,8 +39,11 @@ your deployment.
   Bing's, Apple's and DuckDuckGo's published crawler IP lists every 6 hours,
   sending nothing about the instance or its visitors
   (`KILN_CRAWLER_RANGES=false` turns it off).
-- Retention is bounded and automated: expired auth tokens, recorded search
-  queries, and trashed content are all purged on a schedule.
+- Most retention is bounded and automated: expired auth tokens, recorded
+  search queries, trashed content, spam form submissions and the delivery logs
+  are purged on a schedule. Some data is kept until an admin removes it: form
+  submissions not marked spam, newsletter subscribers and the suppression
+  lists (see *Retention & automated purge* below).
 
 ## What personal data we store
 
@@ -54,14 +62,21 @@ your deployment.
 | Security alert settings | `site_security_alerts` | No | Per site (#2245): the alert kinds turned off, whether admins get the bell and email, whether alerts show full IP addresses. |
 | Platform security alert settings | `platform_security_alerts` | No | One row for the installation (#2245): the platform alert kinds a platform admin turned off (today only `api_key_rate_limited` can be). No person, address or key. Each save is recorded in the instance security log (`platform_alerts_changed`). |
 | Two-step sign-in requirement | `site_second_factor_policy` | No | Per site (#2247): who must hold a second factor (`required_for`: off, administrators, editors and administrators, or everyone), the grace period in days, when each role became covered and when the row last changed. No person, address or factor. Each save is recorded in the site's security log (`second_factor_policy_changed`). Written from `/editor/two-factor`. |
-| Account creation time | `users.inserted_at` | Pseudonymous | When the account was created (#2247), the earliest a required second factor's grace period can start. Accounts that existed before the column was added carry the time of that migration. Not shown anywhere and not exposed by any API. |
+| Account creation time | `users.inserted_at` | Pseudonymous | When the account was created (#2247), the earliest a required second factor's grace period can start. Accounts that existed before the column was added carry the time of that migration. Also decides whether a workflow or task mail job queued by a release before #3019 may reach the account holding its address: only one that existed when the job was queued. Not shown anywhere and not exposed by any API. |
 | Verified API keys | **memory only**, on each node | Pseudonymous (transient) | The SHA-256 of each API key that authenticated on the node recently, with the key's id and when the entry was written (an entry lasts 5 minutes and is rewritten at most every 2.5 minutes while the key is in use) (#2245, `KilnCMS.Security.ApiKeyTrip`), so a rate-limit refusal can tell a real key from a forged one without a database read. Never the key itself, a user or an address. At most 10,000 entries; swept every minute, gone on restart, never shared between nodes or written to disk. |
 | Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
 | Web Push subscriptions | `push_subscriptions` | Yes | One row per browser a user turned push notifications on in: the push service endpoint and its keys, a coarse browser label, and which VAPID key it was made against. Deleted on erasure (#2514) and by the staging scrub. |
 | Saved views | `saved_views` | Pseudonymous | A named content-list filter and its owner's id. A private view is deleted on erasure (#2514); a shared one is the team's and stays, pointing at the anonymized account. |
-| Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
+| Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure, on the account and on every site membership (#2774). |
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
+| Newsletter subscribers | `newsletter_subscribers`, `newsletter_segment_memberships` | Yes | One row per address on a site's list: the **email address**, an optional name, the opt-in status and when it was confirmed or unsubscribed, the tokens behind the confirm and unsubscribe links, and the segments it is on. A paying member's row is linked to their account (`user_id`) by the billing sync. Linked rows are in the account's self-export (without the tokens) and are deleted, with their segment memberships, when the account is erased (#2991). A row at the same address that was never linked is not the account's and stays. No retention purge: an unsubscribed row is kept, with its status, so the address is not mailed again, and a pending row that was never confirmed is kept too. A site admin deletes a row on **Newsletter** (`/editor/newsletter`). Purged by the staging scrub. See [Newsletter](newsletter.md#when-a-member-account-is-erased). |
+| Form submissions | `form_submissions` | Yes | One row per accepted submission: what the visitor typed (`data`, keyed by field name, so whatever the form asked for, names and addresses included), the page's locale, the moderation status and spam score, the human-verification outcome and when it arrived. No IP address or user agent: rate limiting uses the IP in memory only. A submission with status spam is deleted 30 days after it arrived (nightly, see the retention table below). Others (new, reviewed) are kept until an admin deletes them (**Delete submission** on the form's **Entries** tab) or deletes the form, which deletes its submissions; there is no retention setting for them yet ([#2265](https://github.com/The-Verscienta/kiln_cms/issues/2265)). Copies leave in the staff notification and the autoresponder mail, and in the webhook delivery log of an endpoint subscribed to `form.submitted`. Not touched by erasure: a submission is not linked to an account. Purged by the staging scrub. See [Forms](forms.md#spam-moderation-477). |
+| Mail suppression lists | `suppressed_recipients`, `site_suppressed_recipients` | Yes | One row per address a relay hard-bounced: the **email address**, the bounce reason with addresses redacted, and when it last failed; a site's list also names the site. The instance list (the operator's relay) stops the address for every site and for account mail; a site's list (its own relay) stops only that site's mail. Consulted when mail is queued through the mail pipeline (account mail and site mail), by the newsletter worker, and by workflow and task mail when it is sent (#3036); form mail and automation email do not consult them. No retention: a row stays until an admin removes it, on `/editor/mail` for the instance list or on the site's `/editor/site-mail`. Not touched by erasure, so an erased person's bounced address stays listed ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)). Purged by the staging scrub. |
+| Fediverse followers | `federation_followers` | Yes | One row per remote account following a site (#491): its actor URI, its inbox and shared inbox URIs, when it followed and its delivery counters. An actor URI names a person on another server. Removed when that account sends `Undo{Follow}`, when an admin blocks it or its instance, and after 12 deliveries to it fail in a row; at most 50,000 per site. Published only as a count (`GET /actor/followers`). Not touched by erasure: a follower is not an account here. Purged by the staging scrub. The block list (`federation_blocks`: an actor URI or a host, and a reason) is moderation data and is kept by the scrub. See [ActivityPub federation](federation.md#delivery). |
+| Fediverse delivery log | `federation_deliveries` | Pseudonymous | One row per activity per follower inbox: the inbox URI, the activity as sent (published content), the document's id, the state, the attempts and the last error. Deleted 30 days after it was written (fixed). Not touched by erasure. Purged by the staging scrub. |
+| Webhook delivery log | `webhook_deliveries` | Yes | One row per delivery: the event, a snapshot of the endpoint URL, and the **payload as sent**, which for `form.submitted` is the submission, for `membership.*` the member's email address and user id, and for `security.*` user ids and an IP network or address (see [Webhooks](#webhooks-opt-in-per-endpoint)). Deleted 30 days after it was written; the window is `config :kiln_cms, :webhooks, delivery_retention_days:`, read at compile time, so changing it needs a rebuild. A failed retraction (#1926) is kept, and its payload is cut to the document's identity at the same age. No row can be deleted before then ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)), and erasure does not rewrite the log. Purged by the staging scrub. |
+| Queued jobs | `oban_jobs` | Yes (transient) | A background job's args, mostly ids. Account mail (sign-in links, password resets, second-factor and security notices, registration mail) carries the recipient's address in the clear, the id of the account it is for, and the message sealed until the job finishes. Form mail and workflow and task mail queued by this release carry ids only; jobs queued by an earlier release can carry the form data, or the address, title, actor name and excerpt or note. Automation jobs carry the event's document. Oban's Pruner deletes a row 7 days after the job finishes. Private keys are dropped when the job finishes and by a daily scrub, and erasure withholds the account's mail still waiting to run (its address and message removed) and strips the address from finished mail jobs. Purged by the staging scrub. See [Job args retention](#job-args-retention). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
 | Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Purged on retention and by the staging scrub. |
 | Idempotency keys | `idempotent_requests` | Pseudonymous (transient) | One row per `Idempotency-Key` a caller used on a write ([api.md](api.md)), holding the key, the acting user's id, a hash of the request and **the response that was sent** — so it carries whatever that response did. Pruned hourly, 24-hour lifetime. Purged by the staging scrub. |
@@ -161,7 +176,16 @@ These kinds of email leave the system via the configured Swoosh adapter:
   memory for the length of the visit
   ([When the emailed code is asked for](two-factor-auth.md#when-the-emailed-code-is-asked-for)).
 - **Workflow email** — review-requested / published / changes-requested
-  notifications to the relevant admins or author.
+  notifications to the relevant admins or author, comment and @mention
+  mail, and task mail (a task assigned, the daily task digest). Nothing goes
+  to an erased account (#2774). The job carries ids only, and the worker
+  reads the recipient, their address, the actor's name, the title and the
+  comment or task when it sends (#3019): mail queued before the account was
+  erased is not sent, mail goes to the address the account holds at that
+  moment, and nothing is sent for content trashed or deleted, a comment
+  deleted, or a task completed, deleted or reassigned in the meantime. See
+  [Who workflow and task mail goes to](#who-workflow-and-task-mail-goes-to)
+  for the rule each event re-checks when it sends.
 - **Registration email** (#2251), about a site's registration approval queue:
   - to each of the site's admins, "Registrations are waiting for approval on
     (site)", once an applicant has confirmed their address. It names the site
@@ -186,14 +210,60 @@ These kinds of email leave the system via the configured Swoosh adapter:
 
 The recipient address is, necessarily, the user's email. The **display name** in
 the body is the user's chosen `name`, never the email local-part (#214); with no
-name set it renders a neutral "An editor" / "A reviewer". Each user can mute
-workflow email per-event in `/editor/settings`, and a site admin can mute the
+name set it renders a neutral "An editor" / "A reviewer". Workflow and task
+mail read that name when they send, so an actor erased after the mail was
+queued is "An editor" too. Each user can mute
+workflow email per-event in `/editor/settings` (**Email notifications**), and a site admin can mute the
 registration email there (**New registrations**) and the email of site
 security alerts (**Security alerts**); the in-app notice is still written.
+A workflow email muted after it was queued, while it waits or retries, is not
+sent: the worker checks the preference again when it sends (#3019). Task
+mail (assignment and digest) has no preference and cannot be muted.
 Platform security alerts and silencing notices cannot be muted.
 
 Configure the sender and adapter in `config/runtime.exs`
 (`config :kiln_cms, KilnCMS.Mailer, …` and `:email_from`).
+
+### Who workflow and task mail goes to
+
+The recipients of a workflow or task mail are chosen when the event happens,
+and the job can wait or retry for about 15 hours before it is sent. When it
+runs, each job re-checks its own event's rule, through the same function
+that chose the recipient, and sends nothing if the rule no longer holds
+(#3037):
+
+| Mail | Sent only if, when it is sent, the recipient is |
+|------|------|
+| Review requested | an admin of the site: a member admin, a platform admin, or someone with a live temporary admin grant |
+| Published, returned to draft | the content's author |
+| Comment added, comment resolved | someone with a comment on the comment's thread, or the content's author |
+| Mentioned | on the site's mention roster (an active member, or an account with no site memberships at all), or on the comment's thread, or the content's author |
+| Task assigned | the task's assignee, with the task still open |
+| Task digest | sent with only the lines whose task is still open and still theirs, each with the task's due date now; not sent if no line is left |
+
+Then the address is checked against the instance suppression list and the
+site's own (`KilnCMS.Mail.suppressed?/2`, #3036): an address on either is
+sent nothing, and a list that cannot be read fails the job, which retries.
+A mail stopped by any of these completes its job and logs one `info` line
+with the job id and the reason, never the address.
+
+Each event re-checks its own rule and no other. Being removed from a site
+stops a review request, but not a comment notice to someone still on the
+thread, a notice to the content's author, or task mail to the assignee
+([#3048](https://github.com/The-Verscienta/kiln_cms/issues/3048)). Someone
+removed from the only site they belonged to has no membership left, which
+the mention roster reads as belonging to every site, so they can still be
+mentioned and mailed
+([#3047](https://github.com/The-Verscienta/kiln_cms/issues/3047)).
+
+A job queued by v1.10.1 (it carries the address, not an id) is checked
+against the rules its args still allow: review requests and mentions by the
+site, published and returned-to-draft mail by the content's author, a task
+assignment by its task, and a digest by whether an open task of the
+reader's is still on each line's content. A comment-added or
+comment-resolved job of that shape is sent unchecked, because it names
+neither the comment nor, reliably, the thread. The suppression lists apply
+to every job.
 
 ### Optional subprocessors
 
@@ -252,6 +322,18 @@ plugin; they run as trusted system jobs (no actor).
 | Recorded 404 paths | 30 days since last hit | `MissedPath` `:purge_expired` (`40 3 * * *`) | `config :kiln_cms, :missed_paths, retention_days: 30` |
 | Trashed (soft-deleted) content | 30 days | `Page`/`Post` `:purge_trashed` (`0 3 * * *`) | `config :kiln_cms, :trash, retention_days: 30` |
 | Site invitations | 30 days past expiry (expiry is 7 days after the last send) | `Invitation` `:prune_expired` (`35 4 * * *`) | — (fixed, `KilnCMS.Accounts.Invitations.prune_after_days/0`) |
+| Spam form submissions | 30 days since the submission arrived | `FormSubmission` `:prune_spam` (`35 3 * * *`) | `config :kiln_cms, :forms, spam_retention_days: 30` (compile-time) |
+| Webhook delivery log | 30 days since the delivery was written; a failed retraction is kept | `WebhookDelivery` `:prune_deliveries` (`20 3 * * *`) | `config :kiln_cms, :webhooks, delivery_retention_days: 30` (compile-time) |
+| Payload of a kept failed retraction | cut to the document's identity 30 days after the delivery was written | `WebhookDelivery` `:scrub_retraction_payloads` (`25 3 * * *`) | the same `delivery_retention_days` |
+| Fediverse delivery log | 30 days since the delivery was written | `Federation.Delivery` `:prune_deliveries` (`40 3 * * *`) | — (fixed) |
+
+A compile-time key is baked into the trigger's filter, so changing it needs a
+rebuild; there is no environment variable for it. Some personal data is on no
+schedule at all and is kept until someone removes it: form submissions that
+aren't spam, newsletter subscribers, both mail suppression lists, fediverse
+followers (dropped only after failed deliveries) and in-app notifications.
+See [What personal data we store](#what-personal-data-we-store) for how each
+is removed.
 
 View buckets keep a longer window than search queries on purpose: a bucket is
 `(content type, id, UTC day, count)` with no query text and no visitor data, so
@@ -260,13 +342,131 @@ smallest window in which year-over-year comparisons always resolve. The all-time
 `content_views` counter is never purged, so totals stay correct as buckets age
 out — which is also why the two will not sum to the same number.
 
-### Mail job retention
+### Job args retention
 
-Every mail is queued as an Oban job whose args hold the rendered message,
-recipient included. Oban's Pruner deletes finished jobs after 7 days
-(`config/config.exs`). Until then the job holds any link the mail carried: a
-magic link, a password reset, a sign-in unlock link (#2250), or a site
-invitation (#2135), whose token is otherwise stored only as a hash. Backups taken in that window hold them too.
+Background work is queued as Oban jobs, and a job's args are kept in three
+places: the `oban_jobs` row, which Oban's Pruner deletes 7 days after the job
+finishes (`config/config.exs`); the `job:start`, `job:stop` and
+`job:exception` lines Oban's logger prints at `info` for every run; and the
+`extra` of a Sentry event the job raises. Most jobs carry only ids. These do
+not:
+
+- **Mail** (#1843). A mail job carries the message's addresses in the clear,
+  for the delivery panel, and its subject and bodies **sealed** (encrypted
+  with a key derived from `SECRET_KEY_BASE`), because a magic link, a
+  password reset, a sign-in unlock link (#2250) or a site invitation (#2135)
+  is a credential. The sealed message is dropped from the row when the job
+  finishes, and from a Sentry event's `extra.args`. The recipient's address
+  stays in the row until the Pruner deletes it, or until the person is
+  erased, which strips it from finished mail jobs (#3019). Account mail also
+  carries the id of the account it is for (`user_id`), and is sent only
+  while that account still exists, is not erased, and holds the address the
+  job is addressed to (#3035). Otherwise the job drops the address and the
+  message and completes without sending. Erasure drops them from the
+  account's jobs still waiting to run; see
+  [Account mail still waiting to run](#account-mail-still-waiting-to-run).
+- **Workflow and task mail** (#3019). Review requests, published and
+  returned-to-draft mail, comment and mention mail, task assignments and
+  task digests carry ids: the recipient (`user_id`), the site, the content,
+  the acting account (`actor_id`), the comment or task, and for a digest the
+  task ids, content ids and due dates it lists. The worker reads the address, the
+  names, the title and the comment excerpt or task note when it runs, so
+  none of them is in the row, Oban's log lines or a Sentry event. A job
+  queued by the release before this one carries the address, title, actor
+  name and excerpt or note itself. It is delivered only to an account that
+  existed when it was queued and still holds that address, Oban's logger
+  prints those keys once more when it runs, and they are dropped from the
+  row when it finishes.
+- **Form notifications and autoresponders** (#2992). Jobs queued by this
+  release carry the form's, site's and submission's ids only, and the worker
+  reads the submission when it runs. A job queued by an earlier release
+  carries the submitted `data`, and the autoresponder's `to` address. It is
+  still delivered, Oban's logger prints them once more when it runs, and
+  both are dropped from the row when the job finishes.
+- **Automation** (#2992). `DispatchWorker` and `RuleWorker` jobs carry the
+  event's `payload`: the serialized document as it was when the event fired,
+  drafts included (an `in_review` or `returned_to_draft` event carries the
+  draft). It is dropped from the row when the job finishes. **In this
+  release the payload is still written in plain text**, so until a job
+  finishes it is readable in its pending row, and every run prints it in
+  Oban's `job:start` and `job:stop` log lines (and `job:exception` when the
+  run fails). The workers already read a sealed payload; a later release
+  writes it sealed, which leaves only ciphertext in the row and the log
+  lines. See [#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992).
+
+For a Sentry event raised by any of these form, automation, workflow mail or
+task mail jobs, the keys above are dropped from `extra.args`, and so are the
+variables of every stack frame, which can quote the same data (or, for a
+workflow or task mail job, the recipient's account it read).
+
+"Finishes" means completed, canceled, discarded or failed for the last time.
+A job that fails with attempts left keeps its args, because it runs again. A
+job killed mid-run (past the shutdown grace period, or by its timeout) runs
+none of its own code when `Oban.Lifeline` later discards it, so it keeps its
+args; `KilnCMS.Jobs.PrivateArgsScrub` drops the form, automation, workflow
+mail and task mail keys from such rows, and from rows finished under an
+earlier release. It runs ten
+minutes after each boot and daily at 04:50 UTC (`KILN_PRIVATE_ARGS_SCRUB_CRON`;
+see [environment-variables.md](environment-variables.md)).
+To run it by hand, for instance after restoring a backup taken before the
+upgrade:
+
+```bash
+bin/kiln_cms eval 'KilnCMS.Release.scrub_job_args()'
+```
+
+`KilnCMS.Release.scrub_mail_jobs()` does the same for mail jobs' messages.
+
+What is not covered:
+
+- A **backup** taken while a job held its args holds them too, until it is
+  deleted.
+- A **`form.submitted` webhook** keeps the whole submission in its delivery
+  ledger row (`webhook_deliveries`) until that is pruned (30 days by
+  default), and there is no way to delete one row before then
+  ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)). The
+  webhook's job itself carries only the delivery's id.
+- An **account mail job already running** when the erasure commits can
+  still deliver its message. Erasure removes the address and the message
+  from its row, and if that attempt fails, the retry is withheld.
+
+### Account mail still waiting to run
+
+Account mail is mail about an account, to that account's address: a
+password reset, a magic link to an account, a confirmation, a sign-in unlock
+link, a "you were added to a site" notice, registration notices and
+decisions, second-factor notices, sign-in alerts, security alerts and API
+key reuse alerts (#3035). Each job names the account it is for (`"user_id"`
+in its args). Mail to an address with no account behind it is not account
+mail: a site invitation, a newsletter confirmation, a magic link requested
+for a bare address. Its job has a `"user_id"` of `null`.
+
+**When it runs**, `KilnCMS.Mail.DeliveryWorker` reads the account. It sends
+the mail only while the account exists, is not erased, and still holds the
+address the job is addressed to (compared case-insensitively). Otherwise it
+removes the address and the message from the row, logs one `info` line with
+the job id and the reason (`erased`, `no_account`, `no_address` or
+`address_mismatch`, never the address), and completes the job. Nothing went
+wrong, so it is not listed as a delivery failure on `/editor/mail`. The same
+check stops mail queued to an address the account has changed since. An
+account that cannot be read fails the attempt, which retries on the mail
+backoff; if the last attempt fails too, the address and the message are
+removed from the row and the job is discarded.
+
+**When the account is erased**, every account mail job for it not yet
+finished (`available`, `scheduled`, `retryable`, `executing` or
+`suspended`) is withheld in the erasure's transaction
+(`KilnCMS.Mail.withhold_pending/2`): it loses its address and its message
+and gains `"withheld": "erased"`. When it runs it completes without sending
+anything. A request that read the old address before the erasure committed
+can still queue a job after it; that job names the account, so the check
+when it runs stops it.
+
+Jobs queued by v1.10.x carry no `"user_id"` key. For one release the
+erasure also withholds those still waiting that are addressed to the
+account's address, whoever they were for, because nothing in the row says.
+That includes mail to the address that was not the account's, such as an
+invitation or a newsletter confirmation queued by the previous release.
 
 ### Security log retention (#2241)
 
@@ -330,7 +530,7 @@ A sign-in unlock link (#2250) is a stored token with `purpose:
 of addresses without the server secret. It expires 15 minutes after it is
 minted, is revoked when redeemed or when the password is changed or reset, and is
 removed by the same nightly sweep. The mailed link itself also sits in the
-mail job's args (see *Mail job retention*).
+mail job's args, sealed, until the job finishes (see *Job args retention*).
 
 Without cleanup these rows would accumulate forever, so the nightly
 `:expunge_expired` trigger (`lib/kiln_cms/accounts/token.ex`) deletes every token
@@ -409,12 +609,27 @@ so changing it needs a rebuild. The staging scrub purges the table.
 
 Any signed-in user can self-export their own data from **`/editor/settings` →
 "Export my data"** — and a member from **`/account` → "Export my data"** — which
-downloads `kiln-account-export.json` (profile, notification preferences, and paid
-memberships; no secrets). The export is deliberately **cross-organization**: it
+downloads `kiln-account-export.json` (profile, notification preferences, paid
+memberships, the newsletter subscriptions linked to the account on every
+site, with their status, dates and segment names, and its site memberships;
+no secrets, and none of the subscriptions' confirm or unsubscribe tokens).
+The export is deliberately **cross-organization**: it
 answers "what do you hold about me" for the whole instance, not just the site the
 request arrived on. Programmatically this is
 `KilnCMS.Accounts.export_user_data/1`, served by
 `KilnCMSWeb.AccountController.export/2` (scoped to `current_user`).
+
+`site_memberships` (#3010) lists the account's membership on each site, in
+any status (`active`, `pending` or `rejected`): a registration waiting for
+approval, or a rejected one that was kept, is data about the person too. Each
+entry has `org_id`, `site` (the site's name), `status`, `role`,
+`granted_role`, `granted_role_expires_at`, `audiences`, `editable_types`,
+`readable_types`, `field_grants`, `field_read_grants`, `inserted_at` and
+`decided_at`, oldest first. A membership's custom role is not in the export
+yet. The memberships are read as the account itself, since its own rows are
+the only ones it may read; if that read fails, the section is `[]` and the
+failure is logged as an error. If the site names can't be read, the rows
+still go out with `site` set to `null`.
 
 ### Erasure (GDPR Art. 17) — anonymization
 
@@ -477,6 +692,54 @@ Either way, it:
 13. **Deletes the notifications addressed to it** (#2514), on every site: its
     own inbox, which nobody can sign in to read any more. If any site's delete
     fails, the erasure raises so it can be retried.
+14. **Deletes the newsletter subscriptions linked to it** (#2991), on every
+    site and in any status (pending, confirmed or unsubscribed), with their
+    segment memberships. Before this, a confirmed subscription kept mailing the
+    person's real address after the erasure. A newsletter delivery already
+    queued to one of those rows is canceled when it comes to run, and the
+    billing sync never links an erased account to a list again. If any site's
+    delete fails, the erasure raises so it can be retried.
+15. **Demotes every site membership** (#2774). Each `org_memberships` row of
+    the account stays, as the record of who belonged where, but grants
+    nothing: its tier drops to `:viewer`, and its temporary tier and its
+    audiences are cleared. Its status is kept, and so are its type scopes,
+    field grants and custom role, which only ever narrow what a tier allows.
+    The demotion writes no role-change event to the security log. Before
+    this, the row kept its tier, so the tombstone stayed a site admin or
+    editor on the rosters below and kept reading gated content.
+16. **Withholds its account mail still waiting to run, and strips its address
+    from finished mail jobs** (#3019, #3035). Every account mail job for the
+    account that has not finished, a running one included, loses its address
+    and its message and is completed unsent when it runs
+    ([Account mail still waiting to run](#account-mail-still-waiting-to-run)).
+    Every completed, canceled or discarded job on the `mail` queue for the
+    account, or addressed to the address it held before step 1 (matched
+    case-insensitively), loses its `to`. Until the Pruner deletes those rows
+    (7 days after each job finished), the delivery panels on `/editor/mail`
+    and `/editor/site-mail` list such a failure under the domain "unknown".
+    Mail queued by this release to the address but not for the account (an
+    invitation, a newsletter confirmation) that has not run yet is left
+    alone; see
+    [What erasure does not reach](#what-erasure-does-not-reach).
+
+Once erased, the account is on no site's roster and has no tier or audience
+anywhere, whatever a row it left still holds: it is not offered as a task
+assignee, in a `:user` custom field's picker or as a review-request
+recipient, and it gets no workflow or registration mail, no in-app
+notification, no task-assigned notice and no task digest. Workflow and task
+mail queued before the erasure is not sent either: the worker finds the
+account erased when it runs (#3019). A task that names
+it as assignee (one assigned before the erasure) still fires its
+`task.assigned` webhook, which is the task's event, not the person's. No
+one can give it a tier back: editing its membership, granting it a temporary
+tier or setting its audiences is refused
+(`KilnCMS.Accounts.Errors.AccountErased`), and so is changing its platform
+role or audiences (`User.:manage_access`) or granting or ending a temporary
+platform role (`User.:grant_temporary_role`, #3010); removing the membership
+still works. A document whose `:user` custom field names the erased person is
+refused with "must be a person on this site" on its next save that changes
+its custom fields, as for someone removed from the site; pick another person
+or clear the field.
 
 Erasure works on an account, and an invitation is not one: an invitation to
 the person's address is left as it is. To remove one, revoke it on **Team**
@@ -484,10 +747,39 @@ the person's address is left as it is. To remove one, revoke it on **Team**
 invitation the erased user *sent* keeps pointing at their (now anonymous)
 account, and an admin-tier one can no longer be accepted.
 
+Newsletter subscriptions follow the same rule: erasure deletes the rows linked
+to the account (step 14), and a row at the same address that was never linked
+is left as it is. The billing sync links the row at a member's address on each
+site where they hold a paid membership, so such a row is on a site where the
+account never held one. Matching on the
+address instead would delete a stranger's row wherever the address was
+reused. To remove such a row, a site admin deletes it on **Newsletter**
+(`/editor/newsletter`) on that site.
+
+Accounts erased by a release before a step existed still hold what that
+step removes: before #2514, their Web Push subscriptions, their private saved
+views and the notifications addressed to them (steps 11 to 13), and possibly
+audiences on their own row, which step 7 could miss until then; before step 14, their linked newsletter
+rows; before step 15, memberships that still grant a tier, a temporary tier
+or audiences. A background job, `KilnCMS.Accounts.ErasureBackfill`, finishes
+each of those steps the way erasure now does, about 10 minutes after the
+first boot of the release that added it; see
+[Newsletter](newsletter.md#accounts-erased-before-this-release). An erased
+account is also left out of the legacy-audiences report
+(`mix kiln.deprecations`) and its boot job, `LegacyAudiencesWorker`: it is on
+no fallback, and moving it would give it a membership, which is refused.
+Step 16 has no backfill: a finished account mail job addressed to someone
+erased before it existed keeps the address until the Pruner deletes the row,
+at most 7 days after the job finished. Account mail for someone erased
+before #3035 that is still waiting to run carries no account id and is not
+checked when it runs. A finished workflow or task mail job
+of the previous release loses it to the job args scrub
+([Job args retention](#job-args-retention)).
+
 The account **row is retained** (with no personal data) so authorship links and
-referential integrity in content/version history are preserved. Membership rows
-are likewise retained, scrubbed, so the entitlement audit trail stays
-referentially intact.
+referential integrity in content/version history are preserved. Paid
+membership rows are likewise retained, scrubbed, so the entitlement audit trail
+stays referentially intact, and so are site memberships, demoted (step 15).
 
 > **Operator action required: cancel the subscription at the payment provider.**
 > Step 8 is **local only** — Kiln does not call the provider during erasure. Two
@@ -497,9 +789,57 @@ referentially intact.
 > terminate real customers' billing from a staging environment.
 >
 > So after erasing a paying member, **cancel or refund their subscription in the
-> provider's dashboard**. Until you do, they remain billed. Kiln keeps no
+> provider's dashboard**. Until you do, they remain billed. The provider keeps
+> sending webhooks for that subscription (a renewal each period, say). Kiln
+> acknowledges each one and changes nothing (#2774): the membership stays
+> canceled with no provider ids, and no membership event or `membership.*`
+> webhook is recorded, so access is never revived; but the charge still goes
+> through at the provider. Kiln keeps no
 > invoices; invoice retention is the provider's obligation as controller of its
 > own records.
+
+### What erasure does not reach
+
+Erasure works on the account and what is linked to it. These hold personal
+data about the person that it leaves as it is:
+
+- **Form submissions.** A submission is not linked to an account, so one the
+  person sent stays until an admin deletes it on the form's **Entries** tab,
+  or, if it was marked spam, until the 30-day prune.
+- **Suppression list entries.** An address of theirs that hard-bounced stays
+  on the instance list or a site's list until an admin removes it
+  ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)).
+- **Webhook delivery payloads.** A `form.submitted` or `membership.*`
+  payload that named them stays in the delivery log until it is pruned, 30
+  days by default, and no single row can be deleted before then
+  ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)).
+- **Account mail already being sent.** A job that is running when the
+  erasure commits may have checked its recipient before the commit, and can
+  then still deliver to the old address. A later attempt of the same
+  job is withheld
+  ([Account mail still waiting to run](#account-mail-still-waiting-to-run)).
+- **Account mail queued by an old node during the upgrade.** While a rolling
+  deploy from v1.10.x runs both releases, a node of the old release queues
+  account mail without an account id, and sends the new release's jobs
+  without checking the account. A job of either kind that runs on an old
+  node after an erasure can still reach the old address. Erasure withholds
+  the old-shape jobs addressed to the account's address that have not run
+  yet; it cannot stop one an old node has already started.
+- **Mail to the address that is not account mail.** A site invitation, a
+  newsletter confirmation or a magic link requested for a bare address is
+  queued to the address, not to an account, so it is not checked against
+  the account when it runs and erasure does not withhold it, as for a
+  newsletter row at the address that was never linked to the account. Revoke
+  a pending invitation on **Team** (`/editor/team`). For this release only,
+  erasure does withhold such mail queued by v1.10.x to the account's address,
+  because those jobs cannot be told apart from account mail.
+- **Their name in workflow or task mail queued by the release before
+  #3019.** Such a job carries the acting person's name rather than their
+  account's id, so it still says that name if it runs after they were
+  erased. Jobs queued by this release read the name when they run and say
+  "An editor".
+- **Backups.** A backup taken before the erasure holds everything as it was,
+  until that backup is deleted under your backup retention.
 
 ## Audit trail vs. user erasure (#219)
 
@@ -641,7 +981,9 @@ the origin. For a funnel goal the goal page is the funnel's *final step*.
       whether your regime wants consent for it first.
 - [ ] Documented your content-version (PaperTrail) audit-retention period.
 - [ ] Know the two subject-rights paths: self-export (`/editor/settings`) and
-      admin erasure (`anonymize_user`).
+      admin erasure (`anonymize_user`), and
+      [what erasure does not reach](#what-erasure-does-not-reach), which you
+      remove by hand.
 
 ## Staging / preview environments
 

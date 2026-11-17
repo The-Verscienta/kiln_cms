@@ -13,7 +13,9 @@ defmodule KilnCMS.Backups.Redact do
        variables of this process). Catches a password with characters the
        patterns below cannot match. Secrets shorter than #{6} characters are
        skipped: a short one appears inside ordinary words, and blanking every
-       occurrence turns `pg_dump: error` into `***g_dum***: error`.
+       occurrence turns `pg_dump: error` into `***g_dum***: error`. The
+       TLS settings a backup passes (`PGSSLMODE`, `PGSSLROOTCERT`) are not
+       secrets and are left alone.
     2. **URL userinfo** — `scheme://user:pass@host` becomes `scheme://***@host`.
     3. **`key=value` credentials** — `password=…`, `secret_access_key=…`,
        `token=…`, including the rclone connection-string remotes
@@ -28,6 +30,12 @@ defmodule KilnCMS.Backups.Redact do
 
   # Names of variables whose values are secrets whenever they are set.
   @secret_env ~w(PGPASSWORD RCLONE_CONFIG_PASS AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN)
+
+  # Names of variables a command is run with whose values are NOT secrets, and
+  # appear in the very errors that explain a failure: blanking `require` (the
+  # PGSSLMODE a backup sets, #2830) turns "SSL was required" into "SSL was
+  # ***d". By name only, never by value.
+  @public_env ~w(PGSSLMODE PGSSLROOTCERT)
 
   # A key containing one of these words carries a credential.
   @key_words "pass|pwd|secret|token|key|auth|credential|signature"
@@ -76,7 +84,8 @@ defmodule KilnCMS.Backups.Redact do
   def text(_other, _env, max) when is_integer(max), do: ""
 
   defp env_secrets(env) do
-    for {_var, secret} <- env,
+    for {var, secret} <- env,
+        var not in @public_env,
         is_binary(secret),
         String.length(secret) >= @min_literal_secret,
         do: secret

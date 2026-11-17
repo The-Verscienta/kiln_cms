@@ -10,6 +10,12 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
   column pattern finds. The column check below is the second net, for a kept
   table that later grows an address column.
 
+  A plugin's or the overlay's tables are handled by their plugin's
+  `c:Kiln.Plugin.staging_scrub/0` (#2975): the ones it purges or rewrites are
+  in `dispositions/0`, the ones it keeps in `Scrub.plugin_kept/0`, and the
+  scrub refuses to run while one is in neither (`KilnCMS.Staging.PluginScrub`,
+  tested in `plugin_scrub_test.exs`).
+
   The tables are read from the test database, so a stale local database from
   another branch (a table this branch has not got, or lacks one it has) turns
   this red. Rebuild it with `MIX_ENV=test mix ash.reset` before reading
@@ -18,6 +24,7 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
   use KilnCMS.DataCase, async: true
 
   alias KilnCMS.Repo
+  alias KilnCMS.Staging.PluginScrub
   alias KilnCMS.Staging.Scrub
 
   # Tables a scrubbed clone keeps as they are, and why.
@@ -133,10 +140,6 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
     {"storage_profiles", "endpoint"} => "an S3 endpoint URL, not a person"
   }
 
-  # Anchored at the end so `membership` is not an `ip` and `name` is not an
-  # address; plural forms included (`cidrs`, `contacts`).
-  @personal_column ~r/(^|_)(emails?|ips?|cidrs?|user_agents?|actor_uris?|inbox_uris?|endpoints?|p256dh|grantors?|actor_names?|phones?|contacts?)$/
-
   defp base_tables do
     Repo.query!("""
     SELECT table_name FROM information_schema.tables
@@ -150,7 +153,7 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
 
   test "every table is handled by the scrub or kept with a reason" do
     handled = Scrub.dispositions() |> Map.keys() |> MapSet.new()
-    kept = @kept |> Map.keys() |> MapSet.new()
+    kept = @kept |> Map.merge(Scrub.plugin_kept()) |> Map.keys() |> MapSet.new()
     tables = base_tables()
 
     unclassified = tables |> MapSet.difference(handled) |> MapSet.difference(kept)
@@ -188,9 +191,7 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
         """,
         [kept]
       ).rows
-      |> Enum.filter(fn [_table, column, udt] ->
-        udt in ["inet", "cidr", "_inet", "_cidr"] or Regex.match?(@personal_column, column)
-      end)
+      |> Enum.filter(fn [_table, column, udt] -> PluginScrub.personal_column?(column, udt) end)
       |> MapSet.new(fn [table, column, _udt] -> {table, column} end)
 
     listed = @kept_personal |> Map.keys() |> MapSet.new()
@@ -220,6 +221,25 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
           do: {table, n}
 
     assert nonempty == []
+  end
+
+  # With a plugin that declares tables, whether or not they exist yet: its
+  # purges and rewrites are counted under their own keys, and dispositions
+  # still name exactly what the summary holds.
+  test "dispositions name exactly the summary's counts, with a plugin's tables" do
+    opts = [
+      plugins: [KilnCMS.PluginScrubFixtures.DeclaringPlugin],
+      ash_domains: PluginScrub.core_domains()
+    ]
+
+    from_dispositions =
+      opts |> Scrub.dispositions() |> Map.values() |> MapSet.new(fn {_kind, key} -> key end)
+
+    from_summary =
+      opts |> Scrub.run() |> Map.delete(:admin_provisioned) |> Map.keys() |> MapSet.new()
+
+    assert from_dispositions == from_summary
+    assert {:plugin, "booking", "psf_bookings"} in from_summary
   end
 
   test "dispositions name exactly the summary's counts" do

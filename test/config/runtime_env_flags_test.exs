@@ -57,6 +57,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
             GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
             BACKUP_ENABLED OEMBED_ENABLED BACKUP_MEDIA_PART_MB BACKUP_MEDIA_EXCLUDE
+            BACKUP_LOCK_WAIT_SECONDS
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
@@ -69,6 +70,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT KILN_BOT_BUDGET_AI_CRAWLER_PERCENT
             KILN_BOT_BUDGET_DECLARED_BOT_PERCENT KILN_BOT_BUDGET_EMPTY_UA_PERCENT
             KILN_CRAWLER_VERIFICATION KILN_CRAWLER_RANGES KILN_CRAWLER_RANGES_CRON
+            KILN_PRIVATE_ARGS_SCRUB_CRON
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
@@ -1048,6 +1050,40 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
     end
   end
 
+  describe "BACKUP_LOCK_WAIT_SECONDS (#2844)" do
+    @lock_path [:kiln_cms, KilnCMS.Backups, :lock_wait_ms]
+
+    test "is read in seconds and stored in milliseconds" do
+      assert get_in(eval(%{"BACKUP_LOCK_WAIT_SECONDS" => " 30 "}), @lock_path) == 30_000
+      assert get_in(eval(%{"BACKUP_LOCK_WAIT_SECONDS" => "1"}), @lock_path) == 1000
+      assert get_in(eval(%{"BACKUP_LOCK_WAIT_SECONDS" => "3600"}), @lock_path) == 3_600_000
+    end
+
+    test "unset or blank writes nothing, so the 600 s default stands, silently" do
+      for value <- [nil, "", "  "] do
+        {config, stderr} = eval_io(%{"BACKUP_LOCK_WAIT_SECONDS" => value}, :prod)
+        assert get_in(config, @lock_path) == nil
+        refute stderr =~ "BACKUP_LOCK_WAIT_SECONDS"
+      end
+    end
+
+    test "0, out of range or unparseable values keep the default and warn naming the range" do
+      for value <- ["0", "-5", "3601", "abc", "1.5", "10s"] do
+        {config, stderr} = eval_io(%{"BACKUP_LOCK_WAIT_SECONDS" => value}, :prod)
+
+        assert get_in(config, @lock_path) == nil,
+               "BACKUP_LOCK_WAIT_SECONDS=#{inspect(value)} must be refused, not clamped"
+
+        assert stderr =~ "from 1 to 3600"
+
+        assert {"BACKUP_LOCK_WAIT_SECONDS", ^value, {:integer_in, 1, 3600}} =
+                 config
+                 |> get_in([:kiln_cms, :config_warnings])
+                 |> Enum.find(&(elem(&1, 0) == "BACKUP_LOCK_WAIT_SECONDS"))
+      end
+    end
+  end
+
   describe "media archive parts and exclusions (#2218)" do
     @part_path [:kiln_cms, KilnCMS.Backups, :media_part_bytes]
     @exclude_path [:kiln_cms, KilnCMS.Backups, :media_exclude]
@@ -1653,6 +1689,20 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
                "false"
 
       assert eval(%{})[:kiln_cms][:crawler_ranges_cron] == nil
+    end
+  end
+
+  describe "KILN_PRIVATE_ARGS_SCRUB_CRON (#2992)" do
+    test "sets the job-args scrub schedule, false included" do
+      assert eval(%{"KILN_PRIVATE_ARGS_SCRUB_CRON" => "5 2 * * *"})[:kiln_cms][
+               :private_args_scrub_cron
+             ] == "5 2 * * *"
+
+      assert eval(%{"KILN_PRIVATE_ARGS_SCRUB_CRON" => "false"})[:kiln_cms][
+               :private_args_scrub_cron
+             ] == "false"
+
+      assert eval(%{})[:kiln_cms][:private_args_scrub_cron] == nil
     end
   end
 end

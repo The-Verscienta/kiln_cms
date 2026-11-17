@@ -22,7 +22,18 @@ defmodule KilnCMS.Backups.Artifact do
   File names are built and parsed here and nowhere else: `parse_file/1`,
   `part_name/2`, `set_names/2`, `sidecar_name/2`, `parse_sidecar_name/1`,
   `keep_name/1`, `parse_keep_name/1`, `good_name/1`, `parse_good_name/1`,
-  `hold_name/1`, `parse_hold_name/1`.
+  `hold_name/1`, `parse_hold_name/1`, `partial_name/2`.
+
+  ## Temporary files
+
+  A file being written carries a `.partial` suffix until it is renamed into
+  place. A backup step tags its temporary files with its own job and attempt
+  (`kiln-db-<stamp>.dump.48211-2.partial`, `partial_name/2`, #2819), so two
+  steps of the same stamp (a resumed chain and a step that outlived its
+  Cancel) never write the same file; only the rename is shared, and the step
+  does it under its lease. `scripts/backup.sh` keeps the untagged
+  `<name>.partial`. Every reader accepts both: `parse_file/1` and
+  `parse_sidecar_name/1` report either as `partial?: true`.
   """
   use Ash.Resource, data_layer: :embedded
 
@@ -87,7 +98,7 @@ defmodule KilnCMS.Backups.Artifact do
   def subdir(:db), do: "db"
   def subdir(:media), do: "media"
 
-  @name ~r/\Akiln-(db|media)-(\d{8}-\d{6})(?:\.part(\d{2,}))?\.(dump|tar\.gz)(\.partial)?\z/
+  @name ~r/\Akiln-(db|media)-(\d{8}-\d{6})(?:\.part(\d{2,}))?\.(dump|tar\.gz)((?:\.\d+(?:-\d+)?)?\.partial)?\z/
 
   @typedoc "A parsed backup file name; `part` is `nil` for a single-file artifact."
   @type parsed :: %{
@@ -103,7 +114,8 @@ defmodule KilnCMS.Backups.Artifact do
 
   Accepts `kiln-db-<stamp>.dump`, `kiln-media-<stamp>.tar.gz` and, for media,
   `kiln-media-<stamp>.partNN.tar.gz` (`part` is the integer; at least two
-  digits, widening past 99), each with an optional `.partial` suffix. The kind
+  digits, widening past 99), each with an optional `.partial` suffix, tagged
+  (`.<job>-<attempt>.partial`, `.<job>.partial`) or not (`partial_name/2`). The kind
   and extension must agree, a db file has no parts, parts count from 1, and a
   padded `part0001` is refused so one part never has two names. The stamp is
   only checked for shape here; `parse_stamp/1` says whether it is a real
@@ -181,12 +193,12 @@ defmodule KilnCMS.Backups.Artifact do
   def sidecar_name(kind, stamp) when kind in @kinds and is_binary(stamp),
     do: "kiln-#{kind}-#{stamp}.sha256"
 
-  @sidecar_name ~r/\Akiln-(db|media)-(\d{8}-\d{6})\.sha256(\.partial)?\z/
+  @sidecar_name ~r/\Akiln-(db|media)-(\d{8}-\d{6})\.sha256((?:\.\d+(?:-\d+)?)?\.partial)?\z/
 
   @doc """
   Parse a checksum sidecar's name (`kiln-<kind>-<stamp>.sha256`, optionally
-  `.partial` while it is being written) into `{:ok, %{kind, stamp, partial?}}`,
-  or `:error`.
+  `.partial` or a tagged `.<tag>.partial` while it is being written, see
+  `partial_name/2`) into `{:ok, %{kind, stamp, partial?}}`, or `:error`.
   """
   @spec parse_sidecar_name(String.t()) ::
           {:ok, %{kind: :db | :media, stamp: String.t(), partial?: boolean()}} | :error
@@ -202,6 +214,43 @@ defmodule KilnCMS.Backups.Artifact do
   end
 
   def parse_sidecar_name(_other), do: :error
+
+  @doc """
+  The temporary name a file is written under before it is renamed to `name`.
+
+  With no tag it is `name <> ".partial"` (what `scripts/backup.sh` and the
+  older releases write). With a tag it is `name <> ".<tag>.partial"`, where the
+  tag is a backup step's job id, or its job id and attempt as `"<id>-<attempt>"`
+  (`tag/2`). `parse_file/1` and `parse_sidecar_name/1` read both shapes.
+  """
+  @spec partial_name(String.t(), String.t() | pos_integer() | nil) :: String.t()
+  def partial_name(name, nil) when is_binary(name), do: name <> ".partial"
+
+  def partial_name(name, tag) when is_binary(name) and is_integer(tag) and tag > 0,
+    do: name <> ".#{tag}.partial"
+
+  def partial_name(name, tag) when is_binary(name) and is_binary(tag) do
+    if tag?(tag),
+      do: name <> ".#{tag}.partial",
+      else: raise(ArgumentError, "bad tag: #{inspect(tag)}")
+  end
+
+  @doc """
+  The tag a backup step writes its temporary files under: `"<job id>-<attempt>"`.
+  The attempt keeps a retried job's files apart from a late write of the
+  attempt before it.
+  """
+  @spec tag(pos_integer(), pos_integer()) :: String.t()
+  def tag(job_id, attempt)
+      when is_integer(job_id) and job_id > 0 and is_integer(attempt) and attempt > 0,
+      do: "#{job_id}-#{attempt}"
+
+  @tag ~r/\A\d+(?:-\d+)?\z/
+
+  @doc "Whether `tag` has the shape `partial_name/2` accepts (`<digits>` or `<digits>-<digits>`)."
+  @spec tag?(term()) :: boolean()
+  def tag?(tag) when is_binary(tag), do: Regex.match?(@tag, tag)
+  def tag?(_other), do: false
 
   @doc """
   The recovery-point marker for a stamp (#2219): `kiln-<stamp>.keep`. An entry

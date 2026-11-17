@@ -124,6 +124,20 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
     )
   end
 
+  defp assert_keep_host_hint(lv) do
+    assert has_element?(
+             lv,
+             "#schedule-keep #schedule-keep-host-hint",
+             "If host cron prunes this backup directory, its scripts/backup.sh must be from " <>
+               "this release"
+           )
+
+    assert has_element?(
+             lv,
+             ~s|#schedule-keep-host-hint a[href$="backups.md#the-hold-markers"]|
+           )
+  end
+
   defp all_schedules, do: Backups.list_backup_schedules!(actor: Backups.system())
 
   defp form_params(overrides) do
@@ -439,6 +453,20 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       assert has_element?(lv, "#schedule-keep input[name='schedule[keep_days]'][type=number]")
       refute has_element?(lv, "#schedule-keep input[name='schedule[keep_count]'][value]")
       assert has_element?(lv, "#schedule-keep", "BACKUP_KEEP_DAYS, 14 days on this deployment")
+    end
+
+    # #2931: always there, whatever the preview says, in both forms.
+    test "always say host cron needs this release's backup.sh", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+
+      lv |> element("#schedule-new") |> render_click()
+      assert_keep_host_hint(lv)
+      lv |> element("#schedule-form button", "Cancel") |> render_click()
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+      assert_keep_host_hint(lv)
     end
 
     test "are saved, audited, shown on the card, and cleared by emptying them", %{conn: conn} do
@@ -1372,6 +1400,38 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
   end
 
   describe "warnings" do
+    # #2931: backups a schedule keeps, deleted by a host prune that ignores
+    # their `.hold` markers.
+    test "a held backup deleted outside the app", %{conn: conn} do
+      admin = platform_admin()
+      refute has_element?(mount(conn, admin), "#schedule-held-deleted")
+
+      Backups.report_backup_notice!(
+        %{
+          kind: :held_deleted,
+          scope: "local",
+          units: ["db:20261110-020000", "media:20261110-020000"],
+          total: 2,
+          at: DateTime.utc_now()
+        },
+        actor: Backups.system()
+      )
+
+      lv = mount(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#schedule-held-deleted",
+               "2 backups a schedule keeps were deleted outside the app: " <>
+                 "Database backup of 2026-11-10 02:00 UTC, Media backup of 2026-11-10 02:00 UTC."
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#schedule-held-deleted-docs[href$="backups.md#the-hold-markers"]|
+             )
+    end
+
     test "the scheduler turned off", %{conn: conn} do
       put_cron("false")
       lv = mount(conn, platform_admin())

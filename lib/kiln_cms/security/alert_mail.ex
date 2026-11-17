@@ -66,7 +66,7 @@ defmodule KilnCMS.Security.AlertMail do
     |> to(to_string(recipient.email))
     |> subject(subject(data))
     |> html_body(body(data, mutable?))
-    |> Mail.enqueue!()
+    |> Mail.enqueue!(user_id: recipient.id)
   end
 
   defp link_text(%{phase: "notice"}), do: "Open the security alerts settings"

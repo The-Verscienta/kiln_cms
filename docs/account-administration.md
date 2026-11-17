@@ -182,6 +182,14 @@ platform admin is refused here, for the reason in
    time in **Or until (UTC)**, and click **Grant**. The page says, for
    example, "Admin until 2026-11-21 17:00 UTC." **End it now** ends it early.
 
+**An erased account can't be given a platform role** (#3010). On an erased
+account's page, **Save access** and **Grant** fail with "belongs to an
+account that was erased", and nothing changes: a tier or audiences on a
+tombstone would put it back on the rosters erasure took it off. Ending a
+temporary role is refused the same way. Erasure clears the temporary role
+itself, so **End it now** normally isn't shown, and one left on the row
+another way still expires on its own.
+
 A platform admin is an administrator on every site. So when the change makes
 the account a platform admin and it has no second factor, the confirmation
 goes on to say which sites
@@ -607,7 +615,8 @@ an account here.
 4. **An address that already has an account** gets no new account and no
    change to the existing one. Its owner is emailed "Someone tried to create a
    (site) account with your address", with links to sign in or reset their
-   password.
+   password. The mail is queued for that account, so it is not sent if the
+   account is erased, or no longer holds the address, before it goes out.
 
 A mistake in the form itself, such as a password shorter than 8 characters or
 two passwords that don't match, is still shown on the page, the same way for
@@ -830,10 +839,11 @@ confirm; if any fails, the account is kept:
 - the account is nothing but this application: its account-wide role is
   *Viewer*, it holds no temporary role and no audiences, it has no other
   membership on any site (waiting, rejected or active), and nothing points
-  at it: no paid membership, API key (revoked ones included), newsletter
-  subscription, content, version, comment, task, media item, release,
-  invitation it sent, recorded consent, logged editing event, or
-  notification it caused in someone else's inbox.
+  at it: no paid membership, API key (revoked ones included), content,
+  version, comment, task, media item, release, invitation it sent, recorded
+  consent, logged editing event, or notification it caused in someone else's
+  inbox. A newsletter subscription linked to the account doesn't stop it:
+  the erasure deletes it (#2991).
 
 Erasing is the same [anonymization](#removing-an-account) a platform admin
 runs, done in the rejection's own transaction: if the erasure fails, the
@@ -1629,8 +1639,11 @@ the account was loaded with none), passkeys and IdP links are deleted, every
 token is revoked, paid memberships are canceled locally, and live sockets are
 dropped. It also deletes what reaches only that person: their Web Push
 subscriptions (the device endpoints review notifications go to), their private
-saved views (shared views are the team's and stay), and the notifications
-addressed to them. Nothing personal remains and nothing can sign in
+saved views (shared views are the team's and stay), the notifications
+addressed to them, and the newsletter subscriptions linked to the account on
+every site, so the address stops receiving newsletters (a subscription at the
+same address that was never linked to the account stays; see
+[Newsletter](newsletter.md#when-a-member-account-is-erased)). Nothing personal remains and nothing can sign in
 again. What remains is a referenced id, and the console says so rather than
 claiming a delete it did not do.
 
@@ -1642,9 +1655,73 @@ with its content in a state the admin is told about.
 
 A content type whose documents **could not be read** is reported by name — on the
 confirmation screen ("could not be counted") and in the result — never folded into
-a success count. Erasure also clears the account's temporary grant and any
-per-site grants, and **revokes its API keys**: a surviving key would sign the
-tombstone straight back in.
+a success count. Erasure also clears the account's temporary grant, demotes
+every site membership it holds, and **revokes its API keys**: a surviving key
+would sign the tombstone straight back in.
+
+**Site memberships are kept, and grant nothing** (#2774). Each membership row
+stays on its site's Team page as the record that the person belonged there,
+but its tier drops to *Viewer* and its temporary tier and audiences are
+cleared. Its status, type scopes, field grants and custom role are left as
+they were: they only narrow what a tier allows, so clearing them would widen
+the row. No role-change event is written to the security log for the
+demotion. An erased account then has no tier and no audiences on any site,
+whatever a membership row says, and is on no roster: it can't be assigned a
+task, picked in a `:user` custom field or sent a review request, and it gets
+no workflow mail, in-app notification, task-assigned notice or task digest,
+including workflow and task mail that was queued before the erasure (#3019).
+Account mail still waiting to be sent, such as a sign-in alert or a password
+reset, is withheld and never goes out (#3035): it completes unsent and is
+not listed as a delivery failure on `/editor/mail`. A mail already being
+sent as the erasure commits can still arrive, and an invitation to the
+person's address is not account mail and is kept
+([What erasure does not reach](data-flows.md#what-erasure-does-not-reach)).
+
+### Remove an erased member from a site
+
+An erased account's membership stays on each site's **Team** page until you
+remove it. You need the platform admin role.
+
+1. On the site, open **Team** (`/editor/team`).
+2. Find the member's row. Its address is the tombstone
+   (`anonymized-<id>@deleted.invalid`), it reads **On this site:** *No access*,
+   and under that an **Erased** badge and the note "This account was erased.
+   It holds no tier here and cannot be given one; the row is kept as a record
+   until you remove it." The row has no **Edit** button.
+3. Click the trash icon on the row (its label is "Remove" and the address),
+   and confirm **Remove this member from the site?**. You see "Member
+   removed." and the row is gone.
+
+Keep the row instead if you want the site's member list to show that the
+person once belonged; it grants nothing either way.
+
+**What is refused for an erased account.** Every write that could give it
+access back fails with `KilnCMS.Accounts.Errors.AccountErased`, whose message
+is "belongs to an account that was erased":
+
+- any edit of its membership (`Accounts.update_org_membership/3`: tier,
+  custom role, scopes or audiences), which is why the Team page offers no
+  **Edit** for it;
+- granting its membership a temporary tier
+  (`Accounts.grant_membership_temporary_role/3`);
+- saving **Audiences** on its `/editor/accounts/:id` page, which shows that
+  message as the error. The panel is still on the page;
+- changing its platform role (**Save access**, `Accounts.manage_user_access/3`,
+  role or audiences), or granting or ending a temporary platform role
+  (**Grant**, **End it now**, `Accounts.grant_user_temporary_role/3`), #3010.
+  Demoting an admin takes the bootstrap lock and then the account's row, the
+  order erasing an admin takes them in, so a demotion racing that admin's
+  erasure waits rather than deadlocking;
+- adding it to a site, as before.
+
+Removing the membership is not refused.
+
+**A `:user` custom field that names an erased person.** The field must name
+someone on the site's roster, and an erased account is on none. So a document
+whose `:user` field names them keeps the stored value, but its next save that
+changes its custom fields is refused with "must be a person on this site", the
+same as for a member removed from the site. Pick someone else in the field, or
+clear it, and save again.
 
 ## The last admin
 

@@ -15,7 +15,7 @@ defmodule KilnCMS.Backups.CancelTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Chain, Heartbeat, Manifest, StepWorker, WorkState}
+  alias KilnCMS.Backups.{Artifact, Chain, Checksum, Heartbeat, Manifest, StepWorker, WorkState}
   alias KilnCMS.Repo
   alias KilnCMS.Security
   alias KilnCMS.Test.BackupChain
@@ -142,6 +142,16 @@ defmodule KilnCMS.Backups.CancelTest do
       Repo.update_all(from(r in "backup_runs", where: r.stamp == ^stamp),
         set: [finished_at: at]
       )
+  end
+
+  # A `name` on PATH that runs `body`, then the real `name`.
+  defp fake_tool!(base, name, body) do
+    real = System.find_executable(name)
+    bin = Path.join(base, "bin")
+    File.mkdir_p!(bin)
+    File.write!(Path.join(bin, name), "#!/bin/sh\n" <> body <> ~s|exec "#{real}" "$@"\n|)
+    File.chmod!(Path.join(bin, name), 0o755)
+    System.put_env("PATH", bin <> ":" <> System.get_env("PATH"))
   end
 
   defp fake_rclone!(base, body \\ "exit 0\n") do
@@ -423,6 +433,124 @@ defmodule KilnCMS.Backups.CancelTest do
         run = run_of(stamp)
         assert %{status: :running, chain_id: ^resumed} = run
         refute Enum.any?(run.log, &(&1.message =~ "off-site"))
+
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(resumed)
+      end)
+
+      assert %{status: :succeeded} = run_of(stamp)
+    end
+  end
+
+  # #2819: a step's output files are its own until their rename, which is
+  # fenced. The zombie is the job the chain held before the Cancel, run by
+  # hand in a Task as its first attempt; its tool blocks on a gate file only
+  # when it writes the zombie's temporary name, so the resumed chain's run of
+  # the same tool goes through. The gate opens on exit, and the wait ends if
+  # the test's directory is gone, so no stand-in outlives its test.
+  describe "#2819: a step that outlives its Cancel writes only its own files" do
+    test "a zombie dump released after a resume leaves the resumed chain's dump intact", %{
+      base: base,
+      dir: dir,
+      admin: admin
+    } do
+      {:ok, %{status: :started}} = request()
+      job = %{step_until("dump") | attempt: 1}
+      %{stamp: stamp} = lock()
+      gate = Path.join(base, "pg_dump.gate")
+      # A failing assertion must not leave the stand-in sleeping: open the gate.
+      on_exit(fn -> File.write(gate, "") end)
+      tmp = "kiln-db-#{stamp}.dump.#{job.id}-1.partial"
+
+      fake_tool!(base, "pg_dump", """
+      case "$*" in
+        *".#{job.id}-1.partial"*)
+          echo "$*" > "#{gate}.started"
+          while [ ! -f "#{gate}" ] && [ -d "#{base}" ]; do sleep 0.05; done ;;
+      esac
+      """)
+
+      zombie = Task.async(fn -> StepWorker.perform(job) end)
+      wait_for!(gate <> ".started")
+      assert File.read!(gate <> ".started") =~ "--file=#{Path.join([dir, "db", tmp])}"
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+      backdate_finished!(stamp)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: resumed}} = request(resume: stamp)
+        # The resume's start and dump.
+        %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+        %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+        final = Path.join([dir, "db", "kiln-db-#{stamp}.dump"])
+        {:ok, state} = WorkState.read(WorkState.path(dir, stamp))
+        recorded = WorkState.dump(state)["sha256"]
+        assert {:ok, ^recorded, _} = Checksum.file(final)
+        inode = File.stat!(final).inode
+
+        # The zombie's dump finishes and verifies; its rename is refused.
+        File.write!(gate, "")
+        assert {:cancel, :superseded} = Task.await(zombie, 30_000)
+
+        assert {:ok, ^recorded, _} = Checksum.file(final)
+        assert File.stat!(final).inode == inode
+        assert Path.wildcard(Path.join([dir, "db", "*.partial"])) == []
+
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(resumed)
+      end)
+
+      assert %{status: :succeeded} = run_of(stamp)
+    end
+
+    test "a zombie media part released after a resume leaves the resumed chain's part intact",
+         %{base: base, dir: dir, admin: admin} do
+      {:ok, %{status: :started}} = request()
+      job = %{step_until("archive", 2) | attempt: 1}
+      %{stamp: stamp} = lock()
+      gate = Path.join(base, "tar.gate")
+      # A failing assertion must not leave the stand-in sleeping: open the gate.
+      on_exit(fn -> File.write(gate, "") end)
+      tag = "#{job.id}-1"
+
+      fake_tool!(base, "tar", """
+      case "$*" in
+        *-czf*".#{tag}.partial"*)
+          touch "#{gate}.started"
+          while [ ! -f "#{gate}" ] && [ -d "#{base}" ]; do sleep 0.05; done ;;
+      esac
+      """)
+
+      zombie = Task.async(fn -> StepWorker.perform(job) end)
+      wait_for!(gate <> ".started")
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+      backdate_finished!(stamp)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: resumed}} = request(resume: stamp)
+
+        # start, dump (reused), plan (frozen), archive 1 (reused), archive 2
+        # (rebuilt under the resumed chain's own tag).
+        for _ <- 1..5,
+            do: %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+        assert %{step: :archive, part: 3} = lock()
+        part2 = Path.join([dir, "media", Artifact.part_name(stamp, 2)])
+        {:ok, state} = WorkState.read(WorkState.path(dir, stamp))
+        recorded = WorkState.part(state, 2)["sha256"]
+        assert {:ok, ^recorded, _} = Checksum.file(part2)
+        inode = File.stat!(part2).inode
+
+        File.write!(gate, "")
+        assert {:cancel, :superseded} = Task.await(zombie, 30_000)
+
+        assert {:ok, ^recorded, _} = Checksum.file(part2)
+        assert File.stat!(part2).inode == inode
+        assert Path.wildcard(Path.join([dir, "media", "*.#{tag}.partial"])) == []
+
+        assert Path.wildcard(Path.join([dir, ".work", stamp, "*.#{tag}.run.list"])) == []
 
         BackupChain.drain()
         assert :ok = BackupChain.settled(resumed)

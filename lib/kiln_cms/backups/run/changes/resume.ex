@@ -18,6 +18,14 @@ defmodule KilnCMS.Backups.Run.Changes.Resume do
   `Ash.Error.Changes.StaleRecord` error, and the row keeps the winner's
   `chain_id`.
 
+  The WHERE is also pinned to the loaded struct's `updated_at` (#2816): a
+  resume's start reads the run, checks it still holds the lock, then re-opens
+  that struct (`KilnCMS.Backups.Recorder.reopen_run/3`). A resume canceled in
+  between (`Run`'s `:cancel_resume`) writes the row without changing its
+  status, so only the pin tells the start the row moved: its UPDATE matches
+  nothing and it gets the `StaleRecord` error. Every caller re-opens a struct
+  it has just read.
+
   The Cancel cooldown is not part of the early check: `run_resumable?/2` is
   what shows the Resume button, which stays visible, and
   `KilnCMS.Backups.resumable_run/3` refuses a click inside the window with
@@ -65,15 +73,17 @@ defmodule KilnCMS.Backups.Run.Changes.Resume do
   end
 
   # The same guard as `run_resumable?/2`, in the UPDATE's WHERE (#2421), plus
-  # the Cancel cooldown (#2538). A canceled row with no `finished_at` passes,
-  # as in `Backups.resumable_run/3`.
+  # the Cancel cooldown (#2538) and the loaded struct's `updated_at` (#2816).
+  # A canceled row with no `finished_at` passes, as in
+  # `Backups.resumable_run/3`.
   defp still_resumable(changeset, now) do
     %{stale: stale, canceled: canceled} = Backups.resume_cutoffs(now)
+    loaded_at = changeset.data.updated_at
 
     Ash.Changeset.filter(
       changeset,
       Ash.Expr.expr(
-        origin == :app and
+        origin == :app and updated_at == ^loaded_at and
           (status == :failed or
              (status == :canceled and (is_nil(finished_at) or finished_at <= ^canceled)) or
              (status == :running and started_at < ^stale and updated_at < ^stale))

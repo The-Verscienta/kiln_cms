@@ -19,16 +19,44 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   AshAuthentication revocation flow), and nulls the `actor_id` on the user's
   block-level events so the audit trail keeps the *what* without the *who*.
 
+  Its site memberships stay, as the record of who belonged where, but grant
+  nothing (#2774): each is demoted to a bare `:viewer` row with no temporary
+  tier and no audiences (`OrgMembership.:erase`, see `granting/0`). An erased
+  account is also never on a roster and has no tier anywhere
+  (`KilnCMS.Accounts.Scoping`), and a membership edit or temporary tier that
+  reaches it afterwards is refused (`Changes.LockAccount`).
+
+  The account's row is taken `FOR UPDATE` (`KilnCMS.Accounts.AccountLock`)
+  before any other row the erasure writes, so a write that locks the account
+  first (`AccountLock`'s path list) either commits before the erasure starts
+  or waits for it and sees the tombstone.
+
   It also deletes what belongs to the account alone and names or reaches the
   person (#2514): its Web Push subscriptions (a device endpoint), its private
   saved views (shared ones are the team's, kept like authored content), and
-  the notifications addressed to it.
+  the notifications addressed to it. Its newsletter subscriber rows go too
+  (#2991, `KilnCMS.Newsletter.forget_member/1`): the ones linked to the
+  account, on every site, so the address it was registered with stops
+  receiving newsletters. A row added by hand at the same address and never
+  linked is not the account's and is kept.
+
+  Account mail still waiting to run is withheld (#3035,
+  `KilnCMS.Mail.withhold_pending/2`): it loses its address and message and is
+  completed unsent, and a job queued with the old address after this ran is
+  caught when it runs (`KilnCMS.Mail.DeliveryWorker` checks the account
+  again). Finished jobs on the `mail` queue lose the address they were sent
+  to (#3019, `KilnCMS.Mail.forget_recipient/2`). The address is read from the
+  row before the tombstone replaces it. Workflow and task mail still waiting
+  to run carry no address and check the recipient again when they run.
   """
   use Ash.Resource.Change
 
+  require Ash.Expr
   require Ash.Query
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.AccountLock
+  alias KilnCMS.Accounts.OrgMembership
   alias KilnCMS.Accounts.User
   alias KilnCMS.History
 
@@ -48,7 +76,9 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     id = Ash.Changeset.get_attribute(changeset, :id)
 
     changeset
+    |> Ash.Changeset.before_action(&lock_account/1)
     |> Ash.Changeset.before_action(&clear_totp/1)
+    |> Ash.Changeset.before_action(&remember_address/1)
     |> Ash.Changeset.force_change_attributes(%{
       email: "anonymized-#{id}@deleted.invalid",
       name: nil,
@@ -69,18 +99,25 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       notify_on_webhook_failure: true,
       anonymized_at: DateTime.utc_now()
     })
-    |> Ash.Changeset.after_action(fn _changeset, user ->
+    |> Ash.Changeset.after_action(fn changeset, user ->
       revoke_tokens(user)
       remove_identities(user)
       remove_passkeys(user)
       revoke_api_keys(user)
       clear_audiences(user)
       clear_account_grant(user)
-      clear_membership_grants(user)
+      demote_memberships(user)
       cancel_memberships(user)
+      # After the cancel above, so a membership transition it triggers cannot
+      # re-link a row this deletes (#2991).
+      :ok = KilnCMS.Newsletter.forget_member(user.id)
       remove_push_subscriptions(user)
-      remove_private_saved_views(user)
+      # Private ones only; shared views are the team's (#2514).
+      :ok = KilnCMS.CMS.SavedViews.forget_private_views(user.id, Accounts.list_org_ids())
       :ok = KilnCMS.Notifications.forget_recipient(user.id)
+      # Account mail still waiting to run is withheld (#3035), and finished
+      # mail jobs lose the address they were sent to (#3019).
+      :ok = forget_mail(changeset, user)
       :ok = History.anonymize_actor(user.id)
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
       # Their name, snapshotted into other people's inboxes (#1320).
@@ -188,6 +225,35 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     end
   end
 
+  # The address the account holds before the tombstone replaces it, from the
+  # row (after `lock_account/1`) rather than the caller's struct, so the
+  # finished mail jobs addressed to it can be found once the row is written.
+  defp remember_address(changeset) do
+    # authorize?: false — erasure is authorized once, as the `:anonymize`
+    # action (or the staging scrub); only the address is read, to find the
+    # mail jobs that still hold it.
+    case Accounts.get_user(changeset.data.id,
+           authorize?: false,
+           not_found_error?: false,
+           query: [select: [:id, :email]]
+         ) do
+      {:ok, %User{email: email}} when not is_nil(email) ->
+        Ash.Changeset.put_context(changeset, :erased_address, to_string(email))
+
+      {:ok, _no_address} ->
+        changeset
+
+      {:error, error} ->
+        Ash.Changeset.add_error(changeset, error)
+    end
+  end
+
+  defp forget_mail(changeset, user) do
+    address = changeset.context[:erased_address]
+    :ok = KilnCMS.Mail.withhold_pending(address, user.id)
+    KilnCMS.Mail.forget_recipient(address, user.id)
+  end
+
   # Clear the account's own temporary grant. `role: :viewer` alone did nothing
   # while a grant was live — the effective tier stayed the granted one, which put
   # `anonymized-…@deleted.invalid` on the admin roster and
@@ -215,24 +281,52 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     )
   end
 
-  # Clear any temporary per-site tier. Same reasoning as the account's own grant
-  # above: the membership row survives erasure (it is the audit of who belonged
-  # where), and a live `granted_role` on it would keep the tombstone a site
-  # editor or admin until it expired.
-  defp clear_membership_grants(user) do
+  # The account's row `FOR UPDATE`, first of the erasure's own steps (#2774).
+  # Declared before this change, `GuardLastAdmin`'s bootstrap lock and
+  # `GuardRegistrationErasure` run ahead of it; every other row the erasure
+  # locks comes after. The UPDATE of the row takes the same lock (the email
+  # changes), so this only moves it earlier: before `clear_totp/1` and the
+  # writes below, which a membership edit waiting on `LockAccount` must not
+  # interleave with.
+  defp lock_account(changeset) do
+    case AccountLock.exclusive(changeset.data.id) do
+      {:ok, _state} -> changeset
+      {:error, :not_found} -> changeset
+    end
+  end
+
+  # Strip every site membership of what it grants (#2774). The rows survive
+  # erasure — they are the audit of who belonged where, and a rejected
+  # registration's row is what keeps the applicant out (#2514) — but a tier,
+  # a live temporary one or an audience left on them kept the tombstone an
+  # admin on the rosters, an assignee and a reader of gated content.
+  defp demote_memberships(user) do
     require Ash.Query
 
     # authorize?: false — erasure is authorized once, as the `:anonymize` action
-    # (or the staging scrub). The person being erased owns these rows, so no
-    # admin actor would be admitted to them, and the filter pins every row to
-    # this user's id.
-    KilnCMS.Accounts.OrgMembership
-    |> Ash.Query.filter(user_id == ^user.id and not is_nil(granted_role))
-    |> Ash.bulk_update!(:expire_role_grant, %{},
+    # (or the staging scrub). `:erase` is refused to every actor, and the
+    # filter pins every row to this user's id.
+    OrgMembership
+    |> Ash.Query.filter(user_id == ^user.id and ^granting())
+    |> Ash.bulk_update!(:erase, %{},
       authorize?: false,
       strategy: [:atomic, :atomic_batches, :stream],
       return_records?: false,
       return_errors?: true
+    )
+  end
+
+  @doc """
+  The memberships that still grant something `OrgMembership.:erase` takes
+  away: a tier above `:viewer`, a temporary tier, or an audience. Shared with
+  `KilnCMS.Accounts.ErasureBackfill`, so the pass finds exactly what erasure
+  now clears.
+  """
+  @spec granting() :: Ash.Expr.t()
+  def granting do
+    Ash.Expr.expr(
+      role != :viewer or not is_nil(granted_role) or
+        fragment("coalesce(cardinality(?), 0) > 0", audiences)
     )
   end
 
@@ -256,36 +350,6 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       return_errors?: true
     )
   end
-
-  # Delete the account's private saved views (#2514). A shared view is an
-  # admin's published filter the team uses, so it stays, as authored content
-  # does; its `owner_id` points at the tombstone, which names nobody.
-  #
-  # One statement per org: saved views are tenant-scoped under strict tenancy
-  # and have no tenant-bypassing action, and adding one only for this would
-  # widen the resource. Erasure is rare, so a delete per site is the price
-  # (`Notifications.forget_recipient/1` pays it the same way).
-  defp remove_private_saved_views(user) do
-    require Ash.Query
-
-    each_org(fn org_id ->
-      # authorize?: false — erasure is authorized once, as the `:anonymize`
-      # action (or the staging scrub). The person being erased owns these rows,
-      # so no admin actor would be admitted to them, and the filter pins every
-      # row to this user's id.
-      KilnCMS.CMS.SavedView
-      |> Ash.Query.filter(owner_id == ^user.id and shared == false)
-      |> Ash.bulk_destroy!(:destroy, %{},
-        tenant: org_id,
-        authorize?: false,
-        strategy: [:atomic, :atomic_batches, :stream],
-        return_records?: false,
-        return_errors?: true
-      )
-    end)
-  end
-
-  defp each_org(fun), do: Enum.each(KilnCMS.Accounts.list_org_ids(), fun)
 
   # A throwaway bcrypt hash of random bytes — there is no plaintext that matches
   # it, so the scrubbed account can never authenticate.

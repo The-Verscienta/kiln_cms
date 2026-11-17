@@ -85,6 +85,12 @@ defmodule KilnCMSWeb.BackupLive do
   for a platform admin: `Backups.cancel_run/2`, as that admin, whose policy and
   guard decide (a backup that is finishing can't be canceled). Its files stay.
 
+  A resume that holds the lock but hasn't re-opened its run yet (#2816) says
+  on the strip what it waits for (the server that has the run's files, or a
+  Cancel to settle) and offers only its own **Cancel**:
+  `Backups.cancel_run_resume/2`, which frees the lock and notes the run, which
+  keeps its status. The row's Cancel is hidden meanwhile.
+
   A failed, interrupted or canceled in-app run whose `.work/<stamp>/state.json`
   still exists gets a **Resume** button (platform admin only, computed for the
   visible page and bounded by its 25 rows). For about two and a half minutes
@@ -112,6 +118,22 @@ defmodule KilnCMSWeb.BackupLive do
   destinations themselves are the Destinations tab
   (`KilnCMSWeb.BackupDestinationsLive`).
 
+  ## Retention notices (#2487)
+
+  Retention that was skipped or stopped part-way, locally or on a
+  destination, deleted nothing (or not all it should have), so backups pile
+  up while every run reads **Succeeded**. Each place with such a notice
+  (`Backups.status/0`'s `retention`) adds a dated headline line in the alarm
+  tone, with a link to the guide, until a clean pass there clears it.
+
+  ## Held backups deleted outside the app (#2931)
+
+  A backup a schedule keeps that the host's own prune deleted (an older
+  `scripts/backup.sh` ignoring its `.hold` marker) is a warning under the
+  headline (`Backups.status/0`'s `held_deleted`, shown for 8 days after it
+  was found), with what to do and a link to the guide. It doesn't raise the
+  alarm: the backups themselves still run.
+
   ## Tabs (part of #2219)
 
   This is the Backups tab; the in-app schedules and their forms are the
@@ -130,13 +152,16 @@ defmodule KilnCMSWeb.BackupLive do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{DiskView, Importer, Manifest, Markers}
+  alias KilnCMS.Backups.Run.Changes.CancelResume
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.BackupComponents,
     only: [
       tabs: 1,
       component_label: 1,
+      held_deleted_warning: 1,
       offsite_headline: 1,
+      retention_lines: 1,
       run_destination_label: 2,
       run_status_label: 1,
       threshold_label: 1,
@@ -287,6 +312,19 @@ defmodule KilnCMSWeb.BackupLive do
 
   def handle_event("cancel_run", _params, socket), do: {:noreply, socket}
 
+  # Cancel a resume that holds the lock but hasn't re-opened its run (#2816):
+  # as Cancel, by id, and `Backups.cancel_run_resume/2`'s policy and guard
+  # decide.
+  def handle_event("cancel_resume", %{"id" => id}, socket) when is_binary(id) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      cancel_resume(socket, id)
+    else
+      deny(socket)
+    end
+  end
+
+  def handle_event("cancel_resume", _params, socket), do: {:noreply, socket}
+
   # Through the lock (#2218), as the admin, so the policy decides too: a
   # backup while one runs queues behind it, or folds into a queued fresh one;
   # a queued resume refuses it (#2540).
@@ -343,6 +381,72 @@ defmodule KilnCMSWeb.BackupLive do
   end
 
   defp cancel_message(_error), do: gettext("That backup can't be canceled.")
+
+  defp cancel_resume(socket, id) do
+    user = socket.assigns.current_user
+
+    with {:ok, run} <- Backups.get_run(id, actor: user),
+         {:ok, _noted} <-
+           Backups.cancel_run_resume(run,
+             actor: user,
+             # The client the `backup_canceled` event is logged with (#2241).
+             context: socket.assigns[:security_context] || %{}
+           ) do
+      {:noreply,
+       socket
+       |> put_flash(
+         :info,
+         gettext("Resume canceled. The backup stays as it was, so it can be resumed later.")
+       )
+       |> refresh()}
+    else
+      {:error, error} ->
+        {:noreply,
+         socket |> put_flash(:error, cancel_resume_message(error, id, user)) |> refresh()}
+    end
+  end
+
+  @doc false
+  # Public for the test of a Cancel that loses the race with the start's
+  # re-open, which a LiveView test can't time.
+  def cancel_resume_message(%Ash.Error.Forbidden{}, _id, _user),
+    do: gettext("Only a platform admin can cancel a backup.")
+
+  # The resume re-opened the run first: it is a running backup now, with its
+  # own Cancel. Before this read the run (`CancelResume.started/0`), or while
+  # the Cancel ran: a stale record, which anything else that moved the run
+  # (another Cancel, a Resume refused) also gives, so the run and the lock as
+  # they are now decide.
+  def cancel_resume_message(%Ash.Error.Invalid{errors: errors}, id, user) do
+    cond do
+      Enum.any?(errors, &(Exception.message(&1) =~ CancelResume.started())) ->
+        started_message()
+
+      Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)) ->
+        if resume_started?(id, user),
+          do: started_message(),
+          else: gettext("The backup changed meanwhile. Try again.")
+
+      true ->
+        gettext("That resume can't be canceled.")
+    end
+  end
+
+  def cancel_resume_message(_error, _id, _user), do: gettext("That resume can't be canceled.")
+
+  defp started_message,
+    do: gettext("The resume started meanwhile. Cancel it again to stop the backup.")
+
+  # The run is running under the chain the lock holds, as a resume of it.
+  defp resume_started?(id, user) do
+    with {:ok, %{status: :running, stamp: stamp, chain_id: chain}} when is_binary(chain) <-
+           Backups.get_run(id, actor: user),
+         %{chain: ^chain, resume: ^stamp} <- Backups.in_flight() do
+      true
+    else
+      _ -> false
+    end
+  end
 
   defp resume_backup(socket, id) do
     with {:ok, %{stamp: stamp}} <- Backups.get_run(id, actor: socket.assigns.current_user),
@@ -589,22 +693,44 @@ defmodule KilnCMSWeb.BackupLive do
 
   # The lock as the strip shows it, and the run to cancel from it: the one the
   # lock is writing, when it is running (a starting chain has none yet).
+  #
+  # A resume that holds the lock but hasn't re-opened its run (#2816) offers
+  # only Cancel resume, whatever the run's status: a stale `running` run it
+  # is about to re-open would otherwise get the plain Cancel, which marks the
+  # run canceled and leaves the resume's lock and start job alone.
   defp load_in_flight(socket) do
-    in_flight = Backups.in_flight()
+    user = socket.assigns.current_user
+    in_flight = Backups.in_flight(details: true)
 
     run =
       with %{stamp: stamp} when is_binary(stamp) <- in_flight,
-           {:ok, %{status: :running, origin: :app} = run} <-
-             Backups.get_run_by_stamp(stamp, actor: socket.assigns.current_user) do
+           {:ok, %{origin: :app} = run} <- Backups.get_run_by_stamp(stamp, actor: user) do
         run
       else
         _ -> nil
       end
 
+    waiting? = resume_waiting?(in_flight, run)
+
     socket
-    |> assign(:in_flight, in_flight)
-    |> assign(:in_flight_run_id, run && run.id)
+    |> assign(:in_flight, in_flight && Map.put(in_flight, :resume_waiting?, waiting?))
+    |> assign(:in_flight_run_id, if(not waiting? and running?(run), do: run.id))
+    |> assign(
+      :in_flight_resume_run_id,
+      if(waiting? and Backups.can_cancel_run_resume?(user, run), do: run.id)
+    )
   end
+
+  defp running?(%{status: :running}), do: true
+  defp running?(_run), do: false
+
+  # The lock holds a resume of `run` at its start step, under a chain the run
+  # hasn't moved to yet: it hasn't re-opened the run (#2816).
+  defp resume_waiting?(%{step: :start, resume: stamp, chain: chain}, %{stamp: stamp} = run)
+       when is_binary(stamp),
+       do: run.chain_id != chain
+
+  defp resume_waiting?(_in_flight, _run), do: false
 
   defp load_history(socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
@@ -792,7 +918,12 @@ defmodule KilnCMSWeb.BackupLive do
           </div>
         </div>
 
-        <.in_flight :if={@in_flight} in_flight={@in_flight} run_id={@in_flight_run_id} />
+        <.in_flight
+          :if={@in_flight}
+          in_flight={@in_flight}
+          run_id={@in_flight_run_id}
+          resume_run_id={@in_flight_resume_run_id}
+        />
 
         <%!-- Until `Backups.status/0` answers (#2417). Neutral: nothing is
               known yet, good or bad. --%>
@@ -846,6 +977,28 @@ defmodule KilnCMSWeb.BackupLive do
               >
                 {offsite_headline(@status.offsite)}
               </p>
+              <%!-- Retention skipped or stopped part-way (#2487): the backup
+                    succeeded, but old backups are piling up. --%>
+              <p
+                :for={line <- retention_lines(@status)}
+                id={"backup-headline-retention-#{line.id}"}
+                data-role="retention-notice"
+                class="font-medium"
+              >
+                {line.text}
+              </p>
+              <p :if={@status.retention != []} class="mt-1 text-sm">
+                <a
+                  id="backup-retention-docs"
+                  href={docs_url("backups.md#when-retention-is-skipped-or-stops")}
+                  target="_blank"
+                  rel="noopener"
+                  class="link inline-flex items-center gap-1 text-primary-ink"
+                >
+                  {gettext("Why retention skips")}
+                  <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+                </a>
+              </p>
               <p
                 :if={@status.manifest && @status.manifest.artifacts != []}
                 class="mt-1 text-sm text-base-content/70"
@@ -860,6 +1013,17 @@ defmodule KilnCMSWeb.BackupLive do
               </p>
             </div>
           </div>
+        </section>
+
+        <%!-- Backups a schedule keeps, deleted by the host's own prune
+              (#2931): the backups still run, so it is a warning, not the
+              alarm. --%>
+        <section
+          :if={@status && @status.held_deleted != []}
+          class="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/5 p-4 text-sm text-warning-ink"
+        >
+          <.icon name="hero-exclamation-triangle" class="mt-0.5 size-5 shrink-0" />
+          <.held_deleted_warning id="backup-held-deleted" notices={@status.held_deleted} />
         </section>
 
         <%!-- A failed run keeps its own error visible. Showing the previous
@@ -1059,6 +1223,7 @@ defmodule KilnCMSWeb.BackupLive do
 
   attr :in_flight, :map, required: true
   attr :run_id, :string, default: nil
+  attr :resume_run_id, :string, default: nil, doc: "the run of a resume waiting to start (#2816)"
 
   # The running backup: its step, the part of how many, the queued request.
   defp in_flight(assigns) do
@@ -1093,9 +1258,31 @@ defmodule KilnCMSWeb.BackupLive do
         <.icon name="hero-stop-circle" class="mr-1 size-4" />
         {gettext("Cancel")}
       </button>
+      <button
+        :if={@resume_run_id}
+        type="button"
+        phx-click="cancel_resume"
+        phx-value-id={@resume_run_id}
+        phx-disable-with={gettext("Canceling…")}
+        data-role="cancel-resume"
+        data-confirm={cancel_resume_confirm(@in_flight)}
+        class="btn btn-sm btn-danger"
+      >
+        <.icon name="hero-stop-circle" class="mr-1 size-4" />
+        {gettext("Cancel")}
+      </button>
     </section>
     """
   end
+
+  # A resume waiting to start (#2816): what for.
+  defp step_label(%{resume_waiting?: true, waiting_for: :files_server}),
+    do: gettext("Waiting for the server that has this backup's files")
+
+  defp step_label(%{resume_waiting?: true, waiting_for: :cancel_settle}),
+    do: gettext("Waiting for the canceled backup's step to stop")
+
+  defp step_label(%{resume_waiting?: true}), do: gettext("Starting a resume")
 
   defp step_label(%{step: :archive, part: part, parts_total: total})
        when is_integer(part) and is_integer(total),
@@ -1164,6 +1351,15 @@ defmodule KilnCMSWeb.BackupLive do
     do:
       gettext(
         "Cancel this backup? Its files are kept, so it can be resumed later. A queued backup will start next."
+      )
+
+  defp cancel_resume_confirm(%{waiting: nil}),
+    do: gettext("Cancel this resume? The backup stays as it was, so it can be resumed later.")
+
+  defp cancel_resume_confirm(_in_flight),
+    do:
+      gettext(
+        "Cancel this resume? The backup stays as it was, so it can be resumed later. A queued backup will start next."
       )
 
   attr :runs, :list, required: true
@@ -1389,10 +1585,15 @@ defmodule KilnCMSWeb.BackupLive do
               disk={@disk}
             />
             <%!-- Hidden once the backup is finishing, as on the strip: Cancel is
-                  refused from there (#2542). `@in_flight` is read here, not
-                  when the row was built, so it doesn't matter which loaded first. --%>
+                  refused from there (#2542). Hidden too while a resume of it
+                  waits to start (#2816): the strip's Cancel stops that one.
+                  `@in_flight` is read here, not when the row was built, so it
+                  doesn't matter which loaded first. --%>
             <button
-              :if={cancelable? and not finishing?(@in_flight, run)}
+              :if={
+                cancelable? and not finishing?(@in_flight, run) and
+                  not resume_waiting?(@in_flight, run)
+              }
               type="button"
               phx-click="cancel_run"
               phx-value-id={run.id}
@@ -1769,8 +1970,12 @@ defmodule KilnCMSWeb.BackupLive do
   # (#2219): a fresh database backup doesn't make stale media fine.
   # Partly off-site (#2220) too: a good local backup that some destination
   # doesn't have is not a deployment that is fine.
+  # Retention skipped or stopped (#2487) too: the backup is fine today, and
+  # the disk fills up behind it.
   defp alarming?(status),
-    do: status.stale? or status.failed? or match?(%{offsite: %{state: :partial}}, status)
+    do:
+      status.stale? or status.failed? or match?(%{offsite: %{state: :partial}}, status) or
+        status.retention != []
 
   # One component's line (#2219).
   defp headline(%{failed?: true}), do: gettext("The last backup failed")

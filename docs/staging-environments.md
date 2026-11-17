@@ -106,6 +106,7 @@ so that nothing on the clone does so later on production's behalf.
 | **Idempotency keys** | purged (`idempotent_requests_purged`) | Each row caches the response production sent, which carries whatever that response did. |
 | **Backup lock** | purged (`backup_locks_purged`) | Names production's nodes and backup jobs the scrub deletes. An empty table is a free lock for the staging host's own backups. |
 | **Backup node heartbeats** | purged (`backup_node_beats_purged`) | Production's node ids. |
+| **Backup notices** | purged (`backup_notices_purged`) | Production's retention and held-backup warnings, naming its backup directories and destinations. The staging host's own backups report their own (#2487). |
 | **A fresh staging admin** | provisioned, opt-in (`admin_provisioned`) | Because every real account is anonymized (nobody can sign in), the scrub can seed **one** known admin from `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` so the environment is usable. |
 
 The names in parentheses are the keys of the summary map `KilnCMS.Staging.scrub!/1`
@@ -131,12 +132,97 @@ A scrubbed clone still holds a few things to know about before you share it:
 - **Free text written by staff.** Comment bodies, task notes and the `grantor` of a
   content consent are kept with the content they belong to. The accounts that wrote
   them are anonymized, but a name or address typed into the text is not.
-- **Tables a plugin owns.** The scrub only knows the core schema. Check what your
-  plugins store before sharing a clone.
+- **Plugin tables a plugin keeps.** A plugin's `{:keep, …}` entries, and its content
+  tables, stay as production had them ([Plugin tables](#plugin-tables)).
 
 Every core table is accounted for: a test classifies each one as scrubbed (from
 `KilnCMS.Staging.Scrub.dispositions/0`) or kept with a reason, so a new table cannot
-reach a clone without someone deciding.
+reach a clone without someone deciding. A plugin's tables are held to the same rule
+when the scrub runs, below.
+
+### Plugin tables
+
+An overlay can add tables of its own: the Ash domains a plugin lists in
+`domains/0`, and any domain in `:ash_domains` that is neither the core's nor a
+plugin's. The core's test cannot see those, so the scrub checks them itself, against
+the database it is about to change. The rule is the core's: every table is purged,
+rewritten, or kept with a reason
+([ADR 0066](decisions/0066-every-table-reaching-a-staging-clone-is-scrubbed-or-kept-with-a-reason.md)).
+
+**The plugin declares what happens to each table**, in `staging_scrub/0` on its
+entry module (`kiln_plugin` 1.5):
+
+```elixir
+@impl Kiln.Plugin
+def staging_scrub,
+  do: [
+    {:purge, MyProject.Bookings.Note},
+    {:rewrite, MyProject.Bookings.Booking, set: [email: nil, name: "Scrubbed guest"]},
+    {:purge, MyProject.Bookings.Booking.Version},
+    {:keep, MyProject.Bookings.Venue, "opening hours, no visitors"}
+  ]
+```
+
+`{:purge, Resource}` deletes every row, `{:rewrite, Resource, set: [...]}` sets each
+listed attribute on every row, and `{:keep, Resource, reason}` keeps the rows as they
+are. An AshPaperTrail version table is a table of its own and needs its own entry,
+or its history keeps the values the rewrite cleared.
+[Staging scrub](plugin-extensibility.md#staging-scrub) in the
+plugin guide has the rules for each entry.
+
+**Content is kept without an entry.** A content type's table, its version table and
+a graduated join table stay, as the core's content does, unless a column name or type
+looks personal (`email`, `ip`, `phone`, `user_agent`, an `inet` column, …). Such a
+table must be declared.
+
+**An undeclared table stops the scrub before it changes anything.** If one of those
+tables exists in the clone and no entry names it, `mix kiln.staging.scrub` and
+`KilnCMS.Release.scrub_staging/0` raise, leaving the clone as production had it:
+
+```text
+Refusing to scrub: these tables of installed plugins and of the overlay have no staging_scrub/0 entry, so the scrub cannot tell whether a production clone may keep their rows. Add {:purge, Resource}, {:rewrite, Resource, set: [...]} or {:keep, Resource, "reason"} for each to its plugin's staging_scrub/0.
+
+  * bookings: MyProject.Bookings.Booking (table bookings)
+
+Nothing has been changed. See c:Kiln.Plugin.staging_scrub/0 and
+docs/staging-environments.md.
+```
+
+Each line names the plugin, the resource and the table. Add an entry for each to that
+plugin's `staging_scrub/0`, rebuild, and run the scrub again. A table listed under
+`(no plugin)` belongs to a domain no plugin claims, which nothing can declare: move
+the domain into a plugin's `domains/0` and declare the table there. The same refusal,
+under its own heading, comes from a declaration that cannot be used (a callback that
+raises, an entry naming a core table or another plugin's resource, a rewrite of a
+primary key) and from a foreign key with `ON DELETE RESTRICT` or `NO ACTION` that
+would stop a purge part-way. A plugin installed but not yet migrated is fine: a table
+that does not exist is skipped and counts 0.
+
+`mix kiln.plugins.doctor` fails on a declaration that cannot be used, and only notes
+an undeclared table ("note: no staging_scrub/0 entry for …"): a site that never stages
+is not broken by one, but its first staging scrub will refuse.
+
+**The plugin tables go first, in one transaction.** After every check passes, the scrub
+purges and rewrites the plugin tables, in the order the plugins are registered and
+then the order of their entries, before it touches any core table. A constraint the
+checks could not see (a `CHECK`, an expression index, a trigger) rolls back every
+plugin table, with no core row changed yet.
+
+**The summary lists each one after the core's counts**, as the plugin's `name/0` and
+the table, with the number of rows purged or rewritten. Kept tables are not listed:
+
+```text
+  webhooks deactivated:                   0
+  bookings plugin, booking_notes:         12
+  bookings plugin, bookings:              40
+  bookings plugin, bookings_versions:     97
+```
+
+A table outside `public` is listed with its schema (`crm.users`).
+
+Tables an overlay creates with a raw migration, with no Ash resource, are not seen:
+the scrub finds plugin tables through their resources. Check those yourself before
+sharing a clone.
 
 > **The scrub never contacts a payment provider.** Erasing a member cancels their
 > membership *locally* only, precisely so this path — which runs over a clone of
@@ -243,6 +329,13 @@ argument. Its closing `DATABASE_URL=` line, which says "password not shown",
 leaves the password out: put it back, or export `PGPASSWORD`, before you use
 that line
 ([backups.md](backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726)).
+For the tools, `ssl=false` in either URL becomes `sslmode=disable` and Ecto's
+`pool_size`, `timeout` and `idle_interval` are left out, while the line it
+prints and the URL it hands to migrate and scrub keep your query as written. A
+`key=value` string with a password is refused before anything runs
+([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
+The script does not read `DATABASE_SSL`: to require TLS for the copy, put
+`sslmode=require` (or `verify-full`) in the URL.
 
 `up` dumps production with `--exclude-table-data=oban_jobs`: the clone gets the job
 table but none of production's queued jobs. The scrub purges the table anyway, for a

@@ -16,7 +16,9 @@ defmodule KilnCMS.Security.Changes.RecordRoleChange do
   `KilnCMS.Security.Recorder.tenant_key/0`); a membership names its own org, so
   the event lands in that org's log whichever org the acting admin is viewing.
   Erasure writes none of these: it forces `role` through `:anonymize`, a
-  different action, and clears grants through `:expire_role_grant`.
+  different action, clears the account's own grant through
+  `:expire_role_grant`, and demotes its memberships through
+  `OrgMembership.:erase` (#2774), which does not declare this change.
 
   Metadata the security alerts read (#2245):
 

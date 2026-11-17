@@ -37,7 +37,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendSignInUnlock do
         ConsoleHost.org_url("/reset", org)
       )
     )
-    |> Mail.enqueue!()
+    |> Mail.enqueue!(user_id: user.id)
   end
 
   defp body(site, link, reset) do

@@ -16,6 +16,27 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
   defp project, do: test_project(files: %{"config/config.exs" => "import Config\n"})
 
   describe "an overlay plugin (the default)" do
+    # #2975: an overlay's tables stop the staging scrub until declared, so the
+    # scaffold shows the declaration beside domains/0, in a shape that works
+    # once uncommented.
+    test "shows how to declare its tables for the staging scrub" do
+      camel = "GenScrubPluginT#{System.unique_integer([:positive])}"
+      source = Plugin.plugin_source(camel, nil)
+
+      [example] =
+        Regex.run(~r/# def staging_scrub,\n(?:\s*#.*\n)+/, source)
+
+      uncommented = String.replace(example, ~r/^\s*# ?/m, "")
+      assert {:ok, _quoted} = Code.string_to_quoted(uncommented)
+      assert uncommented =~ "{:purge, #{camel}.Catalog.Booking}"
+      assert uncommented =~ "{:rewrite, #{camel}.Catalog.Guest, set: [email: nil]}"
+      assert uncommented =~ ~s|{:keep, #{camel}.Catalog.Venue, "opening hours, no visitors"}|
+
+      # Commented out: a fresh plugin owns no tables and declares nothing.
+      Code.compile_string(source)
+      assert Module.concat([camel, "Plugin"]).staging_scrub() == []
+    end
+
     test "goes under projects/ and is registered in :plugins" do
       igniter = Igniter.compose_task(project(), "kiln.gen.plugin", ["Ratings"])
 
@@ -140,6 +161,8 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
 
       assert source =~ "projects/ overlay"
       refute source =~ "def domains"
+      # A dependency owns no tables, so it has nothing to declare (#2975).
+      refute source =~ "staging_scrub"
     end
   end
 end

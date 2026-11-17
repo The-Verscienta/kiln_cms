@@ -14,22 +14,42 @@ defmodule KilnCMS.Accounts.AccountLock do
 
     * every `OrgMembership` create (`Changes.LockAccount`, resource-wide),
       and the two approvals, before they lock the membership;
+    * `OrgMembership` `:update` and `:grant_temporary_role` (#2774), first:
+      an erasure demotes every membership it finds, and a tier written after
+      it would put one back on the tombstone;
     * `Billing.Membership` `:start` and `:comp`, and the entitlement
       recompute's write in `KilnCMS.Billing.Entitlements`, first;
+    * `Billing.Membership` `:apply_provider_state` and `:uncomp`, first
+      (`KilnCMS.Billing.Changes.SettleErasedAccount`): for an erased account
+      the transition is a successful no-op rather than a refusal, so a late
+      webhook settles without reviving the membership erasure cancelled;
     * `ApiKey` `:create`;
-    * the three updates that confirm an unconfirmed account
+    * the five updates that confirm an unconfirmed account
       (`:confirm_new_user`, `:reset_password_with_token`,
-      `:accept_invitation_with_password`).
+      `:accept_invitation_with_password`, `:take_over_by_magic_link`,
+      `:take_over_by_sso`);
+    * `User` `:manage_access` and `:grant_temporary_role` (#3010), after
+      `Changes.GuardLastAdmin`'s bootstrap lock: a platform tier or audiences
+      given to an erased account would put it back on the rosters erasure
+      took it off. Erasing an admin takes the bootstrap lock and then this
+      row, so a demotion must take them in that order too, or the two
+      deadlock.
 
   The two modes conflict, so whichever transaction locks first goes first and
   the other waits for its commit:
 
     * the erasure first: the writer waits, then reads the row the erasure
       left and is refused (`{:error, :erased}`), rather than attaching a
-      membership, a key or a password to a tombstone;
+      membership, a key, a password or a tier to a tombstone;
     * the writer first: the erasure waits, then checks against what the writer
       committed (READ COMMITTED takes a fresh snapshot per statement), and the
       account is kept.
+
+  Every erasure takes the row `exclusive/1` too, not only a rejected
+  registration's (#2774): `Changes.AnonymizeUser` locks it before any other
+  row it writes, so a membership edit or a billing transition waiting on the
+  account sees the tombstone, and one that got there first is demoted or
+  cancelled by the erasure after it commits.
 
   `FOR KEY SHARE` is the weakest mode that conflicts with `FOR UPDATE`, so
   writers never wait on each other. A foreign-key insert takes it too, which
@@ -37,8 +57,12 @@ defmodule KilnCMS.Accounts.AccountLock do
   direction: it waits for an erasure, then succeeds against the tombstone.
   That is why the paths above lock explicitly and re-read `anonymized_at`.
 
-  **Lock order** is the users row first, then any membership row, on every
-  path, so no two of them can deadlock.
+  **Lock order** is the bootstrap advisory lock when the write takes it
+  (`KilnCMS.Accounts.Bootstrap.lock!/0`, demoting or erasing an admin), then
+  the users row, then any membership row (site or paid), on every path, so
+  no two of them can deadlock. A billing
+  transition used to take its membership row first and the account in the
+  recompute after it, and deadlocked with an erasure cancelling that row.
 
   Both functions must run inside a transaction (they raise otherwise): a row
   lock taken outside one ends with its statement and protects nothing.

@@ -140,4 +140,55 @@ defmodule KilnCMS.Backups.ManifestTest do
       end
     end
   end
+
+  describe "tagged writes (#2818)" do
+    test "a refused rename leaves the manifest standing and no temporary file", %{dir: dir} do
+      :ok =
+        Manifest.write(dir, %Manifest{finished_at: DateTime.utc_now(), trigger: "cron", ok: true})
+
+      before = File.read!(Manifest.path(dir))
+      parent = self()
+
+      refuse = fn from, _to ->
+        send(parent, {:tmp, from})
+        {:error, :superseded}
+      end
+
+      failed = %Manifest{finished_at: DateTime.utc_now(), trigger: "manual", ok: false}
+      assert {:error, :superseded} = Manifest.write(dir, failed, tag: "48211-2", rename: refuse)
+
+      assert_received {:tmp, tmp}
+      assert tmp == Manifest.path(dir) <> ".48211-2.partial"
+      assert File.read!(Manifest.path(dir)) == before
+      refute File.exists?(tmp)
+    end
+
+    # A fenced rename raises when its lock query times out: the temporary file
+    # must not outlive it at the directory's root.
+    test "a rename that raises leaves no temporary file, and the raise goes on", %{dir: dir} do
+      parent = self()
+
+      raising = fn from, _to ->
+        send(parent, {:tmp, from})
+        raise DBConnection.ConnectionError, "timed out"
+      end
+
+      manifest = %Manifest{finished_at: DateTime.utc_now(), trigger: "manual", ok: true}
+
+      assert_raise DBConnection.ConnectionError, fn ->
+        Manifest.write(dir, manifest, tag: "48211-2", rename: raising)
+      end
+
+      assert_received {:tmp, tmp}
+      refute File.exists?(tmp)
+      refute File.exists?(Manifest.path(dir))
+    end
+
+    test "a tagged write lands through its rename function", %{dir: dir} do
+      manifest = %Manifest{finished_at: DateTime.utc_now(), trigger: "manual", ok: true}
+      assert :ok = Manifest.write(dir, manifest, tag: 5, rename: &File.rename/2)
+      assert %Manifest{trigger: "manual", ok: true} = Manifest.read(dir)
+      assert Path.wildcard(Path.join(dir, "*.partial")) == []
+    end
+  end
 end

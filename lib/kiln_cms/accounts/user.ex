@@ -246,10 +246,18 @@ defmodule KilnCMS.Accounts.User do
     # fallback 1.0 removed (#1543) and have not been moved onto a membership
     # yet: audiences held, and no membership anywhere. Backs the post-deploy
     # safety net (`KilnCMS.Accounts.LegacyAudiencesWorker`) and
-    # `mix kiln.deprecations` — see `KilnCMS.Deprecations`.
+    # `mix kiln.deprecations` — see `KilnCMS.Deprecations`. An erased account
+    # is on no fallback: it reads nothing gated (`Scoping.audiences/2`), and
+    # moving it would give a tombstone a membership, which the account lock
+    # refuses (#3010), so the worker would fail on it every boot.
     read :legacy_audience_accounts do
       description "Accounts on the deprecated User.audiences fallback (operator report)."
-      filter expr(fragment("cardinality(?) > 0", audiences) and not exists(org_memberships, true))
+
+      filter expr(
+               is_nil(anonymized_at) and fragment("cardinality(?) > 0", audiences) and
+                 not exists(org_memberships, true)
+             )
+
       prepare build(sort: [email: :asc])
     end
 
@@ -1593,12 +1601,21 @@ defmodule KilnCMS.Accounts.User do
     # an unconfirmed account (see the change).
     change KilnCMS.Accounts.Changes.AnnouncePendingRegistration, on: [:update]
 
-    # The three updates that confirm an unconfirmed account take its row
+    # The five updates that confirm an unconfirmed account take its row
     # first and refuse an erased one (#2514): an erasure of a rejected,
     # unconfirmed registration may have committed while one of them waited,
     # and a confirmation, a new password or a session must not land on the
     # tombstone. The erasure checks `confirmed_at` under the same lock, so
     # one that waits for a confirmation keeps the account.
+    #
+    # The two platform-tier writes refuse an erased account too (#3010): a
+    # tier or audiences given to a tombstone would put it back on the
+    # rosters erasure took it off. Here rather than in the actions, because
+    # a resource-wide change runs after the action's own changes, so the
+    # hook runs after `GuardLastAdmin`'s: the bootstrap lock, then the users
+    # row, the order erasing an admin takes them in. Declared above
+    # `GuardLastAdmin`, demoting an admin while that admin is erased
+    # deadlocks.
     change {KilnCMS.Accounts.Changes.LockAccount, user_id: :id},
       on: [:update],
       where: [
@@ -1607,7 +1624,9 @@ defmodule KilnCMS.Accounts.User do
           :reset_password_with_token,
           :accept_invitation_with_password,
           :take_over_by_magic_link,
-          :take_over_by_sso
+          :take_over_by_sso,
+          :manage_access,
+          :grant_temporary_role
         ])
       ]
   end

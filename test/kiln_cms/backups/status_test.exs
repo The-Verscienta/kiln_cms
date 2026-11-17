@@ -618,4 +618,128 @@ defmodule KilnCMS.Backups.StatusTest do
       assert %{state: :unknown, stamp: nil, failed: []} = status.offsite
     end
   end
+
+  # #2487 / #2931: the notices, as `status/0` says them.
+  describe "notices" do
+    alias KilnCMS.Backups.{DestinationConfig, DirId, Notices}
+
+    defp report!(attrs) do
+      Backups.report_backup_notice!(
+        Map.merge(
+          %{
+            kind: :retention,
+            scope: "local",
+            outcome: :skipped,
+            reason: "why",
+            at: DateTime.utc_now()
+          },
+          attrs
+        ),
+        actor: Backups.system()
+      )
+    end
+
+    defp destination!(attrs) do
+      Ash.Seed.seed!(
+        DestinationConfig,
+        Map.merge(
+          %{
+            name: "NAS #{System.unique_integer([:positive])}",
+            kind: "local",
+            settings: %{},
+            enabled: true,
+            prune: true
+          },
+          attrs
+        )
+      )
+    end
+
+    defp beat!(dir_id) do
+      Backups.beat_node!(
+        %{
+          node: "node-#{System.unique_integer([:positive])}",
+          boot_id: Ash.UUID.generate(),
+          dir_id: dir_id
+        },
+        actor: Backups.system()
+      )
+    end
+
+    test "none: both empty" do
+      assert %{retention: [], held_deleted: []} = Backups.status()
+    end
+
+    test "a local skip is listed with what the panels need" do
+      report!(%{stamp: "20261116-020000", reason: "couldn't read the backup history"})
+
+      assert [
+               %{
+                 scope: :local,
+                 label: nil,
+                 outcome: :skipped,
+                 reason: "couldn't read the backup history",
+                 stamp: "20261116-020000",
+                 dir_id: nil
+               }
+             ] = Backups.status().retention
+    end
+
+    test "a local notice whose directory no live node reports is hidden; a reported one, or this node's, is shown",
+         %{dir: dir} do
+      gone = Ash.UUID.generate()
+      live = Ash.UUID.generate()
+      own = Ash.UUID.generate()
+      File.write!(DirId.path(dir), own)
+      beat!(live)
+
+      for id <- [gone, live, own], do: report!(%{scope: "local:" <> id, dir_id: id})
+
+      assert ids = Enum.map(Backups.status().retention, & &1.dir_id)
+      assert Enum.sort(ids) == Enum.sort([live, own])
+    end
+
+    test "a destination's notice shows while it is pruned, under its current name" do
+      pruned = destination!(%{name: "Renamed NAS"})
+      off = destination!(%{prune: false})
+      disabled = destination!(%{enabled: false})
+
+      for row <- [pruned, off, disabled],
+          do: report!(%{scope: DestinationConfig.key(row), label: "NAS"})
+
+      report!(%{scope: "dest:" <> Ash.UUID.generate(), label: "Deleted"})
+      report!(%{scope: "local", outcome: :stopped, deleted: 2})
+
+      key = DestinationConfig.key(pruned)
+
+      assert [
+               %{scope: :local, outcome: :stopped, deleted: 2},
+               %{scope: {:destination, ^key}, label: "Renamed NAS"}
+             ] = Backups.status().retention
+    end
+
+    test "held-deleted notices show for eight days" do
+      report!(%{kind: :held_deleted, outcome: nil, units: ["db:20261110-020000"], total: 1})
+
+      old = DateTime.add(DateTime.utc_now(), -(Notices.held_deleted_days() + 1) * 86_400, :second)
+      report!(%{kind: :held_deleted, scope: "local:x", outcome: nil, units: ["media:x"], at: old})
+
+      assert [%{units: ["db:20261110-020000"], total: 1, dir_id: nil}] =
+               Backups.status().held_deleted
+    end
+
+    test "unreadable notices are empty and counted, never a crash" do
+      report!(%{})
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :status, :notices_unreadable]
+        ])
+
+      status = Backups.with_actor(KilnCMS.SystemActor.new(:billing), fn -> Backups.status() end)
+
+      assert %{retention: [], held_deleted: []} = status
+      assert_received {[:kiln_cms, :backups, :status, :notices_unreadable], ^ref, %{count: 1}, _}
+    end
+  end
 end

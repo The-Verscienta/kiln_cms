@@ -203,6 +203,31 @@ defmodule KilnCMS.Automation do
 
   defp unique_opts(_payload), do: []
 
+  @doc """
+  The event payload an automation job carries (#2992), from either shape:
+  `"payload"` in the clear, as this release still writes it, or `"sealed"`
+  (`KilnCMS.Jobs.PrivateArgs.seal/1`), which a later release will write
+  instead. Reading both now is what lets that release's jobs run on a node
+  of this one during a rolling deploy.
+
+    * `{:error, :unreadable}` — the seal does not open under any
+      `secret_key_base` this deployment knows;
+    * `{:error, :unavailable}` — the job carries neither, as a finished job
+      does once its private args were dropped.
+  """
+  @spec job_payload(map()) :: {:ok, term()} | {:error, :unreadable | :unavailable}
+  def job_payload(%{"sealed" => sealed}), do: KilnCMS.Jobs.PrivateArgs.open(sealed)
+
+  def job_payload(%{"payload" => payload}), do: {:ok, payload}
+  def job_payload(_args), do: {:error, :unavailable}
+
+  @doc "The cancel reason for a job whose payload `job_payload/1` could not read."
+  @spec describe_payload_error(:unreadable | :unavailable) :: String.t()
+  def describe_payload_error(:unreadable), do: KilnCMS.Jobs.PrivateArgs.describe_unreadable()
+
+  def describe_payload_error(:unavailable),
+    do: "event payload no longer available: the job carries none"
+
   # Derived from the canonical Rule.triggers/0 so a new lifecycle trigger only
   # has to be added there (not also here).
   defp parse_trigger(verb) do

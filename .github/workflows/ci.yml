@@ -588,7 +588,8 @@ jobs:
   #     red on it. Add it here once its failures are down to real regressions.
   #   - deps_audit: the advisory database moves on its own schedule (#51), so
   #     it can go red on a PR that changed nothing about dependencies.
-  #   - image, qpdf_metadata_stripping, optimize_images_script: see each job.
+  #   - image, qpdf_metadata_stripping, optimize_images_script,
+  #     backup_scripts_portability: see each job.
   #
   # Every required job has a job-level `timeout-minutes`, so a hang fails it
   # in minutes rather than holding this check for GitHub's 6-hour default
@@ -1925,3 +1926,198 @@ jobs:
         env:
           OPTIMIZE_RESIZER: ${{ matrix.resizer }}
         run: bash scripts/ci/check_optimize_images.sh
+
+  # The host backup scripts under the tools they claim besides the runner's
+  # own (#2479). `scripts/backup.sh`, `restore.sh` and `staging.sh` support
+  # bash 3.2 (macOS's /bin/bash) and bsdtar as well as bash 5 and GNU tar,
+  # and refuse busybox tar up front. The `test` shards only ever see bash 5
+  # and GNU tar, and #2476's first CI run showed how a combination nobody
+  # runs breaks unnoticed. So the same tests run twice more here:
+  #
+  #   bash 3.2 + GNU tar   bash 3.2.57 built from the pinned GNU tarball
+  #                        (scripts/ci/build_bash32.sh, cached per image and
+  #                        script), linked as `bash` in a shim directory
+  #   bash 5 + bsdtar      libarchive's bsdtar linked as `tar` in the shim
+  #
+  # Both legs install busybox and set KILN_REQUIRE_BUSYBOX=1, so the busybox
+  # refusal tests run (each links its own `tar -> busybox`) and fail rather
+  # than skip if busybox is missing. They are not a leg of their own: the
+  # refusal does not depend on the shell.
+  #
+  # The shim directory goes on PATH for the `mix test` command only, never
+  # into $GITHUB_PATH: the runner's own steps (checkout, cache, setup-beam)
+  # must keep the bash and tar they were written for. Tests resolve `bash`
+  # and `tar` through the BEAM's PATH, so the scripts and their `#!/usr/bin/env
+  # bash` children meet the shim. KILN_EXPECT_BASH / KILN_EXPECT_TAR make
+  # test/scripts/shell_portability_test.exs fail the leg if they do not.
+  #
+  # Not a hosted macOS leg: setup-beam has no macOS builds, so it would mean
+  # building OTP from source plus Homebrew Postgres and pgvector on every
+  # run. BSD `stat -f %z`, BSD xargs and AppleDouble members stay checked on
+  # developers' Macs only, where /bin/bash is 3.2 and tar is bsdtar.
+  #
+  # NOT a required check yet, the posture of `qpdf_metadata_stripping` and
+  # `optimize_images_script`: a new leg that can fail for reasons of its own
+  # (a mirror, a runner image change) should not block every merge until its
+  # pass rate is known. Promote it by adding it to `ci.needs`.
+  backup_scripts_portability:
+    name: Backup scripts (${{ matrix.leg }})
+    runs-on: ubuntu-24.04
+    # The script tests take about two minutes; a cold run adds the bash
+    # build (about a minute) and a cold apt cache.
+    timeout-minutes: 45
+
+    services:
+      postgres:
+        # pgvector rather than plain postgres — see `build`. The import tests
+        # record runs through the app.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: bash 3.2 + GNU tar
+            bash32: true
+          - leg: bash 5 + bsdtar
+            bash32: false
+
+    env:
+      KILN_REQUIRE_BUSYBOX: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Mix (toolchain, cache, deps, compile)
+        uses: ./.github/actions/setup-mix
+
+      # The same cached, wall-clock-bounded apt install as the test job's
+      # qpdf/ffmpeg step (see that step and the script's header). Both legs
+      # install the same packages, so they share one key; only the bash 3.2
+      # leg saves it. bison is for build_bash32.sh (see its header); it costs
+      # the bsdtar leg nothing on a warm cache.
+      - name: Compute the apt cache key
+        id: apt-key
+        run: |
+          echo "prefix=apt-v1-${ImageOS:-unknown}-libarchive-busybox-bison-" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore cached apt packages (libarchive-tools, busybox-static, bison)
+        id: apt-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/kiln-apt
+          key: ${{ steps.apt-key.outputs.prefix }}${{ steps.apt-key.outputs.image }}-${{ hashFiles('scripts/ci/apt_install_cached.sh') }}
+          restore-keys: |
+            ${{ steps.apt-key.outputs.prefix }}
+
+      - name: Install bsdtar, busybox and bison
+        timeout-minutes: 10
+        # A cold cache fetches the full package lists; see
+        # `optimize_images_script` for why the default ceiling is too short.
+        env:
+          APT_UPDATE_TIMEOUT: 240
+          APT_DOWNLOAD_TIMEOUT: 240
+        run: scripts/ci/apt_install_cached.sh "$HOME/.cache/kiln-apt" libarchive-tools busybox-static bison
+
+      - name: Save the apt package cache
+        if: matrix.bash32 && steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/kiln-apt
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
+
+      - name: Compute the bash 3.2 cache key
+        if: matrix.bash32
+        id: bash32-key
+        run: echo "os=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
+
+      # Restore and save are split so a build that passed its version check is
+      # kept even while the job is red.
+      - name: Restore the bash 3.2 build
+        if: matrix.bash32
+        id: bash32-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/kiln-bash32
+          key: bash-3.2.57-${{ steps.bash32-key.outputs.os }}-${{ hashFiles('scripts/ci/build_bash32.sh') }}
+
+      - name: Build bash 3.2.57
+        if: matrix.bash32 && steps.bash32-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        run: scripts/ci/build_bash32.sh "$HOME/.cache/kiln-bash32"
+
+      - name: Build the shim directory
+        env:
+          BASH32: ${{ matrix.bash32 }}
+        run: |
+          shim="$RUNNER_TEMP/kiln-shim"
+          mkdir -p "$shim"
+          if [ "$BASH32" = true ]; then
+            ln -s "$HOME/.cache/kiln-bash32/bin/bash" "$shim/bash"
+            {
+              echo "KILN_BASH32=$HOME/.cache/kiln-bash32/bin/bash"
+              echo "KILN_EXPECT_BASH=3.2.57"
+            } >> "$GITHUB_ENV"
+          else
+            ln -s "$(command -v bsdtar)" "$shim/tar"
+            echo "KILN_EXPECT_TAR=bsdtar" >> "$GITHUB_ENV"
+          fi
+          echo "SHIM=$shim" >> "$GITHUB_ENV"
+
+      # The leg is only worth having if it runs the tools its name says.
+      - name: Show the tools this leg runs
+        env:
+          BASH32: ${{ matrix.bash32 }}
+        run: |
+          export PATH="$SHIM:$PATH"
+          for bin in bash tar busybox; do
+            printf '%-8s %s\n' "$bin" "$(command -v "$bin" || echo '(not installed)')"
+          done
+          bash_version="$(bash -c 'echo $BASH_VERSION')"
+          tar_version="$(tar --version | head -1)"
+          echo "bash $bash_version"
+          echo "$tar_version"
+          command -v busybox >/dev/null || {
+            echo "::error::busybox is not on PATH after installing busybox-static; the busybox tar refusal cannot be tested."
+            exit 1
+          }
+          if [ "$BASH32" = true ]; then
+            case "$bash_version" in
+              3.2.57*) ;;
+              *) echo "::error::bash on the test PATH is $bash_version, not 3.2.57"; exit 1 ;;
+            esac
+          else
+            case "$tar_version" in
+              *bsdtar*) ;;
+              *) echo "::error::tar on the test PATH is '$tar_version', not bsdtar"; exit 1 ;;
+            esac
+          fi
+
+      # `--only shell_portability` selects by module tag, not by a file list:
+      # a script test file opts in with `@moduletag :shell_portability`
+      # (those whose scripts claim bash 3.2; not the publish_* tests, which
+      # run on GitHub's runners only), and a new test in one of them is
+      # covered without editing this file. `--only` is `--include` plus
+      # `--exclude test`, so it would also force-include a test in those
+      # modules carrying a tag test_helper.exs excludes (`:backup_scale`,
+      # `:pg_tools`, …); none does today. `@tag :skip` still skips.
+      - name: Save the bash 3.2 build
+        if: matrix.bash32 && steps.bash32-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/kiln-bash32
+          key: ${{ steps.bash32-cache.outputs.cache-primary-key }}
+      - name: Run the script tests under this leg's tools
+        run: PATH="$SHIM:$PATH" mix test test/scripts --only shell_portability

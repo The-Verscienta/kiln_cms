@@ -18,6 +18,10 @@ same on a laptop and on the VPS).
   /opt/kiln_cms/scripts/backup.sh all >> /var/log/kiln-backup.log 2>&1
 ```
 
+The app's `DATABASE_SSL` doesn't reach this line: when the database is on
+another host, add `?sslmode=require` (or `verify-full`) to its
+`DATABASE_URL` ([How the backup tools choose TLS](#how-the-backup-tools-choose-tls-2830)).
+
 > **Client tools must match the server's major version** — a `pg_dump` older
 > than the server refuses to run ("server version mismatch"). On the VPS use
 > the distro's `postgresql-client-17`; on macOS/Homebrew, put
@@ -356,7 +360,11 @@ When the app writes it:
 - **At the end of every successful in-app backup**, after the run is closed and
   its `.work/<stamp>/` is gone, while it still holds the backup lock. It imports
   cron's backups into History first, so the newest verified backup is chosen
-  from both.
+  from both. A finish step that has lost the lock by then (it stalled long
+  enough to be [taken back](#several-nodes-and-the-backup-lock)) writes no
+  marker: the step that took over finishes the backup and syncs them (#3013).
+  Two syncs for different backups could otherwise remove each other's
+  markers.
 - **Before every in-app prune deletes anything.** The prune runs during each
   in-app backup (the backup in progress is in flight, so the marker names the
   previous one at that point), and when you call
@@ -538,6 +546,8 @@ What it is:
   schedules and the backups on disk, not from whether a backup has already
   passed `BACKUP_KEEP_DAYS`, so a hold is in place before cron would delete
   the backup, not 15 minutes after.
+- **Only for a backup that still has its data.** A unit with nothing left
+  but its `.sha256` sidecar gets no hold, and a hold it had is removed.
 
 When the app writes and removes them: wherever it moves the `.good` markers
 (after every successful in-app backup, before every in-app prune deletes
@@ -593,10 +603,14 @@ Things to know:
   scheduled sync, so on a deployment that takes no in-app backups the holds
   stay, and a `backup.sh` from this release keeps those backups until you
   remove them: `rm /var/backups/kiln/db/kiln-*.hold /var/backups/kiln/media/kiln-*.hold`.
-- **An older `backup.sh` gives no warning.** Nothing on the host tells the
-  app which copy of the script cron runs; the Schedule tab asks you to
-  replace it when host cron backed up here in the last eight days
+- **An older `backup.sh` is caught after the fact.** Nothing on the host
+  tells the app which copy of the script cron runs. The Schedule tab's keep
+  settings always say the script must be this release's, and its preview
+  asks you to replace it when host cron backed up here in the last eight
+  days
   ([Set how long a schedule keeps its backups](#set-how-long-a-schedule-keeps-its-backups)).
+  Once an older copy has deleted a held backup, the next marker sync reports
+  it ([When a backup a schedule keeps is deleted outside the app](#when-a-backup-a-schedule-keeps-is-deleted-outside-the-app)).
 
 **When a hold can't be moved.** The backup, prune or sync succeeds or fails
 on its own terms. Each of these logs a warning, and all but the listing one
@@ -612,6 +626,66 @@ emit `[:kiln_cms, :backups, :hold, :failed]` with measurements `%{count: 1}`:
 
 Why a third marker rather than reusing `.good`, and what was traded:
 [ADR 0062](decisions/0062-a-schedules-keep-holds-reach-backup-sh-through-a-third-presence-only-marker.md).
+
+### When a backup a schedule keeps is deleted outside the app
+
+A host whose `scripts/backup.sh` is older than the hold markers ignores
+them, so its cron prune deletes backups a schedule keeps once they are older
+than `BACKUP_KEEP_DAYS`. The app can't stop that, but it notices at the next
+marker sync (after an in-app backup, before an in-app prune, every 15
+minutes, and after a schedule change) and tells you (#2931).
+
+What counts: a backup with a `.hold` whose data file is gone, either
+entirely or leaving only its `.sha256` sidecar (what the `find`-based prune
+of 1.8 and older leaves), and that the app didn't delete itself. A backup
+still being written (it has a `.work/<stamp>/` directory, or its run is
+`Running`) and one whose History row records the app pruning it here are
+never reported. The report comes once, when the sync removes the stale
+`.hold`; a `.hold` the app can't remove (a directory, say) is never
+reported. When History can't be read, the sync reports nothing and looks
+again next time.
+
+What you see:
+
+- **Backups page:** a yellow warning under the headline, one sentence per
+  backup directory: "On 2026-11-16 03:30 UTC, a backup a schedule keeps was
+  deleted outside the app: Database backup of 2026-07-01 03:17 UTC." (or "…,
+  3 backups a schedule keeps were deleted outside the app: …", naming up to
+  ten, then "and N more"), followed by "This usually means the host's
+  scripts/backup.sh is older than this release and ignores .hold markers.
+  Replace it with this release's copy." and an **About the hold markers**
+  link. The date at the start is when the sync found it. It doesn't turn the
+  headline red: the backups themselves still run.
+- **Schedule tab:** the same warning in the box above the schedule list.
+- **Not on Home.**
+- **Server log**, at warning level: "1 backup(s) a schedule keeps were
+  deleted outside the app although their .hold markers kept them: db backup
+  20260701-031700. The host's scripts/backup.sh is probably older than this
+  release and ignores .hold markers".
+- **Telemetry:** `[:kiln_cms, :backups, :hold, :deleted_outside]`, measurements
+  `%{count: n}`, metadata `%{dir: dir, scope: :local, units: [%{stamp: stamp, kind: :db | :media}]}`,
+  counted as `kiln_cms_backups_hold_deleted_outside_count` when the metrics
+  exporter is on ([observability.md](observability.md#backups)).
+
+The warning stays for eight days after the latest detection. A second
+detection in the same directory within those eight days joins the first:
+the list grows (a backup already listed isn't counted twice), and the date
+moves to the newest. There is no dismiss button.
+
+To fix it, as whoever runs the host:
+
+1. Find the cron line that runs `backup.sh` (`/etc/cron.d/kiln-backup` in
+   the example at the top of this guide) and note the script's path.
+2. Replace that file with `scripts/backup.sh` from this release, on every
+   host whose cron prunes this backup directory.
+3. Check that the copy knows the holds: `grep -c is_held scripts/backup.sh`
+   prints a number above 0 (any copy from 1.10.0 on). An older copy prints
+   `0`.
+4. List the directory after the next cron run: every `kiln-<stamp>.hold`
+   still has its `kiln-db-<stamp>.dump` (or media archive) beside it.
+
+The deleted backups don't come back. If you need one, copy it back from an
+off-site destination that still has it, with its `.sha256` file.
 
 ### What the cron prune cannot see
 
@@ -652,8 +726,8 @@ fails, when `db/`, `media/` or `.work/` cannot be listed, when a file in them
 cannot be read, or when History cannot be read. It writes an error to the
 server log ("Backup retention skipped: …; nothing was deleted"), emits the
 `[:kiln_cms, :backups, :retention, :skipped]` telemetry event (measurements
-`%{count: 1}`, metadata `%{reason: reason}`), and adds a `prune` line at error
-level to the run's log in the database:
+`%{count: 1}`, metadata `%{scope: :local, reason: reason}`), and adds a
+`prune` line at error level to the run's log in the database:
 
 ```text
 Retention skipped: couldn't read the backup history (Ash.Error.Forbidden); nothing was deleted
@@ -673,16 +747,91 @@ cannot be read is left in place. A file that cannot be removed stops that unit,
 so its sidecar stays. If the deleting itself breaks off, the run's log reads
 "Retention removed 2 file(s) from 1 backup(s), then stopped: …", the server log
 has the error, and `[:kiln_cms, :backups, :retention, :stopped]` is emitted
-(measurements `%{count: 1, deleted: n}`). The files already removed are still
+(measurements `%{count: 1, deleted: n}`, metadata `%{scope: :local, reason: reason}`).
+The files already removed are still
 marked `pruned` in History. A normal sweep logs "Retention removed N file(s)
 from M backup(s)".
+
+Retention on a stored destination emits the same two events, with metadata
+`%{scope: :destination, destination: "dest:<id>", reason: reason}`
+([Retention on a destination](#retention-on-a-destination)). Until #2487 they
+were local only; a handler that should count only the local directory
+matches on `scope: :local`. With the metrics exporter on, they are counted
+as `kiln_cms_backups_retention_skipped_count` and
+`kiln_cms_backups_retention_stopped_count`, labeled `scope`
+([observability.md](observability.md#backups)).
+
+**Where it shows.** A skipped or stopped retention leaves every backup
+`Succeeded`, so it would otherwise be found only in the run's log, after the
+disk fills. Each place where it happened (this backup directory, or a stored
+destination) adds a line to the headline of the **Backups** page, which
+turns red, and raises the red backup strip on **Home** for platform admins,
+with the same line:
+
+- "Retention was skipped on the backup of 2026-11-16 02:00 UTC: couldn't
+  read the backup history (Ash.Error.Forbidden). Nothing was deleted, so
+  local backups will build up until this is fixed."
+- "Retention stopped part-way on the backup of 2026-11-16 02:00 UTC: … What
+  it hadn't reached stays until this is fixed."
+- "Retention on NAS was skipped on the backup of 2026-11-16 02:00 UTC: …
+  Nothing was deleted there, so backups will build up there until this is
+  fixed." (and "Retention on NAS stopped part-way …")
+
+The date is the backup whose prune it was. The reason is the run log's, in
+English whatever the interface language. When more than one backup
+directory has a line (a cluster whose nodes back up to their own disks),
+each local line ends with "(backup directory 3f2a9c1e)", the first eight
+characters of the directory's `.kiln-dir-id`. On the Backups page the lines
+are followed by a **Why retention skips** link to this section.
+
+A line goes away:
+
+- **Local:** after the next in-app backup whose retention runs cleanly in
+  that directory. Nothing else clears it: a cron prune, a marker sync, or a
+  retention dry run from the console doesn't. It is also left out while no
+  live node (a backup heartbeat in the last day, or the node reading the
+  status) reports that directory's id, so a directory nobody backs up to any
+  more doesn't keep the alarm on. A directory without an id is always
+  shown.
+- **Destination:** after a clean pass there, or when retention there is
+  off: its **Delete its old backups (retention)** box unticked, or an
+  adapter that can't list and delete. It is left out at once when the
+  destination is disabled or deleted.
+
+If the status can't read the heartbeats or the destinations to decide that,
+the lines are shown anyway. If it can't read the warnings themselves, it
+shows none. Either failure emits
+`[:kiln_cms, :backups, :status, :notices_unreadable]` (measurements
+`%{count: 1}`, metadata `error`, the error's module) and logs "Backup status
+may leave out a retention or held-backup notice: a read failed (…)" at most
+once every 15 minutes. Recording a warning never changes a backup's outcome:
+when the write fails, the run's log and the events above still say it, and
+the server logs "Backup notice not recorded (retention): …" with
+`[:kiln_cms, :backups, :notice, :failed]` (metadata `kind`).
+
+To clear the warning, as a platform admin:
+
+1. Read the reason in the line. It names what retention couldn't do, and
+   the list above says what each reason means.
+2. Fix it: restore the database grant, the directory permissions, or the
+   `BACKUP_KEEP_DAYS` value it names; for a destination, see
+   [Retention on a destination](#retention-on-a-destination).
+3. On **Backups**, click **Back up now** (or wait for the next scheduled
+   backup). When it succeeds, the line is gone from the Backups page and
+   Home. If it comes back, retention failed again: the line names the new
+   backup's date.
+
+Why these warnings are stored as their own rows rather than read from the
+run's log or the security log:
+[ADR 0066](decisions/0066-an-operator-facing-backup-problem-is-a-notice-row-not-a-run-log-line-or-a-security-event.md).
 
 **In cron**, `backup.sh prune` prints a `warning:` line on stderr, deletes
 nothing and exits 0 (so `backup.sh all` still succeeds) when `db/`, `media/` or
 `.work` exists but cannot be listed, or when this host's `date` supports neither
 GNU `date -d @N` nor BSD `date -r N`. A unit whose `.partial` files it cannot
 look for is kept, and a file it cannot remove stops that unit. Read the cron
-log for these: no ping or exit code reports them.
+log for these: no ping or exit code reports them, and the Backups page and
+Home don't show them either.
 
 ## In-app backups (#484)
 
@@ -695,8 +844,10 @@ button. For platform admins, the overview grid grows a red strip when either
 component's last good backup is older than `BACKUP_STALE_AFTER_HOURS`
 (default 36, or the threshold an
 [in-app schedule](#how-a-schedule-sets-the-alarm-threshold) sets), when its
-last attempt failed, or when one has been backed up and
-the other never has; a neutral "Backups aren't set up yet" strip when neither
+last attempt failed, when one has been backed up and
+the other never has, when the last backup reached only some of its
+destinations, or when retention was skipped or stopped part-way
+([When retention is skipped or stops](#when-retention-is-skipped-or-stops)); a neutral "Backups aren't set up yet" strip when neither
 ever has ([Check the last backup of each component](#check-the-last-backup-of-each-component)).
 
 ### It reports on cron's backups too
@@ -736,7 +887,11 @@ Platform admins only, like the rest of the page.
    - "No backup has ever been recorded": neither History nor the manifest has
      one.
 3. The panel's border and icon turn to the alarm when any line is failed or
-   stale: a fresh database backup does not make stale media fine. The file
+   stale: a fresh database backup does not make stale media fine. A
+   partly off-site backup and a retention warning add lines of their own
+   and turn it too
+   ([When a backup reaches only some destinations](#when-a-backup-reaches-only-some-destinations),
+   [When retention is skipped or stops](#when-retention-is-skipped-or-stops)). The file
    list and the **Last run failed** box below still describe the manifest,
    the last backup, whatever it covered.
 
@@ -790,7 +945,9 @@ as before.
 
 The in-app backup (`KilnCMS.Backups.Steps`) runs the same `pg_dump --format=custom --no-owner
 --no-privileges`, writes to the same `db/kiln-db-<stamp>.dump` under the same
-`$BACKUP_DIR`, uses the same `.partial`-then-rename discipline, and verifies with
+`$BACKUP_DIR`, uses the same `.partial`-then-rename discipline (the app's
+temporary names also carry its step's job and attempt,
+[below](#temporary-files-and-the-trash-directories)), and verifies with
 the same `pg_restore --list` / `tar -tzf`. `backup.sh verify` and `restore.sh`
 work on an app-made backup, and this page reports on a cron-made one, because
 the formats are the same family, not two.
@@ -835,13 +992,86 @@ implementing them in Elixir: a hand-rolled export would be a second format
 with a second restore procedure, and the restore path is where a backup system
 earns its keep.
 
+### Temporary files and the trash directories
+
+Every file a backup writes goes to a temporary name first and is renamed into
+place once it is complete, so nothing half-written ever carries a real
+backup's name. The two writers name their temporary files differently:
+
+- **`backup.sh`** writes `<name>.partial`, as it always has:
+  `db/kiln-db-20261117-031700.dump.partial`.
+- **An in-app backup step** writes `<name>.<job>-<attempt>.partial`, where
+  `<job>` is the step's Oban job id and `<attempt>` its attempt (#2819):
+  `db/kiln-db-20261117-031700.dump.48211-2.partial`,
+  `media/kiln-media-20261117-031700.part02.tar.gz.48211-2.partial`,
+  `media/kiln-media-20261117-031700.sha256.48211-2.partial`. The same tag is on
+  the files in `.work/<stamp>/` (`state.json.48211-2.partial`,
+  `plan.json.48211-2.partial`, the media file lists `part01.48211-2.list` and
+  `part01.48211-2.run.list`) and on `manifest.json.48211-2.partial` at the top
+  of `BACKUP_DIR`.
+
+A step writes, checks (`pg_restore --list`, `tar -tzf`) and hashes its file
+under that name, outside the backup lock. Only the rename into place runs
+under the lock, and only while the step still holds the backup
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)). So
+two steps of the same backup, a resume and a step that outlived its Cancel,
+never write the same file, and the one that lost the lock can't rename its
+file over the resume's. Why is in
+[ADR 0067](decisions/0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md).
+
+Every reader takes both shapes as the same thing, a file still being written:
+retention's "in flight" rule, the importer, History, the start step's sweep,
+`backup.sh prune` and `verify`, and `restore.sh`. A media part or dump that
+fails on every attempt leaves a file already under its final name (from an
+earlier attempt) as it was, which can leave it without a matching sidecar.
+Nothing trusts such a file: a resume reuses a file only when its hash matches
+the one recorded in `state.json`, and retention deletes the incomplete unit
+once it ages out.
+
+**Deleting goes through a trash directory.** When a step has to delete
+something of the backup's (a leftover `.work/<stamp>/` at a fresh start, an
+earlier plan's media files under the same stamp, the work directory at the
+end, a dump whose sidecar couldn't be written), it moves it aside into a trash
+directory with one rename under the lock, and deletes it after the lock is
+released. The trash is on the same file system as what it holds, because a
+rename can't cross one:
+
+| Moved from | Into |
+|---|---|
+| `.work/<stamp>/` | `.work/.trash/<stamp>.<job>-<attempt>.work/` |
+| a file in `db/` | `db/.kiln-trash/<stamp>.<job>-<attempt>.db/` |
+| a file in `media/` | `media/.kiln-trash/<stamp>.<job>-<attempt>.media/` |
+
+These directories are normally empty. An entry stays only when a node stopped
+between moving something aside and deleting it, and the start of the next
+in-app backup removes it, whatever its age. The `.kiln-trash` directories
+themselves stay once created. Retention, the importer, History, `backup.sh`
+and `restore.sh` never look inside them. If a rename fails because the file
+is on another file system after all (a single file bind-mounted on its own),
+the step deletes that file in place, under the lock.
+
+**During a rolling upgrade**, update `scripts/backup.sh` on the host in the
+same rollout. A node still on an older release, or an older `backup.sh`, does
+not recognize a tagged name:
+
+- its retention and importer don't count it as in flight, and its start-step
+  sweep removes it as an unrecognized `.partial` once it is an hour old. The
+  backup it belongs to is still protected by its `.work/<stamp>/` directory;
+- an older `backup.sh prune` neither counts nor removes it;
+- History on an older node can show a media set as complete while one of its
+  parts is being rebuilt under a tagged name (display only);
+- an older node that plans the media removes the tagged file lists of an
+  earlier plan, which nothing needs once its own `plan.json` replaces them;
+- after a rollback, an older node reads a `plan.json` that names tagged lists,
+  and uses them as it would any list.
+
 ### Which database URL the backup tools accept (#2719)
 
 `pg_dump`, `pg_restore` and `psql` read a connection string as a URL only
-when it starts with `postgres://` or `postgresql://`. Kiln documents
-`DATABASE_URL` as `ecto://…`, so every Kiln path that hands a URL to them
-rewrites a leading `ecto://` (in any case) to `postgres://` first, and changes
-nothing else in the string:
+when it starts with `postgres://` or `postgresql://`, in lower case. Kiln
+documents `DATABASE_URL` as `ecto://…`, so every Kiln path that hands a URL to
+them rewrites a leading `ecto://` (in any case) to `postgres://` first, and
+lower-cases a `POSTGRES://` or `PostgreSQL://` scheme:
 
 | Path | Reads |
 |---|---|
@@ -851,29 +1081,74 @@ nothing else in the string:
 | `scripts/restore.sh` | `RESTORE_DATABASE_URL` |
 | `scripts/staging.sh` | `PROD_DATABASE_URL`, `STAGING_DATABASE_URL` |
 
-So `ecto://`, `postgres://` and `postgresql://` all work, and the query
-string (`?sslmode=require`, several hosts, an IPv6 `[::1]`) reaches libpq as
-you wrote it.
+So `ecto://`, `postgres://` and `postgresql://` all work, and the host part
+(several hosts, an IPv6 `[::1]`) reaches libpq as you wrote it.
 
-**Ecto-only query parameters are not translated.** libpq refuses any
-parameter it doesn't know, by name:
+**The query parameters only Ecto reads are translated (#2833).** libpq
+refuses any parameter it doesn't know, by name
+(`pg_dump: error: invalid URI query parameter: "pool_size"`), so before a URL
+reaches the tools, every path above changes the ones Ecto itself defines.
+Keys and values are compared after percent-decoding, as both Ecto and libpq
+decode them (`%73sl=%66alse` is `ssl=false`):
+
+| In the URL | What the tools get | Why |
+|---|---|---|
+| `ssl=false` | `sslmode=disable`, in the same place | Ecto reads it as "no TLS" for the app's own connection, whatever `DATABASE_SSL` says, so the tools connect the same way |
+| `pool_size`, `timeout`, `idle_interval` | dropped (and a `?` left with nothing after it) | Ecto's pool settings; none changes which server is reached or how securely |
+| `ssl=true` | kept: libpq reads it as `sslmode=require` | but see [How the backup tools choose TLS](#how-the-backup-tools-choose-tls-2830): when the app verifies the server, it is replaced by the stronger mode |
+| anything else | kept as written | |
 
 ```text
-pg_dump: error: invalid URI query parameter: "pool_size"
+ecto://kiln:…@db/kiln_prod?ssl=false&pool_size=10   →   postgres://kiln@db/kiln_prod?sslmode=disable
 ```
 
-`ssl=true` is the exception: libpq reads it itself, as `sslmode=require`,
-while `ssl=false` is refused like `pool_size`. When the app's `DATABASE_URL`
-carries such a parameter, set `BACKUP_DATABASE_URL` to the same connection
-without it for the in-app backup, and give `backup.sh` a `DATABASE_URL` in
-libpq's form:
+Anything else libpq doesn't know still fails by name. That includes
+`ssl=1` and `ssl=FALSE` (Ecto reads neither as `false`) and Ecto's
+`socket_dir`, which is kept on purpose: it decides which server the app
+reaches, and dropping it would point the dump at another one. For a socket,
+write libpq's form, `postgres:///kiln_prod?host=/run/postgresql`, in
+`BACKUP_DATABASE_URL` (in-app) or in `DATABASE_URL` on the cron line.
+
+Only the URL given to the tools is translated. `restore.sh drill` and
+`staging.sh up` still print the URL as you wrote it (password removed), and
+`staging.sh` hands `STAGING_DATABASE_URL` to the app's migrate and scrub
+commands untranslated: Ecto reads `ssl=false` and `pool_size` itself there.
+
+**A `key=value` connection string is accepted only without a password
+(#2831).** A string that is not a `postgres://` or `postgresql://` URL after
+the scheme rewrite is passed through unchanged when it carries no secret, and
+refused before any tool runs when it does:
+
+| String | Result |
+|---|---|
+| `host=/run/postgresql dbname=kiln_prod` | passed through as written |
+| `kiln_prod` (a bare database name) | passed through as written |
+| `host=db password=hunter2 dbname=kiln` | refused |
+| `host=db sslpassword=… dbname=kiln` | refused |
+| `dbname='postgres://kiln:hunter2@db/kiln'` | refused (libpq would expand it into that URL) |
+| `mysql://u:pw@h/db`, or a URL with a leading space | refused (contains `://` but is not a URL libpq reads) |
+
+The reason: libpq's `key=value` syntax (quoting, backslash escapes, a
+`dbname` that is itself a URL) can't be rewritten safely, so a password in
+it would sit in the tool's command line for the whole dump, and libpq
+echoes an unreadable string back in its errors. Keywords are case-sensitive:
+`PASSWORD=hunter2` is not a password keyword, and libpq refuses it by
+naming it, without printing the value. A refused string fails with:
+
+```text
+BACKUP_DATABASE_URL (or DATABASE_URL) is not a postgres:// URL and holds a password or another URL, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read. Write it as a postgres:// URL, password included (postgres:///database?host=/socket/dir for a Unix socket), or put the password in PGPASSWORD or ~/.pgpass.
+```
+
+The scripts print the same sentence after `error: DATABASE_URL`,
+`RESTORE_DATABASE_URL`, `PROD_DATABASE_URL` or `STAGING_DATABASE_URL`, and
+`backup.sh all` records it in the failure manifest. In the app, the backup
+fails at once (no retry), and a demo reset or golden capture fails with it.
+Rewrite the string as a URL, password included:
 
 ```bash
-BACKUP_DATABASE_URL=postgres://kiln:…@postgres/kiln_prod?sslmode=require
+# was: host=/run/postgresql user=kiln password=hunter2 dbname=kiln_prod
+BACKUP_DATABASE_URL=postgres://kiln:hunter2@/kiln_prod?host=/run/postgresql
 ```
-
-A `key=value` connection string (`host=postgres dbname=kiln_prod`) is passed
-through as written; see the next section for why a URL is better.
 
 ### The database password stays out of the pg_dump command line (#2726)
 
@@ -891,7 +1166,7 @@ gives it to the one `pg_dump`, `pg_restore` or `psql` that needs it as
 | `postgres://kiln@db/kiln?sslmode=require&password=hunter2` | `postgres://kiln@db/kiln?sslmode=require` | `hunter2` |
 | `postgres://kiln:a@db/kiln?password=b` | `postgres://kiln@db/kiln` | `b` |
 | `postgres://kiln@db/kiln` | `postgres://kiln@db/kiln` | not set: yours, or `~/.pgpass`, applies |
-| `host=db password=hunter2 dbname=kiln` | as written, password included | not set |
+| `host=db password=hunter2 dbname=kiln` | refused, nothing runs ([above](#which-database-url-the-backup-tools-accept-2719)) | |
 
 The URL is split where libpq splits it:
 
@@ -903,17 +1178,147 @@ The URL is split where libpq splits it:
 - **A `password=` query parameter is moved too**, also when its name is
   escaped (`pass%77ord=`). With a password in both places, the query one
   wins, as in libpq.
-- **A URL without a password** (or with an empty one, `kiln:@db`) is left as
-  written, apart from `ecto://`, so your own `PGPASSWORD` or `~/.pgpass`
-  decides.
-- **A `key=value` string is not a URL** and is passed as it is, password
-  included. Use a URL.
+- **A URL without a password** (or with an empty one, `kiln:@db`) keeps its
+  user part as written (only the scheme and Ecto's query parameters change),
+  so your own `PGPASSWORD` or `~/.pgpass` decides.
+- **A `key=value` string with a password is refused** (#2831), and one
+  without is passed as it is. Use a URL.
 
 The scripts don't print it either. `restore.sh drill` suggests a
 `STAGING_DATABASE_URL=… ./scripts/staging.sh scrub` line with the password
 removed, and `staging.sh up` prints the staging `DATABASE_URL=` the same way;
 both say "password not shown". Put the password back in the URL, or export
 `PGPASSWORD`, before using them.
+
+### How the backup tools choose TLS (#2830)
+
+The app's own database connection is encrypted unless `DATABASE_SSL` is off,
+and verifies the server when `DATABASE_SSL_CACERTFILE` is set
+([database TLS](environment-variables.md#database-tls)). libpq's default is
+weaker: `sslmode=prefer` falls back to cleartext without a word when TLS
+fails, and never checks the certificate. So the in-app backup and the demo
+reset and golden capture give `pg_dump` and `psql` a `PGSSLMODE` (and
+sometimes `PGSSLROOTCERT`) that matches the app's connection, in their own
+environment only:
+
+| The app connects with | The tools get |
+|---|---|
+| `DATABASE_SSL` off (or `ssl=false` in the URL the app reads) | nothing: libpq's default (`prefer`) |
+| `DATABASE_SSL` on (the default), no `DATABASE_SSL_CACERTFILE` | `PGSSLMODE=require`: encrypted, certificate not checked, as the app does |
+| `DATABASE_SSL` on with `DATABASE_SSL_CACERTFILE=/path/ca.pem` | `PGSSLMODE=verify-full`, `PGSSLROOTCERT=/path/ca.pem` |
+| any other configuration that verifies the server (`ssl: true`, `cacerts`, set in code) | `PGSSLMODE=verify-full`, `PGSSLROOTCERT=system` (the system trust store; libpq 16 or later) |
+
+The rule follows the Repo's effective `:ssl` option, after Ecto has merged
+the URL's own `ssl=` into it, so it cannot disagree with the connection the
+app is actually using.
+
+**Your explicit choice wins, even a weaker one.** Nothing is added when:
+
+- the URL has `sslmode=` or `requiressl=` in its query
+  (`?sslmode=verify-full&sslrootcert=/etc/kiln/ca.pem`), or
+- `PGSSLMODE` is set, and not blank, in the app's environment (the tools
+  inherit it).
+
+That is by design: it lets you reach a backup host the app's settings don't
+fit (a replica over a private network, a cert issued to a different name).
+It also means `?sslmode=disable`, or `PGSSLMODE=prefer`, makes the backup
+weaker than the app, and Kiln does not warn about it.
+
+Two settings are **not** treated as that choice, because neither alone makes
+libpq require TLS:
+
+- **A root certificate alone** (`sslrootcert=` in the URL, or a non-blank
+  `PGSSLROOTCERT` in the environment). Your certificate is kept and no
+  `PGSSLROOTCERT` is added; `PGSSLMODE` is still set to the mode in the
+  table, except that `require` becomes `verify-full` when the certificate is
+  `system` (libpq refuses `system` with a weaker mode).
+- **Ecto's `ssl=true` in the URL.** libpq reads it as `sslmode=require`.
+  When the app only requires TLS, it stays and nothing is added. When the
+  app verifies the server, `ssl=true` is removed from the tools' URL and
+  `PGSSLMODE=verify-full` applies, so the backup is never weaker than the
+  app.
+
+A Unix-socket connection is unaffected: libpq does not use TLS over a
+socket, whatever `PGSSLMODE` says.
+
+**What can now fail, and the fix.** With `DATABASE_SSL` on (the default),
+an in-app backup now requires TLS where it used to fall back to cleartext:
+
+- `BACKUP_DATABASE_URL` points at another server that offers no TLS: the
+  run fails with `pg_dump exited 1: … server does not support SSL, but SSL
+  was required`. Add `?sslmode=disable` (or `prefer`) to that URL if the
+  link is private, or enable TLS on that server.
+- With `DATABASE_SSL_CACERTFILE` set, `BACKUP_DATABASE_URL` names a host the
+  certificate doesn't list (an IP address, an internal alias): libpq's
+  `verify-full` checks the name in that URL. Use a name on the
+  certificate, or set `?sslmode=verify-ca&sslrootcert=/path/ca.pem` to
+  check the chain without the name.
+- `DATABASE_SSL_CACERTFILE` holds only an intermediate CA. The app's
+  connection accepts a chain that ends at it; libpq needs the root
+  certificate too. Put the root (and the intermediate) in the file.
+
+**Cron and the other scripts don't read `DATABASE_SSL`.** `backup.sh`,
+`restore.sh` and `staging.sh` run outside the app, and a cron line can't see
+the app's `DATABASE_SSL`, so they add no TLS settings of their own. Put the
+mode in the URL itself:
+
+```cron
+17 3 * * * kiln  DATABASE_URL='postgres://kiln:…@db.example.com/kiln_prod?sslmode=verify-full&sslrootcert=/etc/kiln/ca.pem' \
+  BACKUP_DIR=/var/backups/kiln \
+  /opt/kiln_cms/scripts/backup.sh all >> /var/log/kiln-backup.log 2>&1
+```
+
+(`?sslmode=require` to encrypt without checking the certificate, as the app
+does without a CA file.) An exported `PGSSLMODE`/`PGSSLROOTCERT` works too.
+
+### When pg_dump waits for a table lock (#2844)
+
+`pg_dump` takes a shared lock on every table it dumps. A migration,
+`VACUUM FULL` or another long transaction holding a conflicting lock used to
+make it wait for as long as that lock was held: forever in cron, and up to
+the step's 2-hour job timeout in the app. Every `pg_dump` Kiln runs (the
+in-app backup, `backup.sh db`/`all`, and the demo golden capture) is now
+given `--lock-wait-timeout`, set by `BACKUP_LOCK_WAIT_SECONDS`:
+
+- **Default 600** (10 minutes). Any whole number of seconds from 1 to 3600.
+  Anything else (`0`, `10m`, `5000`) keeps 600 and warns: at boot in the
+  app, on stderr from `backup.sh`. There is no "wait forever": pg_dump reads
+  `0` that way, so it is refused.
+- **It applies to each `LOCK TABLE`** separately. A dump blocked on several
+  tables in turn can wait several times the value.
+- **Set it for both paths**, in the app's environment and on the cron line;
+  each reads its own copy.
+- `pg_restore`, `psql` and `staging.sh` don't take it.
+
+To change it, set the variable and restart the app (or edit the cron line):
+
+```bash
+BACKUP_LOCK_WAIT_SECONDS=120
+```
+
+**What a lock timeout looks like.** pg_dump implements the option as a
+statement timeout around each `LOCK TABLE`, so its own words don't mention a
+lock. Kiln recognizes that pair and records:
+
+```text
+pg_dump waited longer than BACKUP_LOCK_WAIT_SECONDS (600 s) for a table lock and gave up: another session held a conflicting lock (a migration, VACUUM FULL, a long transaction). pg_dump said: pg_dump: error: query failed: ERROR:  canceling statement due to statement timeout / pg_dump: detail: Query was: LOCK TABLE public.pages IN ACCESS SHARE MODE
+```
+
+(That is the cron manifest's form, one line. The app keeps pg_dump's line
+break where the ` / ` is.)
+
+In the app, this is the dump step's error in the run's log, and the step is
+retried like any failed dump (after 1, 5 and 15 minutes); the run's error
+when it fails for good. From cron, `backup.sh all` writes it to the failure
+manifest, which the Backups page shows under **Last run failed**: the last
+five lines of pg_dump's stderr, newlines joined with ` / `, a URL password of
+6 or more characters replaced with `***`, cut to 500 characters. Any other
+`pg_dump` failure is recorded the same way, as `pg_dump exited <status>:
+<its last lines>`, where the manifest used to say only `backup.sh exited
+<status> - see the backup log`. pg_dump's full stderr is still in the log.
+
+Find what holds the lock with `pg_locks` joined to `pg_stat_activity`, and
+schedule backups away from migrations and maintenance windows.
 
 ### How an in-app backup runs (#2218)
 
@@ -953,6 +1358,45 @@ for while one runs waits behind it ([below](#back-up-while-another-backup-runs))
 most 2 hours per attempt. Neither is configurable. The run's log in History
 records each failed attempt. After the fourth, the backup fails.
 
+**When a step is interrupted.** A step writes what it did to `state.json`
+before it hands over to the next one, so a step that fails, times out or is
+[taken back from a stopped node](#several-nodes-and-the-backup-lock) is run
+again from what the earlier steps recorded, under the same stamp. A step run
+again, whether its first attempt stopped halfway or stopped just after it
+wrote `state.json`, reuses what is already done:
+
+- a database dump that verified, once its sha256 and size are checked again
+  ("Database dump reused from the original attempt … sha256 re-verified");
+- each media part that verified, checked the same way ("Reused N of M media
+  part(s) from the original attempt"). A part or a dump that no longer
+  matches is rebuilt;
+- the media plan, which is frozen when it is first made, so the parts keep
+  the same files;
+- at each destination, the files this backup already sent there with the same
+  sha256.
+
+A step run again after its `state.json` landed lists each file once, in the
+manifest, the checksum sidecars and History. (Earlier releases listed that
+step's files twice, and the off-site copy then refused the sidecar, "the
+checksum file changed after it was written", and failed the backup.)
+
+A finish interrupted after it had closed the run (the run reads `Succeeded`,
+or the manifest is already written ok for this stamp) has finished the
+backup: its retry, its take-back or the cleanup of its ended job only does
+the bookkeeping that is left. It closes a run still `Running` as succeeded,
+recording a destination it never got to as failed ("not attempted: its
+off-site step never ran"), syncs the
+[`.good`](#the-last-good-marker) and [`.hold`](#the-hold-markers) markers,
+releases the lock and starts the queued backup. The server log says "Backup
+complete … (finished after an interruption)". If the run can't be read, a
+retry tries again; when no retry is left, the backup is recorded as
+interrupted, as before.
+
+The 2-hour limit is per attempt of one step, and every media part and every
+destination is a step of its own. There is no limit on the whole backup: one
+with many parts or destinations can run for longer than 2 hours, but a single
+part, upload or database dump that needs more fails each attempt.
+
 **Failures a retry cannot fix fail at once**, without spending the remaining
 attempts:
 
@@ -960,7 +1404,7 @@ attempts:
 |---|---|---|
 | A media part changed on disk between being archived and being checksummed | "Media part(s) changed on disk between being archived and being checksummed: `<names>`. Something other than this backup wrote to the backup directory; Resume rebuilds the changed part(s)." | Find what writes to `BACKUP_DIR`, then **Resume**: it rebuilds only the parts whose hash no longer matches. |
 | A file refused before its off-site copy, at any destination | "Off-site copy REFUSED for …" | [When an off-site copy is refused](#when-an-off-site-copy-is-refused). |
-| The work state is gone, or belongs to another backup | "The backup's work state (.work/`<stamp>`/state.json) is missing or belongs to another backup; nothing more can be done for this one" | Take a new backup. No failure manifest is written, so the panel keeps showing the previous backup. |
+| The work state is gone, or belongs to another backup (except at a finish that had already closed the run, [above](#how-an-in-app-backup-runs-2218)) | "The backup's work state (.work/`<stamp>`/state.json) is missing or belongs to another backup; nothing more can be done for this one" | Take a new backup. No failure manifest is written, so the panel keeps showing the previous backup. |
 
 **When a backup fails**, it writes a failure manifest (when its `state.json`
 is there to say what landed), marks the run `Failed`, releases the lock and
@@ -1096,8 +1540,9 @@ What can go wrong:
 
 **Resume waits about two and a half minutes after a Cancel (#2538).** A node
 that lost the database misses the Cancel, and stops its step only once its
-heartbeat has failed for 90 seconds. A resume that started sooner could write
-the same files as that step. So for 150 seconds after the Cancel (counted from
+heartbeat has failed for 90 seconds. A resume that started sooner could run
+beside that step: its file writes are fenced, but an off-site copy or a prune
+is not ([below](#what-a-step-that-outlives-its-cancel-can-write)). So for 150 seconds after the Cancel (counted from
 the time the row was canceled), **Resume** on that row is refused with "That
 backup was canceled moments ago. Resume it again in N seconds: a step on a
 server that lost contact with the database may still be stopping." The button
@@ -1114,9 +1559,81 @@ to wait about two and a half minutes.
 
 The window is typically enough, not a guarantee. A heartbeat that hangs on a
 half-open database connection waits out the database timeouts first, and so
-stops its step later. The backup's `state.json` and its History row are
-protected from such a step either way; only its temporary `.partial` files
-depend on the window ([below](#what-a-step-that-outlives-its-cancel-can-write)).
+stops its step later. The backup's files and its History row are protected
+from such a step either way: it writes only under temporary names of its own,
+and its renames into place are refused (#2819). What still depends on the
+window is its off-site copy and its prune
+([below](#what-a-step-that-outlives-its-cancel-can-write)).
+
+### Cancel a resume that is waiting to start
+
+A resume holds the backup lock from the moment it is requested, but its
+`start` step can wait before it picks the backup up again: up to about an hour
+for [the server that has the backup's files](#several-nodes-and-the-backup-lock),
+or up to three minutes for a step of the canceled backup to stop
+([above](#cancel-a-running-backup)). New and scheduled backups queue behind it
+all that time. A platform admin can cancel it (#2816).
+
+1. Open **Backups** (`/editor/backups`) as a platform admin. The in-flight
+   strip shows the backup's stamp and what the resume waits for:
+
+   | Strip label | The resume is waiting for |
+   |---|---|
+   | "Waiting for the server that has this backup's files" | A node whose backup directory has the backup's `.work/<stamp>/`. Other nodes keep putting the step back. |
+   | "Waiting for the canceled backup's step to stop" | The window after the backup's Cancel to pass. |
+   | "Starting a resume" | Nothing the page can name: its start step is about to run, or is running. |
+
+2. Click **Cancel** on the strip. The History row has no **Cancel** while the
+   resume waits; the strip's is the one that stops it.
+3. Confirm "Cancel this resume? The backup stays as it was, so it can be
+   resumed later." (with "A queued backup will start next." when one is
+   waiting).
+4. The page says "Resume canceled. The backup stays as it was, so it can be
+   resumed later." The strip shows the queued backup, if there was one, or
+   disappears.
+
+What happens to the backup:
+
+- The resume's start job is canceled and the lock released, so a queued
+  backup starts next.
+- The History row keeps its status, `Failed` or `Canceled`, and its
+  **Resume** button. Its error reads "Resume canceled by a platform admin
+  before it started" above the original error, and its log gains the same
+  line. A second canceled or refused resume replaces that line rather than
+  adding another. A canceled backup's 150-second wait still counts from its
+  original Cancel.
+- A row still `Running` from an attempt that stopped (one the resume was
+  about to take over) becomes `Failed`, with the same line above
+  "Interrupted: the job was killed or the node stopped".
+- Nothing on disk changes: `.work/<stamp>/` and the files already written
+  stay.
+- The instance security log records a **Backup canceled** event with the
+  backup's stamp, `step` `start` and `resume` `true`
+  ([security-events.md](security-events.md#the-instance-log)). Your email is
+  in that event, not on the History row.
+- From a console, `KilnCMS.Backups.await(chain)` on the resume's chain
+  returns `{:error, :no_run}`: the chain ended without re-opening a run.
+
+What can go wrong:
+
+| Message | Meaning |
+|---|---|
+| "The resume started meanwhile. Cancel it again to stop the backup." | The resume picked the backup up before your click landed. It is a running backup now; its **Cancel** is on the strip and the row. |
+| "The backup changed meanwhile. Try again." | Something else wrote the backup's row between the page loading and the click. The page has been refreshed. |
+| "Only a platform admin can cancel a backup." | Your account is no longer a platform admin. |
+| "That resume can't be canceled." | Anything else, for example no resume of this backup is waiting any more. |
+
+The same action from a release console, as a platform admin (the backup
+system actor is refused):
+
+```bash
+bin/kiln_cms rpc 'admin = KilnCMS.Accounts.get_user_by_email!("admin@example.com", authorize?: false); {:ok, run} = KilnCMS.Backups.get_run_by_stamp("20260805-031700", actor: admin); {:ok, run} = KilnCMS.Backups.cancel_run_resume(run, actor: admin); IO.inspect(run.status)'
+```
+
+A fresh backup (not a resume) can also wait at its `start` step, for up to
+three hours, while a legacy `KilnCMS.Backups.Worker` job still runs on a node
+from an older release during an upgrade. The strip shows "Starting a backup"
+with no **Cancel**: it has no History row yet. Let the old job finish.
 
 ### Several nodes and the backup lock
 
@@ -1134,11 +1651,17 @@ looks at the lock:
   every file already finished. The server log says "Backup step `<step>` of
   `<stamp>` was on node `<node>`, which stopped responding: requeued (job
   `<id>`)". With no attempts left the backup fails as "Interrupted: node
-  `<node>` stopped responding".
+  `<node>` stopped responding". A `finish` step taken back stays finishing,
+  so **Cancel** is still refused ("Too late to cancel") until it completes
+  (#3012). During a rolling upgrade, a node still on an older release that
+  takes back a finish step drops that state until the replacement step marks
+  it finishing again, and a Cancel in that gap is accepted.
 - A step whose job ended without handing over (its last attempt timed out
   after 2 hours, or the job was discarded or deleted) fails the backup as
   "Interrupted: the backup's step job ended without finishing its step", and
   the lock is released.
+- Either way, a `finish` step that had already closed the run is completed,
+  not failed ([When a step is interrupted](#how-an-in-app-backup-runs-2218)).
 - A node that cannot write its beat for 90 seconds (it lost the database)
   stops its own backup steps before the others take them over.
 - A node that missed a Cancel or a take-back while it couldn't reach the
@@ -1218,9 +1741,17 @@ waited too, the resume is given up:
 
 That is about an hour in which the resume holds the lock, and a backup asked
 for meanwhile [queues behind it](#back-up-while-another-backup-runs): the price of not refusing a resume just
-because the wrong nodes happened to pick it up first. Nothing on the page can
-cancel it while it waits, because **Cancel** appears only once the row is
-`Running` again. Bring the host with the files back, or wait for the give-up.
+because the wrong nodes happened to pick it up first. Bring the host with the
+files back, wait for the give-up, or
+[cancel the resume](#cancel-a-resume-that-is-waiting-to-start) to let other
+backups run.
+
+**The lock is a Postgres advisory lock.** Every decision about the chain
+(a request, a hand-over, a take-back, a Cancel, a step's rename of a file
+into place) runs in
+a transaction that first takes `pg_advisory_xact_lock` on one fixed key, then
+reads the single row of `backup_locks`. The advisory lock is what keeps two of
+them apart; the row records which chain, step and job hold the backup.
 
 **Pool size.** The `backup_steps` queue runs one job at a time on each node.
 If you size `POOL_SIZE` as the sum of queue limits plus web traffic
@@ -1236,21 +1767,39 @@ down.
 A step on a node that missed its Cancel or its take-back keeps running until
 its node stops it ([above](#several-nodes-and-the-backup-lock)). Until then:
 
-- **`state.json`**: it can't overwrite it. Each step writes it under the
-  cluster-wide backup lock, and only while its job still holds the lock, so a
-  step whose chain was canceled or taken back stops there and writes nothing
-  else.
+- **The backup's files**: it can't replace them. It writes `state.json`, the
+  dump, each media part, the checksum sidecars, the media plan and
+  `manifest.json` under temporary names tagged with its own job and attempt
+  ([Temporary files and the trash directories](#temporary-files-and-the-trash-directories)),
+  and renames each into place under the cluster-wide backup lock, only while
+  its job still holds the lock. A step whose backup was canceled or taken back
+  has its rename refused, removes its temporary file and stops there, writing
+  nothing else (#2818, #2819). It can't delete the backup's files either: a
+  step deletes only by moving the file aside under the same check.
 - **The History row**: it can't write it. A step's progress, success and
   failure land only on a `Running` run that is still on that step's chain,
   so it can't overwrite a Cancel or the progress of a resume of the same run. The fence is argued in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md), and why History writes stay out of the lock transaction in [ADR 0045](decisions/0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md).
-- **Its own temporary files** (`kiln-db-<stamp>.dump.partial`, a media part's
-  `.partial`): these are not fenced. A resume of the same backup could share
-  them, and only the wait after a Cancel
-  ([above](#cancel-a-running-backup)) keeps the two apart.
+- **Off-site and prune: not fenced yet.** An `offsite` step that outlived
+  its Cancel can still upload to its destination, and a `prune` step can
+  still delete what retention allows. Only the wait after a Cancel
+  ([above](#cancel-a-running-backup)) keeps them apart from a resume.
+- **A retry of the same job is not told apart from it.** A step's lease is
+  its job, so a later attempt of the same job (an Oban retry, or the job
+  rescued by Oban's Lifeline after about three hours) holds the same lease as
+  an earlier attempt that is somehow still running. Their temporary files are
+  still apart (the attempt is in the name), but the renames of both are
+  admitted.
 
-Because the `state.json` write holds the backup lock, a backup directory that
-stalls (a hung NFS mount) makes Cancel, new backup requests and the
-heartbeat's sweep wait behind it until their database query times out.
+**A stalled backup directory can still hold the lock.** The contents of every
+file are written outside the lock, so a hung NFS mount no longer holds the
+lock while a step writes its state or its manifest. But the renames into
+place, the moves into the trash, and the finish step's
+[marker sync](#the-last-good-marker) are file-system calls made inside the
+lock's transaction. A mount that stalls between a step's write and its rename
+still makes Cancel, new backup requests and the heartbeat's sweep wait behind
+it until their database query times out. The start step reads the
+directory's `.kiln-dir-id` before it takes the lock; only the very first
+start on a directory with no id creates one inside it.
 
 ### Start a backup from a release console
 
@@ -1281,7 +1830,8 @@ stored. Other calls:
 - **Only some components**: `KilnCMS.Backups.request([trigger: "console", components: [:db]], KilnCMS.Backups.system())`
   ([below](#back-up-only-the-database-or-only-the-media)).
 - **What is running**: `KilnCMS.Backups.in_flight()` returns `nil`, or the
-  chain, its stamp, trigger, step, part, `parts_total`, `components` (what the
+  chain, its stamp, `resume` (the stamp a resume continues, `nil` for a fresh
+  backup), trigger, step, part, `parts_total`, `components` (what the
   running backup covers, as `[:db]`, `[:media]` or `[:db, :media]`; `nil` on a
   node without the backup's directory, and until its start step has run),
   phase (`:running` or `:finishing`), `acquired_at` and the queued request
@@ -1289,7 +1839,9 @@ stored. Other calls:
   `nil` means everything, or `nil`).
 - **Wait for it**: `KilnCMS.Backups.await(chain)` returns `:ok` once that
   chain's backup succeeded, else `{:error, reason}`: the run's error,
-  `:canceled`, `{:skipped, error}`, `:no_run` or `:timeout`. It polls the
+  `:canceled`, `{:skipped, error}`, `:no_run` (the chain ended without a run,
+  as a resume refused or [canceled](#cancel-a-resume-that-is-waiting-to-start)
+  before it picked its backup up does) or `:timeout`. It polls the
   database (every 2 s, for up to 3 hours by default; `:interval` and
   `:timeout` in ms), so it works from any node. A timeout stops the wait, not
   the backup.
@@ -1648,6 +2200,7 @@ Above the list, a warning box appears when any of these holds:
 | "The scheduler hasn't run since 2026-11-13 09:12 UTC. Check that background jobs are running." (or "… hasn't run yet.") | The scheduler is on, and no scheduler job has started since the newest run of `KILN_BACKUP_SCHEDULER_CRON` (read in UTC) that is at least five minutes old, although an enabled schedule was created, edited or resumed before that run. Each run gets five minutes to start: at the default `* * * * *` that is five minutes of silence, at `0 * * * *` a tick missed at 09:00 shows from 09:05. A weekday-only cron such as `* * * * 1-5` expects nothing after Friday 23:59 until Monday 00:00, so a weekend shows no warning. With `@reboot`, the threshold is five minutes. It reads Oban's `oban_jobs` table, so a job queue that has stopped shows here. |
 | "Couldn't check when the scheduler last ran." | Reading `oban_jobs` for that check failed. |
 | "Media isn't archived on this deployment, so a schedule can't include it." | A schedule names media and this deployment has no media directory. |
+| "On 2026-11-16 03:30 UTC, a backup a schedule keeps was deleted outside the app: Database backup of 2026-07-01 03:17 UTC." and "This usually means the host's scripts/backup.sh is older than this release and ignores .hold markers. …" | In the last eight days, a marker sync found a backup a schedule keeps deleted by something other than the app, usually the host's cron with an older `backup.sh` ([When a backup a schedule keeps is deleted outside the app](#when-a-backup-a-schedule-keeps-is-deleted-outside-the-app)). |
 
 In the list, "Couldn't load the backup schedules." means the schedules
 couldn't be read (the alarm thresholds are then the environment's), and
@@ -1780,6 +2333,13 @@ settings.
    - **Keep for (days)**: 1 to 3650. The hint says what an empty box means
      on this deployment: "Empty keeps them for BACKUP_KEEP_DAYS, 14 days on
      this deployment."
+
+   Under the fields, a standing note reads "If host cron prunes this backup
+   directory, its scripts/backup.sh must be from this release: an older
+   copy deletes the backups these settings keep.", with an **About the hold
+   markers** link. It is always there, adding a schedule or editing one,
+   whatever the preview below says: the app can't tell which copy cron
+   runs.
 3. Read the preview under the fields. It estimates what the schedule keeps,
    "Keeps about 31 backups at a time of each of: Database." for a daily
    schedule keeping 30 days, and warns when:
@@ -1871,7 +2431,8 @@ until the next prune. Budget for that with large media archives.
 | "must be at least as long as the schedule's interval, unless a number of backups to keep is set" under **Keep for (days)** | Raise the days to one interval or more, or set **Keep the newest**. |
 | The host-cron notice in the preview | Replace the host's `scripts/backup.sh` (above). The notice is shown whenever cron backed up a component here in the last eight days; the app can't tell which copy of the script cron runs. |
 | "Backup retention skipped: couldn't read the backup schedules (…); nothing was deleted" in the server log and the run's log | The prune couldn't read the schedules, so it deleted nothing ([When retention is skipped or stops](#when-retention-is-skipped-or-stops)). |
-| Backups past `BACKUP_KEEP_DAYS` disappear from a cron-pruned directory | The host's `backup.sh` predates the hold marker, or the app can't see the directory or reach it with the marker sync ([The hold markers](#the-hold-markers)). |
+| "… a backup a schedule keeps was deleted outside the app: …" on the Backups page and the Schedule tab | The host's `backup.sh` predates the hold marker and deleted a backup this schedule keeps. Replace it ([When a backup a schedule keeps is deleted outside the app](#when-a-backup-a-schedule-keeps-is-deleted-outside-the-app)). |
+| Backups past `BACKUP_KEEP_DAYS` disappear from a cron-pruned directory, with no warning | The app can't see the directory or reach it with the marker sync, so it neither writes the holds nor notices what cron deleted ([The hold markers](#the-hold-markers)). |
 
 ### Back up more often than daily
 
@@ -2169,7 +2730,9 @@ the fallback. The reasoning is in [ADR 0037](decisions/0037-a-resume-reuses-a-fi
 
 > **Operators who copy the backup directory with `rclone sync $BACKUP_DIR`:**
 > exclude `.work/**`. It holds lists of media file names (and is removed on
-> success), and has no value off-site.
+> success), and has no value off-site. Exclude `**/.kiln-trash/**` too: it
+> holds files on their way to being deleted
+> ([Temporary files and the trash directories](#temporary-files-and-the-trash-directories)).
 
 **Disk space.** There is no free-space check. Budget for the database dump, plus
 all finished media parts, plus one part being written, plus the file lists.
@@ -2602,6 +3165,16 @@ says so). What it did is on the run's log:
 | "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed. Nothing is deleted on a guess. |
 | "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed; the pass stopped there. The next backup tries again. |
 
+A skipped or stopped pass is also a line in the **Backups** page's
+headline and on **Home**'s red backup strip, "Retention on NAS was skipped
+on the backup of 2026-11-16 02:00 UTC: … Nothing was deleted there, so
+backups will build up there until this is fixed.", until a clean pass on
+that destination, or until you untick retention on it, disable it or
+delete it (#2487). It emits the same
+`[:kiln_cms, :backups, :retention, :skipped]` and `… :stopped` events as
+local retention, with `scope: :destination` and the destination's key
+([When retention is skipped or stops](#when-retention-is-skipped-or-stops)).
+
 A failed or skipped pass doesn't change the destination's upload status:
 the backup reached it. A backup that later fails at another destination
 may already have pruned the destinations before it; only older backups
@@ -2717,12 +3290,22 @@ it on a host:
 
 **What it needs.** GNU tar or bsdtar: every part is built from a NUL-separated
 file list (`--null -T`), and a tar that cannot read one (busybox) is refused
-before anything is written: "tar cannot read a NUL-separated file list". Also
+before any media part is written: "tar cannot read a NUL-separated file list".
+In `backup.sh all` the database dump runs first, so it is kept and verified,
+the run exits 1, and `manifest.json` records the refusal as the run's error
+with the dump as its one artifact. Also
 `stat` (GNU or BSD), `xargs`, `mktemp`, `head`, `gzip`, and `sha256sum` or
 `shasum`; bash 3.2 or later. `iconv` is used when present to keep error text in
 the manifest valid UTF-8. The file lists are built in `TMPDIR` (default `/tmp`)
 and removed when the script exits. Planning a very large library in shell takes
 longer than the app does, and grows with the number of files.
+
+CI runs the script tests under bash 5 with GNU tar, bash 3.2.57 with GNU tar,
+and bash 5 with bsdtar, and checks that busybox tar is refused. BSD
+`stat -f %z`, BSD `xargs` and AppleDouble (`._*`) members are checked only on
+macOS, which CI does not run;
+[system-requirements.md](system-requirements.md#running-the-backup-scripts-on-the-host)
+has the details.
 
 **Permissions.** Parts and the sidecar are 0600 from their first byte (the
 media phase runs under `umask 077`). If the script creates `$BACKUP_DIR/media`,
@@ -2794,7 +3377,10 @@ stamp first in the same way. It runs the importer, then removes the `.partial`
 files of a stamp that has a History row (the app's own run, or an imported
 one) once every file of the stamp is more than an hour old. A cron leftover
 with no row yet is left for the importer. A `.partial` whose name carries no
-backup stamp is removed once it is an hour old, as before.
+backup stamp is removed once it is an hour old, as before, and so is an
+in-app step's `manifest.json.<job>-<attempt>.partial` left at the top of
+`BACKUP_DIR` (cron's `manifest.json.partial` is left to `backup.sh`). It also
+empties the [trash directories](#temporary-files-and-the-trash-directories).
 
 **If the stamp was never read.** With the marker sync turned off
 (`KILN_BACKUP_MARKER_SYNC_CRON=false`) and nobody opening the Backups page, or
@@ -3318,8 +3904,10 @@ What the script checks **before it extracts anything** (a failure stops with
   contains `..`. That last rule also refuses a harmless `d/x -> ../y` link:
   extract such a set by hand once you have looked at it. The reasoning is in [ADR 0036](decisions/0036-restore-refuses-absolute-and-dot-dot-members-and-links-even-harmless-ones.md).
 
-It also refuses a set with a `kiln-media-<stamp>.*.partial` file beside it: a
-backup is still writing that stamp, or was killed while writing it.
+It also refuses a set with a `kiln-media-<stamp>.*.partial` file beside it,
+cron's (`kiln-media-<stamp>.sha256.partial`) or an in-app step's
+(`kiln-media-<stamp>.part02.tar.gz.48211-2.partial`): a backup is still
+writing that stamp, or was killed while writing it.
 
 Missing sidecar on a legacy single archive: the script prints a loud warning
 and continues, because backups from before checksums have none. Set
@@ -3400,7 +3988,7 @@ The app reads them in production only.
 
 | Variable | Script | Meaning |
 |---|---|---|
-| `DATABASE_URL` | backup | source DB (read-only): `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_dump` as `PGPASSWORD` only ([connection URLs](#which-database-url-the-backup-tools-accept-2719)) |
+| `DATABASE_URL` | backup | source DB (read-only): `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_dump` as `PGPASSWORD` only, and a `key=value` string with a password is refused ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The app's `DATABASE_SSL` doesn't reach the script: put `sslmode=` in this URL to require TLS ([TLS](#how-the-backup-tools-choose-tls-2830)) |
 | `BACKUP_DIR` | backup + app | local backup root (default `/var/backups/kiln`) |
 | `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set and `S3_BUCKET` is not |
 | `BACKUP_KEEP_DAYS` | backup + app | local retention, 1 to 2147483647 days (default 14; anything else keeps 14 and warns): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)); an in-app schedule may keep its own backups longer or shorter ([per schedule](#set-how-long-a-schedule-keeps-its-backups)) |
@@ -3410,14 +3998,15 @@ The app reads them in production only.
 | `KILN_BACKUP_SCHEDULER_CRON` | app | when the app checks its [in-app schedules](#schedule-backups-in-the-app) (default `* * * * *`; `false` turns every schedule off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
 | `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
+| `BACKUP_LOCK_WAIT_SECONDS` | backup + app | how long `pg_dump` waits for each table lock before it gives up, 1 to 3600 (default 600; anything else keeps 600 and warns). Also the demo golden capture's ([lock waits](#when-pg_dump-waits-for-a-table-lock-2844)) |
 | `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused copy fails the run, and so does a failed one, unless an in-app backup reached another [destination](#send-backups-to-several-destinations) (then it is partly off-site). The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_LOCAL_DESTINATION_ROOTS` | app | comma-separated absolute directories a **Directory on this server** destination may be under (default unset: that kind isn't offered). One relative or `..` entry drops the whole list with a boot warning ([details](#let-backups-be-written-to-a-directory-on-this-server)). Read in production and development |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
-| `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; Ecto-only query parameters are refused by libpq ([connection URLs](#which-database-url-the-backup-tools-accept-2719)) |
+| `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; `ssl=false` becomes `sslmode=disable` and Ecto's pool options are dropped ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The tools' TLS follows the app's unless this URL sets `sslmode` ([TLS](#how-the-backup-tools-choose-tls-2830)) |
 | `RCLONE_CONFIG`, `RCLONE_CONFIG_<NAME>_*`, `RCLONE_RETRIES` | rclone | read by `rclone` itself, which inherits the environment of whichever path runs it: the named remote's configuration file or settings, and rclone's retry count (default 3). Kiln does not read them. `kiln_offsite` is reserved ([above](#off-site-credentials-stay-out-of-the-rclone-command-line-2690)) |
-| `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill`: `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_restore`/`psql` as `PGPASSWORD` only |
+| `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill`: `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_restore`/`psql` as `PGPASSWORD` only, and a `key=value` string with a password is refused. Put `sslmode=` in it to require TLS |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |
 | `RESTORE_CONFIRM=yes` | restore | skip the interactive confirmation |
 | `RESTORE_REQUIRE_CHECKSUM=1` | restore | `media`: abort when there is no checksum sidecar (default: warn and continue for a legacy single archive) |

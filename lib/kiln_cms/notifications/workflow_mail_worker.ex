@@ -19,14 +19,64 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   escaped per value — matches the pre-#468 code's `h/1` calls exactly, and
   is why the body isn't escaped as one whole string: that would also escape
   the template's own `<p>`/`<a>` markup).
+
+  ## Read back when it runs (#3019)
+
+  The job carries ids: the recipient (`user_id`), the content (`kind`, `id`),
+  the acting account (`actor_id`) and, for a comment event, the comment
+  (`comment_id`). Everything the email says is read when the job runs, so a
+  job that waited hours for a retry sends what is true then:
+
+    * the recipient must still be one (`KilnCMS.Notifications.mail_recipient/2`):
+      an account erased since, left with no address, or that has turned the
+      event's preference off since, is sent nothing, and the mail goes to the
+      address the account holds now;
+    * the actor's name is the account's name now, and an actor erased since
+      is "An editor" (or "A reviewer");
+    * content deleted or trashed since, or a comment deleted since, sends
+      nothing;
+    * the recipient must still be who the event is for, by the event's own
+      rule (#3037, `KilnCMS.Notifications.entitled/3`): an admin of the site
+      for a review request, the content's author for a published or
+      returned-to-draft notice, on the comment's thread or the author for a
+      comment notice, and on the site's mention roster for a mention. Each
+      event re-checks its own rule and no other: being removed from the site
+      stops a review request, but not a comment notice to someone still on
+      the thread;
+    * an address on the instance-wide suppression list, or on the site's own
+      (`KilnCMS.Mail.suppressed?/2`, #3036), is sent nothing. A list that
+      cannot be read fails the job, which retries.
+
+  A skip finishes the job (`:ok`, logged with the job id and the reason, no
+  address), rather than cancelling it: `KilnCMS.Mail.recent_delivery_failures/1`
+  lists cancelled mail jobs as delivery failures. A read that fails, including
+  a refused one, fails the job, which retries (#1659).
+
+  A job queued by the release before this one carries the address, title,
+  actor name and excerpt themselves. It is delivered only while an account
+  that existed when it was queued still holds that address and would still be
+  sent it, and those keys are dropped from its row once it finishes
+  (`KilnCMS.Jobs.PrivateArgs`). The suppression lists apply to it, and so do
+  the rules above that its args can still be checked against: the review
+  request's and the mention's, by the site it names, and the author's, by
+  the content it names. A comment notice on a thread is sent unchecked: the
+  job names the content by the mail's type name (a dynamic entry's
+  "recipe"), which is not always the thread's own `content_type`, and
+  carries no comment id, so the thread cannot be found from it reliably.
   """
   use Oban.Worker, queue: :mail, max_attempts: 8
   use KilnCMSWeb, :verified_routes
 
   import Swoosh.Email
 
+  require Logger
+
   alias Kiln.Tokens
+  alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Jobs.PrivateArgs
   alias KilnCMS.Mail
+  alias KilnCMS.Notifications
   alias KilnCMS.Notifications.Link
 
   @templates %{
@@ -87,8 +137,70 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   @spec events() :: [String.t()]
   def events, do: Map.keys(@templates)
 
+  @comment_events ~w(comment_added comment_resolved comment_mention)
+
   @impl Oban.Worker
-  def perform(%Oban.Job{id: id, args: args}) do
+  def perform(%Oban.Job{args: %{"user_id" => user_id, "event" => event} = args} = job)
+      when is_binary(user_id) do
+    tenant = args["org_id"]
+
+    with {:ok, preference} <- preference(event),
+         {:ok, user} <- Notifications.mail_recipient(user_id, preference),
+         {:ok, content} <- content(args["kind"], args["id"], tenant),
+         {:ok, comment} <- comment(event, args["comment_id"], tenant),
+         :ok <-
+           Notifications.entitled(event, user, %{
+             org_id: tenant,
+             author_id: content.author_id,
+             comment: comment
+           }),
+         :ok <- not_suppressed(to_string(user.email), tenant) do
+      args
+      |> Map.merge(%{
+        "to" => to_string(user.email),
+        "title" => content.title,
+        "actor_name" => Notifications.actor_name_now(args["actor_id"]),
+        "excerpt" => comment && Notifications.snippet(comment.body)
+      })
+      |> deliver(job)
+    else
+      {:skip, reason} -> skip(job, reason)
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  # Queued by the release before #3019, with the address, title, actor name
+  # and excerpt in the args. Remove no earlier than the release after this
+  # one: the Pruner deletes finished rows after a week, and a retrying mail
+  # job is done within a day.
+  def perform(%Oban.Job{args: %{"to" => to, "title" => _title} = args} = job)
+      when is_binary(to) do
+    PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
+      with {:ok, preference} <- preference(args["event"]),
+           {:ok, user} <-
+             Notifications.mail_recipient_by_address(to, job.inserted_at, preference),
+           :ok <- legacy_entitled(args, user),
+           :ok <- not_suppressed(to, args["org_id"]) do
+        deliver(args, job)
+      else
+        {:skip, reason} -> skip(job, reason)
+        {:error, error} -> {:error, error}
+      end
+    end)
+  end
+
+  # Neither shape: a legacy job whose keys were already dropped
+  # (`PrivateArgs.finishing/3` forgets before Oban acks the job, so a node
+  # lost in between leaves it executing without them, and Lifeline re-queues
+  # it). The mail went out; nothing is left to send.
+  def perform(%Oban.Job{id: id}) do
+    # `:ok`, not `{:cancel, _}`: a cancelled `mail` job is listed as a delivery
+    # failure on /editor/mail, and nothing failed here.
+    Logger.info("workflow mail job #{id}: notification no longer in the job, nothing sent")
+    :ok
+  end
+
+  defp deliver(args, %Oban.Job{id: id}) do
     args
     |> build_email()
     # This worker builds its email at perform time (not via Mail.enqueue!), so
@@ -100,6 +212,100 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     # `org_id` was in the args carry none and use the operator's relay, as
     # they would have.
     |> Mail.deliver_for_worker(org_id: args["org_id"])
+  end
+
+  # The preference that governs each event's mail — the one `dispatch/3` and
+  # `dispatch_comment/4` consulted when the job was queued. Explicit clauses:
+  # the event comes from a job row, and is never turned into an atom.
+  defp preference("submitted_for_review"), do: {:ok, :submitted_for_review}
+  defp preference("published"), do: {:ok, :published}
+  defp preference("returned_to_draft"), do: {:ok, :returned_to_draft}
+  defp preference(event) when event in @comment_events, do: {:ok, :comment}
+  defp preference(_unknown), do: {:skip, :unknown_event}
+
+  # The legacy job's own rule (#3037), from what its args still name: the
+  # review request's site and the mention's site, and for an author's notice
+  # the content, read for its author now. A legacy comment event on a thread
+  # is sent unchecked: its args name the record by the mail's `kind` (a
+  # dynamic entry's type name, "recipe"), not the thread's own
+  # `content_type`, and carry no comment id, so the thread cannot be found
+  # from them reliably. It is sent as the release before would have sent it.
+  defp legacy_entitled(%{"event" => event} = args, user)
+       when event in ["submitted_for_review", "comment_mention"],
+       do: Notifications.entitled(event, user, %{org_id: args["org_id"]})
+
+  defp legacy_entitled(%{"event" => event} = args, user)
+       when event in ["published", "returned_to_draft"] do
+    with {:ok, content} <- content(args["kind"], args["id"], args["org_id"]) do
+      Notifications.entitled(event, user, %{author_id: content.author_id})
+    end
+  end
+
+  defp legacy_entitled(_args, _user), do: :ok
+
+  # The suppression lists (#3036): the instance-wide one and, for a site's
+  # mail, that site's own (`Mail.suppressed?/2`). An address on either is a
+  # skip. A list that cannot be read raises, which fails the job and retries
+  # it, as the newsletter worker does: mail is never sent past a list nobody
+  # read.
+  defp not_suppressed(address, tenant) do
+    if Mail.suppressed?(address, org_id: tenant), do: {:skip, :suppressed}, else: :ok
+  end
+
+  # The content's title and author now. Gone (deleted, trashed, or of a type
+  # that no longer exists) is a skip: there is nothing left to link to.
+  defp content(kind, id, tenant) do
+    # authorize?: false — a content read (the #1402 content-read argument, as
+    # `TaskMailWorker` reads titles): a standing system grant on content would
+    # hand the notifier the whole corpus, drafts included, for one title. The
+    # job already decided the recipient; only the title and the author's id
+    # (for the event's own rule, #3037) are selected.
+    case ContentTypes.get_record(kind, id,
+           authorize?: false,
+           not_found_error?: false,
+           tenant: tenant,
+           query: [select: [:id, :title, :author_id]]
+         ) do
+      {:ok, %{} = content} -> {:ok, content}
+      {:ok, nil} -> {:skip, :content_gone}
+      {:error, :unknown_content_type} -> {:skip, :content_gone}
+      {:error, error} -> {:error, error}
+    end
+  rescue
+    # A type the registry knows but can no longer resolve to a compiled
+    # interface raises `ArgumentError` (see `TaskMailWorker.content_title/3`).
+    # Only that: any other raise fails the job, which retries, as an error
+    # tuple does above.
+    _unknown_type in ArgumentError -> {:skip, :content_gone}
+  end
+
+  # The comment now (its excerpt, and its thread for the event's rule), read
+  # as the notifier's system actor, which `CMS.Comment` admits for reads
+  # (#1659). `authorize_with: :error`: a refused read must fail the job, not
+  # read as "comment deleted".
+  defp comment(event, comment_id, tenant)
+       when event in @comment_events and is_binary(comment_id) do
+    case CMS.get_comment(comment_id,
+           actor: Notifications.system(),
+           authorize_with: :error,
+           not_found_error?: false,
+           tenant: tenant
+         ) do
+      {:ok, nil} -> {:skip, :comment_gone}
+      {:ok, comment} -> {:ok, comment}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp comment(event, _comment_id, _tenant) when event in @comment_events,
+    do: {:skip, :comment_gone}
+
+  defp comment(_event, _comment_id, _tenant), do: {:ok, nil}
+
+  # A fixed reason and the job id: never the address.
+  defp skip(%Oban.Job{id: id}, reason) do
+    Logger.info("workflow mail job #{id} not sent: #{reason}")
+    :ok
   end
 
   @impl Oban.Worker
