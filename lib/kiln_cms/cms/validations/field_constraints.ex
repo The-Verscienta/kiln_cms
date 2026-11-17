@@ -27,6 +27,10 @@ defmodule KilnCMS.CMS.Validations.FieldConstraints do
 
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.FieldConstraints
+  alias KilnCMS.CMS.FieldSchema
+  alias KilnCMS.CMS.FieldTypes.Color
+
+  @max_palette 64
 
   @impl true
   def validate(changeset, _opts, _context) do
@@ -47,6 +51,7 @@ defmodule KilnCMS.CMS.Validations.FieldConstraints do
              :ok <- applicable(changeset, validation),
              :ok <- ordered(validation),
              :ok <- pattern(validation),
+             :ok <- schema(validation),
              :ok <- unique(changeset, validation) do
           default(changeset, validation)
         end
@@ -78,6 +83,13 @@ defmodule KilnCMS.CMS.Validations.FieldConstraints do
   defp shape_ok?("pattern_message", value), do: is_binary(value)
   defp shape_ok?("unique", value), do: is_boolean(value)
 
+  defp shape_ok?("palette", value),
+    do:
+      is_list(value) and value != [] and length(value) <= @max_palette and
+        Enum.all?(value, &(is_binary(&1) and match?({:ok, _}, Color.normalize(&1))))
+
+  defp shape_ok?("json_schema", value), do: is_map(value) and not is_struct(value)
+
   defp shape_hint(key) when key in ["min", "max"], do: "expected a number"
 
   defp shape_hint(key) when key in ["min_length", "max_length"],
@@ -86,6 +98,11 @@ defmodule KilnCMS.CMS.Validations.FieldConstraints do
   defp shape_hint("pattern"), do: "expected a non-empty pattern"
   defp shape_hint("pattern_message"), do: "expected text"
   defp shape_hint("unique"), do: "expected true or false"
+
+  defp shape_hint("palette"),
+    do: "expected 1 to #{@max_palette} hex colors such as #ff8800"
+
+  defp shape_hint("json_schema"), do: "expected a JSON Schema object"
 
   defp applicable(changeset, validation) do
     type = Ash.Changeset.get_attribute(changeset, :field_type)
@@ -149,6 +166,16 @@ defmodule KilnCMS.CMS.Validations.FieldConstraints do
   end
 
   defp pattern(_validation), do: :ok
+
+  # The JSON Schema is bounded, local-only and builds (#2434).
+  defp schema(%{"json_schema" => schema}) do
+    case FieldSchema.check_schema(schema) do
+      :ok -> :ok
+      {:error, message} -> error("json_schema is not valid: #{message}")
+    end
+  end
+
+  defp schema(_validation), do: :ok
 
   defp unique(changeset, %{"unique" => true}) do
     cond do
