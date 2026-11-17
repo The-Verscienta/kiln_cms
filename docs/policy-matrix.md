@@ -576,6 +576,36 @@ else is refused before any file or network I/O, and records the outcome as
 the `:backups` system actor (`backup_destination_tested`, the admin as its
 actor). Not exposed through GraphQL, JSON:API or MCP.
 
+<a id="backup-uploads"></a>
+
+## Resumable backup uploads — `Backups.Upload`
+
+| Action | platform admin | editor | org admin (not platform admin) | viewer | anonymous | `:backups` system actor |
+|--------|:-----:|:------:|:-----:|:------:|:---------:|:-----:|
+| `read`, `open_for`, `owed` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `open`, `claim`, `save_checkpoint`, `note_error`, `complete`, `abandon`, `mark_aborted`, `purge` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+The uploads a resumable destination adapter has under way (part of #2223),
+one open row per file and destination. Instance-wide and tenant-less.
+System-only, like `Notice`: `KilnCMS.Backups.Uploads` reads and writes every
+row as `Backups.system/0`, the reads with `authorize_with: :error`, and
+every person is refused the resource, platform admin included. No page
+shows it. A row's `checkpoint` is the adapter's own state (an upload id, the
+parts it has sent), never a secret, and not a public attribute.
+
+The policy is only half the guard. The write actions also filter on the
+row's owner, so the system actor can't use them to move ownership backward:
+`claim` takes a row only for a step at least as new as its owner (a later
+Oban job, or the same job at an attempt no smaller); `save_checkpoint`,
+`note_error` and `complete` write only for the owner while the row is
+`open`; `abandon` and `mark_aborted` write only from the status and owner
+the caller read. A write that matches no row fails as stale, which the
+pipeline reads as "superseded", so a step that lost its lease can't
+overwrite the progress of the step that took over. `purge` deletes closed
+rows, and a deleted destination's rows, older than the cutoff it is given.
+Not exposed through GraphQL, JSON:API or MCP. The reasoning is in
+[ADR 0068](decisions/0068-a-resumable-backup-upload-is-recorded-by-the-installation-that-started-it-and-only-it-aborts-it.md).
+
 ## Bounce suppression — `Mail.SuppressedRecipient`
 
 | Action | admin | editor | viewer | anonymous |

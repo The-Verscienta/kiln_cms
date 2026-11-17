@@ -597,6 +597,147 @@ What the core holds an adapter to:
   that is taken; `mix kiln.plugins.list` counts each plugin's backup
   destinations. A destination whose plugin was removed stays listed, and
   each backup records it failed until it is deleted or disabled.
+- **What `put/3` answers decides what Kiln does next** (`kiln_plugin`
+  1.5). `:ok` once the whole file is stored. `{:ok, :already_present}` when
+  the destination already holds this very file, same size and SHA-256, and
+  nothing was sent: Kiln records it as sent. Answer it only when the store
+  can vouch for the content, never for a name alone. `{:error, {:permanent,
+  message}}` when no retry fixes it (the bucket is gone, the key is revoked):
+  the destination fails at once instead of on the backup's last attempt.
+  Any other `{:error, reason}` is retried. Any other `{:ok, _}` is that
+  file's error ("`<module>.put/3` returned an unexpected value").
+- **`opts[:deadline]` comes with every `put/3`**: the
+  `System.monotonic_time(:millisecond)` instant the call must be done by.
+  Kiln kills the call there anyway; an adapter that watches it can stop
+  cleanly first. Ignore any option you don't know: later releases may add
+  some.
+
+<a id="resumable-uploads-in-a-backup-destination"></a>
+
+##### Resumable uploads in a backup destination
+
+An adapter for a store with multipart or chunked uploads can let an
+interrupted upload continue on the next attempt instead of starting over
+([Resumable uploads](backups.md#resumable-uploads) has what the operator
+sees). It opts in by declaring `:resume` in `supports/0` and implementing
+`abort_upload/3`. Both are needed: an adapter that declares `:resume` without
+`abort_upload/3` is never resumed, and `mix kiln.plugins.doctor` reports
+"declares :resume in supports/0 but does not implement abort_upload/3, so
+its uploads are never resumed".
+
+Each `put/3` then gets a `Kiln.BackupDestination.Resume` in
+`opts[:resume]`:
+
+- `resume.checkpoint` is what the adapter last saved for this file on this
+  destination, or `nil` for a fresh start. It comes back with **string
+  keys**, whatever keys it was saved with. Kiln hands it back only for the
+  same file (same size and SHA-256); a changed file starts afresh, and Kiln
+  aborts its old upload through `abort_upload/3`.
+- `resume.attempt` is how many attempts have worked on this upload, from 1.
+- `resume.save.(checkpoint)` records progress. Call it **right after
+  creating the store upload**, before sending any data, so the upload can be
+  found and aborted later, and again after each part the store
+  acknowledges. It runs in the adapter's process and writes to Kiln's
+  database.
+- A checkpoint is a map that survives a JSON round trip, at most 8 KiB
+  encoded. **Never put a secret in it**: it is stored in the clear. An upload
+  id, part numbers and their store tags are what it is for. An optional
+  `bytes_done` key, a non-negative integer, is how far the upload got; the
+  run's log reports it when a later attempt resumes ("Resumed … at 512 of
+  2048 bytes").
+- When `save` answers `{:error, :superseded}`, a newer attempt owns the
+  upload: stop at once and return `{:error, :superseded}`. If this very call
+  created the store upload, abort it yourself first; one it resumed is the
+  newer attempt's. On any other `{:error, reason}` from `save`, stop and
+  return it.
+- Trust nothing in a checkpoint the store doesn't confirm: ask the store
+  which parts it holds before sending only the rest, and start over when
+  they don't match.
+
+`abort_upload(config, %{subdir: subdir, name: name, checkpoint: checkpoint},
+opts)` frees what the store keeps of an upload. An upload the store no
+longer knows is `:ok`. `opts` carries `:deadline`. Kiln calls it when an
+upload failed permanently, when its file changed, when the file turned out
+to be on the destination already while an upload of it was under way, and
+from the sweep for an upload abandoned or untouched for four days. It never
+calls it for a transient failure or a timeout.
+
+A sketch, for a store client `MyStore` with multipart uploads (its
+functions are this example's, not Kiln's):
+
+```elixir
+@impl Kiln.BackupDestination
+def supports, do: [:list, :delete, :resume]
+
+@impl Kiln.BackupDestination
+def put(config, file, opts) do
+  resume = Keyword.fetch!(opts, :resume)
+
+  case resume.checkpoint do
+    %{"upload_id" => id, "parts" => parts} ->
+      # Only what the store confirms counts.
+      case MyStore.list_parts(config, id) do
+        {:ok, ^parts} -> send_parts(config, file, resume, id, parts, false)
+        _gone_or_different -> start(config, file, resume)
+      end
+
+    nil ->
+      start(config, file, resume)
+  end
+end
+
+defp start(config, file, resume) do
+  with {:ok, id} <- MyStore.create_upload(config, file.subdir, file.name) do
+    case resume.save.(%{upload_id: id, parts: [], bytes_done: 0}) do
+      :ok -> send_parts(config, file, resume, id, [], true)
+      {:error, _reason} = error -> stop(config, id, true, error)
+    end
+  end
+end
+
+# Sends the parts after `done`, saving after each one the store
+# acknowledged, then completes the upload (`:ok`).
+defp send_parts(config, file, resume, id, done, fresh?) do
+  file.path
+  |> MyStore.parts(skip: length(done))
+  |> Enum.reduce_while({:ok, done}, fn part, {:ok, parts} ->
+    with {:ok, tag} <- MyStore.upload_part(config, id, part),
+         parts = parts ++ [tag],
+         :ok <- resume.save.(%{upload_id: id, parts: parts, bytes_done: part.end_byte}) do
+      {:cont, {:ok, parts}}
+    else
+      {:error, _reason} = error -> {:halt, error}
+    end
+  end)
+  |> case do
+    {:ok, _parts} -> MyStore.complete_upload(config, id)
+    {:error, _reason} = error -> stop(config, id, fresh?, error)
+  end
+end
+
+# A store upload this call created is this call's to abort.
+defp stop(config, id, true = _fresh?, {:error, :superseded} = error) do
+  _ = MyStore.abort_upload(config, id)
+  error
+end
+
+defp stop(_config, _id, _fresh?, error), do: error
+
+@impl Kiln.BackupDestination
+def abort_upload(config, %{checkpoint: %{"upload_id" => id}}, _opts) do
+  case MyStore.abort_upload(config, id) do
+    :ok -> :ok
+    {:error, :no_such_upload} -> :ok
+    {:error, _reason} = error -> error
+  end
+end
+
+def abort_upload(_config, _upload, _opts), do: :ok
+```
+
+`test/support/backup_destinations.ex` in the KilnCMS repository has a
+complete resumable adapter (`ResumableFake`) that the core's tests drive
+through the whole backup chain.
 
 Cron (`scripts/backup.sh`) never sends to a plugin's destination. A plugin
 built against `kiln_plugin` older than 1.5 has no `backup_destinations/0`;

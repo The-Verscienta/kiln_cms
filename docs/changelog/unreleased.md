@@ -85,6 +85,20 @@ carries the reasoning.
   summary
   ([docs/staging-environments.md](../staging-environments.md#the-scrub)).
 
+<a id="resumable-backup-uploads-upgrade"></a>
+
+- **Run `mix ash.migrate` (new table `backup_uploads`, part of #2223). No new environment variables; rolling back is safe.**
+  The additive migration `add_backup_uploads` creates the table in which an
+  in-app backup records the uploads a resumable destination adapter has
+  under way (see *Backup uploads can resume* under Added). It has no foreign
+  key and starts empty, and stays empty until a destination whose adapter
+  declares `:resume` is used: none of Kiln's own adapters does yet. A
+  release before this one ignores the table, so rolling back is safe; an
+  upload left open across the rollback is resumed or swept after rolling
+  forward. The staging scrub purges the table and reports
+  `backup_uploads_purged` in its summary
+  ([docs/staging-environments.md](../staging-environments.md#the-scrub)).
+
 <a id="erasure-backfill-newsletter-upgrade"></a>
 
 - **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release. No migration; rolling back is safe, and what it deleted stays deleted.**
@@ -741,6 +755,58 @@ carries the reasoning.
   implements the behaviour and has a usable `kind/0` that neither
   `local`, `rclone` nor another module already has. See *Backup
   destinations* in [plugin-extensibility.md](../plugin-extensibility.md).
+
+<a id="resumable-backup-uploads"></a>
+
+- **Backup uploads can resume: on a destination whose adapter opts in, an off-site upload cut off by a timeout, a retry, a node that died or a reclaim continues from its last checkpoint on the next attempt (part of #2223).**
+  No adapter that ships with Kiln resumes yet; a plugin's can, from
+  `kiln_plugin` 1.5, and an S3 destination is to follow (#2221). Each
+  upload under way is a row in the new `backup_uploads` table
+  (`KilnCMS.Backups.Upload`, system-only), keyed by the destination and the
+  file, owned by the step's Oban job and attempt. Ownership only moves
+  forward, so a step that lost its lease can't overwrite the progress of
+  the step that took over. A checkpoint is handed back only for a file of
+  the same size and SHA-256. Kiln aborts a recorded upload only when it
+  failed permanently, its file changed, the file turned out to be on the
+  destination already, or it lay unfinished for four days; a timeout or a
+  transient failure keeps it for the next attempt. Each time a backup
+  reaches a destination, a sweep aborts that destination's abandoned and
+  four-day-idle uploads, whether or not retention is on there, and closed
+  rows are purged after 30 days. Kiln never lists the store's own pending
+  uploads, so with an S3-style resumable adapter, set the bucket's
+  lifecycle rule for incomplete multipart uploads as well.
+
+  **Every adapter changes a little.** Every `put/3` now gets
+  `opts[:deadline]`, the `System.monotonic_time(:millisecond)` instant the
+  call must end by. A `put/3` may answer `{:ok, :already_present}` when the
+  destination already holds the file with the same size and SHA-256: the
+  file is recorded as sent, and the run's log reads "`<file>` was already
+  on `<destination>` with the same checksum; not sent again". Such a file is
+  then retention's to delete there like any file this installation sent,
+  since the same stamp and checksum are the same backup. A **Directory on
+  this server** destination answers this way: it compares the target's size,
+  then reads it whole to hash it. A `put/3` may answer `{:error,
+  {:permanent, message}}` for a failure no retry fixes, which fails that
+  destination on the attempt it happens in, and the backup moves on to the
+  next destination. A refused file still fails the whole backup (ADR 0043).
+  Any other `{:ok, _}` from a plugin's `put/3` is now that file's error
+  ("`<module>.put/3` returned an unexpected value"), where an
+  `{:ok, _}` the step didn't expect used to crash it.
+
+  **New on the run's log:** "Resumed `<file>` on `<destination>` at X of Y
+  bytes" (or "… from its last checkpoint"), and "Aborted N unfinished
+  upload(s) on `<destination>`", with the sweep's
+  `[:kiln_cms, :backups, :upload, :swept]` telemetry event. A destination
+  whose file was refused now reads "REFUSED for N files: …" on its chip and
+  in **Where backups go**; it had shown an inspected Elixir map since
+  destinations were added in this release cycle. `mix kiln.plugins.doctor`
+  reports an adapter that declares `:resume` without `abort_upload/3`,
+  which is never resumed. The reasoning is in
+  [ADR 0068](../decisions/0068-a-resumable-backup-upload-is-recorded-by-the-installation-that-started-it-and-only-it-aborts-it.md);
+  how it behaves is in
+  [Resumable uploads](../backups.md#resumable-uploads), and what a plugin
+  implements is in
+  [plugin-extensibility.md](../plugin-extensibility.md#resumable-uploads-in-a-backup-destination).
 
 <a id="plugin-staging-scrub"></a>
 
