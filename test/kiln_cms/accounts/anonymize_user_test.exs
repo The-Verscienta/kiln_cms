@@ -272,4 +272,99 @@ defmodule KilnCMS.Accounts.AnonymizeUserTest do
       refute Map.has_key?(export.account, :hashed_password)
     end
   end
+
+  describe "export_user_data/1 — site memberships (#3010)" do
+    import ExUnit.CaptureLog
+    import KilnCMS.OrgFixtures, only: [org: 1]
+
+    alias KilnCMS.Accounts.OrgMembership
+
+    @gated hd(KilnCMS.CMS.Audiences.gated())
+
+    defp membership(user, org_id, attrs) do
+      Ash.Seed.seed!(
+        OrgMembership,
+        Map.merge(%{user_id: user.id, organization_id: org_id}, Map.new(attrs))
+      )
+    end
+
+    defp in_hours(n), do: DateTime.add(DateTime.utc_now(), n * 3_600)
+
+    test "lists the account's own memberships, in any status, with what each grants" do
+      u = user(:viewer)
+      site = org("export-memberships")
+      expires = in_hours(24)
+
+      active =
+        membership(u, Accounts.default_org_id(),
+          role: :editor,
+          granted_role: :admin,
+          granted_role_expires_at: expires,
+          audiences: [@gated],
+          editable_types: ["post"],
+          readable_types: ["post", "page"],
+          field_grants: %{"post" => ["title"]},
+          field_read_grants: %{"post" => []}
+        )
+
+      pending = membership(u, site.id, status: :pending)
+      # Someone else's row on the same site is not this person's data.
+      membership(user(:editor), site.id, role: :admin)
+
+      assert [first, second] = Accounts.export_user_data(u).site_memberships
+
+      assert first == %{
+               org_id: Accounts.default_org_id(),
+               site: Accounts.default_org().name,
+               status: :active,
+               role: :editor,
+               granted_role: :admin,
+               granted_role_expires_at: expires,
+               audiences: [@gated],
+               editable_types: ["post"],
+               readable_types: ["post", "page"],
+               field_grants: %{"post" => ["title"]},
+               field_read_grants: %{"post" => []},
+               inserted_at: active.inserted_at,
+               decided_at: nil
+             }
+
+      assert %{
+               org_id: org_id,
+               site: name,
+               status: :pending,
+               role: :viewer,
+               inserted_at: inserted_at
+             } = second
+
+      assert {org_id, name, inserted_at} == {site.id, site.name, pending.inserted_at}
+    end
+
+    test "an erased account's export shows its memberships as erasure left them" do
+      u = user(:viewer)
+      membership(u, Accounts.default_org_id(), role: :admin, audiences: [@gated])
+
+      erased = Accounts.anonymize_user!(u, actor: user(:admin))
+
+      assert [%{role: :viewer, audiences: [], granted_role: nil, status: :active}] =
+               Accounts.export_user_data(erased).site_memberships
+    end
+
+    test "an account with no membership exports none" do
+      assert Accounts.export_user_data(user(:viewer)).site_memberships == []
+    end
+
+    test "a refused site-name read still exports the rows, and says so in the log" do
+      u = user(:viewer)
+      membership(u, Accounts.default_org_id(), role: :editor)
+
+      {export, log} =
+        with_log(fn ->
+          Accounts.with_actor(nil, fn -> Accounts.export_user_data(u) end)
+        end)
+
+      assert [%{site: nil, role: :editor}] = export.site_memberships
+      assert log =~ "data-subject export could not read the site names"
+    end
+  end
 end
