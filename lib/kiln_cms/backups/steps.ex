@@ -160,6 +160,9 @@ defmodule KilnCMS.Backups.Steps do
           do: run_step(lease, job, state),
           else: lost_state(lease, :foreign_state)
 
+      {:error, :no_state} when lease.step == "finish" ->
+        finish_interrupted(lease)
+
       {:error, :no_state} ->
         lost_state(lease, :no_state)
     end
@@ -774,6 +777,52 @@ defmodule KilnCMS.Backups.Steps do
     {:cancel, reason}
   end
 
+  # A finish step with no state may be one that got past `succeed/4`'s
+  # `File.rm_rf/1` and died before releasing the lock (issue 2419): the
+  # backup is done, and only the tail is left. It is done when this chain's
+  # Run says succeeded, or when the manifest says ok for this stamp
+  # (`succeed/4` writes it first); a Run still running then is one whose
+  # best-effort close failed, and is closed here (no Run of this chain at
+  # all: nothing to close). A Run that failed or was canceled contradicts an
+  # ok manifest; that, and anything else, is lost state, as for any other
+  # step.
+  defp finish_interrupted(lease) do
+    dir = Backups.dir()
+    rec = Recorder.from_run(lease.stamp, lease.chain)
+
+    cond do
+      match?(%{status: :succeeded}, rec.run) ->
+        finish_tail(dir, lease)
+
+      manifest_ok?(dir, lease.stamp) and (rec.run == nil or rec.run.status == :running) ->
+        rec
+        |> Recorder.log(:info, "done", "Backup complete (finished after an interruption)")
+        |> Recorder.finish()
+
+        finish_tail(dir, lease)
+
+      true ->
+        lost_state(lease, :no_state)
+    end
+  end
+
+  defp manifest_ok?(dir, stamp),
+    do: match?(%Manifest{stamp: ^stamp, ok: true}, Manifest.read(dir))
+
+  # `succeed/4`'s steps after the work directory is gone.
+  defp finish_tail(dir, lease) do
+    _ = Retention.sync_last_good(dir)
+    _ = Chain.release(lease)
+
+    Logger.info(
+      "Backup complete (#{lease.trigger || "manual"}): #{lease.stamp} in #{dir} " <>
+        "(finished after an interruption)"
+    )
+
+    settled(lease, :ok)
+    :ok
+  end
+
   # The state write is fenced (#2538): it runs under the lock, and only while
   # this step's lease still holds it. A step that outlived its Cancel (its node
   # missed the signal) must not overwrite the `state.json` a resume of the same
@@ -949,8 +998,19 @@ defmodule KilnCMS.Backups.Steps do
     end
   end
 
-  defp put_outputs(state, entries),
-    do: Map.put(state, "outputs", Enum.map(outputs(state) ++ entries, &stringify/1))
+  # A step retried after its state landed (its hand-over failed, or its node
+  # stopped right after the write) adds the same outputs again: keep one entry
+  # per path, the latest, or the manifest and the sidecars list it twice and
+  # off-site refuses the sidecar as changed (#2419).
+  defp put_outputs(state, entries) do
+    outputs =
+      (outputs(state) ++ entries)
+      |> Enum.reverse()
+      |> Enum.uniq_by(& &1.path)
+      |> Enum.reverse()
+
+    Map.put(state, "outputs", Enum.map(outputs, &stringify/1))
+  end
 
   defp stringify(map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
 
@@ -1366,8 +1426,12 @@ defmodule KilnCMS.Backups.Steps do
 
     bytes = Enum.sum(Enum.map(parts, & &1.bytes))
 
+    # A retried checksum step adds the same set again (#2419): replace it.
+    names = MapSet.new(attrs, & &1.name)
+    kept = Enum.reject(rec.artifacts, &MapSet.member?(names, &1.name))
+
     Recorder.log(
-      %{rec | artifacts: rec.artifacts ++ attrs},
+      %{rec | artifacts: kept ++ attrs},
       :info,
       "media",
       "Media archive verified (#{length(parts)} part(s), #{bytes} bytes)"
@@ -2028,7 +2092,11 @@ defmodule KilnCMS.Backups.Steps do
     |> Recorder.finish()
 
     # After the run is closed: a node that dies between the two leaves at most
-    # a stale `.work/<stamp>`, which `sweep_work_dirs/2` removes in time.
+    # a stale `.work/<stamp>`, which `sweep_work_dirs/2` removes in time. One
+    # that dies after this, before the lock is released, has its retried or
+    # reclaimed finish find no state: `finish_interrupted/1` runs what is left
+    # below (step_boundary_test.exs, "finish interrupted after it closed the
+    # run", replays this function's steps up to here by hand).
     File.rm_rf(ctx.work_dir)
 
     # Once `.work/<stamp>` is gone this run is no longer in flight, so it can

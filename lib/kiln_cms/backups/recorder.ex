@@ -411,8 +411,12 @@ defmodule KilnCMS.Backups.Recorder do
   @spec add_artifact(t(), map()) :: t()
   def add_artifact(%__MODULE__{} = rec, artifact) do
     case Artifact.from_manifest(artifact) do
-      {:ok, attrs} -> %{rec | artifacts: rec.artifacts ++ [attrs]}
-      :error -> rec
+      # A retried step adds the same artifact again (#2419): replace it.
+      {:ok, attrs} ->
+        %{rec | artifacts: Enum.reject(rec.artifacts, &(&1.name == attrs.name)) ++ [attrs]}
+
+      :error ->
+        rec
     end
   end
 

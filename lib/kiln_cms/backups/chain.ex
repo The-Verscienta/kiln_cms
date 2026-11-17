@@ -19,6 +19,16 @@ defmodule KilnCMS.Backups.Chain do
   would abort the transaction that inserts the next step. Run writes happen
   before (a step's progress) or after the commit (bookkeeping here).
 
+  The advisory lock is the guarantee, not the row. Today the `:ensure` upsert
+  that follows it also row-locks the singleton (AshPostgres renders it as
+  `ON CONFLICT ... DO UPDATE`), so two lock transactions would queue on the
+  row even without it; but that is how AshPostgres happens to render an
+  upsert with nothing to update, not something this module controls, and a
+  transaction that takes the advisory lock without touching the row (a
+  maintenance query, a future caller) must still keep every decision out.
+  `chain_race_test.exs` pins it: a transaction holding only the advisory key
+  (`lock_key/0`) holds a request back.
+
   One other write does happen inside it: a scheduled request's window claims
   (part of #2219; `request/1`'s `:claim`), so a window is claimed exactly when
   the backup it asked for is started, queued or folded. A claim that matches
@@ -106,6 +116,11 @@ defmodule KilnCMS.Backups.Chain do
   @spec stale_after_s() :: pos_integer()
   def stale_after_s, do: @stale_after_s
 
+  @doc false
+  # The advisory lock's key, for the race test that holds it on its own.
+  @spec lock_key() :: String.t()
+  def lock_key, do: @lock_key
+
   ## The lock transaction
 
   @doc """
@@ -127,6 +142,9 @@ defmodule KilnCMS.Backups.Chain do
   Take the advisory lock in the CURRENT transaction and return the lock row
   (created if missing). For a caller already inside a transaction of its own
   (the Run `:cancel` action); everyone else uses `with_lock/1`.
+
+  The advisory lock is taken first and is what serializes; the row lock the
+  `:ensure` upsert also takes is incidental (see "One transaction, one lock").
   """
   @spec locked_row() :: Lock.t()
   def locked_row do
