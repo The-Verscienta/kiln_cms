@@ -110,6 +110,40 @@ defmodule KilnCMS.Backups.HeartbeatTest do
                )
     end
 
+    # #2543: a beat that reports no directory id clears the one before it, so
+    # a node whose BACKUP_DIR lost its id stops being routed marker syncs.
+    test "each beat's dir_id replaces the last one's, nil included; still one row" do
+      boot = Ash.UUID.generate()
+      [a, b] = [Ash.UUID.generate(), Ash.UUID.generate()]
+
+      beat =
+        &Backups.beat_node!(%{node: "this@node", boot_id: boot, dir_id: &1},
+          actor: Backups.system()
+        )
+
+      beat.(a)
+      assert beat_of("this@node").dir_id == a
+
+      beat.(b)
+      assert beat_of("this@node").dir_id == b
+
+      Repo.update_all(from(n in "backup_node_beats", where: n.node == "this@node"),
+        set: [beat_at: DateTime.add(DateTime.utc_now(), -600, :second)]
+      )
+
+      old = beat_of("this@node").beat_at
+      beat.(nil)
+
+      assert %{dir_id: nil, beat_at: at} = beat_of("this@node")
+      assert DateTime.after?(at, old)
+
+      assert [_one] =
+               Enum.filter(
+                 Backups.list_node_beats!(actor: Backups.system()),
+                 &(&1.node == "this@node")
+               )
+    end
+
     test "W9: a row another boot wrote since this node's last beat is logged as an error", %{
       state: state
     } do

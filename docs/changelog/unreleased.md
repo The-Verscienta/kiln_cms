@@ -739,6 +739,47 @@ carries the reasoning.
   brings the wait back.
   ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932))
 
+<a id="backup-finish-after-interruption"></a>
+
+- **An in-app backup whose finish step was interrupted after it had closed the run now completes, instead of failing with "work state … missing" and leaving the `.good` and `.hold` markers unsynced.**
+  The finish step writes the manifest, closes the run, removes
+  `.work/<stamp>/` and only then syncs the markers and releases the backup
+  lock. A node that stopped in that last gap left a finish whose retry (or
+  take-back from the stopped node) found no `state.json`: it logged "Backup
+  FAILED: The backup's work state … is missing … nothing more can be done for
+  this one", and never synced the markers, so `backup.sh prune` didn't learn of the new backup until the
+  next sync. A finish that can't find its state now checks whether it had in
+  fact finished: the run reads `Succeeded`, or the manifest is written ok for
+  this stamp. If so, it closes a run still `Running` as succeeded (a
+  destination it never got to is recorded failed, "not attempted: its
+  off-site step never ran"), syncs the markers under the lock, releases the
+  lock and logs "Backup complete … (finished after an interruption)". The
+  same check runs when the heartbeat takes back a finish with no attempts
+  left, and when the lock is released because the finish job ended. If the
+  run can't be read, the step is retried; with no retry left the backup is
+  recorded as interrupted, as before. Part of the step-chain work in
+  [issue 2419](https://github.com/The-Verscienta/kiln_cms/issues/2419); see
+  [How an in-app backup runs](../backups.md#how-an-in-app-backup-runs-2218).
+  No migration; rolling back brings the failure back.
+
+<a id="backup-retried-step-duplicate-outputs"></a>
+
+- **A backup step run again after it had recorded its work no longer lists its files twice, which made the off-site copy refuse the checksum file and fail the backup.**
+  When a step wrote `state.json` and then couldn't hand over to the next step
+  (the hand-over failed, or its node stopped right after the write), the
+  retry added the same dump, media parts or sidecars to the backup's output
+  list a second time. The manifest and the run's artifacts in History listed
+  them twice, and the off-site copy refused the sidecar ("the checksum file
+  changed after it was written"), failing the backup. A retried step now
+  keeps one entry per file, the latest. Tests now cover an interruption at
+  every step boundary, both before and after the step's state write, the
+  `start` step's wait for a legacy `Backups.Worker` job, a retry that leaves
+  the previous good manifest alone, the advisory lock on its own, and the
+  heartbeat dropping a backup directory id that is gone
+  ([#2543](https://github.com/The-Verscienta/kiln_cms/issues/2543)). Part of
+  [issue 2419](https://github.com/The-Verscienta/kiln_cms/issues/2419). No
+  migration.
+
 <a id="erasure-deletes-newsletter-subscriptions"></a>
 
 - **Erasure deletes the account's newsletter subscriptions, so the person's address stops receiving newsletters, and the self-service data export lists them.**

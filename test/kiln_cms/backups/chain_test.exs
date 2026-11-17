@@ -919,6 +919,126 @@ defmodule KilnCMS.Backups.ChainTest do
     end
   end
 
+  # Issue 2419: a failure before the last attempt is only retried. Nothing
+  # says the backup failed in between: the manifest keeps the previous good
+  # backup until the retry settles it.
+  describe "failures a retry can fix" do
+    test "a failed attempt leaves the manifest alone and the run open; the retry succeeds", %{
+      dir: dir
+    } do
+      assert :ok = BackupChain.run()
+      assert [%{stamp: good}] = runs()
+      before = File.read!(Manifest.path(dir))
+
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups)[:database_url]
+      set_config(database_url: "postgres://nobody:nope@127.0.0.1:1/nope")
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      job = step_until("dump")
+      %{stamp: stamp} = lock()
+      assert stamp != good
+
+      assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+      assert %Oban.Job{state: "retryable", attempt: 1} = Repo.get!(Oban.Job, job.id)
+      assert File.read!(Manifest.path(dir)) == before
+      assert %{step: :dump, step_job_id: job_id} = lock()
+      assert job_id == job.id
+
+      assert %{status: :running, log: log} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert Enum.any?(log, &(&1.step == "dump" and &1.level == :error))
+
+      set_config(database_url: original)
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert %Oban.Job{state: "completed", attempt: 2} = Repo.get!(Oban.Job, job.id)
+
+      assert %{status: :succeeded} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert %Manifest{ok: true, stamp: ^stamp} = Manifest.read(dir)
+    end
+  end
+
+  # #2543: during an upgrade, a legacy `Worker` job from an older node may
+  # still be running the whole pipeline without the lock. The start step
+  # waits for it (`Steps.start/2`).
+  describe "an upgrade while a legacy Worker job runs" do
+    defp legacy_executing! do
+      {:ok, job} = Oban.insert(Worker.new(%{"trigger" => "manual"}))
+
+      {1, _} =
+        Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id),
+          set: [state: "executing", attempted_at: DateTime.utc_now(), attempt: 1]
+        )
+
+      job
+    end
+
+    test "the start step snoozes without spending an attempt, then runs once the job is done" do
+      legacy = legacy_executing!()
+      {:ok, %{status: :started, chain: chain}} = request()
+      start = current_job()
+
+      assert %{snoozed: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+      assert %Oban.Job{state: "scheduled", attempt: 0, meta: %{"snoozed" => 1}} =
+               Repo.get!(Oban.Job, start.id)
+
+      # Nothing started: no run, no work directory, the lock still on start.
+      assert runs() == []
+      %{stamp: stamp} = row = lock()
+      assert row.step == :start and row.step_job_id == start.id
+      refute File.exists?(Backups.work_dir(stamp))
+
+      # A snoozed step is a job that will run again, not an orphan.
+      assert {:ok, :none} = Chain.reap()
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^legacy.id),
+        set: [state: "completed", completed_at: DateTime.utc_now()]
+      )
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded}] = runs()
+    end
+
+    # Pins today's behavior (owner question on #2543): past the bound every
+    # attempt fails at once, since `meta["snoozed"]` counts across attempts;
+    # the job is discarded with no run, and the reaper frees the lock.
+    test "past three hours of waiting each attempt fails at once; the reaper frees the lock" do
+      legacy_executing!()
+      {:ok, %{status: :started}} = request()
+      start = current_job()
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^start.id),
+        set: [meta: %{"snoozed" => 180}]
+      )
+
+      assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+
+      assert %Oban.Job{state: "retryable", attempt: 1, errors: [error]} =
+               Repo.get!(Oban.Job, start.id)
+
+      assert error["error"] =~ "legacy_backup_running"
+      assert runs() == []
+
+      assert %{failure: 2, discard: 1} = BackupChain.drain()
+      assert %Oban.Job{state: "discarded", attempt: 4} = Repo.get!(Oban.Job, start.id)
+      assert runs() == []
+
+      assert {:ok, {:orphaned, _}} = Chain.reap()
+      assert Backups.in_flight() == nil
+    end
+  end
+
   describe "components (#2219)" do
     defp media_files(dir) do
       case File.ls(Path.join(dir, "media")) do

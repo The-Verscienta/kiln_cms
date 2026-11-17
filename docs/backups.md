@@ -1100,6 +1100,45 @@ for while one runs waits behind it ([below](#back-up-while-another-backup-runs))
 most 2 hours per attempt. Neither is configurable. The run's log in History
 records each failed attempt. After the fourth, the backup fails.
 
+**When a step is interrupted.** A step writes what it did to `state.json`
+before it hands over to the next one, so a step that fails, times out or is
+[taken back from a stopped node](#several-nodes-and-the-backup-lock) is run
+again from what the earlier steps recorded, under the same stamp. A step run
+again, whether its first attempt stopped halfway or stopped just after it
+wrote `state.json`, reuses what is already done:
+
+- a database dump that verified, once its sha256 and size are checked again
+  ("Database dump reused from the original attempt … sha256 re-verified");
+- each media part that verified, checked the same way ("Reused N of M media
+  part(s) from the original attempt"). A part or a dump that no longer
+  matches is rebuilt;
+- the media plan, which is frozen when it is first made, so the parts keep
+  the same files;
+- at each destination, the files this backup already sent there with the same
+  sha256.
+
+A step run again after its `state.json` landed lists each file once, in the
+manifest, the checksum sidecars and History. (Earlier releases listed that
+step's files twice, and the off-site copy then refused the sidecar, "the
+checksum file changed after it was written", and failed the backup.)
+
+A finish interrupted after it had closed the run (the run reads `Succeeded`,
+or the manifest is already written ok for this stamp) has finished the
+backup: its retry, its take-back or the cleanup of its ended job only does
+the bookkeeping that is left. It closes a run still `Running` as succeeded,
+recording a destination it never got to as failed ("not attempted: its
+off-site step never ran"), syncs the
+[`.good`](#the-last-good-marker) and [`.hold`](#the-hold-markers) markers,
+releases the lock and starts the queued backup. The server log says "Backup
+complete … (finished after an interruption)". If the run can't be read, a
+retry tries again; when no retry is left, the backup is recorded as
+interrupted, as before.
+
+The 2-hour limit is per attempt of one step, and every media part and every
+destination is a step of its own. There is no limit on the whole backup: one
+with many parts or destinations can run for longer than 2 hours, but a single
+part, upload or database dump that needs more fails each attempt.
+
 **Failures a retry cannot fix fail at once**, without spending the remaining
 attempts:
 
@@ -1107,7 +1146,7 @@ attempts:
 |---|---|---|
 | A media part changed on disk between being archived and being checksummed | "Media part(s) changed on disk between being archived and being checksummed: `<names>`. Something other than this backup wrote to the backup directory; Resume rebuilds the changed part(s)." | Find what writes to `BACKUP_DIR`, then **Resume**: it rebuilds only the parts whose hash no longer matches. |
 | A file refused before its off-site copy, at any destination | "Off-site copy REFUSED for …" | [When an off-site copy is refused](#when-an-off-site-copy-is-refused). |
-| The work state is gone, or belongs to another backup | "The backup's work state (.work/`<stamp>`/state.json) is missing or belongs to another backup; nothing more can be done for this one" | Take a new backup. No failure manifest is written, so the panel keeps showing the previous backup. |
+| The work state is gone, or belongs to another backup (except at a finish that had already closed the run, [above](#how-an-in-app-backup-runs-2218)) | "The backup's work state (.work/`<stamp>`/state.json) is missing or belongs to another backup; nothing more can be done for this one" | Take a new backup. No failure manifest is written, so the panel keeps showing the previous backup. |
 
 **When a backup fails**, it writes a failure manifest (when its `state.json`
 is there to say what landed), marks the run `Failed`, releases the lock and
@@ -1286,6 +1325,8 @@ looks at the lock:
   after 2 hours, or the job was discarded or deleted) fails the backup as
   "Interrupted: the backup's step job ended without finishing its step", and
   the lock is released.
+- Either way, a `finish` step that had already closed the run is completed,
+  not failed ([When a step is interrupted](#how-an-in-app-backup-runs-2218)).
 - A node that cannot write its beat for 90 seconds (it lost the database)
   stops its own backup steps before the others take them over.
 - A node that missed a Cancel or a take-back while it couldn't reach the
@@ -1368,6 +1409,12 @@ for meanwhile [queues behind it](#back-up-while-another-backup-runs): the price 
 because the wrong nodes happened to pick it up first. Nothing on the page can
 cancel it while it waits, because **Cancel** appears only once the row is
 `Running` again. Bring the host with the files back, or wait for the give-up.
+
+**The lock is a Postgres advisory lock.** Every decision about the chain
+(a request, a hand-over, a take-back, a Cancel, a `state.json` write) runs in
+a transaction that first takes `pg_advisory_xact_lock` on one fixed key, then
+reads the single row of `backup_locks`. The advisory lock is what keeps two of
+them apart; the row records which chain, step and job hold the backup.
 
 **Pool size.** The `backup_steps` queue runs one job at a time on each node.
 If you size `POOL_SIZE` as the sum of queue limits plus web traffic

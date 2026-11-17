@@ -19,6 +19,16 @@ defmodule KilnCMS.Backups.Chain do
   would abort the transaction that inserts the next step. Run writes happen
   before (a step's progress) or after the commit (bookkeeping here).
 
+  The advisory lock is the guarantee, not the row. Today the `:ensure` upsert
+  that follows it also row-locks the singleton (AshPostgres renders it as
+  `ON CONFLICT ... DO UPDATE`), so two lock transactions would queue on the
+  row even without it; but that is how AshPostgres happens to render an
+  upsert with nothing to update, not something this module controls, and a
+  transaction that takes the advisory lock without touching the row (a
+  maintenance query, a future caller) must still keep every decision out.
+  `chain_race_test.exs` pins it: a transaction holding only the advisory key
+  (`lock_key/0`) holds a request back.
+
   One other write does happen inside it: a scheduled request's window claims
   (part of #2219; `request/1`'s `:claim`), so a window is claimed exactly when
   the backup it asked for is started, queued or folded. A claim that matches
@@ -106,6 +116,11 @@ defmodule KilnCMS.Backups.Chain do
   @spec stale_after_s() :: pos_integer()
   def stale_after_s, do: @stale_after_s
 
+  @doc false
+  # The advisory lock's key, for the race test that holds it on its own.
+  @spec lock_key() :: String.t()
+  def lock_key, do: @lock_key
+
   ## The lock transaction
 
   @doc """
@@ -127,6 +142,9 @@ defmodule KilnCMS.Backups.Chain do
   Take the advisory lock in the CURRENT transaction and return the lock row
   (created if missing). For a caller already inside a transaction of its own
   (the Run `:cancel` action); everyone else uses `with_lock/1`.
+
+  The advisory lock is taken first and is what serializes; the row lock the
+  `:ensure` upsert also takes is incidental (see "One transaction, one lock").
   """
   @spec locked_row() :: Lock.t()
   def locked_row do
@@ -767,7 +785,8 @@ defmodule KilnCMS.Backups.Chain do
   The old job is canceled first, so a zombie that wakes up can neither ack it
   nor move the chain on (its epoch is gone). With attempts left the step is
   requeued under a new job with the remaining budget, same stamp; with none the
-  run fails as interrupted and the waiting request is promoted.
+  run fails as interrupted (a finish that had in fact finished is completed
+  instead, `Steps.interrupt_finish/4`) and the waiting request is promoted.
 
   Returns `{:ok, :none | {:requeued, info} | {:interrupted, info}}`.
   """
@@ -870,12 +889,13 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   defp after_reclaim({:ok, {:interrupted, info}} = result) do
-    Logger.error(
-      "Backup step #{info.step} of #{info.stamp || "a starting backup"} was on node " <>
-        "#{info.node}, which stopped responding, and has no attempts left: the backup failed"
-    )
+    if interrupt(info, "Interrupted: node #{info.node} stopped responding") != :finished do
+      Logger.error(
+        "Backup step #{info.step} of #{info.stamp || "a starting backup"} was on node " <>
+          "#{info.node}, which stopped responding, and has no attempts left: the backup failed"
+      )
+    end
 
-    interrupt(info, "Interrupted: node #{info.node} stopped responding")
     reclaimed_event(info, :interrupted)
     result
   end
@@ -895,8 +915,9 @@ defmodule KilnCMS.Backups.Chain do
   @doc """
   Release a lock whose step job is gone (completed, discarded or canceled
   without moving the chain on, or deleted): a step killed by its timeout, a
-  job discarded by Lifeline, a linked exit. The run fails as interrupted and
-  the waiting request is promoted. `{:ok, :none | {:orphaned, info}}`.
+  job discarded by Lifeline, a linked exit. The run fails as interrupted (a
+  finish that had in fact finished is completed instead,
+  `Steps.interrupt_finish/4`) and the waiting request is promoted. `{:ok, :none | {:orphaned, info}}`.
   """
   @spec reap() :: {:ok, term()} | {:error, term()}
   def reap do
@@ -907,13 +928,13 @@ defmodule KilnCMS.Backups.Chain do
           else: {:ok, :none}
       end)
 
-    with {:ok, {:orphaned, info}} <- result do
+    with {:ok, {:orphaned, info}} <- result,
+         outcome when outcome != :finished <-
+           interrupt(info, "Interrupted: the backup's step job ended without finishing its step") do
       Logger.error(
         "Backup step #{info.step} of #{info.stamp || "a starting backup"} ended without " <>
           "finishing its step: the backup failed and the lock was released"
       )
-
-      interrupt(info, "Interrupted: the backup's step job ended without finishing its step")
     end
 
     result
@@ -941,11 +962,21 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   # After the commit: the Run, and the failure manifest when the files are here.
+  # `:finished` when the step was a finish that had in fact finished (#2419):
+  # it is completed, not failed (`Steps.interrupt_finish/4`).
   #
   # A resume chain (#2539) whose start never re-opened the run (discarded or
   # killed before it claimed the lock, or before the re-open) has no run of its
   # own to fail: the run still names the chain it last ran under. It gets the
   # refusal note instead of nothing.
+  defp interrupt(%{step: :finish, stamp: stamp} = info, message) when is_binary(stamp) do
+    Steps.interrupt_finish(stamp, info.chain, info.dir_id, message)
+  rescue
+    error ->
+      Logger.warning("Couldn't record the interrupted backup: #{Exception.message(error)}")
+      :ok
+  end
+
   defp interrupt(%{resume: stamp} = info, message) when is_binary(stamp) do
     if Recorder.from_run(stamp, info.chain).run,
       do: Steps.interrupt(stamp, info.chain, info.dir_id, message),

@@ -175,6 +175,44 @@ defmodule KilnCMS.Backups.ChainRaceTest do
     end
   end
 
+  # #2543: the advisory lock alone holds a request back. The `:ensure`
+  # upsert's row lock also serializes two lock transactions today, so the
+  # race above passes without the advisory lock; this one does not: the
+  # holder takes only the advisory key and never touches the lock row.
+  test "a transaction holding only the advisory lock holds a request back until it commits" do
+    parent = self()
+
+    holder =
+      Task.async(fn ->
+        unboxed(fn ->
+          Repo.transaction(fn ->
+            Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+              Chain.lock_key()
+            ])
+
+            send(parent, {:holding, self()})
+
+            receive do
+              :go -> :ok
+            end
+          end)
+        end)
+      end)
+
+    assert_receive {:holding, pid}, 10_000
+
+    request =
+      Task.async(fn ->
+        unboxed(fn -> Backups.request([trigger: "manual"], Backups.system()) end)
+      end)
+
+    assert Task.yield(request, 500) == nil
+
+    send(pid, :go)
+    assert {:ok, :ok} = Task.await(holder, 10_000)
+    assert {:ok, %{status: :started}} = Task.await(request, 10_000)
+  end
+
   # #2554: the marker sync takes the same advisory lock, so a request that
   # arrives while it moves the markers waits for it, and a backup can never
   # start (and later sync markers of its own) in the middle of it.

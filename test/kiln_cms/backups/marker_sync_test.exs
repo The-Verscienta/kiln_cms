@@ -525,6 +525,29 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       end
     end
 
+    # #2543: the beat's upsert writes a nil id too, so the fan-out stops
+    # queueing syncs for a directory that is gone ("no node with that
+    # directory" every slot).
+    test "a node whose directory lost its id stops reporting it; no job is queued for the old id" do
+      a = host!("a", "20260801-031700")
+      b = host!("b", "20260801-041700")
+
+      tick_as(a, "a@host")
+      state_b = tick_as(b, "b@host")
+      assert {:ok, id_b} = DirId.current(b)
+      assert beat_of("b@host").dir_id == id_b
+
+      # B's volume is replaced by an empty one: no backups, no id file.
+      for entry <- File.ls!(b), do: File.rm_rf!(Path.join(b, entry))
+      tick_as(b, state_b)
+
+      refute File.exists?(DirId.path(b))
+      assert beat_of("b@host").dir_id == nil
+
+      assert :ok = as_node(a, fn -> perform_job(MarkerSyncWorker, %{}) end)
+      assert routed_jobs() == []
+    end
+
     # The mutation check: without the heartbeat's ids (the job turned off
     # here, so no tick creates one) the test above fails. B is never reached.
     test "without the heartbeat's ids, a host whose node never fetches the cron job stays " <>
