@@ -244,15 +244,18 @@ defmodule KilnCMS.Analytics do
   arrangements of `2, 1, 1, 1, 0`, and each category then takes 0, 1 or 2
   across the 21 candidates.
 
-  This rule was **found by enumeration, not derived**. Over thresholds 2–20 and
-  view totals up to 50, with five categories (and with four or six), no
-  all-hidden publication leaves any category a single value, and no partial
-  publication leaves a suppressed category a single *nonzero* value. With three
-  categories it would not hold — `2, 2, 2` at a threshold of 3 is pinned — so a
-  change to `referrer_sources/0` means re-running that search.
-  `test/kiln_cms/analytics/referrer_suppression_test.exs` re-runs it over
-  `referrer_sources/0` automatically, for thresholds 2, 3, 5 and 10 and totals
-  up to the threshold plus four, where the tightest all-hidden classes sit.
+  This rule was **found by enumeration, not derived**. Searches run outside
+  the test suite while it was written (thresholds 2–20, view totals up to 50,
+  with five categories, and with four or six) found no all-hidden publication
+  that leaves any category a single value, and no partial publication that
+  leaves a suppressed category a single *nonzero* value. With three categories
+  it would not hold (`2, 2, 2` at a threshold of 3 is pinned), so a change to
+  `referrer_sources/0` means re-running a search that wide.
+  `test/kiln_cms/analytics/referrer_suppression_test.exs` checks the same
+  property over `referrer_sources/0` for thresholds 2, 3, 5 and 10 and totals
+  up to the threshold plus four. That bound caps the test's cost; it is not
+  where the tightest classes sit (at a threshold of 10 they sit below it), and
+  totals above it rest on the wider search, not on the test.
 
   The cost falls on tiny days: simulating item-days that average one to ten
   views over a typical mix of sources, 0.1–4.1% of them move from a partial

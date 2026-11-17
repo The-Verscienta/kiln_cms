@@ -134,13 +134,14 @@ carries the reasoning.
 
 ## Known issues
 
-<a id="all-hidden-referrer-breakdown-recoverable"></a>
+<a id="referrer-breakdowns-differenced"></a>
 
-- **An all-hidden referrer breakdown can still be recovered at a small view total.** Affects sites with referrer attribution on
-  (`KILN_ANALYTICS_REFERRERS`), on the analytics dashboard and in the export. A reader who knows the suppression rule can rule
-  out every split it would have published partially, and for some small totals one split is left: at the default threshold
-  of 5, an item with 5 views shown as five `"hidden"` categories had exactly one view from each source. There is no
-  workaround short of turning referrer attribution off. ([#2981](https://github.com/The-Verscienta/kiln_cms/issues/2981))
+- **Two referrer breakdowns of overlapping traffic can be differenced to recover a count both suppressed.** Affects sites with
+  referrer attribution on (`KILN_ANALYTICS_REFERRERS`). Each breakdown is protected on its own, but Kiln publishes
+  several of the same views: the dashboard's span beside the export's per-day rows, the site-wide chart beside an
+  item's bars, the 7-day window beside the 30-day one, and today read twice as it fills. A reader holding two of them
+  can subtract one from the other. There is no workaround short of turning referrer attribution off.
+  ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989))
 
 ## Added
 
@@ -695,8 +696,32 @@ carries the reasoning.
   written before this release keeps what it published. No configuration or
   migration.
 
-  This does not cover the all-hidden case, which is listed under Known issues.
+  The all-hidden case is covered by the entry below; two breakdowns read
+  together are not, which is listed under Known issues.
   ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752))
+
+<a id="referrer-breakdown-all-hidden"></a>
+
+- **A referrer breakdown hidden whole no longer lets a reader who knows the rule recover its counts, taken on its own.**
+  Until now, at the default threshold of 5, five views with one from each
+  source (direct, internal, search, social, other) was the only 5-view
+  breakdown published as five `"hidden"` values. A reader who knew the
+  suppression rule and saw the item's exact total of 5 beside an all-hidden
+  breakdown could therefore name every count. Now a breakdown of five views
+  or fewer, spread over four sources or more, and with every source that
+  has any views below the threshold, is also hidden whole. At a total of 5 that adds
+  the twenty arrangements of `2, 1, 1, 1, 0`, so each source could be 0, 1
+  or 2.
+
+  What you'll see: on the lowest-traffic items and days, a few referrer
+  breakdowns that used to show `"< n"` labels now show every category as
+  hidden, on the dashboard and in the export alike. Busier items publish as
+  before. No configuration or migration; an export file written before this
+  release keeps what it published.
+
+  This covers one breakdown read on its own. Two breakdowns of overlapping
+  traffic read together are a separate gap, listed under Known issues.
+  ([#2981](https://github.com/The-Verscienta/kiln_cms/issues/2981))
 
 <a id="backup-hold-sync-after-change"></a>
 

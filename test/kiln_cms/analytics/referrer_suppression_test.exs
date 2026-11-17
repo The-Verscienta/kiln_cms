@@ -292,7 +292,9 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
     # The reader's whole view of one publication is its total and its labels,
     # so every breakdown of a total, grouped by what the algorithm publishes,
     # is every candidate class there is. Totals run to the threshold plus
-    # four: the tightest all-hidden class sits at the threshold plus three.
+    # four to keep the test fast; that covers the classes the rule was built
+    # around (threshold 5, total 5) but not every total. Larger totals rest on
+    # the wider search described in `Analytics.suppress_referrer_group/1`.
     test "no small total leaves a suppressed category pinned" do
       for threshold <- [2, 3, 5, 10], total <- 0..(threshold + 4) do
         put_threshold(threshold)
