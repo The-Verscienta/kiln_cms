@@ -282,6 +282,16 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
       for field <- fields, do: assert(field["__typename"] =~ "Json")
     end
 
+    test "an address is served as the generic JSON value (#2279)", %{admin: admin} do
+      define!(admin, %{name: "office", field_type: :address})
+
+      post = post!(admin, %{"office" => %{"country" => "gb", "postal_code" => "sw1a1aa"}})
+
+      assert %{"fields" => [field]} = one(post, ["office"])
+      assert field["name"] == "office"
+      assert field["__typename"] =~ "Json"
+    end
+
     test "the format types: strings through customString, json as the generic value (#2278)",
          %{admin: admin} do
       define!(admin, %{name: "contact", field_type: :email})

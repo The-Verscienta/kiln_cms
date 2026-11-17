@@ -17,6 +17,10 @@ defmodule KilnCMS.CMS.FieldConstraints do
     * `pattern` — a regular expression the whole value must match
       (anchored, unicode), with `pattern_message` as the admin's own
       explanation when it does not;
+    * `palette` — on a `:color` field, the hex colors it may hold
+      (`KilnCMS.CMS.FieldTypes.Color`, #2434);
+    * `json_schema` — on a `:json` field, a draft 2020-12 JSON Schema its value
+      must satisfy (`KilnCMS.CMS.FieldSchema`, `KilnCMS.CMS.FieldTypes.Json`, #2434);
     * `unique` — recorded here and shape-checked on save; enforced by the
       write path (`KilnCMS.CMS.UniqueValues`), not by `check/3`.
 
@@ -40,7 +44,7 @@ defmodule KilnCMS.CMS.FieldConstraints do
   """
   use Gettext, backend: KilnCMSWeb.Gettext
 
-  @keys ~w(min max min_length max_length pattern pattern_message unique)
+  @keys ~w(min max min_length max_length pattern pattern_message unique palette json_schema)
   @max_subject 2_000
   @match_limit 100_000
   @recursion_limit 1_000
@@ -63,6 +67,8 @@ defmodule KilnCMS.CMS.FieldConstraints do
 
   def allowed_keys(:text, :plain), do: ~w(min_length max_length pattern pattern_message)
   def allowed_keys(type, _format) when type in [:date, :datetime, :slug], do: ["unique"]
+  def allowed_keys(:color, _format), do: ["palette"]
+  def allowed_keys(:json, _format), do: ["json_schema"]
   def allowed_keys(_type, _format), do: []
 
   @doc """
@@ -123,6 +129,31 @@ defmodule KilnCMS.CMS.FieldConstraints do
     end
   end
 
+  # A JSON value is a list or map whole, never a list of items (#2434).
+  def check(%{field_type: :json} = def, value, path) do
+    path = path || def.name
+
+    case normalize(Map.get(def, :validation)) do
+      %{"json_schema" => %{} = schema} when schema != %{} and not is_nil(value) ->
+        case KilnCMS.CMS.FieldSchema.validate(value, schema) do
+          :ok ->
+            []
+
+          {:error, messages} ->
+            text =
+              dgettext("errors", "%{field} doesn't match its JSON Schema: %{reasons}",
+                field: field(def, path),
+                reasons: Enum.join(messages, "; ")
+              )
+
+            [{path, def.label, {:full, text}}]
+        end
+
+      _none ->
+        []
+    end
+  end
+
   def check(def, value, path) do
     path = path || def.name
     validation = normalize(Map.get(def, :validation))
@@ -166,6 +197,8 @@ defmodule KilnCMS.CMS.FieldConstraints do
       case type do
         :integer -> parse(Integer.parse(value))
         :float -> parse(Float.parse(value))
+        :color -> with {:ok, hex} <- KilnCMS.CMS.FieldTypes.Color.normalize(value), do: hex
+        :json -> with {:ok, decoded} <- Jason.decode(value), do: decoded
         _ -> value
       end
 
@@ -211,6 +244,21 @@ defmodule KilnCMS.CMS.FieldConstraints do
       problem(def, path, min_length(validation["min_length"], length, field)) ++
         problem(def, path, max_length(validation["max_length"], length, field)) ++
         problem(def, path, pattern(validation, value, field))
+    end
+  end
+
+  defp scalar(%{field_type: :color} = def, %{"palette" => palette}, path, value)
+       when is_list(palette) and is_binary(value) do
+    allowed = KilnCMS.CMS.FieldTypes.Color.palette(%{validation: %{"palette" => palette}})
+
+    if allowed == [] or value in allowed do
+      []
+    else
+      problem(
+        def,
+        path,
+        dgettext("errors", "%{field} must be one of the palette colors", field: field(def, path))
+      )
     end
   end
 

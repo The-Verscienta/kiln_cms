@@ -11,7 +11,7 @@ defmodule KilnCMS.CMS.ScalarLists do
   sub-field holds one scalar (`KilnCMS.CMS.Changes.ClearMultiple`).
 
   Types left out on purpose: `:json` (a value may already be an array), the
-  composite types (`:range`, `:key_value`, `:link`, `:geolocation`,
+  composite types (`:range`, `:key_value`, `:link`, `:address`, `:geolocation`,
   `:datetime_range` — a `:group` holds several of those), `:recurrence`
   (already a rule for many dates), `:computed` (derived), `:boolean`
   (a list of them means nothing), `:text` (HTML per item — a `:group`),

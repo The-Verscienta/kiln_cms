@@ -993,6 +993,78 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     """
   end
 
+  # A `:color` field restricted to a palette (#2434): one swatch per allowed
+  # color, as radios (the server refuses anything else regardless). A
+  # not-required field also offers "None", so a value can be cleared. A color
+  # the palette no longer holds (stored before it narrowed) is shown as the
+  # current value and kept until changed.
+  def custom_field_input(%{definition: %{field_type: :color, multiple: multiple}} = assigns)
+      when multiple != true do
+    case KilnCMS.CMS.FieldTypes.Color.palette(assigns.definition) do
+      [] ->
+        default_custom_field_input(assigns)
+
+      palette ->
+        current = current_color(assigns.value)
+        stale = if current != "" and current not in palette, do: current
+
+        assigns =
+          assigns
+          |> assign(:palette, palette)
+          |> assign(:current, current)
+          |> assign(:stale, stale)
+
+        ~H"""
+        <fieldset
+          id={cf_id(@definition)}
+          aria-invalid={@errors != [] && "true"}
+          aria-describedby={@errors != [] && cf_errors_id(@definition)}
+        >
+          <legend class="mb-1 block text-sm font-medium">{@definition.label}</legend>
+          <div class="flex flex-wrap items-center gap-2">
+            <label
+              :if={not @definition.required}
+              class="inline-flex cursor-pointer items-center gap-1 rounded-full border border-base-content/20 px-2 py-1 text-xs has-[:checked]:border-primary has-[:checked]:ring-2 has-[:checked]:ring-primary/40"
+            >
+              <input
+                type="radio"
+                name={@name}
+                value=""
+                checked={@current == ""}
+                class="sr-only"
+              />
+              {gettext("None")}
+            </label>
+            <label
+              :for={color <- Enum.reject([@stale | @palette], &is_nil/1)}
+              class="cursor-pointer"
+              title={color}
+            >
+              <input
+                type="radio"
+                name={@name}
+                value={color}
+                checked={@current == color}
+                required={@definition.required}
+                class="peer sr-only"
+              />
+              <span
+                class="block size-8 rounded-full border border-base-content/20 transition peer-checked:ring-2 peer-checked:ring-primary peer-checked:ring-offset-2 peer-focus-visible:ring-2 peer-focus-visible:ring-primary"
+                style={"background-color: #{color}"}
+              >
+                <span class="sr-only">{color}</span>
+              </span>
+            </label>
+          </div>
+          <p :if={@definition.help_text} class="mt-1 text-xs text-base-content/70">
+            {@definition.help_text}
+          </p>
+          <.custom_field_errors_list definition={@definition} errors={@errors} />
+        </fieldset>
+        """
+    end
+  end
+
   # A `:json` field (#2278): a monospace textarea, with the stored structure
   # pretty-printed. After a failed save the value is what was posted, so the
   # editor sees their own text (and the parse error beside it), not a
@@ -1030,7 +1102,9 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   #
   # A type declaring `input_hook/1` (#1918) gets its widget wrapped in the
   # hook's element, so the hook sees every part of a composite field.
-  def custom_field_input(assigns) do
+  def custom_field_input(assigns), do: default_custom_field_input(assigns)
+
+  defp default_custom_field_input(assigns) do
     case field_type_hook(assigns.definition) do
       nil ->
         bare_custom_field_input(assigns)
@@ -2293,6 +2367,15 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   end
 
   defp key_value_text(_value), do: ""
+
+  defp current_color(value) when is_binary(value) do
+    case KilnCMS.CMS.FieldTypes.Color.normalize(value) do
+      {:ok, hex} -> hex
+      :error -> ""
+    end
+  end
+
+  defp current_color(_value), do: ""
 
   defp json_text(value) when is_binary(value), do: value
 

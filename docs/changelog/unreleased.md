@@ -7,6 +7,19 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="address-field-type-name-upgrade"></a>
+
+- **The field type name `address` is reserved (#2279).**
+  Kiln now ships a built-in `:address` type, and a name can be registered only
+  once. An overlay or plugin `Kiln.FieldType` that registers `address` must be
+  renamed, in the module's `name/0` and in any stored field definition;
+  `mix kiln.plugins.doctor` fails otherwise. A stored definition that already
+  used the name is cast by the built-in type. No migration. Rolling back to
+  1.8.0 or older needs the `address` fields removed first, like `key_value`
+  and `telephone`; see
+  [docs/releasing.md](../releasing.md#new-values-in-an-atom-column).
+
+
 <a id="flexible-item-types-upgrade"></a>
 
 - **Run `mix ash.migrate` (new `field_definitions.flex_of_id`, nullable, and `item_setting`, default `false`; part of #2282). Nothing changes for existing fields; rolling back is safe.**
@@ -59,6 +72,26 @@ carries the reasoning.
   See [docs/releasing.md](../releasing.md#rolling-back-past-backup-destinations).
 
 ## Added
+
+<a id="address-field-type"></a>
+
+- **A built-in `:address` custom field type: a postal address stored as one object (country, administrative area, locality, postal code, two address lines), with a country select in the editor (#2279).**
+  The country is an ISO 3166-1 alpha-2 code and is required once any other
+  part is given; parts are trimmed, single-line and capped, and unknown keys
+  are refused. The postal code is upper-cased and given its canonical spacing,
+  and its format is checked for US, CA, GB, DE, FR, NL, AU, ES, IT, JP, CH, SE,
+  BR and IN; any other country takes free text. No licensed dataset ships: the
+  country list is the public ISO assignment and the formats are a small
+  hand-written table. Served as generic JSON, never sortable, filterable only
+  for "Empty or not"; a `searchable` flag indexes the lines, locality, region
+  and postal code. Guide:
+  [Address fields](../extending-content.md#address-fields).
+  - **Not yet.** Labels and required parts that follow the country,
+    administrative-area lists, a schema.org `PostalAddress` in the JSON-LD
+    output, and a geocode hand-off to `:geolocation`.
+
+
+
 
 <a id="number-field-options"></a>
 
@@ -206,6 +239,18 @@ carries the reasoning.
   implements the behaviour and has a usable `kind/0` that neither
   `local`, `rclone` nor another module already has. See *Backup
   destinations* in [plugin-extensibility.md](../plugin-extensibility.md).
+
+<a id="color-palette-json-schema"></a>
+
+- **A color field can be limited to a palette, and a JSON field can carry a JSON Schema: both are checked when a value changes.**
+  Both live in the field's existing `validation` map, so there is no migration, and field-definition export and import carry them.
+  - **`validation["palette"]` on a `:color` field** is a list of 1 to 64 hex colors (`#rgb` or `#rrggbb`). Any other color is refused on every write surface that changes the value (editor, JSON:API, GraphQL, MCP, imports), and the editor shows the palette as swatches, plus a **None** choice when the field isn't required. A palette entry and a value are compared after tidying, so `#F80` matches `#ff8800`. A field's default must be in its palette. A color stored before the palette narrowed stays shown and kept until someone changes it.
+  - **`validation["json_schema"]` on a `:json` field** is a JSON Schema, draft 2020-12 only (checked with the `jsv` library, now a direct dependency; it was already in the tree through `req_llm`). It is admin input that runs on every write, so it is bounded: at most 16 KB encoded, 16 levels deep and 1,000 values. References must be local (`"$ref": "#/$defs/dose"`); a `$ref` that doesn't start with `#`, and `$id`, `$dynamicRef`, `$recursiveRef` and `$dynamicAnchor`, are refused when the definition is saved, and no remote reference is ever fetched. `format` is an annotation, not asserted. A check runs with a 1-second deadline, so a pathological `pattern` fails the write with a message instead of holding the request. A failure names the offending part, for example *Spec (spec) doesn't match its JSON Schema: /dosage: value 1 is lower than minimum 3* (at most five problems). The value is still held to the existing JSON field limits first. A value already stored, or restored from a version, is not re-judged by a rule set after it; only a changed value is checked.
+  - **Set them** in `/editor/fields` (admin only): the **Validation (optional)** group of a color field gains **Palette** (hex colors separated by commas or spaces), and of a JSON field gains **JSON Schema** (JSON text).
+  - **Schema export** gains two annotations, `x-kiln-palette` (the normalized hex list) and `x-kiln-json-schema` (the admin's schema, whole). They are annotations, not assertions, because a stored value may predate the rule.
+  - **Upgrade:** nothing to run. After rolling back, the previous release ignores a stored palette or schema (any color or JSON passes), and refuses to save a color or JSON field definition that still carries one, because it takes no constraints for those types; remove the key first.
+
+  See [Constrain the values of a field](../extending-content.md#constrain-the-values-of-a-field).
 
 <a id="computed-titles"></a>
 

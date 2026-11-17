@@ -193,7 +193,8 @@ defmodule KilnCMS.CMS.SearchableFields do
 
   # What a built-in composite type (#2278) contributes when no extractor
   # decides: a link its label only (the URL, target and `rel` are not prose),
-  # a key/value list its values (not its keys), a range nothing. Every other
+  # a key/value list its values (not its keys), a range nothing, an address
+  # its lines, locality, region and postal code. Every other
   # type reads with the generic rule.
   defp type_texts(%{field_type: :link}, %{"label" => label}) when is_binary(label),
     do: default_texts(label)
@@ -209,6 +210,21 @@ defmodule KilnCMS.CMS.SearchableFields do
   end
 
   defp type_texts(%{field_type: :key_value}, _value), do: []
+
+  # An address (#2279): the lines, locality, administrative area and postal
+  # code, so a search for a street or a postcode finds the record. The country
+  # is a code, not prose, and is left out.
+  defp type_texts(%{field_type: :address}, %{} = address) do
+    ~w(address_line1 address_line2 locality administrative_area postal_code)
+    |> Enum.flat_map(fn key ->
+      case Map.get(address, key) do
+        text when is_binary(text) -> default_texts(text)
+        _other -> []
+      end
+    end)
+  end
+
+  defp type_texts(%{field_type: :address}, _value), do: []
   defp type_texts(_definition, value), do: default_texts(value)
 
   # An extractor runs inside every indexing write: a bug in it — a raise, a

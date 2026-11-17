@@ -806,6 +806,10 @@ defmodule KilnCMS.MixProject do
       # (docs/seo.md). Declared directly rather than leaned on as an `ash_ai`
       # transitive: a minor bump there could make it optional and break us.
       {:req_llm, "~> 1.17"},
+      # JSON Schema (draft 2020-12) validation of a `:json` custom field's
+      # value (#2434). Already in the tree through `req_llm`; declared directly
+      # so a bump there cannot drop it. See `KilnCMS.CMS.FieldSchema`.
+      {:jsv, "~> 0.26"},
       {:ash_admin, "~> 1.0"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       # `mix kiln.gen.content` and `mix kiln.gen.plugin` are Igniter tasks, and

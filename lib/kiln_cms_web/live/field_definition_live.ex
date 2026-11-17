@@ -1703,6 +1703,35 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     if is_binary(value) and String.trim(value) != "", do: {:ok, value}, else: :error
   end
 
+  # A palette is posted as text, colors separated by commas or whitespace
+  # (#2434); a stray token stays in, so the save names the palette input.
+  defp constraint_value("palette", _type, value) when is_binary(value) do
+    case String.split(value, [",", " ", "\n", "\t", ";"], trim: true) do
+      [] -> :error
+      colors -> {:ok, colors}
+    end
+  end
+
+  # A JSON Schema is posted as JSON text; text that does not parse stays text,
+  # so the save refuses it beside the input.
+  defp constraint_value("json_schema", _type, value) when is_binary(value) do
+    text = String.trim(value)
+
+    cond do
+      text == "" ->
+        :error
+
+      byte_size(text) > KilnCMS.CMS.FieldSchema.max_bytes() * 2 ->
+        {:ok, text}
+
+      true ->
+        case Jason.decode(text) do
+          {:ok, %{} = schema} -> {:ok, schema}
+          _unparsed -> {:ok, text}
+        end
+    end
+  end
+
   defp constraint_value(_key, _type, value) when is_number(value), do: {:ok, value}
   defp constraint_value(_key, _type, _value), do: :error
 
@@ -1716,6 +1745,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp type_atom("text"), do: :text
   defp type_atom("date"), do: :date
   defp type_atom("datetime"), do: :datetime
+  defp type_atom("color"), do: :color
+  defp type_atom("json"), do: :json
   defp type_atom(_other), do: :other
 
   defp format_atom("plain"), do: :plain
@@ -2376,11 +2407,23 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       number_options_summary(definition),
       length_summary(validation["min_length"], validation["max_length"]),
       if(validation["pattern"], do: gettext("Must match a pattern.")),
+      palette_summary(validation["palette"]),
+      if(is_map(validation["json_schema"]), do: gettext("Checked against a JSON Schema.")),
       if(validation["unique"] == true, do: gettext("Each value used once."))
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" ")
   end
+
+  defp palette_summary(colors) when is_list(colors) and colors != [],
+    do:
+      ngettext(
+        "Limited to %{count} color.",
+        "Limited to %{count} colors.",
+        length(colors)
+      )
+
+  defp palette_summary(_none), do: nil
 
   # A number's step, prefix and suffix (#2432), in the list.
   defp number_options_summary(definition) do
@@ -3730,6 +3773,39 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           hint={gettext("Shown to editors. Leave empty for the standard message.")}
           errors={key_errors(@errors, "pattern_message")}
         />
+        <.input
+          :if={"palette" in @keys}
+          id={"#{@id}-palette"}
+          name={"#{@name}[palette]"}
+          value={palette_text(@validation["palette"])}
+          type="textarea"
+          rows="2"
+          label={gettext("Palette")}
+          placeholder="#0f172a, #2563eb, #f59e0b"
+          hint={
+            gettext(
+              "Hex colors editors may choose, separated by commas (up to 64). Leave empty to allow any color."
+            )
+          }
+          errors={key_errors(@errors, "palette")}
+        />
+        <.input
+          :if={"json_schema" in @keys}
+          id={"#{@id}-json-schema"}
+          name={"#{@name}[json_schema]"}
+          value={schema_text(@validation["json_schema"])}
+          type="textarea"
+          rows="8"
+          class="field-input font-mono text-xs"
+          label={gettext("JSON Schema")}
+          placeholder={~s({"type": "object", "required": ["id"]})}
+          hint={
+            gettext(
+              "Every write is checked against it (JSON Schema draft 2020-12, up to 16 KB). References must point inside the schema; nothing is fetched. Leave empty for no check."
+            )
+          }
+          errors={key_errors(@errors, "json_schema")}
+        />
         <label :if={@unique?} for={"#{@id}-unique"} class="flex items-start gap-2 text-sm">
           <input type="hidden" name={"#{@name}[unique]"} value="false" />
           <input
@@ -3758,6 +3834,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     </fieldset>
     """
   end
+
+  defp palette_text(colors) when is_list(colors), do: Enum.join(colors, ", ")
+  defp palette_text(text) when is_binary(text), do: text
+  defp palette_text(_none), do: nil
+
+  defp schema_text(%{} = schema), do: Jason.encode!(schema, pretty: true)
+  defp schema_text(text) when is_binary(text), do: text
+  defp schema_text(_none), do: nil
 
   # A validation error belongs to the input of the constraint it opens with
   # ("pattern is not a valid regular expression: ...").

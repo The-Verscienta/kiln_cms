@@ -686,7 +686,7 @@ agility of a live marketplace while staying compile-time-safe:
   examples: `KilnCMS.CMS.FieldTypes.Geolocation` (#428, composite) and
   `KilnCMS.CMS.FieldTypes.Computed` (#429, derived). Every in-tree type's name
   is reserved, and since 1.9 that includes `email`, `telephone`, `color`,
-  `slug`, `time`, `json`, `range`, `key_value` and `link` as well as
+  `slug`, `time`, `json`, `range`, `key_value`, `link` and `address` as well as
   `geolocation`, `computed`, `datetime_range` and `recurrence`
   (`KilnCMS.CMS.FieldTypes.reserved/0` lists them with the core types).
   `mix kiln.plugins.doctor` rejects a plugin that claims one ("collides with
