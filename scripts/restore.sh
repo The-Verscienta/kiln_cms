@@ -134,13 +134,18 @@ pg_conn_decode() {
 # translated: the one to print, or to hand the app as its DATABASE_URL (Ecto
 # reads `ssl=false` and `pool_size` itself).
 # A string that is not a postgres:// or postgresql:// URI is refused (#2831)
-# when it mentions `password` (any case) or holds `://`: PG_CONN_ERROR says
-# why, PG_CONN_URL is empty, and the caller dies with it. A passwordless
-# `key=value` conninfo or a bare database name is left unchanged.
+# when it holds a `password=` or `sslpassword=` keyword (at the start, or
+# after whitespace or a closing quote; libpq keywords are case-sensitive and
+# cannot be quoted, and a match inside a quoted value only refuses more) or
+# `://`: PG_CONN_ERROR says why, PG_CONN_URL is empty, and the caller dies
+# with it. A passwordless `key=value` conninfo or a bare database name is
+# left unchanged.
 pg_conn_split() {
   local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
   local query="" has_query=0 q seg key val kept="" sep="" shown="" ssep=""
   local qpw="" has_qpw=0
+  # In a variable: bash 3.2 reads a quoted right-hand side of `=~` literally.
+  local secret_kw="(^|[[:space:]'])(ssl)?password[[:space:]]*="
   PG_CONN_URL="$url"
   PG_CONN_DISPLAY_URL="$url"
   PG_CONN_PASSWORD=""
@@ -156,13 +161,14 @@ pg_conn_split() {
   PG_CONN_DISPLAY_URL="$url"
   case "$url" in
     postgres://* | postgresql://*) ;;
-    *://* | *[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]*)
-      PG_CONN_URL=""
-      PG_CONN_DISPLAY_URL=""
-      PG_CONN_ERROR="is not a postgres:// URL and holds a password or another URL, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read. Write it as a postgres:// URL, password included (postgres:///database?host=/socket/dir for a Unix socket), or put the password in PGPASSWORD or ~/.pgpass."
+    *)
+      if [[ "$url" == *://* || "$url" =~ $secret_kw ]]; then
+        PG_CONN_URL=""
+        PG_CONN_DISPLAY_URL=""
+        PG_CONN_ERROR="is not a postgres:// URL and holds a password or another URL, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read. Write it as a postgres:// URL, password included (postgres:///database?host=/socket/dir for a Unix socket), or put the password in PGPASSWORD or ~/.pgpass."
+      fi
       return 0
       ;;
-    *) return 0 ;;
   esac
 
   rest="${url#*://}"

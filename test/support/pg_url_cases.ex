@@ -98,14 +98,27 @@ defmodule KilnCMS.Test.PgUrlCases do
        "postgresql://kiln@db/kiln", "hunter2"},
       {"another scheme is refused", "mysql://u:pw@h/db", :refused, nil},
       {"a leading space is not a URI, and is refused", " postgres://u:pw@h/db", :refused, nil},
-      # key=value strings (#2831): refused when they mention a password or
-      # hold a URL; libpq keywords are case-sensitive and cannot be quoted.
+      # key=value strings (#2831): refused when a keyword is `password` or
+      # `sslpassword`, or they hold a URL; libpq keywords are case-sensitive
+      # and cannot be quoted.
       {"a conninfo string with a password is refused", "host=db password=x dbname=kiln", :refused,
        nil},
       {"a quoted conninfo password is refused", "host=db password='a b\\'c' dbname=kiln",
        :refused, nil},
       {"a conninfo sslpassword is refused", "host=db sslpassword=x dbname=kiln", :refused, nil},
-      {"PASSWORD in capitals is refused", "host=db PASSWORD=x dbname=kiln", :refused, nil},
+      {"a conninfo password alone is refused", "password=x", :refused, nil},
+      {"spaces around `=` still make a password keyword", "host=db password = x", :refused, nil},
+      {"a keyword straight after a closing quote is refused", "host='x'password=y dbname=kiln",
+       :refused, nil},
+      # Not a libpq keyword (they are case-sensitive): libpq refuses the
+      # string by naming `PASSWORD`, without echoing its value
+      # (pg_url_libpq_test.exs), so it is passed through.
+      {"PASSWORD in capitals is libpq's to refuse", "host=db PASSWORD=hunter2 dbname=kiln",
+       "host=db PASSWORD=hunter2 dbname=kiln", nil},
+      {"`password` inside a value is not a keyword", "host=db dbname=password_reset_svc",
+       "host=db dbname=password_reset_svc", nil},
+      {"`password` at the start of a value is not a keyword", "host=db user=passwordless",
+       "host=db user=passwordless", nil},
       {"a dbname that libpq would expand into a URI is refused", "dbname='postgres://u:s@h/db'",
        :refused, nil},
       {"a passwordless conninfo string is kept", "host=/run/postgresql dbname=kiln_prod",
@@ -200,8 +213,9 @@ defmodule KilnCMS.Test.PgUrlCases do
   end
 
   @doc """
-  `{url, sets_tls?}`: whether the string itself says how libpq uses TLS
-  (`KilnCMS.Backups.PgUrl.sets_tls?/1`), so the app adds no `PGSSLMODE`.
+  `{url, sets_tls?}`: whether the string itself chooses libpq's sslmode
+  (`KilnCMS.Backups.PgUrl.sets_tls?/1`), so the app adds no `PGSSLMODE`. A
+  root certificate alone does not.
   """
   @spec tls_cases() :: [{String.t(), boolean()}]
   def tls_cases do
@@ -211,7 +225,7 @@ defmodule KilnCMS.Test.PgUrlCases do
       {"postgres://u@h/db?a=1&sslmode=disable", true},
       {"postgres://u@h/db?%73slmode=verify-full", true},
       {"postgres://u@h/db?requiressl=1", true},
-      {"postgres://u@h/db?sslrootcert=/ca.pem", true},
+      {"postgres://u@h/db?sslrootcert=/ca.pem", false},
       {"postgres://u@h/db?ssl=true", false},
       {"postgres://u@h/db?sslcert=/c.pem&sslkey=/k.pem", false},
       {"postgres://u@h/db?application_name=sslmode=x", false},
@@ -219,7 +233,7 @@ defmodule KilnCMS.Test.PgUrlCases do
       {"host=db dbname=kiln sslmode=require", true},
       {"host=db sslmode = verify-full dbname=kiln", true},
       {"host=db requiressl=1", true},
-      {"host=db sslrootcert='/etc/a b.pem'", true},
+      {"host=db sslrootcert='/etc/a b.pem'", false},
       {"host=db application_name='x sslmode=disable' dbname=kiln", false},
       {"host=db application_name=x\\ sslmode=disable dbname=kiln", false},
       {"host=db dbname=kiln", false},

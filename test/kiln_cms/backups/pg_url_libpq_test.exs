@@ -21,8 +21,7 @@ defmodule KilnCMS.Backups.PgUrlLibpqTest do
   @moduletag :libpq
 
   # For each refused case: the option libpq reads the secret into, and its
-  # value; `:refused` where libpq refuses the string itself (it still sat in
-  # argv until then).
+  # value.
   @refused %{
     "mysql://u:pw@h/db" => {"dbname", "mysql://u:pw@h/db"},
     " postgres://u:pw@h/db" => {"dbname", " postgres://u:pw@h/db"},
@@ -30,7 +29,9 @@ defmodule KilnCMS.Backups.PgUrlLibpqTest do
     "host=db password='a b\\'c' dbname=kiln" => {"password", "a b'c"},
     "host=db sslpassword=x dbname=kiln" => {"sslpassword", "x"},
     "dbname='postgres://u:s@h/db'" => {"dbname", "postgres://u:s@h/db"},
-    "host=db PASSWORD=x dbname=kiln" => :refused
+    "password=x" => {"password", "x"},
+    "host=db password = x" => {"password", "x"},
+    "host='x'password=y dbname=kiln" => {"password", "y"}
   }
 
   test "the harness is libpq: it refuses an Ecto option by name" do
@@ -86,6 +87,21 @@ defmodule KilnCMS.Backups.PgUrlLibpqTest do
     end
   end
 
+  test "an unknown keyword (PASSWORD) is refused by libpq, naming it, never its value" do
+    assert [{:error, message}] = Libpq.parse!(["host=db PASSWORD=hunter2 dbname=kiln"])
+    assert message =~ "PASSWORD"
+    refute message =~ "hunter2"
+  end
+
+  test "an accepted conninfo string mentioning `password` reads no password in libpq" do
+    for input <- ["host=db dbname=password_reset_svc", "host=db user=passwordless"] do
+      assert {:ok, {^input, []}} = PgUrl.split(input)
+      assert [{:ok, options}] = Libpq.parse!([input])
+      assert Map.get(options, "password") in [nil, ""], input
+      assert Map.get(options, "sslpassword") in [nil, ""], input
+    end
+  end
+
   test "a translated ssl=false reaches libpq as sslmode=disable" do
     for {_label, input, url, _password} <- PgUrlCases.cases(),
         url != :refused,
@@ -99,10 +115,8 @@ defmodule KilnCMS.Backups.PgUrlLibpqTest do
     assert Enum.sort(refused) == Enum.sort(Map.keys(@refused))
 
     for {input, result} <- Enum.zip(refused, Libpq.parse!(refused)) do
-      case Map.fetch!(@refused, input) do
-        {key, value} -> assert {:ok, %{^key => ^value}} = result, input
-        :refused -> assert {:error, _} = result, input
-      end
+      {key, value} = Map.fetch!(@refused, input)
+      assert {:ok, %{^key => ^value}} = result, input
     end
   end
 

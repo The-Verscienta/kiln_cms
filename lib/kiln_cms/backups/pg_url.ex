@@ -47,13 +47,15 @@ defmodule KilnCMS.Backups.PgUrl do
       `URI.parse`/`URI.to_string` round trip, which re-encodes.
 
   A string that is not a `postgres://` or `postgresql://` URI after
-  `normalize/1` is refused (#2831) when it mentions `password` (in any case,
-  so `sslpassword` too) or holds `://` (another scheme, or a `dbname=` that
-  libpq would expand into a URI): its secret would sit in argv for the whole
-  dump, and libpq echoes an unreadable one back in its errors. libpq keywords
-  are case-sensitive and cannot be quoted, so no secret-bearing `key=value`
-  string passes. A passwordless one (`host=/run/postgresql dbname=kiln_prod`)
-  and a bare database name pass through unchanged.
+  `normalize/1` is refused (#2831) when one of its `key=value` keywords is
+  `password` or `sslpassword`, or it holds `://` (another scheme, or a
+  `dbname=` that libpq would expand into a URI): its secret would sit in argv
+  for the whole dump, and libpq echoes an unreadable one back in its errors.
+  libpq keywords are case-sensitive and cannot be quoted, so no
+  secret-bearing `key=value` string passes; `PASSWORD=` is not a keyword, and
+  libpq refuses the string by naming it, never echoing its value. A
+  passwordless one (`host=/run/postgresql dbname=password_reset_svc`) and a
+  bare database name pass through unchanged.
 
       iex> KilnCMS.Backups.PgUrl.split("ecto://kiln:hunter2@db/kiln_prod?sslmode=require")
       {:ok, {"postgres://kiln@db/kiln_prod?sslmode=require", [{"PGPASSWORD", "hunter2"}]}}
@@ -65,7 +67,7 @@ defmodule KilnCMS.Backups.PgUrl do
   back to plaintext and never checks the certificate. `tls_env/3` turns the
   Repo's effective `:ssl` option into `PGSSLMODE` (and `PGSSLROOTCERT`) for
   the child (#2830), unless the URL or the operator's environment already
-  says how to connect.
+  sets an `sslmode`.
 
   `scripts/backup.sh`, `scripts/restore.sh` and `scripts/staging.sh` do the
   URL and password part in shell (`pg_conn_split`); the two are tested
@@ -87,11 +89,13 @@ defmodule KilnCMS.Backups.PgUrl do
   # server is reached or how securely.
   @ecto_only ~w(pool_size timeout idle_interval)
 
-  # Query keys (percent-decoded) and conninfo keywords that state how libpq
-  # uses TLS. `sslrootcert` counts: with it, libpq verifies even under
-  # `sslmode=require`, and `PGSSLMODE=require` with `sslrootcert=system` is
-  # refused as a weak mode.
-  @tls_keys ~w(sslmode requiressl sslrootcert)
+  # Query keys (percent-decoded) and conninfo keywords that choose libpq's
+  # sslmode. `sslrootcert` does not: it says what to verify against, not
+  # whether to encrypt, and alone leaves libpq on `prefer` (see `tls_env/3`).
+  @tls_keys ~w(sslmode requiressl)
+
+  # conninfo keywords whose value is a secret (#2831).
+  @secret_keywords ~w(password sslpassword)
 
   @doc """
   Rewrites a leading `ecto://` (any case) to `postgres://`, lower-cases a
@@ -173,7 +177,7 @@ defmodule KilnCMS.Backups.PgUrl do
 
   defp refused?(string) do
     String.contains?(string, "://") or
-      string |> String.downcase(:ascii) |> String.contains?("password")
+      Enum.any?(conninfo_keys(string), &(&1 in @secret_keywords))
   end
 
   defp parse(url) do
@@ -275,10 +279,10 @@ defmodule KilnCMS.Backups.PgUrl do
   defp password_env(password), do: [{"PGPASSWORD", password}]
 
   @doc """
-  Whether `url` itself states how libpq uses TLS: a `sslmode`, `requiressl`
-  or `sslrootcert` query parameter (keys percent-decoded) of a URI, or the
-  same keyword in a `key=value` string. Ecto's `ssl=true` does not count (see
-  `tls_env/3`).
+  Whether `url` itself chooses libpq's sslmode: a `sslmode` or `requiressl`
+  query parameter (keys percent-decoded) of a URI, or the same keyword in a
+  `key=value` string. Ecto's `ssl=true` does not count, nor does
+  `sslrootcert` alone (see `tls_env/3`).
   """
   @spec sets_tls?(String.t() | nil) :: boolean()
   def sets_tls?(nil), do: false
@@ -287,34 +291,60 @@ defmodule KilnCMS.Backups.PgUrl do
     url |> connection_keys() |> Enum.any?(&(&1 in @tls_keys))
   end
 
-  defp connection_keys(url) do
+  defp connection_keys(url), do: url |> connection_params() |> Enum.map(&elem(&1, 0))
+
+  # `{key, value}` for each parameter `url` gives libpq, decoded as libpq
+  # decodes it: a URI's query (a bare key has the value `nil`), or a
+  # `key=value` string's keywords.
+  defp connection_params(url) do
     case parse(url) do
-      {:ok, %{query: nil}} -> []
-      {:ok, %{query: query}} -> query |> String.split("&") |> Enum.map(&param_key/1)
-      :not_a_uri -> conninfo_keys(url)
+      {:ok, %{query: nil}} ->
+        []
+
+      {:ok, %{query: query}} ->
+        query |> String.split("&") |> Enum.map(&query_param/1)
+
+      :not_a_uri ->
+        conninfo_params(url)
     end
   end
 
-  # The keywords of a libpq `key=value` string (`conninfo_parse` in
-  # fe-connect.c): a keyword runs to whitespace or `=`, and a value is either
-  # single-quoted (a backslash escapes the next character) or runs to the
-  # next whitespace. A string without `=` is a bare database name and has
-  # none. A malformed string stops the scan: libpq refuses it anyway.
-  defp conninfo_keys(string) do
-    if String.contains?(string, "="), do: conninfo_keys(string, []), else: []
+  defp query_param(param) do
+    case String.split(param, "=", parts: 2) do
+      [key, value] -> {decode(key), decode(value)}
+      [_bare] -> {nil, nil}
+    end
   end
 
-  defp conninfo_keys(string, keys) do
+  defp conninfo_keys(string), do: string |> conninfo_params() |> Enum.map(&elem(&1, 0))
+
+  # The `{keyword, value}` pairs of a libpq `key=value` string
+  # (`conninfo_parse` in fe-connect.c): a keyword runs to whitespace or `=`,
+  # and a value is either single-quoted or runs to the next whitespace; in
+  # both a backslash takes the next character literally. A closing quote
+  # ends the value, so a keyword may follow it directly (`a='x'password=y`).
+  # A string without `=` is a bare database name and has none. A keyword
+  # with no `=` after it stops the scan and is not counted: libpq refuses
+  # the string there anyway.
+  defp conninfo_params(string) do
+    if String.contains?(string, "="), do: conninfo_params(string, []), else: []
+  end
+
+  defp conninfo_params(string, params) do
     case skip_space(string) do
       "" ->
-        Enum.reverse(keys)
+        Enum.reverse(params)
 
       rest ->
         {key, rest} = take_until(rest, &(&1 in ~c" \t\n\r\f\v="))
 
         case skip_space(rest) do
-          "=" <> value -> conninfo_keys(skip_value(skip_space(value)), [key | keys])
-          _malformed -> Enum.reverse([key | keys])
+          "=" <> value ->
+            {value, rest} = take_value(skip_space(value))
+            conninfo_params(rest, [{key, value} | params])
+
+          _malformed ->
+            Enum.reverse(params)
         end
     end
   end
@@ -332,18 +362,24 @@ defmodule KilnCMS.Backups.PgUrl do
 
   defp take_until(<<>>, _stop?, acc), do: {acc |> Enum.reverse() |> IO.iodata_to_binary(), ""}
 
-  defp skip_value("'" <> rest), do: skip_quoted(rest)
-  defp skip_value(rest), do: skip_unquoted(rest)
+  # `{value, rest}`. An unterminated quote takes the rest of the string.
+  defp take_value("'" <> rest), do: take_quoted(rest, [])
+  defp take_value(rest), do: take_unquoted(rest, [])
 
-  defp skip_quoted(<<?\\, _escaped, rest::binary>>), do: skip_quoted(rest)
-  defp skip_quoted(<<?', rest::binary>>), do: rest
-  defp skip_quoted(<<_c, rest::binary>>), do: skip_quoted(rest)
-  defp skip_quoted(<<>>), do: ""
+  defp take_quoted(<<?\\, c, rest::binary>>, acc), do: take_quoted(rest, [c | acc])
+  defp take_quoted(<<?', rest::binary>>, acc), do: {chars(acc), rest}
+  defp take_quoted(<<c, rest::binary>>, acc), do: take_quoted(rest, [c | acc])
+  defp take_quoted(<<>>, acc), do: {chars(acc), ""}
 
-  defp skip_unquoted(<<?\\, _escaped, rest::binary>>), do: skip_unquoted(rest)
-  defp skip_unquoted(<<c, _::binary>> = rest) when c in ~c" \t\n\r\f\v", do: rest
-  defp skip_unquoted(<<_c, rest::binary>>), do: skip_unquoted(rest)
-  defp skip_unquoted(<<>>), do: ""
+  defp take_unquoted(<<?\\, c, rest::binary>>, acc), do: take_unquoted(rest, [c | acc])
+
+  defp take_unquoted(<<c, _::binary>> = rest, acc) when c in ~c" \t\n\r\f\v",
+    do: {chars(acc), rest}
+
+  defp take_unquoted(<<c, rest::binary>>, acc), do: take_unquoted(rest, [c | acc])
+  defp take_unquoted(<<>>, acc), do: {chars(acc), ""}
+
+  defp chars(acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
 
   @doc """
   `{url, env}`: the TLS settings for a libpq child that match the app's own
@@ -363,12 +399,20 @@ defmodule KilnCMS.Backups.PgUrl do
       (`PGSSLROOTCERT=system`, libpq 16 or later). It fails closed: a
       connection that cannot be verified fails rather than going weaker.
 
-  An explicit choice wins, and then nothing is set: a `sslmode`, `requiressl`
-  or `sslrootcert` in the URL (`sets_tls?/1`), or a non-blank `PGSSLMODE` or
-  `PGSSLROOTCERT` in `ambient` (the operator's environment, which the child
-  inherits). Ecto's `ssl=true` is not such a choice: Ecto ignores it when the
-  Repo's `:ssl` is a list, so when the app verifies the server it is dropped
-  from the URL and the derived mode applies; otherwise it stays (libpq reads
+  An explicit sslmode wins, and then nothing is set: a `sslmode` or
+  `requiressl` in the URL (`sets_tls?/1`), or a non-blank `PGSSLMODE` in
+  `ambient` (the operator's environment, which the child inherits).
+
+  A root certificate alone (`sslrootcert` in the URL, or a non-blank
+  `PGSSLROOTCERT` in `ambient`) is not such a choice: without a mode libpq
+  stays on `prefer` and may connect in cleartext. The operator's root
+  certificate is kept (no `PGSSLROOTCERT` is added) and only `PGSSLMODE` is
+  set to the derived mode, except that `require` becomes `verify-full` when
+  the root certificate is `system`, which libpq refuses with a weaker mode.
+
+  Ecto's `ssl=true` is not a choice either: Ecto ignores it when the Repo's
+  `:ssl` is a list, so when the mode to set is stronger than `require` it is
+  dropped from the URL and the mode applies; otherwise it stays (libpq reads
   it as `sslmode=require`) and nothing is added.
   """
   @spec tls_env(String.t() | nil, term(), %{optional(String.t()) => String.t() | nil}) ::
@@ -376,15 +420,48 @@ defmodule KilnCMS.Backups.PgUrl do
   def tls_env(nil, _ssl, _ambient), do: {nil, []}
 
   def tls_env(url, ssl, ambient) when is_binary(url) do
-    derived = derive_tls(ssl)
+    case derive_tls(ssl) do
+      [] ->
+        {url, []}
 
+      [{"PGSSLMODE", mode} | _root] = derived ->
+        cond do
+          ambient_set?(ambient, "PGSSLMODE") -> {url, []}
+          sets_tls?(url) -> {url, []}
+          true -> url |> with_root_cert(derived, mode, ambient) |> with_ssl_true(url)
+        end
+    end
+  end
+
+  # The operator's root certificate stays; only the mode is set.
+  defp with_root_cert(url, derived, mode, ambient) do
+    case root_cert(url, ambient) do
+      nil -> derived
+      "system" -> [{"PGSSLMODE", "verify-full"}]
+      _file -> [{"PGSSLMODE", mode}]
+    end
+  end
+
+  # The URL's `sslrootcert` (the last one, as libpq keeps), which beats the
+  # environment's, or a non-blank `PGSSLROOTCERT`; `nil` for neither.
+  defp root_cert(url, ambient) do
+    url_root =
+      url
+      |> connection_params()
+      |> Enum.filter(&match?({"sslrootcert", _}, &1))
+      |> List.last()
+
+    case url_root do
+      {"sslrootcert", value} -> String.trim(value)
+      nil -> if ambient_set?(ambient, "PGSSLROOTCERT"), do: String.trim(ambient["PGSSLROOTCERT"])
+    end
+  end
+
+  defp with_ssl_true(env, url) do
     cond do
-      derived == [] -> {url, []}
-      ambient_tls?(ambient) -> {url, []}
-      sets_tls?(url) -> {url, []}
-      ssl_true?(url) and match?([{"PGSSLMODE", "require"}], derived) -> {url, []}
-      ssl_true?(url) -> {drop_ssl_true(url), derived}
-      true -> {url, derived}
+      not ssl_true?(url) -> {url, env}
+      env == [{"PGSSLMODE", "require"}] -> {url, []}
+      true -> {drop_ssl_true(url), env}
     end
   end
 
@@ -409,13 +486,11 @@ defmodule KilnCMS.Backups.PgUrl do
     [{"PGSSLMODE", "verify-full"}, {"PGSSLROOTCERT", root}]
   end
 
-  defp ambient_tls?(ambient) do
-    Enum.any?(["PGSSLMODE", "PGSSLROOTCERT"], fn var ->
-      case Map.get(ambient, var) do
-        value when is_binary(value) -> String.trim(value) != ""
-        _unset -> false
-      end
-    end)
+  defp ambient_set?(ambient, var) do
+    case Map.get(ambient, var) do
+      value when is_binary(value) -> String.trim(value) != ""
+      _unset -> false
+    end
   end
 
   defp ssl_true?(url) do

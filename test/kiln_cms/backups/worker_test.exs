@@ -238,7 +238,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
     test "split_credentials moves the password out of argv into PGPASSWORD" do
       # argv is world-readable via /proc/<pid>/cmdline; the environment is not.
-      assert {:ok, {url, [{"PGPASSWORD", "hunter2"}]}} =
+      assert {url, [{"PGPASSWORD", "hunter2"}]} =
                Worker.split_credentials("postgres://someone:hunter2@db.example.com:5432/kiln")
 
       refute url =~ "hunter2"
@@ -247,20 +247,33 @@ defmodule KilnCMS.Backups.WorkerTest do
 
     test "split_credentials decodes a percent-encoded password" do
       # Ecto/URI encode it; libpq wants the real bytes in PGPASSWORD.
-      assert {:ok, {_url, [{"PGPASSWORD", "p@ss word"}]}} =
+      assert {_url, [{"PGPASSWORD", "p@ss word"}]} =
                Worker.split_credentials("postgres://u:p%40ss%20word@h:5432/db")
     end
 
     test "split_credentials leaves a passwordless URL alone" do
-      assert {:ok, {"postgres://u@h:5432/db", []}} =
-               Worker.split_credentials("postgres://u@h:5432/db")
-
-      assert {:ok, {nil, []}} = Worker.split_credentials(nil)
+      assert {"postgres://u@h:5432/db", []} = Worker.split_credentials("postgres://u@h:5432/db")
+      assert {nil, []} = Worker.split_credentials(nil)
     end
 
-    test "split_credentials refuses a key=value string with a password (#2831)" do
-      assert {:error, :refused_conninfo} =
-               Worker.split_credentials("host=db password=hunter2 dbname=kiln")
+    test "split_credentials keeps its {url, env} shape; Steps' returns {:ok, _}" do
+      # The release console calls Worker.split_credentials/1 (deprecated
+      # surface, signature kept); the step chain uses the tagged one.
+      assert {"postgres://u@h/db", [{"PGPASSWORD", "pw"}]} =
+               Worker.split_credentials("postgres://u:pw@h/db")
+
+      assert {:ok, {"postgres://u@h/db", [{"PGPASSWORD", "pw"}]}} =
+               KilnCMS.Backups.Steps.split_credentials("postgres://u:pw@h/db")
+    end
+
+    test "split_credentials raises a readable error for a refused string (#2831)" do
+      error =
+        assert_raise ArgumentError, fn ->
+          Worker.split_credentials("host=db password=hunter2 dbname=kiln")
+        end
+
+      assert error.message =~ "is not a postgres:// URL"
+      refute error.message =~ "hunter2"
     end
 
     @tag :pg_tools

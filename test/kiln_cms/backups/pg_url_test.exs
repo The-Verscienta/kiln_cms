@@ -139,16 +139,81 @@ defmodule KilnCMS.Backups.PgUrlTest do
       end
     end
 
-    test "the operator's own PGSSLMODE or PGSSLROOTCERT wins, and nothing is added" do
+    test "the operator's own PGSSLMODE wins, and nothing is added" do
       ssl = [verify: :verify_peer, cacertfile: "/ca.pem"]
 
-      for ambient <- [%{"PGSSLMODE" => "disable"}, %{"PGSSLROOTCERT" => "/other.pem"}] do
+      for ambient <- [
+            %{"PGSSLMODE" => "disable"},
+            %{"PGSSLMODE" => "require", "PGSSLROOTCERT" => "/other.pem"}
+          ] do
         assert PgUrl.tls_env(@url, ssl, ambient) == {@url, []}
       end
 
-      for blank <- [%{"PGSSLMODE" => ""}, %{"PGSSLMODE" => "  ", "PGSSLROOTCERT" => nil}] do
-        assert {@url, [{"PGSSLMODE", "verify-full"} | _]} = PgUrl.tls_env(@url, ssl, blank)
+      for blank <- [
+            %{"PGSSLMODE" => ""},
+            %{"PGSSLMODE" => "  ", "PGSSLROOTCERT" => nil},
+            %{"PGSSLROOTCERT" => " "}
+          ] do
+        assert PgUrl.tls_env(@url, ssl, blank) ==
+                 {@url, [{"PGSSLMODE", "verify-full"}, {"PGSSLROOTCERT", "/ca.pem"}]}
       end
+    end
+
+    # A root certificate is not an sslmode: alone it leaves libpq on
+    # `prefer`, which falls back to cleartext. The mode is still set; the
+    # operator's root certificate is kept.
+    test "a root certificate alone still gets the derived mode, and is kept" do
+      require = [verify: :verify_none]
+      verify = [verify: :verify_peer, cacertfile: "/ca.pem"]
+
+      for {url, ambient} <- [
+            {@url, %{"PGSSLROOTCERT" => "/other.pem"}},
+            {"postgres://kiln@db/kiln?sslrootcert=/other.pem", @none},
+            {"postgres://kiln@db/kiln?%73slrootcert=/other.pem", @none},
+            {"host=db dbname=kiln sslrootcert='/etc/a b.pem'", @none}
+          ] do
+        assert PgUrl.tls_env(url, require, ambient) == {url, [{"PGSSLMODE", "require"}]}, url
+        assert PgUrl.tls_env(url, verify, ambient) == {url, [{"PGSSLMODE", "verify-full"}]}, url
+        assert PgUrl.tls_env(url, true, ambient) == {url, [{"PGSSLMODE", "verify-full"}]}, url
+      end
+    end
+
+    # libpq refuses `sslmode=require` with `sslrootcert=system` ("weak
+    # sslmode"); verify-full is the mode that works and is not weaker.
+    test "a `system` root certificate turns require into verify-full" do
+      for {url, ambient} <- [
+            {@url, %{"PGSSLROOTCERT" => "system"}},
+            {"postgres://kiln@db/kiln?sslrootcert=system", @none},
+            {"postgres://kiln@db/kiln?sslrootcert=system", %{"PGSSLROOTCERT" => "/other.pem"}},
+            {"host=db sslrootcert=system", @none}
+          ] do
+        assert PgUrl.tls_env(url, [verify: :verify_none], ambient) ==
+                 {url, [{"PGSSLMODE", "verify-full"}]},
+               url
+      end
+
+      # The URL's root certificate beats the environment's, as in libpq.
+      url = "postgres://kiln@db/kiln?sslrootcert=/other.pem"
+
+      assert PgUrl.tls_env(url, [verify: :verify_none], %{"PGSSLROOTCERT" => "system"}) ==
+               {url, [{"PGSSLMODE", "require"}]}
+    end
+
+    test "with a root certificate, ssl=true stays for require and goes for verify-full" do
+      url = "postgres://kiln@db/kiln?ssl=true&sslrootcert=/other.pem"
+      assert PgUrl.tls_env(url, [verify: :verify_none], @none) == {url, []}
+
+      assert PgUrl.tls_env(url, true, @none) ==
+               {"postgres://kiln@db/kiln?sslrootcert=/other.pem", [{"PGSSLMODE", "verify-full"}]}
+
+      system = "postgres://kiln@db/kiln?ssl=true&sslrootcert=system"
+
+      assert PgUrl.tls_env(system, [verify: :verify_none], @none) ==
+               {"postgres://kiln@db/kiln?sslrootcert=system", [{"PGSSLMODE", "verify-full"}]}
+    end
+
+    test "a root certificate with no TLS in the Repo still adds nothing" do
+      assert PgUrl.tls_env(@url, false, %{"PGSSLROOTCERT" => "system"}) == {@url, []}
     end
 
     test "ssl=true never makes it weaker than the Repo: dropped when the Repo verifies" do

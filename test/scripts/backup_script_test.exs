@@ -1965,6 +1965,27 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       refute error =~ "hunter2xyz"
     end
 
+    # As KilnCMS.Backups.Redact: a password under 6 characters is not
+    # scrubbed, or every `e` in the message would become `***`.
+    test "a password under 6 characters leaves pg_dump's words as they are", ctx do
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: connection to server failed: SSL was required" >&2
+      exit 2
+      """)
+
+      assert {_out, status} =
+               backup(ctx, "all", [
+                 {"DATABASE_URL", "ecto://kiln:e@db/kiln_prod"},
+                 {"PGPASSWORD", nil}
+               ])
+
+      assert status != 0
+
+      assert manifest!(ctx)["error"] =~
+               "pg_dump exited 2: pg_dump: error: connection to server failed: SSL was required"
+    end
+
     # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
     unless ShellTools.bash32(),
       do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
