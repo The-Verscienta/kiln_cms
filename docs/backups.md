@@ -999,7 +999,11 @@ place once it is complete, so nothing half-written ever carries a real
 backup's name. The two writers name their temporary files differently:
 
 - **`backup.sh`** writes `<name>.partial`, as it always has:
-  `db/kiln-db-20261117-031700.dump.partial`.
+  `db/kiln-db-20261117-031700.dump.partial`. Its manifest is the exception:
+  it goes to `manifest.json.<pid>-<random>.partial`
+  (`manifest.json.48211-117342.partial`), where `<random>` is between 100000
+  and 132767 (#2832). The script creates that file only if the name is
+  free, and picks another number if it is taken.
 - **An in-app backup step** writes `<name>.<job>-<attempt>.partial`, where
   `<job>` is the step's Oban job id and `<attempt>` its attempt (#2819):
   `db/kiln-db-20261117-031700.dump.48211-2.partial`,
@@ -1009,6 +1013,26 @@ backup's name. The two writers name their temporary files differently:
   `plan.json.48211-2.partial`, the media file lists `part01.48211-2.list` and
   `part01.48211-2.run.list`) and on `manifest.json.48211-2.partial` at the top
   of `BACKUP_DIR`.
+- **A manifest the app writes without a step**, the failure manifest of an
+  interrupted backup recorded from outside its step, goes to
+  `manifest.json.<random digits>.partial` (#2832).
+
+**No two writers share a manifest temporary name.** A cron run and an
+in-app backup that finish at the same moment each write their own file and
+rename it over `manifest.json`, so `manifest.json` is always one writer's
+complete file, the one that renamed last. Before #2832 both wrote
+`manifest.json.partial`, and could publish a mix of the two. The random and
+`<pid>-<random>` names keep writers apart; they fence nothing, since cron
+takes no lock.
+
+A manifest temporary file is renamed a moment after it is written, so one
+left at the top of `BACKUP_DIR` belongs to a writer stopped in between. Once
+it is more than 60 minutes old, the start of the next in-app backup and
+`backup.sh prune` (which also runs at the end of every `backup.sh all` that
+succeeds) both remove it. They remove only `manifest.json.<digits>.partial`
+and `manifest.json.<digits>-<digits>.partial`. The plain
+`manifest.json.partial` that an older `backup.sh` writes is never removed by
+either; delete one by hand once no older script is running.
 
 A step writes, checks (`pg_restore --list`, `tar -tzf`) and hashes its file
 under that name, outside the backup lock. Only the rename into place runs
@@ -3321,6 +3345,21 @@ A failed or [refused](#when-an-off-site-copy-is-refused) off-site copy after
 the set is complete keeps the set and fails the run, and the files after it are
 not copied.
 
+**`HUP`, `INT` and `TERM` stop the run at once (#2847).** The script runs
+`pg_dump`, `pg_restore --list`, `tar` and `rclone` in the background and
+waits for them, so a signal no longer waits for the dump, part or upload in
+progress to finish. It stops that program (`TERM`, then `KILL` if it still
+runs about 5 seconds later; a program paused with `kill -STOP` or Ctrl-Z is
+resumed first so it can act on the `TERM`), then removes its `.partial`
+files and, for `backup.sh all`, writes the failure manifest ("interrupted by
+SIGTERM"). A second signal during that cleanup is ignored, so it always
+finishes. At a terminal, Ctrl-C reaches the running program through the
+script's `TERM`, not directly. One case still waits: a program stuck in the
+kernel on a hung mount (a stalled NFS server) ignores both signals until the
+I/O returns, and the cleanup waits with it; only `kill -9` of the script ends
+that, and its [background loop](#when-a-cron-run-is-killed-outright-2478)
+stops the program once it can.
+
 **When a run is killed outright** (`kill -9`, the OOM killer, power loss), no
 cleanup runs, and the run's `.partial` files stay behind. It recovers on its
 own: see [When a cron run is killed outright](#when-a-cron-run-is-killed-outright-2478).
@@ -3339,6 +3378,32 @@ writing. `backup.sh all` creates the marker before the database dump whenever
 `MEDIA_DIR` is set, so a run killed during its dump, or during the dump's
 off-site copy, leaves one too. While a `.partial` is there, `backup.sh verify`
 skips that stamp's media set and `restore.sh media` refuses it.
+
+**The program it was running is stopped too (#2847).** A `pg_dump`, `tar` or
+`rclone` that the killed run started would otherwise run on, writing a
+`.partial` that nothing keeps fresh, until `prune` deleted the file under it
+and it went on filling disk through the deleted file. The script's background
+loop (below) stops it within 5 minutes of the kill: `TERM` first, then `KILL`
+if it still runs about 5 seconds later. It only does so when the script is
+certainly gone, and only to a process that still runs the same program and
+has the loop's own parent (both were adopted by the same process when the
+script died), so a process that has since taken the same PID is left alone.
+It reads the process's command line and parent with `ps`, or from `/proc`
+where `ps` has no `-p` (busybox). Where neither works it goes by the PID
+alone. While `ps` can't tell whether the script is alive, the loop keeps
+going, and after three such answers in a row it stops without stopping
+anything.
+
+What it can't stop:
+
+- a child the script started in the instant before the kill, before it
+  recorded the child's PID;
+- the commands it does not track: the `head | gzip` that writes an empty
+  media part, and those that only read (`find`, `stat`, the `sha256sum` that
+  hashes a finished file);
+- any child at all if `backup.sh` could not create its record in `TMPDIR`; the
+  run then warns "could not create a file in `<TMPDIR>`: a child of this run
+  would outlive a kill -9" and carries on.
 
 Nobody has to step in. While a run is alive, a background loop in `backup.sh`
 touches every `.partial` of its stamp every 5 minutes, so a run that is slow
@@ -3377,10 +3442,16 @@ stamp first in the same way. It runs the importer, then removes the `.partial`
 files of a stamp that has a History row (the app's own run, or an imported
 one) once every file of the stamp is more than an hour old. A cron leftover
 with no row yet is left for the importer. A `.partial` whose name carries no
-backup stamp is removed once it is an hour old, as before, and so is an
-in-app step's `manifest.json.<job>-<attempt>.partial` left at the top of
-`BACKUP_DIR` (cron's `manifest.json.partial` is left to `backup.sh`). It also
-empties the [trash directories](#temporary-files-and-the-trash-directories).
+backup stamp is removed once it is an hour old, as before, and so is a
+manifest temporary file left at the top of `BACKUP_DIR`: a step's
+`manifest.json.<job>-<attempt>.partial`, the app's
+`manifest.json.<random digits>.partial`, or `backup.sh`'s
+`manifest.json.<pid>-<random>.partial` (#2832). `backup.sh prune` removes the
+same files once they are an hour old. The plain `manifest.json.partial` of an
+older `backup.sh` is removed by neither
+([Temporary files](#temporary-files-and-the-trash-directories)). The start of
+an in-app backup also empties the
+[trash directories](#temporary-files-and-the-trash-directories).
 
 **If the stamp was never read.** With the marker sync turned off
 (`KILN_BACKUP_MARKER_SYNC_CRON=false`) and nobody opening the Backups page, or
@@ -3826,9 +3897,10 @@ backups are. Work from the copy you kept outside Kiln
    - a **Directory on this server** destination (a NAS share, a second
      disk, mounted on the new host): `cp /mnt/nas/kiln/db/<newest>.dump .`
 
-   Take the backup's `kiln-db-<stamp>.sha256` with it, and check it
-   (`sha256sum -c kiln-db-<stamp>.sha256`) before you restore. A
-   destination that was failing lacks the newest backups, so list each one
+   Take the backup's `kiln-db-<stamp>.sha256` with it, into the same
+   directory as the dump and under its own name: `restore.sh` checks the
+   dump against it in the next step. A destination that was failing lacks
+   the newest backups, so list each one
    (`rclone lsf nas:kiln-backups/site/db/`, `ls /mnt/nas/kiln/db/`) and take
    the newest stamp that has both its dump and its `.sha256`.
 3. **Restore the database:**
@@ -3836,6 +3908,17 @@ backups are. Work from the copy you kept outside Kiln
    RESTORE_DATABASE_URL=postgres://…/kiln_prod \
      ./scripts/restore.sh db kiln-db-<stamp>.dump
    ```
+   Expect `==> Verifying checksum from kiln-db-<stamp>.sha256` and
+   `kiln-db-<stamp>.dump: OK` first (#2877), then the prompt to type the
+   database name, then `==> pg_restore kiln-db-<stamp>.dump → kiln_prod`.
+   The check runs before the prompt and before anything touches the
+   database, so a damaged dump stops there with "nothing was restored". The
+   dump must keep its `kiln-db-<stamp>.dump` name, and a symlink to it must
+   too: the sidecar is looked for next to the path you give, by that name.
+   With no sidecar, `restore.sh` prints a warning and restores anyway (a dump
+   from before checksums has none), unless `RESTORE_REQUIRE_CHECKSUM=1` is
+   set. What can go wrong is under
+   [What can go wrong when restoring a dump](#what-can-go-wrong-when-restoring-a-dump).
 4. **Restore media.** Local adapter: fetch the whole media set for the stamp
    (every `kiln-media-<stamp>*` file, plus its `.sha256` sidecar) into one
    directory, then run `RESTORE_MEDIA_DIR=/data/kiln/uploads
@@ -3870,6 +3953,30 @@ Partial-loss variants: single-table mishaps can restore selectively
 (`pg_restore --table=…` from the same `-Fc` dump into a scratch DB, then copy
 rows over); content-level mistakes usually don't need backups at all — prefer
 in-app version restore / trash first.
+
+### What can go wrong when restoring a dump
+
+`restore.sh db` and `restore.sh drill` check the dump against its sidecar
+`kiln-db-<stamp>.sha256` before they ask for confirmation, create the
+database or run `pg_restore` (#2877). The sidecar must hold one well-formed
+line, name exactly the dump and nothing else, and match its bytes
+(`sha256sum -c`, or `shasum -a 256 -c` on macOS). It is the same check
+`restore.sh media` makes, and the reason it reads the sidecar and never
+`manifest.json` is in
+[ADR 0035](decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
+
+| Message (abridged) | Meaning |
+|---|---|
+| `checksum verification FAILED for kiln-db-<stamp>.dump — nothing was restored` | The dump is not the file the backup wrote: damaged in transit, truncated, or altered. Fetch it again, or use another copy or an older stamp. |
+| `kiln-db-<stamp>.sha256 does not list exactly kiln-db-<stamp>.dump — nothing was restored` | The sidecar names another file, or more than one. Fetch the sidecar that belongs to this dump. |
+| `kiln-db-<stamp>.sha256 has a missing or malformed checksum line — nothing was restored` | The sidecar is empty, truncated or edited. |
+| `WARNING: no checksum found for this database dump.` (a banner) | No sidecar next to the dump, or the dump is not named `kiln-db-<stamp>.dump`, so there is no stamp to find one by. The restore continues unverified. Fetch the sidecar, or rename the dump back, to have it checked. |
+| `RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found — nothing was restored` | As above, with `RESTORE_REQUIRE_CHECKSUM=1` set, which now covers `db` and `drill` as well as `media`. |
+| `neither sha256sum nor shasum is installed — cannot verify kiln-db-<stamp>.sha256` | Install coreutils (or use macOS's `shasum`); nothing was restored. |
+
+To check a dump by hand, from the directory that holds both files:
+`sha256sum --strict -c kiln-db-<stamp>.sha256` (`shasum -a 256 --strict -c`
+on macOS).
 
 ### Restore a media set that has several parts
 
@@ -3965,8 +4072,13 @@ RESTORE_DATABASE_URL=postgres://localhost/kiln_drill \
   ./scripts/restore.sh drill /var/backups/kiln/db/<newest>.dump
 ```
 
-The drill restores into a throwaway DB (the name must look throwaway — it
-refuses otherwise) and sanity-checks core tables (`users`, `pages`, `posts`,
+Run it on the dump where its `kiln-db-<stamp>.sha256` sidecar sits beside it,
+as in `BACKUP_DIR/db/`: the drill checks the dump against it first (#2877),
+exactly as `restore.sh db` does
+([what can go wrong](#what-can-go-wrong-when-restoring-a-dump)), so a drill
+also proves the sidecar matches. The drill restores into a throwaway DB (the
+name must look throwaway — it refuses otherwise, before the checksum check)
+and sanity-checks core tables (`users`, `pages`, `posts`,
 `media_items`, `schema_migrations`). To go further and boot a real instance
 against the drill DB, **scrub it first** — it contains production PII and
 webhook config: `STAGING_DATABASE_URL=… ./scripts/staging.sh scrub` (the
@@ -3999,7 +4111,7 @@ The app reads them in production only.
 | `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
 | `BACKUP_LOCK_WAIT_SECONDS` | backup + app | how long `pg_dump` waits for each table lock before it gives up, 1 to 3600 (default 600; anything else keeps 600 and warns). Also the demo golden capture's ([lock waits](#when-pg_dump-waits-for-a-table-lock-2844)) |
-| `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |
+| `TMPDIR` | backup | where `backup.sh` builds the media file lists and keeps the record of its running child that the [heartbeat](#when-a-cron-run-is-killed-outright-2478) reads (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused copy fails the run, and so does a failed one, unless an in-app backup reached another [destination](#send-backups-to-several-destinations) (then it is partly off-site). The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_LOCAL_DESTINATION_ROOTS` | app | comma-separated absolute directories a **Directory on this server** destination may be under (default unset: that kind isn't offered). One relative or `..` entry drops the whole list with a boot warning ([details](#let-backups-be-written-to-a-directory-on-this-server)). Read in production and development |
@@ -4009,5 +4121,5 @@ The app reads them in production only.
 | `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill`: `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_restore`/`psql` as `PGPASSWORD` only, and a `key=value` string with a password is refused. Put `sslmode=` in it to require TLS |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |
 | `RESTORE_CONFIRM=yes` | restore | skip the interactive confirmation |
-| `RESTORE_REQUIRE_CHECKSUM=1` | restore | `media`: abort when there is no checksum sidecar (default: warn and continue for a legacy single archive) |
+| `RESTORE_REQUIRE_CHECKSUM=1` | restore | `db`, `drill` and `media`: abort when there is no checksum sidecar (default: warn and continue for a dump, or a legacy single archive, with none). `db` and `drill` read it since #2877 ([details](#what-can-go-wrong-when-restoring-a-dump)) |
 | `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1` | restore | `media`: restore a `.partNN` set that has no sidecar (default: refuse, since a set without one is most likely from a killed run) |

@@ -127,7 +127,8 @@ image. That machine needs:
 | `pg_dump`, `pg_restore`, `psql`, `createdb`, `dropdb` (the Postgres client package) | `db`, `all`, `restore.sh db` and `drill` | **Same major version as the server**, as in the image |
 | GNU tar or bsdtar | Media parts | busybox tar is refused before any media part is written: it cannot read the NUL-separated file list each part is built from. In `backup.sh all` the database dump runs first, so it is kept and verified, and `manifest.json` records the refusal |
 | `gzip`, `stat` (GNU or BSD), `xargs`, `mktemp`, `head` | Media parts | Standard on Debian, Ubuntu and macOS |
-| `sha256sum`, or `shasum` on macOS | Checksum sidecars, `verify`, `restore.sh media` | |
+| `sha256sum`, or `shasum` on macOS | Checksum sidecars, `verify`, `restore.sh media`, `db` and `drill` | |
+| `ps` that takes `-o … -p`, or `/proc` | `db`, `media`, `all` | Lets the background loop of a run killed with `kill -9` stop the `pg_dump`, `tar` or `rclone` it left running, and check that the PID is still that program first. Without either it goes by the PID alone ([backups.md](backups.md#when-a-cron-run-is-killed-outright-2478)) |
 | `rclone` | Off-site copy | Only with `BACKUP_RCLONE_REMOTE` set |
 | `curl` | `BACKUP_PING_URL` | Only with that set |
 
