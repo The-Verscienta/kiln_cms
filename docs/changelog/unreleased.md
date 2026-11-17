@@ -90,6 +90,16 @@ carries the reasoning.
   See [docs/staging-environments.md](../staging-environments.md#running-the-scrub).
   Refs #2721.
 
+## Known issues
+
+<a id="all-hidden-referrer-breakdown-recoverable"></a>
+
+- **An all-hidden referrer breakdown can still be recovered at a small view total.** Affects sites with referrer attribution on
+  (`KILN_ANALYTICS_REFERRERS`), on the analytics dashboard and in the export. A reader who knows the suppression rule can rule
+  out every split it would have published partially, and for some small totals one split is left: at the default threshold
+  of 5, an item with 5 views shown as five `"hidden"` categories had exactly one view from each source. There is no
+  workaround short of turning referrer attribution off. ([#2981](https://github.com/The-Verscienta/kiln_cms/issues/2981))
+
 ## Added
 
 <a id="flexible-content"></a>
@@ -538,6 +548,33 @@ carries the reasoning.
     slashes it took about 4 s in Node. Its input is the integrator's own
     `baseUrl` or attribute. Both now trim in a loop, with the same result.
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947))
+
+<a id="referrer-suppression-partner-bounds"></a>
+
+- **A referrer breakdown published with `"< n"` and one `"hidden"` category no longer lets a reader recover the suppressed counts exactly; breakdowns that would have done so are now hidden whole.**
+  The analytics dashboard and the CSV export both print an item's exact view
+  total beside its referrer breakdown, so the categories form one equation. A
+  breakdown is published partially (low counts as `"< n"`, plus the largest
+  other category as a `"hidden"` partner) only when more than one split fits
+  that equation for a reader who knows the rule. That count let the partner be
+  `0` when it could not be: it is the largest of the categories that are not
+  naturally low, and on a tie it is the first in source order, so a published
+  `5` beside it, or a published `0` listed before it, rules `0` out. At the
+  default threshold of 5, `direct: 1, search: 1, social: 5, other: 5`
+  (12 views) was published as `< 5`, `0`, `< 5`, `hidden`, `5`, and only
+  `direct: 1, search: 1` fits that (#2752). The count now models both bounds,
+  and breakdowns like this one are published as five `"hidden"` values.
+
+  What you'll see: on low-traffic items and days, some referrer breakdowns that
+  used to show a `"< n"` label now show every category as hidden, on the
+  dashboard and in the export alike (both use
+  `Analytics.suppress_referrer_group/1`). Breakdowns with nothing below the
+  threshold, and those of busier items, publish as before. An export file
+  written before this release keeps what it published. No configuration or
+  migration.
+
+  This does not cover the all-hidden case, which is listed under Known issues.
+  ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752))
 
 <a id="backup-hold-sync-after-change"></a>
 
