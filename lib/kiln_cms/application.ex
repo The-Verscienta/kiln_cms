@@ -289,6 +289,7 @@ defmodule KilnCMS.Application do
       enqueue_sync_exposure_backfill()
       enqueue_totp_secret_backfill()
       enqueue_erasure_backfill()
+      enqueue_private_args_scrub()
       {:ok, pid}
     end
   end
@@ -355,6 +356,16 @@ defmodule KilnCMS.Application do
   defp enqueue_erasure_backfill do
     if Application.get_env(:kiln_cms, :erasure_backfill_on_boot, true) do
       KilnCMS.Accounts.ErasureBackfill.enqueue()
+    end
+  end
+
+  # Finished jobs that still hold a form submission or an automation payload
+  # have it dropped (#2992): see `KilnCMS.Jobs.PrivateArgsScrub`, which the
+  # crontab also runs daily. Off in `:test` and `:e2e` for the
+  # committed-`oban_jobs` reason above.
+  defp enqueue_private_args_scrub do
+    if Application.get_env(:kiln_cms, :private_args_scrub_on_boot, true) do
+      KilnCMS.Jobs.PrivateArgsScrub.enqueue()
     end
   end
 
@@ -512,6 +523,9 @@ defmodule KilnCMS.Application do
     {:backup_scheduler_cron, KilnCMS.Backups.Scheduler, "KILN_BACKUP_SCHEDULER_CRON",
      "in-app backup schedules will NOT run; backups come only from host cron or Back up " <>
        "now. Refs #2219."},
+    {:private_args_scrub_cron, KilnCMS.Jobs.PrivateArgsScrub, "KILN_PRIVATE_ARGS_SCRUB_CRON",
+     "finished jobs discarded after a crash will keep form submissions and automation " <>
+       "payloads in their args until the next boot. See #2992."},
     {:crawler_ranges_cron, KilnCMS.CrawlerVerification.RangesWorker, "KILN_CRAWLER_RANGES_CRON",
      "search engines' published crawler IP ranges will NOT be fetched at all (no " <>
        "boot or stale-list fetch either): once a list is stale, DuckDuckBot stays " <>

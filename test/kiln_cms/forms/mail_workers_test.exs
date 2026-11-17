@@ -10,13 +10,22 @@ defmodule KilnCMS.Forms.MailWorkersTest do
   entirely on its own `h/1` to escape it, and both re-fetch the form at
   *perform* time, so a form deleted or switched off between enqueue and run
   must send nothing rather than crash a job that will then retry four times.
+
+  Since #2992 a job carries the submission's id and the worker reads the
+  submission back, so the visitor's data never sits in `oban_jobs`. The
+  "legacy jobs" blocks run the shape queued before that (`data`, and the
+  autoresponder's `to`, in the args), which both workers still deliver.
   """
   use KilnCMS.DataCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
 
   import Swoosh.TestAssertions
 
+  import Ecto.Query, only: [from: 2]
+  import ExUnit.CaptureLog
+
   alias KilnCMS.CMS
+  alias KilnCMS.Forms
   alias KilnCMS.Forms.AutoresponderWorker
   alias KilnCMS.Forms.NotificationWorker
 
@@ -71,6 +80,45 @@ defmodule KilnCMS.Forms.MailWorkersTest do
     CMS.update_form!(CMS.get_form!(form.id, authorize?: false), attrs, authorize?: false)
   end
 
+  # A stored submission, recorded the way `Forms.submit/3` records one, and
+  # the args a job queued for it carries (#2992).
+  defp submission!(form, data) do
+    submission =
+      CMS.create_form_submission!(%{form_id: form.id, data: data},
+        actor: Forms.system(),
+        tenant: form.org_id
+      )
+
+    assert submission.status == :new
+    submission
+  end
+
+  defp args!(form, data) do
+    %{
+      "form_id" => form.id,
+      "org_id" => form.org_id,
+      "submission_id" => submission!(form, data).id
+    }
+  end
+
+  defp job_row(id), do: Repo.one!(from(j in Oban.Job, where: j.id == ^id))
+
+  defp simple_autoresponder_form! do
+    autoresponder_form!(
+      %{
+        autoresponder_enabled: true,
+        autoresponder_subject: "Thanks!",
+        autoresponder_body: "<p>Hi.</p>"
+      },
+      [%{name: "email", label: "Email", field_type: :email}]
+    )
+  end
+
+  # A job inserted for real and run through the queue, so the worker's own
+  # write to its row (`PrivateArgs.finishing/3`) happens: `perform_job/3`
+  # builds a job with no id, which that write leaves alone.
+  defp insert!(worker, args), do: args |> worker.new() |> Oban.insert!()
+
   describe "NotificationWorker" do
     test "goes out through the site's own relay when it has one (#1322)" do
       form = form!(%{name: "Contact", notify_email: "team@example.com"})
@@ -82,12 +130,7 @@ defmodule KilnCMS.Forms.MailWorkersTest do
         authorize?: false
       )
 
-      assert :ok =
-               perform_job(NotificationWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => org_id,
-                 "data" => %{"message" => "hello"}
-               })
+      assert :ok = perform_job(NotificationWorker, args!(form, %{"message" => "hello"}))
 
       assert_received {:site_relay_email, %{from: {_name, "forms@site.example"}}, config}
       assert config[:relay] == "smtp.example.com"
@@ -97,12 +140,7 @@ defmodule KilnCMS.Forms.MailWorkersTest do
     test "mails notify_email a table of the submission" do
       form = form!(%{name: "Contact", notify_email: "team@example.com"})
 
-      assert :ok =
-               perform_job(NotificationWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => KilnCMS.Accounts.default_org_id(),
-                 "data" => %{"message" => "hello"}
-               })
+      assert :ok = perform_job(NotificationWorker, args!(form, %{"message" => "hello"}))
 
       assert_email_sent(fn email ->
         assert email.to == [{"", "team@example.com"}]
@@ -117,13 +155,12 @@ defmodule KilnCMS.Forms.MailWorkersTest do
       form = form!(%{name: "Contact <b>us</b>", notify_email: "team@example.com"})
 
       assert :ok =
-               perform_job(NotificationWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => KilnCMS.Accounts.default_org_id(),
-                 "data" => %{
+               perform_job(
+                 NotificationWorker,
+                 args!(form, %{
                    "<img src=x onerror=\"alert(1)\">" => "<script>alert(\"xss\")</script>"
-                 }
-               })
+                 })
+               )
 
       assert_email_sent(fn email ->
         # The whole point of `h/1`: nothing a visitor typed reaches the admin's
@@ -149,11 +186,10 @@ defmodule KilnCMS.Forms.MailWorkersTest do
       form = form!(%{notify_email: "team@example.com"})
 
       assert :ok =
-               perform_job(NotificationWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => KilnCMS.Accounts.default_org_id(),
-                 "data" => %{"topics" => ["a", "b"], "amount" => 2.5}
-               })
+               perform_job(
+                 NotificationWorker,
+                 args!(form, %{"topics" => ["a", "b"], "amount" => 2.5})
+               )
 
       assert_email_sent(fn email ->
         assert email.html_body =~ "a, b"
@@ -161,15 +197,11 @@ defmodule KilnCMS.Forms.MailWorkersTest do
       end)
     end
 
-    test "a non-string value still renders (data comes back from Oban args as JSON)" do
+    test "a non-string value still renders (data comes back from the stored JSON)" do
       form = form!(%{notify_email: "team@example.com"})
 
       assert :ok =
-               perform_job(NotificationWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => KilnCMS.Accounts.default_org_id(),
-                 "data" => %{"agree" => true, "count" => 3}
-               })
+               perform_job(NotificationWorker, args!(form, %{"agree" => true, "count" => 3}))
 
       assert_email_sent(fn email ->
         assert email.html_body =~ "true"
@@ -191,13 +223,9 @@ defmodule KilnCMS.Forms.MailWorkersTest do
 
     test "the org_id in the args is what scopes the re-fetch" do
       form = form!(%{notify_email: "team@example.com"})
+      args = Map.put(args!(form, %{"message" => "hi"}), "org_id", other_org().id)
 
-      assert :ok =
-               perform_job(NotificationWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => other_org().id,
-                 "data" => %{"message" => "hi"}
-               })
+      assert :ok = perform_job(NotificationWorker, args)
 
       assert_no_email_sent()
     end
@@ -205,23 +233,16 @@ defmodule KilnCMS.Forms.MailWorkersTest do
     test "sends nothing when the form has no notify_email, or lost it since enqueue" do
       never_had_one = form!()
 
-      assert :ok =
-               perform_job(NotificationWorker, %{
-                 "form_id" => never_had_one.id,
-                 "data" => %{"message" => "hi"}
-               })
+      assert :ok = perform_job(NotificationWorker, args!(never_had_one, %{"message" => "hi"}))
 
       switched_off = form!(%{notify_email: "team@example.com"})
+      args = args!(switched_off, %{"message" => "hi"})
 
       CMS.update_form!(CMS.get_form!(switched_off.id, authorize?: false), %{notify_email: ""},
         authorize?: false
       )
 
-      assert :ok =
-               perform_job(NotificationWorker, %{
-                 "form_id" => switched_off.id,
-                 "data" => %{"message" => "hi"}
-               })
+      assert :ok = perform_job(NotificationWorker, args)
 
       assert_no_email_sent()
     end
@@ -230,9 +251,31 @@ defmodule KilnCMS.Forms.MailWorkersTest do
       assert :ok =
                perform_job(NotificationWorker, %{
                  "form_id" => Ecto.UUID.generate(),
-                 "data" => %{"message" => "hi"}
+                 "submission_id" => Ecto.UUID.generate()
                })
 
+      assert_no_email_sent()
+    end
+
+    test "a submission deleted between enqueue and run sends nothing, and the job is done" do
+      form = form!(%{notify_email: "team@example.com"})
+      args = args!(form, %{"message" => "hi"})
+
+      CMS.get_form_submission!(args["submission_id"], authorize?: false, tenant: form.org_id)
+      |> CMS.destroy_form_submission!(authorize?: false, tenant: form.org_id)
+
+      assert :ok = perform_job(NotificationWorker, args)
+      assert_no_email_sent()
+    end
+
+    test "a submission marked spam between enqueue and run sends nothing" do
+      form = form!(%{notify_email: "team@example.com"})
+      args = args!(form, %{"message" => "hi"})
+
+      CMS.get_form_submission!(args["submission_id"], authorize?: false, tenant: form.org_id)
+      |> CMS.mark_form_submission_spam!(authorize?: false, tenant: form.org_id)
+
+      assert :ok = perform_job(NotificationWorker, args)
       assert_no_email_sent()
     end
 
@@ -261,12 +304,10 @@ defmodule KilnCMS.Forms.MailWorkersTest do
         )
 
       assert :ok =
-               perform_job(AutoresponderWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => KilnCMS.Accounts.default_org_id(),
-                 "to" => "ada@example.com",
-                 "data" => %{"name" => "Ada", "email" => "ada@example.com"}
-               })
+               perform_job(
+                 AutoresponderWorker,
+                 args!(form, %{"name" => "Ada", "email" => "ada@example.com"})
+               )
 
       assert_email_sent(fn email ->
         # Addressed to the submitter, not to the form's notify_email — the one
@@ -298,12 +339,10 @@ defmodule KilnCMS.Forms.MailWorkersTest do
 
       # Submissions from now on carry the value under the new key.
       assert :ok =
-               perform_job(AutoresponderWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => KilnCMS.Accounts.default_org_id(),
-                 "to" => "ada@example.com",
-                 "data" => %{"full_name" => "Ada", "email" => "ada@example.com"}
-               })
+               perform_job(
+                 AutoresponderWorker,
+                 args!(form, %{"full_name" => "Ada", "email" => "ada@example.com"})
+               )
 
       assert_email_sent(fn email ->
         assert email.subject == "Thanks, Ada!"
@@ -326,14 +365,13 @@ defmodule KilnCMS.Forms.MailWorkersTest do
         )
 
       assert :ok =
-               perform_job(AutoresponderWorker, %{
-                 "form_id" => form.id,
-                 "to" => "ada@example.com",
-                 "data" => %{
+               perform_job(
+                 AutoresponderWorker,
+                 args!(form, %{
                    "name" => "Ada\r\nBcc: victim@example.com <script>alert(1)</script>",
                    "email" => "ada@example.com"
-                 }
-               })
+                 })
+               )
 
       assert_email_sent(fn email ->
         # `Autoresponder.render/3` decides both of these; this asserts the
@@ -372,48 +410,38 @@ defmodule KilnCMS.Forms.MailWorkersTest do
     end
 
     test "the org_id in the args is what scopes the re-fetch" do
-      form =
-        autoresponder_form!(
-          %{
-            autoresponder_enabled: true,
-            autoresponder_subject: "Thanks!",
-            autoresponder_body: "<p>Hi.</p>"
-          },
-          [%{name: "email", label: "Email", field_type: :email}]
-        )
+      form = simple_autoresponder_form!()
+      args = Map.put(args!(form, %{"email" => "ada@example.com"}), "org_id", other_org().id)
 
-      assert :ok =
-               perform_job(AutoresponderWorker, %{
-                 "form_id" => form.id,
-                 "org_id" => other_org().id,
-                 "to" => "ada@example.com",
-                 "data" => %{"email" => "ada@example.com"}
-               })
+      assert :ok = perform_job(AutoresponderWorker, args)
 
       assert_no_email_sent()
     end
 
     test "an autoresponder switched off between enqueue and run sends nothing" do
-      form =
-        autoresponder_form!(
-          %{
-            autoresponder_enabled: true,
-            autoresponder_subject: "Thanks!",
-            autoresponder_body: "<p>Hi.</p>"
-          },
-          [%{name: "email", label: "Email", field_type: :email}]
-        )
+      form = simple_autoresponder_form!()
+      args = args!(form, %{"email" => "ada@example.com"})
 
       CMS.update_form!(CMS.get_form!(form.id, authorize?: false), %{autoresponder_enabled: false},
         authorize?: false
       )
 
-      assert :ok =
-               perform_job(AutoresponderWorker, %{
-                 "form_id" => form.id,
-                 "to" => "ada@example.com",
-                 "data" => %{"email" => "ada@example.com"}
-               })
+      assert :ok = perform_job(AutoresponderWorker, args)
+
+      assert_no_email_sent()
+    end
+
+    test "an email field removed between enqueue and run sends nothing (eligibility is re-asked)" do
+      form = simple_autoresponder_form!()
+      args = args!(form, %{"email" => "ada@example.com"})
+
+      admin = admin()
+
+      form.id
+      |> CMS.form_fields_for!(actor: admin)
+      |> Enum.each(&CMS.destroy_form_field!(&1, actor: admin))
+
+      assert :ok = perform_job(AutoresponderWorker, args)
 
       assert_no_email_sent()
     end
@@ -422,10 +450,31 @@ defmodule KilnCMS.Forms.MailWorkersTest do
       assert :ok =
                perform_job(AutoresponderWorker, %{
                  "form_id" => Ecto.UUID.generate(),
-                 "to" => "ada@example.com",
-                 "data" => %{"email" => "ada@example.com"}
+                 "submission_id" => Ecto.UUID.generate()
                })
 
+      assert_no_email_sent()
+    end
+
+    test "a submission deleted between enqueue and run sends nothing, and the job is done" do
+      form = simple_autoresponder_form!()
+      args = args!(form, %{"email" => "ada@example.com"})
+
+      CMS.get_form_submission!(args["submission_id"], authorize?: false, tenant: form.org_id)
+      |> CMS.destroy_form_submission!(authorize?: false, tenant: form.org_id)
+
+      assert :ok = perform_job(AutoresponderWorker, args)
+      assert_no_email_sent()
+    end
+
+    test "a submission marked spam between enqueue and run sends nothing" do
+      form = simple_autoresponder_form!()
+      args = args!(form, %{"email" => "ada@example.com"})
+
+      CMS.get_form_submission!(args["submission_id"], authorize?: false, tenant: form.org_id)
+      |> CMS.mark_form_submission_spam!(authorize?: false, tenant: form.org_id)
+
+      assert :ok = perform_job(AutoresponderWorker, args)
       assert_no_email_sent()
     end
 
@@ -435,6 +484,110 @@ defmodule KilnCMS.Forms.MailWorkersTest do
 
       assert AutoresponderWorker.backoff(%Oban.Job{attempt: 4}) ==
                KilnCMS.Mail.backoff_seconds(4)
+    end
+  end
+
+  describe "legacy jobs, queued before #2992 with the data in their args" do
+    test "the notification is still delivered, and the finished row keeps no data" do
+      form = form!(%{notify_email: "team@example.com"})
+
+      job =
+        insert!(NotificationWorker, %{
+          "form_id" => form.id,
+          "org_id" => form.org_id,
+          "data" => %{"message" => "legacy-secret"}
+        })
+
+      Oban.drain_queue(queue: :mail)
+
+      assert_email_sent(fn email -> assert email.html_body =~ "legacy-secret" end)
+
+      row = job_row(job.id)
+      assert row.state == "completed"
+      assert row.args == %{"form_id" => form.id, "org_id" => form.org_id}
+    end
+
+    test "the autoresponder is still delivered to the queued address, and forgets it and the data" do
+      form = simple_autoresponder_form!()
+
+      job =
+        insert!(AutoresponderWorker, %{
+          "form_id" => form.id,
+          "org_id" => form.org_id,
+          "to" => "legacy@example.com",
+          "data" => %{"email" => "legacy@example.com"}
+        })
+
+      Oban.drain_queue(queue: :mail)
+
+      assert_email_sent(fn email -> assert email.to == [{"", "legacy@example.com"}] end)
+
+      row = job_row(job.id)
+      assert row.state == "completed"
+      assert row.args == %{"form_id" => form.id, "org_id" => form.org_id}
+    end
+
+    test "a form deleted since forgets the data too (the job is done)" do
+      job =
+        insert!(NotificationWorker, %{
+          "form_id" => Ecto.UUID.generate(),
+          "data" => %{"message" => "legacy-secret"}
+        })
+
+      Oban.drain_queue(queue: :mail)
+
+      row = job_row(job.id)
+      assert row.state == "completed"
+      refute Map.has_key?(row.args, "data")
+    end
+
+    test "a failure with attempts left keeps the data; failing the last attempt forgets it" do
+      form = form!(%{notify_email: "team@example.com"})
+
+      job =
+        insert!(NotificationWorker, %{
+          "form_id" => form.id,
+          "org_id" => form.org_id,
+          "data" => %{"message" => "legacy-secret"}
+        })
+
+      # A lost grant fails the read with `Forbidden`: an error, so a retry.
+      Forms.with_actor(nil, fn ->
+        capture_log(fn -> Oban.drain_queue(queue: :mail) end)
+      end)
+
+      row = job_row(job.id)
+      assert row.state == "retryable"
+      assert row.args["data"] == %{"message" => "legacy-secret"}
+
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id),
+        set: [state: "available", attempt: row.max_attempts - 1, scheduled_at: DateTime.utc_now()]
+      )
+
+      Forms.with_actor(nil, fn ->
+        capture_log(fn -> Oban.drain_queue(queue: :mail) end)
+      end)
+
+      row = job_row(job.id)
+      assert row.state == "discarded"
+      refute Map.has_key?(row.args, "data")
+      assert_no_email_sent()
+    end
+  end
+
+  describe "new jobs carry ids, not the submission (#2992)" do
+    test "a finished notification job's row is the three ids, before and after" do
+      form = form!(%{notify_email: "team@example.com"})
+      args = args!(form, %{"message" => "new-secret"})
+      job = insert!(NotificationWorker, args)
+
+      Oban.drain_queue(queue: :mail)
+
+      assert_email_sent(fn email -> assert email.html_body =~ "new-secret" end)
+      row = job_row(job.id)
+      assert row.state == "completed"
+      assert row.args == args
+      refute inspect(row) =~ "new-secret"
     end
   end
 end

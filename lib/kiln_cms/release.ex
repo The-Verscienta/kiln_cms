@@ -114,6 +114,34 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  Drop private job arguments from finished jobs (#2992): the form submission
+  data and autoresponder address of form mail jobs, and the document snapshot
+  of automation jobs, from completed, cancelled and discarded rows that still
+  hold them. Jobs still waiting to run are left alone.
+
+      bin/kiln_cms eval 'KilnCMS.Release.scrub_job_args()'
+
+  A running node does this ten minutes after boot and daily
+  (`KilnCMS.Jobs.PrivateArgsScrub`); this is for a backup restored from
+  before the upgrade, or a node that is not serving. Returns the count per
+  worker.
+  """
+  @spec scrub_job_args() :: KilnCMS.Jobs.PrivateArgsScrub.result()
+  def scrub_job_args do
+    load_app()
+
+    {:ok, result, _} =
+      Ecto.Migrator.with_repo(hd(repos()), &KilnCMS.Jobs.PrivateArgsScrub.run/1)
+
+    IO.puts(
+      "Job args scrubbed: #{result |> Map.values() |> Enum.sum()} finished jobs " <>
+        "had private arguments dropped (#{inspect(result)})."
+    )
+
+    result
+  end
+
+  @doc """
   `mix kiln.links.backfill` for a release (#1594): write the reference edges
   for `:reference` custom field values that have none, and delete the ones no
   stored value implies.
