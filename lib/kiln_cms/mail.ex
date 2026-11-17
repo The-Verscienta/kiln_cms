@@ -364,8 +364,9 @@ defmodule KilnCMS.Mail do
   # as naming the address: the recipient is dropped and the drop is LOGGED.
   # Not sending is the closed side (#1659); raising instead would fail the
   # caller's own action (a registration, a password reset) over a mail-side
-  # fault. `KilnCMS.Newsletter.MailWorker` calls `suppressed?/2` directly and
-  # lets the raise retry the job, which is the closed side there.
+  # fault. `KilnCMS.Newsletter.MailWorker`, `KilnCMS.Notifications.WorkflowMailWorker`
+  # and `KilnCMS.Notifications.TaskMailWorker` call `suppressed?/2` directly
+  # and let the raise retry the job, which is the closed side there.
   defp suppressed_or_unreadable?(address, org_id) do
     suppressed?(address, org_id: org_id)
   rescue

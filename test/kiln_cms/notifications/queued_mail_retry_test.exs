@@ -92,15 +92,24 @@ defmodule KilnCMS.Notifications.QueuedMailRetryTest do
   end
 
   test "a legacy task mail keeps its address to retry, and drops it on the last failure" do
-    address = to_string(user().email)
+    assignee = user()
+    address = to_string(assignee.email)
+
+    # A real task: a legacy assignment is sent only while its task is still
+    # open and the assignee's (#3037).
+    {:ok, task} =
+      KilnCMS.CMS.assign_task(
+        %{content_type: "page", content_id: Ecto.UUID.generate(), assignee_id: assignee.id},
+        actor: user()
+      )
 
     job =
       legacy!(TaskMailWorker, %{
         "kind" => "assigned",
         "to" => address,
-        "task_id" => Ecto.UUID.generate(),
-        "content_type" => "page",
-        "content_id" => Ecto.UUID.generate(),
+        "task_id" => task.id,
+        "content_type" => task.content_type,
+        "content_id" => task.content_id,
         "org_id" => KilnCMS.Accounts.default_org_id(),
         "note" => "retried note"
       })
