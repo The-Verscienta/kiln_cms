@@ -312,6 +312,33 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
 
       assert to(emails(), address(mentioned)) == []
     end
+
+    # `dispatch_comment/4` takes a mentioned participant out of the thread
+    # audience, so the mention is their only notice of the comment.
+    test "a participant also mentioned is still sent it off the roster; a non-participant is not" do
+      participant = user(:editor)
+      bystander = user(:editor)
+      page = page!(user(:editor))
+      comment!(page, "first", participant)
+      drain()
+      emails()
+
+      comment!(page, "see #{handle(participant)} and #{handle(bystander)}", user(:editor))
+
+      for person <- [participant, bystander] do
+        assert [%{args: %{"event" => "comment_mention"}}] = jobs_for(WorkflowMailWorker, person)
+      end
+
+      other = KilnCMS.OrgFixtures.org("entitled-mention-thread")
+      membership!(participant, other.id, :editor)
+      membership!(bystander, other.id, :editor)
+      drain()
+
+      sent = emails()
+      assert [mention] = to(sent, address(participant))
+      assert mention.subject =~ "mentioned you"
+      assert to(sent, address(bystander)) == []
+    end
   end
 
   describe "a task digest" do
@@ -372,6 +399,23 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
       # Not vacuous: with the grant, the same job delivers.
       assert :ok = TaskMailWorker.perform(job)
       assert [_digest] = to(emails(), address(assignee))
+    end
+
+    test "each line shows its task's due date now, not the one it was queued with" do
+      assignee = user(:editor)
+      today = Date.utc_today()
+      moved_to = Date.add(today, 2)
+      task = assign!(assignee, %{due_on: today})
+      drain()
+      emails()
+
+      assert :ok = TaskDigestWorker.send_digests(tenant(), Date.add(today, 3))
+      CMS.update_task!(task, %{due_on: moved_to}, actor: user(:editor))
+      drain()
+
+      assert [digest] = to(emails(), address(assignee))
+      assert digest.html_body =~ Date.to_iso8601(moved_to)
+      refute digest.html_body =~ Date.to_iso8601(today)
     end
   end
 
@@ -708,6 +752,26 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
 
       assert [digest] = to(emails(), address(assignee))
       assert digest.subject == "Your task digest: 1 item"
+    end
+
+    test "a digest line shows its task's due date now" do
+      assignee = user(:editor)
+      moved_to = Date.add(Date.utc_today(), 2)
+      task = assign!(assignee, %{due_on: Date.utc_today()})
+      CMS.update_task!(task, %{due_on: moved_to}, actor: user(:editor))
+      drain()
+      emails()
+
+      legacy!(
+        TaskMailWorker,
+        legacy_digest(address(assignee), [item(task.content_type, task.content_id)])
+      )
+
+      drain()
+
+      assert [digest] = to(emails(), address(assignee))
+      assert digest.html_body =~ Date.to_iso8601(moved_to)
+      refute digest.html_body =~ Date.to_iso8601(Date.utc_today())
     end
 
     test "a digest with no line left is not sent" do

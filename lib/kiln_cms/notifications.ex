@@ -1090,7 +1090,8 @@ defmodule KilnCMS.Notifications do
     * `"comment_added"`, `"comment_resolved"`: still on the comment's thread,
       or the content's author (`comment_audience_ids/2`);
     * `"comment_mention"`: still on the site's mention roster
-      (`mention_roster_member?/2`).
+      (`mention_roster_member?/2`), or still on the comment's thread or the
+      author (the thread notice a mention replaces).
 
   `context` carries what the rule needs: `:org_id` (the site), `:author_id`
   (the content's author now) and `:comment` (the comment, as it is now).
@@ -1114,11 +1115,25 @@ defmodule KilnCMS.Notifications do
       else: {:skip, :not_on_the_thread}
   end
 
-  def entitled("comment_mention", %User{} = user, %{org_id: org_id}) do
-    if mention_roster_member?(org_id, user), do: :ok, else: {:skip, :not_on_the_roster}
+  # A mention is also a thread notice: `dispatch_comment/4` takes the people
+  # it names out of the thread audience, so a participant who was mentioned
+  # has only this job. Off the roster but still on the thread or the author,
+  # they are still sent it, as the thread notice they would otherwise have
+  # had. A legacy job's context has no comment, so only the roster counts.
+  def entitled("comment_mention", %User{} = user, %{org_id: org_id} = context) do
+    cond do
+      mention_roster_member?(org_id, user) -> :ok
+      on_the_thread?(user, context) -> :ok
+      true -> {:skip, :not_on_the_roster}
+    end
   end
 
   def entitled(_event, _user, _context), do: {:skip, :unknown_event}
+
+  defp on_the_thread?(%User{id: user_id}, %{comment: %{} = comment} = context),
+    do: user_id in comment_audience_ids(comment, Map.get(context, :author_id))
+
+  defp on_the_thread?(_user, _context), do: false
 
   defp predates?(%User{inserted_at: %DateTime{} = created}, %DateTime{} = queued_at),
     do: DateTime.compare(created, queued_at) != :gt

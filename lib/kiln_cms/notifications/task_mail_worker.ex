@@ -22,7 +22,8 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   "An editor". A digest lists only the lines whose task is still open and
   still the assignee's when it runs (#3037): each line names its task
   (`task_id`), the open tasks are read once, and a digest with no line left
-  is not sent; its subject and body count the lines it lists. A line whose
+  is not sent; its subject and body count the lines it lists, and each line
+  shows its task's due date now. A line whose
   content is gone keeps its place, titled by the content type, as before.
 
   An address on the instance-wide suppression list, or on the site's own
@@ -195,8 +196,9 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   # `authorize_with: :error` (a refused read fails the job rather than
   # reading as "no tasks"). A line names its task (`task_id`); a line queued
   # before it did names only the content, and is kept while an open task of
-  # theirs is on that content. Nothing left is a skip. Filtered before the
-  # email is built, so its count is of the lines it lists.
+  # theirs is on that content. Each line kept shows its task's due date now,
+  # not the one it was queued with. Nothing left is a skip. Filtered before
+  # the email is built, so its count is of the lines it lists.
   defp open_items(items, user_id, tenant) do
     case CMS.list_tasks_for_assignee(user_id,
            actor: Notifications.system(),
@@ -204,15 +206,15 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
            tenant: tenant
          ) do
       {:ok, tasks} ->
-        task_ids = MapSet.new(tasks, & &1.id)
-        targets = MapSet.new(tasks, &{&1.content_type, &1.content_id})
+        by_id = Map.new(tasks, &{&1.id, &1})
+        # The tasks come sorted by due date, so a legacy line on content with
+        # two open tasks takes the earlier one's.
+        by_target =
+          tasks |> Enum.reverse() |> Map.new(&{{&1.content_type, &1.content_id}, &1})
 
         items
         |> List.wrap()
-        |> Enum.filter(fn
-          %{"task_id" => task_id} when is_binary(task_id) -> MapSet.member?(task_ids, task_id)
-          item -> MapSet.member?(targets, {item["content_type"], item["content_id"]})
-        end)
+        |> Enum.flat_map(&with_due_now(&1, matching_task(&1, by_id, by_target)))
         |> case do
           [] -> {:skip, :no_open_tasks}
           open -> {:ok, open}
@@ -222,6 +224,18 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
         {:error, error}
     end
   end
+
+  # A line kept, with its task's due date now; no open task, no line.
+  defp with_due_now(_item, nil), do: []
+
+  defp with_due_now(item, task),
+    do: [Map.put(item, "due_on", task.due_on && Date.to_iso8601(task.due_on))]
+
+  defp matching_task(%{"task_id" => task_id}, by_id, _by_target) when is_binary(task_id),
+    do: Map.get(by_id, task_id)
+
+  defp matching_task(item, _by_id, by_target),
+    do: Map.get(by_target, {item["content_type"], item["content_id"]})
 
   # The suppression lists (#3036), as `WorkflowMailWorker` asks them: an
   # address on the instance-wide list or the site's own is a skip, and a list
