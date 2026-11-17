@@ -162,7 +162,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3081](https://github.com/The-Verscienta/kiln_cms/pull/3081) · [long form](docs/changelog/unreleased.md#resumable-backup-uploads))
 
 - **Backups → Destinations: a new kind, S3-compatible storage (AWS S3, R2, B2, Wasabi, MinIO, Garage), with resumable multipart uploads, a Test, and retention. A store on a private network or over `http://` needs its host in the new `BACKUP_S3_PRIVATE_HOSTS`.**
-  ([#2221](https://github.com/The-Verscienta/kiln_cms/issues/2221) · [long form](docs/changelog/unreleased.md#s3-backup-destination))
+  ([#3086](https://github.com/The-Verscienta/kiln_cms/pull/3086) · [long form](docs/changelog/unreleased.md#s3-backup-destination))
 
 - **`kiln_plugin` 1.5.0: plugins declare what the staging scrub does to each table their domains own (`c:Kiln.Plugin.staging_scrub/0`): purge, rewrite columns, or keep with a reason, all checked before the scrub changes anything.**
   ([long form](docs/changelog/unreleased.md#plugin-staging-scrub))
