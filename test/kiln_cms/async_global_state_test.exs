@@ -30,6 +30,14 @@ defmodule KilnCMS.AsyncGlobalStateTest do
   about to read it back (`KilnCMS.Firing.DeliveryTest`'s warm reads came back
   `:unavailable` in a full run). Those calls count as writes too.
 
+  So do the other node-wide caches a request reads (#2839):
+  `KilnCMS.Security.IpBlocklist.clear/0`, `KilnCMS.Cache.Hosts.clear/0`,
+  `KilnCMS.Security.ApiKeyTrip.clear/0`, and a `Cachex.clear` of the blocklist,
+  the host cache or `KilnCMS.Cache`'s generation store. A clear lets a
+  concurrent request refill the entry from its own sandbox, and the clearing
+  test then reads that sandbox's answer (`KilnCMS.ReleaseIpBlocksTest` saw its
+  new rule's address as not blocked).
+
   Writes made on a test's behalf count as well (#2559):
 
     * A `test/support` function that writes, directly or through any chain of
@@ -320,6 +328,92 @@ defmodule KilnCMS.AsyncGlobalStateTest do
                  end
                end
                """)
+    end
+
+    test "an async module that clears the IP blocklist, host cache or verified-key table" do
+      assert [
+               %{call: "IpBlocklist.clear", key: "IP blocklist cache"},
+               %{call: "KilnCMS.Security.IpBlocklist.clear", key: "IP blocklist cache"},
+               %{call: "Cachex.clear", key: "IP blocklist cache"},
+               %{call: "Cachex.clear!", key: "IP blocklist cache"},
+               %{call: "KilnCMS.Cache.Hosts.clear", key: "host cache"},
+               %{call: "Hosts.clear", key: "host cache"},
+               %{call: "Cachex.clear", key: "host cache"},
+               %{call: "Cachex.clear", key: "host cache"},
+               %{call: "ApiKeyTrip.clear", key: "verified API key table"}
+             ] =
+               offenders_in("""
+               defmodule A do
+                 use KilnCMSWeb.ConnCase, async: true
+                 setup do
+                   IpBlocklist.clear()
+                   on_exit(&KilnCMS.Security.IpBlocklist.clear/0)
+                 end
+                 test "t" do
+                   Cachex.clear(IpBlocklist.cache_name())
+                   Cachex.clear!(:kiln_cms_ip_blocklist_cache)
+                   KilnCMS.Cache.Hosts.clear()
+                   Hosts.clear()
+                   Cachex.clear(KilnCMS.Cache.Hosts.cache_name())
+                   :kiln_cms_host_cache |> Cachex.clear()
+                   ApiKeyTrip.clear()
+                 end
+               end
+               """)
+    end
+
+    test "a Cachex.clear of the content cache's generation store" do
+      assert [
+               %{call: "Cachex.clear", key: "delivery caches"},
+               %{call: "Cachex.clear", key: "delivery caches"},
+               %{call: "Cachex.clear", key: "delivery caches"}
+             ] =
+               offenders_in("""
+               defmodule A do
+                 use KilnCMS.DataCase, async: true
+                 @generations KilnCMS.Cache.generation_cache_name()
+                 test "t" do
+                   Cachex.clear(Cache.generation_cache_name())
+                   Cachex.clear(:kiln_cms_generation_cache)
+                   Cachex.clear(@generations)
+                 end
+               end
+               """)
+    end
+
+    test "a per-key bust of those caches is not a clear" do
+      # What an async test may do instead: drop only the key it owns.
+      assert [] =
+               offenders_in("""
+               defmodule A do
+                 use KilnCMSWeb.ConnCase, async: true
+                 test "t" do
+                   IpBlocklist.bust(org_id)
+                   Cachex.del(KilnCMS.Cache.Hosts.cache_name(), host)
+                   Cachex.del(IpBlocklist.cache_name(), key)
+                   Cachex.clear(KilnCMS.Security.PasswordNotice.cache())
+                 end
+               end
+               """)
+    end
+
+    test "a support helper that clears the host cache makes its async caller a writer" do
+      support = """
+      defmodule KilnCMS.HostFixture do
+        def fresh_hosts!, do: KilnCMS.Cache.Hosts.clear()
+      end
+      """
+
+      assert [%{call: "KilnCMS.HostFixture.fresh_hosts!"}] =
+               offenders_in(
+                 """
+                 defmodule A do
+                   use KilnCMSWeb.ConnCase, async: true
+                   test "t", do: KilnCMS.HostFixture.fresh_hosts!()
+                 end
+                 """,
+                 [support]
+               )
     end
 
     test "another cache's clear, or a sync module's, is not a delivery-cache write" do
@@ -844,7 +938,6 @@ defmodule KilnCMS.AsyncGlobalStateTest do
   @app_writes [:put_env, :delete_env, :put_all_env]
   @system_writes [:put_env, :delete_env]
   @cachex_clears [:clear, :clear!]
-  @delivery_caches "delivery caches"
   @term_writes [:put, :erase]
 
   # The direct writes in `ast`. `attrs` are the module's attributes, so a write
@@ -878,9 +971,10 @@ defmodule KilnCMS.AsyncGlobalStateTest do
         {acc, bindings}
         when fun in @cachex_clears ->
           acc =
-            if delivery_cache?(lhs, attrs),
-              do: [write(meta, "Cachex.#{fun}", {nil, @delivery_caches}) | acc],
-              else: acc
+            case cache_kind(lhs, attrs) do
+              nil -> acc
+              kind -> [write(meta, "Cachex.#{fun}", {nil, kind}) | acc]
+            end
 
           {{:__block__, [], [lhs | args]}, {acc, bindings}}
 
@@ -901,7 +995,7 @@ defmodule KilnCMS.AsyncGlobalStateTest do
         {{:., _, [{:__aliases__, _, parts}, fun]}, meta, args} = node, {acc, bindings} ->
           case cache_clear(parts, fun, args, attrs) do
             nil -> {node, {acc, bindings}}
-            call -> {node, {[write(meta, call, {nil, @delivery_caches}) | acc], bindings}}
+            {call, kind} -> {node, {[write(meta, call, {nil, kind}) | acc], bindings}}
           end
 
         node, acc ->
@@ -952,31 +1046,80 @@ defmodule KilnCMS.AsyncGlobalStateTest do
 
   defp write(meta, call, {app, key}), do: %{line: meta[:line], call: call, app: app, key: key}
 
-  # The delivery caches' clears, recognized by the module's last alias segment
-  # so an aliased call (`Cache.clear()` after `alias KilnCMS.Firing.Cache`)
-  # counts. `KilnCMS.Cache` has no `clear/0`, so `Cache.clear` is the firing
-  # cache's. `Cachex.clear/1,2` and `clear!/1,2` only when their cache is one
-  # of the two.
-  @delivery_cache_name ~r/(^|\.)Cache\.cache_name\(\)$|^:kiln_cms_(content|firing)_cache$/
+  # The node-wide caches' clears, recognized by the module's last alias
+  # segment so an aliased call (`Cache.clear()` after
+  # `alias KilnCMS.Firing.Cache`) counts. `KilnCMS.Cache` has no `clear/0`, so
+  # `Cache.clear` is the firing cache's. `Cachex.clear/1,2` and `clear!/1,2`
+  # only when their cache is one of these, by name or by its `cache_name`
+  # function. Each is one store per VM keyed by org (or host, or key hash), so
+  # a clear empties entries another async test filled and is about to read:
+  #
+  #   * the delivery caches (#2504): `KilnCMS.Cache`'s content and generation
+  #     stores, and `KilnCMS.Firing.Cache`.
+  #   * the IP blocklist (#2839): a concurrent request for the same org
+  #     refills it from its own sandbox, where the clearing test's rule does
+  #     not exist, so the test's `blocked?/2` reads the other sandbox's `[]`.
+  #   * the host cache (`KilnCMS.Cache.Hosts`): host to org resolution, which
+  #     every request through the endpoint reads.
+  #   * the verified API key table (`KilnCMS.Security.ApiKeyTrip`): a public
+  #     ETS table, not Cachex, so only its own `clear/0` is matched. Its one
+  #     caller is sync today; listed so that stays a choice, since a clear
+  #     turns another test's remembered key into an `:unverified` trip.
+  @delivery_caches "delivery caches"
+
+  @clear_zero %{
+    Cache: @delivery_caches,
+    IpBlocklist: "IP blocklist cache",
+    Hosts: "host cache",
+    ApiKeyTrip: "verified API key table"
+  }
+
+  @cache_names [
+    {~r/(^|\.)Cache\.(generation_)?cache_name\(\)$|^:kiln_cms_(content|firing|generation)_cache$/,
+     @delivery_caches},
+    {~r/(^|\.)IpBlocklist\.cache_name\(\)$|^:kiln_cms_ip_blocklist_cache$/, "IP blocklist cache"},
+    {~r/(^|\.)Hosts\.cache_name\(\)$|^:kiln_cms_host_cache$/, "host cache"}
+  ]
 
   defp cache_clear(parts, :flush_delivery, _args, _attrs) when parts != [],
-    do: if(List.last(parts) == :Cache, do: "#{alias_name(parts)}.flush_delivery")
+    do:
+      if(List.last(parts) == :Cache,
+        do: {"#{alias_name(parts)}.flush_delivery", @delivery_caches}
+      )
 
   defp cache_clear(parts, :broadcast_clear, _args, _attrs) when parts != [],
-    do: if(List.last(parts) == :ClusterBust, do: "#{alias_name(parts)}.broadcast_clear")
+    do:
+      if(List.last(parts) == :ClusterBust,
+        do: {"#{alias_name(parts)}.broadcast_clear", @delivery_caches}
+      )
 
-  defp cache_clear(parts, :clear, [], _attrs) when parts != [],
-    do: if(List.last(parts) == :Cache, do: "#{alias_name(parts)}.clear")
+  defp cache_clear(parts, :clear, [], _attrs) when parts != [] do
+    case Map.fetch(@clear_zero, List.last(parts)) do
+      {:ok, kind} -> {"#{alias_name(parts)}.clear", kind}
+      :error -> nil
+    end
+  end
 
-  defp cache_clear([:Cachex], fun, [cache | _], attrs) when fun in @cachex_clears,
-    do: if(delivery_cache?(cache, attrs), do: "Cachex.#{fun}")
+  defp cache_clear([:Cachex], fun, [cache | _], attrs) when fun in @cachex_clears do
+    case cache_kind(cache, attrs) do
+      nil -> nil
+      kind -> {"Cachex.#{fun}", kind}
+    end
+  end
 
   defp cache_clear(_parts, _fun, _args, _attrs), do: nil
 
-  defp delivery_cache?({:@, _, [{attr, _, context}]} = cache, attrs) when is_atom(context),
-    do: attrs |> Map.get(attr, cache) |> Macro.to_string() =~ @delivery_cache_name
+  # Which node-wide cache `cache` names, if any. A module attribute is read
+  # through to its value.
+  defp cache_kind({:@, _, [{attr, _, context}]} = cache, attrs) when is_atom(context),
+    do: attrs |> Map.get(attr, cache) |> cache_kind_of()
 
-  defp delivery_cache?(cache, _attrs), do: Macro.to_string(cache) =~ @delivery_cache_name
+  defp cache_kind(cache, _attrs), do: cache_kind_of(cache)
+
+  defp cache_kind_of(cache) do
+    name = Macro.to_string(cache)
+    Enum.find_value(@cache_names, fn {pattern, kind} -> if name =~ pattern, do: kind end)
+  end
 
   defp alias_name(parts), do: Enum.map_join(parts, ".", &Atom.to_string/1)
 
