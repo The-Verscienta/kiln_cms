@@ -477,6 +477,11 @@ defmodule KilnCMS.Backups.Steps do
           {:error, :destinations_unreadable = reason} ->
             retry_or_fail(context(lease, nil), lease, job, nil, %Recorder{}, reason)
 
+          # The resume was canceled before it re-opened the run (#2816; see
+          # `reopen/1`): the Cancel said so on the run and freed the lock.
+          {:error, :superseded} ->
+            {:cancel, :superseded}
+
           {:error, reason} ->
             refuse_resume(lease, reason)
         end
@@ -484,15 +489,30 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   # A resume that can't run here (#2539) closes visibly: the run says why on
-  # its row before the lock is released, as `fail/5` does, so a Resume can't
-  # re-open a run this chain is still about to write. Nothing was started: no
-  # manifest.
+  # its row. Nothing was started: no manifest.
+  #
+  # The lock is released first, under the lease, and only a release that held
+  # it writes the note, as `Chain.abandon_start/2` does. A resume canceled
+  # before it started (#2816) frees the lock and notes the run in one
+  # transaction, so it may commit after this start's last lease check: the
+  # release then finds the lease gone (`:superseded`) and the start stops
+  # quietly, leaving the Cancel's note and its settle as they are. A Resume
+  # requested once the lock is free can't lose its run to the note: the note
+  # pins the run's status as loaded, and never touches a live one
+  # (`Run.Changes.ResumeRefused`). A release that fails otherwise still notes
+  # the run; the reaper frees the lock.
   defp refuse_resume(lease, reason) do
-    Logger.warning("Backup resume refused: #{inspect(reason)}")
-    note_resume_refused(lease.resume, lease.chain, reason)
-    _ = Chain.release(lease)
-    settled(lease, {:error, reason})
-    {:cancel, reason}
+    case Chain.release(lease) do
+      {:error, :superseded} ->
+        Logger.info("Backup resume of #{lease.resume} stopped: it was canceled meanwhile")
+        {:cancel, :superseded}
+
+      _released ->
+        Logger.warning("Backup resume refused: #{inspect(reason)}")
+        note_resume_refused(lease.resume, lease.chain, reason)
+        settled(lease, {:error, reason})
+        {:cancel, reason}
+    end
   end
 
   @doc false
@@ -579,16 +599,50 @@ defmodule KilnCMS.Backups.Steps do
   # Either way the run is bound to this node's backup directory (#2539), which
   # just read the run's `state.json`: `Recorder.reopen/3` writes it, and a run
   # already re-opened records it with its next progress write.
+  #
+  # A resume canceled before it started (#2816, `Run :cancel_resume`) releases
+  # this chain's lock and writes the run without re-opening it, while this
+  # start may be in `settled_resumable/2`'s wait or between its read and the
+  # re-open. So the lease is checked after the read, and the re-open is the
+  # struct that read loaded, its UPDATE pinned to that struct's `updated_at`
+  # (`Run.Changes.Resume`): a Cancel that commits before the check stops this
+  # start there, and one that commits between the check and the UPDATE makes
+  # the UPDATE match nothing. Either way the lease is gone, and the start
+  # stops quietly (`{:error, :superseded}`): no refusal note, no release, no
+  # settle, since the Cancel did all three. A refusal with the lease still
+  # held is the run's own.
   defp reopen(lease) do
     case Recorder.reopened(lease.stamp, lease.chain) do
       {:ok, rec} ->
         {:ok, %{rec | dir_id: lease.dir_id}}
 
       {:error, _} ->
-        with {:ok, run, waited_ms} <- settled_resumable(lease.stamp, 0),
-             {:ok, rec} <- Recorder.reopen(run.stamp, lease.chain, lease.dir_id) do
-          {:ok, log_settle_wait(rec, waited_ms)}
+        case reopen_settled(lease) do
+          {:ok, _rec} = ok -> ok
+          {:error, :superseded} = superseded -> superseded
+          {:error, reason} -> refused_while_holding(lease, reason)
         end
+    end
+  end
+
+  # A refusal counts only while the lease still holds: a lost lease is the
+  # Cancel's, which said so on the run (`{:error, :superseded}`).
+  defp refused_while_holding(lease, reason) do
+    with :ok <- holding(lease), do: {:error, reason}
+  end
+
+  defp reopen_settled(lease) do
+    with {:ok, run, waited_ms} <- settled_resumable(lease.stamp, 0),
+         :ok <- holding(lease),
+         {:ok, rec} <- Recorder.reopen_run(run, lease.chain, lease.dir_id) do
+      {:ok, log_settle_wait(rec, waited_ms)}
+    end
+  end
+
+  defp holding(lease) do
+    case Chain.while_holding(lease, fn -> :ok end) do
+      {:ok, :ok} -> :ok
+      {:error, _} = error -> error
     end
   end
 
@@ -787,11 +841,11 @@ defmodule KilnCMS.Backups.Steps do
   defp finish_interrupted(lease) do
     case finish_verdict(lease.stamp, lease.chain) do
       {:done, _rec} ->
-        finish_tail(lease)
+        finish_tail(lease, interrupted_done(lease))
 
       {:close, rec} ->
         close_finished(rec, lease.stamp, lease.chain)
-        finish_tail(lease)
+        finish_tail(lease, interrupted_done(lease))
 
       :lost ->
         lost_state(lease, :no_state)
@@ -838,13 +892,23 @@ defmodule KilnCMS.Backups.Steps do
     |> Recorder.finish()
   end
 
-  # `succeed/4`'s steps after the work directory is gone. The importer runs
+  defp interrupted_done(lease) do
+    "Backup complete (#{lease.trigger || "manual"}): #{lease.stamp} in #{Backups.dir()} " <>
+      "(finished after an interruption)"
+  end
+
+  # Every finish ends here once the work directory is gone: `succeed/4`, and
+  # a finish that found it gone (`finish_interrupted/1`). The importer runs
   # first, outside the lock (it writes Run rows); the marker sync runs under
-  # the lock and only while this finish still holds it, as the lease-checked
-  # release after it does. A lock write that fails is retried.
-  defp finish_tail(lease) do
+  # the lock and only while this finish still holds it (#3013: two syncs on
+  # different stamps can remove each other's markers), as the lease-checked
+  # release after it does. A finish whose lease was superseded meanwhile
+  # writes no marker, releases nothing and settles nothing: the step that
+  # took over does. A lock write that fails is retried. `done` is the log
+  # line, the one thing that tells the two callers apart.
+  defp finish_tail(lease, done) do
     dir = Backups.dir()
-    _ = Importer.run(dir)
+    import_best_effort(dir, "Backup import before the marker sync")
 
     synced =
       AfterCommit.deferring(fn ->
@@ -853,11 +917,7 @@ defmodule KilnCMS.Backups.Steps do
 
     with {:ok, _sync} <- synced,
          {:ok, _promoted} <- Chain.release(lease) do
-      Logger.info(
-        "Backup complete (#{lease.trigger || "manual"}): #{lease.stamp} in #{dir} " <>
-          "(finished after an interruption)"
-      )
-
+      Logger.info(done)
       settled(lease, :ok)
       :ok
     else
@@ -2198,19 +2258,15 @@ defmodule KilnCMS.Backups.Steps do
     # Once `.work/<stamp>` is gone this run is no longer in flight, so it can
     # be the newest verified backup, and count toward its schedules' keep
     # count: its `.good` markers (and the `.hold` markers, #2219) are written now,
-    # under the lock, so a later run that fails leaving a newer complete set
-    # can't get the cron prune to take this one. Total; nothing it does
-    # changes the backup's outcome. It runs the importer first, so a
-    # cron-made backup sitting next to this one is picked up too.
-    _ = Retention.sync_last_good(ctx.dir)
-    _ = Chain.release(lease)
-
-    Logger.info(
+    # under the lock and only while this finish still holds it (#3013), so a
+    # later run that fails leaving a newer complete set can't get the cron
+    # prune to take this one. The importer runs first, so a cron-made backup
+    # sitting next to this one is picked up too. A sync that fails changes
+    # nothing about the backup's outcome.
+    finish_tail(
+      lease,
       "Backup complete (#{ctx.trigger}): #{length(artifacts)} artifact(s) in #{ctx.dir}"
     )
-
-    settled(lease, :ok)
-    :ok
   end
 
   # A destination still pending at finish was never sent to: its part ran on
@@ -2684,16 +2740,17 @@ defmodule KilnCMS.Backups.Steps do
   # swept. A `.partial` named like no stamp (or with a stamp no Importer will
   # ever record) can never get a row, so it is swept by age alone, as before.
   defp import_then_sweep_partials(dir) do
-    import_best_effort(dir)
+    import_best_effort(dir, "Backup import before the partial sweep")
     sweep_stale_partials(dir)
   end
 
-  # Best effort, never a gate: see above. `Importer.run/1` already turns a
-  # raise into an error; this boundary also catches an exit (a call into a
-  # process that died) or a throw, so the start step carries on to the sweep,
-  # which fails closed on its own. `config :kiln_cms, KilnCMS.Backups,
-  # importer:` swaps the module in tests only.
-  defp import_best_effort(dir) do
+  # Best effort, never a gate: see above, and the finish's marker sync
+  # (`finish_tail/2`). `Importer.run/1` already turns a raise into an error;
+  # this boundary also catches an exit (a call into a process that died) or a
+  # throw, so the step carries on to what follows, which fails closed on its
+  # own. `what` names the import in the warning. `config :kiln_cms,
+  # KilnCMS.Backups, importer:` swaps the module in tests only.
+  defp import_best_effort(dir, what) do
     importer =
       Keyword.get(Application.get_env(:kiln_cms, KilnCMS.Backups, []), :importer, Importer)
 
@@ -2701,12 +2758,10 @@ defmodule KilnCMS.Backups.Steps do
     :ok
   rescue
     error ->
-      Logger.warning(
-        "Backup import before the partial sweep crashed: #{Exception.message(error)}"
-      )
+      Logger.warning("#{what} crashed: #{Exception.message(error)}")
   catch
     kind, reason ->
-      Logger.warning("Backup import before the partial sweep failed: #{inspect({kind, reason})}")
+      Logger.warning("#{what} failed: #{inspect({kind, reason})}")
   end
 
   # sobelow_skip ["Traversal.FileModule"]

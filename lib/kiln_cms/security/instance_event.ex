@@ -64,7 +64,8 @@ defmodule KilnCMS.Security.InstanceEvent do
   ]
 
   @metadata_keys %{
-    backup_canceled: ~w(stamp step),
+    # `resume`: true when it was a resume canceled before it started (#2816).
+    backup_canceled: ~w(stamp step resume),
     backup_schedule_created:
       ~w(components interval time_of_day time_zone starts_on enabled keep_count keep_days),
     backup_schedule_changed:

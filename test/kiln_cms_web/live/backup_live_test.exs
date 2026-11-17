@@ -1370,6 +1370,274 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
       assert Backups.in_flight() != nil
     end
+
+    # A failed run with a resume of it holding the lock at its start, not
+    # re-opened yet (#2816). Its files are recorded in another backup
+    # directory, so with `snooze?: true` the start, run once, snoozes waiting
+    # for the server that has them; else it hasn't run. `fields` change the
+    # run first.
+    defp waiting_resume!(dir, stamp, opts \\ []) do
+      run =
+        Backups.start_run!(
+          %{
+            stamp: stamp,
+            trigger: "manual",
+            chain_id: Ash.UUID.generate(),
+            dir_id: Ash.UUID.generate()
+          },
+          actor: Backups.system()
+        )
+
+      run = Backups.fail_run!(run, %{error: "tar exited 2"}, actor: Backups.system())
+      work = WorkState.path(dir, stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+
+      case Keyword.get(opts, :fields, []) do
+        [] -> :ok
+        fields -> set_run!(stamp, fields)
+      end
+
+      {:ok, %{status: :started, chain: chain}} =
+        Backups.request([resume: stamp], Backups.system())
+
+      if Keyword.get(opts, :snooze?, true) do
+        File.rename!(work, Path.join(dir, "aside-#{stamp}"))
+        %{snoozed: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      end
+
+      %{run: Backups.get_run!(run.id, actor: Backups.system()), chain: chain}
+    end
+
+    defp set_run!(stamp, fields) do
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          Ecto.Query.from(r in "backup_runs", where: r.stamp == ^stamp),
+          set: fields
+        )
+    end
+
+    @strip_cancel_resume ~s|#backup-in-flight button[data-role="cancel-resume"]|
+
+    @tag :pg_tools
+    test "a resume waiting for the server with its files says so; its Cancel frees the lock, " <>
+           "and the row keeps its status (#2816)",
+         %{dir: dir} do
+      %{run: run} = waiting_resume!(dir, "20261103-101010")
+      {:ok, %{status: :queued}} = Backups.request([trigger: "schedule"], Backups.system())
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Waiting for the server that has this backup"
+             )
+
+      assert has_element?(
+               lv,
+               @strip_cancel_resume <>
+                 ~s|[data-confirm*="Cancel this resume? The backup stays as it was"]| <>
+                 ~s|[data-confirm*="A queued backup will start next"]|
+             )
+
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="cancel"]|)
+      row = "#backup-run-#{run.id}"
+      refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
+
+      html = lv |> element(@strip_cancel_resume) |> render_click()
+
+      assert html =~ "Resume canceled. The backup stays as it was, so it can be resumed later."
+      assert %{trigger: "schedule", resume: nil} = Backups.in_flight()
+      assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Starting a backup")
+      refute has_element?(lv, @strip_cancel_resume)
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Failed")
+
+      assert %{error: "Resume canceled by a platform admin before it started\ntar exited 2"} =
+               Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    @tag :pg_tools
+    test "the strip says what a waiting resume waits for (#2816)", %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-111111", snooze?: false)
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      # Its start hasn't run yet.
+      assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Starting a resume")
+
+      assert has_element?(
+               lv,
+               @strip_cancel_resume <>
+                 ~s|[data-confirm="Cancel this resume? The backup stays as it was, so it can be resumed later."]|
+             )
+
+      # Its start runs, inside the settle window of the run's Cancel.
+      set_run!(run.stamp, status: "canceled", finished_at: DateTime.utc_now())
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          Ecto.Query.from(j in Oban.Job, where: j.id == ^lock_row().step_job_id),
+          set: [state: "executing"]
+        )
+
+      send(lv.pid, :refresh)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Waiting for the canceled backup"
+             )
+
+      assert has_element?(lv, @strip_cancel_resume)
+      assert %{chain: ^chain} = Backups.in_flight()
+    end
+
+    # Critic change 1: a stale `running` run that a resume is about to re-open
+    # gets only the resume's Cancel; the plain one would leave the resume
+    # holding the lock.
+    @tag :pg_tools
+    test "a stale running run being resumed offers only the resume's Cancel (#2816)", %{
+      dir: dir
+    } do
+      quiet = DateTime.add(DateTime.utc_now(), -5 * 3600, :second)
+
+      %{run: run} =
+        waiting_resume!(dir, "20261103-121212",
+          fields: [
+            status: "running",
+            finished_at: nil,
+            error: nil,
+            started_at: quiet,
+            updated_at: quiet
+          ]
+        )
+
+      assert run.status == :running
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Running")
+      refute has_element?(lv, ~s|#{row} [data-role="cancel"]|)
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="cancel"]|)
+
+      html = lv |> element(@strip_cancel_resume) |> render_click()
+
+      assert html =~ "Resume canceled."
+      assert Backups.in_flight() == nil
+      assert %{status: :failed} = Backups.get_run!(run.id, actor: Backups.system())
+      assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Failed")
+    end
+
+    @tag :pg_tools
+    test "a resume that started meanwhile: the click says so, and the plain Cancel is offered",
+         %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-131313")
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+      assert has_element?(lv, @strip_cancel_resume)
+
+      # The start re-opens the run before the click lands.
+      Backups.resume_run!(Backups.get_run!(run.id, actor: Backups.system()), %{chain_id: chain},
+        actor: Backups.system()
+      )
+
+      html = lv |> element(@strip_cancel_resume) |> render_click()
+
+      assert html =~ "The resume started meanwhile. Cancel it again to stop the backup."
+      assert %{chain: ^chain} = Backups.in_flight()
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+      refute has_element?(lv, @strip_cancel_resume)
+      assert has_element?(lv, ~s|#backup-in-flight button[data-role="cancel"]|)
+    end
+
+    # A stale record that isn't the resume starting: the run is `running`
+    # but not stale, under its own chain, so the Cancel's pinned UPDATE
+    # matches nothing while the lock still holds the waiting resume.
+    @tag :pg_tools
+    test "a Cancel that finds the backup changed otherwise says so, neutrally (#2816)",
+         %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-131314")
+      set_run!(run.stamp, status: "running", finished_at: nil)
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      html = render_hook(lv, "cancel_resume", %{"id" => run.id})
+
+      assert html =~ "The backup changed meanwhile. Try again."
+      refute html =~ "The resume started meanwhile"
+      assert %{chain: ^chain, step: :start} = Backups.in_flight()
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+    end
+
+    # The race a LiveView test can't time: the Cancel read the run, then the
+    # start re-opened it before the Cancel's UPDATE (a stale record). The run
+    # and the lock as they are now decide the message.
+    @tag :pg_tools
+    test "a stale-record Cancel says the resume started only when it did (#2816)", %{dir: dir} do
+      admin = authed_user(:admin)
+      stale = %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}
+
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-131315")
+
+      assert KilnCMSWeb.BackupLive.cancel_resume_message(stale, run.id, admin) ==
+               "The backup changed meanwhile. Try again."
+
+      Backups.resume_run!(run, %{chain_id: chain}, actor: Backups.system())
+
+      assert KilnCMSWeb.BackupLive.cancel_resume_message(stale, run.id, admin) ==
+               "The resume started meanwhile. Cancel it again to stop the backup."
+    end
+
+    @tag :pg_tools
+    test "a forged resume cancel of a running or finished backup is refused", %{dir: dir} do
+      done = app_run!(dir, 2, :succeeded)
+      %{run: running} = started!()
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+      refute has_element?(lv, @strip_cancel_resume)
+
+      for id <- [done.id, running.id, Ecto.UUID.generate()] do
+        assert render_hook(lv, "cancel_resume", %{"id" => id}) =~
+                 "That resume can&#39;t be canceled."
+      end
+
+      render_hook(lv, "cancel_resume", %{"id" => 7})
+
+      assert %{status: :succeeded} = Backups.get_run!(done.id, actor: Backups.system())
+      assert %{status: :running} = Backups.get_run!(running.id, actor: Backups.system())
+      assert %{step: :dump} = Backups.in_flight()
+    end
+
+    @tag :pg_tools
+    test "the resume cancel handler re-checks platform admin (#2816)", %{dir: dir} do
+      %{run: run, chain: chain} = waiting_resume!(dir, "20261103-141414")
+
+      org_admin = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: org_admin.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      for user <- [
+            authed_user(:editor),
+            org_admin,
+            authed_user(:viewer),
+            expired_grant_user(),
+            nil
+          ] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+
+        assert_denied(
+          KilnCMSWeb.BackupLive.handle_event("cancel_resume", %{"id" => run.id}, socket)
+        )
+      end
+
+      assert Backups.get_run!(run.id, actor: Backups.system()) == run
+      assert %{chain: ^chain, step: :start} = Backups.in_flight()
+    end
   end
 
   describe "one headline line per component (#2219)" do

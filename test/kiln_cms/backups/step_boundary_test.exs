@@ -1,3 +1,25 @@
+defmodule KilnCMS.Backups.StepBoundaryTest.SupersedingImporter do
+  @moduledoc false
+  # The `:importer` seam (#3013), one-shot: the first call runs the test's
+  # function (which supersedes the finishing step's lease) instead of
+  # importing; every later call imports as usual.
+  @key {__MODULE__, :once}
+
+  def arm(fun), do: :persistent_term.put(@key, fun)
+  def disarm, do: :persistent_term.erase(@key)
+
+  def run(dir) do
+    case :persistent_term.get(@key, nil) do
+      nil ->
+        KilnCMS.Backups.Importer.run(dir)
+
+      fun ->
+        disarm()
+        fun.()
+    end
+  end
+end
+
 defmodule KilnCMS.Backups.StepBoundaryTest do
   @moduledoc """
   A backup killed at every step boundary completes on retry without redoing
@@ -25,9 +47,12 @@ defmodule KilnCMS.Backups.StepBoundaryTest do
   import Ecto.Query
   import KilnCMS.Test.BackupDestinations, only: [destination!: 1]
 
+  alias KilnCMS.Accounts.User
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Chain, Manifest, Recorder, Steps, StepWorker, WorkState}
+  alias KilnCMS.Backups.StepBoundaryTest.SupersedingImporter
   alias KilnCMS.Repo
+  alias KilnCMS.Security
   alias KilnCMS.Test.BackupChain
 
   @moduletag :capture_log
@@ -617,6 +642,110 @@ defmodule KilnCMS.Backups.StepBoundaryTest do
 
       assert BackupChain.settled(chain) == {:error, :unsettled}
       refute marked?(ctx.dir, stamp)
+    end
+  end
+
+  ## #3012 and #3013: the finish and the lock
+
+  defp admin do
+    Ash.Seed.seed!(User, %{
+      email: "boundary-admin-#{System.unique_integer([:positive])}@example.com",
+      hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+      confirmed_at: DateTime.utc_now(),
+      role: :admin
+    })
+  end
+
+  defp canceled_events(actor) do
+    Security.list_instance_events!(actor: actor, page: [limit: 100])
+    |> then(fn
+      %{results: results} -> results
+      list -> list
+    end)
+    |> Enum.filter(&(&1.type == :backup_canceled))
+  end
+
+  # Every `.good` and `.hold` marker in the backup directory, with its bytes.
+  defp markers(dir) do
+    for sub <- ["db", "media"],
+        name <- File.ls!(Path.join(dir, sub)),
+        Path.extname(name) in [".good", ".hold"],
+        into: %{} do
+      path = Path.join([dir, sub, name])
+      {path, File.read!(path)}
+    end
+  end
+
+  describe "#3012: a reclaimed finishing step" do
+    test "stays finishing, so a Cancel in the gap is refused; the replacement completes", ctx do
+      {chain, stamp} = finish_until(ctx, [:keep_work])
+      admin = admin()
+
+      # Requeued: the replacement job hasn't run `mark_finishing/1` yet.
+      row = lock()
+      assert %{chain_id: ^chain, phase: :finishing, step: :finish} = row
+      run = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert run.status == :running
+
+      assert {:error, %Ash.Error.Invalid{} = error} = Backups.cancel_run(run, actor: admin)
+      assert Exception.message(error) =~ "too late to cancel"
+
+      assert %{status: :running} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert lock() == row
+      assert canceled_events(admin) == []
+
+      assert :ok = drain_to_end(chain)
+      assert_completed(ctx, stamp, %{})
+    end
+  end
+
+  describe "#3013: a finish whose lease is superseded before its marker sync" do
+    setup do
+      on_exit(&SupersedingImporter.disarm/0)
+    end
+
+    test "writes no marker and releases nothing; the step that took over syncs them", ctx do
+      # An older backup, marked good, and a hold marker no schedule names: a
+      # sync would move the first and remove the second.
+      # Planted once the chain reaches its finish: its prune step syncs the
+      # markers too.
+      assert :ok = BackupChain.run()
+      assert [%{stamp: older}] = runs()
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      job = step_until("finish", nil)
+      %{stamp: stamp} = lock()
+
+      File.write!(Path.join([ctx.dir, "db", Artifact.hold_name(older)]), "")
+      before = markers(ctx.dir)
+      assert Map.has_key?(before, Path.join([ctx.dir, "db", Artifact.good_name(older)]))
+
+      # The finish stalls in its import past the reclaim window: its node is
+      # judged stopped and the step requeued, under a new lease.
+      SupersedingImporter.arm(fn ->
+        executing!(job, "dead@node", 600)
+        {:ok, {:requeued, _}} = Chain.reclaim_stale()
+        {:ok, %{}}
+      end)
+
+      config = Application.get_env(:kiln_cms, KilnCMS.Backups)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(config, :importer, SupersedingImporter)
+      )
+
+      assert {:cancel, :superseded} = StepWorker.perform(job)
+
+      assert markers(ctx.dir) == before
+      refute File.exists?(Path.join([ctx.dir, "db", Artifact.good_name(stamp)]))
+      assert %{chain: ^chain, step: :finish} = Backups.in_flight()
+
+      assert :ok = drain_to_end(chain)
+      assert File.exists?(Path.join([ctx.dir, "db", Artifact.good_name(stamp)]))
+      refute File.exists?(Path.join([ctx.dir, "db", Artifact.good_name(older)]))
+      assert Backups.in_flight() == nil
     end
   end
 end

@@ -5249,6 +5249,16 @@ msgstr ""
 msgid "Cancel this backup? Its files are kept, so it can be resumed later. A queued backup will start next."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel this resume? The backup stays as it was, so it can be resumed later."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel this resume? The backup stays as it was, so it can be resumed later. A queued backup will start next."
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Cancel upload"
@@ -19147,6 +19157,11 @@ msgid "Resume"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Resume canceled. The backup stays as it was, so it can be resumed later."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
@@ -21914,6 +21929,11 @@ msgstr ""
 msgid "Starting a backup"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Starting a resume"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "Starting on"
@@ -23110,6 +23130,11 @@ msgstr ""
 msgid "That release no longer exists."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That resume can't be canceled."
+msgstr ""
+
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "That rule is no longer listed."
@@ -23280,6 +23305,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The backup changed meanwhile. Try again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
@@ -23870,6 +23900,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/compliance_components.ex
 #, elixir-autogen, elixir-format
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The resume started meanwhile. Cancel it again to stop the backup."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_log_live.ex
@@ -26733,6 +26768,16 @@ msgstr ""
 #: lib/kiln_cms/notifications.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting for review: one %{kind}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for the canceled backup's step to stop"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for the server that has this backup's files"
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex

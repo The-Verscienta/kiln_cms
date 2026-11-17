@@ -632,6 +632,8 @@ defmodule KilnCMS.Backups.ChainTest do
       assert row.step_job_id == new_id and row.step == :archive and row.part == 2
       assert row.epoch > epoch
       assert row.stamp == stamp
+      # Only a finishing step stays finishing across a reclaim (#3012).
+      assert row.phase == :running
 
       # The zombie wakes up: it can't move the chain on.
       assert {:error, :superseded} = Chain.advance(zombie, "archive", 3)

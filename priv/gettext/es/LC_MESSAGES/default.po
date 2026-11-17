@@ -5249,6 +5249,16 @@ msgstr "¿Cancelar esta copia de seguridad? Sus archivos se conservan, así que 
 msgid "Cancel this backup? Its files are kept, so it can be resumed later. A queued backup will start next."
 msgstr "¿Cancelar esta copia de seguridad? Sus archivos se conservan, así que puede reanudarse más tarde. A continuación empezará una copia en cola."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel this resume? The backup stays as it was, so it can be resumed later."
+msgstr "¿Cancelar esta reanudación? La copia queda como estaba y se puede reanudar más tarde."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel this resume? The backup stays as it was, so it can be resumed later. A queued backup will start next."
+msgstr "¿Cancelar esta reanudación? La copia queda como estaba y se puede reanudar más tarde. A continuación empezará una copia en cola."
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Cancel upload"
@@ -19147,6 +19157,11 @@ msgid "Resume"
 msgstr "Reanudar"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Resume canceled. The backup stays as it was, so it can be resumed later."
+msgstr "Reanudación cancelada. La copia queda como estaba y se puede reanudar más tarde."
+
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
@@ -21914,6 +21929,11 @@ msgstr "Empezaste con «%{recipe}». Cambia lo que quieras y luego añade la reg
 msgid "Starting a backup"
 msgstr "Iniciando una copia de seguridad"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Starting a resume"
+msgstr "Iniciando una reanudación"
+
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "Starting on"
@@ -23110,6 +23130,11 @@ msgstr "Ese lanzamiento no se puede eliminar."
 msgid "That release no longer exists."
 msgstr "Ese lanzamiento ya no existe."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That resume can't be canceled."
+msgstr "Esa reanudación no se puede cancelar."
+
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "That rule is no longer listed."
@@ -23281,6 +23306,11 @@ msgstr "El icono de la aplicación se guardó, pero todavía no es instalable: %
 #, elixir-autogen, elixir-format
 msgid "The autoresponder now uses [field:%{new}] where it used [field:%{old}]."
 msgstr "La respuesta automática ahora usa [field:%{new}] donde usaba [field:%{old}]."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The backup changed meanwhile. Try again."
+msgstr "La copia cambió mientras tanto. Inténtelo de nuevo."
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
@@ -23871,6 +23901,11 @@ msgstr "No se pudieron guardar los ajustes de registro."
 #, elixir-autogen, elixir-format
 msgid "The required disclaimer is missing. Add it verbatim: “%{disclaimer}”"
 msgstr "Falta el aviso legal obligatorio. Añádalo literalmente: «%{disclaimer}»"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The resume started meanwhile. Cancel it again to stop the backup."
+msgstr "La reanudación empezó mientras tanto. Cancélela de nuevo para detener la copia."
 
 #: lib/kiln_cms_web/live/security_log_live.ex
 #, elixir-autogen, elixir-format
@@ -26734,6 +26769,16 @@ msgstr "Esperando aprobación en %{site}. Puedes iniciar sesión, pero solo podr
 #, elixir-autogen, elixir-format
 msgid "Waiting for review: one %{kind}."
 msgstr "En espera de revisión: un contenido de tipo %{kind}."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for the canceled backup's step to stop"
+msgstr "Esperando a que se detenga el paso de la copia cancelada"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting for the server that has this backup's files"
+msgstr "Esperando al servidor que tiene los archivos de esta copia"
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex

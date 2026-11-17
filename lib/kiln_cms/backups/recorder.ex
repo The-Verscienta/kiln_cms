@@ -339,11 +339,27 @@ defmodule KilnCMS.Backups.Recorder do
         end
       end)
 
-    case result do
-      {:ok, %{} = run} -> {:ok, resumed(run, chain_id)}
-      _ -> {:error, :not_resumable}
-    end
+    reopened_result(result, chain_id)
   end
+
+  @doc """
+  `reopen/3` with the run the caller already loaded, not read again (#2816):
+  the `:resume` action's UPDATE is pinned to that struct's `updated_at`, so
+  anything that wrote the row since (a resume canceled before it started,
+  `Run :cancel_resume`) refuses it with `{:error, :not_resumable}`.
+  """
+  @spec reopen_run(Backups.Run.t(), String.t() | nil, String.t() | nil) ::
+          {:ok, t()} | {:error, :not_resumable}
+  def reopen_run(%Backups.Run{} = run, chain_id, dir_id) do
+    "reopen"
+    |> safely(fn ->
+      Backups.resume_run(run, resume_params(chain_id, dir_id), actor: Backups.system())
+    end)
+    |> reopened_result(chain_id)
+  end
+
+  defp reopened_result({:ok, %{} = run}, chain_id), do: {:ok, resumed(run, chain_id)}
+  defp reopened_result(_result, _chain_id), do: {:error, :not_resumable}
 
   # A nil `dir_id` keeps the run's own: it is not evidence of anything.
   defp resume_params(chain_id, nil), do: %{chain_id: chain_id}
