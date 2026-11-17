@@ -460,6 +460,30 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
     assert CMS.get_release_item!(item.id, authorize?: false).status == :applied
   end
 
+  test "a refusal that isn't about the release keeps its own message, even if it moved",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin, "Moved, but not why")
+    page = CMS.create_page!(%{title: "Still here", slug: slug()}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    {:ok, view, _html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    {:ok, _} = CMS.start_release(rel, %{}, actor: admin)
+
+    # An item that doesn't exist is refused as not found, which is not the
+    # release changing, whatever the release has done meanwhile.
+    html = render_click(view, "remove_item", %{"id" => Ash.UUID.generate()})
+    assert html =~ "Couldn&#39;t remove that item."
+    refute html =~ "This release changed since you opened it."
+
+    KilnCMS.DataCase.drain_oban()
+  end
+
   test "an empty release is not offered a go-live that would ship nothing", %{conn: conn} do
     admin = authed_user(:admin)
     rel = release(admin)

@@ -314,7 +314,11 @@ defmodule KilnCMSWeb.ReleaseLive do
        |> reload()
        |> put_flash(:info, gettext("Change updated."))}
     else
-      error -> {:noreply, item_refused(socket, error, gettext("Couldn't change that item."))}
+      {:error, error} ->
+        {:noreply, item_refused(socket, error, gettext("Couldn't change that item."))}
+
+      _other ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't change that item."))}
     end
   end
 
@@ -331,7 +335,11 @@ defmodule KilnCMSWeb.ReleaseLive do
        |> reload()
        |> put_flash(:info, gettext("Removed from the release."))}
     else
-      error -> {:noreply, item_refused(socket, error, gettext("Couldn't remove that item."))}
+      {:error, error} ->
+        {:noreply, item_refused(socket, error, gettext("Couldn't remove that item."))}
+
+      _other ->
+        {:noreply, put_flash(socket, :error, gettext("Couldn't remove that item."))}
     end
   end
 
@@ -388,12 +396,20 @@ defmodule KilnCMSWeb.ReleaseLive do
   # An item write refused because the release moved since this page was drawn
   # (#2740: it is checked under a lock on the release row now, so a go-live
   # claimed meanwhile refuses it) is the same story as a stale transition, and
-  # gets the same answer. Any other refusal keeps its own message.
+  # gets the same answer. Only a refusal ABOUT the release's state does: a
+  # Forbidden, a missing item or any other validation keeps its own message,
+  # even when the release happened to move as well.
   defp item_refused(socket, error, message) do
-    if Releases.stale?(error) or release_moved?(socket),
+    if Releases.stale?(error) or (release_refusal?(error) and release_moved?(socket)),
       do: changed_since_opened(socket),
       else: put_flash(socket, :error, message)
   end
+
+  # `ReleaseOpenForEdit`'s refusal, which names the `release_id` field.
+  defp release_refusal?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.any?(errors, &match?(%Ash.Error.Changes.InvalidChanges{fields: [:release_id]}, &1))
+
+  defp release_refusal?(_error), do: false
 
   defp release_moved?(socket) do
     case CMS.get_release(socket.assigns.release.id, act(socket)) do

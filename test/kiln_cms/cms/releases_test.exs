@@ -847,6 +847,86 @@ defmodule KilnCMS.CMS.ReleasesTest do
   defp pending_on(release),
     do: CMS.list_release_items_with_status!(release.id, :pending, authorize?: false)
 
+  describe "the minute cron claims only a release that is still due (#2745)" do
+    # The GoLive worker reads the release, then claims it with no transaction
+    # around the two. `:start` also serves "Publish now", so it accepts an
+    # `:open` release; the cron's claim must instead re-check its own `where`.
+    defp due(admin) do
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+
+      {:ok, scheduled} =
+        CMS.schedule_release(rel, %{scheduled_at: DateTime.add(DateTime.utc_now(), -60)},
+          actor: admin
+        )
+
+      scheduled
+    end
+
+    defp run_go_live do
+      AshOban.schedule_and_run_triggers({KilnCMS.CMS.ContentRelease, :go_live},
+        drain_queues?: true,
+        with_recursion: true,
+        with_scheduled: true
+      )
+    end
+
+    test "an unschedule between the worker's read and its claim cancels the job" do
+      admin = user(:admin)
+      rel = due(admin)
+
+      on_action_start(:update, KilnCMS.CMS.ContentRelease, :start_scheduled, fn ->
+        {:ok, _} = CMS.unschedule_release(reload(rel), %{}, actor: admin)
+      end)
+
+      assert %{cancelled: 1, failure: 0} = run_go_live()
+      KilnCMS.DataCase.drain_oban()
+
+      after_run = reload(rel)
+      assert after_run.state == :open
+      assert is_nil(after_run.scheduled_at)
+      assert is_nil(after_run.published_at)
+    end
+
+    test "a reschedule to tomorrow in that window keeps the new date and ships nothing" do
+      admin = user(:admin)
+      rel = due(admin)
+      tomorrow = DateTime.add(DateTime.utc_now(), 86_400)
+
+      on_action_start(:update, KilnCMS.CMS.ContentRelease, :start_scheduled, fn ->
+        {:ok, _} = CMS.schedule_release(reload(rel), %{scheduled_at: tomorrow}, actor: admin)
+      end)
+
+      assert %{cancelled: 1, failure: 0} = run_go_live()
+      KilnCMS.DataCase.drain_oban()
+
+      after_run = reload(rel)
+      assert after_run.state == :scheduled
+      assert DateTime.compare(after_run.scheduled_at, tomorrow) == :eq
+      assert is_nil(after_run.published_at)
+    end
+
+    test "Publish now still claims an open release" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+
+      assert {:ok, %{state: :publishing}} = CMS.start_release(rel, %{}, actor: admin)
+      KilnCMS.DataCase.drain_oban()
+      assert reload(rel).state == :published
+    end
+
+    test "no person may run the cron's claim, an admin included" do
+      admin = user(:admin)
+      rel = due(admin)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.start_scheduled_release(rel, %{}, actor: admin)
+
+      assert reload(rel).state == :scheduled
+    end
+  end
+
   describe "an item write and the go-live claim serialize (#2740)" do
     test "an add whose release is claimed after the add was built is refused" do
       # The window: the add read the release as `:open`, the claim committed,

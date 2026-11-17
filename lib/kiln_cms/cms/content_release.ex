@@ -126,6 +126,8 @@ defmodule KilnCMS.CMS.ContentRelease do
       transition :unschedule, from: :scheduled, to: :open
       # The claim: both the minute cron and "Publish now" land here first.
       transition :start, from: [:open, :scheduled], to: :publishing
+      # The minute cron's claim: only a release that is still due.
+      transition :start_scheduled, from: :scheduled, to: :publishing
       transition :mark_published, from: :publishing, to: :published
       transition :mark_failed, from: :publishing, to: :failed
       transition :reopen, from: :failed, to: :open
@@ -155,7 +157,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       # `KilnCMS.CMS.Workers.ReleaseWorker` so it owns its own transaction
       # boundary rather than nesting inside AshOban's.
       trigger :go_live do
-        action :start
+        action :start_scheduled
         queue :scheduling
         scheduler_cron "* * * * *"
         # Strict-tenancy prep (#419): schedulers scan per org, not globally.
@@ -245,6 +247,31 @@ defmodule KilnCMS.CMS.ContentRelease do
       # `StaleRecord` error instead of a duplicate go-live.
       change filter(expr(state in [:open, :scheduled]))
       change transition_state(:publishing)
+      change KilnCMS.CMS.Changes.StampReleaseTrigger
+      change {KilnCMS.CMS.Changes.EnqueueReleaseWorker, mode: :publish}
+    end
+
+    update :start_scheduled do
+      description "System: the minute cron claims a due release and enqueues the go-live worker."
+      accept []
+      require_atomic? false
+
+      # Its own action rather than `:start`, which also serves "Publish now"
+      # and so must accept an `:open` release (#2745). The AshOban worker reads
+      # the release, then claims it outside any transaction of its own; an
+      # admin who unschedules (`:open`, no date) or moves the date to tomorrow
+      # in that window would still match `:start`'s filter, and the release
+      # would ship anyway. This filter is the trigger's `where`, word for word,
+      # so the claim lands only on a release that is still due. A miss is a
+      # `StaleRecord`, which AshOban cancels as `:trigger_no_longer_applies`,
+      # as on `KilnCMS.CMS.Content`'s `:publish_scheduled`. No policy admits a
+      # person: only the scheduler, through the `AshObanInteraction` bypass.
+      change filter(
+               expr(state == :scheduled and not is_nil(scheduled_at) and scheduled_at <= now())
+             )
+
+      change transition_state(:publishing)
+      # No actor here, so this keeps the scheduling admin's stamp.
       change KilnCMS.CMS.Changes.StampReleaseTrigger
       change {KilnCMS.CMS.Changes.EnqueueReleaseWorker, mode: :publish}
     end
