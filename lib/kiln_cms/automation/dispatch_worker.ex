@@ -14,11 +14,25 @@ defmodule KilnCMS.Automation.DispatchWorker do
   # automation).
   use Oban.Worker, queue: :default, max_attempts: 3
 
+  alias KilnCMS.Automation
+  alias KilnCMS.Jobs.PrivateArgs
+
+  # The payload is the event's serialized document, drafts included (#2992):
+  # it is read in either shape `Automation.job_payload/1` accepts and dropped
+  # from the job's row once the job is finished.
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"event" => event, "payload" => payload} = args}) do
-    # `org_id` scopes the rule match to the event's own site (epic #336); pre-#336
-    # jobs carry none and fall back to the sole org.
-    org_id = Map.get(args, "org_id", KilnCMS.Accounts.default_org_id())
-    KilnCMS.Automation.dispatch(event, payload, org_id)
+  def perform(%Oban.Job{args: %{"event" => event} = args} = job) do
+    PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
+      case Automation.job_payload(args) do
+        {:ok, payload} ->
+          # `org_id` scopes the rule match to the event's own site (epic #336);
+          # pre-#336 jobs carry none and fall back to the sole org.
+          org_id = Map.get(args, "org_id", KilnCMS.Accounts.default_org_id())
+          Automation.dispatch(event, payload, org_id)
+
+        {:error, reason} ->
+          {:cancel, Automation.describe_payload_error(reason)}
+      end
+    end)
   end
 end

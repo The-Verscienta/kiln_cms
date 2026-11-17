@@ -508,3 +508,8 @@ config :kiln_cms, KilnCMS.CrawlerVerification.Ranges,
 # Test-only; nothing else sets this key.
 config :kiln_cms, KilnCMS.Backups.Destination,
   extra_adapters: [KilnCMS.Test.BackupDestinations.Fake]
+
+# No boot-time job-args scrub (#2992), for the boot-enqueue reason at the top
+# of this file. Down here so docs/environment-variables.md's line anchor into
+# this file stays put.
+config :kiln_cms, :private_args_scrub_on_boot, false

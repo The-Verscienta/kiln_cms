@@ -69,6 +69,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_BOT_BUDGET_SEARCH_ENGINE_PERCENT KILN_BOT_BUDGET_AI_CRAWLER_PERCENT
             KILN_BOT_BUDGET_DECLARED_BOT_PERCENT KILN_BOT_BUDGET_EMPTY_UA_PERCENT
             KILN_CRAWLER_VERIFICATION KILN_CRAWLER_RANGES KILN_CRAWLER_RANGES_CRON
+            KILN_PRIVATE_ARGS_SCRUB_CRON
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
@@ -1653,6 +1654,20 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
                "false"
 
       assert eval(%{})[:kiln_cms][:crawler_ranges_cron] == nil
+    end
+  end
+
+  describe "KILN_PRIVATE_ARGS_SCRUB_CRON (#2992)" do
+    test "sets the job-args scrub schedule, false included" do
+      assert eval(%{"KILN_PRIVATE_ARGS_SCRUB_CRON" => "5 2 * * *"})[:kiln_cms][
+               :private_args_scrub_cron
+             ] == "5 2 * * *"
+
+      assert eval(%{"KILN_PRIVATE_ARGS_SCRUB_CRON" => "false"})[:kiln_cms][
+               :private_args_scrub_cron
+             ] == "false"
+
+      assert eval(%{})[:kiln_cms][:private_args_scrub_cron] == nil
     end
   end
 end
