@@ -1,16 +1,24 @@
 # 0046. A section's layout is its own row, keyed by the section name, not a setting on each field
 
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
-  #2496 in 1.9.0.
+  #2496 in 1.9.0. Amended 2026-11-16 by
+  [#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) and
+  [#2881](https://github.com/The-Verscienta/kiln_cms/issues/2881) (every
+  field write keeps the layouts in step at once, see "Amendment").
 - **References** — [#2280](https://github.com/The-Verscienta/kiln_cms/issues/2280)
   and [#2496](https://github.com/The-Verscienta/kiln_cms/pull/2496), which
   built it; [#2656](https://github.com/The-Verscienta/kiln_cms/issues/2656),
   which asked for this record;
-  [#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) for two
-  places the lifecycle rule below is applied imperfectly;
+  [#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) and
+  [#2881](https://github.com/The-Verscienta/kiln_cms/issues/2881), the paths
+  that applied the lifecycle rule below late or not at all, closed by the
+  amendment;
   [ADR 0047](0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
   for the field sync file that carries the layouts.
-- **Changelog** — [1.9.0](../changelog/v1.9.0.md#field-layout).
+- **Changelog** — [1.9.0](../changelog/v1.9.0.md#field-layout); the
+  amendment in the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md)
+  ([Fixed](../changelog/unreleased.md#section-layouts-kept-in-step) and
+  [Breaking](../changelog/unreleased.md#field-sync-section-entries-stricter)).
 
 ## The problem
 
@@ -50,29 +58,55 @@ with a lifecycle rule:
 > exported and is eventually pruned.**
 
 Link fields and group sub-fields have no section, so only top-level fields
-count (`KilnCMS.CMS.SectionLayouts.carried/2`). `SectionLayouts.prune/2`
-reads the fields and the rows fresh, not from a page's loaded copy, so one
-admin's prune does not destroy a layout another admin has just set. Where the
-rule is applied:
+count (`KilnCMS.CMS.SectionLayouts.carried/2`, which also counts a field of a
+type the release does not register). `SectionLayouts.prune/2` reads the
+fields and the rows fresh, not from a page's loaded copy, so one admin's
+prune does not destroy a layout another admin has just set, and its reads
+fail closed: a read the actor may not make is an error, never an empty list
+that would make every layout look uncarried. Where the rule is applied (as
+amended by #2652 and #2881):
 
+- **Every field update or destroy.** `KilnCMS.CMS.FieldDefinition`'s
+  `:update` and `:destroy` run `KilnCMS.CMS.Changes.KeepSectionLayouts`. When
+  the write takes a field out of a section (its `section` renamed or cleared,
+  its owner changed, or the field deleted), the change reads where the field
+  is now, locked, inside the write's transaction, and after the write calls
+  `SectionLayouts.prune/2` with `only:` the section it left. The prune runs
+  as the field write's own actor in the record's org, in the same
+  transaction; if it is refused, the field write fails with
+  `KilnCMS.CMS.Errors.SectionLayoutNotKept` and rolls back. This covers the
+  fields admin's edit and delete, `KilnCMS.CMS.JoinGraduation.retire/2`,
+  and any code interface call.
+- **Renaming a section.** The fields admin's **Save** passes
+  `carry_section_layout?: true` to `:update`. Before the prune, the change
+  calls `SectionLayouts.carry/4`, decided from a fresh read made after the
+  rename: if no top-level field still carries the old name and the old name
+  has a non-default row, the new name gets that layout when it has no row
+  (or only a default one); a new name with a layout of its own keeps it.
+  The prune that follows then drops the old row, whichever way the carry
+  went, unless a field still carries the old name. A field sync import does
+  not ask for the carry: its file declares the layouts itself.
 - **Saving a section's layout.** The **Sections of** panel at
   `/editor/fields` (`KilnCMSWeb.FieldDefinitionLive`, the `section_layout`
-  event) writes the row, then calls `SectionLayouts.prune/2` for the whole
-  owner, which drops every row no field carries.
-- **Deleting a field.** The fields admin's `delete` event calls
-  `SectionLayouts.prune/2` with `only:` the deleted field's section, so the
-  last field of a section takes its layout with it.
-- **Renaming a section.** When an edit renames the last field still carrying
-  a section, `carry_section_layout/3` in the same LiveView recreates the row
-  under the new name and deletes the old one, unless the new name has a row
-  already.
+  event) writes the row, or deletes it when it is set back to the default,
+  then calls `SectionLayouts.prune/2` for the whole owner, which drops every
+  row no field carries.
 - **Field sync export.** `KilnCMS.CMS.FieldSync.export/1` writes an owner's
-  `"sections"` only for rows some top-level field of that owner carries.
-- **Field sync import.** A field the import deletes takes its section's layout
-  with it, as in the console (`SectionLayouts.prune/2` after every delete has
-  run). With `--prune`, an owner whose file carries a `"sections"` key loses
-  the rows the file does not list. An owner without the key, a file from
-  before layouts, keeps its rows untouched.
+  `"sections"` only for rows that some top-level field of that owner carries
+  and that are not at the default (`KilnCMS.CMS.FieldSection.default?/1`).
+- **Field sync import.** The import's field writes pass
+  `section_layouts: :deferred`, so the per-write prune waits: a swap (one
+  field from A to B, another from B to A) would otherwise drop a layout
+  halfway through. Once every write has run, in the same transaction and in
+  a dry run too, `SectionLayouts.prune_names/2` prunes the sections the
+  import's fields left (moved out of, or deleted) and the sections the file
+  lays out. The plan lists those deletes. An entry at the default creates
+  nothing and deletes the stored row of that name. A non-default entry for a
+  section no top-level field carries once the import is done is refused at
+  plan time, so nothing is written. With `--prune`, an owner whose file
+  carries a `"sections"` key loses the rows the file does not list. An owner
+  without the key keeps its rows, except a section its own field writes leave
+  empty.
 - **Promotion.** `mix kiln.promote_data` moves the rows from the dynamic type
   to the compiled one in the same transaction as the fields
   (`KilnCMS.CMS.Promotion`, `rescope_field_definitions/2`), so neither side
@@ -100,25 +134,60 @@ carry, so a row nobody carries renders and exports nothing.
 
 ## Consequences
 
-- **A stale row can wake up.** The rule says "eventually": between the moment
-  a section loses its last field and the next prune, the row stays. If a
-  field is filed under that name again before then, the section takes the old
-  layout, in the editor and in the schema export, because both match by
-  name. Nothing is lost, but an admin may see a tab they did not set.
-- **Not every path prunes at once.** As built in 1.9.0, these leave a row
-  behind until the type's next **Sections of** save, or for good if no field
-  of the type has a section any more, since the panel is then not shown:
-  - `KilnCMS.CMS.JoinGraduation.retire/2` destroys a graduated field without
-    pruning its section.
-  - A field edit that moves the last field of a section to no section, or to
-    a section that already has a layout, leaves the old row; the rename carry
-    covers only a move to a name with no row. The carry also decides from the
-    page as it was loaded (#2652).
-  - A field sync import that changes a field's `section` prunes nothing
-    without `--prune`. An import also creates a row for any section the file
-    lists, carried by a field or not, and a row at the default layout (#2652).
+- **A stale row could wake up, until #2881.** As built in 1.9.0, the rule
+  said "eventually": between the moment a section lost its last field and
+  the next prune, the row stayed, and a field filed under that name again
+  took the old layout, in the editor and in the schema export, because both
+  match by name. The prune now runs in the same transaction as the write
+  that empties the section, so a new orphan cannot appear; see "Amendment".
+- **Rows orphaned before the amendment stay.** A row a 1.9.x or 1.10.x
+  release left behind is pruned only by the type's next **Sections of**
+  save, or by a field sync import whose file lists that section at the
+  default layout or, with `--prune`, carries the owner's `"sections"` key
+  without it. If no field of the type
+  has a section any more, the panel is not shown and nothing in the console
+  removes the row.
+- **A layout can be lost to a race.** A field created in a section at the
+  same moment as a prune that saw the section empty renders that section
+  with the default layout.
+- **A row can still be created with no carrier.** `FieldSection`'s own
+  `:create` does not check that a field carries the name, because a sync
+  import writes its sections before its fields. The console only offers
+  sections that fields carry, and the import refuses a ghost entry, so only
+  a direct code interface call (`CMS.create_field_section/2`) can make one.
+- **A field write can now fail on its layout.** A refused prune or carry
+  fails the field write with `KilnCMS.CMS.Errors.SectionLayoutNotKept` and
+  rolls it back, rather than leaving an orphan. The layout writes and the
+  field write are both admin-only, so the field write's own policy refuses
+  first in the ordinary case.
 - **Field sync carries the rows as their own list** per owner, with their own
   `?`, `~` and `-` lines in the diff
-  ([field-sync.md](../field-sync.md)).
+  ([field-sync.md](../field-sync.md)), and refuses an entry no field carries,
+  as it refuses an unknown key.
+
+## Amendment (2026-11-16, #2652 and #2881): the field write keeps its layouts
+
+In 1.9.0 and 1.10.0 each caller kept the layouts itself: the fields admin's
+delete and rename events, and a field sync import's deletes. Five paths left
+a row behind, which a later field of that name inherited:
+`JoinGraduation.retire/2`; a rename onto a section that already had a
+layout; clearing a field's section; a sync import that moved a field to
+another section; and a sync file listing a section no field carries. The
+rename carry also decided from the page as loaded, so with another admin
+editing the same type it could move a layout that another field still used,
+or leave one that nothing did.
+
+The rule in this record is unchanged. Where it is applied moved into the
+resource: one change on `FieldDefinition`'s `:update` and `:destroy`, so
+every path, present and future, prunes in the field write's own transaction,
+from a locked, fresh read. The carry is opt-in on the action, since only the
+console means "rename this section" by a field edit. Field sync defers the
+prune to one reconcile at the end of its transaction, refuses a ghost entry
+at plan time rather than storing or silently dropping it, and treats an
+entry at the default as "no row", as the console always did. Rejected along
+the way: patching the five callers one by one (it leaves an owner move and
+any future caller open), hiding uncarried rows at read time (a later field
+still inherits the row), and pruning with `authorize?: false` (it would
+bypass the per-row policy).
 
 See [Lay out custom fields as tabs, fieldsets or columns](../extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns).

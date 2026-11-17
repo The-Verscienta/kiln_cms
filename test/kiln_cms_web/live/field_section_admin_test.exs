@@ -8,7 +8,8 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
   Pinned here: the panel writes, updates and removes `FieldSection` rows,
   prunes the rows no field names any more (read fresh, so another admin's new
   section survives), carries a layout along when a section is renamed on its
-  last field, drops it with the section's last field, and refuses an event from an admin
+  last field (decided from a fresh read, so a stale page decides right, #2652),
+  drops it with the section's last field, and refuses an event from an admin
   demoted after mounting or one naming a type or section the page does not
   list.
   """
@@ -229,7 +230,8 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       refute Map.has_key?(layouts(), "Identity")
     end
 
-    test "a rename whose layout cannot be carried says so", %{conn: conn} do
+    test "a rename onto a section with a layout of its own keeps that layout",
+         %{conn: conn} do
       admin = authed_user(:admin)
       latin = field!(admin, "latin", 0, "Identity")
 
@@ -251,8 +253,150 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
         |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
         |> render_submit()
 
+      refute html =~ "Couldn&#39;t save the section layout."
+      assert CMS.get_field_definition!(latin.id, actor: admin).section == "Names"
+      assert %{"Names" => %{display: :fieldset}} = layouts()
+      refute Map.has_key?(layouts(), "Identity")
+    end
+
+    test "a rename whose layout cannot be carried says so, and saves nothing",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "latin", 0, "Identity")
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: admin
+      )
+
+      # A row at the defaults an older release stored with an owner each way:
+      # carrying the layout onto it is refused.
+      type = CMS.create_type_definition!(%{name: "fsadmin_broken", label: "B"}, actor: admin)
+
+      Ash.Seed.seed!(KilnCMS.CMS.FieldSection, %{
+        content_type: :page,
+        type_definition_id: type.id,
+        name: "Names",
+        display: :accordion,
+        initially: :auto
+      })
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      html =
+        lv
+        |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
+        |> render_submit()
+
       assert html =~ "Couldn&#39;t save the section layout."
-      assert %{"Names" => %{display: :fieldset}, "Identity" => %{display: :tab}} = layouts()
+      assert CMS.get_field_definition!(latin.id, actor: admin).section == "Identity"
+      assert %{"Identity" => %{display: :tab}, "Names" => %{display: :accordion}} = layouts()
+    end
+
+    test "a rename on a stale page keeps a layout another admin's field now shares",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "latin", 0, "Identity")
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # Another admin, behind this page's back: a second field in Identity.
+      other = authed_user(:admin)
+      field!(other, "pinyin", 1, "Identity")
+
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      lv
+      |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
+      |> render_submit()
+
+      assert %{"Identity" => %{display: :tab}} = layouts()
+      refute Map.has_key?(layouts(), "Names")
+    end
+
+    test "a rename on a stale page moves a layout its last field now holds alone",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "latin", 0, "Identity")
+      pinyin = field!(admin, "pinyin", 1, "Identity")
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # Another admin, behind this page's back: pinyin leaves Identity.
+      other = authed_user(:admin)
+      CMS.update_field_definition!(pinyin, %{section: "Other"}, actor: other)
+
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      lv
+      |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
+      |> render_submit()
+
+      assert %{"Names" => %{display: :tab}} = layouts()
+      refute Map.has_key?(layouts(), "Identity")
+    end
+
+    test "clearing the section of its last field drops its layout (#2881)", %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "latin", 0, "Identity")
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      lv
+      |> form("#edit-field-#{latin.id}", field_definition: %{section: ""})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(latin.id, actor: admin).section == nil
+      assert layouts() == %{}
+      # No field of the type has a section now, so no panel is left to prune
+      # it from: the save itself had to.
+      refute has_element?(lv, ~s([data-field-section="Identity"]))
+    end
+
+    test "a rename from a form opened before another admin moved the field keeps no orphan",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "latin", 0, "Identity")
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      # Another admin, with the form open: latin moves to Dosing, alone
+      # there, and Dosing gets a layout.
+      other = authed_user(:admin)
+      CMS.update_field_definition!(latin, %{section: "Dosing"}, actor: other)
+
+      CMS.create_field_section!(%{content_type: :page, name: "Dosing", display: :fieldset},
+        actor: other
+      )
+
+      lv
+      |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(latin.id, actor: admin).section == "Names"
+      # Dosing's layout went with its only field, carried to Names.
+      assert %{"Names" => %{display: :fieldset}} = layouts()
+      assert Map.keys(layouts()) == ["Names"]
     end
 
     test "renaming a section on its last field takes its layout along", %{conn: conn} do
@@ -368,6 +512,47 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
       assert html =~ "You can&#39;t change custom fields."
       assert layouts(tenant: site) == %{}
+    end
+  end
+
+  describe "authorization on a rename" do
+    test "an admin demoted after opening the edit form cannot move a section's last field",
+         %{conn: conn} do
+      platform_admin = authed_user(:admin)
+      site = org("fsadmin-rename")
+      latin = field!(platform_admin, "latin", 0, "Identity", tenant: site)
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: platform_admin,
+        tenant: site
+      )
+
+      user = authed_user(:editor)
+
+      membership =
+        Ash.Seed.seed!(Accounts.OrgMembership, %{
+          user_id: user.id,
+          organization_id: site.id,
+          role: :admin
+        })
+
+      {:ok, lv, _html} = conn |> org_conn(site) |> log_in(user) |> live(~p"/editor/fields")
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      Ash.Seed.update!(membership, %{role: :editor})
+
+      html =
+        lv
+        |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
+        |> render_submit()
+
+      refute html =~ "Saved."
+
+      assert CMS.get_field_definition!(latin.id, actor: platform_admin, tenant: site).section ==
+               "Identity"
+
+      assert %{"Identity" => %{display: :tab}} = layouts(tenant: site)
+      refute Map.has_key?(layouts(tenant: site), "Names")
     end
   end
 
