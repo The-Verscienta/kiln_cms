@@ -29,7 +29,8 @@ UI" workflow, scoped to fields.
   `:datetime_range`, `:recurrence`, `:computed`, the six format types
   `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (see
   "Built-in format types" below) and the composite `:range`, `:key_value` and
-  `:link` (see "Range and key-value and link fields") — plus
+  `:link` (see "Range and key-value and link fields") and the structured
+  `:address` (see "Address fields") — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
 - **Required fields (`required: true`)**: every create or save that sends
@@ -546,7 +547,7 @@ indexed (not the keys), so flag only a field whose contents are prose worth
 finding.
 
 **Names are reserved.** `email`, `telephone`, `color`, `slug`, `time`,
-`json`, `range`, `key_value` and `link` can no longer be used for a type an overlay or plugin registers; rename
+`json`, `range`, `key_value`, `link` and `address` can no longer be used for a type an overlay or plugin registers; rename
 it (`mix kiln.plugins.doctor` fails otherwise). A stored field definition
 that already used one of these names as its `field_type` is now cast by the
 built-in type: values that do not pass its check are refused on the next save.
@@ -621,6 +622,57 @@ not be greater than the maximum*; *each line must be key=value*; *every value
 needs a key*; *has a repeated key (x)*; *a key may not contain "="*; *address
 must be an http(s) URL, a mailto: address, a /path or a #fragment*; *rel must be
 one or more of: noopener, noreferrer, nofollow, sponsored, ugc, external*.
+
+### Address fields
+
+An `:address` field holds one postal address as a single object, checked the
+same way in the editor, the API and imports, and served through GraphQL as the
+generic JSON value. Pick it in `/editor/fields` (an admin task). The editor
+shows a **Country** select (every ISO 3166-1 country, blank first), then
+**Address line 1**, **Address line 2**, **City or town**, **State, province or
+region** and **Postal code**.
+
+```json
+{
+  "country": "GB",
+  "address_line1": "10 Downing Street",
+  "locality": "London",
+  "postal_code": "SW1A 1AA"
+}
+```
+
+- **Country** is an ISO 3166-1 alpha-2 code, upper-cased (`gb` is stored as
+  `GB`); a name such as "United Kingdom" is refused. It is required as soon as
+  any other part is filled in. A form where every part is blank is an empty
+  field, not an address.
+- **Text parts** are trimmed, single-line, and capped (200 characters for each
+  line, 100 for the city and the region, 16 for the postal code). Blank parts
+  are not stored, and a key other than the six above is refused.
+- **Postal code** is upper-cased with its spacing made canonical. For US, CA,
+  GB, DE, FR, NL, AU, ES, IT, JP, CH, SE, BR and IN the format is checked too
+  (`k1a0b1` is stored as `K1A 0B1`, `1234ab` as `1234 AB`, and a five-digit US
+  code with a letter in it is refused). Every other country takes free text, so
+  a code is never refused for a country Kiln has no rule for. This is a format
+  check, not a lookup: it cannot tell a real postcode from a well-formed one.
+- **No licensed dataset ships.** The country list is the public ISO 3166-1
+  assignment (English names) and the postal formats are a small hand-written
+  table.
+- **Search.** A `searchable` flag indexes the lines, city, region and postal
+  code, not the country code.
+- **Lists and queries.** Like the other composite types, an address is not a
+  Columns picker column and cannot be sorted; a `custom_filter` answers only
+  "Empty or not" (`null`). `multiple` is cleared and validation constraints
+  are refused.
+
+**Not yet:** labels and required parts that follow the country (a US "State"
+and "ZIP code", a UK "County"), administrative-area lists, a schema.org
+`PostalAddress` in the JSON-LD output, and looking up coordinates for a
+`:geolocation` field.
+
+**What can go wrong.** *needs a country* (a part is given without one);
+*country must be an ISO 3166-1 alpha-2 code (like GB or US)*; *postal code is
+not a valid United States postal code* (the country is named); *address line 1
+must be a single line*; *locality is too long (at most 100)*.
 
 ### Make a field hold a list of values
 

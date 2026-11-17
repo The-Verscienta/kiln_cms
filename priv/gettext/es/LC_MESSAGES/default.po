@@ -2128,6 +2128,11 @@ msgstr "Un plugin con un problema de seguridad conocido o un paquete modificado 
 msgid "A point on a map: latitude, longitude and zoom. For a shop, a venue or where a photo was taken."
 msgstr "Un punto en el mapa: latitud, longitud y zoom. Para una tienda, un local o el lugar donde se tomó una foto."
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "A postal address: country, lines, city, region and postal code. For an office, a venue or a clinic. Cannot be filtered or sorted."
+msgstr "Una dirección postal: país, líneas, ciudad, región y código postal. Para una oficina, un local o una clínica. No se puede filtrar ni ordenar."
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "A preview. Nothing is sent, posted or saved."
@@ -3242,6 +3247,16 @@ msgstr "Dirección bloqueada automáticamente"
 #, elixir-autogen, elixir-format
 msgid "Address blocked."
 msgstr "Dirección bloqueada."
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Address line 1"
+msgstr "Dirección, línea 1"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Address line 2"
+msgstr "Dirección, línea 2"
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
@@ -5736,6 +5751,11 @@ msgstr "Términos elegidos"
 msgid "Citation"
 msgstr "Fuente"
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "City or town"
+msgstr "Ciudad o localidad"
+
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -7194,6 +7214,11 @@ msgstr "Se cuenta desde lo más reciente entre la creación de la cuenta, su lle
 #, elixir-autogen, elixir-format
 msgid "Counting…"
 msgstr "Contando…"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Country"
+msgstr "País"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -17055,6 +17080,11 @@ msgstr "Publica en Bluesky o Mastodon cuando se publica una entrada."
 msgid "Post to social media"
 msgstr "Publicar en redes sociales"
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Postal code"
+msgstr "Código postal"
+
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
 msgid "PostgreSQL client tools aren't installed in this image, so a backup can't run here. Cron backups on the host are unaffected."
@@ -20156,6 +20186,11 @@ msgstr "Seleccionar %{name}"
 msgid "Select %{title}"
 msgstr "Seleccionar %{title}"
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Select a country"
+msgstr "Seleccione un país"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select a field on the canvas to edit it, or add one from the palette."
@@ -21580,6 +21615,11 @@ msgstr "Empieza"
 #, elixir-autogen, elixir-format
 msgid "State"
 msgstr "Estado"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "State, province or region"
+msgstr "Estado, provincia o región"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
