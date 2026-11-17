@@ -456,6 +456,8 @@ defmodule KilnCMS.Staging.ScrubTest do
     end
 
     test "purges rate-limit counters and cached idempotent responses" do
+      # Counters can be committed outside the sandbox by an earlier test's
+      # throttle, so count what is there rather than assume an empty table.
       seed!(KilnCMS.Accounts.ThrottleCounter, %{
         bucket: "sign_in",
         key_hash: :crypto.hash(:sha256, "203.0.113.5"),
@@ -471,10 +473,14 @@ defmodule KilnCMS.Staging.ScrubTest do
         fingerprint: "fingerprint"
       })
 
+      counters = count(KilnCMS.Accounts.ThrottleCounter)
+      requests = count(KilnCMS.Accounts.IdempotentRequest)
+      assert counters >= 1 and requests >= 1
+
       summary = Scrub.run([])
 
-      assert summary.throttle_counters_purged == 1
-      assert summary.idempotent_requests_purged == 1
+      assert summary.throttle_counters_purged == counters
+      assert summary.idempotent_requests_purged == requests
       assert count(KilnCMS.Accounts.ThrottleCounter) == 0
       assert count(KilnCMS.Accounts.IdempotentRequest) == 0
     end
@@ -672,6 +678,13 @@ defmodule KilnCMS.Staging.ScrubTest do
     test "the test build's Oban is not live (it executes no jobs)" do
       refute Staging.oban_live?()
       refute Staging.oban_live?(:"oban-#{uniq()}-not-started")
+    end
+
+    test "an inline Oban is live: it runs a job the moment one is inserted" do
+      name = :"oban-#{uniq()}-inline"
+      start_supervised!({Oban, name: name, repo: KilnCMS.Repo, testing: :inline})
+
+      assert Staging.oban_live?(name)
     end
 
     test "reports every count in the summary" do

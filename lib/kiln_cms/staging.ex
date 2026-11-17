@@ -117,8 +117,9 @@ defmodule KilnCMS.Staging do
   def inert_backups_config(config), do: Keyword.put(config, :heartbeat?, false)
 
   @doc """
-  Whether the Oban instance `name` is running and executing jobs (`testing:
-  :disabled`). False when it is not started (a release `eval`) or is inert
+  Whether the Oban instance `name` is running and can execute jobs: any
+  `testing` mode but `:manual` (`:inline` runs a job the moment it is
+  inserted). False when it is not started (a release `eval`) or is inert
   (`inert_oban_config/1`, the test suite).
   """
   @spec oban_live?(Oban.name()) :: boolean()
@@ -127,7 +128,7 @@ defmodule KilnCMS.Staging do
     # `Oban.whereis/1` raises rather than answering nil.
     with registry when is_pid(registry) <- Process.whereis(Oban.Registry),
          pid when is_pid(pid) <- Oban.whereis(name) do
-      Oban.config(name).testing == :disabled
+      Oban.config(name).testing != :manual
     else
       _ -> false
     end
