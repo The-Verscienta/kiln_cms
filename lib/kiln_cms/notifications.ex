@@ -64,6 +64,14 @@ defmodule KilnCMS.Notifications do
   do not go through `wants?/2` (`KilnCMS.Notifications.Tasks`,
   `KilnCMS.Notifications.TaskDigestWorker`) skip it themselves.
 
+  Mail takes that decision twice (#3019): once when the job is queued, and
+  again when it runs (`mail_recipient/2`), because a mail job can wait hours
+  for a retry. The job carries ids only, and the worker reads the recipient,
+  their address, the actor's name, the title and the comment back, so an
+  account erased or an event muted in the meantime gets nothing, and an actor
+  erased in the meantime is "An editor". The second decision only narrows the
+  first.
+
   Best-effort, like the other two: a notification that cannot be written is
   logged and dropped, never raised into the editorial action that caused it.
   The triggering changes (`KilnCMS.CMS.Changes.NotifyWorkflowEmail`,
@@ -693,19 +701,14 @@ defmodule KilnCMS.Notifications do
       actor: actor
     )
 
-    %{
-      "to" => email_of(user),
-      "event" => to_string(event),
-      "kind" => kind(record),
-      "title" => record.title,
-      "id" => record.id,
-      "actor_name" => actor_name(actor),
-      "block_id" => comment.block_id,
-      "excerpt" => snippet(comment.body),
-      # Which site's relay the mail goes out through (#1322).
-      "org_id" => comment.org_id
-    }
-    |> then(fn args -> if args["to"], do: enqueue_args(args), else: :ok end)
+    if email_of(user) do
+      record
+      |> mail_args(event, user, actor)
+      |> Map.merge(%{"block_id" => comment.block_id, "comment_id" => comment.id})
+      |> enqueue_args()
+    else
+      :ok
+    end
   end
 
   defp enqueue_args(args) do
@@ -713,14 +716,42 @@ defmodule KilnCMS.Notifications do
     :ok
   end
 
+  # A workflow mail job's args: ids only (#3019). The worker reads the
+  # recipient, their address and preferences, the actor's name, the title and
+  # the comment back when it runs, so a person erased or a preference turned
+  # off in the meantime is honoured, and nobody's address, name or words sit
+  # in `oban_jobs` (or in Oban's logs and Sentry) while the job waits.
+  #
+  # No `"to"` and no `"title"`, on purpose: the previous release's worker
+  # needs both to build its email, so a job of this shape picked up by an old
+  # node during a rolling deploy fails and retries, and a new node delivers
+  # it, instead of the old node sending it somewhere wrong. `"kind"` is the
+  # content type here and stays.
+  defp mail_args(record, event, recipient, actor) do
+    %{
+      "event" => to_string(event),
+      "kind" => kind(record),
+      "id" => record.id,
+      "user_id" => recipient.id,
+      "actor_id" => actor_id(actor),
+      # Which site's relay the mail goes out through (#1322).
+      "org_id" => Map.get(record, :org_id)
+    }
+  end
+
   # A taste of the comment, not the comment. Enough to know whether it needs
   # attention now; short enough that the email is not a copy of a conversation
   # that lives in the editor (and that a private review note is not fanned out
   # in full to everyone's inbox).
+  #
+  # Public for `WorkflowMailWorker`, which reads the comment back when it runs
+  # (#3019) and must quote it exactly as the inbox row does.
   @snippet_max 140
-  defp snippet(nil), do: ""
+  @doc false
+  @spec snippet(String.t() | nil) :: String.t()
+  def snippet(nil), do: ""
 
-  defp snippet(body) do
+  def snippet(body) do
     flat = body |> to_string() |> String.replace(~r/\s+/u, " ") |> String.trim()
 
     if String.length(flat) > @snippet_max,
@@ -754,7 +785,7 @@ defmodule KilnCMS.Notifications do
     Push.notify(recipients, push_payload(event, record))
 
     Enum.each(recipients, fn recipient ->
-      enqueue(email_of(recipient), event, record, actor)
+      enqueue(recipient, event, record, actor)
       persist(recipient, event, record, block_id: nil, actor: actor)
     end)
   end
@@ -933,23 +964,104 @@ defmodule KilnCMS.Notifications do
   defp wants?(%{notify_on_comment: enabled?}, :comment), do: enabled?
   defp wants?(_user, _event), do: true
 
-  defp enqueue(nil, _event, _record, _actor), do: :ok
+  @doc """
+  Whether a queued notification mail may still go to `user` (an account or
+  its id) now, when the job runs (#3019): `{:ok, user}` with the account as it
+  is now, `{:skip, reason}` when nothing is to be sent, or `{:error, error}`
+  when the account could not be read.
 
-  defp enqueue(to, event, record, actor) do
-    %{
-      "to" => to,
-      "event" => to_string(event),
-      "kind" => kind(record),
-      "title" => record.title,
-      "id" => record.id,
-      "actor_name" => actor_name(actor),
-      # Which site's relay the mail goes out through (#1322).
-      "org_id" => Map.get(record, :org_id)
-    }
-    |> WorkflowMailWorker.new()
-    |> Oban.insert!()
+  The same decision `dispatch/3` and `dispatch_comment/4` took when the job
+  was queued, taken again, because a job can wait hours for a retry: an
+  account erased since (#2774) is skipped, whatever its preferences now say,
+  and so is one with no address left or one that turned `preference` off
+  since (`nil`: no preference governs the mail, as for task mail). It only
+  narrows: a recipient the enqueue left out is never added here.
+  """
+  @spec mail_recipient(User.t() | String.t(), atom() | nil) ::
+          {:ok, User.t()} | {:skip, atom()} | {:error, term()}
+  def mail_recipient(%User{anonymized_at: %DateTime{}}, _preference), do: {:skip, :erased}
+  def mail_recipient(%User{email: nil}, _preference), do: {:skip, :no_address}
 
-    :ok
+  def mail_recipient(%User{} = user, preference) do
+    if is_nil(preference) or wants?(user, preference),
+      do: {:ok, user},
+      else: {:skip, :muted}
+  end
+
+  def mail_recipient(user_id, preference) when is_binary(user_id) do
+    # authorize?: false — an `Accounts.User` read (self-only policy), as
+    # `user_by_id/1`: a system grant would cover every account on the
+    # deployment, for the one recipient the job already names.
+    case Accounts.get_user(user_id, authorize?: false, not_found_error?: false) do
+      {:ok, %User{} = user} -> mail_recipient(user, preference)
+      {:ok, nil} -> {:skip, :no_account}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  @doc """
+  `mail_recipient/2` for a job queued before #3019, which names its
+  recipient by `address` rather than by account: the account holding that
+  address now, if it already existed at `queued_at` (the job's
+  `inserted_at`), and `{:skip, reason}` otherwise.
+
+  Erasure replaces the address with a tombstone, so an erased recipient has
+  no account here. An account registered since with the freed address is
+  somebody else, and is skipped. No action changes an account's address once
+  it exists (only a create sets it, and erasure replaces it), so the
+  account's age is the whole test.
+  """
+  @spec mail_recipient_by_address(String.t(), DateTime.t() | nil, atom() | nil) ::
+          {:ok, User.t()} | {:skip, atom()} | {:error, term()}
+  def mail_recipient_by_address(address, queued_at, preference) when is_binary(address) do
+    # authorize?: false — an `Accounts.User` read by address (self-only
+    # policy), as `KilnCMS.Security.AuthEvents` does: the job already names
+    # the address, and the account only decides whether the mail still goes.
+    case Accounts.get_user_by_email(address, authorize?: false, not_found_error?: false) do
+      {:ok, %User{} = user} ->
+        if predates?(user, queued_at),
+          do: mail_recipient(user, preference),
+          else: {:skip, :address_reassigned}
+
+      {:ok, nil} ->
+        {:skip, :no_account}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  defp predates?(%User{inserted_at: %DateTime{} = created}, %DateTime{} = queued_at),
+    do: DateTime.compare(created, queued_at) != :gt
+
+  defp predates?(_user, _queued_at), do: false
+
+  @doc """
+  The display name of the account `actor_id` names, as it is now, for a mail
+  job's body (#3019): nil, which the mail renders as a neutral "An editor",
+  for an account erased since, one with no name, or no account at all.
+  Never the address (#214).
+  """
+  @spec actor_name_now(String.t() | nil) :: String.t() | nil
+  def actor_name_now(actor_id) when is_binary(actor_id) do
+    # authorize?: false — an `Accounts.User` read (self-only policy), for one
+    # display name: the same read the notifier made when it queued the job.
+    case Accounts.get_user(actor_id, authorize?: false, not_found_error?: false) do
+      {:ok, %User{anonymized_at: nil} = user} -> actor_name(user)
+      _no_name -> nil
+    end
+  end
+
+  def actor_name_now(_actor_id), do: nil
+
+  defp enqueue(recipient, event, record, actor) do
+    if email_of(recipient) do
+      record
+      |> mail_args(event, recipient, actor)
+      |> enqueue_args()
+    else
+      :ok
+    end
   end
 
   # Resolve the human-facing content-type name from the registry rather than

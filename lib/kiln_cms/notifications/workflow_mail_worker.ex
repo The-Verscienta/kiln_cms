@@ -19,14 +19,47 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   escaped per value — matches the pre-#468 code's `h/1` calls exactly, and
   is why the body isn't escaped as one whole string: that would also escape
   the template's own `<p>`/`<a>` markup).
+
+  ## Read back when it runs (#3019)
+
+  The job carries ids: the recipient (`user_id`), the content (`kind`, `id`),
+  the acting account (`actor_id`) and, for a comment event, the comment
+  (`comment_id`). Everything the email says is read when the job runs, so a
+  job that waited hours for a retry sends what is true then:
+
+    * the recipient must still be one (`KilnCMS.Notifications.mail_recipient/2`):
+      an account erased since, left with no address, or that has turned the
+      event's preference off since, is sent nothing, and the mail goes to the
+      address the account holds now;
+    * the actor's name is the account's name now, and an actor erased since
+      is "An editor" (or "A reviewer");
+    * content deleted or trashed since, or a comment deleted since, sends
+      nothing.
+
+  A skip finishes the job (`:ok`, logged with the job id and the reason, no
+  address), rather than cancelling it: `KilnCMS.Mail.recent_delivery_failures/1`
+  lists cancelled mail jobs as delivery failures. A read that fails, including
+  a refused one, fails the job, which retries (#1659).
+
+  A job queued by the release before this one carries the address, title,
+  actor name and excerpt themselves. It is delivered only while an account
+  that existed when it was queued still holds that address and would still be
+  sent it, and those keys are dropped from its row once it finishes
+  (`KilnCMS.Jobs.PrivateArgs`).
   """
   use Oban.Worker, queue: :mail, max_attempts: 8
   use KilnCMSWeb, :verified_routes
 
   import Swoosh.Email
 
+  require Logger
+
   alias Kiln.Tokens
+  alias KilnCMS.CMS
+  alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Jobs.PrivateArgs
   alias KilnCMS.Mail
+  alias KilnCMS.Notifications
   alias KilnCMS.Notifications.Link
 
   @templates %{
@@ -87,8 +120,56 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   @spec events() :: [String.t()]
   def events, do: Map.keys(@templates)
 
+  @comment_events ~w(comment_added comment_resolved comment_mention)
+
   @impl Oban.Worker
-  def perform(%Oban.Job{id: id, args: args}) do
+  def perform(%Oban.Job{args: %{"user_id" => user_id, "event" => event} = args} = job)
+      when is_binary(user_id) do
+    tenant = args["org_id"]
+
+    with {:ok, preference} <- preference(event),
+         {:ok, user} <- Notifications.mail_recipient(user_id, preference),
+         {:ok, title} <- content_title(args["kind"], args["id"], tenant),
+         {:ok, excerpt} <- excerpt(event, args["comment_id"], tenant) do
+      args
+      |> Map.merge(%{
+        "to" => to_string(user.email),
+        "title" => title,
+        "actor_name" => Notifications.actor_name_now(args["actor_id"]),
+        "excerpt" => excerpt
+      })
+      |> deliver(job)
+    else
+      {:skip, reason} -> skip(job, reason)
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  # Queued by the release before #3019, with the address, title, actor name
+  # and excerpt in the args. Remove no earlier than the release after this
+  # one: the Pruner deletes finished rows after a week, and a retrying mail
+  # job is done within a day.
+  def perform(%Oban.Job{args: %{"to" => to, "title" => _title} = args} = job)
+      when is_binary(to) do
+    PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
+      with {:ok, preference} <- preference(args["event"]),
+           {:ok, _user} <-
+             Notifications.mail_recipient_by_address(to, job.inserted_at, preference) do
+        deliver(args, job)
+      else
+        {:skip, reason} -> skip(job, reason)
+        {:error, error} -> {:error, error}
+      end
+    end)
+  end
+
+  # Neither shape: a legacy job whose keys were already dropped
+  # (`PrivateArgs.finishing/3` forgets before Oban acks the job, so a node
+  # lost in between leaves it executing without them, and Lifeline re-queues
+  # it). The mail went out; nothing is left to send.
+  def perform(%Oban.Job{}), do: {:cancel, "notification no longer in the job"}
+
+  defp deliver(args, %Oban.Job{id: id}) do
     args
     |> build_email()
     # This worker builds its email at perform time (not via Mail.enqueue!), so
@@ -100,6 +181,67 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     # `org_id` was in the args carry none and use the operator's relay, as
     # they would have.
     |> Mail.deliver_for_worker(org_id: args["org_id"])
+  end
+
+  # The preference that governs each event's mail — the one `dispatch/3` and
+  # `dispatch_comment/4` consulted when the job was queued. Explicit clauses:
+  # the event comes from a job row, and is never turned into an atom.
+  defp preference("submitted_for_review"), do: {:ok, :submitted_for_review}
+  defp preference("published"), do: {:ok, :published}
+  defp preference("returned_to_draft"), do: {:ok, :returned_to_draft}
+  defp preference(event) when event in @comment_events, do: {:ok, :comment}
+  defp preference(_unknown), do: {:skip, :unknown_event}
+
+  # The content's title now. Gone (deleted, trashed, or of a type that no
+  # longer exists) is a skip: there is nothing left to link to.
+  defp content_title(kind, id, tenant) do
+    # authorize?: false — a content read (the #1402 content-read argument, as
+    # `TaskMailWorker` reads titles): a standing system grant on content would
+    # hand the notifier the whole corpus, drafts included, for one title. The
+    # job already decided the recipient; only the title is selected.
+    case ContentTypes.get_record(kind, id,
+           authorize?: false,
+           not_found_error?: false,
+           tenant: tenant,
+           query: [select: [:id, :title]]
+         ) do
+      {:ok, %{title: title}} -> {:ok, title}
+      {:ok, nil} -> {:skip, :content_gone}
+      {:error, :unknown_content_type} -> {:skip, :content_gone}
+      {:error, error} -> {:error, error}
+    end
+  rescue
+    # `ContentTypes.get_record/3` raises for a type the registry cannot
+    # resolve to a resource (see `TaskMailWorker.content_title/3`).
+    _unknown_type -> {:skip, :content_gone}
+  end
+
+  # The comment's excerpt now, read as the notifier's system actor, which
+  # `CMS.Comment` admits for reads (#1659). `authorize_with: :error`: a refused
+  # read must fail the job, not read as "comment deleted".
+  defp excerpt(event, comment_id, tenant)
+       when event in @comment_events and is_binary(comment_id) do
+    case CMS.get_comment(comment_id,
+           actor: Notifications.system(),
+           authorize_with: :error,
+           not_found_error?: false,
+           tenant: tenant
+         ) do
+      {:ok, nil} -> {:skip, :comment_gone}
+      {:ok, comment} -> {:ok, Notifications.snippet(comment.body)}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp excerpt(event, _comment_id, _tenant) when event in @comment_events,
+    do: {:skip, :comment_gone}
+
+  defp excerpt(_event, _comment_id, _tenant), do: {:ok, nil}
+
+  # A fixed reason and the job id: never the address.
+  defp skip(%Oban.Job{id: id}, reason) do
+    Logger.info("workflow mail job #{id} not sent: #{reason}")
+    :ok
   end
 
   @impl Oban.Worker

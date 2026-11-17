@@ -178,6 +178,55 @@ defmodule KilnCMS.SentryFilterTest do
       end
     end
 
+    # Queued before #3019: the recipient's address and what the mail quoted.
+    test "a workflow or task mail job's address, title, name, excerpt and note leave extra.args" do
+      for {worker, args, kept} <- [
+            {"KilnCMS.Notifications.WorkflowMailWorker",
+             %{
+               "id" => "p1",
+               "to" => "LEAKED@example.com",
+               "title" => "LEAKED",
+               "actor_name" => "LEAKED",
+               "excerpt" => "LEAKED"
+             }, %{"id" => "p1"}},
+            {"KilnCMS.Notifications.TaskMailWorker",
+             %{
+               "task_id" => "t1",
+               "to" => "LEAKED@example.com",
+               "note" => "LEAKED",
+               "actor_name" => "LEAKED"
+             }, %{"task_id" => "t1"}}
+          ] do
+        scrubbed = SentryFilter.before_send(event(extra: job_extra(worker, args)))
+
+        refute inspect(scrubbed) =~ "LEAKED"
+        assert scrubbed.extra.args == kept
+      end
+    end
+
+    # A current-shape mail job reads the recipient's account back; a failure
+    # in its helpers would quote it in the frames.
+    test "a workflow mail job's stack frames lose their variables" do
+      vars = %{"arg0" => ~s(%{email: "LEAKED@example.com"})}
+
+      exception = %Sentry.Interfaces.Exception{
+        type: "FunctionClauseError",
+        value: "no function clause matching",
+        stacktrace: frames(vars)
+      }
+
+      scrubbed =
+        SentryFilter.before_send(
+          event(
+            extra: job_extra("KilnCMS.Notifications.WorkflowMailWorker", %{"user_id" => "u1"}),
+            exception: [exception]
+          )
+        )
+
+      refute inspect(scrubbed) =~ "LEAKED"
+      assert [%{stacktrace: %{frames: [%{vars: nil}]}}] = scrubbed.exception
+    end
+
     test "an unregistered worker's args keep their keys" do
       args = %{"data" => "kept", "payload" => "kept"}
       scrubbed = SentryFilter.before_send(event(extra: job_extra("KilnCMS.Other.Worker", args)))

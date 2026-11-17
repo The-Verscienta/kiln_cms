@@ -21,6 +21,8 @@ defmodule KilnCMS.Notifications.SystemActorAuthorizationTest do
   alias KilnCMS.CMS
   alias KilnCMS.Notifications
   alias KilnCMS.Notifications.TaskDigestWorker
+  alias KilnCMS.Notifications.TaskMailWorker
+  alias KilnCMS.Notifications.WorkflowMailWorker
   alias KilnCMS.Push
   alias KilnCMS.Push.Vapid
   alias KilnCMS.Push.Worker
@@ -217,6 +219,47 @@ defmodule KilnCMS.Notifications.SystemActorAuthorizationTest do
           Notifications.dispatch_comment(:comment_added, added, page, commenter)
         end)
       end
+    end
+
+    # #3019: the mail job reads the comment back when it runs. A refused read
+    # must fail the job (which retries), not read as "comment deleted" and
+    # finish without sending.
+    test "with the grant gone, the comment mail job fails rather than skipping" do
+      author = user(:editor)
+      commenter = user(:editor)
+      page = page(author)
+      added = comment(page, Ecto.UUID.generate(), "Read me back", commenter)
+
+      assert [job] =
+               all_enqueued(worker: WorkflowMailWorker)
+               |> Enum.filter(&(&1.args["comment_id"] == added.id))
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Notifications.with_actor(nil, fn -> WorkflowMailWorker.perform(job) end)
+
+      # Not vacuous: with the grant, the same job delivers.
+      assert :ok = WorkflowMailWorker.perform(job)
+    end
+  end
+
+  describe "CMS.Task — the assignment mail's read (#3019)" do
+    test "with the grant gone, the task mail job fails rather than skipping" do
+      assignee = user(:editor)
+
+      {:ok, task} =
+        CMS.assign_task(
+          %{content_type: "page", content_id: Ecto.UUID.generate(), assignee_id: assignee.id},
+          actor: user(:editor)
+        )
+
+      assert [job] =
+               all_enqueued(worker: TaskMailWorker)
+               |> Enum.filter(&(&1.args["task_id"] == task.id))
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Notifications.with_actor(nil, fn -> TaskMailWorker.perform(job) end)
+
+      assert :ok = TaskMailWorker.perform(job)
     end
   end
 

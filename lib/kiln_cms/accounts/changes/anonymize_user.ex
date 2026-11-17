@@ -39,6 +39,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   account, on every site, so the address it was registered with stops
   receiving newsletters. A row added by hand at the same address and never
   linked is not the account's and is kept.
+
+  Finished jobs on the `mail` queue lose the address they were sent to
+  (#3019, `KilnCMS.Mail.forget_recipient/1`): the address is read from the
+  row before the tombstone replaces it. Workflow and task mail still waiting
+  to run carry no address and check the recipient again when they run.
   """
   use Ash.Resource.Change
 
@@ -69,6 +74,7 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     changeset
     |> Ash.Changeset.before_action(&lock_account/1)
     |> Ash.Changeset.before_action(&clear_totp/1)
+    |> Ash.Changeset.before_action(&remember_address/1)
     |> Ash.Changeset.force_change_attributes(%{
       email: "anonymized-#{id}@deleted.invalid",
       name: nil,
@@ -88,7 +94,7 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       notify_on_security_alert: true,
       anonymized_at: DateTime.utc_now()
     })
-    |> Ash.Changeset.after_action(fn _changeset, user ->
+    |> Ash.Changeset.after_action(fn changeset, user ->
       revoke_tokens(user)
       remove_identities(user)
       remove_passkeys(user)
@@ -104,6 +110,8 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       # Private ones only; shared views are the team's (#2514).
       :ok = KilnCMS.CMS.SavedViews.forget_private_views(user.id, Accounts.list_org_ids())
       :ok = KilnCMS.Notifications.forget_recipient(user.id)
+      # The address finished mail jobs were sent to (#3019).
+      :ok = forget_mail_address(changeset)
       :ok = History.anonymize_actor(user.id)
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
       # Their name, snapshotted into other people's inboxes (#1320).
@@ -210,6 +218,34 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
         Ash.Changeset.add_error(changeset, error)
     end
   end
+
+  # The address the account holds before the tombstone replaces it, from the
+  # row (after `lock_account/1`) rather than the caller's struct, so the
+  # finished mail jobs addressed to it can be found once the row is written.
+  defp remember_address(changeset) do
+    # authorize?: false — erasure is authorized once, as the `:anonymize`
+    # action (or the staging scrub); only the address is read, to find the
+    # mail jobs that still hold it.
+    case Accounts.get_user(changeset.data.id,
+           authorize?: false,
+           not_found_error?: false,
+           query: [select: [:id, :email]]
+         ) do
+      {:ok, %User{email: email}} when not is_nil(email) ->
+        Ash.Changeset.put_context(changeset, :erased_address, to_string(email))
+
+      {:ok, _no_address} ->
+        changeset
+
+      {:error, error} ->
+        Ash.Changeset.add_error(changeset, error)
+    end
+  end
+
+  defp forget_mail_address(%{context: %{erased_address: address}}) when is_binary(address),
+    do: KilnCMS.Mail.forget_recipient(address)
+
+  defp forget_mail_address(_changeset), do: :ok
 
   # Clear the account's own temporary grant. `role: :viewer` alone did nothing
   # while a grant was live — the effective tier stayed the granted one, which put

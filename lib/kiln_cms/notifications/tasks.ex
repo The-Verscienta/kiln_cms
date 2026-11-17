@@ -66,19 +66,15 @@ defmodule KilnCMS.Notifications.Tasks do
     end
 
     if task.assignee && task.assignee.email do
+      # Ids only (#3019): the worker reads the assignee, the task (its note,
+      # due date and block) and the assigner's name back when it runs. See
+      # `TaskMailWorker` for why there is no `"kind"` and no `"to"` here.
       %{
-        "kind" => "assigned",
-        "to" => to_string(task.assignee.email),
+        "event" => "assigned",
+        "user_id" => task.assignee_id,
         "task_id" => task.id,
-        "content_type" => task.content_type,
-        "content_id" => task.content_id,
-        # Which block, when the task is anchored to one — the assignee opens
-        # straight onto the paragraph rather than onto a document and a hunt.
-        "block_id" => task.block_id,
         "org_id" => task.org_id,
-        "due_on" => task.due_on && Date.to_iso8601(task.due_on),
-        "note" => task.note,
-        "actor_name" => actor_name(actor)
+        "actor_id" => actor_id(actor)
       }
       |> TaskMailWorker.new()
       |> Oban.insert!()
