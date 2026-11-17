@@ -518,6 +518,26 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert count(KilnCMS.Backups.Notice) == 0
     end
 
+    test "purges production's resumable backup uploads" do
+      seed!(KilnCMS.Backups.Upload, %{
+        destination_key: "dest:#{Ecto.UUID.generate()}|0123456789abcdef",
+        destination_id: Ecto.UUID.generate(),
+        subdir: "db",
+        name: "kiln-db-20260101-000000.dump",
+        bytes: 10,
+        sha256: String.duplicate("a", 64),
+        checkpoint: %{"upload_id" => "production-upload"},
+        status: :open,
+        owner_job_id: 1,
+        owner_attempt: 1
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.backup_uploads_purged == 1
+      assert count(KilnCMS.Backups.Upload) == 0
+    end
+
     test "purges queued jobs in every state (their args carry recipients)" do
       states = ~w(available scheduled executing retryable completed discarded cancelled)
       Enum.each(states, &seed_job!/1)

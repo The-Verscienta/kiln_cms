@@ -233,6 +233,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `Backups.DestinationConfig` | `read`, `enabled`, `record_test_result` **only** | `read`, `enabled`, `record_test_result`: `:backups` | In-app backup destinations (#2220). The step chain reads the enabled destinations at a backup's start (`Backups.Destination.active/0`, `enabled`) and re-reads each one just before its upload (`read`), both with `authorize_with: :error`, so a refused or failed read fails the attempt instead of reading as "no destinations" (a backup would otherwise report a complete off-site copy that reached fewer places than asked). Retention on a destination (ADR 0064) re-reads the row for its `prune` setting and reads every row to re-check overlaps, the same way, and deletes nothing when either read fails. A destination's save reads the other rows the same way to enforce the cap of eight enabled and refuse a place that overlaps another. `Backups.test_destination/2` reads the row as the platform admin first, then records the Test's outcome (`record_test_result`) as the system actor, with the admin as the audit event's actor; no person can mark a destination tested. The system actor never creates, updates or destroys a destination. The read grant is narrowed inside the platform-admin read policy with `forbid_unless action([:read, :enabled])`. |
 | `Backups.NodeBeat` | `read`, `live`, `beat`, `prune` | `read`, `live`, `beat`, `prune`: `:backups` | Each node's backup heartbeat (#2218), stamped with the database's clock. The heartbeat upserts its row and prunes rows a day old; the lock's reclaim sweep reads the holder's node beat; the marker sync reads the live beats (`live`, judged on the database's clock, #2789) to route one sync to each backup directory. System-only: no person reads or writes a beat. |
 | `Backups.Notice` | `read`, `report`, `clear` | `read`, `report`, `clear`: `:backups` | Backup problems an operator must hear about (#2487, #2931), one row per kind and place: retention that was skipped or stopped part-way, locally or on a destination, and a held backup deleted outside the app. The step chain's prune and off-site steps report a skip or stop (`report`, an upsert) and clear it after a clean pass (`clear`); retention's hold sync reports a held backup deleted outside the app, reading the row first (`read`) to merge a second detection into it. `Backups.status/0` reads the rows for the Backups page and Home, both platform-admin only. All as `Backups.system/0`, the reads with `authorize_with: :error`. System-only: no person reads or writes a notice, platform admin included. |
+| `Backups.Upload` | `read`, `open`, `open_for`, `owed`, `claim`, `save_checkpoint`, `note_error`, `complete`, `abandon`, `mark_aborted`, `purge` | `read`, `open`, `open_for`, `owed`, `claim`, `save_checkpoint`, `note_error`, `complete`, `abandon`, `mark_aborted`, `purge`: `:backups` | Resumable uploads of backup files to stored destinations (#2223). The off-site step records an upload on its first checkpoint (`open`), takes it over on a retry or reclaim (`claim`, only for a step at least as new as its owner), records progress and its outcome (`save_checkpoint`, `note_error`, `complete`, `abandon`, `mark_aborted`, each only for the owner), and finds what it may resume (`open_for`). After a destination is reached, the sweep reads what is owed an abort there (`owed`), aborts it and deletes old closed rows (`purge`). All as `Backups.system/0`. System-only: no person reads or writes an upload, platform admin included. |
 | `Newsletter.Segment` | `read`, `for_tier`, `sync_managed` **only** | `read`: `:automation`, `:newsletter` · `for_tier`, `sync_managed`: `:newsletter` | The tier-backed lifecycle is driven by billing, not by a human: both write actions are `forbid_if always()` for everyone including admins. Managing a segment by hand stays an admin act, so the grant is narrowed inside the blanket admin policy as well — Ash ANDs policies, so both halves are needed. The "send as newsletter" automation reads the segment its rule names as the sender (`Newsletter.send_as_newsletter/2`, #1659), `read` only. |
 | `Newsletter.Subscriber` | `read`, `confirmed`, `link_member`, `forget_member` **only** | `read`, `confirmed`, `link_member`, `forget_member`: `:newsletter` | `link_member` is the one write that may set `user_id`, and it is `forbid_if always()` for everyone. `forget_member` (#2991) is erasure's delete of the rows linked to an erased account (`Newsletter.forget_member/1`, from `AnonymizeUser` and `Accounts.ErasureBackfill`): also `forbid_if always()` for everyone, admins included, and wider than a consent change, which is why only the account's erasure reaches it. `for_user`, the member's cross-site lookup, is the member's own read only: it ignores the tenant (`multitenancy :bypass`), so admins and the system actor are refused it (#2991). The send pipeline (`Newsletter.system/0`, #1659) reads a campaign's recipients (`confirmed`) and re-reads each one before delivery (`read`), both with `authorize_with: :error`: a refused list would read as "no subscribers" and mark the campaign sent having mailed nobody, and a refused re-read would cancel the recipient's unique job for good, so both log and retry. Narrowed the same way, so admin-only list management and every consent change are untouched. |
 | `Newsletter.NewsletterSend` | `create`, `read`, `mark_sending`, `mark_sent`, `record_sent`, `record_failed` **only** | `create`: `:automation` · `read`, `mark_sending`, `mark_sent`, `record_sent`, `record_failed`: `:newsletter` | The "on publish → send the newsletter" automation (`Automation.RuleWorker`) records the campaign it queues (#1655), and only that: it never reads or rewrites the ledger (dedupe is the unique index, not a read). The send pipeline (`SendWorker`, `MailWorker`, as `Newsletter.system/0`, #1659) re-reads the campaign it was enqueued for, failing closed (a refusal retries rather than cancelling as "not found"), and keeps the fan-out and per-recipient counters, but cannot open a campaign. A counter write that fails after delivery is logged, not retried, so nobody is mailed twice. `mark_failed` and `destroy` stay admin acts: the row is the record of what went out and the automation's dedupe key. Narrowed inside the blanket admin policy, with `action:` splitting the two callers. |
@@ -574,6 +575,36 @@ button (`Backups.test_destination/2`) reads the row as the admin, so anyone
 else is refused before any file or network I/O, and records the outcome as
 the `:backups` system actor (`backup_destination_tested`, the admin as its
 actor). Not exposed through GraphQL, JSON:API or MCP.
+
+<a id="backup-uploads"></a>
+
+## Resumable backup uploads — `Backups.Upload`
+
+| Action | platform admin | editor | org admin (not platform admin) | viewer | anonymous | `:backups` system actor |
+|--------|:-----:|:------:|:-----:|:------:|:---------:|:-----:|
+| `read`, `open_for`, `owed` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `open`, `claim`, `save_checkpoint`, `note_error`, `complete`, `abandon`, `mark_aborted`, `purge` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+The uploads a resumable destination adapter has under way (part of #2223),
+one open row per file and destination. Instance-wide and tenant-less.
+System-only, like `Notice`: `KilnCMS.Backups.Uploads` reads and writes every
+row as `Backups.system/0`, the reads with `authorize_with: :error`, and
+every person is refused the resource, platform admin included. No page
+shows it. A row's `checkpoint` is the adapter's own state (an upload id, the
+parts it has sent), never a secret, and not a public attribute.
+
+The policy is only half the guard. The write actions also filter on the
+row's owner, so the system actor can't use them to move ownership backward:
+`claim` takes a row only for a step at least as new as its owner (a later
+Oban job, or the same job at an attempt no smaller); `save_checkpoint`,
+`note_error` and `complete` write only for the owner while the row is
+`open`; `abandon` and `mark_aborted` write only from the status and owner
+the caller read. A write that matches no row fails as stale, which the
+pipeline reads as "superseded", so a step that lost its lease can't
+overwrite the progress of the step that took over. `purge` deletes closed
+rows, and a deleted destination's rows, older than the cutoff it is given.
+Not exposed through GraphQL, JSON:API or MCP. The reasoning is in
+[ADR 0068](decisions/0068-a-resumable-backup-upload-is-recorded-by-the-installation-that-started-it-and-only-it-aborts-it.md).
 
 ## Bounce suppression — `Mail.SuppressedRecipient`
 

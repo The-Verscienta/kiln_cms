@@ -31,6 +31,39 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
   not override it is unchanged. A plugin using it should require
   `{:kiln_plugin, "~> 1.5"}`.
 
+- **`c:Kiln.BackupDestination.put/3` gets `opts[:deadline]`, and may answer
+  `{:ok, :already_present}` or `{:error, {:permanent, message}}`
+  (kiln_cms#2223).** `opts[:deadline]` is the
+  `System.monotonic_time(:millisecond)` instant the call must end by, passed
+  on every call; ignore any other option you don't know. `{:ok,
+  :already_present}` means the destination already holds the file with the
+  same size and SHA-256, and Kiln records it as sent; answer it only when
+  the store vouches for the content, not for a name. `{:error, {:permanent,
+  message}}` is a failure no retry fixes, and fails the destination at once
+  instead of on the backup's last attempt. Any other `{:ok, _}` from `put/3`
+  is that file's error.
+
+- **Resumable uploads: `Kiln.BackupDestination.Resume`, the `:resume`
+  capability and the optional `c:Kiln.BackupDestination.abort_upload/3`
+  (kiln_cms#2223).** An adapter that declares `:resume` in `supports/0` and
+  implements `abort_upload/3` gets a `Kiln.BackupDestination.Resume` in
+  `put/3`'s `opts[:resume]`:
+  - `checkpoint`: what it last saved for this file, with string keys (a
+    JSON round trip), or `nil`. At most 8 KiB as JSON, and never a secret.
+    An optional `bytes_done` key, a non-negative integer, reports progress;
+  - `attempt`: how many attempts have worked on this upload, from 1;
+  - `save`: call it right after creating the store upload, before sending
+    data, and after each part the store acknowledged. When it answers
+    `{:error, :superseded}`, stop, abort a store upload created in this same
+    call, and return `{:error, :superseded}`.
+
+  The struct's `Inspect` shows only `attempt`. `abort_upload/3` frees an
+  upload Kiln recorded; one the store no longer knows is `:ok`. An adapter
+  that declares `:resume` without it is not resumed, and
+  `mix kiln.plugins.doctor` reports it. The new types are
+  `t:Kiln.BackupDestination.capability/0` and
+  `t:Kiln.BackupDestination.upload/0`.
+
 - **`c:Kiln.Plugin.staging_scrub/0` and `t:Kiln.Plugin.staging_scrub_entry/0`
   (kiln_cms#2975).** A plugin declares what the staging scrub does to each
   table its domains own: `{:purge, Resource}`, `{:rewrite, Resource, set:

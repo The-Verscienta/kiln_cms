@@ -504,10 +504,14 @@ config :kiln_cms, KilnCMS.CrawlerVerification.Ranges,
 
 # Backup destination adapters beyond Kiln's own and the plugins' (#2220): the
 # fake whose settings make a call succeed, fail, raise, exit or hang, so the
-# facade's boundary and the step chain can be tested without a real store.
+# facade's boundary and the step chain can be tested without a real store,
+# and a resumable one (#2223).
 # Test-only; nothing else sets this key.
 config :kiln_cms, KilnCMS.Backups.Destination,
-  extra_adapters: [KilnCMS.Test.BackupDestinations.Fake]
+  extra_adapters: [
+    KilnCMS.Test.BackupDestinations.Fake,
+    KilnCMS.Test.BackupDestinations.ResumableFake
+  ]
 
 # No boot-time job-args scrub (#2992), for the boot-enqueue reason at the top
 # of this file. Down here so docs/environment-variables.md's line anchor into

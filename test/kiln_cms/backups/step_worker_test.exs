@@ -38,6 +38,15 @@ defmodule KilnCMS.Backups.StepWorkerTest do
     }
   end
 
+  # #2223: an upload a step's time limit cuts off stays open for the next
+  # attempt, which Oban's Lifeline only starts once the step's own limit has
+  # passed. A step's adapter calls end 5 minutes before that limit
+  # (`Steps.call_deadline/1`).
+  test "a step's time limit sits inside the Lifeline rescue window" do
+    rescue_after = KilnCMS.Application.oban_rescue_after() || :timer.minutes(180)
+    assert StepWorker.timeout(%Oban.Job{}) < rescue_after
+  end
+
   test "the directory id is created once, private, and read back", %{dir: dir, local: local} do
     assert {:ok, ^local} = DirId.local()
     assert {:ok, ^local} = DirId.current()

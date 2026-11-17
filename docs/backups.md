@@ -3152,7 +3152,11 @@ destination's directory, mode 0600; a directory it has to create is made
 mode 0700, and one that exists is left as it is. Each is
 written as `<name>.partial`, hashed again and compared with the SHA-256
 the backup verified, and only then renamed, so a file that doesn't match
-never appears under its real name. Mount the same storage at the same path
+never appears under its real name. A file already in place with the same
+size and SHA-256 is not copied again: the size is compared first, and only
+a file of the right size is read whole to hash it, so a resend reads a
+large media part back from the mount once instead of writing it
+([Resumable uploads](#resumable-uploads)). Mount the same storage at the same path
 on every node that can run backups: a node where the directory is missing
 fails that destination for the backups it runs.
 
@@ -3327,7 +3331,9 @@ On a backup's run, as a destination's error (the chip's tooltip, and the
 
 | Error | Meaning |
 |---|---|
-| "FAILED for 2 files: kiln-db-20261115-031700.dump (…), …" | Those files' copies still failed on the step's last attempt. In the brackets is each one's reason: rclone's output, the adapter's error, or one of the reasons below. |
+| "FAILED for 2 files: kiln-db-20261115-031700.dump (…), …" | Those files' copies still failed on the step's last attempt, or one of them failed permanently on an earlier one. In the brackets is each one's reason: rclone's output, the adapter's error, or one of the reasons below. |
+| "REFUSED for 1 file: kiln-media-20261115-031700.part02.tar.gz (changed on disk after this backup verified it (…))" | The file changed after the backup verified it, and the whole backup failed ([When an off-site copy is refused](#when-an-off-site-copy-is-refused)). |
+| (in the brackets) the adapter's own sentence, on the first attempt | The adapter said no retry fixes it (the bucket doesn't exist, the credentials are refused for good). The destination failed at once, without waiting for the backup's other attempts, and the backup went on to the next destination ([Resumable uploads](#resumable-uploads)). Fix what it names; the next backup tries it again. |
 | (in the brackets) "… timed out after …" | A call ran past what was left of the step's run time, or past `call_timeout` ([below](#how-long-a-destination-may-take)). The rest of that destination's files wait for the next attempt. |
 | (in the brackets) "Local destinations are off: BACKUP_LOCAL_DESTINATION_ROOTS is not set", "… does not exist on this server" | The node that ran the backup has no roots, or not this directory ([above](#let-backups-be-written-to-a-directory-on-this-server)). |
 | "removed or disabled during this backup" | The destination was deleted or disabled after the backup started. |
@@ -3335,6 +3341,9 @@ On a backup's run, as a destination's error (the chip's tooltip, and the
 | "rclone is not installed in this image" | The node that ran the backup has no `rclone`. No retry fixes it, so it fails at once. |
 | "credentials can't be decrypted (was SECRET_KEY_BASE changed?); re-enter them" | [Above](#keep-destination-credentials-outside-kiln). |
 | "the adapter for this destination is not installed (was its plugin removed?)" | A plugin's destination whose plugin is gone. Reinstall it, or disable or delete the destination. |
+| (in the brackets) "stopped before the step's time ran out; the upload resumes on the next attempt" | A resumable adapter stopped at the step's deadline, having recorded how far it got. The rest of that destination's files wait for the next attempt, which continues the upload. |
+| (in the brackets) "a later attempt of this backup took over the upload" | This step lost its lease to a newer one (a retry, or a step that took over from a node that went away), which owns the upload now. |
+| (in the brackets) "MyPlugin.BackupDestination.put/3 returned an unexpected value" | A plugin's `put/3` answered something the contract doesn't allow. That file counts as failed; report it to the plugin's author. |
 
 ### How long a destination may take
 
@@ -3352,6 +3361,161 @@ config :kiln_cms, KilnCMS.Backups.Destination, call_timeout: :timer.minutes(30)
 The cap applies to each call, so a large media set with many parts still
 gets as many calls as it has files. A Test is held to 30 seconds and the
 adapter's checks on Save to 30 seconds, whatever the cap.
+
+### Resumable uploads
+
+A large file can be cut off part-way to a destination: the step's time runs
+out, the connection drops, the node goes away, or a newer step takes the
+backup over. On a destination whose adapter can resume, the next attempt
+continues that upload from where it stopped instead of sending the whole
+file again (#2223).
+
+**Which destinations resume.** Only an adapter that opts in
+([below](#a-plugin-opts-in)). None of Kiln's own does yet: a **Directory on
+this server**, an **Rclone remote** and `BACKUP_RCLONE_REMOTE` send each file
+whole, as before. There is nothing to configure. The upgrade only needs
+`mix ash.migrate`, which creates the `backup_uploads` table.
+
+**What is recorded, and where.** One row in `backup_uploads`, in Kiln's
+database, per file being uploaded to a destination
+(`KilnCMS.Backups.Upload`). It holds:
+
+- the destination's key, which is its id plus a fingerprint of where it
+  writes, so a row never follows a destination to another place;
+- the file's directory (`db` or `media`), name and backup stamp, and the
+  size and SHA-256 it verified with;
+- the adapter's checkpoint and how far the upload got (`bytes_done`);
+- the status: `open`, `abandoned`, `completed` or `aborted`;
+- the Oban job and attempt of the step that owns it, how many steps have
+  worked on it, and the last error.
+
+The checkpoint is the adapter's own small state, such as the store's upload
+id and the parts it has acknowledged. It is at most 8 KiB of JSON and never
+a credential. A row is written on the adapter's first checkpoint, so an
+upload that never saved one leaves no row. Nothing shows the table: not the
+Backups page, not History, not any API. Only the backup pipeline reads or
+writes it ([policy matrix](policy-matrix.md#backup-uploads)),
+and the staging scrub empties it (`backup_uploads_purged`).
+
+**Only the newest step may continue an upload.** Each row belongs to one
+step, named by its Oban job id and attempt. A step may take a row over only
+if it is at least as new as the owner: a retry of the same job (a higher
+attempt), or a step that took the backup over from a node that went away (a
+newer job). Job ids and attempts only grow, so ownership only moves forward.
+A step that has lost its lease ([Several nodes and the backup
+lock](#several-nodes-and-the-backup-lock)) can no longer record progress.
+Its next save matches no row, its adapter is told the upload was superseded
+and stops, and the progress of the step that took over stands. The reasoning
+is in [ADR 0068](decisions/0068-a-resumable-backup-upload-is-recorded-by-the-installation-that-started-it-and-only-it-aborts-it.md).
+
+**Only the same file resumes.** A checkpoint is handed back only for a file
+with the size and SHA-256 the upload started with. If the file changed (a
+**Resume** rebuilt it), its old upload is abandoned and aborted, and the
+upload starts over. An adapter also checks what the store holds before it
+trusts a checkpoint.
+
+**A file already there is not sent again.** An adapter may answer that the
+destination already holds this file with the same size and SHA-256. Kiln
+then records it as sent, exactly as if it had just uploaded it, and the
+run's log reads "kiln-db-20261117-031700.dump was already on NAS with the
+same checksum; not sent again". A **Directory on this server** answers this
+way ([above](#let-backups-be-written-to-a-directory-on-this-server)). Such a
+file is then retention's to delete on that destination like any file this
+installation sent there. The same stamp and SHA-256 make it the same backup.
+
+**Permanent and transient failures.** An adapter may say a failure is
+permanent, meaning no retry fixes it: the bucket doesn't exist, or the
+credentials are refused for good. That destination then fails on the
+attempt it happened in, without spending the backup's other attempts, and
+the backup goes on to the next destination. The adapter's sentence is the
+destination's error. Every other failure is transient: a timeout, a dropped
+connection, a store that answered 500. The destination is tried again on the
+step's next attempt (after 1, 5, then 15 minutes, four attempts in all), and
+an open upload is kept, with its error, for that attempt to continue. A
+refused file is unchanged by any of this. It still fails the whole backup
+([When an off-site copy is refused](#when-an-off-site-copy-is-refused)).
+
+**When Kiln aborts an upload.** On most stores an unfinished upload costs
+storage until it is aborted, but an aborted one can't be resumed. Kiln
+aborts an upload it recorded only when:
+
+- it failed permanently;
+- the file changed since the upload started;
+- the destination turned out to hold the file already, while an upload of
+  it was under way;
+- the sweep finds it abandoned, or open and untouched for four days.
+
+A timeout or a transient error never aborts an upload: the next attempt
+needs it. An abort that fails leaves the row `abandoned`, for the sweep to
+try again.
+
+**The sweep.** Each time a backup reaches a destination, Kiln aborts that
+destination's recorded uploads that were abandoned, or left open and
+untouched for four days. Four days is longer than any backup's retries and
+reclaims, and than the three-day sweep of old work directories. The sweep
+runs before retention, and it runs whether or not **Delete its old backups
+(retention)** is ticked. It takes at most 50 uploads per pass, starts no
+abort within 30 seconds of the step's deadline for destination calls, and
+never touches an
+upload of the backup that holds the backup lock. The run's log reads
+"Aborted 2 unfinished upload(s) on NAS", with "; 1 couldn't be, and are
+tried again later" when some aborts failed. The pass is also the
+`[:kiln_cms, :backups, :upload, :swept]` telemetry event, with `aborted` and
+`failed` counts and the destination's key as `destination`. Then, whichever
+destination was reached, rows that closed (`completed` or `aborted`) more
+than 30 days ago are deleted, and so is every row of a deleted destination
+once it is 30 days old.
+
+**Time limits.**
+
+- **The step: 2 hours.** Each attempt of the off-site step may run two
+  hours. Every call to a destination must be done five minutes before that,
+  or sooner with `call_timeout`
+  ([How long a destination may take](#how-long-a-destination-may-take)). A
+  resumable adapter that watches the deadline stops cleanly with its
+  progress saved. The destination's error then reads "stopped before the
+  step's time ran out; the upload resumes on the next attempt". One that
+  doesn't is killed at the deadline, and its last checkpoint stands.
+- **A node that dies: 3 hours.** A step whose node died mid-upload is
+  rescued by Oban's Lifeline after `KILN_OBAN_RESCUE_AFTER_MINUTES` (180 by
+  default), and, if it has attempts left, runs again as the next attempt,
+  which continues the upload.
+  The step's two hours fit inside that window, so the rescued attempt never
+  runs beside the one it replaces. Keep the variable above two hours.
+- **A step that is fenced.** When another node reclaims the backup, the old
+  step is stopped, its upload stays open, and the step that took over
+  continues it. If the old step was still running somewhere, its saves are
+  refused, as above.
+
+A resumed upload is on the run's log as "Resumed
+kiln-media-20261117-031700.part01.tar.gz on NAS at 268435456 of 1073741824
+bytes", or "… from its last checkpoint" when the adapter doesn't report its
+progress.
+
+**Set a lifecycle rule on the bucket.** Once you use an S3-style adapter
+that resumes, also set the bucket's own lifecycle rule for incomplete
+multipart uploads, for example "abort incomplete multipart uploads after 7
+days". Kiln aborts only the uploads it recorded. It never lists the store's
+own pending uploads, so it never aborts:
+
+- an upload cut off before its first checkpoint was saved;
+- an upload on a destination you deleted, since Kiln no longer calls it;
+- an upload whose row was lost when the database was restored from an
+  older backup;
+- another installation's uploads in the same bucket.
+
+<a id="a-plugin-opts-in"></a>
+
+#### A plugin opts in
+
+An adapter resumes when its `supports/0` includes `:resume` and it
+implements `abort_upload/3`. It then gets a `Kiln.BackupDestination.Resume`
+in `put/3`'s `opts[:resume]`, holding the last checkpoint and a `save`
+function to record a new one. An adapter that declares `:resume` without
+`abort_upload/3` is never resumed, since Kiln could never free an upload it
+started, and `mix kiln.plugins.doctor` says so. What an adapter must do is
+under *Backup destinations* in
+[plugin-extensibility.md](plugin-extensibility.md#resumable-uploads-in-a-backup-destination).
 
 ### Cron backups in parts
 

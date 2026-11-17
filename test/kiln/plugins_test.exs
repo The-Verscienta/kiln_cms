@@ -1056,11 +1056,32 @@ defmodule Kiln.PluginsTest do
         def describe(_config), do: "x"
       end
 
+      defmodule UnabortableDestination do
+        use Kiln.BackupDestination
+        def kind, do: "unabortable"
+        def label, do: "x"
+        def fields, do: []
+        def supports, do: [:list, :delete, :resume]
+        def validate(_config), do: :ok
+        def test(_config), do: :ok
+        def put(_config, _file, _opts), do: :ok
+        def list(_config), do: {:ok, []}
+        def get(_config, _ref, _to), do: :ok
+        def delete(_config, _ref), do: :ok
+        def describe(_config), do: "x"
+      end
+
       defmodule DestinationPlugin do
         use Kiln.Plugin
 
         def backup_destinations,
-          do: [NotADestination, BadKindDestination, LocalImpostor, TwinDestination]
+          do: [
+            NotADestination,
+            BadKindDestination,
+            LocalImpostor,
+            TwinDestination,
+            UnabortableDestination
+          ]
       end
 
       problems =
@@ -1076,6 +1097,13 @@ defmodule Kiln.PluginsTest do
 
       assert Enum.any?(problems, &(&1 =~ "BadKindDestination needs a kind/0"))
       assert Enum.any?(problems, &(&1 =~ ~s(LocalImpostor takes the kind "local")))
+
+      assert Enum.any?(
+               problems,
+               &(&1 =~
+                   "UnabortableDestination declares :resume in supports/0 but does not " <>
+                     "implement abort_upload/3")
+             )
 
       assert Enum.any?(
                problems,

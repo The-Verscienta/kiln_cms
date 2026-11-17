@@ -70,8 +70,9 @@ defmodule Kiln.ContractTest do
   end
 
   describe "a backup destination" do
-    test "the contract's callbacks and arities, with supports/0 the only optional one" do
+    test "the contract's callbacks and arities, with supports/0 and abort_upload/3 optional" do
       assert Enum.sort(Kiln.BackupDestination.behaviour_info(:callbacks)) == [
+               abort_upload: 3,
                delete: 2,
                describe: 1,
                fields: 0,
@@ -85,7 +86,35 @@ defmodule Kiln.ContractTest do
                validate: 1
              ]
 
-      assert Kiln.BackupDestination.behaviour_info(:optional_callbacks) == [supports: 0]
+      assert Enum.sort(Kiln.BackupDestination.behaviour_info(:optional_callbacks)) == [
+               abort_upload: 3,
+               supports: 0
+             ]
+    end
+
+    test "use Kiln.BackupDestination defines no abort_upload/3, so nothing resumes by default" do
+      refute function_exported?(Destination, :abort_upload, 3)
+    end
+
+    test "a resume's inspect shows only its attempt, never its checkpoint or save" do
+      resume = %Kiln.BackupDestination.Resume{
+        checkpoint: %{"upload_id" => "upload-id-xyz"},
+        attempt: 2,
+        save: fn _checkpoint -> :ok end
+      }
+
+      inspected = inspect(resume)
+      assert inspected =~ "attempt: 2"
+      refute inspected =~ "upload-id-xyz"
+      refute inspected =~ "save"
+      assert resume.save.(%{"part" => 1}) == :ok
+    end
+
+    test "a resume needs a save, and defaults to a fresh start on attempt 1" do
+      assert %Kiln.BackupDestination.Resume{checkpoint: nil, attempt: 1} =
+               struct!(Kiln.BackupDestination.Resume, save: fn _ -> :ok end)
+
+      assert_raise ArgumentError, fn -> struct!(Kiln.BackupDestination.Resume, []) end
     end
 
     test "use Kiln.BackupDestination defaults supports/0 to nothing, so nothing is pruned" do

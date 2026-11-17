@@ -102,6 +102,7 @@ defmodule KilnCMS.Staging.Scrub do
           backup_locks_purged: non_neg_integer(),
           backup_node_beats_purged: non_neg_integer(),
           backup_notices_purged: non_neg_integer(),
+          backup_uploads_purged: non_neg_integer(),
           oban_jobs_purged: non_neg_integer(),
           admin_provisioned: String.t() | nil
         }
@@ -151,6 +152,10 @@ defmodule KilnCMS.Staging.Scrub do
     # destinations, with their errors; the staging host's own backups report
     # their own.
     {:backup_notices_purged, KilnCMS.Backups.Notice},
+    # Resumable uploads (#2223) are production's uploads to production's
+    # destinations, which the purge above already took: a staging host must
+    # never resume, nor abort, one of them.
+    {:backup_uploads_purged, KilnCMS.Backups.Upload},
     # The security audit log (#2241) holds raw IPs, user agents and email
     # snapshots of the production sign-ins: personal data a clone must not carry.
     {:security_events_purged, KilnCMS.Security.Event},
