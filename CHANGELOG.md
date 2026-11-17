@@ -187,6 +187,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The API key reuse email names the key's owner by display name, or "account" and their id, instead of their email address.**
   ([long form](docs/changelog/unreleased.md#api-key-reuse-alert-names-owner))
 
+- **The email telling someone a platform admin removed their passkey or authenticator app names that admin by display name ("an administrator" when they have none) instead of their email address.**
+  ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044) · [long form](docs/changelog/unreleased.md#factor-removed-notice-names-admin))
+
 ### Fixed
 
 - **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**

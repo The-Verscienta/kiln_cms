@@ -146,11 +146,55 @@ defmodule KilnCMS.Accounts.FactorRemovedNoticeTest do
 
       assert [mail] = mails_to(owner)
       assert mail.html_body =~ "A passkey was removed"
-      assert mail.html_body =~ "removed by an administrator, #{admin.email}"
+      # No display name: named as "an administrator", never by address (#3044).
+      assert mail.html_body =~ "It was removed by an administrator."
+      refute mail.html_body =~ to_string(admin.email)
+      refute mail.subject =~ to_string(admin.email)
       assert mail.html_body =~ "ask an administrator of your site why"
       assert mails_to(admin) == []
 
       assert "two_factor_disabled" in alert_kinds(org)
+    end
+
+    test "names an admin with a display name by that name, escaped, and never by address",
+         %{org: org} do
+      owner = passkey_user()
+      admin = passkey_user(:admin) |> Ash.Seed.update!(%{name: "Ada <b>L</b> & co"})
+      passkey = fresh_passkey(owner, "cred-removed-named-admin")
+      _admins_own = passkey_of(admin, "cred-removed-named-admin-own")
+
+      {:ok, passkey} = Accounts.get_passkey(passkey.id, actor: admin)
+
+      assert :ok =
+               Accounts.remove_passkey(passkey,
+                 actor: admin,
+                 context: TwoFactorFixtures.verified_now(ctx(org))
+               )
+
+      assert [mail] = mails_to(owner)
+      assert mail.html_body =~ "removed by an administrator, Ada &lt;b&gt;L&lt;/b&gt; &amp; co."
+      refute mail.html_body =~ "<b>L</b>"
+      refute mail.html_body =~ to_string(admin.email)
+      refute mail.subject =~ to_string(admin.email)
+    end
+
+    test "an admin whose display name is blank is named generically", %{org: org} do
+      owner = passkey_user()
+      admin = passkey_user(:admin) |> Ash.Seed.update!(%{name: ""})
+      passkey = fresh_passkey(owner, "cred-removed-blank-admin")
+      _admins_own = passkey_of(admin, "cred-removed-blank-admin-own")
+
+      {:ok, passkey} = Accounts.get_passkey(passkey.id, actor: admin)
+
+      assert :ok =
+               Accounts.remove_passkey(passkey,
+                 actor: admin,
+                 context: TwoFactorFixtures.verified_now(ctx(org))
+               )
+
+      assert [mail] = mails_to(owner)
+      assert mail.html_body =~ "It was removed by an administrator."
+      refute mail.html_body =~ to_string(admin.email)
     end
   end
 
