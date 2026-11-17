@@ -81,6 +81,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The boot-time erasure backfill now also demotes the site memberships of accounts erased before this release (its result gains `memberships`). No migration; rolling back is safe.**
   ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#erasure-backfill-memberships-upgrade))
 
+- **About 10 minutes after boot and daily, a job drops form submission data and automation payloads from finished jobs (`KILN_PRIVATE_ARGS_SCRUB_CRON`). No migration. Drain the `mail` queue before rolling back: form mail queued by this release fails on the previous one and is lost.**
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#private-job-args-upgrade))
+
 - **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: audiences, push subscriptions, private saved views and notifications (its result gains those four keys). No migration; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#erasure-backfill-2514-steps-upgrade))
 
@@ -96,6 +99,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Two referrer breakdowns of overlapping traffic (dashboard span vs. the export's days, site chart vs. item bars, 7 vs. 30 days, today read twice) can be differenced to recover a suppressed count. No workaround short of turning off `KILN_ANALYTICS_REFERRERS`.**
   ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989) · [long form](docs/changelog/unreleased.md#referrer-breakdowns-differenced))
+
+- **Automation jobs still hold the event's document, drafts included, in plain text while pending and in Oban's `job:start` / `job:stop` log lines, until the next release seals it. No workaround short of logging above `info`.**
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#automation-payload-plain-in-pending-jobs))
 
 ### Added
 
@@ -157,6 +163,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Contributors: the backup script tests also run in CI under bash 3.2.57 and under bsdtar, and check that busybox tar is refused. The docs now say `backup.sh all` keeps its verified database dump when it refuses a tar.**
   ([long form](docs/changelog/unreleased.md#backup-scripts-portability-ci))
 
+- **Form mail built from the stored submission when the job runs: a submission deleted or marked spam before then sends nothing, and no confirmation goes out if its email field was removed or renamed, or the autoresponder switched off, since.**
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-mail-reads-stored-submission))
+
 ### Fixed
 
 - **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
@@ -191,6 +200,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A payment webhook for an erased member is acknowledged and changes nothing, instead of reviving the canceled membership, and no longer deadlocks with that member's erasure.**
   ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#billing-webhook-erased-account))
+
+- **Form mail jobs carry only ids, and form data and automation payloads are dropped from a job's row when it finishes and from Sentry events. Automation payloads stay plain while pending (Known issues).**
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-automation-job-args))
 
 - **An erased account can no longer be given a platform role, temporary role or audiences, and `mix kiln.deprecations` and its boot job leave erased accounts out.**
   ([long form](docs/changelog/unreleased.md#erasure-refuses-platform-role))

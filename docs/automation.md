@@ -215,6 +215,18 @@ When post.in_review        → suggest_metadata  {"to": "editors@example.com"}
   `type`, `event`), and rule matching is trigger + content type only. There is
   no condition surface on which to say "only public documents", so a rule that
   forwards content outward forwards gated content too.
+- **The payload travels in the job.** It is the document as it was when the
+  event fired, drafts included, and a reaction needs that snapshot, so the
+  `DispatchWorker` and `RuleWorker` jobs carry it rather than an id to read
+  back. It is dropped from the job's row once the job finishes, whether it
+  succeeded, was canceled or discarded, or failed for the last time (#2992);
+  a job that fails with attempts left keeps it for the retry. In this release
+  it is still written in plain text, so a pending job's row and Oban's
+  `job:start` / `job:stop` log lines show it; a later release writes it
+  sealed, which the workers already read. A job whose payload can't be read
+  (sealed under a `SECRET_KEY_BASE` the deployment no longer has, or missing)
+  is canceled with a reason saying so. See
+  [Job args retention](data-flows.md#job-args-retention).
 
 Modules: `KilnCMS.Automation` (domain + executor), `KilnCMS.Automation.Rule`
 (the admin-managed resource), `KilnCMS.Automation.RuleWorker` (the reactions),

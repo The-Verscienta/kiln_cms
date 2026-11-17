@@ -124,14 +124,27 @@ defmodule KilnCMS.Automation.RuleWorker do
   alias KilnCMS.Automation
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Jobs.PrivateArgs
 
   # A reaction has no request actor. See "How this worker is authorized".
   defp system_actor, do: KilnCMS.SystemActor.new(:automation)
 
+  # The payload is the event-time snapshot of the document, drafts included
+  # (#2992). A reaction needs that snapshot (a `{{title}}` template, a
+  # `:broadcast`), so it cannot be read back by id; it is read in either shape
+  # `Automation.job_payload/1` accepts and dropped from the job's row once the
+  # job is finished, whichever way it finishes.
   @impl Oban.Worker
-  def perform(%Oban.Job{
-        args: %{"rule_id" => rule_id, "event" => event, "payload" => payload} = args
-      }) do
+  def perform(%Oban.Job{args: %{"rule_id" => rule_id, "event" => event} = args} = job) do
+    PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
+      case Automation.job_payload(args) do
+        {:ok, payload} -> perform_rule(rule_id, event, payload, args)
+        {:error, reason} -> {:cancel, Automation.describe_payload_error(reason)}
+      end
+    end)
+  end
+
+  defp perform_rule(rule_id, event, payload, args) do
     # `org_id` scopes the rule read to its own site (epic #336); a pre-#336 job
     # carries none and reads under the default org (a non-default org's rule
     # from that era is treated as gone). `rule_id` was enqueued by

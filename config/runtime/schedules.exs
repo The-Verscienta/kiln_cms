@@ -129,3 +129,13 @@ end
 if cron = System.get_env("KILN_CRAWLER_RANGES_CRON") do
   config :kiln_cms, :crawler_ranges_cron, cron
 end
+
+# ## Private job arguments (#2992)
+#
+# When finished form-mail and automation jobs that still hold a submission or
+# a document snapshot have it dropped (`KilnCMS.Jobs.PrivateArgsScrub`).
+# Daily by default; `false` turns the schedule off (the boot run is
+# `:private_args_scrub_on_boot`).
+if cron = System.get_env("KILN_PRIVATE_ARGS_SCRUB_CRON") do
+  config :kiln_cms, :private_args_scrub_cron, cron
+end
