@@ -106,7 +106,29 @@ defmodule KilnCMS.Backups.Retention do
   `sync_last_good/2` the `.good` markers don't depend on the policy: when the
   schedules can't be read the `.good` markers still move and every hold is
   left as it is, with the same warning and event. Like `.good`, the app never
-  reads a `.hold` as a keep rule.
+  reads a `.hold` as a keep rule. A unit with no data file left, only its
+  sidecar, gets no hold.
+
+  ### A held backup deleted outside the app (#2931)
+
+  A host whose `scripts/backup.sh` predates the hold markers ignores them,
+  and its cron prune deletes what a schedule keeps. Each sync spots that from
+  the `.hold` markers the scan listed, before any is written or removed
+  (`held_deleted_candidates/2`): a held unit with no member left at all (the
+  v1.9.x script's `remove_unit` deletes the sidecar too), or none but its
+  sidecar (v1.8 and older prune with `find` by age, which can leave the
+  `.sha256`), whose stamp has no `.work/` directory, whose Run is not
+  running, and whose Run doesn't record the app pruning that kind here (the
+  app's own deletes, one that stopped part-way included). The scan's held
+  stamps are part of the one Run read, so this adds no query. Such a unit's
+  `.hold` is stale, and it is reported only once that `.hold` is removed, so
+  a marker that can't be removed (a directory, say) is never reported, and a
+  removed one is never reported twice. The report is a warning naming up to
+  ten units ("and N more"), a `[:kiln_cms, :backups, :hold, :deleted_outside]`
+  event (`%{count: n}`, with `scope: :local`), and a notice
+  (`KilnCMS.Backups.Notices.held_deleted/2`) that the Backups page and the
+  Schedule tab show. A unit the app pruned whose Run could not be marked
+  (`Recorder.mark_pruned/2` is best-effort) is reported too.
 
   ## Fail closed, loudly
 
@@ -121,7 +143,9 @@ defmodule KilnCMS.Backups.Retention do
   `[:kiln_cms, :backups, :retention, :skipped]` telemetry event. Right before
   each unit goes, `.work/<stamp>`, the stamp's markers and its Run are checked
   again; a unit that is now in flight, pinned, or whose Run can't be read is
-  left alone.
+  left alone. The Run read covers the stamps of the `.hold` markers too, so
+  when it fails no held unit is reported deleted either; the next sync looks
+  again.
 
   ## What cron can't see
 
@@ -185,7 +209,7 @@ defmodule KilnCMS.Backups.Retention do
   """
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Destination, Importer, Recorder, WorkState}
+  alias KilnCMS.Backups.{Artifact, Destination, Importer, Notices, Recorder, WorkState}
   alias KilnCMS.Backups.Retention.Policy
 
   require Logger
@@ -220,6 +244,7 @@ defmodule KilnCMS.Backups.Retention do
           required(:markers) => MapSet.t(String.t()),
           required(:work) => MapSet.t(String.t()),
           required(:strays) => [%{name: String.t(), sub: String.t(), mtime: integer()}],
+          optional(:held) => MapSet.t({String.t(), :db | :media}),
           optional(:key) => String.t()
         }
 
@@ -279,10 +304,10 @@ defmodule KilnCMS.Backups.Retention do
           | {:error, term()}
   def run(dir \\ Backups.dir(), opts \\ []) do
     case prepare(dir, opts) do
-      {:ok, plan} ->
+      {:ok, {plan, inventory, runs}} ->
         if Keyword.get(opts, :dry_run, false),
           do: {:ok, %{deleted: [], units: 0, plan: plan, stopped: nil}},
-          else: execute(dir, plan, opts)
+          else: execute(dir, {plan, inventory, runs}, opts)
 
       {:error, reason} ->
         skipped(reason)
@@ -298,7 +323,7 @@ defmodule KilnCMS.Backups.Retention do
          {:ok, policy} <- policy(opts),
          {:ok, inventory} <- scan(dir),
          {:ok, runs} <- read_runs(stamps(inventory)) do
-      {:ok, plan(inventory, runs, policy, now)}
+      {:ok, {plan(inventory, runs, policy, now), inventory, runs}}
     end
   rescue
     error -> {:error, {:crashed, error.__struct__}}
@@ -307,9 +332,9 @@ defmodule KilnCMS.Backups.Retention do
   # Whatever was deleted is marked on its runs, even when the deleting stopped
   # part-way. The markers move first: nothing below deletes the newest
   # verified unit, and a cron prune that runs meanwhile sees the new one.
-  defp execute(dir, plan, opts) do
+  defp execute(dir, {plan, inventory, runs}, opts) do
     _ = sync(dir, plan.last_good, opts)
-    _ = sync_holds(dir, plan.holds, opts)
+    _ = sync_holds(dir, plan.holds, inventory, runs, opts)
     {deleted, units, stopped} = apply_plan(dir, plan, Keyword.take(opts, [:before_unit]))
     Recorder.mark_pruned(deleted)
     if stopped, do: stopped(deleted, stopped)
@@ -319,7 +344,10 @@ defmodule KilnCMS.Backups.Retention do
   defp skipped(reason) do
     Logger.error("Backup retention skipped: #{describe(reason)}; nothing was deleted")
 
-    :telemetry.execute([:kiln_cms, :backups, :retention, :skipped], %{count: 1}, %{reason: reason})
+    :telemetry.execute([:kiln_cms, :backups, :retention, :skipped], %{count: 1}, %{
+      scope: :local,
+      reason: reason
+    })
 
     {:error, reason}
   end
@@ -332,7 +360,7 @@ defmodule KilnCMS.Backups.Retention do
     :telemetry.execute(
       [:kiln_cms, :backups, :retention, :stopped],
       %{count: 1, deleted: length(deleted)},
-      %{reason: reason}
+      %{scope: :local, reason: reason}
     )
   end
 
@@ -474,7 +502,7 @@ defmodule KilnCMS.Backups.Retention do
   defp sync_holds_with_policy(dir, inventory, runs, now, opts) do
     case policy(opts) do
       {:ok, policy} ->
-        sync_holds(dir, plan(inventory, runs, policy, now).holds, opts)
+        sync_holds(dir, plan(inventory, runs, policy, now).holds, inventory, runs, opts)
 
       {:error, reason} ->
         Logger.warning("Backup hold markers not updated: #{describe(reason)}")
@@ -529,8 +557,11 @@ defmodule KilnCMS.Backups.Retention do
   # Every hold the plan names is written first, in both directories; only
   # then is a `.hold` it doesn't name removed. A failed write is logged and
   # reported (`[:kiln_cms, :backups, :hold, :failed]`) and stops nothing else.
-  defp sync_holds(dir, holds, opts) do
+  # The held units found deleted outside the app are worked out from the
+  # scan's holds before any of that, and reported once their `.hold` is gone.
+  defp sync_holds(dir, holds, inventory, runs, opts) do
     create = Keyword.get(opts, :create_marker, &create_marker/1)
+    gone = held_deleted_candidates(inventory, runs)
 
     for kind <- [:db, :media], stamp <- Map.get(holds, kind, []) do
       sub = Artifact.subdir(kind)
@@ -546,33 +577,119 @@ defmodule KilnCMS.Backups.Retention do
       end
     end
 
-    for kind <- [:db, :media] do
-      keep = holds |> Map.get(kind, []) |> MapSet.new(&Artifact.hold_name/1)
-      remove_stale_holds(dir, Artifact.subdir(kind), keep)
-    end
+    removed =
+      for kind <- [:db, :media],
+          stamp <- remove_stale_holds(dir, kind, MapSet.new(Map.get(holds, kind, []))),
+          into: MapSet.new(),
+          do: {stamp, kind}
+
+    gone
+    |> Enum.filter(&MapSet.member?(removed, {&1.stamp, &1.kind}))
+    |> held_deleted(dir, opts)
 
     :ok
   end
 
+  # The stamps of the kind's stale `.hold` markers that are gone now.
   # sobelow_skip ["Traversal.FileModule"]
-  defp remove_stale_holds(dir, sub, keep) do
+  defp remove_stale_holds(dir, kind, keep) do
+    sub = Artifact.subdir(kind)
+
     case File.ls(Path.join(dir, sub)) do
       {:ok, names} ->
         for name <- names,
-            not MapSet.member?(keep, name),
-            match?({:ok, _}, Artifact.parse_hold_name(name)) do
-          remove_marker(Path.join([dir, sub, name]), "#{sub}/#{name}", :hold)
-        end
-
-        :ok
+            {:ok, stamp} <- [Artifact.parse_hold_name(name)],
+            not MapSet.member?(keep, stamp),
+            remove_marker(Path.join([dir, sub, name]), "#{sub}/#{name}", :hold) == :ok,
+            do: stamp
 
       {:error, :enoent} ->
-        :ok
+        []
 
       {:error, reason} ->
         Logger.warning("Couldn't list #{sub}/ to remove old hold markers (#{inspect(reason)})")
-        :ok
+        []
     end
+  end
+
+  @doc false
+  # The held units deleted outside the app (#2931), pure: every
+  # `{stamp, kind}` the scan found a `.hold` for (`inventory.held`) whose
+  # unit has no member left (a v1.9.x `backup.sh`'s `remove_unit` deletes the
+  # sidecar too), or none but its sidecar (v1.8 and older prune with `find` by
+  # age, which can leave the `.sha256`). Not one whose stamp has a `.work/` directory or whose Run is
+  # running (a backup still writing it), nor one whose Run records the app
+  # pruning it here (`Recorder.mark_pruned/2`, the artifact or any of its
+  # parts: retention's own deletes, a pass that stopped part-way included,
+  # since the sidecar goes last). `runs` must cover the held stamps
+  # (`stamps/1` includes them). Returned as `[%{stamp, kind}]`, sorted.
+  @spec held_deleted_candidates(inventory(), %{String.t() => map()}) :: [
+          %{stamp: String.t(), kind: :db | :media}
+        ]
+  def held_deleted_candidates(inventory, runs) do
+    inventory
+    |> Map.get(:held, MapSet.new())
+    |> Enum.filter(fn {stamp, kind} ->
+      run = runs[stamp]
+
+      not has_data?(inventory.units[{stamp, kind}]) and
+        not MapSet.member?(inventory.work, stamp) and
+        not match?(%{status: :running}, run) and
+        not pruned_here?(run, kind)
+    end)
+    |> Enum.sort()
+    |> Enum.map(fn {stamp, kind} -> %{stamp: stamp, kind: kind} end)
+  end
+
+  defp has_data?(nil), do: false
+  defp has_data?(unit), do: Enum.any?(unit.files, &(&1.role == :data))
+
+  defp pruned_here?(%{artifacts: artifacts}, kind) when is_list(artifacts) do
+    Enum.any?(artifacts, fn artifact ->
+      artifact.kind == kind and
+        (local_pruned?(artifact.destinations) or
+           Enum.any?(artifact.parts || [], &local_pruned?(&1["destinations"])))
+    end)
+  end
+
+  defp pruned_here?(_run, _kind), do: false
+
+  defp local_pruned?(%{} = destinations),
+    do: get_in(destinations, ["local", "status"]) == "pruned"
+
+  defp local_pruned?(_none), do: false
+
+  @log_units 10
+
+  # The report: a warning naming up to ten, a
+  # `[:kiln_cms, :backups, :hold, :deleted_outside]` event, and the notice
+  # (`notify:`, tests only, standing in for `Notices.held_deleted/2`, which
+  # never raises and holds its write until any open lock transaction commits).
+  defp held_deleted([], _dir, _opts), do: :ok
+
+  defp held_deleted(units, dir, opts) do
+    count = length(units)
+
+    named =
+      units |> Enum.take(@log_units) |> Enum.map_join(", ", &"#{&1.kind} backup #{&1.stamp}")
+
+    more = if count > @log_units, do: " and #{count - @log_units} more", else: ""
+
+    Logger.warning(
+      "#{count} backup(s) a schedule keeps were deleted outside the app although their " <>
+        ".hold markers kept them: #{named}#{more}. The host's scripts/backup.sh is " <>
+        "probably older than this release and ignores .hold markers"
+    )
+
+    :telemetry.execute([:kiln_cms, :backups, :hold, :deleted_outside], %{count: count}, %{
+      dir: dir,
+      scope: :local,
+      units: units
+    })
+
+    notify = Keyword.get(opts, :notify, &Notices.held_deleted/2)
+    notify.(dir, units)
+    :ok
   end
 
   # An entry of that name already there, whatever it is, counts: `backup.sh`
@@ -638,14 +755,19 @@ defmodule KilnCMS.Backups.Retention do
             )
 
             removal_failed(which, %{marker: label, reason: {:remove, reason}})
+            :error
         end
 
       {:ok, %{type: type}} ->
         Logger.warning("Left #{label} in place: a #{type}, not a regular file")
         removal_failed(which, %{marker: label, reason: {:not_regular, type}})
+        :error
 
-      {:error, _gone_or_unreadable} ->
+      {:error, :enoent} ->
         :ok
+
+      {:error, _unreadable} ->
+        :error
     end
   end
 
@@ -706,7 +828,12 @@ defmodule KilnCMS.Backups.Retention do
 
       # A last-good or hold marker is never a keep rule here (the plan works
       # out the newest verified unit and the schedules' holds itself) and
-      # never a stray; the marker sync manages both.
+      # never a stray; the marker sync manages both. A hold is listed, for
+      # the held units deleted outside the app (#2931).
+      match?({:ok, _}, Artifact.parse_hold_name(name)) ->
+        {:ok, stamp} = Artifact.parse_hold_name(name)
+        {:hold, {stamp, if(sub == "db", do: :db, else: :media)}}
+
       String.starts_with?(name, "kiln-") and
           (String.ends_with?(name, ".good") or String.ends_with?(name, ".hold")) ->
         :ignore
@@ -784,12 +911,15 @@ defmodule KilnCMS.Backups.Retention do
   end
 
   defp inventory(classified, work) do
-    empty = %{units: %{}, partials: %{}, markers: MapSet.new(), strays: []}
+    empty = %{units: %{}, partials: %{}, markers: MapSet.new(), held: MapSet.new(), strays: []}
 
     acc =
       Enum.reduce(classified, empty, fn
         {:marker, stamp}, acc ->
           %{acc | markers: MapSet.put(acc.markers, stamp)}
+
+        {:hold, key}, acc ->
+          %{acc | held: MapSet.put(acc.held, key)}
 
         {:stray, stray}, acc ->
           %{acc | strays: [stray | acc.strays]}
@@ -810,13 +940,19 @@ defmodule KilnCMS.Backups.Retention do
     %{
       units: units,
       markers: acc.markers,
+      held: acc.held,
       work: work |> Enum.filter(&WorkState.valid_stamp?/1) |> MapSet.new(),
       strays: Enum.sort_by(acc.strays, &{&1.sub, &1.name})
     }
   end
 
-  defp stamps(inventory),
-    do: inventory.units |> Map.keys() |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+  # The held stamps too, so the one Run read also tells the hold sync which
+  # held units the app pruned itself.
+  defp stamps(inventory) do
+    (Map.keys(inventory.units) ++ MapSet.to_list(Map.get(inventory, :held, MapSet.new())))
+    |> Enum.map(&elem(&1, 0))
+    |> Enum.uniq()
+  end
 
   ## Runs
 
@@ -1137,9 +1273,14 @@ defmodule KilnCMS.Backups.Retention do
   # schedule's age rule (its own `keep_days`, or a floor raised above
   # `keep_days`), whatever rules 1 to 4 say of it today and whatever the
   # host's `BACKUP_KEEP_DAYS` is.
+  # A unit with no data file left (only its sidecar) holds nothing worth a
+  # `.hold`: its hold goes, and the sync reports it if the app didn't prune it.
   defp holds(units, runs, policy, counted, now) do
     held =
-      for unit <- units, held?(unit, runs[unit.stamp], policy, counted, now), do: unit
+      for unit <- units,
+          has_data?(unit),
+          held?(unit, runs[unit.stamp], policy, counted, now),
+          do: unit
 
     Map.new([:db, :media], fn kind ->
       {kind, for(%{kind: ^kind, stamp: stamp} <- held, do: stamp) |> Enum.uniq() |> Enum.sort()}

@@ -538,6 +538,8 @@ What it is:
   schedules and the backups on disk, not from whether a backup has already
   passed `BACKUP_KEEP_DAYS`, so a hold is in place before cron would delete
   the backup, not 15 minutes after.
+- **Only for a backup that still has its data.** A unit with nothing left
+  but its `.sha256` sidecar gets no hold, and a hold it had is removed.
 
 When the app writes and removes them: wherever it moves the `.good` markers
 (after every successful in-app backup, before every in-app prune deletes
@@ -593,10 +595,14 @@ Things to know:
   scheduled sync, so on a deployment that takes no in-app backups the holds
   stay, and a `backup.sh` from this release keeps those backups until you
   remove them: `rm /var/backups/kiln/db/kiln-*.hold /var/backups/kiln/media/kiln-*.hold`.
-- **An older `backup.sh` gives no warning.** Nothing on the host tells the
-  app which copy of the script cron runs; the Schedule tab asks you to
-  replace it when host cron backed up here in the last eight days
+- **An older `backup.sh` is caught after the fact.** Nothing on the host
+  tells the app which copy of the script cron runs. The Schedule tab's keep
+  settings always say the script must be this release's, and its preview
+  asks you to replace it when host cron backed up here in the last eight
+  days
   ([Set how long a schedule keeps its backups](#set-how-long-a-schedule-keeps-its-backups)).
+  Once an older copy has deleted a held backup, the next marker sync reports
+  it ([When a backup a schedule keeps is deleted outside the app](#when-a-backup-a-schedule-keeps-is-deleted-outside-the-app)).
 
 **When a hold can't be moved.** The backup, prune or sync succeeds or fails
 on its own terms. Each of these logs a warning, and all but the listing one
@@ -612,6 +618,66 @@ emit `[:kiln_cms, :backups, :hold, :failed]` with measurements `%{count: 1}`:
 
 Why a third marker rather than reusing `.good`, and what was traded:
 [ADR 0062](decisions/0062-a-schedules-keep-holds-reach-backup-sh-through-a-third-presence-only-marker.md).
+
+### When a backup a schedule keeps is deleted outside the app
+
+A host whose `scripts/backup.sh` is older than the hold markers ignores
+them, so its cron prune deletes backups a schedule keeps once they are older
+than `BACKUP_KEEP_DAYS`. The app can't stop that, but it notices at the next
+marker sync (after an in-app backup, before an in-app prune, every 15
+minutes, and after a schedule change) and tells you (#2931).
+
+What counts: a backup with a `.hold` whose data file is gone, either
+entirely or leaving only its `.sha256` sidecar (what the `find`-based prune
+of 1.8 and older leaves), and that the app didn't delete itself. A backup
+still being written (it has a `.work/<stamp>/` directory, or its run is
+`Running`) and one whose History row records the app pruning it here are
+never reported. The report comes once, when the sync removes the stale
+`.hold`; a `.hold` the app can't remove (a directory, say) is never
+reported. When History can't be read, the sync reports nothing and looks
+again next time.
+
+What you see:
+
+- **Backups page:** a yellow warning under the headline, one sentence per
+  backup directory: "On 2026-11-16 03:30 UTC, a backup a schedule keeps was
+  deleted outside the app: Database backup of 2026-07-01 03:17 UTC." (or "…,
+  3 backups a schedule keeps were deleted outside the app: …", naming up to
+  ten, then "and N more"), followed by "This usually means the host's
+  scripts/backup.sh is older than this release and ignores .hold markers.
+  Replace it with this release's copy." and an **About the hold markers**
+  link. The date at the start is when the sync found it. It doesn't turn the
+  headline red: the backups themselves still run.
+- **Schedule tab:** the same warning in the box above the schedule list.
+- **Not on Home.**
+- **Server log**, at warning level: "1 backup(s) a schedule keeps were
+  deleted outside the app although their .hold markers kept them: db backup
+  20260701-031700. The host's scripts/backup.sh is probably older than this
+  release and ignores .hold markers".
+- **Telemetry:** `[:kiln_cms, :backups, :hold, :deleted_outside]`, measurements
+  `%{count: n}`, metadata `%{dir: dir, scope: :local, units: [%{stamp: stamp, kind: :db | :media}]}`,
+  counted as `kiln_cms_backups_hold_deleted_outside_count` when the metrics
+  exporter is on ([observability.md](observability.md#backups)).
+
+The warning stays for eight days after the latest detection. A second
+detection in the same directory within those eight days joins the first:
+the list grows (a backup already listed isn't counted twice), and the date
+moves to the newest. There is no dismiss button.
+
+To fix it, as whoever runs the host:
+
+1. Find the cron line that runs `backup.sh` (`/etc/cron.d/kiln-backup` in
+   the example at the top of this guide) and note the script's path.
+2. Replace that file with `scripts/backup.sh` from this release, on every
+   host whose cron prunes this backup directory.
+3. Check that the copy knows the holds: `grep -c is_held scripts/backup.sh`
+   prints a number above 0 (any copy from 1.10.0 on). An older copy prints
+   `0`.
+4. List the directory after the next cron run: every `kiln-<stamp>.hold`
+   still has its `kiln-db-<stamp>.dump` (or media archive) beside it.
+
+The deleted backups don't come back. If you need one, copy it back from an
+off-site destination that still has it, with its `.sha256` file.
 
 ### What the cron prune cannot see
 
@@ -652,8 +718,8 @@ fails, when `db/`, `media/` or `.work/` cannot be listed, when a file in them
 cannot be read, or when History cannot be read. It writes an error to the
 server log ("Backup retention skipped: …; nothing was deleted"), emits the
 `[:kiln_cms, :backups, :retention, :skipped]` telemetry event (measurements
-`%{count: 1}`, metadata `%{reason: reason}`), and adds a `prune` line at error
-level to the run's log in the database:
+`%{count: 1}`, metadata `%{scope: :local, reason: reason}`), and adds a
+`prune` line at error level to the run's log in the database:
 
 ```text
 Retention skipped: couldn't read the backup history (Ash.Error.Forbidden); nothing was deleted
@@ -673,16 +739,91 @@ cannot be read is left in place. A file that cannot be removed stops that unit,
 so its sidecar stays. If the deleting itself breaks off, the run's log reads
 "Retention removed 2 file(s) from 1 backup(s), then stopped: …", the server log
 has the error, and `[:kiln_cms, :backups, :retention, :stopped]` is emitted
-(measurements `%{count: 1, deleted: n}`). The files already removed are still
+(measurements `%{count: 1, deleted: n}`, metadata `%{scope: :local, reason: reason}`).
+The files already removed are still
 marked `pruned` in History. A normal sweep logs "Retention removed N file(s)
 from M backup(s)".
+
+Retention on a stored destination emits the same two events, with metadata
+`%{scope: :destination, destination: "dest:<id>", reason: reason}`
+([Retention on a destination](#retention-on-a-destination)). Until #2487 they
+were local only; a handler that should count only the local directory
+matches on `scope: :local`. With the metrics exporter on, they are counted
+as `kiln_cms_backups_retention_skipped_count` and
+`kiln_cms_backups_retention_stopped_count`, labeled `scope`
+([observability.md](observability.md#backups)).
+
+**Where it shows.** A skipped or stopped retention leaves every backup
+`Succeeded`, so it would otherwise be found only in the run's log, after the
+disk fills. Each place where it happened (this backup directory, or a stored
+destination) adds a line to the headline of the **Backups** page, which
+turns red, and raises the red backup strip on **Home** for platform admins,
+with the same line:
+
+- "Retention was skipped on the backup of 2026-11-16 02:00 UTC: couldn't
+  read the backup history (Ash.Error.Forbidden). Nothing was deleted, so
+  local backups will build up until this is fixed."
+- "Retention stopped part-way on the backup of 2026-11-16 02:00 UTC: … What
+  it hadn't reached stays until this is fixed."
+- "Retention on NAS was skipped on the backup of 2026-11-16 02:00 UTC: …
+  Nothing was deleted there, so backups will build up there until this is
+  fixed." (and "Retention on NAS stopped part-way …")
+
+The date is the backup whose prune it was. The reason is the run log's, in
+English whatever the interface language. When more than one backup
+directory has a line (a cluster whose nodes back up to their own disks),
+each local line ends with "(backup directory 3f2a9c1e)", the first eight
+characters of the directory's `.kiln-dir-id`. On the Backups page the lines
+are followed by a **Why retention skips** link to this section.
+
+A line goes away:
+
+- **Local:** after the next in-app backup whose retention runs cleanly in
+  that directory. Nothing else clears it: a cron prune, a marker sync, or a
+  retention dry run from the console doesn't. It is also left out while no
+  live node (a backup heartbeat in the last day, or the node reading the
+  status) reports that directory's id, so a directory nobody backs up to any
+  more doesn't keep the alarm on. A directory without an id is always
+  shown.
+- **Destination:** after a clean pass there, or when retention there is
+  off: its **Delete its old backups (retention)** box unticked, or an
+  adapter that can't list and delete. It is left out at once when the
+  destination is disabled or deleted.
+
+If the status can't read the heartbeats or the destinations to decide that,
+the lines are shown anyway. If it can't read the warnings themselves, it
+shows none. Either failure emits
+`[:kiln_cms, :backups, :status, :notices_unreadable]` (measurements
+`%{count: 1}`, metadata `error`, the error's module) and logs "Backup status
+may leave out a retention or held-backup notice: a read failed (…)" at most
+once every 15 minutes. Recording a warning never changes a backup's outcome:
+when the write fails, the run's log and the events above still say it, and
+the server logs "Backup notice not recorded (retention): …" with
+`[:kiln_cms, :backups, :notice, :failed]` (metadata `kind`).
+
+To clear the warning, as a platform admin:
+
+1. Read the reason in the line. It names what retention couldn't do, and
+   the list above says what each reason means.
+2. Fix it: restore the database grant, the directory permissions, or the
+   `BACKUP_KEEP_DAYS` value it names; for a destination, see
+   [Retention on a destination](#retention-on-a-destination).
+3. On **Backups**, click **Back up now** (or wait for the next scheduled
+   backup). When it succeeds, the line is gone from the Backups page and
+   Home. If it comes back, retention failed again: the line names the new
+   backup's date.
+
+Why these warnings are stored as their own rows rather than read from the
+run's log or the security log:
+[ADR 0066](decisions/0066-an-operator-facing-backup-problem-is-a-notice-row-not-a-run-log-line-or-a-security-event.md).
 
 **In cron**, `backup.sh prune` prints a `warning:` line on stderr, deletes
 nothing and exits 0 (so `backup.sh all` still succeeds) when `db/`, `media/` or
 `.work` exists but cannot be listed, or when this host's `date` supports neither
 GNU `date -d @N` nor BSD `date -r N`. A unit whose `.partial` files it cannot
 look for is kept, and a file it cannot remove stops that unit. Read the cron
-log for these: no ping or exit code reports them.
+log for these: no ping or exit code reports them, and the Backups page and
+Home don't show them either.
 
 ## In-app backups (#484)
 
@@ -695,8 +836,10 @@ button. For platform admins, the overview grid grows a red strip when either
 component's last good backup is older than `BACKUP_STALE_AFTER_HOURS`
 (default 36, or the threshold an
 [in-app schedule](#how-a-schedule-sets-the-alarm-threshold) sets), when its
-last attempt failed, or when one has been backed up and
-the other never has; a neutral "Backups aren't set up yet" strip when neither
+last attempt failed, when one has been backed up and
+the other never has, when the last backup reached only some of its
+destinations, or when retention was skipped or stopped part-way
+([When retention is skipped or stops](#when-retention-is-skipped-or-stops)); a neutral "Backups aren't set up yet" strip when neither
 ever has ([Check the last backup of each component](#check-the-last-backup-of-each-component)).
 
 ### It reports on cron's backups too
@@ -736,7 +879,11 @@ Platform admins only, like the rest of the page.
    - "No backup has ever been recorded": neither History nor the manifest has
      one.
 3. The panel's border and icon turn to the alarm when any line is failed or
-   stale: a fresh database backup does not make stale media fine. The file
+   stale: a fresh database backup does not make stale media fine. A
+   partly off-site backup and a retention warning add lines of their own
+   and turn it too
+   ([When a backup reaches only some destinations](#when-a-backup-reaches-only-some-destinations),
+   [When retention is skipped or stops](#when-retention-is-skipped-or-stops)). The file
    list and the **Last run failed** box below still describe the manifest,
    the last backup, whatever it covered.
 
@@ -1648,6 +1795,7 @@ Above the list, a warning box appears when any of these holds:
 | "The scheduler hasn't run since 2026-11-13 09:12 UTC. Check that background jobs are running." (or "… hasn't run yet.") | The scheduler is on, and no scheduler job has started since the newest run of `KILN_BACKUP_SCHEDULER_CRON` (read in UTC) that is at least five minutes old, although an enabled schedule was created, edited or resumed before that run. Each run gets five minutes to start: at the default `* * * * *` that is five minutes of silence, at `0 * * * *` a tick missed at 09:00 shows from 09:05. A weekday-only cron such as `* * * * 1-5` expects nothing after Friday 23:59 until Monday 00:00, so a weekend shows no warning. With `@reboot`, the threshold is five minutes. It reads Oban's `oban_jobs` table, so a job queue that has stopped shows here. |
 | "Couldn't check when the scheduler last ran." | Reading `oban_jobs` for that check failed. |
 | "Media isn't archived on this deployment, so a schedule can't include it." | A schedule names media and this deployment has no media directory. |
+| "On 2026-11-16 03:30 UTC, a backup a schedule keeps was deleted outside the app: Database backup of 2026-07-01 03:17 UTC." and "This usually means the host's scripts/backup.sh is older than this release and ignores .hold markers. …" | In the last eight days, a marker sync found a backup a schedule keeps deleted by something other than the app, usually the host's cron with an older `backup.sh` ([When a backup a schedule keeps is deleted outside the app](#when-a-backup-a-schedule-keeps-is-deleted-outside-the-app)). |
 
 In the list, "Couldn't load the backup schedules." means the schedules
 couldn't be read (the alarm thresholds are then the environment's), and
@@ -1780,6 +1928,13 @@ settings.
    - **Keep for (days)**: 1 to 3650. The hint says what an empty box means
      on this deployment: "Empty keeps them for BACKUP_KEEP_DAYS, 14 days on
      this deployment."
+
+   Under the fields, a standing note reads "If host cron prunes this backup
+   directory, its scripts/backup.sh must be from this release: an older
+   copy deletes the backups these settings keep.", with an **About the hold
+   markers** link. It is always there, adding a schedule or editing one,
+   whatever the preview below says: the app can't tell which copy cron
+   runs.
 3. Read the preview under the fields. It estimates what the schedule keeps,
    "Keeps about 31 backups at a time of each of: Database." for a daily
    schedule keeping 30 days, and warns when:
@@ -1871,7 +2026,8 @@ until the next prune. Budget for that with large media archives.
 | "must be at least as long as the schedule's interval, unless a number of backups to keep is set" under **Keep for (days)** | Raise the days to one interval or more, or set **Keep the newest**. |
 | The host-cron notice in the preview | Replace the host's `scripts/backup.sh` (above). The notice is shown whenever cron backed up a component here in the last eight days; the app can't tell which copy of the script cron runs. |
 | "Backup retention skipped: couldn't read the backup schedules (…); nothing was deleted" in the server log and the run's log | The prune couldn't read the schedules, so it deleted nothing ([When retention is skipped or stops](#when-retention-is-skipped-or-stops)). |
-| Backups past `BACKUP_KEEP_DAYS` disappear from a cron-pruned directory | The host's `backup.sh` predates the hold marker, or the app can't see the directory or reach it with the marker sync ([The hold markers](#the-hold-markers)). |
+| "… a backup a schedule keeps was deleted outside the app: …" on the Backups page and the Schedule tab | The host's `backup.sh` predates the hold marker and deleted a backup this schedule keeps. Replace it ([When a backup a schedule keeps is deleted outside the app](#when-a-backup-a-schedule-keeps-is-deleted-outside-the-app)). |
+| Backups past `BACKUP_KEEP_DAYS` disappear from a cron-pruned directory, with no warning | The app can't see the directory or reach it with the marker sync, so it neither writes the holds nor notices what cron deleted ([The hold markers](#the-hold-markers)). |
 
 ### Back up more often than daily
 
@@ -2601,6 +2757,16 @@ says so). What it did is on the run's log:
 | "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, while `BACKUP_RCLONE_REMOTE` is set. Untick retention on it and prune it yourself, or unset the env remote. |
 | "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed. Nothing is deleted on a guess. |
 | "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed; the pass stopped there. The next backup tries again. |
+
+A skipped or stopped pass is also a line in the **Backups** page's
+headline and on **Home**'s red backup strip, "Retention on NAS was skipped
+on the backup of 2026-11-16 02:00 UTC: … Nothing was deleted there, so
+backups will build up there until this is fixed.", until a clean pass on
+that destination, or until you untick retention on it, disable it or
+delete it (#2487). It emits the same
+`[:kiln_cms, :backups, :retention, :skipped]` and `… :stopped` events as
+local retention, with `scope: :destination` and the destination's key
+([When retention is skipped or stops](#when-retention-is-skipped-or-stops)).
 
 A failed or skipped pass doesn't change the destination's upload status:
 the backup reached it. A backup that later fails at another destination

@@ -71,6 +71,20 @@ carries the reasoning.
   without the same limit.
   See [docs/releasing.md](../releasing.md#rolling-back-past-backup-destinations).
 
+<a id="backup-notices-upgrade"></a>
+
+- **Run `mix ash.migrate` (new table `backup_notices`, #2487 and #2931). Nothing to backfill; rolling back is safe.**
+  The additive migration `add_backup_notices` creates the table behind the
+  backup warnings under Added (retention skipped or stopped, a held backup
+  deleted outside the app). It starts empty: the first in-app backup or
+  marker sync after the upgrade fills it if there is something to say. A
+  release before this one ignores the table. A warning written before a
+  rollback is shown again after rolling forward, until the next clean
+  in-app backup clears it (retention) or eight days pass (held backup). The
+  staging scrub purges the table and reports `backup_notices_purged` in its
+  summary
+  ([docs/staging-environments.md](../staging-environments.md#the-scrub)).
+
 <a id="erasure-backfill-newsletter-upgrade"></a>
 
 - **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release. No migration; rolling back is safe, and what it deleted stays deleted.**
@@ -456,6 +470,49 @@ carries the reasoning.
   now covered by a JavaScript test (`assets/test/reveal_section.test.mjs`).
   ([#2933](https://github.com/The-Verscienta/kiln_cms/issues/2933))
 
+<a id="backup-retention-warnings"></a>
+
+- **Retention that was skipped or stopped part-way now shows on the Backups page and raises Home's red backup strip, locally and on each stored destination, until a clean pass clears it (#2487).**
+  Retention fails closed: when it can't read the history, the schedules, a
+  directory or a destination's listing, it deletes nothing, and the backup
+  still reads **Succeeded**. Until now that was said only in the run's log,
+  so backups could pile up until the disk filled. Each place where it
+  happened now adds a line in the alarm's red, dated by the backup whose
+  prune it was: "Retention was skipped on the backup of 2026-11-16 02:00
+  UTC: couldn't read the backup history (…). Nothing was deleted, so local
+  backups will build up until this is fixed." (and "Retention stopped
+  part-way …", "Retention on NAS was skipped …"), with a **Why retention
+  skips** link. A local line clears on the next in-app backup whose
+  retention runs cleanly in that directory; a destination's on a clean pass
+  there or when retention there is off. A line for a backup directory no
+  live node reports, or for a destination that is disabled or deleted, is
+  left out. Platform admins only, like the rest of the page. Cron's own
+  `backup.sh prune` warnings still show only in the cron log. Four metrics
+  are now registered (`kiln_cms_backups_retention_skipped_count`,
+  `…_retention_stopped_count`, `…_hold_deleted_outside_count`,
+  `…_notice_failed_count`, labeled `scope` or `kind`). Guide:
+  [When retention is skipped or stops](../backups.md#when-retention-is-skipped-or-stops);
+  record:
+  [ADR 0066](../decisions/0066-an-operator-facing-backup-problem-is-a-notice-row-not-a-run-log-line-or-a-security-event.md).
+
+<a id="backup-held-deleted-warning"></a>
+
+- **The Backups page and the Schedule tab warn, for eight days, when a backup a schedule keeps was deleted outside the app, usually by a host `scripts/backup.sh` older than the hold markers (#2931).**
+  An older script ignores `kiln-<stamp>.hold` and deletes what a schedule's
+  keep settings hold once it passes `BACKUP_KEEP_DAYS`. Each marker sync now
+  spots a held backup whose data file is gone (entirely, or leaving only its
+  `.sha256`, as the prune of 1.8 and older does) and that the app didn't
+  delete, and reports it once: a warning in the server log, the
+  `[:kiln_cms, :backups, :hold, :deleted_outside]` event (`%{count: n}`), and
+  "On 2026-11-16 03:30 UTC, a backup a schedule keeps was deleted outside the
+  app: Database backup of 2026-07-01 03:17 UTC." with what to do. It doesn't
+  raise the alarm and isn't on Home. A later detection within the eight days
+  joins the same warning. The keep settings in the schedule form now always
+  say that host cron's `backup.sh` must be this release's. A unit with only
+  its sidecar left no longer gets a `.hold`. Guide:
+  [When a backup a schedule keeps is deleted outside the app](../backups.md#when-a-backup-a-schedule-keeps-is-deleted-outside-the-app);
+  amends [ADR 0062](../decisions/0062-a-schedules-keep-holds-reach-backup-sh-through-a-third-presence-only-marker.md).
+
 <a id="color-palette-json-schema"></a>
 
 - **A color field can be limited to a palette, and a JSON field can carry a JSON Schema: both are checked when a value changes.**
@@ -567,6 +624,15 @@ carries the reasoning.
   the referrer is saved again, so the two can disagree without the sort being
   wrong. A list-valued field is still not offered, and a `sort=field:…` URL or
   saved view naming one falls back to the default order. No migration.
+
+<a id="backup-retention-telemetry-scope"></a>
+
+- **`[:kiln_cms, :backups, :retention, :skipped]` and `[…, :stopped]` now also fire for retention on a stored destination, with `scope: :destination` and `destination: "dest:<id>"`; the local events gain `scope: :local` (#2487).**
+  Before this they meant local retention only, and a destination's skip or
+  stop emitted nothing. A handler or alert that should still count only the
+  local directory matches on `scope: :local`. Measurements and the `reason`
+  metadata are unchanged. See
+  [When retention is skipped or stops](../backups.md#when-retention-is-skipped-or-stops).
 
 ## Fixed
 

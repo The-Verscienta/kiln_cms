@@ -499,10 +499,17 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       run!(@b, [key])
       seed(path, [@a, @b])
 
+      # #2487: an earlier skip there is cleared, since nothing prunes it now.
+      Backups.report_backup_notice!(
+        %{kind: :retention, scope: key, outcome: :skipped, reason: "x", at: DateTime.utc_now()},
+        actor: Backups.system()
+      )
+
       assert :ok = BackupChain.run()
 
       assert present?(path, @a)
       assert %{pruned: 0} = Enum.find(current_run().destinations, &(&1.key == key))
+      assert Backups.list_backup_notices!(actor: Backups.system()) == []
     end
 
     test "a listing that fails logs the skipped line; the destination stays reached" do
@@ -512,7 +519,29 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
           settings: %{"mode" => "ok", "list_mode" => "fail"}
         })
 
+      key = "dest:" <> row.id
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :retention, :skipped]
+        ])
+
       assert :ok = BackupChain.run()
+
+      # #2487: the same event local retention emits, scoped to the
+      # destination, and a notice naming it.
+      assert_received {[:kiln_cms, :backups, :retention, :skipped], ^ref, %{count: 1},
+                       %{scope: :destination, destination: ^key, reason: {:list, _}}}
+
+      assert [
+               %{
+                 scope: {:destination, ^key},
+                 label: "Bucket",
+                 outcome: :skipped,
+                 reason: "couldn't list the destination" <> _
+               }
+             ] = Backups.status().retention
+
       run = current_run()
 
       assert run.offsite_status == :complete
@@ -526,6 +555,14 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
                    &1.message =~ "Retention on Bucket skipped: couldn't list the destination" and
                    &1.message =~ "nothing was deleted")
              )
+
+      # A clean pass there clears it.
+      Backups.update_backup_destination!(row, %{settings: %{"mode" => "ok"}},
+        actor: KilnCMS.Test.BackupSchedules.platform_admin()
+      )
+
+      assert :ok = BackupChain.run()
+      assert Backups.status().retention == []
     end
 
     # An rclone that logs its argv to the returned path and succeeds, with
