@@ -110,6 +110,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`mix kiln.staging.scrub` and `Release.scrub_staging/0` now refuse, changing nothing, while an overlay or plugin domain owns a non-content table with no `staging_scrub/0` entry: add `{:purge, R}`, `{:rewrite, R, set: [...]}` or `{:keep, R, "reason"}` for each and require `{:kiln_plugin, "~> 1.5"}`.**
   ([long form](docs/changelog/unreleased.md#plugin-staging-scrub-refuses-undeclared))
 
+- **Field sync import refuses a non-default `"sections"` entry no field carries (a hand-edited file that imported before now fails, nothing written). An entry at the default deletes the stored layout, and a section the import empties loses its layout, without `--prune`.**
+  ([long form](docs/changelog/unreleased.md#field-sync-section-entries-stricter))
+
 ### Known issues
 
 - **Two referrer breakdowns of overlapping traffic (dashboard span vs. the export's days, site chart vs. item bars, 7 vs. 30 days, today read twice) can be differenced to recover a suppressed count. No workaround short of turning off `KILN_ANALYTICS_REFERRERS`.**
@@ -206,6 +209,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
   ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))
+
+- **A section's layout is deleted with its last field by every route (rename, cleared section, delete, join graduation, sync), so a later field no longer inherits it; a section rename in the fields admin decides from the fields as they are at Save.**
+  ([#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) · [long form](docs/changelog/unreleased.md#section-layouts-kept-in-step))
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))

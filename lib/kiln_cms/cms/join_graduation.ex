@@ -585,6 +585,10 @@ defmodule KilnCMS.CMS.JoinGraduation do
           # Its `after_transaction` hooks — the value purge
           # (`SyncFieldValues`) above all — run inside this transaction on
           # purpose: the purge must commit or roll back with the check.
+          #
+          # A field that was the last of its section takes the section's
+          # layout with it (`Changes.KeepSectionLayouts`, #2881), in this
+          # same transaction and under this same `authorize?: false`.
           CMS.destroy_field_definition!(definition,
             authorize?: false,
             tenant: org_id,

@@ -97,7 +97,7 @@ defmodule KilnCMS.NewerReleaseRows do
   `:content_type` (a type name, default `"page"`; pass `nil` with
   `:type_definition_id`), `:type_definition_id`, `:link_of_id`,
   `:group_of_id`, `:name`, `:label`, `:field_type`, `:private`,
-  `:validation`, `:position`. Returns its id.
+  `:validation`, `:position`, `:section`. Returns its id.
   """
   @spec field_definition!(map()) :: Ecto.UUID.t()
   def field_definition!(attrs \\ %{}) do
@@ -107,8 +107,8 @@ defmodule KilnCMS.NewerReleaseRows do
       """
       INSERT INTO field_definitions
         (id, org_id, content_type, type_definition_id, link_of_id, group_of_id,
-         name, label, field_type, private, validation, position)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         name, label, field_type, private, validation, position, section)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       """,
       [
         dump(id),
@@ -122,7 +122,8 @@ defmodule KilnCMS.NewerReleaseRows do
         Map.get(attrs, :field_type, unknown_field_type()),
         Map.get(attrs, :private, false),
         Map.get(attrs, :validation, %{}),
-        Map.get(attrs, :position, 0)
+        Map.get(attrs, :position, 0),
+        attrs[:section]
       ]
     )
 

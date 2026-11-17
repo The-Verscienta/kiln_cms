@@ -501,9 +501,15 @@ defmodule KilnCMS.CMS.FieldDefinition do
     create :create, primary?: true
 
     # Non-atomic: the KnownContentType validation runs in Elixir.
+    #
+    # `carry_section_layout?` (#2652): a field renamed out of a section it was
+    # the last of takes the section's layout to the new name
+    # (`Changes.KeepSectionLayouts`). The fields admin asks for it; a field
+    # sync import does not, as its file declares the layouts itself.
     update :update do
       primary? true
       require_atomic? false
+      argument :carry_section_layout?, :boolean, default: false, allow_nil?: false
     end
 
     # Moves computed fields whose formula calls `today()` to the site's new
@@ -680,6 +686,11 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # edit came to destroy three paragraphs of prose. A rename never asked for
     # that at all; a destroy did, but here, not months later.
     change KilnCMS.CMS.Changes.SyncFieldValues, on: [:update, :destroy]
+
+    # A section's layout (`FieldSection`, #2280) lives only while a top-level
+    # field carries the section's name: a field that leaves its section, by
+    # any path, prunes the layout it left with nothing to lay out (#2652).
+    change KilnCMS.CMS.Changes.KeepSectionLayouts, on: [:update, :destroy]
   end
 
   validations do

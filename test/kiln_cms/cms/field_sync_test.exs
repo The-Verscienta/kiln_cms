@@ -722,6 +722,19 @@ defmodule KilnCMS.CMS.FieldSyncTest do
     defp map_sections(doc, fun),
       do: update_in(doc, ["owners", Access.all()], &Map.update!(&1, "sections", fun))
 
+    defp post_doc(fields, sections) do
+      %{
+        "format" => "kiln-field-definitions",
+        "version" => 1,
+        "owners" => [
+          %{"kind" => "compiled", "type" => "post", "fields" => fields, "sections" => sections}
+        ]
+      }
+    end
+
+    defp string_field(name, section),
+      do: %{"name" => name, "label" => name, "field_type" => "string", "section" => section}
+
     test "a changed layout is an update of only what differs", %{admin: admin} do
       model!(admin)
 
@@ -811,8 +824,21 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       assert {:ok, _} = apply!(drop.(doc, ["latin"]), admin, prune?: true)
       assert [_] = Enum.filter(sections(admin), &(&1.name == "Names"))
 
-      # The last one goes, and so does the layout; the others stay.
-      assert {:ok, _} = apply!(drop.(doc, ["latin", "pinyin"]), admin, prune?: true)
+      # The last one goes while the file still lays its section out: that
+      # entry lays nothing out, so the import is refused (#2881).
+      assert {:error, %{errors: [%{path: "post/section/Names"}]}} =
+               apply!(drop.(doc, ["latin", "pinyin"]), admin, prune?: true)
+
+      # Without the entry (here, a file with no "sections" key at all, which
+      # leaves the layouts to the fields), the layout goes with its last
+      # field; the others stay.
+      no_layouts =
+        update_in(drop.(doc, ["latin", "pinyin"]), ["owners", Access.all()], fn
+          %{"type" => "post"} = o -> Map.delete(o, "sections")
+          o -> o
+        end)
+
+      assert {:ok, _} = apply!(no_layouts, admin, prune?: true)
 
       assert ["Identity", "Kitchen"] == admin |> sections() |> Enum.map(& &1.name) |> Enum.sort()
     end
@@ -867,10 +893,256 @@ defmodule KilnCMS.CMS.FieldSyncTest do
 
       assert m =~ "must be a list"
 
-      assert {:ok, _} = apply!(doc.([%{"name" => "Main"}]), admin)
+      assert {:ok, _} = apply!(doc.([%{"name" => "Main", "display" => "tab"}]), admin)
+      assert [%{display: :tab, initially: :auto}] = CMS.field_sections_for!(:post, actor: admin)
 
-      assert [%{display: :accordion, initially: :auto}] =
-               CMS.field_sections_for!(:post, actor: admin)
+      # An entry with every key left out is at the defaults: no layout (#2652).
+      assert {:ok, _} = apply!(doc.([%{"name" => "Main"}]), admin)
+      assert sections(admin) == []
+    end
+
+    test "an import whose sections are all at the defaults stores no layout", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin)
+      wipe!(admin)
+
+      doc =
+        map_sections(doc, fn ss ->
+          Enum.map(ss, &%{&1 | "display" => "accordion", "initially" => "auto"})
+        end)
+
+      assert {:ok, report} = FieldSync.import_doc(doc, actor: admin)
+      refute Enum.any?(report.ops, &(&1.kind == :section))
+
+      assert {:ok, _} = apply!(doc, admin)
+      assert sections(admin) == []
+    end
+
+    test "a stored layout at the defaults is not exported, and only a prune removes it",
+         %{admin: admin} do
+      model!(admin)
+      field!(admin, %{name: "plain", label: "Plain", field_type: :string, section: "Plain"})
+      CMS.create_field_section!(%{content_type: :post, name: "Plain"}, actor: admin)
+
+      doc = export!(admin)
+      assert [%{"name" => "Identity"}] = owner(doc, "compiled", "post")["sections"]
+
+      assert {:ok, report} = apply!(doc, admin)
+      assert "post/section/Plain" in report.untouched
+      assert "Plain" in Enum.map(sections(admin), & &1.name)
+
+      assert {:ok, _} = apply!(doc, admin, prune?: true)
+      refute "Plain" in Enum.map(sections(admin), & &1.name)
+      assert "Identity" in Enum.map(sections(admin), & &1.name)
+    end
+
+    test "an entry at the defaults removes the section's row, without a prune",
+         %{admin: admin} do
+      model!(admin)
+      field!(admin, %{name: "plain", label: "Plain", field_type: :string, section: "Plain"})
+      CMS.create_field_section!(%{content_type: :post, name: "Plain"}, actor: admin)
+
+      doc =
+        map_sections(export!(admin), fn ss ->
+          Enum.map(ss, fn
+            %{"name" => "Identity"} = s -> %{s | "display" => "accordion", "initially" => "auto"}
+            s -> s
+          end) ++ [%{"name" => "Plain", "display" => "accordion", "initially" => "auto"}]
+        end)
+
+      assert {:ok, report} = FieldSync.import_doc(doc, actor: admin)
+
+      assert ["post/section/Identity", "post/section/Plain"] ==
+               report.ops
+               |> Enum.filter(&(&1.kind == :section and &1.op == :delete))
+               |> Enum.map(& &1.path)
+               |> Enum.sort()
+
+      assert report.untouched == []
+
+      assert {:ok, _} = apply!(doc, admin)
+      assert ["Kitchen"] == Enum.map(sections(admin), & &1.name)
+      # Imported again, the defaults plan nothing; the stored layout is unchanged.
+      assert {:ok, again} = FieldSync.import_doc(doc, actor: admin)
+
+      assert [%{path: "recipe/section/Kitchen", op: :unchanged}] =
+               Enum.filter(again.ops, &(&1.kind == :section))
+    end
+
+    test "a field the import moves out of its section takes the layout along, without a prune",
+         %{admin: admin} do
+      field!(admin, %{name: "latin", label: "Latin", field_type: :string, section: "Fsync A"})
+
+      CMS.create_field_section!(%{content_type: :post, name: "Fsync A", display: :tab},
+        actor: admin
+      )
+
+      # The section renamed in the file, on its field and on its layout.
+      doc =
+        post_doc([string_field("latin", "Fsync B")], [%{"name" => "Fsync B", "display" => "tab"}])
+
+      assert {:ok, report} = FieldSync.import_doc(doc, actor: admin)
+      assert report.dry_run?
+      assert [%{name: "Fsync A"}] = sections(admin)
+
+      assert {:ok, _} = apply!(doc, admin)
+      assert [%{name: "Fsync B", display: :tab}] = sections(admin)
+
+      # A file with no "sections" key moves the field the same way: the
+      # layout it left goes, and the new section has none.
+      field!(admin, %{name: "dose", label: "Dose", field_type: :string, section: "Fsync C"})
+
+      CMS.create_field_section!(%{content_type: :post, name: "Fsync C", display: :tab},
+        actor: admin
+      )
+
+      doc =
+        [string_field("latin", "Fsync B"), string_field("dose", "Fsync D")]
+        |> post_doc([])
+        |> update_in(["owners", Access.all()], &Map.delete(&1, "sections"))
+
+      assert {:ok, _} = apply!(doc, admin)
+      assert [%{name: "Fsync B"}] = sections(admin)
+    end
+
+    test "a layout the import leaves with no field is planned as a delete, not kept",
+         %{admin: admin} do
+      field!(admin, %{name: "latin", label: "Latin", field_type: :string, section: "Fsync A"})
+      field!(admin, %{name: "dose", label: "Dose", field_type: :string, section: "Fsync Old"})
+
+      CMS.create_field_section!(%{content_type: :post, name: "Fsync A", display: :tab},
+        actor: admin
+      )
+
+      # An orphan no write of this import makes: left as it was (S11).
+      CMS.create_field_section!(%{content_type: :post, name: "Fsync Orphan", display: :tab},
+        actor: admin
+      )
+
+      # A's row is not in the file, and its last field moves out of it.
+      doc =
+        post_doc(
+          [string_field("latin", "Fsync B"), string_field("dose", "Fsync Old")],
+          [%{"name" => "Fsync B", "display" => "tab"}]
+        )
+
+      assert {:ok, dry} = FieldSync.import_doc(doc, actor: admin)
+      assert %{op: :delete} = Enum.find(dry.ops, &(&1.path == "post/section/Fsync A"))
+      refute "post/section/Fsync A" in dry.untouched
+      assert "post/section/Fsync Orphan" in dry.untouched
+      assert FieldSync.describe(dry) =~ "- post/section/Fsync A"
+
+      assert ["Fsync A", "Fsync Orphan"] ==
+               admin |> sections() |> Enum.map(& &1.name) |> Enum.sort()
+
+      assert {:ok, applied} = apply!(doc, admin)
+      assert FieldSync.digest(applied) == FieldSync.digest(dry)
+
+      assert ["Fsync B", "Fsync Orphan"] ==
+               admin |> sections() |> Enum.map(& &1.name) |> Enum.sort()
+
+      # A file with no "sections" key plans the same delete.
+      field!(admin, %{name: "rank", label: "Rank", field_type: :string, section: "Fsync C"})
+
+      CMS.create_field_section!(%{content_type: :post, name: "Fsync C", display: :tab},
+        actor: admin
+      )
+
+      doc =
+        [string_field("latin", "Fsync B"), string_field("rank", nil)]
+        |> post_doc([])
+        |> update_in(["owners", Access.all()], &Map.delete(&1, "sections"))
+
+      assert {:ok, report} = apply!(doc, admin)
+      assert %{op: :delete} = Enum.find(report.ops, &(&1.path == "post/section/Fsync C"))
+      refute "Fsync C" in Enum.map(sections(admin), & &1.name)
+    end
+
+    test "two fields swapping sections keep both layouts", %{admin: admin} do
+      field!(admin, %{name: "latin", label: "Latin", field_type: :string, section: "Fsync A"})
+      field!(admin, %{name: "dose", label: "Dose", field_type: :string, section: "Fsync B"})
+
+      CMS.create_field_section!(%{content_type: :post, name: "Fsync A", display: :tab},
+        actor: admin
+      )
+
+      CMS.create_field_section!(%{content_type: :post, name: "Fsync B", display: :fieldset},
+        actor: admin
+      )
+
+      # Each write alone leaves its old section empty for a moment; the
+      # layouts are reconciled only once both have run.
+      doc =
+        post_doc(
+          [string_field("latin", "Fsync B"), string_field("dose", "Fsync A")],
+          [
+            %{"name" => "Fsync A", "display" => "tab"},
+            %{"name" => "Fsync B", "display" => "fieldset"}
+          ]
+        )
+
+      assert {:ok, _} = apply!(doc, admin)
+
+      assert [%{name: "Fsync A", display: :tab}, %{name: "Fsync B", display: :fieldset}] =
+               admin |> sections() |> Enum.sort_by(& &1.name)
+    end
+
+    test "a layout for a section no field carries is refused, in a dry run and an apply",
+         %{admin: admin} do
+      field!(admin, %{
+        name: "rating",
+        label: "Rating",
+        field_type: :integer,
+        section: "Fsync Main"
+      })
+
+      doc =
+        post_doc(
+          [string_field("rating", "Fsync Main") |> Map.put("field_type", "integer")],
+          [
+            %{"name" => "Fsync Main", "display" => "tab"},
+            %{"name" => "Fsync Ghost", "display" => "tab"}
+          ]
+        )
+
+      for opts <- [[], [apply?: true], [apply?: true, prune?: true]] do
+        assert {:error, report} = FieldSync.import_doc(doc, [actor: admin] ++ opts)
+        assert [%{path: "post/section/Fsync Ghost", messages: [message]}] = report.errors
+        assert message =~ "no field of post is in this section"
+        assert FieldSync.describe(report) =~ "ERROR post/section/Fsync Ghost"
+        refute report.applied?
+        assert sections(admin) == []
+      end
+
+      # At the defaults, the entry stores nothing, so it is no ghost.
+      doc =
+        put_in(doc, ["owners", Access.at(0), "sections", Access.at(1)], %{"name" => "Fsync Ghost"})
+
+      assert {:ok, _} = apply!(doc, admin)
+      assert [%{name: "Fsync Main"}] = sections(admin)
+    end
+
+    test "a stored field the import keeps carries its section; one it prunes does not",
+         %{admin: admin} do
+      field!(admin, %{name: "dose", label: "Dose", field_type: :string, section: "Fsync Kept"})
+      doc = post_doc([], [%{"name" => "Fsync Kept", "display" => "tab"}])
+
+      assert {:error, %{errors: [%{path: "post/section/Fsync Kept"}]}} =
+               apply!(doc, admin, prune?: true)
+
+      assert sections(admin) == []
+
+      assert {:ok, _} = apply!(doc, admin)
+      assert [%{name: "Fsync Kept", display: :tab}] = sections(admin)
+    end
+
+    test "a field of a type this release does not know carries its section, even when pruning",
+         %{admin: admin} do
+      KilnCMS.NewerReleaseRows.field_definition!(%{content_type: "post", section: "Fsync Specs"})
+      doc = post_doc([], [%{"name" => "Fsync Specs", "display" => "tab"}])
+
+      assert {:ok, _} = apply!(doc, admin, prune?: true)
+      assert [%{name: "Fsync Specs", display: :tab}] = sections(admin)
     end
 
     test "a new dynamic type's layout is tied to the type the import creates", %{admin: admin} do
