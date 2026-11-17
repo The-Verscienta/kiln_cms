@@ -17,7 +17,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendNewUserConfirmationEmail do
     |> to(to_string(user.email))
     |> subject(subject(opts))
     |> html_body(body(token, opts))
-    |> Mail.enqueue!()
+    |> Mail.enqueue!(user_id: user.id)
   end
 
   # `opts[:confirmation_type]` is `:identity_link` when an OAuth2/OIDC

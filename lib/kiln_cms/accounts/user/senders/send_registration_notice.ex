@@ -13,17 +13,29 @@ defmodule KilnCMS.Accounts.User.Senders.SendRegistrationNotice do
   anyone can name any address, and it is the mail that costs the recipient.
   Dropped silently when the budget is spent; the requester is told the same
   thing either way.
+
+  Account mail (#3035): the account holding the address is read again here,
+  after the registration's transaction, and the notice is queued for it
+  (`user_id:`), so it is not sent once that account is erased. No account
+  holds the address any more (erased between the refusal and this): nothing is
+  sent. The refusal's own read cannot hand the account over, because
+  `after_transaction` sees the changeset from before its `before_action`; the
+  second read costs about a millisecond, after the hash, on the path that
+  already queues a job.
   """
   use KilnCMSWeb, :verified_routes
 
   import Swoosh.Email
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.User
   alias KilnCMS.Mail
 
   @spec deliver(String.t()) :: :ok
   def deliver(address) do
-    if AccountThrottle.allow_mail?(:registration_notice, address) do
+    with %User{} = owner <- owner(address),
+         true <- AccountThrottle.allow_mail?(:registration_notice, address) do
       site = KilnCMS.Branding.for_org(nil).site_name
 
       new()
@@ -31,9 +43,18 @@ defmodule KilnCMS.Accounts.User.Senders.SendRegistrationNotice do
       |> to(address)
       |> subject("Someone tried to create a #{site} account with your address")
       |> html_body(body(site))
-      |> Mail.enqueue!()
+      |> Mail.enqueue!(user_id: owner.id)
     else
-      :ok
+      _no_account_or_no_budget -> :ok
+    end
+  end
+
+  defp owner(address) do
+    # authorize?: false — pre-auth registration lookup, no actor exists (the
+    # same read `Changes.RefuseExistingAddress` refused the registration on).
+    case Accounts.get_user_by_email(address, authorize?: false, not_found_error?: false) do
+      {:ok, %User{anonymized_at: nil} = user} -> user
+      _none -> nil
     end
   end
 

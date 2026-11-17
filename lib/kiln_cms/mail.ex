@@ -121,10 +121,23 @@ defmodule KilnCMS.Mail do
   site's relay (`KilnCMS.Mail.SiteRelay`), and that site's own suppression list
   applies to it as well as the instance-wide one (`suppressed?/2`). Leave it
   out for account mail, which only the instance-wide list can stop.
+
+  `user_id:` names the account the mail is for (#3035): account mail passes
+  it, and `KilnCMS.Mail.DeliveryWorker` then sends only while that account
+  still holds the address the job was queued to, so an account erased while
+  its mail waits for a retry is sent nothing. Leave it out for mail to an
+  address that has no account behind it (an invitation, a newsletter
+  confirmation). It names one recipient, so it raises with more than one `to`.
   """
   @spec enqueue!(Swoosh.Email.t(), keyword()) :: :ok
   def enqueue!(%Swoosh.Email{} = email, opts \\ []) do
     org_id = Keyword.get(opts, :org_id)
+    user_id = Keyword.get(opts, :user_id)
+
+    if user_id != nil and length(email.to) > 1 do
+      raise ArgumentError,
+            "user_id: names one account; the email has #{length(email.to)} recipients"
+    end
 
     if email.attachments != [] do
       raise ArgumentError, "KilnCMS.Mail does not support attachments yet"
@@ -159,6 +172,10 @@ defmodule KilnCMS.Mail do
     |> Enum.each(fn recipient ->
       email
       |> serialize(recipient)
+      # Always written, `nil` included: a job with the key was queued by a
+      # release that checks the recipient at send time, and one without it
+      # was queued before (#3035; see `withhold_pending/2`).
+      |> Map.put("user_id", user_id)
       |> maybe_put_org(org_id)
       |> DeliveryWorker.new()
       |> Oban.insert!()
@@ -968,33 +985,157 @@ defmodule KilnCMS.Mail do
 
   @finished_states ~w(completed cancelled discarded)
 
+  # What a withheld or skipped account mail job loses: the recipient and the
+  # whole message, the clear `subject` of a job queued before 1.0 included.
+  @message_keys ["to", "subject" | @body_keys]
+
   @doc """
-  Drop `address` from every finished job on the `mail` queue addressed to it
-  (#3019) — a step of erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`).
+  Drop the recipient and the message from a mail job's args (#3035): an
+  account mail job `KilnCMS.Mail.DeliveryWorker` decided not to send, because
+  the account it was queued for no longer holds the address. Unlike
+  `forget_body/1`, the address goes too, as erasure would have taken it.
 
-  Account mail (`enqueue!/2`) keeps its recipient in a finished job's args,
-  for the delivery panel, until the Pruner deletes the row; a workflow or task
-  mail job queued before #3019 keeps it too. Both shapes are matched, case
-  insensitively: `["name", "address"]` and a bare address. Only the `"to"`
-  key goes; the delivery panel lists such a failure as "unknown".
-
-  A job still waiting to run keeps its address: workflow and task mail check
-  the recipient again when they run, and account mail does not yet.
+  Best-effort, as `forget_body/1`; a job never inserted is left alone.
   """
-  @spec forget_recipient(String.t()) :: :ok
-  def forget_recipient(address) when is_binary(address) do
-    address = String.downcase(address)
+  @spec forget_message(Oban.Job.t()) :: :ok
+  def forget_message(%Oban.Job{id: nil}), do: :ok
+
+  def forget_message(%Oban.Job{id: id}) do
+    Ecto.Query.from(j in Oban.Job,
+      where: j.id == ^id,
+      update: [set: [args: fragment("? - ?::text[]", j.args, ^@message_keys)]]
+    )
+    |> KilnCMS.Repo.update_all([])
+
+    :ok
+  rescue
+    error ->
+      Logger.warning(
+        "Could not drop the message from mail job #{id}: #{inspect(error.__struct__)}"
+      )
+
+      :ok
+  end
+
+  @doc """
+  Withhold every account mail job not yet finished that is for the account
+  `user_id`, or addressed to `address` (#3035) — a step of erasure
+  (`KilnCMS.Accounts.Changes.AnonymizeUser`), run in its transaction.
+
+  The job loses its recipient and its message, and gains
+  `"withheld" => "erased"`: `KilnCMS.Mail.DeliveryWorker` completes such a
+  job without sending anything, and the release before this one, which reads
+  no `"withheld"`, finds no message and cancels it ("message no longer
+  available"). Nothing is delivered either way.
+
+  Two shapes are matched, in every state but the finished ones (`executing`
+  and `suspended` included: Oban's ack never rewrites a job's args, so a
+  running attempt that fails retries as withheld):
+
+    * a job with a `"user_id"` key (queued by this release or later) whose
+      `user_id` is the account's. Its address is not consulted: the worker
+      checks it again when it runs, which is what catches a job queued with
+      the old address after this has run;
+    * a job with no `"user_id"` key (queued by an earlier release) addressed,
+      case insensitively, to `address`. Those jobs say nothing of who they
+      were for, so this also withholds mail to the address that was never
+      the account's (an invitation, a newsletter confirmation to a row added
+      by hand). It is needed for one release, until no job of that shape is
+      left waiting.
+
+  A job whose `"user_id"` is `null` is mail to an address with no account
+  behind it (`enqueue!/2`), and is left alone.
+  """
+  @spec withhold_pending(String.t() | nil, String.t()) :: :ok
+  def withhold_pending(address, user_id) when is_binary(user_id) do
+    for_account = Ecto.Query.dynamic([j], fragment("?->>'user_id'", j.args) == ^user_id)
+
+    match =
+      if is_binary(address) do
+        address = String.downcase(address)
+
+        Ecto.Query.dynamic(
+          [j],
+          ^for_account or
+            (not fragment("jsonb_exists(?, 'user_id')", j.args) and
+               fragment("lower(?->'to'->>1)", j.args) == ^address)
+        )
+      else
+        for_account
+      end
 
     Ecto.Query.from(j in Oban.Job,
       where:
-        j.queue == "mail" and j.state in ^@finished_states and
-          (fragment("lower(?->'to'->>1)", j.args) == ^address or
-             fragment("lower(?->>'to')", j.args) == ^address),
+        j.queue == "mail" and j.worker == "KilnCMS.Mail.DeliveryWorker" and
+          j.state not in ^@finished_states,
+      where: ^match,
+      update: [
+        set: [
+          args:
+            fragment(
+              "(? - ?::text[]) || jsonb_build_object('withheld', 'erased')",
+              j.args,
+              ^@message_keys
+            )
+        ]
+      ]
+    )
+    |> KilnCMS.Repo.update_all([])
+
+    :ok
+  end
+
+  @doc """
+  Drop the recipient from every finished job on the `mail` queue addressed to
+  `address`, or queued for the account `user_id` (#3019, #3035) — a step of
+  erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`).
+
+  Account mail (`enqueue!/2`) keeps its recipient in a finished job's args,
+  for the delivery panel, until the Pruner deletes the row; a workflow or task
+  mail job queued before #3019 keeps it too. Both address shapes are matched,
+  case insensitively: `["name", "address"]` and a bare address. Only the
+  `"to"` key goes; the delivery panel lists such a failure as "unknown".
+
+  A job still waiting to run is `withhold_pending/2`'s, for account mail;
+  workflow and task mail check the recipient again when they run.
+  """
+  @spec forget_recipient(String.t() | nil, String.t() | nil) :: :ok
+  def forget_recipient(address, user_id \\ nil)
+
+  def forget_recipient(nil, nil), do: :ok
+
+  def forget_recipient(address, user_id) do
+    Ecto.Query.from(j in Oban.Job,
+      where: j.queue == "mail" and j.state in ^@finished_states,
+      where: ^recipient_match(address, user_id),
       update: [set: [args: fragment("? - 'to'", j.args)]]
     )
     |> KilnCMS.Repo.update_all([])
 
     :ok
+  end
+
+  defp recipient_match(address, user_id) do
+    by_address =
+      if is_binary(address) do
+        address = String.downcase(address)
+
+        Ecto.Query.dynamic(
+          [j],
+          fragment("lower(?->'to'->>1)", j.args) == ^address or
+            fragment("lower(?->>'to')", j.args) == ^address
+        )
+      end
+
+    by_account =
+      if is_binary(user_id),
+        do: Ecto.Query.dynamic([j], fragment("?->>'user_id'", j.args) == ^user_id)
+
+    case {by_address, by_account} do
+      {nil, by_account} -> by_account
+      {by_address, nil} -> by_address
+      {by_address, by_account} -> Ecto.Query.dynamic(^by_address or ^by_account)
+    end
   end
 
   @doc false

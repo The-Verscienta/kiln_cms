@@ -35,7 +35,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendRegistrationDecision do
     |> to(to_string(applicant.email))
     |> subject(subject_line(outcome, KilnCMS.Branding.for_org(org).site_name))
     |> html_body(body(outcome, site, org, role))
-    |> Mail.enqueue!(org_id: org.id)
+    |> Mail.enqueue!(org_id: org.id, user_id: applicant.id)
   rescue
     # Boundary: the decision has committed; a mail fault must not turn the
     # admin's successful decision into a crash. The module only: the message
