@@ -7,9 +7,12 @@ defmodule KilnCMS.Backups.Schedule.Changes.SyncHolds do
 
   Nothing is queued when the marker sync is turned off
   (`KILN_BACKUP_MARKER_SYNC_CRON=false`), or when one is already waiting
-  (the worker is unique while a job is live; that job reads the schedules
-  when it runs). A failed insert is logged and never fails the action: the
-  next slot or backup syncs the markers anyway.
+  (the worker is unique while a job is available, scheduled or retryable;
+  that job reads the schedules when it runs). A job that is already running
+  does not stop the insert (#2932): it may have read the schedules before
+  this change, so the new job queues behind it, waits for the backup lock it
+  holds, and reads the committed change. A failed insert is logged and never
+  fails the action: the next slot or backup syncs the markers anyway.
   """
   use Ash.Resource.Change
 

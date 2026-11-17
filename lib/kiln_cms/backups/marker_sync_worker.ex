@@ -52,9 +52,22 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   A failed import, an unreadable directory or history, or a lock that can't
   be taken writes and removes no marker; `Chain.sync_last_good/2` logs it with
   a `[:kiln_cms, :backups, :last_good, :failed]` event, and the job fails
-  without retrying: the next slot runs the same sync. One attempt only, and
-  unique per directory while a job is live, so a slow or snoozing job never
-  stacks up behind the next slot's.
+  without retrying: the next slot runs the same sync. One attempt only.
+
+  ## Uniqueness
+
+  Every insert (the cron slot, `SyncHolds` and the per-directory jobs) is
+  unique per directory while a job is waiting: `:available`, `:scheduled`
+  (a snoozing job) or `:retryable`. A waiting job reads the schedules when it
+  runs, so a second one would sync nothing new, and a slow or snoozing job
+  never stacks up behind the next slot's.
+
+  An `:executing` job does not count (#2932): it may have read the schedules
+  before a change committed, so a change made while it runs queues one more
+  job behind it. That job's sync waits on the backup lock (a waiting advisory
+  lock, `Chain.with_lock/1`) until the running one is done, then reads the
+  schedules afresh. So each directory has at most one running job and one
+  waiting behind it.
   """
   use Oban.Worker,
     queue: :default,
@@ -62,7 +75,9 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     unique: [
       keys: [:dir],
       period: :infinity,
-      states: [:available, :scheduled, :executing, :retryable]
+      # No :executing: a running job may have read the schedules before a
+      # change committed (#2932, "Uniqueness" above).
+      states: [:available, :scheduled, :retryable]
     ]
 
   alias KilnCMS.Backups
@@ -134,7 +149,7 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     end
   end
 
-  # A conflict is a job for that directory still live from an earlier slot.
+  # A conflict is a job for that directory still waiting from an earlier slot.
   defp enqueue(dir_id) do
     case %{"dir" => dir_id} |> new() |> Oban.insert() do
       {:ok, _job} ->
