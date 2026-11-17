@@ -14,8 +14,9 @@ defmodule KilnCMS.Backups.ChainRaceTest do
   import Ecto.Query
 
   alias Ecto.Adapters.SQL.Sandbox
+  alias KilnCMS.Accounts.User
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, Recorder, Worker}
+  alias KilnCMS.Backups.{Chain, DirId, Recorder, StepWorker, Worker, WorkState}
   alias KilnCMS.Repo
 
   @moduletag :pg_tools
@@ -255,5 +256,108 @@ defmodule KilnCMS.Backups.ChainRaceTest do
     assert {:ok, %{db: "20260801-031700"}} = Task.await(sync, 10_000)
     assert {:ok, %{status: :started}} = Task.await(request, 10_000)
     assert File.exists?(Path.join([dir, "db", "kiln-20260801-031700.good"]))
+  end
+
+  describe "#2816: a resume canceled while its start re-opens the run" do
+    # A failed run whose files are in this backup directory, so its resume's
+    # start runs here.
+    defp resumable_here!(stamp, dir_id) do
+      unboxed(fn ->
+        %{stamp: stamp, trigger: "test", chain_id: Ash.UUID.generate(), dir_id: dir_id}
+        |> Backups.start_run!(actor: Backups.system())
+        |> Backups.fail_run!(%{error: "boom"}, actor: Backups.system())
+      end)
+
+      work = WorkState.path(Backups.dir(), stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(stamp))
+    end
+
+    # The Cancel against the whole start step, on two real connections, twenty
+    # times: either may win, never both, and the loser leaves no trace. Both
+    # win some rounds (checked by hand, not asserted: it depends on timing). The
+    # invariant is the issue's: the lock is never free while the run is
+    # `running` under the chain that was canceled.
+    test "exactly one wins, every time" do
+      File.mkdir_p!(Backups.dir())
+      {:ok, dir_id} = DirId.local(Backups.dir())
+      # Not seeded: the audit row names the actor by id only.
+      admin = %User{id: Ash.UUID.generate(), email: "race-admin@example.com", role: :admin}
+
+      on_exit(fn ->
+        unboxed(fn ->
+          Repo.delete_all(
+            from(e in "instance_security_events",
+              where: e.actor_id == type(^admin.id, :binary_id)
+            )
+          )
+        end)
+      end)
+
+      outcomes =
+        for n <- 1..20 do
+          stamp = "20260804-1000" <> String.pad_leading(Integer.to_string(n), 2, "0")
+          resumable_here!(stamp, dir_id)
+
+          {:ok, %{status: :started, chain: chain}} =
+            unboxed(fn ->
+              Backups.request([trigger: "manual", resume: stamp], Backups.system())
+            end)
+
+          {job, run} =
+            unboxed(fn ->
+              {Repo.get!(Oban.Job, Backups.backup_lock!(actor: Backups.system()).step_job_id),
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())}
+            end)
+
+          # Each round lets the start get a little further first, so the
+          # Cancel lands before its lock claim, during its checks, around
+          # its re-open, and after it.
+          [cancel, start] =
+            race(
+              fn ->
+                Process.sleep(div(3 * (n - 1), 2))
+                Backups.cancel_run_resume(run, actor: admin)
+              end,
+              fn -> StepWorker.perform(job) end
+            )
+
+          {row, after_run} =
+            unboxed(fn ->
+              {Backups.backup_lock!(actor: Backups.system()),
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())}
+            end)
+
+          reopened? = after_run.status == :running and after_run.chain_id == chain
+
+          refute row.chain_id == nil and reopened?,
+                 "round #{n}: the lock is free and the run runs under the canceled chain"
+
+          outcome =
+            case cancel do
+              {:ok, _} ->
+                assert start == {:cancel, :superseded}, "round #{n}: #{inspect(start)}"
+                assert after_run.status == :failed and after_run.chain_id == run.chain_id
+                refute after_run.error =~ "Resume refused"
+                assert row.chain_id == nil
+                :canceled
+
+              {:error, %Ash.Error.Invalid{}} ->
+                assert start == :ok, "round #{n}: #{inspect(start)}"
+                assert reopened?
+                assert row.chain_id == chain
+                :started
+            end
+
+          unboxed(fn ->
+            Repo.delete_all(from(j in "oban_jobs", where: j.queue == "backup_steps"))
+            Repo.delete_all(from(l in "backup_locks"))
+          end)
+
+          outcome
+        end
+
+      assert Enum.all?(outcomes, &(&1 in [:canceled, :started]))
+    end
   end
 end

@@ -85,6 +85,12 @@ defmodule KilnCMSWeb.BackupLive do
   for a platform admin: `Backups.cancel_run/2`, as that admin, whose policy and
   guard decide (a backup that is finishing can't be canceled). Its files stay.
 
+  A resume that holds the lock but hasn't re-opened its run yet (#2816) says
+  on the strip what it waits for (the server that has the run's files, or a
+  Cancel to settle) and offers only its own **Cancel**:
+  `Backups.cancel_run_resume/2`, which frees the lock and notes the run, which
+  keeps its status. The row's Cancel is hidden meanwhile.
+
   A failed, interrupted or canceled in-app run whose `.work/<stamp>/state.json`
   still exists gets a **Resume** button (platform admin only, computed for the
   visible page and bounded by its 25 rows). For about two and a half minutes
@@ -146,6 +152,7 @@ defmodule KilnCMSWeb.BackupLive do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{DiskView, Importer, Manifest, Markers}
+  alias KilnCMS.Backups.Run.Changes.CancelResume
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.BackupComponents,
@@ -305,6 +312,19 @@ defmodule KilnCMSWeb.BackupLive do
 
   def handle_event("cancel_run", _params, socket), do: {:noreply, socket}
 
+  # Cancel a resume that holds the lock but hasn't re-opened its run (#2816):
+  # as Cancel, by id, and `Backups.cancel_run_resume/2`'s policy and guard
+  # decide.
+  def handle_event("cancel_resume", %{"id" => id}, socket) when is_binary(id) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      cancel_resume(socket, id)
+    else
+      deny(socket)
+    end
+  end
+
+  def handle_event("cancel_resume", _params, socket), do: {:noreply, socket}
+
   # Through the lock (#2218), as the admin, so the policy decides too: a
   # backup while one runs queues behind it, or folds into a queued fresh one;
   # a queued resume refuses it (#2540).
@@ -361,6 +381,49 @@ defmodule KilnCMSWeb.BackupLive do
   end
 
   defp cancel_message(_error), do: gettext("That backup can't be canceled.")
+
+  defp cancel_resume(socket, id) do
+    user = socket.assigns.current_user
+
+    with {:ok, run} <- Backups.get_run(id, actor: user),
+         {:ok, _noted} <-
+           Backups.cancel_run_resume(run,
+             actor: user,
+             # The client the `backup_canceled` event is logged with (#2241).
+             context: socket.assigns[:security_context] || %{}
+           ) do
+      {:noreply,
+       socket
+       |> put_flash(
+         :info,
+         gettext("Resume canceled. The backup stays as it was, so it can be resumed later.")
+       )
+       |> refresh()}
+    else
+      {:error, error} ->
+        {:noreply, socket |> put_flash(:error, cancel_resume_message(error)) |> refresh()}
+    end
+  end
+
+  defp cancel_resume_message(%Ash.Error.Forbidden{}),
+    do: gettext("Only a platform admin can cancel a backup.")
+
+  # The resume re-opened the run first: it is a running backup now, with its
+  # own Cancel. Before this read the run (`CancelResume.started/0`), or while
+  # the Cancel ran (a stale record).
+  defp cancel_resume_message(%Ash.Error.Invalid{errors: errors}) do
+    started? =
+      Enum.any?(errors, fn error ->
+        match?(%Ash.Error.Changes.StaleRecord{}, error) or
+          Exception.message(error) =~ CancelResume.started()
+      end)
+
+    if started?,
+      do: gettext("The resume started meanwhile. Cancel it again to stop the backup."),
+      else: gettext("That resume can't be canceled.")
+  end
+
+  defp cancel_resume_message(_error), do: gettext("That resume can't be canceled.")
 
   defp resume_backup(socket, id) do
     with {:ok, %{stamp: stamp}} <- Backups.get_run(id, actor: socket.assigns.current_user),
@@ -607,22 +670,44 @@ defmodule KilnCMSWeb.BackupLive do
 
   # The lock as the strip shows it, and the run to cancel from it: the one the
   # lock is writing, when it is running (a starting chain has none yet).
+  #
+  # A resume that holds the lock but hasn't re-opened its run (#2816) offers
+  # only Cancel resume, whatever the run's status: a stale `running` run it
+  # is about to re-open would otherwise get the plain Cancel, which marks the
+  # run canceled and leaves the resume's lock and start job alone.
   defp load_in_flight(socket) do
-    in_flight = Backups.in_flight()
+    user = socket.assigns.current_user
+    in_flight = Backups.in_flight(details: true)
 
     run =
       with %{stamp: stamp} when is_binary(stamp) <- in_flight,
-           {:ok, %{status: :running, origin: :app} = run} <-
-             Backups.get_run_by_stamp(stamp, actor: socket.assigns.current_user) do
+           {:ok, %{origin: :app} = run} <- Backups.get_run_by_stamp(stamp, actor: user) do
         run
       else
         _ -> nil
       end
 
+    waiting? = resume_waiting?(in_flight, run)
+
     socket
-    |> assign(:in_flight, in_flight)
-    |> assign(:in_flight_run_id, run && run.id)
+    |> assign(:in_flight, in_flight && Map.put(in_flight, :resume_waiting?, waiting?))
+    |> assign(:in_flight_run_id, if(not waiting? and running?(run), do: run.id))
+    |> assign(
+      :in_flight_resume_run_id,
+      if(waiting? and Backups.can_cancel_run_resume?(user, run), do: run.id)
+    )
   end
+
+  defp running?(%{status: :running}), do: true
+  defp running?(_run), do: false
+
+  # The lock holds a resume of `run` at its start step, under a chain the run
+  # hasn't moved to yet: it hasn't re-opened the run (#2816).
+  defp resume_waiting?(%{step: :start, resume: stamp, chain: chain}, %{stamp: stamp} = run)
+       when is_binary(stamp),
+       do: run.chain_id != chain
+
+  defp resume_waiting?(_in_flight, _run), do: false
 
   defp load_history(socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
@@ -810,7 +895,12 @@ defmodule KilnCMSWeb.BackupLive do
           </div>
         </div>
 
-        <.in_flight :if={@in_flight} in_flight={@in_flight} run_id={@in_flight_run_id} />
+        <.in_flight
+          :if={@in_flight}
+          in_flight={@in_flight}
+          run_id={@in_flight_run_id}
+          resume_run_id={@in_flight_resume_run_id}
+        />
 
         <%!-- Until `Backups.status/0` answers (#2417). Neutral: nothing is
               known yet, good or bad. --%>
@@ -1110,6 +1200,7 @@ defmodule KilnCMSWeb.BackupLive do
 
   attr :in_flight, :map, required: true
   attr :run_id, :string, default: nil
+  attr :resume_run_id, :string, default: nil, doc: "the run of a resume waiting to start (#2816)"
 
   # The running backup: its step, the part of how many, the queued request.
   defp in_flight(assigns) do
@@ -1144,9 +1235,31 @@ defmodule KilnCMSWeb.BackupLive do
         <.icon name="hero-stop-circle" class="mr-1 size-4" />
         {gettext("Cancel")}
       </button>
+      <button
+        :if={@resume_run_id}
+        type="button"
+        phx-click="cancel_resume"
+        phx-value-id={@resume_run_id}
+        phx-disable-with={gettext("Canceling…")}
+        data-role="cancel-resume"
+        data-confirm={cancel_resume_confirm(@in_flight)}
+        class="btn btn-sm btn-danger"
+      >
+        <.icon name="hero-stop-circle" class="mr-1 size-4" />
+        {gettext("Cancel")}
+      </button>
     </section>
     """
   end
+
+  # A resume waiting to start (#2816): what for.
+  defp step_label(%{resume_waiting?: true, waiting_for: :files_server}),
+    do: gettext("Waiting for the server that has this backup's files")
+
+  defp step_label(%{resume_waiting?: true, waiting_for: :cancel_settle}),
+    do: gettext("Waiting for the canceled backup's step to stop")
+
+  defp step_label(%{resume_waiting?: true}), do: gettext("Starting a resume")
 
   defp step_label(%{step: :archive, part: part, parts_total: total})
        when is_integer(part) and is_integer(total),
@@ -1215,6 +1328,15 @@ defmodule KilnCMSWeb.BackupLive do
     do:
       gettext(
         "Cancel this backup? Its files are kept, so it can be resumed later. A queued backup will start next."
+      )
+
+  defp cancel_resume_confirm(%{waiting: nil}),
+    do: gettext("Cancel this resume? The backup stays as it was, so it can be resumed later.")
+
+  defp cancel_resume_confirm(_in_flight),
+    do:
+      gettext(
+        "Cancel this resume? The backup stays as it was, so it can be resumed later. A queued backup will start next."
       )
 
   attr :runs, :list, required: true
@@ -1440,10 +1562,15 @@ defmodule KilnCMSWeb.BackupLive do
               disk={@disk}
             />
             <%!-- Hidden once the backup is finishing, as on the strip: Cancel is
-                  refused from there (#2542). `@in_flight` is read here, not
-                  when the row was built, so it doesn't matter which loaded first. --%>
+                  refused from there (#2542). Hidden too while a resume of it
+                  waits to start (#2816): the strip's Cancel stops that one.
+                  `@in_flight` is read here, not when the row was built, so it
+                  doesn't matter which loaded first. --%>
             <button
-              :if={cancelable? and not finishing?(@in_flight, run)}
+              :if={
+                cancelable? and not finishing?(@in_flight, run) and
+                  not resume_waiting?(@in_flight, run)
+              }
               type="button"
               phx-click="cancel_run"
               phx-value-id={run.id}

@@ -79,6 +79,7 @@ defmodule KilnCMS.Backups.Chain do
   alias KilnCMS.Backups.{
     Artifact,
     DirId,
+    Heartbeat,
     Importer,
     Lock,
     Markers,
@@ -579,6 +580,24 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   @doc """
+  Inside a lock transaction: cancel every step job of `chain`
+  (`Oban.cancel_all_jobs/1`; an executing one is killed once the transaction
+  commits). For the person's Cancel (`Run.Changes.Cancel`, and a resume
+  canceled before it started, `Run.Changes.CancelResume`), which then releases
+  the lock with `release_in_txn/1`.
+  """
+  @spec cancel_chain_jobs(String.t()) :: :ok
+  def cancel_chain_jobs(chain) when is_binary(chain) do
+    query =
+      from(j in Oban.Job,
+        where: j.queue == "backup_steps" and fragment("?->>'chain' = ?", j.args, ^chain)
+      )
+
+    {:ok, _canceled} = Oban.cancel_all_jobs(query)
+    :ok
+  end
+
+  @doc """
   Inside a lock transaction: clear the holder and promote the waiting request
   to a new chain. `{:ok, promoted_chain | nil}`, or `{:error, reason}` when the
   promoted start job can't be inserted (the caller rolls back).
@@ -851,12 +870,7 @@ defmodule KilnCMS.Backups.Chain do
       # A fresh `meta`: the replacement is a new attempt, with its own
       # affinity snoozes (`StepWorker`).
       with {:ok, replacement} <- insert_step(job.args, max_attempts: remaining) do
-        write!(&Backups.move_backup_lock!/3, row, %{
-          step: row.step,
-          part: row.part,
-          step_job_id: replacement.id
-        })
-
+        move_to_replacement(row, replacement)
         {:ok, {:requeued, Map.put(info, :job_id, replacement.id)}}
       end
     else
@@ -864,6 +878,22 @@ defmodule KilnCMS.Backups.Chain do
         {:ok, {:interrupted, Map.put(info, :promoted, promoted)}}
       end
     end
+  end
+
+  # `:move` resets the phase to `:running`. A finishing step stays past the
+  # point of no return (#3012): until its replacement runs `mark_finishing/1`
+  # again, a Cancel would otherwise be accepted for a backup whose manifest
+  # may already say ok.
+  defp move_to_replacement(row, replacement) do
+    moved =
+      write!(&Backups.move_backup_lock!/3, row, %{
+        step: row.step,
+        part: row.part,
+        step_job_id: replacement.id
+      })
+
+    if row.phase == :finishing,
+      do: write!(&Backups.mark_backup_lock_finishing!/3, moved, %{})
   end
 
   defp info(row, node) do
@@ -997,38 +1027,93 @@ defmodule KilnCMS.Backups.Chain do
       :ok
   end
 
-  @doc "The lock as `Backups.in_flight/0` reports it; see there."
-  @spec in_flight() :: map() | nil
-  def in_flight do
+  @doc "The lock as `Backups.in_flight/1` reports it; see there."
+  @spec in_flight(keyword()) :: map() | nil
+  def in_flight(opts \\ []) do
     case Backups.backup_lock(actor: Backups.system()) do
       {:ok, %{chain_id: chain} = row} when is_binary(chain) ->
-        {destinations_total, destination_label} = destination_progress(row)
+        in_flight = held(row)
 
-        %{
-          chain: chain,
-          stamp: row.stamp || row.resume_stamp,
-          trigger: row.trigger,
-          step: row.step,
-          part: row.part,
-          parts_total: parts_total(row),
-          destinations_total: destinations_total,
-          destination_label: destination_label,
-          components: holder_components(row),
-          phase: row.phase,
-          acquired_at: row.acquired_at,
-          waiting:
-            row.waiting_requested_at &&
-              %{
-                trigger: row.waiting_trigger,
-                resume: row.waiting_resume_stamp,
-                components: waiting_scope(row).components,
-                requested_at: row.waiting_requested_at,
-                folds: row.waiting_folds
-              }
-        }
+        if Keyword.get(opts, :details, false),
+          do: Map.put(in_flight, :waiting_for, waiting_for(row)),
+          else: in_flight
 
       _ ->
         nil
+    end
+  end
+
+  defp held(row) do
+    {destinations_total, destination_label} = destination_progress(row)
+
+    %{
+      chain: row.chain_id,
+      stamp: row.stamp || row.resume_stamp,
+      resume: row.resume_stamp,
+      trigger: row.trigger,
+      step: row.step,
+      part: row.part,
+      parts_total: parts_total(row),
+      destinations_total: destinations_total,
+      destination_label: destination_label,
+      components: holder_components(row),
+      phase: row.phase,
+      acquired_at: row.acquired_at,
+      waiting:
+        row.waiting_requested_at &&
+          %{
+            trigger: row.waiting_trigger,
+            resume: row.waiting_resume_stamp,
+            components: waiting_scope(row).components,
+            requested_at: row.waiting_requested_at,
+            folds: row.waiting_folds
+          }
+    }
+  end
+
+  # What a resume's start is waiting for before it re-opens its run (#2816),
+  # from its job: `:files_server` while it snoozes for the server that has the
+  # run's files (`StepWorker`'s pinned affinity; a retryable attempt only
+  # when that is what failed it), `:cancel_settle` while it runs inside the
+  # settle window of the run's Cancel (`Steps`), else nil. Only for the
+  # Backups page (`in_flight/1`'s `details: true`): two more reads, which the
+  # `Backups.await/2` poll doesn't need.
+  defp waiting_for(%{step: :start, resume_stamp: stamp, step_job_id: id})
+       when is_binary(stamp) and is_integer(id) do
+    query = from(j in Oban.Job, where: j.id == ^id, select: map(j, [:state, :meta, :errors]))
+
+    case Repo.one(query) do
+      %{state: state} = job when state in ["available", "scheduled", "retryable"] ->
+        if snoozed_for_files?(job), do: :files_server
+
+      %{state: "executing"} ->
+        if canceled_recently?(stamp), do: :cancel_settle
+
+      _other ->
+        nil
+    end
+  end
+
+  defp waiting_for(_row), do: nil
+
+  defp snoozed_for_files?(%{state: state, meta: meta, errors: errors}) do
+    (meta["snoozed"] || 0) > 0 and (state != "retryable" or last_error_elsewhere?(errors))
+  end
+
+  defp last_error_elsewhere?(errors) do
+    case List.last(errors || []) do
+      %{"error" => error} when is_binary(error) -> error =~ "backup_dir_elsewhere"
+      _ -> false
+    end
+  end
+
+  defp canceled_recently?(stamp) do
+    case Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
+      {:ok, %{status: :canceled, finished_at: %DateTime{} = at}} ->
+        DateTime.diff(DateTime.utc_now(), at, :millisecond) < Heartbeat.settled_after_ms()
+
+      _ ->
+        false
     end
   end
 

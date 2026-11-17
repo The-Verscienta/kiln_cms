@@ -28,8 +28,6 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
   """
   use Ash.Resource.Change
 
-  import Ecto.Query
-
   alias KilnCMS.Backups.{Chain, Steps}
 
   require Logger
@@ -78,7 +76,7 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
         )
 
       true ->
-        cancel_jobs(row.chain_id)
+        :ok = Chain.cancel_chain_jobs(row.chain_id)
 
         case Chain.release_in_txn(row) do
           {:ok, promoted} ->
@@ -104,16 +102,6 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
 
   defp holds?(row, run),
     do: (run.chain_id != nil and row.chain_id == run.chain_id) or row.stamp == run.stamp
-
-  defp cancel_jobs(chain) do
-    query =
-      from(j in Oban.Job,
-        where: j.queue == "backup_steps" and fragment("?->>'chain' = ?", j.args, ^chain)
-      )
-
-    {:ok, _canceled} = Oban.cancel_all_jobs(query)
-    :ok
-  end
 
   defp step_label(%{step: nil}), do: nil
   defp step_label(%{step: :archive, part: part}) when is_integer(part), do: "archive part #{part}"

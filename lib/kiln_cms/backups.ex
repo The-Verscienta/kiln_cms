@@ -105,6 +105,7 @@ defmodule KilnCMS.Backups do
       define :list_running_runs, action: :running
       define :mark_run_pruned, action: :mark_pruned
       define :cancel_run, action: :cancel
+      define :cancel_run_resume, action: :cancel_resume
     end
 
     resource KilnCMS.Backups.Lock do
@@ -1592,15 +1593,24 @@ defmodule KilnCMS.Backups do
   node has the chain's backup directory; else nil), phase (`:running`, or
   `:finishing` once Cancel is refused), when it took the lock, and the queued
   request (`%{trigger, resume, components, requested_at, folds}`, where nil
-  `components` is everything) or `nil`.
+  `components` is everything) or `nil`. `resume` (#2816) is the stamp a
+  resume chain resumes, or nil for a fresh backup.
+
+  `details: true` (the Backups page) adds `waiting_for` (#2816): what a
+  resume's start step waits for before it re-opens its run, `:files_server`
+  (the server that has the run's files), `:cancel_settle` (the run's Cancel
+  to settle) or nil. It reads the start job and the run, so the
+  `await/2` poll leaves it out.
   """
-  @spec in_flight() :: map() | nil
-  def in_flight, do: Chain.in_flight()
+  @spec in_flight(keyword()) :: map() | nil
+  def in_flight(opts \\ []), do: Chain.in_flight(opts)
 
   @doc """
   Wait for the chain `chain` to settle: `:ok` when its run succeeded, else
   `{:error, reason}` (the run's error, `:canceled`, `{:skipped, error}`,
-  `:no_run` when it ended without one, or `:timeout`). Polls the database, so it
+  `:no_run` when it ended without one, as a resume chain does when it was
+  refused or canceled before it re-opened its run (#2539, #2816), or
+  `:timeout`). Polls the database, so it
   works from any node. Options: `:timeout` (ms, default 3 hours), `:interval`
   (ms, default 2 s).
   """
