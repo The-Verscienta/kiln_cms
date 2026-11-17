@@ -416,9 +416,18 @@ defmodule KilnCMS.Notifications do
   system-only policy deciding, and any failed org raising at the end.
   """
   @spec forget_recipient(String.t()) :: :ok
-  def forget_recipient(user_id) when is_binary(user_id) do
+  def forget_recipient(user_id) when is_binary(user_id),
+    do: forget_recipient(user_id, KilnCMS.Accounts.list_org_ids())
+
+  @doc """
+  `forget_recipient/1`, over the given orgs only: the erasure backfill
+  (`KilnCMS.Accounts.ErasureBackfill`) visits just the orgs where an account
+  erased before #2514 still has notifications.
+  """
+  @spec forget_recipient(String.t(), [Ash.UUID.t()]) :: :ok
+  def forget_recipient(user_id, org_ids) when is_binary(user_id) and is_list(org_ids) do
     failed =
-      Enum.reject(KilnCMS.Accounts.list_org_ids(), fn org_id ->
+      Enum.reject(org_ids, fn org_id ->
         try do
           Notification
           |> Ash.Query.filter(user_id == ^user_id)

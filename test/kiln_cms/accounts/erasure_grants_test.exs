@@ -480,6 +480,66 @@ defmodule KilnCMS.Accounts.ErasureGrantsTest do
                )
     end
 
+    test "a platform tier or audiences on the account itself are refused (#3010)", ctx do
+      tombstone = Accounts.get_user!(ctx.person.id, authorize?: false)
+
+      assert erased_error?(
+               Accounts.manage_user_access(tombstone, %{role: :admin}, actor: ctx.admin)
+             )
+
+      assert erased_error?(
+               Accounts.manage_user_access(tombstone, %{audiences: [@gated]}, actor: ctx.admin)
+             )
+
+      assert %{role: :viewer, audiences: []} =
+               Accounts.get_user!(ctx.person.id, authorize?: false)
+    end
+
+    test "a platform temporary tier is refused, granted or revoked (#3010)", ctx do
+      tombstone = Accounts.get_user!(ctx.person.id, authorize?: false)
+
+      assert erased_error?(
+               Accounts.grant_user_temporary_role(
+                 tombstone,
+                 %{granted_role: :admin, granted_role_expires_at: in_hours(24)},
+                 actor: ctx.admin
+               )
+             )
+
+      assert %{granted_role: nil} = Accounts.get_user!(ctx.person.id, authorize?: false)
+
+      # Revoking is refused too: the lever is closed to an erased account
+      # whatever it writes. Erasure clears the grant itself, and the expiry
+      # sweep (`:expire_role_grant`) clears one left on a row by hand.
+      held =
+        Ash.Seed.update!(tombstone, %{
+          granted_role: :editor,
+          granted_role_expires_at: in_hours(24)
+        })
+
+      assert erased_error?(
+               Accounts.grant_user_temporary_role(
+                 held,
+                 %{granted_role: nil, granted_role_expires_at: nil},
+                 actor: ctx.admin
+               )
+             )
+    end
+
+    test "the same platform writes still reach a live account", ctx do
+      live = user()
+
+      assert {:ok, %{role: :editor}} =
+               Accounts.manage_user_access(live, %{role: :editor}, actor: ctx.admin)
+
+      assert {:ok, %{granted_role: :admin}} =
+               Accounts.grant_user_temporary_role(
+                 live,
+                 %{granted_role: :admin, granted_role_expires_at: in_hours(24)},
+                 actor: ctx.admin
+               )
+    end
+
     test "nobody may call :erase, a platform admin included", ctx do
       live = reload_membership(member(ctx.site, :admin), ctx.site)
 

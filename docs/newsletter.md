@@ -282,21 +282,44 @@ still grants something drops to `:viewer` with neither, as erasure now does
 ([Data flows](data-flows.md#subject-rights-workflows), erasure step 15).
 It runs first, before the newsletter step.
 
+After the newsletter step, it finishes what erasure has done since #2514 for
+accounts erased before then (#3010): it clears the audiences on the
+account's own row, then deletes its Web Push subscriptions, its private saved
+views (shared views are the team's and stay) and the notifications addressed
+to it, on the sites where it has them
+([Data flows](data-flows.md#subject-rights-workflows), erasure steps 7 and
+11 to 13).
+
 - To run it by hand:
 
   ```bash
   bin/kiln_cms rpc "KilnCMS.Accounts.ErasureBackfill.run()"
   ```
 
-  `run/0` returns what it did, for example
-  `%{memberships: 4, newsletter_accounts: 2, newsletter_subscribers: 3, failed: 0}`
-  (four memberships of erased accounts demoted; two erased accounts had three
-  newsletter rows between them). Wrap the call in `IO.inspect/1` to print it.
+  `run/0` returns what it did, for example:
+
+  ```elixir
+  %{memberships: 4, newsletter_accounts: 2, newsletter_subscribers: 3,
+    audiences: 1, push_subscriptions: 2, saved_views: 5, notifications: 40,
+    failed: 0}
+  ```
+
+  Four memberships of erased accounts demoted; two erased accounts had three
+  newsletter rows between them; one erased account had its audiences
+  cleared; and two push subscriptions, five private saved views and 40
+  notifications deleted. Wrap the call in `IO.inspect/1` to print it.
 - To stop the boot from queuing it, set
   `config :kiln_cms, :erasure_backfill_on_boot, false`.
-- An account whose rows could not be deleted, or whose memberships could not
-  be demoted, is logged at warning
-  (`erasure backfill could not forget newsletter rows for <id>`, or
-  `erasure backfill could not demote the memberships of <id>`) and counted
-  under `failed`. The job then ends in error and Oban retries it, up to three
+- An account whose rows could not be deleted, whose memberships could not
+  be demoted or whose audiences could not be cleared is logged at warning
+  and counted under `failed`, once for each step that failed for it. The
+  messages start `erasure backfill could not`, then
+  `forget newsletter rows for <id>`,
+  `demote the memberships of <id>`,
+  `clear the audiences of <n> erased account(s)`,
+  `delete the push subscriptions of <n> erased account(s)`,
+  `delete the saved_views of <id>` or
+  `delete the notifications of <id>`. Audiences and push subscriptions are
+  each one statement for every account, so when one fails, every account
+  in it is counted. The job then ends in error and Oban retries it, up to three
   attempts in all; each retry only finds what is still left.

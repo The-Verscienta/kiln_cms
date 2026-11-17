@@ -3,7 +3,8 @@ defmodule KilnCMS.Accounts.ErasureRaceTest do
   Erasing an account (`KilnCMS.Accounts.Changes.AnonymizeUser`) against a
   write on the same person committed by another transaction at the same
   moment: a newsletter tier sync (#3006), a billing webhook's state change,
-  and a site admin's membership edit (#2774).
+  a site admin's membership edit (#2774), and a platform admin demoting the
+  account being erased (#3010).
 
   Run **outside** the sandbox (`Ecto.Adapters.SQL.Sandbox.unboxed_run/2`), on
   real connections whose writes commit, for the reason
@@ -11,9 +12,11 @@ defmodule KilnCMS.Accounts.ErasureRaceTest do
   row lock never makes anything wait. Each interleaving is pinned with
   `KilnCMS.Test.Latch`: the first transaction holds after it has its locks,
   the second is shown to be waiting, then the first is released. Everything
-  committed is deleted again on exit. No platform admin is committed: the
-  erasure runs `authorize?: false`, as the staging scrub does, and the
-  membership edit is a site admin's.
+  committed is deleted again on exit. The erasure runs `authorize?: false`,
+  as the staging scrub does, and the membership edit is a site admin's. Only
+  the demotion tests commit platform admins (the one demoted and erased, and
+  a second so neither write would orphan the instance), and a module that is
+  not `async` runs with no other test alongside.
   """
   use ExUnit.Case, async: false
 
@@ -360,6 +363,63 @@ defmodule KilnCMS.Accounts.ErasureRaceTest do
       assert {:ok, {:ok, %{role: :admin}}} = Task.await(edit, 10_000)
       assert {:ok, _erased} = Task.await(erasure, 10_000)
       assert %{role: :viewer, status: :active} = membership(ctx.person, ctx.site)
+      refute_received {:latch_timeout, _, _}
+    end
+  end
+
+  # ── a platform admin's demotion of the admin being erased (#3010) ─────
+
+  describe "a platform demotion" do
+    # Two standing admins, so neither write would leave the instance without
+    # one: `GuardLastAdmin` still takes the bootstrap lock for both, which is
+    # the point.
+    setup ctx do
+      {admin, other} = unboxed(fn -> {seed_user(%{role: :admin}), seed_user(%{role: :admin})} end)
+      Agent.update(ctx.tracked, &[admin.id, other.id | &1])
+      %{admin: admin}
+    end
+
+    defp demote(admin),
+      do: fn -> Accounts.manage_user_access(admin, %{role: :viewer}, authorize?: false) end
+
+    # The erasure, holding the bootstrap lock (as `GuardLastAdmin` takes it)
+    # before it has locked the account's row. A hook added to the changeset
+    # before the action runs before the action's own; the lock is re-entrant,
+    # so the erasure's own `GuardLastAdmin` takes it again without waiting.
+    defp erasure_holding_bootstrap_lock(user) do
+      held =
+        user
+        |> Ash.Changeset.new()
+        |> Ash.Changeset.before_action(fn changeset ->
+          Accounts.Bootstrap.lock!()
+          Latch.enter(:erasure_race)
+          changeset
+        end)
+
+      Task.async(fn -> unboxed(fn -> Accounts.anonymize_user(held, authorize?: false) end) end)
+    end
+
+    # The order that deadlocked when the account lock came first: the
+    # demotion would hold the users row and wait for the bootstrap lock,
+    # while the erasure held that and waited for the row.
+    test "after the erasure took the bootstrap lock: no deadlock, and the demotion is refused",
+         ctx do
+      erasure = erasure_holding_bootstrap_lock(ctx.admin)
+      demotion = race(demote(ctx.admin))
+
+      assert {:ok, %{anonymized_at: %DateTime{}}} = Task.await(erasure, 10_000)
+      assert erased_error?(Task.await(demotion, 10_000))
+      assert %{role: :viewer} = reload(ctx.admin)
+      refute_received {:latch_timeout, _, _}
+    end
+
+    test "committed first: the erasure waits, then erases the demoted account", ctx do
+      demotion = held(demote(ctx.admin))
+      erasure = race(fn -> erase(ctx.admin) end)
+
+      assert {:ok, {:ok, %{role: :viewer}}} = Task.await(demotion, 10_000)
+      assert {:ok, _erased} = Task.await(erasure, 10_000)
+      assert erased?(ctx.admin)
       refute_received {:latch_timeout, _, _}
     end
   end
