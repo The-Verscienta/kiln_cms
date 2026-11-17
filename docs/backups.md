@@ -3017,7 +3017,8 @@ An in-app backup keeps its files in `BACKUP_DIR` and, when it is set,
 copies them to `BACKUP_RCLONE_REMOTE`. On the **Destinations** tab of the
 Backups page a platform admin adds more places to copy them to (#2220): a
 directory on this server (a NAS mount, a second disk), a remote already
-named in rclone's configuration, or a kind a plugin adds. Each backup is
+named in rclone's configuration, an S3-compatible bucket, or a kind a plugin
+adds. Each backup is
 then sent to every enabled destination, one after another, and a
 destination that fails doesn't stop the others.
 
@@ -3037,6 +3038,9 @@ and what the kind of destination needs:
   an `rclone.conf` named by `RCLONE_CONFIG`, or `RCLONE_CONFIG_<NAME>_*`
   variables. The form takes only the remote's name, so no credential is
   stored in Kiln's database.
+- **S3-compatible storage:** a bucket and an access key for it, and
+  `BACKUP_S3_PRIVATE_HOSTS` for a store on your own network
+  ([Back up to S3-compatible storage](#back-up-to-s3-compatible-storage)).
 
 1. Open **Backups** (`/editor/backups`) and click the **Destinations** tab.
    The page is headed **Backup destinations**. When `BACKUP_RCLONE_REMOTE`
@@ -3047,7 +3051,8 @@ and what the kind of destination needs:
    all, the list reads "No off-site destination: backups stay on this server
    only."
 2. Click **Add a destination**. Under **What kind of destination?** pick
-   **Directory on this server**, **Rclone remote**, or a plugin's kind.
+   **Directory on this server**, **Rclone remote**, **S3-compatible
+   storage**, or a plugin's kind.
    **Directory on this server** is missing, with "A directory on this server
    can be added once BACKUP_LOCAL_DESTINATION_ROOTS lists where it may
    write.", until that variable is set.
@@ -3094,16 +3099,17 @@ Backups stop being sent to it; the files already there stay, and are no
 longer pruned."
 
 **Where a destination writes can't be changed.** On **Edit**, the location
-fields (a directory's **Path**; a remote's **Remote name** and **Path**)
-are read-only, with "Where a destination writes can't be changed. To move
+fields (a directory's **Path**; a remote's **Remote name** and **Path**; an
+S3 destination's **Endpoint**, **Bucket** and **Prefix**) are read-only, with "Where a destination writes can't be changed. To move
 it, add a new destination and delete this one." Retention deletes only what
 was sent to a destination, recorded against the destination itself, so
 letting it point somewhere new would let it delete what it never sent
 there ([ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)).
 For the same reason a new destination may not be, contain or sit inside
 `BACKUP_RCLONE_REMOTE` or another destination. That check compares rclone
-remote names and paths, so an rclone `alias` remote, or two names for the
-same bucket, can't be caught: don't point two destinations at one place.
+remote names and paths, and S3 endpoints, buckets and prefixes, so an rclone
+`alias` remote, or two names for the same bucket, can't be caught: don't
+point two destinations at one place.
 
 Every add, change, delete and Test is in the
 [instance security log](security-events.md#the-instance-log)
@@ -3160,6 +3166,349 @@ large media part back from the mount once instead of writing it
 on every node that can run backups: a node where the directory is missing
 fails that destination for the backups it runs.
 
+### Back up to S3-compatible storage
+
+A destination of the kind **S3-compatible storage** sends each in-app
+backup straight to a bucket over the S3 API (#2221): AWS S3, Cloudflare R2,
+Backblaze B2, Wasabi, or a MinIO or Garage you run yourself. Unlike an
+**Rclone remote**, it needs nothing in the image and nothing in rclone's
+configuration: the form takes the endpoint, the bucket and a key pair, and
+Kiln talks to the store itself. Large files go up in parts and resume where
+they stopped ([Resumable uploads](#resumable-uploads)).
+
+**Before you start:**
+
+- a running release with the `add_backup_destinations`,
+  `backup_run_destinations` and `add_backup_uploads` migrations applied, and
+  a platform admin account;
+- a bucket, and an access key that may use it
+  ([Give the key only what it needs](#give-the-key-only-what-it-needs));
+- for a store on your own network or reached over `http://`, its host name
+  in `BACKUP_S3_PRIVATE_HOSTS` on every node
+  ([Reach a store on your own network](#reach-a-store-on-your-own-network)).
+
+1. Open **Backups** (`/editor/backups`), click the **Destinations** tab, then
+   **Add a destination**.
+2. Under **What kind of destination?** pick **S3-compatible storage**. The
+   form shows the fields below, and under them the hint "Add a lifecycle rule
+   to the bucket that aborts incomplete multipart uploads after a few days:
+   Kiln aborts the uploads it recorded, but not one a crash left before it
+   could record it."
+3. Fill in the form. The values for each provider are in
+   [Settings for each provider](#settings-for-each-provider).
+
+   | Field | What it takes |
+   |---|---|
+   | **Name** | Required, unique, at most 80 characters, for example `Offsite S3`. |
+   | **Endpoint** | The store's URL, scheme and host only (a port is allowed, a path is not): `https://s3.us-east-1.amazonaws.com`. Must be `https://` unless `BACKUP_S3_PRIVATE_HOSTS` lists the host. |
+   | **Region** | The bucket's region, lowercase letters, digits and `-`: `us-east-1`, `auto` for R2. |
+   | **Bucket** | The bucket's name, 3 to 63 lowercase letters, digits, dots and hyphens. |
+   | **Prefix** | Optional. A folder in the bucket to keep the backups under, for example `kiln/site`. Slashes at either end are dropped; no `.` or `..` segment. |
+   | **Path style** | Ticked, the bucket goes in the URL's path (`https://host/bucket/…`) rather than its host name (`https://bucket.host/…`). Tick it for MinIO and Garage. A bucket name with a dot, or an endpoint that is an IP address, is always addressed this way. |
+   | **Access key** | The access key id. A password box: stored encrypted and never shown again. |
+   | **Secret access key** | The secret. The same: stored encrypted and never shown again. |
+   | **Enabled**, **Delete its old backups (retention)** | As for every destination ([above](#send-backups-to-several-destinations)). |
+
+4. Click **Save destination**. While it reads **Checking…**, Kiln checks the
+   settings and looks the endpoint up in DNS (the host it will connect to:
+   `<bucket>.<host>` unless path-style). It does not contact the store yet.
+   Then "Destination added." appears, and the row reads, for example,
+   `s3://kiln-backups/kiln/site (s3.us-east-1.amazonaws.com)`.
+5. Click **Test** on the row. In at most 30 seconds it:
+   1. checks the bucket (`HeadBucket`), and compares the store's clock with
+      this server's;
+   2. lists one key under the prefix;
+   3. writes `kiln-test-<random>.txt` under `<prefix>/.kiln-test/`, reads it
+      back and deletes it (the delete is tried even when the read fails).
+
+   "Offsite S3: the test passed (on kiln@node1)." means a backup can be sent
+   there. A failure names the step that failed, for example "Offsite S3: the
+   test failed (on kiln@node1): checking the bucket: the bucket does not
+   exist" ([What can go wrong with an S3 destination](#what-can-go-wrong-with-an-s3-destination)).
+6. Click **Back up now** on the **Backups** tab. When it finishes, the
+   History row has the chip "Offsite S3 · ok", and the bucket holds
+   `kiln/site/db/kiln-db-<stamp>.dump` and its `.sha256`, and the media
+   files under `kiln/site/media/`, laid out as in `BACKUP_DIR`.
+
+The endpoint, bucket and prefix can't be changed after saving, as for every
+destination's location; the region, **Path style** and the keys can. On
+**Edit**, leave a key blank to keep the stored one.
+
+<a id="give-the-key-only-what-it-needs"></a>
+
+#### Give the key only what it needs
+
+Create a key for Kiln alone, allowed on this bucket and nothing else. It
+needs six permissions:
+
+| Permission | Used for |
+|---|---|
+| `s3:ListBucket` | The Test's `HeadBucket` and listing, retention's listing, and telling a missing file from a refused one. Without it a store answers `403`, not `404`, for a file that isn't there, so every upload reads as refused access. |
+| `s3:PutObject` | Uploading, in one request or in parts. |
+| `s3:GetObject` | The Test's read-back, and checking whether a file is already there. |
+| `s3:DeleteObject` | Retention, and removing the Test's file. |
+| `s3:AbortMultipartUpload` | Aborting an upload Kiln recorded and no longer needs. |
+| `s3:ListMultipartUploadParts` | Checking what the store holds before resuming an upload. |
+
+An AWS IAM policy for the bucket `kiln-backups` and the prefix `kiln/site`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "KilnBackupsBucket",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::kiln-backups"
+    },
+    {
+      "Sid": "KilnBackupsObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::kiln-backups/kiln/site/*"
+    }
+  ]
+}
+```
+
+Grant `s3:ListBucket` on the whole bucket, without an `s3:prefix`
+condition: `HeadBucket`, and the listing Kiln makes to explain a refused
+`HEAD`, are not limited to the prefix. Wasabi and MinIO take the same
+policy document. On R2 and B2, give the key read and write access to this
+bucket only (below).
+
+<a id="settings-for-each-provider"></a>
+
+#### Settings for each provider
+
+| Provider | Endpoint | Region | Path style |
+|---|---|---|---|
+| AWS S3 | `https://s3.<region>.amazonaws.com`, for example `https://s3.eu-west-1.amazonaws.com` | the bucket's region, `eu-west-1` | off |
+| Cloudflare R2 | `https://<account id>.r2.cloudflarestorage.com` (`<account id>.eu.r2.cloudflarestorage.com` for an EU-jurisdiction bucket) | `auto` | off |
+| Backblaze B2 | `https://s3.<region>.backblazeb2.com`, for example `https://s3.us-west-004.backblazeb2.com` (the bucket's "Endpoint" in B2's console) | the region in that host, `us-west-004` | off |
+| Wasabi | `https://s3.<region>.wasabisys.com`, for example `https://s3.us-central-1.wasabisys.com` | the bucket's region, `us-central-1` | off |
+| MinIO on your network | `http://minio.lan:9000`, or `https://` if it has a certificate | `us-east-1` unless you set another in MinIO | on |
+| Garage on your network | `http://garage.lan:3900` | the `s3_region` in Garage's config (`garage` in its sample config) | on |
+
+- **AWS S3.** Use the regional endpoint of the bucket's region. A bucket in
+  another region than the one you enter fails at once, with the region the
+  store names: "the bucket is in the region eu-west-1; set the region (and
+  endpoint) to match". Use the policy above.
+- **Cloudflare R2.** Create an R2 API token with **Object Read & Write**,
+  limited to the bucket; it gives an access key id and a secret access key.
+  The region is always `auto`.
+- **Backblaze B2.** Create an application key limited to the bucket, with
+  read and write access. The **keyID** is the access key and the
+  **applicationKey** the secret.
+- **Wasabi.** Create an access key for a sub-user with the policy above.
+  Wasabi may bill a deleted object for a minimum storage period, so
+  retention's deletes don't lower the bill right away; check your plan.
+- **MinIO or Garage** on your own network: see the next section.
+
+<a id="reach-a-store-on-your-own-network"></a>
+
+#### Reach a store on your own network
+
+The endpoint is typed into a form, so Kiln treats it as it treats a webhook
+URL: by default it must be `https://`, and its host must resolve only to
+public addresses. To allow a MinIO or Garage on your network, the operator
+lists its host in `BACKUP_S3_PRIVATE_HOSTS`, on every node:
+
+```bash
+BACKUP_S3_PRIVATE_HOSTS=minio.lan
+```
+
+and the destination uses `http://minio.lan:9000`, region `us-east-1`, with
+**Path style** ticked.
+
+- **List the name Kiln connects to.** With **Path style** ticked that is the
+  endpoint's host, `minio.lan`. Without it, it is `<bucket>.<host>`, for
+  example `kiln-backups.minio.lan`, which must then be listed instead (and
+  resolve). Listing a host opens none of its subdomains. Ticking **Path
+  style** is usually simpler.
+- **Exact names only**, comma-separated, case-insensitive. An IP address
+  works too (`10.0.0.5`, or `fd12::5` for `http://[fd12::5]:9000`). An entry
+  with a scheme, a port, a path or a `*` is ignored.
+- **A listed host may** use `http://`, resolve to a private or loopback
+  address, and be a `localhost`, `.local` or `.internal` name.
+- **Nothing opens** a link-local or cloud-metadata address
+  (`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254`), including one reached
+  through a NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) address, nor a
+  metadata host name such as `metadata.google.internal`.
+- It is read in every environment, so a MinIO in development works as in
+  production. `scripts/backup.sh` doesn't read it
+  ([environment-variables.md](environment-variables.md#in-app-backups-484)).
+
+The address is checked when the destination is saved and again before every
+call, and each call connects to the address it checked, so a name that
+starts resolving somewhere else is refused rather than followed. A redirect
+from the store is never followed either. Two limits follow from the DNS
+lookup:
+
+- **A name that doesn't resolve can't be saved.** Save looks it up on the
+  node serving the page, so a store only the backup nodes can resolve must
+  be resolvable there too.
+- **A host name with only IPv6 (AAAA) addresses can't be saved:** it reads
+  as not resolving. Give the store an IPv4 address, or enter its IPv6
+  address as the endpoint (`https://[2001:db8:1::5]`).
+
+Why the policy is this one is in
+[ADR 0069](decisions/0069-an-admin-entered-backup-endpoint-is-pinned-per-call-and-only-the-operator-opens-private-hosts.md).
+
+<a id="set-a-lifecycle-rule-for-unfinished-uploads"></a>
+
+#### Set a lifecycle rule for unfinished uploads
+
+A file of 16 MiB or more goes up as a multipart upload. Until it is
+completed or aborted, the parts sent so far cost storage, and they don't
+show in a normal listing. Kiln aborts the uploads it recorded when they are
+no longer needed ([When Kiln aborts an upload](#resumable-uploads)), but
+never one it has no record of: an upload cut off before its first
+checkpoint was saved, one on a destination you deleted, one whose record a
+database restore lost. Add a lifecycle rule to the bucket as the backstop.
+On AWS, with the AWS CLI:
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "abort-incomplete-multipart-uploads",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "kiln/site/" },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 7 }
+    }
+  ]
+}
+```
+
+```bash
+aws s3api put-bucket-lifecycle-configuration \
+  --bucket kiln-backups --lifecycle-configuration file://lifecycle.json
+```
+
+This replaces the bucket's whole lifecycle configuration: if it has rules
+already, add this one to them (`aws s3api get-bucket-lifecycle-configuration`
+shows them). Keep it to four days or more, so it never aborts an upload
+Kiln could still resume. Other providers set the same rule in their console
+or through the same API call, where they support it; check theirs.
+
+<a id="how-an-upload-to-s3-works"></a>
+
+#### How an upload to S3 works
+
+- **A file already there is not sent again.** Before each upload Kiln asks
+  for the object (`HEAD`). One with the same size and the same
+  `x-amz-meta-kiln-sha256` metadata is recorded as sent.
+- **Files under 16 MiB** (the dumps' `.sha256` sidecars, a small database)
+  go in one request, with `Content-MD5`, so the store checks what arrived.
+- **Larger files** go in parts of at least 16 MiB, one after another, each
+  with `Content-MD5`; a file that would need more than 9,000 parts gets
+  larger parts, in whole MiB. Each acknowledged part is recorded. Before the
+  upload is completed, the file's SHA-256, computed while reading the parts,
+  must equal the one the backup verified, and after it is completed Kiln
+  reads the object's size and `x-amz-meta-kiln-sha256` back to confirm.
+- **Resuming** asks the store which parts it holds (`ListParts`) and checks
+  them against the record, by part number, ETag and size. ETags are not
+  assumed to be MD5s, so a bucket with SSE-KMS or MinIO's encryption resumes
+  as well. Anything that doesn't match aborts that upload and starts the
+  file over.
+- **Every object carries `x-amz-meta-kiln-sha256`**, the file's SHA-256.
+  A multipart object's ETag is not its MD5, so check a download against
+  this metadata or the backup's `.sha256` file, not the ETag.
+- **A file over 5 TiB** (S3's largest object) is refused before anything is
+  sent.
+
+**Failures.** A request that fails for a reason that may pass (a `5xx`,
+`SlowDown`, a `429`, a timeout, a dropped connection, any `4xx` Kiln has no
+rule for) is retried up to six times in all, after a random wait of up to
+1, 2, 4, 8 and 16 seconds, and no retry starts within
+30 seconds of the step's deadline. A failure no retry fixes fails the
+destination at once, without the backup's other attempts
+([Resumable uploads](#resumable-uploads)): refused credentials, a missing
+bucket, the wrong region, a clock more than five minutes off the store's,
+a part or a file the store refuses (`InvalidPart`, `EntityTooLarge`), a file
+over 5 TiB. Kiln writes its own sentence for each, naming the store's error
+code; it never shows the text a store sends with it.
+
+Each request emits the `[:kiln_cms, :backups, :s3, :request]` telemetry
+event, with its `duration`, `operation`, `method`, `status` and `class`
+(`:ok`, `:transient`, `:permanent`, …), and never a key, a URL, a header or
+a body.
+
+<a id="retention-on-an-s3-bucket"></a>
+
+#### Retention on an S3 bucket
+
+Retention works as on any destination
+([Retention on a destination](#retention-on-a-destination)), with these
+limits:
+
+- **Not while `BACKUP_RCLONE_REMOTE` is set.** An rclone remote can name the
+  same bucket under any name, so Kiln can't tell that the two don't overlap.
+  Each pass is skipped with "can't confirm it doesn't overlap
+  BACKUP_RCLONE_REMOTE; nothing was deleted", as for a plugin's destination
+  ([ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)).
+  Untick retention on the S3 destination and use a lifecycle rule, or unset
+  `BACKUP_RCLONE_REMOTE`.
+- **Two S3 destinations overlap** only when they have the same endpoint host
+  and port (case and the default port ignored) and the same bucket, and one
+  prefix is inside the other. Such a destination can't be saved. Two names
+  for one store are not caught: `s3.amazonaws.com` and
+  `s3.us-east-1.amazonaws.com`, or a MinIO by name and by IP address, look
+  like two stores. **Don't point two destinations at one bucket** unless
+  their prefixes are separate.
+- **A versioned bucket keeps what retention deletes.** A delete there adds a
+  delete marker and keeps the old version, which still costs storage. Add a
+  lifecycle rule that expires noncurrent versions, or use a bucket without
+  versioning.
+- **Object Lock keeps locked versions** until their retention date,
+  whatever Kiln deletes. If you lock backups, size the lock to your
+  retention, or untick retention here.
+
+<a id="what-can-go-wrong-with-an-s3-destination"></a>
+
+#### What can go wrong with an S3 destination
+
+When saving:
+
+| Message | Meaning |
+|---|---|
+| "the endpoint must use https:// (http:// only for a host in BACKUP_S3_PRIVATE_HOSTS)" | An `http://` endpoint whose host isn't listed. Use `https://`, or list the host ([above](#reach-a-store-on-your-own-network)). |
+| "the endpoint resolves to a private or loopback address; list its host in BACKUP_S3_PRIVATE_HOSTS to allow it" | A store on your network. List the name Kiln connects to. |
+| "the endpoint must not be a .local or .internal host unless BACKUP_S3_PRIVATE_HOSTS lists it", "the endpoint must not be a loopback host" | As it says. |
+| "the endpoint resolves to a link-local or metadata address, which no setting allows", "the endpoint must not be a metadata host" | No listing allows these. |
+| "kiln-backups.minio.lan: hostname could not be resolved" | The name Kiln connects to doesn't resolve on this node. Without **Path style** that is `<bucket>.<host>`: tick **Path style**, or fix DNS. A host with only IPv6 addresses reads this way too. |
+| "the endpoint must not have a path", "the endpoint must be a bare URL", "the endpoint must not contain credentials" | Enter the scheme, host and port only. The bucket goes in **Bucket**, the folder in **Prefix**, the keys in their own fields. |
+| "the bucket name must be 3 to 63 lowercase letters, digits, dots and hyphens, …" and the other bucket-name messages | The name breaks S3's naming rules. |
+| "the region must be lowercase letters, digits and hyphens, e.g. us-east-1 or auto" | As it says. |
+| "the prefix must be folder names of letters, digits, dots, hyphens and underscores, separated by /" | No spaces or other characters, no `.` or `..` folder. |
+| "the access key id must not contain spaces" | Usually a paste with a space in it. |
+| "this is, contains or is inside another destination; choose a place of its own" | Another S3 destination has this bucket on this endpoint with a prefix inside or around this one. |
+
+On a Test or a backup (on a Test, after the step: "checking the bucket: …"):
+
+| Error | What to do |
+|---|---|
+| "the store refused access (AccessDenied); check the key's permissions", "the store refused to read the file (AccessDenied); …" | The key lacks a permission ([above](#give-the-key-only-what-it-needs)), often `s3:ListBucket`, or the bucket's own policy refuses it. |
+| "the store doesn't know the access key id (InvalidAccessKeyId)", "the store refused the secret access key (SignatureDoesNotMatch)" | Re-enter both keys on **Edit**. |
+| "the bucket does not exist (NoSuchBucket)", "the bucket does not exist" | Check **Bucket** and the endpoint (an R2 bucket is under its account's endpoint). |
+| "the bucket is in the region eu-west-1; set the region (and endpoint) to match", "the bucket is in another region or behind another endpoint; …", "the store refused the request's region (AuthorizationHeaderMalformed); check the region" | The region, or the endpoint, is not the bucket's. |
+| "this server's clock is more than 5 minutes off the store's (RequestTimeTooSkewed); fix the clock (NTP)" | Fix the server's clock; no retry helps. |
+| "the endpoint answered with a redirect (HTTP 302); check the endpoint" | The endpoint is not the store's S3 API (a web console's address, say). Kiln never follows a redirect. |
+| "the store refused a part of the upload (InvalidPart)", "the file is larger than the store accepts (EntityTooLarge)" | The store refused the upload for good; that upload is aborted. The next backup starts the file over. |
+| "the store failed the request (HTTP 500, InternalError)", "the store asked to slow down (SlowDown)", "couldn't reach the store (timeout)", "the store refused the request (HTTP 400)" | Retried six times; this is the last answer. The next attempt of the step tries again, continuing the upload. |
+| "the store's answer was larger than the 8388608 bytes expected; it was cut off" | The store sent far more than an S3 answer holds. Check the endpoint. |
+| "kiln-media-20261117-031700.part01.tar.gz is larger than the 5 TiB an S3 object can hold" | S3 holds no larger object, so this file can't go to an S3 destination; nothing was sent. |
+| "the file read back doesn't match its sha256; it was not kept" | A read from the store didn't match the object's `x-amz-meta-kiln-sha256`. |
+| "… timed out after 30 s" (a Test) | The store didn't answer in time, or its retries ran past the Test's 30 seconds. |
+
 ### Manage destinations from a release console
 
 The tab's code interfaces work from a release console too, with an actor
@@ -3182,9 +3531,11 @@ IO.inspect(Map.take(d, [:name, :kind, :enabled, :prune, :settings, :last_test_ok
 #   name: "NAS", prune: true, settings: %{"path" => "/mnt/nas/kiln"}}
 ```
 
-`kind` is `"local"` or `"rclone"` (settings `"remote_name"` and `"path"`),
-or a plugin's kind; a plugin's secret fields go in a `secrets:` map beside
-`settings`. A refused save is `{:error, %Ash.Error.Invalid{}}` with the
+`kind` is `"local"`, `"rclone"` (settings `"remote_name"` and `"path"`),
+`"s3"` (settings `"endpoint"`, `"region"`, `"bucket"`, `"prefix"` and
+`"path_style"`, a boolean; secrets `"access_key_id"` and
+`"secret_access_key"`), or a plugin's kind; secret fields go in a
+`secrets:` map beside `settings`. A refused save is `{:error, %Ash.Error.Invalid{}}` with the
 messages in the table [below](#what-can-go-wrong-with-a-destination). The
 other calls, each with `actor: admin`:
 `KilnCMS.Backups.list_backup_destinations/1`,
@@ -3266,7 +3617,7 @@ says so). What it did is on the run's log:
 | "Retention on NAS removed 4 file(s) from 2 backup(s)" | Those backups were deleted there, and are marked `pruned` for that destination in History. |
 | "Retention on NAS skipped: it overlaps BACKUP_RCLONE_REMOTE; nothing was deleted" | The destination is, contains or is inside the env remote, which changed since the destination was added. Point the two at separate places. |
 | "Retention on NAS skipped: it overlaps another backup destination; nothing was deleted" | Two destinations share a place. Delete one. |
-| "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, while `BACKUP_RCLONE_REMOTE` is set. Untick retention on it and prune it yourself, or unset the env remote. |
+| "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, or an S3 destination, which can't be compared with an rclone remote, while `BACKUP_RCLONE_REMOTE` is set ([Retention on an S3 bucket](#retention-on-an-s3-bucket)). Untick retention on it and prune it yourself, or unset the env remote. |
 | "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed. Nothing is deleted on a guess. |
 | "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed; the pass stopped there. The next backup tries again. |
 
@@ -3295,6 +3646,9 @@ where it writes, and its credentials.
 - **Rclone remotes** keep their credentials in rclone's configuration
   (`rclone.conf` or `RCLONE_CONFIG_<NAME>_*`), never in the database. Back
   that configuration up as you would the app's environment.
+- **An S3 destination's** endpoint, bucket, prefix and region are on its
+  row; keep them, and the key pair (or a way to make a new one), outside
+  Kiln. Its two keys are secret fields, stored as below.
 - **A plugin's destination** may have secret fields. Those are stored in
   the database, encrypted with a key derived from `SECRET_KEY_BASE`, and
   never shown again. Rotating `SECRET_KEY_BASE` keeps them with
@@ -3306,6 +3660,9 @@ where it writes, and its credentials.
   enter the secret fields again and **Save destination**.
 
 ### What can go wrong with a destination
+
+An S3 destination's own messages are in
+[What can go wrong with an S3 destination](#what-can-go-wrong-with-an-s3-destination).
 
 When saving (the form shows the message under the field, or above the form):
 
@@ -3370,10 +3727,11 @@ backup over. On a destination whose adapter can resume, the next attempt
 continues that upload from where it stopped instead of sending the whole
 file again (#2223).
 
-**Which destinations resume.** Only an adapter that opts in
-([below](#a-plugin-opts-in)). None of Kiln's own does yet: a **Directory on
-this server**, an **Rclone remote** and `BACKUP_RCLONE_REMOTE` send each file
-whole, as before. There is nothing to configure. The upgrade only needs
+**Which destinations resume.** An **S3-compatible storage** destination
+([Back up to S3-compatible storage](#back-up-to-s3-compatible-storage)), and
+a plugin's adapter that opts in ([below](#a-plugin-opts-in)). A **Directory
+on this server**, an **Rclone remote** and `BACKUP_RCLONE_REMOTE` send each
+file whole, as before. There is nothing to configure. The upgrade only needs
 `mix ash.migrate`, which creates the `backup_uploads` table.
 
 **What is recorded, and where.** One row in `backup_uploads`, in Kiln's
@@ -3492,10 +3850,11 @@ kiln-media-20261117-031700.part01.tar.gz on NAS at 268435456 of 1073741824
 bytes", or "… from its last checkpoint" when the adapter doesn't report its
 progress.
 
-**Set a lifecycle rule on the bucket.** Once you use an S3-style adapter
-that resumes, also set the bucket's own lifecycle rule for incomplete
-multipart uploads, for example "abort incomplete multipart uploads after 7
-days". Kiln aborts only the uploads it recorded. It never lists the store's
+**Set a lifecycle rule on the bucket.** Once you use an S3 destination, or
+another S3-style adapter that resumes, also set the bucket's own lifecycle
+rule for incomplete multipart uploads, for example "abort incomplete
+multipart uploads after 7 days"
+([Set a lifecycle rule for unfinished uploads](#set-a-lifecycle-rule-for-unfinished-uploads)). Kiln aborts only the uploads it recorded. It never lists the store's
 own pending uploads, so it never aborts:
 
 - an upload cut off before its first checkpoint was saved;
@@ -4138,12 +4497,16 @@ backups are. Work from the copy you kept outside Kiln
      rclone configured for that remote again;
    - a **Directory on this server** destination (a NAS share, a second
      disk, mounted on the new host): `cp /mnt/nas/kiln/db/<newest>.dump .`
+   - an **S3-compatible storage** destination: any S3 client, with the
+     endpoint, bucket, prefix and a key you kept, for example
+     `aws s3 cp s3://kiln-backups/kiln/site/db/<newest>.dump . --endpoint-url https://s3.eu-west-1.amazonaws.com`.
 
    Take the backup's `kiln-db-<stamp>.sha256` with it, into the same
    directory as the dump and under its own name: `restore.sh` checks the
    dump against it in the next step. A destination that was failing lacks
    the newest backups, so list each one
-   (`rclone lsf nas:kiln-backups/site/db/`, `ls /mnt/nas/kiln/db/`) and take
+   (`rclone lsf nas:kiln-backups/site/db/`, `ls /mnt/nas/kiln/db/`,
+   `aws s3 ls s3://kiln-backups/kiln/site/db/`) and take
    the newest stamp that has both its dump and its `.sha256`.
 3. **Restore the database:**
    ```bash

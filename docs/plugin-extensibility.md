@@ -514,7 +514,9 @@ as declaring none.
 In-app backups copy their files to `BACKUP_DIR`, to `BACKUP_RCLONE_REMOTE`,
 and to every destination a platform admin adds on the Backups page's
 **Destinations** tab ([Send backups to several destinations](backups.md#send-backups-to-several-destinations)).
-Kiln's own kinds are a directory on the server and a named rclone remote. A
+Kiln's own kinds are a directory on the server, a named rclone remote and
+an S3-compatible bucket
+([Back up to S3-compatible storage](backups.md#back-up-to-s3-compatible-storage)). A
 plugin adds another store from its entry module, with
 `backup_destinations/0` (`kiln_plugin` 1.5; require
 `{:kiln_plugin, "~> 1.5"}`). It works from a Mix dependency: the contract,
@@ -591,7 +593,7 @@ What the core holds an adapter to:
   destination is skipped.
 - **`kind/0` is stored on every destination of the adapter**, so it never
   changes once released: lowercase letters, digits and `_`, at most 32
-  characters. `local` and `rclone` are Kiln's, and of two modules declaring
+  characters. `local`, `rclone` and `s3` are Kiln's, and of two modules declaring
   one kind the first registered wins. `mix kiln.plugins.doctor` reports a
   module that doesn't implement the behaviour, an unusable kind, and a kind
   that is taken; `mix kiln.plugins.list` counts each plugin's backup
@@ -738,6 +740,10 @@ def abort_upload(_config, _upload, _opts), do: :ok
 `test/support/backup_destinations.ex` in the KilnCMS repository has a
 complete resumable adapter (`ResumableFake`) that the core's tests drive
 through the whole backup chain.
+Kiln's own S3 destination, `KilnCMS.Backups.Destination.S3`, is a
+production adapter that resumes: its checkpoint keeps the store's upload
+id, the parts done and a sha256 over their `(number, ETag, size)`, which
+`ListParts` must reproduce before it trusts the checkpoint.
 
 Cron (`scripts/backup.sh`) never sends to a plugin's destination. A plugin
 built against `kiln_plugin` older than 1.5 has no `backup_destinations/0`;

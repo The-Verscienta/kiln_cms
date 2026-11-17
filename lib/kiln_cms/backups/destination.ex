@@ -6,8 +6,8 @@ defmodule KilnCMS.Backups.Destination do
 
   The behaviour every adapter implements is `Kiln.BackupDestination`, in the
   plugin SDK, so Kiln's own adapters (`KilnCMS.Backups.Destination.Rclone`,
-  `KilnCMS.Backups.Destination.Local`) and a plugin's are the same kind of
-  thing. This module is the core's side of it:
+  `KilnCMS.Backups.Destination.Local`, `KilnCMS.Backups.Destination.S3`) and
+  a plugin's are the same kind of thing. This module is the core's side of it:
 
     * `registry/0` — every installed adapter, by `kind/0`;
     * `active/0` — the destinations a backup starting now sends to, as plain
@@ -34,13 +34,13 @@ defmodule KilnCMS.Backups.Destination do
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, DestinationConfig, RcloneRemote, Redact}
-  alias KilnCMS.Backups.Destination.{Local, Rclone}
+  alias KilnCMS.Backups.Destination.{Local, Rclone, S3}
 
   require Logger
 
   # Kiln's own adapters. First in the registry, so a plugin can never take
   # over the kind a stored destination of Kiln's carries.
-  @core [Rclone, Local]
+  @core [Rclone, Local, S3]
 
   # The bound on one adapter call made outside a backup step (a Test, a
   # task), unless the caller passes `:timeout` or `:deadline`. A step passes
@@ -81,7 +81,7 @@ defmodule KilnCMS.Backups.Destination do
   A module that does not load, does not implement `Kiln.BackupDestination`,
   or answers no usable `kind/0` is left out, and so is one whose kind an
   earlier module already has: the first one listed keeps it, so a plugin
-  cannot displace Kiln's own `local` or `rclone`. `mix kiln.plugins.doctor`
+  cannot displace Kiln's own `local`, `rclone` or `s3` (`core_kinds/0`). `mix kiln.plugins.doctor`
   reports both.
   """
   @spec registry() :: [module()]
@@ -97,6 +97,13 @@ defmodule KilnCMS.Backups.Destination do
     |> Enum.uniq_by(fn {kind, _module} -> kind end)
     |> Enum.map(fn {_kind, module} -> module end)
   end
+
+  @doc """
+  The kinds of Kiln's own adapters: `"rclone"`, `"local"` and `"s3"`. No
+  plugin can take one over.
+  """
+  @spec core_kinds() :: [String.t()]
+  def core_kinds, do: Enum.map(@core, & &1.kind())
 
   @doc "The installed adapter for `kind`, or `{:error, :not_installed}`."
   @spec adapter(String.t()) :: {:ok, module()} | {:error, :not_installed}
@@ -355,6 +362,12 @@ defmodule KilnCMS.Backups.Destination do
 
   ## Files and locations
 
+  @typedoc "Where a destination writes, as `location/1` normalizes it."
+  @type location ::
+          Rclone.location()
+          | {:s3, String.t(), non_neg_integer(), String.t(), [String.t()]}
+          | :unknown
+
   @doc """
   Whether `name` is a whole backup file: an artifact or a checksum sidecar,
   named as `scripts/backup.sh` names them, and not a `.partial` upload.
@@ -370,12 +383,14 @@ defmodule KilnCMS.Backups.Destination do
 
   @doc """
   Where `config` writes, normalized for `overlap?/2`: `{:rclone, name,
-  segments}` or `{:local, segments}` for Kiln's own adapters, `:unknown` for
-  a plugin's, whose settings mean nothing here.
+  segments}`, `{:local, segments}` or `{:s3, host, port, bucket, segments}`
+  for Kiln's own adapters, `:unknown` for a plugin's, whose settings mean
+  nothing here.
   """
-  @spec location(Config.t()) :: Rclone.location() | :unknown
+  @spec location(Config.t()) :: location()
   def location(%Config{kind: "rclone"} = config), do: Rclone.location(config)
   def location(%Config{kind: "local"} = config), do: Local.location(config)
+  def location(%Config{kind: "s3"} = config), do: S3.location(config)
   def location(%Config{}), do: :unknown
 
   @doc """
@@ -387,6 +402,7 @@ defmodule KilnCMS.Backups.Destination do
   @spec location_fields(String.t()) :: [String.t()]
   def location_fields("rclone"), do: ["remote_name", "path"]
   def location_fields("local"), do: ["path"]
+  def location_fields("s3"), do: ["endpoint", "bucket", "prefix"]
   def location_fields(_kind), do: []
 
   @doc """
@@ -396,9 +412,14 @@ defmodule KilnCMS.Backups.Destination do
   sent (critic change 2), so a new destination must overlap none. An
   `:unknown` location overlaps nothing that can be told.
   """
-  @spec overlap?(Rclone.location() | :unknown, Rclone.location() | :unknown) :: boolean()
+  @spec overlap?(location(), location()) :: boolean()
   def overlap?({:rclone, name, a}, {:rclone, name, b}), do: nested?(a, b)
   def overlap?({:local, a}, {:local, b}), do: nested?(a, b)
+
+  # The same store (host and port) and bucket, one prefix inside the other.
+  # An S3 location is never compared with an rclone remote, which may name
+  # the same bucket under any name: retention treats that pair as unknown.
+  def overlap?({:s3, host, port, bucket, a}, {:s3, host, port, bucket, b}), do: nested?(a, b)
   def overlap?(_a, _b), do: false
 
   defp nested?(a, b), do: List.starts_with?(a, b) or List.starts_with?(b, a)

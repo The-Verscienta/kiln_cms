@@ -239,8 +239,8 @@ defmodule Kiln.BackupDestination do
   @doc """
   The stable identifier stored on each destination of this adapter. Rows
   outlive module names, so this must never change once destinations carry
-  it. Lowercase letters, digits and `_`, at most 32 characters. `local` and
-  `rclone` are Kiln's own.
+  it. Lowercase letters, digits and `_`, at most 32 characters. `local`,
+  `rclone` and `s3` are Kiln's own.
   """
   @callback kind() :: String.t()
 

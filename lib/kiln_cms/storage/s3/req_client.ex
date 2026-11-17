@@ -28,6 +28,14 @@ defmodule KilnCMS.Storage.S3.ReqClient do
   put on the request is what the store sees, so the signature still matches.
   And it follows no redirect: a redirect is a fresh resolution the pin never
   sees, and a store has no reason to send one.
+
+  ## A backup destination's store (#2221)
+
+  `KilnCMS.Backups.Destination.S3` asks for the same pinning with
+  `pinned: true` (and `pinned_address:`), and may pass its own
+  `receive_timeout:` and `req_options:`. Those `req_options` apply after this
+  module's config, so the test env can route a backup store's requests to a
+  `Req.Test` stub of their own.
   """
   @behaviour ExAws.Request.HttpClient
 
@@ -64,13 +72,23 @@ defmodule KilnCMS.Storage.S3.ReqClient do
     )
     |> Keyword.merge(site_options(url, http_opts, connect_timeout))
     |> Keyword.merge(Keyword.get(config, :req_options, []))
+    |> Keyword.merge(caller_options(http_opts))
   end
+
+  # A backup destination's own bound and Req options, over the config's.
+  defp caller_options(http_opts) when is_list(http_opts) do
+    http_opts
+    |> Keyword.take([:receive_timeout])
+    |> Keyword.merge(Keyword.get(http_opts, :req_options, []))
+  end
+
+  defp caller_options(_http_opts), do: []
 
   # See "A site's own store" above. `pinned_address: nil` is the not-pinning
   # case (`allow_private_hosts`, or DNS resolution off in the test env): the URL
   # as given, still without redirects.
   defp site_options(url, http_opts, connect_timeout) when is_list(http_opts) do
-    if Keyword.get(http_opts, :site_storage) == true do
+    if Keyword.get(http_opts, :site_storage) == true or Keyword.get(http_opts, :pinned) == true do
       url
       |> KilnCMS.SafeFetch.connect_target(
         Keyword.get(http_opts, :pinned_address),

@@ -60,7 +60,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Destination, DestinationConfig}
-  alias KilnCMS.Backups.Destination.Local
+  alias KilnCMS.Backups.Destination.{Local, S3}
   alias KilnCMS.Backups.DestinationConfig.Fields
 
   @impl true
@@ -605,6 +605,9 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp location_text(%DestinationConfig{kind: "local", settings: settings}),
     do: settings["path"]
 
+  defp location_text(%DestinationConfig{kind: "s3"} = row),
+    do: S3.describe(%Kiln.BackupDestination.Config{kind: "s3", settings: row.settings || %{}})
+
   defp location_text(_row), do: nil
 
   defp stamp(%DateTime{} = at), do: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
@@ -1002,6 +1005,11 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
         <p class="-mt-1 text-xs text-base-content/70">
           {gettext(
             "Retention here deletes only backups this installation sent to this destination, by the same rules as on this server, and only on destinations that can list and delete."
+          )}
+        </p>
+        <p :if={@kind == "s3"} id="destination-s3-hint" class="text-xs text-base-content/70">
+          {gettext(
+            "Add a lifecycle rule to the bucket that aborts incomplete multipart uploads after a few days: Kiln aborts the uploads it recorded, but not one a crash left before it could record it."
           )}
         </p>
 

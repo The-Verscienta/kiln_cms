@@ -20,7 +20,11 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
        another destination (`Destination.overlap?/2`);
     9. the adapter's own `validate/1` accepts it, run through
        `Destination.call/4` (bounded, isolated, its error scrubbed of the
-       secrets).
+       secrets);
+   10. for an S3 destination (#2221), its endpoint resolves only to
+       addresses it may reach (`KilnCMS.Backups.Destination.S3.Endpoint.pin/2`):
+       `validate/1` stays offline, as the contract asks, so the DNS check is
+       the core's, here, and again before every call.
 
   An update that changes neither the settings nor the secrets, and does not
   enable the destination, is not checked: a destination whose plugin was
@@ -37,6 +41,7 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Destination, DestinationConfig}
+  alias KilnCMS.Backups.Destination.S3
   alias KilnCMS.Backups.DestinationConfig.Changes.StoreSecrets
   alias KilnCMS.Backups.DestinationConfig.Fields
 
@@ -76,8 +81,9 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
          {:ok, config} <- with_secrets(changeset, config),
          :ok <- required(config, fields),
          :ok <- cap(changeset),
-         :ok <- no_overlap(changeset, config) do
-      adapter_valid(config)
+         :ok <- no_overlap(changeset, config),
+         :ok <- adapter_valid(config) do
+      reachable(config)
     end
   end
 
@@ -310,6 +316,17 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
       _other -> :ok
     end
   end
+
+  defp reachable(%Config{kind: "s3", settings: settings}) do
+    with {:ok, endpoint} <- S3.Endpoint.parse(settings),
+         {:ok, _address} <- S3.Endpoint.pin(endpoint) do
+      :ok
+    else
+      {:error, reason} -> error(:settings, Destination.format_reason(reason), [])
+    end
+  end
+
+  defp reachable(_config), do: :ok
 
   defp unreadable do
     error(

@@ -222,3 +222,13 @@ if config_env() == :dev do
     config :kiln_cms, KilnCMS.Backups, local_destination_roots: roots
   end
 end
+
+# S3 backup destinations (#2221): the hosts an admin may point one at that
+# resolve to a private or loopback address, or that are reached over
+# http:// (a MinIO or Garage on the LAN). Exact names, comma-separated. Read
+# in every environment, so a developer's MinIO works as a release's does.
+# Down here so no anchor above shifts.
+if raw = System.get_env("BACKUP_S3_PRIVATE_HOSTS") do
+  config :kiln_cms, KilnCMS.Backups.Destination.S3,
+    private_hosts: KilnCMS.Backups.Destination.S3.Endpoint.parse_private_hosts(raw)
+end

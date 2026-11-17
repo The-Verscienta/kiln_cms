@@ -87,12 +87,12 @@ carries the reasoning.
 
 <a id="resumable-backup-uploads-upgrade"></a>
 
-- **Run `mix ash.migrate` (new table `backup_uploads`, part of #2223). No new environment variables; rolling back is safe.**
+- **Run `mix ash.migrate` (new table `backup_uploads`, part of #2223). No environment variable to set; rolling back is safe.**
   The additive migration `add_backup_uploads` creates the table in which an
   in-app backup records the uploads a resumable destination adapter has
   under way (see *Backup uploads can resume* under Added). It has no foreign
-  key and starts empty, and stays empty until a destination whose adapter
-  declares `:resume` is used: none of Kiln's own adapters does yet. A
+  key and starts empty, and stays empty until an S3 destination, or a
+  plugin's destination whose adapter declares `:resume`, is used. A
   release before this one ignores the table, so rolling back is safe; an
   upload left open across the rollback is resumed or swept after rolling
   forward. The staging scrub purges the table and reports
@@ -753,14 +753,14 @@ carries the reasoning.
   `{:kiln_plugin, "~> 1.5"}`. `mix kiln.plugins.list` counts each plugin's
   backup destinations, and `mix kiln.plugins.doctor` checks that each one
   implements the behaviour and has a usable `kind/0` that neither
-  `local`, `rclone` nor another module already has. See *Backup
+  `local`, `rclone`, `s3` nor another module already has. See *Backup
   destinations* in [plugin-extensibility.md](../plugin-extensibility.md).
 
 <a id="resumable-backup-uploads"></a>
 
 - **Backup uploads can resume: on a destination whose adapter opts in, an off-site upload cut off by a timeout, a retry, a node that died or a reclaim continues from its last checkpoint on the next attempt (part of #2223).**
-  No adapter that ships with Kiln resumes yet; a plugin's can, from
-  `kiln_plugin` 1.5, and an S3 destination is to follow (#2221). Each
+  Kiln's S3 destination resumes (#2221, *S3-compatible storage* below), and
+  a plugin's adapter can, from `kiln_plugin` 1.5. Each
   upload under way is a row in the new `backup_uploads` table
   (`KilnCMS.Backups.Upload`, system-only), keyed by the destination and the
   file, owned by the step's Oban job and attempt. Ownership only moves
@@ -807,6 +807,84 @@ carries the reasoning.
   [Resumable uploads](../backups.md#resumable-uploads), and what a plugin
   implements is in
   [plugin-extensibility.md](../plugin-extensibility.md#resumable-uploads-in-a-backup-destination).
+
+<a id="s3-backup-destination"></a>
+
+- **Backups → Destinations has a new kind, S3-compatible storage: AWS S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO or Garage, with resumable multipart uploads and retention. A store on your own network needs its host in the new `BACKUP_S3_PRIVATE_HOSTS` (#2221; closes the second half of #2223).**
+  A platform admin adds it on the **Destinations** tab like any destination:
+  **Endpoint**, **Region** (`auto` for R2), **Bucket**, an optional
+  **Prefix**, **Path style**, and the key pair, **Access key** and **Secret
+  access key**, both stored encrypted under `SECRET_KEY_BASE` and never
+  shown again. Save checks the settings and resolves the endpoint without
+  contacting the store; **Test** checks the bucket (`HeadBucket`), compares
+  the store's clock with this server's, lists one key, and writes, reads
+  back and deletes a probe under `<prefix>/.kiln-test/`. Files land as in
+  `BACKUP_DIR`, under `<prefix>/db/` and `<prefix>/media/`, and every object
+  carries the file's SHA-256 as `x-amz-meta-kiln-sha256`. The key needs
+  `s3:ListBucket`, `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`,
+  `s3:AbortMultipartUpload` and `s3:ListMultipartUploadParts`; without
+  `s3:ListBucket` a missing file answers `403`, which reads as refused
+  access.
+
+  **Uploads.** A file the bucket already holds with the same size and
+  SHA-256 is not sent again. A file under 16 MiB goes in one request; a
+  larger one in sequential parts of at least 16 MiB, each with
+  `Content-MD5`, recorded as the store acknowledges it, so a cut-off upload
+  resumes on the next attempt (see *Backup uploads can resume* above).
+  Before trusting its record, a resume lists the parts the store holds and
+  checks a digest of their numbers, ETags and sizes; it doesn't assume an
+  ETag is an MD5, so a bucket with SSE-KMS or MinIO's encryption resumes as
+  well. Before completing, the file's SHA-256 must equal the verified one,
+  and after completing a `HEAD` confirms the object's size and SHA-256
+  metadata, which also catches a `200` answer that carries an `<Error>`.
+
+  **Failures.** Refused credentials, a missing bucket, the wrong region
+  (named, when the store's `301` gives it), a clock more than five minutes
+  off, `InvalidPart`, `EntityTooLarge`, and a file over 5 TiB fail the
+  destination at once, as a permanent failure, and its recorded upload is
+  aborted. A `5xx`, `SlowDown`, a `429`, a timeout and any other `4xx` are
+  retried up to six times with full-jitter backoff (1 s base, 30 s cap),
+  never into the last 30 seconds before the step's deadline. Kiln writes its
+  own sentence for each error and never shows the store's `<Message>`. Each
+  request emits `[:kiln_cms, :backups, :s3, :request]`, without a key, URL,
+  header or body.
+
+  **Where it may connect.** The endpoint must be `https://` and resolve only
+  to public addresses, checked on save and again before every call, and
+  each call connects to the address it checked, following no redirect. The
+  operator opens a private or loopback store, and `http://`, by listing its
+  exact host name in `BACKUP_S3_PRIVATE_HOSTS` (the name connected to:
+  the host with **Path style** ticked, else `<bucket>.<host>`). No listing
+  opens a link-local or cloud-metadata address, including through NAT64 or
+  6to4. A name that doesn't resolve on the node serving the page can't be
+  saved, and a host name with only IPv6 addresses reads as not resolving;
+  an IPv6 literal works. The request never uses the app's own `:ex_aws`
+  configuration, so the media store's credentials can't reach a host an
+  admin typed. The reasoning is in
+  [ADR 0069](../decisions/0069-an-admin-entered-backup-endpoint-is-pinned-per-call-and-only-the-operator-opens-private-hosts.md).
+
+  **Retention** runs as on any destination, with two limits. While
+  `BACKUP_RCLONE_REMOTE` is set it is skipped on an S3 destination ("can't
+  confirm it doesn't overlap BACKUP_RCLONE_REMOTE"), since a remote may name
+  the same bucket under any name (ADR 0064). Two S3 destinations overlap
+  only on the same endpoint host and port, the same bucket and nested
+  prefixes, so two names for one store (`s3.amazonaws.com` and
+  `s3.us-east-1.amazonaws.com`) aren't caught: don't point two destinations
+  at one bucket. On a versioned bucket a delete leaves the old version.
+
+  **Set a lifecycle rule** on the bucket that aborts incomplete multipart
+  uploads after a few days (seven, say): Kiln aborts only the uploads it
+  recorded, and the form says so under the S3 fields. Storage classes and
+  server-side encryption headers (#2224) are not set.
+
+  Nothing to migrate beyond the `backup_uploads` table above;
+  `BACKUP_S3_PRIVATE_HOSTS` is needed only for a store on a private network
+  or over `http://`, and is read in every environment. `mix
+  kiln.plugins.doctor` now reports a plugin kind `s3` as taken, and
+  `KilnCMS.Backups.Destination.core_kinds/0` lists Kiln's own kinds. How to
+  set it up, with each provider's settings, an IAM policy and the lifecycle
+  rule:
+  [Back up to S3-compatible storage](../backups.md#back-up-to-s3-compatible-storage).
 
 <a id="plugin-staging-scrub"></a>
 

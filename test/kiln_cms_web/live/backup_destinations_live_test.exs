@@ -343,6 +343,91 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
     end
   end
 
+  describe "an S3 destination (#2221)" do
+    @key_id "AKIDS3FORMTEST"
+    @s3_secret "s3-form-secret-access-key"
+
+    test "both keys are write-only, the lifecycle hint is shown, and the row says where", %{
+      conn: conn
+    } do
+      lv = mount(conn)
+      lv |> element("#destination-new") |> render_click()
+      lv |> element("#destination-kind-s3") |> render_click()
+
+      for name <- ["access_key_id", "secret_access_key"] do
+        assert has_element?(
+                 lv,
+                 "input#destination-new-#{name}[type=password][name='destination[secrets][#{name}]'][value='']"
+               )
+      end
+
+      assert has_element?(lv, "#destination-s3-hint", "lifecycle rule")
+
+      html =
+        lv
+        |> form("#destination-form",
+          destination: %{
+            name: "Bucket",
+            settings: %{
+              endpoint: "https://s3.test",
+              region: "auto",
+              bucket: "kiln-backups",
+              prefix: "/site/",
+              path_style: "true"
+            },
+            secrets: %{access_key_id: @key_id, secret_access_key: @s3_secret}
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "Destination added."
+      refute html =~ @key_id
+      refute html =~ @s3_secret
+
+      assert [%{kind: "s3", settings: %{"path_style" => true}} = row] = all_destinations()
+      refute Map.has_key?(row.settings, "access_key_id")
+
+      assert {:ok, %{"access_key_id" => @key_id, "secret_access_key" => @s3_secret}} =
+               KilnCMS.Backups.DestinationConfig.decrypt_secrets(row.secrets_encrypted)
+
+      assert has_element?(
+               lv,
+               "#backup-destination-#{row.id} [data-role=location]",
+               "s3://kiln-backups/site (s3.test)"
+             )
+
+      # Editing: where it writes is fixed, and neither key comes back.
+      html = lv |> element("#backup-destination-#{row.id} [data-role=edit]") |> render_click()
+      refute html =~ @key_id
+      refute html =~ @s3_secret
+
+      for name <- ["endpoint", "bucket", "prefix"] do
+        assert has_element?(lv, "input#destination-#{row.id}-#{name}[readonly][data-locked=true]")
+      end
+
+      refute has_element?(lv, "input#destination-#{row.id}-region[readonly]")
+    end
+
+    test "an endpoint over http:// is refused unless its host is listed", %{conn: conn} do
+      lv = mount(conn)
+      lv |> element("#destination-new") |> render_click()
+      lv |> element("#destination-kind-s3") |> render_click()
+
+      lv
+      |> form("#destination-form",
+        destination: %{
+          name: "LAN",
+          settings: %{endpoint: "http://minio.lan:9000", region: "us-east-1", bucket: "kiln"},
+          secrets: %{access_key_id: @key_id, secret_access_key: @s3_secret}
+        }
+      )
+      |> render_submit()
+
+      assert has_element?(lv, "#destination-form-panel", "BACKUP_S3_PRIVATE_HOSTS")
+      assert all_destinations() == []
+    end
+  end
+
   describe "editing" do
     test "the secret is never filled in; blank keeps it; the change is audited", %{conn: conn} do
       row = fake!()
