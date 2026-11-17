@@ -1886,7 +1886,7 @@ defmodule KilnCMS.Backups.Steps do
           Recorder.put_run_destination(
             rec,
             key,
-            Map.merge(counts, %{status: :failed, error: destination_error(problems)})
+            Map.merge(counts, %{status: :failed, error: destination_error({:offsite, problems})})
           )
 
         {:fatal, {:offsite, problems}, state, rec}
@@ -2283,7 +2283,6 @@ defmodule KilnCMS.Backups.Steps do
   defp destination_error({:offsite, %{failed: failed}}),
     do: "FAILED for #{count_files(failed)}: " <> named(failed, &short_destination_failure/1)
 
-  defp destination_error({:permanent, message}) when is_binary(message), do: message
   defp destination_error(:removed), do: "removed or disabled during this backup"
   defp destination_error(:unreadable), do: "couldn't be read"
   defp destination_error(reason), do: Destination.format_reason(reason)

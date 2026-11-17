@@ -230,6 +230,40 @@ defmodule KilnCMS.Backups.UploadsTest do
       assert {:ok, _opts, _info} = Uploads.handle(config, put, target(config, 10, 2))
       assert [%Upload{status: :abandoned}] = rows()
     end
+
+    test "a changed file whose upload can't be abandoned is sent whole, recording nothing", %{
+      put: put,
+      store: store
+    } do
+      config = config(store)
+      seed_row(config, put, %{sha256: String.duplicate("b", 64)})
+
+      # The database refuses the abandon (and only it). Rolled back with the
+      # test's sandbox transaction; this module is not async, so no other
+      # test waits on the table meanwhile.
+      Repo.query!("""
+      CREATE FUNCTION pg_temp.refuse_abandon() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'abandon refused'; END $$ LANGUAGE plpgsql
+      """)
+
+      Repo.query!("""
+      CREATE TRIGGER refuse_abandon BEFORE UPDATE ON backup_uploads
+      FOR EACH ROW WHEN (NEW.status = 'abandoned') EXECUTE FUNCTION pg_temp.refuse_abandon()
+      """)
+
+      assert {:ok, opts, %{resumable?: false}} =
+               Uploads.handle(config, put, target(config, 10, 2))
+
+      refute Keyword.has_key?(opts, :resume)
+      assert Keyword.has_key?(opts, :deadline)
+      refute_received {:resumable_fake, :abort, _, _}
+
+      # The stale row is still the old file's, untouched by this put.
+      assert [%Upload{status: :open, sha256: sha, checkpoint: %{"upload_id" => "seeded"}}] =
+               rows()
+
+      assert sha == String.duplicate("b", 64)
+    end
   end
 
   describe "save" do
@@ -264,6 +298,36 @@ defmodule KilnCMS.Backups.UploadsTest do
                |> Task.await()
 
       assert [%Upload{owner_job_id: 21, checkpoint: %{"upload_id" => "b"}}] = rows()
+    end
+
+    test "a lazy open that races an older step's takes its row over and saves", %{
+      put: put,
+      store: store
+    } do
+      config = config(store)
+
+      {:ok, older, _} = Uploads.handle(config, put, target(config, 20, 1))
+      {:ok, newer, _} = Uploads.handle(config, put, target(config, 20, 2))
+
+      assert :ok = older[:resume].save.(%{upload_id: "a", offset: 0})
+
+      # The newer step's first save finds the older step's row: it claims it
+      # and records its own progress there.
+      assert :ok =
+               Task.async(fn -> newer[:resume].save.(%{upload_id: "b", offset: 64}) end)
+               |> Task.await()
+
+      assert [
+               %Upload{
+                 owner_job_id: 20,
+                 owner_attempt: 2,
+                 attempts: 2,
+                 checkpoint: %{"upload_id" => "b", "offset" => 64}
+               }
+             ] = rows()
+
+      # And the older step is now refused.
+      assert {:error, :superseded} = older[:resume].save.(%{upload_id: "a", offset: 128})
     end
 
     test "an oversized or non-JSON checkpoint is refused, and nothing is recorded", %{

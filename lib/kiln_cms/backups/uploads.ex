@@ -162,10 +162,7 @@ defmodule KilnCMS.Backups.Uploads do
 
           {:ok, opts(info, row), info}
         else
-          # The file changed since that upload started: what it sent is of
-          # another file. Abandoned first, so a failed abort is the sweep's.
-          give_up(config, row, info, :open, "the file changed; the upload started over")
-          {:ok, opts(info, nil), info}
+          changed(config, row, info)
         end
 
       {:error, :superseded} ->
@@ -175,6 +172,29 @@ defmodule KilnCMS.Backups.Uploads do
         Logger.warning(
           "Backup off-site: couldn't take over the upload of #{row.name} (#{short(error)}); " <>
             "it is sent whole"
+        )
+
+        {:ok, [deadline: info.deadline], %{resumable?: false}}
+    end
+  end
+
+  # The file changed since that upload started: what it sent is of another
+  # file. Abandoned first, so a failed abort is the sweep's, then the upload
+  # starts over. If it can't be abandoned, the row would still be open with
+  # the old file's metadata, and a fresh upload's progress would land in it:
+  # this put is sent whole and records nothing instead.
+  defp changed(config, row, info) do
+    case give_up(config, row, info, :open, "the file changed; the upload started over") do
+      :ok ->
+        {:ok, opts(info, nil), info}
+
+      {:error, :superseded} ->
+        {:error, :superseded}
+
+      {:error, error} ->
+        Logger.warning(
+          "Backup off-site: couldn't abandon the upload of #{row.name}, whose file changed " <>
+            "(#{short(error)}); it is sent whole"
         )
 
         {:ok, [deadline: info.deadline], %{resumable?: false}}
@@ -256,21 +276,54 @@ defmodule KilnCMS.Backups.Uploads do
         :ok
 
       {:error, error} ->
-        # Another step opened this file's upload first (`:unique_open`): it
-        # owns it, and this one stops. Any other failure is said as itself.
+        # Another step opened this file's upload first (`:unique_open`). An
+        # older step's row is this one's to take over, as `handle/3` would
+        # have; a newer step's (or another attempt's) owns it, and this one
+        # stops. Any other failure is said as itself.
         case open_row(fields) do
-          {:ok, %Upload{owner_job_id: job, owner_attempt: attempt} = row}
-          when job == fields.owner.job_id and attempt == fields.owner.attempt ->
+          {:ok, %Upload{} = row} -> open_taken(fields, row, checkpoint)
+          _none_or_unreadable -> {:error, "couldn't record the upload (#{short(error)})"}
+        end
+    end
+  end
+
+  defp open_taken(fields, row, checkpoint) do
+    cond do
+      owned_by?(row, fields.owner) ->
+        Process.put(cache_key(fields), row.id)
+        write_checkpoint(fields, row.id, checkpoint)
+
+      not older?(row, fields.owner) ->
+        {:error, :superseded}
+
+      row.bytes != fields.put.bytes or row.sha256 != fields.put.sha256 ->
+        # An older step's upload of another version of the file: the next
+        # attempt abandons it (`handle/3`); this one stops.
+        {:error, "an earlier upload of a different version of #{row.name} is still open"}
+
+      true ->
+        case claim(row, fields.owner) do
+          {:ok, row} ->
             Process.put(cache_key(fields), row.id)
             write_checkpoint(fields, row.id, checkpoint)
 
-          {:ok, %Upload{}} ->
-            {:error, :superseded}
+          {:error, :superseded} = superseded ->
+            superseded
 
-          _none_or_unreadable ->
-            {:error, "couldn't record the upload (#{short(error)})"}
+          {:error, error} ->
+            {:error, "couldn't take over the upload (#{short(error)})"}
         end
     end
+  end
+
+  defp owned_by?(row, owner),
+    do: row.owner_job_id == owner.job_id and row.owner_attempt == owner.attempt
+
+  # The row's owner is an older step than `owner`: an earlier job, or an
+  # earlier attempt of the same one.
+  defp older?(row, owner) do
+    row.owner_job_id < owner.job_id or
+      (row.owner_job_id == owner.job_id and row.owner_attempt < owner.attempt)
   end
 
   defp write_checkpoint(fields, id, checkpoint) do
@@ -316,11 +369,15 @@ defmodule KilnCMS.Backups.Uploads do
     do: complete(row, info)
 
   # Already there, with an upload of it under way: that upload is not needed.
-  defp settle_row(config, info, row, {:ok, :already_present}),
-    do: give_up(config, row, info, :open, "the file was already on the destination")
+  defp settle_row(config, info, row, {:ok, :already_present}) do
+    _ = give_up(config, row, info, :open, "the file was already on the destination")
+    :ok
+  end
 
-  defp settle_row(config, info, row, {:error, {:permanent, message}}),
-    do: give_up(config, row, info, :open, message)
+  defp settle_row(config, info, row, {:error, {:permanent, message}}) do
+    _ = give_up(config, row, info, :open, message)
+    :ok
+  end
 
   defp settle_row(_config, info, row, {:error, reason}) do
     Backups.note_backup_upload_error(
@@ -358,7 +415,9 @@ defmodule KilnCMS.Backups.Uploads do
   end
 
   # Abandon (so a failed abort is left to the sweep), then abort; aborted
-  # once the store says so.
+  # once the store says so. `:ok` once abandoned, whatever the abort did;
+  # `{:error, :superseded}` when the row was no longer this step's, else the
+  # error that kept it from being abandoned.
   defp give_up(config, row, info, from, why) do
     abandoned =
       Backups.abandon_backup_upload(
@@ -379,8 +438,9 @@ defmodule KilnCMS.Backups.Uploads do
           {:error, _reason} -> :ok
         end
 
-      error ->
-        logged(error, "abandon", row)
+      {:error, error} = failed ->
+        logged(failed, "abandon", row)
+        if stale?(error), do: {:error, :superseded}, else: {:error, error}
     end
   end
 

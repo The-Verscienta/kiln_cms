@@ -419,7 +419,7 @@ defmodule KilnCMS.Backups.FanoutTest do
       [a_log, b_log, c_log] = for n <- ~w(a b c), do: Path.join(base, "#{n}.log")
       # A appends to part 2 once it has been sent the checksum sidecars.
       fake!("A", 1, %{"log" => a_log, "tamper_after" => ".sha256"})
-      fake!("B", 2, %{"log" => b_log})
+      b = fake!("B", 2, %{"log" => b_log})
       fake!("C", 3, %{"log" => c_log})
 
       assert {:error, {:offsite, %{refused: [{p2, {:changed, _}}], failed: []}}} =
@@ -438,6 +438,9 @@ defmodule KilnCMS.Backups.FanoutTest do
 
       assert run.status == :failed
       assert run.error =~ "Off-site copy REFUSED for 1 file: #{p2} (changed on disk"
+      # B's own Run entry names the refusal, not an inspected problems map.
+      assert %{status: :failed, error: b_error} = entry(run, "dest:" <> b.id)
+      assert b_error =~ "REFUSED for 1 file: #{p2}"
       assert %{attempt: 1, state: "cancelled"} = offsite_job(2)
 
       [db, media] = run.artifacts
