@@ -2,9 +2,11 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
   @moduledoc """
   `KilnCMS.Accounts.ErasureBackfill` gives an account erased by an earlier
   release the erasure steps added since: demoting its site memberships
-  (#2774), which erasure used to leave granting a tier and audiences, and
+  (#2774), which erasure used to leave granting a tier and audiences;
   deleting its linked newsletter subscriptions (#2991), which erasure used to
-  leave mailing the real address.
+  leave mailing the real address; and #2514's steps, deleting its push
+  subscriptions, private saved views and own notifications and clearing the
+  audiences on its row.
   """
   use KilnCMS.DataCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
@@ -17,6 +19,18 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
   alias KilnCMS.Accounts.ErasureBackfill
   alias KilnCMS.Accounts.User
   alias KilnCMS.Newsletter
+
+  # A run that changed nothing; each test merges in what it expects.
+  @nothing %{
+    memberships: 0,
+    newsletter_accounts: 0,
+    newsletter_subscribers: 0,
+    audiences: 0,
+    push_subscriptions: 0,
+    saved_views: 0,
+    notifications: 0,
+    failed: 0
+  }
 
   defp user(attrs \\ %{}) do
     Ash.Seed.seed!(
@@ -63,8 +77,12 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
     KilnCMS.Repo.all(from(j in Oban.Job, where: j.worker == "KilnCMS.Accounts.ErasureBackfill"))
   end
 
-  # How many DELETEs on `newsletter_subscribers` `fun` sends, in this process.
-  defp count_subscriber_deletes(fun) do
+  defp count_subscriber_deletes(fun), do: count_deletes("newsletter_subscribers", fun)
+
+  # How many DELETEs on `table` `fun` sends, in this process.
+  defp count_deletes(table, fun) do
+    pattern = ~r/^DELETE FROM "#{table}"/
+
     id = {__MODULE__, make_ref()}
     parent = self()
 
@@ -72,7 +90,7 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
       id,
       [:kiln_cms, :repo, :query],
       fn _event, _measurements, %{query: query}, _config ->
-        if self() == parent and query =~ ~r/^DELETE FROM "newsletter_subscribers"/,
+        if self() == parent and query =~ pattern,
           do: send(parent, {id, :delete})
       end,
       nil
@@ -108,10 +126,9 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
     live = link(user(), Accounts.default_org_id())
 
     assert ErasureBackfill.run() == %{
-             memberships: 0,
-             newsletter_accounts: 1,
-             newsletter_subscribers: 2,
-             failed: 0
+             @nothing
+             | newsletter_accounts: 1,
+               newsletter_subscribers: 2
            }
 
     refute Enum.any?(rows, &exists?/1)
@@ -123,12 +140,7 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
 
     assert %{newsletter_accounts: 1} = ErasureBackfill.run()
 
-    assert ErasureBackfill.run() == %{
-             memberships: 0,
-             newsletter_accounts: 0,
-             newsletter_subscribers: 0,
-             failed: 0
-           }
+    assert ErasureBackfill.run() == @nothing
   end
 
   test "the job runs the pass" do
@@ -268,6 +280,168 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
 
       assert :ok = perform_job(ErasureBackfill, %{})
       assert %{role: :viewer} = reload(admin_row)
+    end
+  end
+
+  describe "what erasure deletes since #2514" do
+    alias KilnCMS.Accounts.PushSubscription
+    alias KilnCMS.CMS
+    alias KilnCMS.Notifications
+
+    @gated hd(KilnCMS.CMS.Audiences.gated())
+
+    defp push_subscription(user) do
+      Ash.Seed.seed!(PushSubscription, %{
+        user_id: user.id,
+        org_id: Accounts.default_org_id(),
+        endpoint: "https://push.example.com/x/#{System.unique_integer([:positive])}",
+        p256dh: "key",
+        auth: "auth",
+        label: "iOS · Safari",
+        vapid_public_key: "vapid"
+      })
+    end
+
+    defp saved_view(user, org_id, shared?) do
+      Ash.Seed.seed!(CMS.SavedView, %{
+        owner_id: user.id,
+        org_id: org_id,
+        name: if(shared?, do: "Team", else: "Mine"),
+        params: %{},
+        shared: shared?
+      })
+    end
+
+    defp notification(user, org_id) do
+      Notifications.record_notification!(
+        %{
+          user_id: user.id,
+          event: :comment_mention,
+          content_type: "page",
+          content_id: Ecto.UUID.generate(),
+          title: "A draft"
+        },
+        tenant: org_id
+      )
+    end
+
+    # One person's rows on two sites: a device, a private and a shared view
+    # on each, a notification on each, and audiences on the account row.
+    defp with_rows(user, sites) do
+      %{
+        push: push_subscription(user),
+        private: Enum.map(sites, &saved_view(user, &1, false)),
+        shared: Enum.map(sites, &saved_view(user, &1, true)),
+        notifications: Enum.map(sites, &notification(user, &1))
+      }
+    end
+
+    # An account erased before #2514: tombstoned, everything above left.
+    defp pre_2514_tombstone(sites) do
+      user = user(%{audiences: [@gated]})
+      rows = with_rows(user, sites)
+
+      tombstone =
+        Ash.Seed.update!(user, %{
+          email: "anonymized-#{user.id}@deleted.invalid",
+          name: nil,
+          anonymized_at: DateTime.utc_now()
+        })
+
+      {tombstone, rows}
+    end
+
+    defp sites, do: [Accounts.default_org_id(), org("erasure-backfill-2514").id]
+
+    defp push_exists?(row),
+      do:
+        Accounts.get_push_subscription(row.id, authorize?: false, not_found_error?: false) !=
+          {:ok, nil}
+
+    defp view_exists?(row),
+      do:
+        CMS.get_saved_view(row.id,
+          authorize?: false,
+          tenant: row.org_id,
+          not_found_error?: false
+        ) != {:ok, nil}
+
+    defp notification_exists?(row),
+      do:
+        Notifications.get_notification(row.id,
+          authorize?: false,
+          tenant: row.org_id,
+          not_found_error?: false
+        ) != {:ok, nil}
+
+    defp audiences(user), do: Accounts.get_user!(user.id, authorize?: false).audiences
+
+    test "deletes an erased account's rows, clears its audiences, and leaves a live account's alone" do
+      sites = sites()
+      {tombstone, rows} = pre_2514_tombstone(sites)
+      live = user(%{audiences: [@gated]})
+      live_rows = with_rows(live, sites)
+
+      assert ErasureBackfill.run() == %{
+               @nothing
+               | audiences: 1,
+                 push_subscriptions: 1,
+                 saved_views: 2,
+                 notifications: 2
+             }
+
+      assert audiences(tombstone) == []
+      refute push_exists?(rows.push)
+      refute Enum.any?(rows.private, &view_exists?/1)
+      refute Enum.any?(rows.notifications, &notification_exists?/1)
+      # A shared view is the team's, as erasure keeps it.
+      assert Enum.all?(rows.shared, &view_exists?/1)
+
+      assert audiences(live) == [@gated]
+      assert push_exists?(live_rows.push)
+      assert Enum.all?(live_rows.private ++ live_rows.shared, &view_exists?/1)
+      assert Enum.all?(live_rows.notifications, &notification_exists?/1)
+    end
+
+    test "a second run finds nothing to do" do
+      pre_2514_tombstone(sites())
+
+      assert %{audiences: 1, push_subscriptions: 1} = ErasureBackfill.run()
+      assert ErasureBackfill.run() == @nothing
+    end
+
+    test "deletes saved views and notifications only in the orgs where the account has rows" do
+      {_tombstone, rows} = pre_2514_tombstone([Accounts.default_org_id()])
+      for n <- 1..3, do: org("erasure-backfill-2514-empty-#{n}")
+
+      deletes =
+        count_deletes("saved_views", fn ->
+          send(self(), {:notifications, count_deletes("notifications", &ErasureBackfill.run/0)})
+        end)
+
+      assert deletes == length(rows.private)
+      assert_received {:notifications, notification_deletes}
+      assert notification_deletes == length(rows.notifications)
+    end
+
+    test "a failed step fails the job, and the retry finishes it" do
+      {_tombstone, rows} = pre_2514_tombstone(sites())
+
+      log =
+        capture_log(fn ->
+          KilnCMS.Push.with_actor(nil, fn ->
+            assert {:error, message} = perform_job(ErasureBackfill, %{})
+            assert message =~ "failed for 1 account"
+          end)
+        end)
+
+      assert log =~ "erasure backfill could not delete the push subscriptions"
+      assert push_exists?(rows.push)
+      # The other steps went on without it.
+      refute Enum.any?(rows.private, &view_exists?/1)
+
+      assert :ok = perform_job(ErasureBackfill, %{})
+      refute push_exists?(rows.push)
     end
   end
 

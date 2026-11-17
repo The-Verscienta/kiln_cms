@@ -199,6 +199,30 @@ carries the reasoning.
   ([#2818](https://github.com/The-Verscienta/kiln_cms/issues/2818),
   [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819))
 
+<a id="erasure-backfill-2514-steps-upgrade"></a>
+
+- **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: their audiences, push subscriptions, private saved views and notifications. No migration; rolling back is safe.**
+  Since #2514, erasure clears the audiences on the account's own row
+  (`users.audiences`) in a statement of its own, and deletes its Web Push
+  subscriptions, its private saved views and the notifications addressed to
+  it. An account erased before then could still hold all four.
+  `KilnCMS.Accounts.ErasureBackfill`, the job each boot queues
+  (`:erasure_backfill_on_boot`, default on), now finishes those steps for
+  every erased account, after the membership and newsletter steps: it clears
+  the audiences, deletes the push subscriptions, and deletes the private
+  saved views and the notifications on the sites where the account has them.
+  Shared saved views are the team's and stay. Its result map gains
+  `audiences` (accounts cleared), `push_subscriptions`, `saved_views` and
+  `notifications` (rows deleted):
+  `%{memberships: 0, newsletter_accounts: 0, newsletter_subscribers: 0, audiences: 1, push_subscriptions: 2, saved_views: 5, notifications: 40, failed: 0}`.
+  A step that fails is logged at warning and counted under `failed`, and the
+  job retries as before; a second run finds nothing. Rolling back is safe:
+  the job only deletes rows and clears a column no access decision reads,
+  and the previous release works without them. What it removed is not
+  restored. See
+  [docs/newsletter.md](../newsletter.md#accounts-erased-before-this-release).
+  ([#3010](https://github.com/The-Verscienta/kiln_cms/issues/3010))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -1231,6 +1255,47 @@ carries the reasoning.
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019)). No
   migration. See [Job args retention](../data-flows.md#job-args-retention).
   Refs #2992.
+
+<a id="erasure-refuses-platform-role"></a>
+
+- **An erased account can no longer be given a platform role, temporary role or audiences, and is left out of the legacy-audiences report and its boot job.**
+  `User.:manage_access` (**Save access** on `/editor/accounts/:id`,
+  `Accounts.manage_user_access/3`) and `User.:grant_temporary_role`
+  (**Grant** and **End it now**, `Accounts.grant_user_temporary_role/3`)
+  accepted an erased account, so a platform admin could put a tombstone back
+  on the admin and editor rosters erasure took it off. Both now refuse it,
+  granting and revoking alike, with `KilnCMS.Accounts.Errors.AccountErased`
+  ("belongs to an account that was erased"), which the Accounts console
+  shows as the error; nothing is written. Demoting an admin takes the
+  bootstrap lock and then the account's row, the order erasing an admin
+  takes them in, so a demotion racing that admin's erasure waits rather than
+  deadlocking.
+
+  `User.:legacy_audience_accounts` now leaves erased accounts out, so
+  `mix kiln.deprecations` no longer lists one and
+  `KilnCMS.Accounts.LegacyAudiencesWorker` no longer tries to move one onto a
+  membership. That move would be refused, and the job would fail on it
+  every boot. No migration. See
+  [docs/account-administration.md](../account-administration.md#removing-an-account).
+  ([#3010](https://github.com/The-Verscienta/kiln_cms/issues/3010))
+
+<a id="export-lists-site-memberships"></a>
+
+- **Export my data now lists the account's site memberships, in any status, with what each grants.**
+  The data-subject export (**Export my data** on `/account` and
+  `/editor/settings`, `KilnCMS.Accounts.export_user_data/1`) left out the
+  account's site memberships, which are data about the person: which sites
+  they belong to, or applied to, and with what access. It gains
+  `site_memberships`, one entry per membership on every site, oldest first,
+  including pending and rejected registrations: `org_id`, `site` (the site's
+  name), `status`, `role`, `granted_role`, `granted_role_expires_at`,
+  `audiences`, `editable_types`, `readable_types`, `field_grants`,
+  `field_read_grants`, `inserted_at` and `decided_at`. A membership's custom
+  role is not included yet. If the memberships can't be read, the section is
+  empty and the failure is logged as an error; if only the site names
+  can't, the rows go out with `site` as `null`. No migration. See
+  [docs/data-flows.md](../data-flows.md#subject-rights-workflows).
+  ([#3010](https://github.com/The-Verscienta/kiln_cms/issues/3010))
 
 ## Security
 

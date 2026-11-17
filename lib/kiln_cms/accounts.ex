@@ -459,8 +459,9 @@ defmodule KilnCMS.Accounts do
   @doc """
   A JSON-serializable snapshot of a user's own data for an access/portability
   request (GDPR Art. 15/20, #212): profile fields and notification preferences,
-  paid memberships, and the newsletter subscriptions linked to the account
-  (#2991). No secrets (password hash, tokens, the subscriber's confirm and
+  paid memberships, the newsletter subscriptions linked to the account
+  (#2991), and its site memberships in any status, with what each grants
+  (#3010). No secrets (password hash, tokens, the subscriber's confirm and
   unsubscribe tokens) are included.
   """
   @spec export_user_data(KilnCMS.Accounts.User.t()) :: map()
@@ -488,7 +489,77 @@ defmodule KilnCMS.Accounts do
       # covers them, and having them lets the subject exercise their rights
       # against the provider directly. They are not credentials.
       memberships: membership_export(user),
-      newsletter_subscriptions: newsletter_export(user)
+      newsletter_subscriptions: newsletter_export(user),
+      site_memberships: site_membership_export(user)
+    }
+  end
+
+  # The account's site memberships (#3010), on every site and in any status:
+  # a registration waiting for approval, or a rejected one kept, is data about
+  # the person too. Read as the account itself, because memberships are global
+  # (not tenant-scoped) and their only read grant is the member's own rows; no
+  # system actor is admitted, so a system read would export nothing.
+  # `authorize_with: :error`, as `membership_export/1`. The site names come
+  # from the system's org read; when that fails the rows still go out, with no
+  # name.
+  defp site_membership_export(user) do
+    case list_memberships_for_user(user.id, actor: user, authorize_with: :error) do
+      {:ok, memberships} ->
+        names = site_names(user, memberships)
+
+        memberships
+        |> Enum.sort_by(&{DateTime.to_unix(&1.inserted_at, :microsecond), &1.organization_id})
+        |> Enum.map(&site_membership_entry(&1, names))
+
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not read site memberships for #{user.id}: " <>
+            Exception.message(error)
+        )
+
+        []
+    end
+  end
+
+  defp site_names(_user, []), do: %{}
+
+  defp site_names(user, memberships) do
+    ids = Enum.map(memberships, & &1.organization_id)
+    query = KilnCMS.Accounts.Organization |> Ash.Query.filter(id in ^ids)
+
+    case list_organizations(
+           actor: system(),
+           authorize_with: :error,
+           query: Ash.Query.select(query, [:id, :name])
+         ) do
+      {:ok, orgs} ->
+        Map.new(orgs, &{&1.id, &1.name})
+
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not read the site names for #{user.id}: " <>
+            Exception.message(error)
+        )
+
+        %{}
+    end
+  end
+
+  defp site_membership_entry(membership, names) do
+    %{
+      org_id: membership.organization_id,
+      site: Map.get(names, membership.organization_id),
+      status: membership.status,
+      role: membership.role,
+      granted_role: membership.granted_role,
+      granted_role_expires_at: membership.granted_role_expires_at,
+      audiences: membership.audiences,
+      editable_types: membership.editable_types,
+      readable_types: membership.readable_types,
+      field_grants: membership.field_grants,
+      field_read_grants: membership.field_read_grants,
+      inserted_at: membership.inserted_at,
+      decided_at: membership.decided_at
     }
   end
 

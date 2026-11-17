@@ -101,7 +101,8 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       # re-link a row this deletes (#2991).
       :ok = KilnCMS.Newsletter.forget_member(user.id)
       remove_push_subscriptions(user)
-      remove_private_saved_views(user)
+      # Private ones only; shared views are the team's (#2514).
+      :ok = KilnCMS.CMS.SavedViews.forget_private_views(user.id, Accounts.list_org_ids())
       :ok = KilnCMS.Notifications.forget_recipient(user.id)
       :ok = History.anonymize_actor(user.id)
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
@@ -306,36 +307,6 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       return_errors?: true
     )
   end
-
-  # Delete the account's private saved views (#2514). A shared view is an
-  # admin's published filter the team uses, so it stays, as authored content
-  # does; its `owner_id` points at the tombstone, which names nobody.
-  #
-  # One statement per org: saved views are tenant-scoped under strict tenancy
-  # and have no tenant-bypassing action, and adding one only for this would
-  # widen the resource. Erasure is rare, so a delete per site is the price
-  # (`Notifications.forget_recipient/1` pays it the same way).
-  defp remove_private_saved_views(user) do
-    require Ash.Query
-
-    each_org(fn org_id ->
-      # authorize?: false — erasure is authorized once, as the `:anonymize`
-      # action (or the staging scrub). The person being erased owns these rows,
-      # so no admin actor would be admitted to them, and the filter pins every
-      # row to this user's id.
-      KilnCMS.CMS.SavedView
-      |> Ash.Query.filter(owner_id == ^user.id and shared == false)
-      |> Ash.bulk_destroy!(:destroy, %{},
-        tenant: org_id,
-        authorize?: false,
-        strategy: [:atomic, :atomic_batches, :stream],
-        return_records?: false,
-        return_errors?: true
-      )
-    end)
-  end
-
-  defp each_org(fun), do: Enum.each(KilnCMS.Accounts.list_org_ids(), fun)
 
   # A throwaway bcrypt hash of random bytes — there is no plaintext that matches
   # it, so the scrubbed account can never authenticate.

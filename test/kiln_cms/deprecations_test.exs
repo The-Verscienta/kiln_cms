@@ -229,6 +229,25 @@ defmodule KilnCMS.DeprecationsTest do
                []
     end
 
+    test "leaves an erased account out of the report and the move (#3010)" do
+      # A tombstone erased before #2514 cleared `User.audiences`: still holding
+      # them, and no membership. A membership for it would be refused by the
+      # account lock, so the job would fail on it every boot.
+      tombstone = user(%{audiences: [@gated], anonymized_at: DateTime.utc_now()})
+      legacy = user(%{audiences: [@gated]})
+
+      assert [%{id: id}] = Deprecations.report().legacy_audience_accounts
+      assert id == legacy.id
+
+      assert :ok = perform_job(LegacyAudiencesWorker, %{})
+
+      assert {:ok, nil} =
+               Accounts.get_org_membership(tombstone.id, default_org_id(),
+                 authorize?: false,
+                 not_found_error?: false
+               )
+    end
+
     test "enqueue/0 queues one job however many nodes boot" do
       assert :ok = LegacyAudiencesWorker.enqueue()
       assert :ok = LegacyAudiencesWorker.enqueue()

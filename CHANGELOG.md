@@ -87,6 +87,9 @@ Every summary line below that was shortened links to its own entry there.
 - **In-app backups name their temporary files `<name>.<job>-<attempt>.partial`. No migration; update the host's `scripts/backup.sh` in the same rollout, since an older copy doesn't recognize the new names. Rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#backup-step-files-fenced-upgrade))
 
+- **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: audiences, push subscriptions, private saved views and notifications (its result gains those four keys). No migration; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#erasure-backfill-2514-steps-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -215,6 +218,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Form mail jobs carry only ids, and form data and automation payloads are dropped from a job's row when it finishes and from Sentry events. Automation payloads stay plain while pending (Known issues).**
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-automation-job-args))
+
+- **An erased account can no longer be given a platform role, temporary role or audiences, and `mix kiln.deprecations` and its boot job leave erased accounts out.**
+  ([long form](docs/changelog/unreleased.md#erasure-refuses-platform-role))
+
+- **Export my data now lists the account's site memberships, in any status, with what each grants.**
+  ([long form](docs/changelog/unreleased.md#export-lists-site-memberships))
 
 ### Security
 

@@ -19,12 +19,16 @@ defmodule KilnCMS.Accounts.Changes.LockAccount do
   approvals it is declared above `get_and_lock_for_update()`, which keeps the
   lock order users row first, then membership row.
 
+  On `User` it is declared resource-wide, with a `where:` naming the five
+  confirming actions and the two platform-tier writes (`:manage_access`,
+  `:grant_temporary_role`, #3010). A resource-wide change runs after the
+  action's own, so its hook comes after `Changes.GuardLastAdmin`'s, which
+  keeps the lock order bootstrap lock, then users row.
+
   `atomic/3` attaches the same hook: an atomic update still runs its
   `before_action` hooks, in its transaction, before its one statement. That
-  matters on `User`, where the change is declared resource-wide with a
-  `where:` naming the three confirming actions, and Ash asks every atomic
-  `User` update for the change's atomic form before the condition rules it
-  out.
+  matters on `User`, where Ash asks every atomic update for the change's
+  atomic form before the `where:` rules it out.
   """
   use Ash.Resource.Change
 
