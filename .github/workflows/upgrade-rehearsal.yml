@@ -46,7 +46,7 @@ jobs:
     outputs:
       tags: ${{ steps.pick.outputs.tags }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -95,7 +95,7 @@ jobs:
       - name: Pick the scratch root
         run: echo "REHEARSAL_WORK=$RUNNER_TEMP/rehearsal" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Every tag, and history back to the oldest: kiln.update counts and
           # diffs commits between the pin and the target.
@@ -119,7 +119,7 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Cache Hex packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.hex/packages
           key: rehearsal-hex-${{ runner.os }}-${{ matrix.tag }}-${{ hashFiles('mix.lock') }}

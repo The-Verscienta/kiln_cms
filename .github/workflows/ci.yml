@@ -105,7 +105,7 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Mix (toolchain, cache, deps, compile)
         # The one job that SAVES the cache; every other restores. Warnings as
@@ -329,7 +329,7 @@ jobs:
       MIX_TEST_PARTITION: ${{ matrix.partition }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Check the matrix agrees with SHARD_COUNT
         # `strategy.job-total` is the matrix's real size, `include:` rows and
@@ -403,7 +403,7 @@ jobs:
 
       - name: Restore cached apt packages (qpdf, ffmpeg)
         id: apt-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/kiln-apt
           key: ${{ steps.apt-key.outputs.prefix }}${{ steps.apt-key.outputs.image }}-${{ hashFiles('scripts/ci/apt_install_cached.sh') }}
@@ -426,7 +426,7 @@ jobs:
 
       - name: Save the apt package cache
         if: matrix.partition == 1 && steps.apt-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/kiln-apt
           key: ${{ steps.apt-cache.outputs.cache-primary-key }}
@@ -478,7 +478,7 @@ jobs:
     # the shards' data and runs the reporters; nothing here boots the app.
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Mix (toolchain, cache, deps, compile)
         # The same cache the shards compiled from. That matters here more
@@ -538,7 +538,7 @@ jobs:
     # minutes the check itself takes plus a compile, in parallel with
     # everything else instead of after it.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Mix (toolchain, cache, deps)
         # No compile step: `mix dialyzer` compiles the project itself.
@@ -547,7 +547,7 @@ jobs:
           compile: none
 
       - name: Cache Dialyzer PLTs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: priv/plts
           key: ${{ runner.os }}-plt-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
@@ -651,7 +651,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -675,7 +675,7 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Cache deps and _build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -749,7 +749,7 @@ jobs:
       MIX_ENV: dev
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -776,7 +776,7 @@ jobs:
       # test profile (`consolidate_protocols` differs, and esbuild/tailwind are
       # runtime deps only in `:dev`), so sharing that job's key would thrash it.
       - name: Cache deps and _build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -887,7 +887,7 @@ jobs:
         working-directory: clients/elixir/kiln_client
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -911,7 +911,7 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Cache deps and _build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             clients/elixir/kiln_client/deps
@@ -950,7 +950,7 @@ jobs:
         working-directory: sdk/kiln_plugin
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -969,7 +969,7 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Cache deps, _build and PLTs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             sdk/kiln_plugin/deps
@@ -1041,10 +1041,10 @@ jobs:
         working-directory: clients/js
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version-file: .tool-versions
           cache: npm
@@ -1105,7 +1105,7 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -1129,12 +1129,12 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version-file: .tool-versions
 
       - name: Cache deps and _build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -1144,7 +1144,7 @@ jobs:
             ${{ runner.os }}-mix-e2e-${{ hashFiles('.tool-versions') }}-
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           # The browser list is part of the key, not just the lockfile: adding
@@ -1263,7 +1263,7 @@ jobs:
       MIX_TEST_PARTITION: strict
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -1287,7 +1287,7 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Cache deps and strict build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -1374,7 +1374,7 @@ jobs:
       MIX_TEST_PARTITION: ml
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -1399,7 +1399,7 @@ jobs:
 
       - name: Cache deps and ML build
         id: ml-cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -1528,7 +1528,7 @@ jobs:
       MIX_TEST_PARTITION: overlay
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -1552,7 +1552,7 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Cache deps and overlay build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -1663,7 +1663,7 @@ jobs:
       DOCKER_BUILD_RECORD_UPLOAD: false
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -1782,7 +1782,7 @@ jobs:
             exit 1
           }
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -1801,7 +1801,7 @@ jobs:
           if [ -f "$script" ]; then escript "$script"; else echo "::notice::no $script in this checkout; httpc left stock"; fi
 
       - name: Cache deps and _build
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -1854,7 +1854,7 @@ jobs:
             resizer: magick
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Ubuntu leg: the same cached, wall-clock-bounded apt install as the
       # test job's qpdf/ffmpeg step (see that step and the script's header).
@@ -1868,7 +1868,7 @@ jobs:
       - name: Restore cached apt packages (imagemagick, webp)
         if: matrix.container == ''
         id: apt-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/kiln-apt
           key: ${{ steps.apt-key.outputs.prefix }}${{ steps.apt-key.outputs.image }}-${{ hashFiles('scripts/ci/apt_install_cached.sh') }}
@@ -1889,7 +1889,7 @@ jobs:
 
       - name: Save the apt package cache
         if: matrix.container == '' && steps.apt-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/kiln-apt
           key: ${{ steps.apt-cache.outputs.cache-primary-key }}
@@ -1997,7 +1997,7 @@ jobs:
       KILN_REQUIRE_BUSYBOX: "1"
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Mix (toolchain, cache, deps, compile)
         uses: ./.github/actions/setup-mix
@@ -2015,7 +2015,7 @@ jobs:
 
       - name: Restore cached apt packages (libarchive-tools, busybox-static, bison)
         id: apt-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/kiln-apt
           key: ${{ steps.apt-key.outputs.prefix }}${{ steps.apt-key.outputs.image }}-${{ hashFiles('scripts/ci/apt_install_cached.sh') }}
@@ -2033,7 +2033,7 @@ jobs:
 
       - name: Save the apt package cache
         if: matrix.bash32 && steps.apt-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/kiln-apt
           key: ${{ steps.apt-cache.outputs.cache-primary-key }}
@@ -2048,7 +2048,7 @@ jobs:
       - name: Restore the bash 3.2 build
         if: matrix.bash32
         id: bash32-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/kiln-bash32
           key: bash-3.2.57-${{ steps.bash32-key.outputs.os }}-${{ hashFiles('scripts/ci/build_bash32.sh') }}
@@ -2115,7 +2115,7 @@ jobs:
       # `:pg_tools`, …); none does today. `@tag :skip` still skips.
       - name: Save the bash 3.2 build
         if: matrix.bash32 && steps.bash32-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/kiln-bash32
           key: ${{ steps.bash32-cache.outputs.cache-primary-key }}
