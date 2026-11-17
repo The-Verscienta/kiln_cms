@@ -99,6 +99,12 @@ Every summary line below that was shortened links to its own entry there.
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
 
+- **Backup schedules can run every 2, 4, 8 or 12 hours. A schedule that runs more often than daily must set Keep for (days), and its alarm threshold drops to 8 to 18 hours.**
+  ([#2219](https://github.com/The-Verscienta/kiln_cms/issues/2219) · [long form](docs/changelog/unreleased.md#backup-sub-daily-schedules))
+
+- **Backups → History badges each backup a schedule's keep settings hold: "Kept by a schedule: Database" or "… Media".**
+  ([#2933](https://github.com/The-Verscienta/kiln_cms/issues/2933) · [long form](docs/changelog/unreleased.md#backup-history-held-badge))
+
 - **Color fields can be limited to a palette (`validation["palette"]`, shown as swatches in the editor) and JSON fields can carry a JSON Schema (`validation["json_schema"]`, draft 2020-12, local `$ref` only, bounded, never fetches); both are checked when a value changes. No migration.**
   ([long form](docs/changelog/unreleased.md#color-palette-json-schema))
 
@@ -119,6 +125,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
+
+- **A backup schedule change made while a marker sync is running now reaches the `.hold` markers right after that sync, not at the next 15-minute slot.**
+  ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932) · [long form](docs/changelog/unreleased.md#backup-hold-sync-after-change))
 
 ### Security
 

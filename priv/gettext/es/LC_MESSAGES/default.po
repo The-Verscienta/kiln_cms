@@ -9596,6 +9596,16 @@ msgstr "Cada %{hours} horas desde las %{time} (%{zone})"
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
+msgid "Every 12 hours"
+msgstr "Cada 12 horas"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every 2 hours"
+msgstr "Cada 2 horas"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
 msgid "Every 2 weeks"
 msgstr "Cada 2 semanas"
 
@@ -9603,6 +9613,16 @@ msgstr "Cada 2 semanas"
 #, elixir-autogen, elixir-format
 msgid "Every 2 weeks on %{weekday} at %{time} (%{zone}), from %{date}"
 msgstr "Cada 2 semanas el %{weekday} a las %{time} (%{zone}), desde el %{date}"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every 4 hours"
+msgstr "Cada 4 horas"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every 8 hours"
+msgstr "Cada 8 horas"
 
 #: lib/kiln_cms/security/posture/checks/second_factor.ex
 #, elixir-autogen, elixir-format
@@ -12383,6 +12403,16 @@ msgstr[1] "Conserva sus %{count} copias más recientes, y todas las de los últi
 #, elixir-autogen, elixir-format
 msgid "Kept"
 msgstr "Conservado"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kept by a schedule: %{component}"
+msgstr "Conservada por una programación: %{component}"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kept by backup.sh prune: a schedule's keep settings hold this backup (kiln-<stamp>.hold)"
+msgstr "Conservada por backup.sh prune: los ajustes de conservación de una programación retienen esta copia (kiln-<stamp>.hold)"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -15771,6 +15801,11 @@ msgstr "Una vez guardado el campo, añade debajo, en la lista inferior, los camp
 msgid "One %{type}"
 msgstr "Un %{type}"
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "One backup at this time, and the others every %{hours} hours around the clock."
+msgstr "Una copia a esta hora y las demás cada %{hours} horas a lo largo del día."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "One choice"
@@ -18737,6 +18772,11 @@ msgstr "Obligatorio"
 msgid "Required disclaimer"
 msgstr "Aviso legal obligatorio"
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Required for a schedule that runs more often than daily."
+msgstr "Obligatorio para una programación más frecuente que una vez al día."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Required on every connection"
@@ -19815,11 +19855,6 @@ msgstr "Despublicación programada para"
 #, elixir-autogen, elixir-format
 msgid "Schedules"
 msgstr "Programaciones"
-
-#: lib/kiln_cms_web/live/backup_schedule_live.ex
-#, elixir-autogen, elixir-format
-msgid "Schedules more often than daily can't be edited here yet. You can pause, resume or delete it."
-msgstr "Las programaciones más frecuentes que diarias aún no se pueden editar aquí. Puede pausarla, reanudarla o eliminarla."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -24631,6 +24666,11 @@ msgstr "Esta programación no se puede editar aquí: solo se puede pausar, reanu
 #, elixir-autogen, elixir-format
 msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
 msgstr "Esta programación cambió desde que la abrió, así que no se guardó. El formulario contiene ahora los valores guardados, con lo que introdujo al lado: vuelva a introducir los cambios que quiera conservar y guarde."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule runs more often than daily without Keep for (days), so its backups are kept for BACKUP_KEEP_DAYS. Set Keep for (days) to edit it; you can still pause, resume or delete it."
+msgstr "Esta programación se ejecuta más de una vez al día sin «Conservar durante (días)», así que sus copias se conservan según BACKUP_KEEP_DAYS. Indique «Conservar durante (días)» para editarla; aún puede pausarla, reanudarla o eliminarla."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format

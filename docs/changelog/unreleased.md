@@ -259,6 +259,77 @@ carries the reasoning.
   `local`, `rclone` nor another module already has. See *Backup
   destinations* in [plugin-extensibility.md](../plugin-extensibility.md).
 
+<a id="backup-sub-daily-schedules"></a>
+
+- **Backup schedules can run every 2, 4, 8 or 12 hours. A schedule that runs more often than daily must set its own Keep for (days).**
+  On **Backups** → **Schedule** (`/editor/backups/schedules`, platform admins
+  only), **How often** now offers **Every 2 hours**, **Every 4 hours**,
+  **Every 8 hours** and **Every 12 hours** before **Every day**. Such a
+  schedule backs up at **At** and then every N hours around the clock in its
+  time zone: 03:00 every 8 hours is 03:00, 11:00 and 19:00. Its card reads
+  "Every 8 hours from 03:00 (Europe/Paris)". On a daylight-saving night two
+  of its backups can be an hour closer together or further apart.
+
+  **Why Keep for (days) is required.** Every scheduled run is a full set (a
+  database dump, and a media archive if the schedule covers media), and
+  **Keep the newest** is a minimum, not a cap. Kept for `BACKUP_KEEP_DAYS`
+  alone, a two-hourly schedule would keep 12 × 14 = 168 sets of each
+  component on the default 14 days. So with a sub-daily **How often**, the
+  form marks **Keep for (days)** required ("Required for a schedule that
+  runs more often than daily."), and the save is refused without it, "is
+  required for a schedule that runs more often than daily" under the field.
+  The rule applies when a schedule is created, when it is switched to a
+  sub-daily interval, when its keep days are cleared, and on any edit of a
+  sub-daily schedule that has none. **Pause**, **Resume** and **Delete**
+  always work. A sub-daily schedule stored without keep days (written past
+  the form, from a console) keeps firing, its backups kept for
+  `BACKUP_KEEP_DAYS`, and its card says "This schedule runs more often than
+  daily without Keep for (days), so its backups are kept for
+  BACKUP_KEEP_DAYS. Set Keep for (days) to edit it; you can still pause,
+  resume or delete it."
+
+  The preview's "Keeps about N backups at a time" now counts in hours: a
+  two-hourly schedule keeping 7 days keeps about 85 (7 × 12 + 1). Each
+  covered component's alarm threshold follows the schedule as for the
+  longer intervals (the interval plus half of it, at least 6 hours), so a
+  sub-daily schedule makes the alarm stricter than the default 36 hours:
+  8 hours for every 2 hours, 10 for 4, 14 for 8, 18 for 12. A backup still
+  running when the next window comes queues that window ("Last window:
+  queued behind another backup"), and the window after that joins the
+  queued request: never two backups at once, never a pile-up. Mind the disk:
+  a sub-daily database schedule and a daily media one usually cost far less
+  than backing up media every few hours.
+
+  From a release console, `create_backup_schedule/2` and
+  `update_backup_schedule/3` take `interval: :every_2h` (or `:every_4h`,
+  `:every_8h`, `:every_12h`) with a `keep_days`; without one, the error is
+  on `keep_days`. The previous refusal, "schedules more often than daily
+  aren't available yet; choose daily or longer" on `interval`
+  (`Schedule.Validations.IntervalAvailable`), is gone, replaced by
+  `Schedule.Validations.SubDailyKeepsDays`. `Schedule.Window.interval_hours/1`
+  is new.
+
+  No migration. Rolling back to 1.10 is safe: 1.10 fires sub-daily schedules
+  and honors their keep days, and its Schedule tab shows them with "Schedules
+  more often than daily can't be edited here yet. You can pause, resume or
+  delete it." See
+  [Back up more often than daily](../backups.md#back-up-more-often-than-daily).
+  ([#2219](https://github.com/The-Verscienta/kiln_cms/issues/2219))
+
+<a id="backup-history-held-badge"></a>
+
+- **Backups → History badges each component of a backup that a schedule's keep settings hold: "Kept by a schedule: Database" or "Kept by a schedule: Media".**
+  The badge stands for a `kiln-<stamp>.hold` marker in `db/` or `media/`,
+  the file that tells `scripts/backup.sh prune` to keep that unit
+  ([The hold markers](../backups.md#the-hold-markers)); its tooltip says so.
+  Before this, the only way to see what a schedule held was to list the
+  directories on the host. The markers come from the same read of this
+  server's `BACKUP_DIR` as the **Last good** badges, so no badge shows while
+  that read is pending ("checking…"), has timed out, or found a directory it
+  couldn't list. The `?run=<id>` link that scrolls History to a run's row is
+  now covered by a JavaScript test (`assets/test/reveal_section.test.mjs`).
+  ([#2933](https://github.com/The-Verscienta/kiln_cms/issues/2933))
+
 <a id="color-palette-json-schema"></a>
 
 - **A color field can be limited to a palette, and a JSON field can carry a JSON Schema: both are checked when a value changes.**
@@ -429,6 +500,25 @@ carries the reasoning.
     slashes it took about 4 s in Node. Its input is the integrator's own
     `baseUrl` or attribute. Both now trim in a loop, with the same result.
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947))
+
+<a id="backup-hold-sync-after-change"></a>
+
+- **A backup schedule change made while a marker sync is running now reaches the `.hold` markers right after that sync, not at the next 15-minute slot.**
+  Every schedule create, change or delete queues a marker sync so that
+  `backup.sh prune` learns the new holds at once. The sync job was unique
+  while one was waiting *or running*, so a change committed while a sync ran
+  queued nothing, and the running sync might have read the schedules before
+  the change. Until the next slot (`KILN_BACKUP_MARKER_SYNC_CRON`, every 15
+  minutes by default) or the next in-app backup, cron could delete a backup
+  the new settings keep. A running job no longer counts (#2932): the change
+  queues one more sync, which waits for the backup lock the running one
+  holds and then reads the committed schedules. A sync already waiting still
+  absorbs the change, so each backup directory normally has at most one sync
+  waiting behind the running one. If an in-app backup holds the lock instead, the sync writes
+  nothing and the backup syncs the markers itself when it succeeds; a
+  backup that fails leaves them to the next slot. No migration; rolling back
+  brings the wait back.
+  ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932))
 
 ## Security
 

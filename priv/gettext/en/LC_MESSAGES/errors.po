@@ -148,6 +148,11 @@ msgstr ""
 msgid "is not a known time zone"
 msgstr ""
 
+#: lib/kiln_cms/backups/schedule/validations/sub_daily_keeps_days.ex
+#, elixir-autogen, elixir-format
+msgid "is required for a schedule that runs more often than daily"
+msgstr ""
+
 ## From Ecto.Changeset.validate_exclusion/3
 msgid "is reserved"
 msgstr ""
@@ -203,11 +208,6 @@ msgstr ""
 #: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
 #, elixir-autogen, elixir-format
 msgid "no installed backup destination has this kind (was its plugin removed?)"
-msgstr ""
-
-#: lib/kiln_cms/backups/schedule/validations/interval_available.ex
-#, elixir-autogen, elixir-format
-msgid "schedules more often than daily aren't available yet; choose daily or longer"
 msgstr ""
 
 msgid "should be %{count} byte(s)"

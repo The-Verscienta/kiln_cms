@@ -223,6 +223,31 @@ defmodule KilnCMS.Backups.RequestScheduledTest do
       assert run.schedule_ids == [s.id]
     end
 
+    # A run longer than the interval: the next window queues behind it, the
+    # one after folds into the queued one, and no second chain starts.
+    test "sub-daily windows during a long run: queued, then folded, never a second chain (#2219)" do
+      s = due!(%{interval: :every_2h, time_of_day: ~T[00:00:00], keep_days: 7})
+      w3 = window(s, DateTime.utc_now())
+      w2 = DateTime.add(w3, -2 * 3600, :second)
+      w1 = DateTime.add(w3, -4 * 3600, :second)
+
+      assert {:ok, %{status: :started, chain: chain, claimed: [{_, ^w1}]}} = fire(s.id, w1)
+      assert %{last_window_at: ^w1, last_outcome: :started} = reload(s)
+
+      # The chain is still running (its start job not drained).
+      assert {:ok, %{status: :queued, claimed: [{_, ^w2}]}} = fire(s.id, w2)
+      assert %{last_window_at: ^w2, last_outcome: :queued} = reload(s)
+
+      assert {:ok, %{status: :folded, claimed: [{_, ^w3}]}} = fire(s.id, w3)
+      assert %{last_window_at: ^w3, last_outcome: :folded} = reload(s)
+
+      assert [%{args: %{"chain" => ^chain}}] = start_jobs()
+      row = lock()
+      assert row.chain_id == chain
+      assert row.waiting_trigger == "schedule"
+      assert Chain.waiting_scope(row).schedule_ids == [s.id]
+    end
+
     test "nothing due: no request" do
       s = due!()
       {:ok, %{status: :started}} = fire(s.id)
