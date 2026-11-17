@@ -111,10 +111,9 @@ defmodule KilnCMS.Security.IpBlocklistTest do
   describe "the cache" do
     test "a warm check runs no database query" do
       add!("203.0.113.9")
-      # The rule's bust reaches this node twice; the second must not land
-      # after the warm-up.
-      QueryCounting.settle_busts()
-      assert IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
+      # The rule's bust reaches this node twice; `warm_up/1` lets the second
+      # land before the warm-up, not after it.
+      QueryCounting.warm_up(fn -> assert IpBlocklist.blocked?(org_id(), {203, 0, 113, 9}) end)
 
       {_, queries} =
         QueryCounting.queries(fn ->
@@ -127,8 +126,7 @@ defmodule KilnCMS.Security.IpBlocklistTest do
 
     test "an org with no rules is cached too: the second check reads nothing" do
       # A bust an earlier test sent must not land after the warm-up.
-      QueryCounting.settle_busts()
-      refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
+      QueryCounting.warm_up(fn -> refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 9}) end)
 
       {_, queries} =
         QueryCounting.queries(fn -> refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 9}) end)

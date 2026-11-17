@@ -69,7 +69,7 @@ defmodule KilnCMSWeb.EditorLiveExportQueriesTest do
     cap = KilnCMSWeb.EditorLive.ListScope.export_cap()
 
     # Warm the one-off caches (registries, settings) so they are not counted.
-    page_queries(conn, "/editor?type=page&q=#{prefix}")
+    warm_up(fn -> page_queries(conn, "/editor?type=page&q=#{prefix}") end)
 
     {lv, rendering} =
       queries(fn ->

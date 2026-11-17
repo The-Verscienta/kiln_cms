@@ -608,7 +608,7 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
 
       count = fn limit ->
         q = String.replace(query, "limit: 25", "limit: #{limit}")
-        run!(q, %{}, admin)
+        QueryCounting.warm_up(fn -> run!(q, %{}, admin) end)
         {definitions, records} = counted(fn -> run!(q, %{}, admin) end)
         {definitions, records}
       end

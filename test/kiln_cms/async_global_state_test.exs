@@ -188,7 +188,9 @@ defmodule KilnCMS.AsyncGlobalStateTest do
       # through a local call (`enable!` calls `put_config`)
       {"KilnCMS.ExperimentFixtures", :enable!},
       # System env
-      {"KilnCMS.ChallengeFixtures", :enable!}
+      {"KilnCMS.ChallengeFixtures", :enable!},
+      # node-wide cache clears, through a private function
+      {"KilnCMS.Test.QueryCounting", :warm_up}
     ]
 
     assert Enum.reject(expected, &(&1 in found)) == []

@@ -8,7 +8,11 @@ defmodule KilnCMS.Test.QueryCountingTest do
   # async: false — the unrelated process below needs the shared sandbox.
   use KilnCMS.DataCase, async: false
 
+  alias KilnCMS.Accounts
+  alias KilnCMS.Cache.Hosts
+  alias KilnCMS.Firing
   alias KilnCMS.Repo
+  alias KilnCMS.Security.IpBlocklist
   alias KilnCMS.Test.QueryCounting
 
   defp select_one, do: Repo.query!("SELECT 1")
@@ -68,5 +72,51 @@ defmodule KilnCMS.Test.QueryCountingTest do
     right = [%{source: "users", sql: "", params: []}]
 
     assert_raise ExUnit.AssertionError, fn -> QueryCounting.assert_same_queries(left, right) end
+  end
+
+  describe "warm_up/1" do
+    # Every TTL cache a measured request can fill, by the instance it lives in.
+    @ttl_caches [
+      KilnCMS.Cache.cache_name(),
+      KilnCMS.Cache.generation_cache_name(),
+      IpBlocklist.cache_name(),
+      Hosts.cache_name(),
+      Firing.Cache.cache_name()
+    ]
+
+    defp sizes, do: Map.new(@ttl_caches, &{&1, Cachex.size!(&1)})
+
+    # One entry in each, through the module's own fill.
+    defp fill_each do
+      org_id = Accounts.default_org_id()
+
+      KilnCMS.Branding.for_org(org_id)
+      KilnCMS.Cache.head_generation(org_id)
+      IpBlocklist.blocked?(org_id, {203, 0, 113, 9})
+      Hosts.fetch("query-counting-#{System.unique_integer([:positive])}.test", fn -> nil end)
+
+      Firing.Cache.put(
+        org_id,
+        :page,
+        Ecto.UUID.generate(),
+        hd(Firing.Surfaces.all()),
+        %{"title" => "Warm"}
+      )
+    end
+
+    test "runs its function with every TTL cache empty, and returns its result" do
+      fill_each()
+      assert Enum.all?(sizes(), fn {_cache, size} -> size > 0 end), inspect(sizes())
+
+      assert {:warmed, seen} = QueryCounting.warm_up(fn -> {:warmed, sizes()} end)
+
+      assert seen == Map.new(@ttl_caches, &{&1, 0})
+    end
+
+    test "keeps what its function filled" do
+      assert QueryCounting.warm_up(&fill_each/0)
+
+      assert Enum.all?(sizes(), fn {_cache, size} -> size > 0 end), inspect(sizes())
+    end
   end
 end
