@@ -133,6 +133,11 @@ msgstr "n'est pas valide"
 msgid "is not a known time zone"
 msgstr "n'est pas un fuseau horaire connu"
 
+#: lib/kiln_cms/backups/schedule/validations/sub_daily_keeps_days.ex
+#, elixir-autogen, elixir-format
+msgid "is required for a schedule that runs more often than daily"
+msgstr "est obligatoire pour une planification plus fréquente qu’une fois par jour"
+
 msgid "is reserved"
 msgstr "est réservé"
 
@@ -185,11 +190,6 @@ msgstr "doit être inférieur ou égal à %{number}"
 #, elixir-autogen, elixir-format
 msgid "no installed backup destination has this kind (was its plugin removed?)"
 msgstr "aucune destination de sauvegarde installée n'est de ce type (son extension a-t-elle été supprimée ?)"
-
-#: lib/kiln_cms/backups/schedule/validations/interval_available.ex
-#, elixir-autogen, elixir-format
-msgid "schedules more often than daily aren't available yet; choose daily or longer"
-msgstr "les planifications plus fréquentes qu'une fois par jour ne sont pas encore disponibles ; choisissez quotidien ou plus long"
 
 msgid "should be %{count} byte(s)"
 msgid_plural "should be %{count} byte(s)"

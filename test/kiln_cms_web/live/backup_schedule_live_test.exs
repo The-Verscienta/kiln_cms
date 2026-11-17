@@ -1170,6 +1170,29 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       end
     end
 
+    test "a sub-daily schedule without keep days says so, also in French (#2219)", %{conn: conn} do
+      admin = platform_admin()
+
+      for {locale, text} <- [
+            {nil, "is required for a schedule that runs more often than daily"},
+            {"fr", "est obligatoire pour une planification plus fréquente"}
+          ] do
+        lv = mount(conn, admin, locale)
+        lv |> element("#schedule-new") |> render_click()
+
+        html =
+          lv
+          |> form("#schedule-form",
+            schedule: form_params(%{"interval" => "every_2h", "keep_days" => ""})
+          )
+          |> render_submit()
+
+        assert html =~ text
+      end
+
+      assert all_schedules() == []
+    end
+
     test "unchecking every component shows an error and saves nothing", %{conn: conn} do
       lv = mount(conn, platform_admin())
       lv |> element("#schedule-new") |> render_click()
