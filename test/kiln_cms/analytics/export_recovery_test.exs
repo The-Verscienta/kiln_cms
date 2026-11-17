@@ -173,12 +173,14 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
   defp readings(views, published) do
     exact = for {source, cell} <- published, {n, ""} <- [Integer.parse(cell)], do: {source, n}
     lows = for {source, "< " <> n} <- published, do: {source, 1..(String.to_integer(n) - 1)//1}
-    [partner] = for {source, "hidden"} <- published, do: source
+    # No partner when every suppressed category is naturally low: the lows
+    # then carry the whole residual on their own.
+    partner = for {source, "hidden"} <- published, do: {source, 0..views//1}
     residual = views - (exact |> Enum.map(&elem(&1, 1)) |> Enum.sum())
     file = Map.new(published)
 
     residual
-    |> assignments([{partner, 0..residual//1} | lows])
+    |> assignments(partner ++ lows)
     |> Stream.map(&Map.new(exact ++ &1))
     |> Stream.filter(&(as_written(&1) == file))
     |> Enum.take(2)
@@ -204,9 +206,10 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
   end
 
   # The four breakdowns #1073 brute-forced and found exactly recoverable under
-  # the old algorithm, and the shape #2752 found the same way. Every one of them reaches the export through the same
-  # decision, so they are the cases that must survive a round trip through a
-  # file — not just through the function.
+  # the old algorithm, and the shapes #2752 found the same way. Every one of
+  # them reaches the export through the same decision, so they are the cases
+  # that must survive a round trip through a file — not just through the
+  # function.
   @cases [
     {"one low count and four genuine zeros", %{direct: 3}},
     {"one low count beside three large ones", %{direct: 2, search: 40, social: 50, other: 60}},
@@ -218,7 +221,10 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
     {"two low counts beside two at the threshold", %{direct: 1, search: 1, social: 5, other: 5}},
     # The zeros ahead of `social` would have won a tie at 0, so the partner is
     # not 0 either — which the issue's one-line fix still missed.
-    {"two low counts with zeros ahead of the partner", %{search: 1, social: 5, other: 1}}
+    {"two low counts with zeros ahead of the partner", %{search: 1, social: 5, other: 1}},
+    # Every category naturally low: published partially with no `"hidden"`
+    # partner at all, so the reader has only the lows to split the residual.
+    {"every category naturally low", %{direct: 1, internal: 1, search: 1, social: 1, other: 2}}
   ]
 
   for {name, breakdown} <- @cases do
