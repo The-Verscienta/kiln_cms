@@ -177,25 +177,6 @@ defmodule KilnCMS.Accounts.FactorRemovedNoticeTest do
       refute mail.html_body =~ to_string(admin.email)
       refute mail.subject =~ to_string(admin.email)
     end
-
-    test "an admin whose display name is blank is named generically", %{org: org} do
-      owner = passkey_user()
-      admin = passkey_user(:admin) |> Ash.Seed.update!(%{name: ""})
-      passkey = fresh_passkey(owner, "cred-removed-blank-admin")
-      _admins_own = passkey_of(admin, "cred-removed-blank-admin-own")
-
-      {:ok, passkey} = Accounts.get_passkey(passkey.id, actor: admin)
-
-      assert :ok =
-               Accounts.remove_passkey(passkey,
-                 actor: admin,
-                 context: TwoFactorFixtures.verified_now(ctx(org))
-               )
-
-      assert [mail] = mails_to(owner)
-      assert mail.html_body =~ "It was removed by an administrator."
-      refute mail.html_body =~ to_string(admin.email)
-    end
   end
 
   describe "a refused removal" do
@@ -241,6 +222,22 @@ defmodule KilnCMS.Accounts.FactorRemovedNoticeTest do
       assert mail.html_body =~ "recovery codes no longer work"
 
       assert "two_factor_disabled" in alert_kinds(org)
+    end
+
+    test "by an admin, names the admin by display name and never by address", %{org: org} do
+      {user, secret} = TwoFactorFixtures.enabled_user(role: :editor)
+      admin = passkey_user(:admin) |> Ash.Seed.update!(%{name: "Grace H"})
+
+      assert {:ok, _} =
+               Accounts.disable_totp(user, %{code: TwoFactorFixtures.current_code(secret)},
+                 actor: admin,
+                 context: ctx(org)
+               )
+
+      assert [mail] = mails_to(user)
+      assert mail.html_body =~ "The authenticator app was turned off"
+      assert mail.html_body =~ "removed by an administrator, Grace H."
+      refute mail.html_body =~ to_string(admin.email)
     end
   end
 

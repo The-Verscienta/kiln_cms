@@ -46,9 +46,9 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
   and site, and, when an administrator removed it rather than the owner, that
   administrator by display name ("an administrator" when they have none),
   never by address (#3044): the mail goes to someone else, and an address is
-  contact data an erased administrator would leave behind in it. The name is
-  typed by the administrator, the acting operator rather than an attacker, and
-  escaped like every other value. Still no passkey name. It needs no throttle of its own:
+  contact data, while the display name is what the administrator chose to
+  show. The name is typed by the administrator, the acting operator rather
+  than an attacker, and escaped like every other value. Still no passkey name. It needs no throttle of its own:
   an account holds at most `KilnCMS.Accounts.Passkey.max_per_account/0`
   passkeys, each added one already mailed, and turning the authenticator app
   off spends the second-factor code budget.
