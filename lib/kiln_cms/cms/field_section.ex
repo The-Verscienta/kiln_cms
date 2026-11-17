@@ -15,11 +15,17 @@ defmodule KilnCMS.CMS.FieldSection do
   (`content_type`) or a dynamic one (`type_definition_id`). Link fields and
   group sub-fields have no section, so neither owner of theirs appears here.
 
-  A row whose name no field carries any more (the last field of a section
-  renamed it) is harmless — nothing renders or exports it — and the fields
-  admin prunes it when it next saves that type's sections
-  (`KilnCMS.CMS.SectionLayouts`). Deleting a section's last field, in the
-  admin or by a pruning field sync import, drops its row at once.
+  A row is kept only while some top-level field of its owner carries its
+  name. A row nothing carries is not harmless: the next field filed under
+  that name inherits the stale layout. So every `KilnCMS.CMS.FieldDefinition`
+  update and destroy that takes a field out of a section prunes that
+  section's row in the same transaction (`KilnCMS.CMS.Changes.KeepSectionLayouts`,
+  through `KilnCMS.CMS.SectionLayouts`). The fields admin's rename of a
+  section's last field carries the layout to the new name first.
+
+  A row at the defaults (`default?/1`) renders exactly as no row does, so
+  neither the fields admin nor a field sync import stores one, and the export
+  leaves one out.
 
   Editor-only, like `section` itself: it changes nothing about a value, its
   validation or its delivery. The schema export reports a non-accordion
@@ -43,6 +49,19 @@ defmodule KilnCMS.CMS.FieldSection do
   """
   @spec initial_states() :: [atom()]
   def initial_states, do: @initial_states
+
+  @doc """
+  Whether a layout is the one a section without a row already has: an
+  accordion that opens by the panel's own heuristic. Takes a row, or a map
+  with atom or string keys and atom or string values (a sync file's entry).
+  """
+  @spec default?(map()) :: boolean()
+  def default?(layout) when is_map(layout) do
+    value(layout, :display) in [:accordion, "accordion"] and
+      value(layout, :initially) in [:auto, "auto"]
+  end
+
+  defp value(layout, key), do: Map.get(layout, key, Map.get(layout, Atom.to_string(key)))
 
   postgres do
     table "field_sections"

@@ -866,10 +866,80 @@ defmodule KilnCMS.CMS.FieldSyncTest do
 
       assert m =~ "must be a list"
 
-      assert {:ok, _} = apply!(doc.([%{"name" => "Main"}]), admin)
+      assert {:ok, _} = apply!(doc.([%{"name" => "Main", "display" => "tab"}]), admin)
+      assert [%{display: :tab, initially: :auto}] = CMS.field_sections_for!(:post, actor: admin)
 
-      assert [%{display: :accordion, initially: :auto}] =
-               CMS.field_sections_for!(:post, actor: admin)
+      # An entry with every key left out is at the defaults: no layout (#2652).
+      assert {:ok, _} = apply!(doc.([%{"name" => "Main"}]), admin)
+      assert sections(admin) == []
+    end
+
+    test "an import whose sections are all at the defaults stores no layout", %{admin: admin} do
+      model!(admin)
+      doc = export!(admin)
+      wipe!(admin)
+
+      doc =
+        map_sections(doc, fn ss ->
+          Enum.map(ss, &%{&1 | "display" => "accordion", "initially" => "auto"})
+        end)
+
+      assert {:ok, report} = FieldSync.import_doc(doc, actor: admin)
+      refute Enum.any?(report.ops, &(&1.kind == :section))
+
+      assert {:ok, _} = apply!(doc, admin)
+      assert sections(admin) == []
+    end
+
+    test "a stored layout at the defaults is not exported, and only a prune removes it",
+         %{admin: admin} do
+      model!(admin)
+      field!(admin, %{name: "plain", label: "Plain", field_type: :string, section: "Plain"})
+      CMS.create_field_section!(%{content_type: :post, name: "Plain"}, actor: admin)
+
+      doc = export!(admin)
+      assert [%{"name" => "Identity"}] = owner(doc, "compiled", "post")["sections"]
+
+      assert {:ok, report} = apply!(doc, admin)
+      assert "post/section/Plain" in report.untouched
+      assert "Plain" in Enum.map(sections(admin), & &1.name)
+
+      assert {:ok, _} = apply!(doc, admin, prune?: true)
+      refute "Plain" in Enum.map(sections(admin), & &1.name)
+      assert "Identity" in Enum.map(sections(admin), & &1.name)
+    end
+
+    test "an entry at the defaults removes the section's row, without a prune",
+         %{admin: admin} do
+      model!(admin)
+      field!(admin, %{name: "plain", label: "Plain", field_type: :string, section: "Plain"})
+      CMS.create_field_section!(%{content_type: :post, name: "Plain"}, actor: admin)
+
+      doc =
+        map_sections(export!(admin), fn ss ->
+          Enum.map(ss, fn
+            %{"name" => "Identity"} = s -> %{s | "display" => "accordion", "initially" => "auto"}
+            s -> s
+          end) ++ [%{"name" => "Plain", "display" => "accordion", "initially" => "auto"}]
+        end)
+
+      assert {:ok, report} = FieldSync.import_doc(doc, actor: admin)
+
+      assert ["post/section/Identity", "post/section/Plain"] ==
+               report.ops
+               |> Enum.filter(&(&1.kind == :section and &1.op == :delete))
+               |> Enum.map(& &1.path)
+               |> Enum.sort()
+
+      assert report.untouched == []
+
+      assert {:ok, _} = apply!(doc, admin)
+      assert ["Kitchen"] == Enum.map(sections(admin), & &1.name)
+      # Imported again, the defaults plan nothing; the stored layout is unchanged.
+      assert {:ok, again} = FieldSync.import_doc(doc, actor: admin)
+
+      assert [%{path: "recipe/section/Kitchen", op: :unchanged}] =
+               Enum.filter(again.ops, &(&1.kind == :section))
     end
 
     test "a new dynamic type's layout is tied to the type the import creates", %{admin: admin} do

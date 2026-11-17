@@ -43,7 +43,9 @@ defmodule KilnCMS.CMS.FieldSync do
   An owner's `"sections"` lists how its sections are laid out in the editor
   (`KilnCMS.CMS.FieldSection`, #2280): `name`, `display` and `initially`, one
   entry per stored layout of a section some field of the owner carries. A
-  section with no entry is the default accordion. The key is optional on
+  section with no entry is the default accordion, so the export leaves out a
+  layout at the defaults, and an entry at the defaults stores nothing: it
+  removes the row its section has, if any, with or without `prune?`. The key is optional on
   import: an owner without it (a file written before layouts existed) leaves
   that owner's layouts as they are, even with `prune?: true`; an owner with
   it, `[]` included, declares all its layouts. A file this release writes
@@ -216,12 +218,14 @@ defmodule KilnCMS.CMS.FieldSync do
   end
 
   # Only the layouts of sections a field of the owner still carries: a row a
-  # renamed or deleted section left behind lays nothing out.
+  # renamed or deleted section left behind lays nothing out. A row at the
+  # defaults renders as no row does, so it is no entry either (#2652).
   defp section_docs(sections, fields) do
     carried = MapSet.new(fields, & &1.section)
 
     sections
     |> Enum.filter(&MapSet.member?(carried, &1.name))
+    |> Enum.reject(&FieldSection.default?/1)
     |> Enum.sort_by(& &1.name)
     |> Enum.map(&attrs_doc(&1, section_keys()))
   end
@@ -578,6 +582,11 @@ defmodule KilnCMS.CMS.FieldSync do
 
   # Matched by name within the owner, as fields are. The path cannot collide
   # with a field's: a field name never holds a `/`.
+  #
+  # An entry at the defaults (an accordion opening by itself) is what a
+  # section with no row already renders, so the fields admin never stores
+  # one (#2652): it creates nothing, and deletes whatever row the name has,
+  # without `prune?` — the file says how that section is laid out.
   defp section_ops(owner, existing, prune?) do
     by_name = Map.new(existing, &{&1.name, &1})
     file_names = MapSet.new(owner.sections, & &1["name"])
@@ -585,25 +594,12 @@ defmodule KilnCMS.CMS.FieldSync do
     keys = section_keys() -- ["name"]
 
     present =
-      for section <- owner.sections do
-        here = path.(section["name"])
-
-        case Map.get(by_name, section["name"]) do
-          nil ->
-            %{
-              op: :create,
-              kind: :section,
-              path: here,
-              attrs: section,
-              changes: %{},
-              existing: nil
-            }
-
-          record ->
-            op_for(:section, here, section, record, diff(record, section, keys))
+      Enum.flat_map(owner.sections, fn section ->
+        case section_op(section, Map.get(by_name, section["name"]), path, keys) do
+          nil -> []
+          op -> [Map.put(op, :owner, owner.type)]
         end
-        |> Map.put(:owner, owner.type)
-      end
+      end)
 
     extra =
       for record <- existing, not MapSet.member?(file_names, record.name) do
@@ -619,6 +615,24 @@ defmodule KilnCMS.CMS.FieldSync do
       end
 
     present ++ extra
+  end
+
+  defp section_op(section, record, path, keys) do
+    here = path.(section["name"])
+
+    case {record, FieldSection.default?(section)} do
+      {nil, true} ->
+        nil
+
+      {nil, false} ->
+        %{op: :create, kind: :section, path: here, attrs: section, changes: %{}, existing: nil}
+
+      {record, true} ->
+        %{op: :delete, kind: :section, path: here, attrs: nil, changes: %{}, existing: record}
+
+      {record, false} ->
+        op_for(:section, here, section, record, diff(record, section, keys))
+    end
   end
 
   defp type_op(%{kind: "dynamic", definition: %{} = definition, type: type}, types) do
@@ -859,7 +873,11 @@ defmodule KilnCMS.CMS.FieldSync do
   end
 
   defp run_ops(ops, scope) do
-    opts = [actor: scope[:actor], tenant: scope[:tenant], context: AfterCommit.context()]
+    # `section_layouts: :deferred`: a field write leaves the layouts alone
+    # (`Changes.KeepSectionLayouts`); they are reconciled once, after every
+    # write, so a swap of two sections does not prune one mid-import.
+    context = Map.put(AfterCommit.context(), :section_layouts, :deferred)
+    opts = [actor: scope[:actor], tenant: scope[:tenant], context: context]
     # Everything stored already, so a new field can find its stored owner.
     ids =
       for %{existing: existing, path: path} when not is_nil(existing) <- ops,
