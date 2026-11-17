@@ -74,7 +74,8 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   While an in-app backup holds the lock, a sync returns `:busy` and writes
   nothing; the backup's finish step syncs the markers itself with the
   schedules as they are then. So a change made during a running in-app
-  backup reaches the `.hold` markers when that backup finishes.
+  backup reaches the `.hold` markers when that backup succeeds (a failed one
+  leaves it to the next slot).
   """
   use Oban.Worker,
     queue: :default,

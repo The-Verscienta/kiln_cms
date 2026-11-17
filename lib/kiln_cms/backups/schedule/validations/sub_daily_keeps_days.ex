@@ -18,7 +18,7 @@ defmodule KilnCMS.Backups.Schedule.Validations.SubDailyKeepsDays do
   clearing `keep_days` on a sub-daily one, and any edit of a sub-daily row
   that has none are refused until it is set. Pausing, resuming, an unchanged
   resubmit and a destroy always pass: a sub-daily row without `keep_days`
-  (written from a console, or by a release that allowed it) can still be
+  (written from a console past the action) can still be
   paused, resumed or deleted, and keeps firing meanwhile, its backups kept
   for `BACKUP_KEEP_DAYS` like any schedule's without its own days.
 

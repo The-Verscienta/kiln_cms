@@ -60,8 +60,8 @@ defmodule KilnCMS.Backups.Schedule do
   `12 × BACKUP_KEEP_DAYS` sets of each component. Required on a create, a
   switch to a sub-daily interval and any edit of a sub-daily row; never for
   a pause, a resume or a destroy. A sub-daily row without it (written from a
-  console, or by a release that allowed it) keeps firing, its backups kept
-  for `BACKUP_KEEP_DAYS`, until someone sets it.
+  console past the action) keeps firing, its backups kept for
+  `BACKUP_KEEP_DAYS`, until someone sets it.
 
   ## Keep fields
 

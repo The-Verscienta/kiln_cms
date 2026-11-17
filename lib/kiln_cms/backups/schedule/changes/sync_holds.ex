@@ -13,8 +13,9 @@ defmodule KilnCMS.Backups.Schedule.Changes.SyncHolds do
   this change, so the new job queues behind it, waits for the backup lock it
   holds, and reads the committed change. If an in-app backup holds the lock
   instead, the sync is `:busy` and the backup's finish step syncs the markers
-  with the new rules when it ends. A failed insert is logged and never
-  fails the action: the next slot or backup syncs the markers anyway.
+  with the new rules if it succeeds (otherwise the next slot does). A
+  failed insert is logged and never fails the action: the next slot or
+  backup syncs the markers anyway.
   """
   use Ash.Resource.Change
 
