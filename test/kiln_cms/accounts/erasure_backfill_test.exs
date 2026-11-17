@@ -1,8 +1,10 @@
 defmodule KilnCMS.Accounts.ErasureBackfillTest do
   @moduledoc """
   `KilnCMS.Accounts.ErasureBackfill` gives an account erased by an earlier
-  release the erasure steps added since: today, deleting its linked newsletter
-  subscriptions (#2991), which erasure used to leave mailing the real address.
+  release the erasure steps added since: demoting its site memberships
+  (#2774), which erasure used to leave granting a tier and audiences, and
+  deleting its linked newsletter subscriptions (#2991), which erasure used to
+  leave mailing the real address.
   """
   use KilnCMS.DataCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
@@ -106,6 +108,7 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
     live = link(user(), Accounts.default_org_id())
 
     assert ErasureBackfill.run() == %{
+             memberships: 0,
              newsletter_accounts: 1,
              newsletter_subscribers: 2,
              failed: 0
@@ -121,6 +124,7 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
     assert %{newsletter_accounts: 1} = ErasureBackfill.run()
 
     assert ErasureBackfill.run() == %{
+             memberships: 0,
              newsletter_accounts: 0,
              newsletter_subscribers: 0,
              failed: 0
@@ -188,6 +192,83 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
     assert %{success: 1} = Oban.drain_queue(queue: :default, with_scheduled: true)
     assert [%{state: "completed"}] = jobs()
     refute Enum.any?(rows, &exists?/1)
+  end
+
+  describe "memberships (#2774)" do
+    alias KilnCMS.Accounts.OrgMembership
+
+    @gated hd(KilnCMS.CMS.Audiences.gated())
+
+    defp membership(user, org_id, attrs) do
+      Ash.Seed.seed!(
+        OrgMembership,
+        Map.merge(%{user_id: user.id, organization_id: org_id}, Map.new(attrs))
+      )
+    end
+
+    defp reload(membership),
+      do:
+        Accounts.get_org_membership!(membership.user_id, membership.organization_id,
+          authorize?: false
+        )
+
+    # An account erased before #2774: tombstoned, its memberships untouched.
+    defp tombstone_with_memberships do
+      user = user()
+      site = org("erasure-backfill-members").id
+
+      granting = [
+        membership(user, Accounts.default_org_id(),
+          role: :admin,
+          audiences: [@gated],
+          editable_types: ["post"]
+        ),
+        membership(user, site,
+          role: :viewer,
+          granted_role: :editor,
+          granted_role_expires_at: DateTime.add(DateTime.utc_now(), 86_400)
+        )
+      ]
+
+      bare = membership(user, org("erasure-backfill-bare").id, role: :viewer)
+
+      Ash.Seed.update!(user, %{
+        email: "anonymized-#{user.id}@deleted.invalid",
+        anonymized_at: DateTime.utc_now()
+      })
+
+      {granting, bare}
+    end
+
+    test "demotes an erased account's memberships and leaves a live account's alone" do
+      {[admin_row, granted_row], bare} = tombstone_with_memberships()
+      live = membership(user(), Accounts.default_org_id(), role: :admin, audiences: [@gated])
+
+      assert %{memberships: 2, failed: 0} = ErasureBackfill.run()
+
+      assert %{role: :viewer, audiences: [], editable_types: ["post"]} = reload(admin_row)
+
+      assert %{role: :viewer, granted_role: nil, granted_role_expires_at: nil} =
+               reload(granted_row)
+
+      # A bare viewer row grants nothing, so it is not counted or written.
+      assert reload(bare).updated_at == bare.updated_at
+      assert %{role: :admin, audiences: [@gated]} = reload(live)
+    end
+
+    test "a second run finds nothing to do" do
+      tombstone_with_memberships()
+
+      assert %{memberships: 2} = ErasureBackfill.run()
+      assert %{memberships: 0, failed: 0} = ErasureBackfill.run()
+    end
+
+    test "the job runs the step" do
+      {[admin_row, _granted_row], _bare} = tombstone_with_memberships()
+
+      assert :ok = perform_job(ErasureBackfill, %{})
+      assert %{role: :viewer} = reload(admin_row)
+    end
   end
 
   test "the test build does not enqueue it on boot" do

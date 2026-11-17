@@ -9632,6 +9632,7 @@ msgid "Erase the account if the email address was never confirmed"
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
+#: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Erased"
 msgstr ""
@@ -24425,6 +24426,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
 msgid "This account was erased on %{when}. Nothing personal remains on it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/team_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account was erased. It holds no tier here and cannot be given one; the row is kept as a record until you remove it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex

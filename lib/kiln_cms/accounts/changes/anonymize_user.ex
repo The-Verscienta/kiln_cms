@@ -19,6 +19,18 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   AshAuthentication revocation flow), and nulls the `actor_id` on the user's
   block-level events so the audit trail keeps the *what* without the *who*.
 
+  Its site memberships stay, as the record of who belonged where, but grant
+  nothing (#2774): each is demoted to a bare `:viewer` row with no temporary
+  tier and no audiences (`OrgMembership.:erase`, see `granting/0`). An erased
+  account is also never on a roster and has no tier anywhere
+  (`KilnCMS.Accounts.Scoping`), and a membership edit or temporary tier that
+  reaches it afterwards is refused (`Changes.LockAccount`).
+
+  The account's row is taken `FOR UPDATE` (`KilnCMS.Accounts.AccountLock`)
+  before any other row the erasure writes, so a write that locks the account
+  first (`AccountLock`'s path list) either commits before the erasure starts
+  or waits for it and sees the tombstone.
+
   It also deletes what belongs to the account alone and names or reaches the
   person (#2514): its Web Push subscriptions (a device endpoint), its private
   saved views (shared ones are the team's, kept like authored content), and
@@ -30,9 +42,12 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   """
   use Ash.Resource.Change
 
+  require Ash.Expr
   require Ash.Query
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.AccountLock
+  alias KilnCMS.Accounts.OrgMembership
   alias KilnCMS.Accounts.User
   alias KilnCMS.History
 
@@ -52,6 +67,7 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     id = Ash.Changeset.get_attribute(changeset, :id)
 
     changeset
+    |> Ash.Changeset.before_action(&lock_account/1)
     |> Ash.Changeset.before_action(&clear_totp/1)
     |> Ash.Changeset.force_change_attributes(%{
       email: "anonymized-#{id}@deleted.invalid",
@@ -79,7 +95,7 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       revoke_api_keys(user)
       clear_audiences(user)
       clear_account_grant(user)
-      clear_membership_grants(user)
+      demote_memberships(user)
       cancel_memberships(user)
       # After the cancel above, so a membership transition it triggers cannot
       # re-link a row this deletes (#2991).
@@ -221,24 +237,52 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     )
   end
 
-  # Clear any temporary per-site tier. Same reasoning as the account's own grant
-  # above: the membership row survives erasure (it is the audit of who belonged
-  # where), and a live `granted_role` on it would keep the tombstone a site
-  # editor or admin until it expired.
-  defp clear_membership_grants(user) do
+  # The account's row `FOR UPDATE`, first of the erasure's own steps (#2774).
+  # Declared before this change, `GuardLastAdmin`'s bootstrap lock and
+  # `GuardRegistrationErasure` run ahead of it; every other row the erasure
+  # locks comes after. The UPDATE of the row takes the same lock (the email
+  # changes), so this only moves it earlier: before `clear_totp/1` and the
+  # writes below, which a membership edit waiting on `LockAccount` must not
+  # interleave with.
+  defp lock_account(changeset) do
+    case AccountLock.exclusive(changeset.data.id) do
+      {:ok, _state} -> changeset
+      {:error, :not_found} -> changeset
+    end
+  end
+
+  # Strip every site membership of what it grants (#2774). The rows survive
+  # erasure — they are the audit of who belonged where, and a rejected
+  # registration's row is what keeps the applicant out (#2514) — but a tier,
+  # a live temporary one or an audience left on them kept the tombstone an
+  # admin on the rosters, an assignee and a reader of gated content.
+  defp demote_memberships(user) do
     require Ash.Query
 
     # authorize?: false — erasure is authorized once, as the `:anonymize` action
-    # (or the staging scrub). The person being erased owns these rows, so no
-    # admin actor would be admitted to them, and the filter pins every row to
-    # this user's id.
-    KilnCMS.Accounts.OrgMembership
-    |> Ash.Query.filter(user_id == ^user.id and not is_nil(granted_role))
-    |> Ash.bulk_update!(:expire_role_grant, %{},
+    # (or the staging scrub). `:erase` is refused to every actor, and the
+    # filter pins every row to this user's id.
+    OrgMembership
+    |> Ash.Query.filter(user_id == ^user.id and ^granting())
+    |> Ash.bulk_update!(:erase, %{},
       authorize?: false,
       strategy: [:atomic, :atomic_batches, :stream],
       return_records?: false,
       return_errors?: true
+    )
+  end
+
+  @doc """
+  The memberships that still grant something `OrgMembership.:erase` takes
+  away: a tier above `:viewer`, a temporary tier, or an audience. Shared with
+  `KilnCMS.Accounts.ErasureBackfill`, so the pass finds exactly what erasure
+  now clears.
+  """
+  @spec granting() :: Ash.Expr.t()
+  def granting do
+    Ash.Expr.expr(
+      role != :viewer or not is_nil(granted_role) or
+        fragment("coalesce(cardinality(?), 0) > 0", audiences)
     )
   end
 

@@ -238,6 +238,12 @@ defmodule KilnCMSWeb.TeamLive do
 
   def handle_event("edit_member", %{"id" => id}, socket) when is_binary(id) do
     case get_membership(socket, id) do
+      # An erased account's row is not edited (#2774): every write that could
+      # give it a tier back is refused (`Changes.LockAccount`), so the form
+      # would only fail on save. Removing the row is still offered.
+      {:ok, %{user: %{anonymized_at: %DateTime{}}}} ->
+        {:noreply, socket}
+
       {:ok, membership} ->
         form =
           membership
@@ -559,6 +565,9 @@ defmodule KilnCMSWeb.TeamLive do
   end
 
   defp site_admin?(user), do: RoleGrant.effective_role(user) == :admin
+
+  defp erased?(%{anonymized_at: %DateTime{}}), do: true
+  defp erased?(_user), do: false
 
   # A member added (or a registration approved) here: the confirmation, and
   # the two-step sign-in warning when their new tier needs a factor they lack
@@ -1023,6 +1032,18 @@ defmodule KilnCMSWeb.TeamLive do
                     </:note>
                   </.role_summary>
                   <p
+                    :if={erased?(membership.user)}
+                    id={"member-#{membership.id}-erased"}
+                    class="flex flex-wrap items-center gap-1 text-xs text-base-content/60"
+                  >
+                    <.badge variant="outline">{gettext("Erased")}</.badge>
+                    <span>
+                      {gettext(
+                        "This account was erased. It holds no tier here and cannot be given one; the row is kept as a record until you remove it."
+                      )}
+                    </span>
+                  </p>
+                  <p
                     :if={site_admin?(membership.user) or membership.custom_role}
                     class="flex flex-wrap items-center gap-1 text-xs text-base-content/60"
                   >
@@ -1043,6 +1064,7 @@ defmodule KilnCMSWeb.TeamLive do
                 </div>
                 <div class="flex shrink-0 items-center gap-1">
                   <button
+                    :if={not erased?(membership.user)}
                     type="button"
                     phx-click="edit_member"
                     phx-value-id={membership.id}

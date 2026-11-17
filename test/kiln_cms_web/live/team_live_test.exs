@@ -109,6 +109,33 @@ defmodule KilnCMSWeb.TeamLiveTest do
       refute has_element?(view, "#site-admin-#{colleague.id}")
     end
 
+    test "an erased member is marked, cannot be edited, and can still be removed (#2774)",
+         %{conn: conn} do
+      colleague = authed_user(:editor)
+
+      {:ok, membership} =
+        Accounts.create_org_membership(
+          %{user_id: colleague.id, organization_id: Accounts.default_org_id(), role: :admin},
+          authorize?: false
+        )
+
+      Accounts.anonymize_user!(colleague, authorize?: false)
+
+      {:ok, view, _html} = live(conn, ~p"/editor/team")
+
+      assert has_element?(view, "#member-#{membership.id}-erased", "Erased")
+      refute has_element?(view, "#member-#{membership.id} button", "Edit")
+      # A pushed edit opens no form for it.
+      render_click(view, "edit_member", %{"id" => membership.id})
+      refute has_element?(view, "#edit-member-#{membership.id}")
+
+      view
+      |> element("#member-#{membership.id} button[phx-click='remove_member']")
+      |> render_click()
+
+      refute has_element?(view, "#member-#{membership.id}")
+    end
+
     test "each row's actions name the member or role they act on (#1774)", %{conn: conn} do
       admin = authed_user(:admin)
       conn = log_in(conn, admin)

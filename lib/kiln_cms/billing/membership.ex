@@ -116,6 +116,14 @@ defmodule KilnCMS.Billing.Membership do
       # provider event caused which grant.
       argument :provider_event_id, :string
 
+      # The account's row before this one (`KilnCMS.Accounts.AccountLock`'s
+      # lock order). The recompute in `RecordTransition` takes it anyway, but
+      # only after this row's UPDATE: an erasure holding the account and
+      # cancelling this membership then deadlocked with it. Not refused for
+      # an erased account: the recompute writes nothing to one (`:erased`),
+      # so a late webhook settles instead of retrying.
+      change {KilnCMS.Accounts.Changes.LockAccount, refuse_erased?: false}
+
       change KilnCMS.Billing.Changes.RecordTransition
     end
 
@@ -136,6 +144,8 @@ defmodule KilnCMS.Billing.Membership do
     update :uncomp do
       accept []
       require_atomic? false
+      # As `:apply_provider_state`: the account's row first.
+      change {KilnCMS.Accounts.Changes.LockAccount, refuse_erased?: false}
       change set_attribute(:status, :canceled)
       change set_attribute(:canceled_at, &DateTime.utc_now/0)
       change KilnCMS.Billing.Changes.RecordTransition
