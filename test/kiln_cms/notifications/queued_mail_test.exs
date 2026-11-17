@@ -514,13 +514,15 @@ defmodule KilnCMS.Notifications.QueuedMailTest do
       }
     end
 
-    defp legacy_assigned(to) do
+    # The task is real: a legacy assignment is sent only while its task is
+    # still open and still the assignee's (#3037).
+    defp legacy_assigned(to, task) do
       %{
         "kind" => "assigned",
         "to" => to,
-        "task_id" => Ecto.UUID.generate(),
-        "content_type" => "page",
-        "content_id" => Ecto.UUID.generate(),
+        "task_id" => task.id,
+        "content_type" => task.content_type,
+        "content_id" => task.content_id,
         "block_id" => nil,
         "org_id" => tenant(),
         "due_on" => nil,
@@ -582,7 +584,10 @@ defmodule KilnCMS.Notifications.QueuedMailTest do
 
     test "a task assignment to a live account is delivered, and forgets the address and note" do
       assignee = user(:editor)
-      job = legacy!(TaskMailWorker, legacy_assigned(address(assignee)))
+      task = assign!(assignee)
+      drain()
+      emails()
+      job = legacy!(TaskMailWorker, legacy_assigned(address(assignee), task))
       drain()
 
       assert [assigned] = to(emails(), address(assignee))
@@ -596,8 +601,11 @@ defmodule KilnCMS.Notifications.QueuedMailTest do
 
     test "a task assignment to an account erased since is not sent" do
       assignee = user(:editor)
+      task = assign!(assignee)
+      drain()
+      emails()
       old_address = address(assignee)
-      job = legacy!(TaskMailWorker, legacy_assigned(old_address))
+      job = legacy!(TaskMailWorker, legacy_assigned(old_address, task))
 
       erase!(assignee)
       drain()
@@ -608,6 +616,10 @@ defmodule KilnCMS.Notifications.QueuedMailTest do
 
     test "a digest to a live account is delivered" do
       assignee = user(:editor)
+      # A line is listed while an open task of theirs is on its content (#3037).
+      task = assign!(assignee, %{due_on: Date.utc_today()})
+      drain()
+      emails()
 
       job =
         legacy!(TaskMailWorker, %{
@@ -616,8 +628,8 @@ defmodule KilnCMS.Notifications.QueuedMailTest do
           "org_id" => tenant(),
           "items" => [
             %{
-              "content_type" => "page",
-              "content_id" => Ecto.UUID.generate(),
+              "content_type" => task.content_type,
+              "content_id" => task.content_id,
               "due_on" => Date.to_iso8601(Date.utc_today())
             }
           ]

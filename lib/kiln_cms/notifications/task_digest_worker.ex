@@ -96,7 +96,9 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
   defp enqueue_digest([%{assignee: assignee} | _] = tasks, org_id) do
     if assignee && assignee.email do
       # The assignee by id (#3019): the worker reads the address when it runs.
-      # The items are ids and dates, a snapshot of what was due today.
+      # The items are ids and dates, a snapshot of what was due today. Each
+      # names its task, so the worker sends only the lines still open and
+      # still this assignee's when it runs (#3037).
       %{
         "event" => "digest",
         "user_id" => assignee.id,
@@ -104,6 +106,7 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
         "items" =>
           Enum.map(tasks, fn task ->
             %{
+              "task_id" => task.id,
               "content_type" => task.content_type,
               "content_id" => task.content_id,
               "due_on" => task.due_on && Date.to_iso8601(task.due_on)

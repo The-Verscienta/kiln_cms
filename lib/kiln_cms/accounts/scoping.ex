@@ -458,6 +458,26 @@ defmodule KilnCMS.Accounts.Scoping do
   end
 
   @doc """
+  Whether `user_id` is on `users_with_tier(org, tiers)` now: the same query,
+  narrowed to that one account and asked as an existence check, so a caller
+  holding one id does not load the whole roster.
+
+  The review-request mail asks it when the job runs (#3037): the recipient
+  must still be one of the site's admins. A read that fails raises, so a
+  caller never reads a failure as "not on the roster".
+  """
+  @spec has_tier?(struct() | String.t() | nil, String.t(), [:admin | :editor | :viewer]) ::
+          boolean()
+  def has_tier?(org, user_id, tiers) when is_binary(user_id) and is_list(tiers) do
+    # authorize?: false — the roster read of `users_with_tier/2`, narrowed to
+    # one account; the same reason holds (#1402).
+    org
+    |> users_with_tier_query(tiers)
+    |> Ash.Query.filter(id == ^user_id)
+    |> Ash.exists?(authorize?: false)
+  end
+
+  @doc """
   `users_with_tier/2` as a query, not yet run, for a caller that narrows it
   further (the Security posture page's second-factor check, #2252). Reading it
   is the caller's system read to justify, as `users_with_tier/2` does.

@@ -34,7 +34,18 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     * the actor's name is the account's name now, and an actor erased since
       is "An editor" (or "A reviewer");
     * content deleted or trashed since, or a comment deleted since, sends
-      nothing.
+      nothing;
+    * the recipient must still be who the event is for, by the event's own
+      rule (#3037, `KilnCMS.Notifications.entitled/3`): an admin of the site
+      for a review request, the content's author for a published or
+      returned-to-draft notice, on the comment's thread or the author for a
+      comment notice, and on the site's mention roster for a mention. Each
+      event re-checks its own rule and no other: being removed from the site
+      stops a review request, but not a comment notice to someone still on
+      the thread;
+    * an address on the instance-wide suppression list, or on the site's own
+      (`KilnCMS.Mail.suppressed?/2`, #3036), is sent nothing. A list that
+      cannot be read fails the job, which retries.
 
   A skip finishes the job (`:ok`, logged with the job id and the reason, no
   address), rather than cancelling it: `KilnCMS.Mail.recent_delivery_failures/1`
@@ -45,7 +56,13 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   actor name and excerpt themselves. It is delivered only while an account
   that existed when it was queued still holds that address and would still be
   sent it, and those keys are dropped from its row once it finishes
-  (`KilnCMS.Jobs.PrivateArgs`).
+  (`KilnCMS.Jobs.PrivateArgs`). The suppression lists apply to it, and so do
+  the rules above that its args can still be checked against: the review
+  request's and the mention's, by the site it names, and the author's, by
+  the content it names. A comment notice on a thread is sent unchecked: the
+  job names the content by the mail's type name (a dynamic entry's
+  "recipe"), which is not always the thread's own `content_type`, and
+  carries no comment id, so the thread cannot be found from it reliably.
   """
   use Oban.Worker, queue: :mail, max_attempts: 8
   use KilnCMSWeb, :verified_routes
@@ -129,14 +146,21 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
 
     with {:ok, preference} <- preference(event),
          {:ok, user} <- Notifications.mail_recipient(user_id, preference),
-         {:ok, title} <- content_title(args["kind"], args["id"], tenant),
-         {:ok, excerpt} <- excerpt(event, args["comment_id"], tenant) do
+         {:ok, content} <- content(args["kind"], args["id"], tenant),
+         {:ok, comment} <- comment(event, args["comment_id"], tenant),
+         :ok <-
+           Notifications.entitled(event, user, %{
+             org_id: tenant,
+             author_id: content.author_id,
+             comment: comment
+           }),
+         :ok <- not_suppressed(to_string(user.email), tenant) do
       args
       |> Map.merge(%{
         "to" => to_string(user.email),
-        "title" => title,
+        "title" => content.title,
         "actor_name" => Notifications.actor_name_now(args["actor_id"]),
-        "excerpt" => excerpt
+        "excerpt" => comment && Notifications.snippet(comment.body)
       })
       |> deliver(job)
     else
@@ -153,8 +177,10 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
       when is_binary(to) do
     PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
       with {:ok, preference} <- preference(args["event"]),
-           {:ok, _user} <-
-             Notifications.mail_recipient_by_address(to, job.inserted_at, preference) do
+           {:ok, user} <-
+             Notifications.mail_recipient_by_address(to, job.inserted_at, preference),
+           :ok <- legacy_entitled(args, user),
+           :ok <- not_suppressed(to, args["org_id"]) do
         deliver(args, job)
       else
         {:skip, reason} -> skip(job, reason)
@@ -197,20 +223,50 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   defp preference(event) when event in @comment_events, do: {:ok, :comment}
   defp preference(_unknown), do: {:skip, :unknown_event}
 
-  # The content's title now. Gone (deleted, trashed, or of a type that no
-  # longer exists) is a skip: there is nothing left to link to.
-  defp content_title(kind, id, tenant) do
+  # The legacy job's own rule (#3037), from what its args still name: the
+  # review request's site and the mention's site, and for an author's notice
+  # the content, read for its author now. A legacy comment event on a thread
+  # is sent unchecked: its args name the record by the mail's `kind` (a
+  # dynamic entry's type name, "recipe"), not the thread's own
+  # `content_type`, and carry no comment id, so the thread cannot be found
+  # from them reliably. It is sent as the release before would have sent it.
+  defp legacy_entitled(%{"event" => event} = args, user)
+       when event in ["submitted_for_review", "comment_mention"],
+       do: Notifications.entitled(event, user, %{org_id: args["org_id"]})
+
+  defp legacy_entitled(%{"event" => event} = args, user)
+       when event in ["published", "returned_to_draft"] do
+    with {:ok, content} <- content(args["kind"], args["id"], args["org_id"]) do
+      Notifications.entitled(event, user, %{author_id: content.author_id})
+    end
+  end
+
+  defp legacy_entitled(_args, _user), do: :ok
+
+  # The suppression lists (#3036): the instance-wide one and, for a site's
+  # mail, that site's own (`Mail.suppressed?/2`). An address on either is a
+  # skip. A list that cannot be read raises, which fails the job and retries
+  # it, as the newsletter worker does: mail is never sent past a list nobody
+  # read.
+  defp not_suppressed(address, tenant) do
+    if Mail.suppressed?(address, org_id: tenant), do: {:skip, :suppressed}, else: :ok
+  end
+
+  # The content's title and author now. Gone (deleted, trashed, or of a type
+  # that no longer exists) is a skip: there is nothing left to link to.
+  defp content(kind, id, tenant) do
     # authorize?: false — a content read (the #1402 content-read argument, as
     # `TaskMailWorker` reads titles): a standing system grant on content would
     # hand the notifier the whole corpus, drafts included, for one title. The
-    # job already decided the recipient; only the title is selected.
+    # job already decided the recipient; only the title and the author's id
+    # (for the event's own rule, #3037) are selected.
     case ContentTypes.get_record(kind, id,
            authorize?: false,
            not_found_error?: false,
            tenant: tenant,
-           query: [select: [:id, :title]]
+           query: [select: [:id, :title, :author_id]]
          ) do
-      {:ok, %{title: title}} -> {:ok, title}
+      {:ok, %{} = content} -> {:ok, content}
       {:ok, nil} -> {:skip, :content_gone}
       {:error, :unknown_content_type} -> {:skip, :content_gone}
       {:error, error} -> {:error, error}
@@ -223,10 +279,11 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
     _unknown_type in ArgumentError -> {:skip, :content_gone}
   end
 
-  # The comment's excerpt now, read as the notifier's system actor, which
-  # `CMS.Comment` admits for reads (#1659). `authorize_with: :error`: a refused
-  # read must fail the job, not read as "comment deleted".
-  defp excerpt(event, comment_id, tenant)
+  # The comment now (its excerpt, and its thread for the event's rule), read
+  # as the notifier's system actor, which `CMS.Comment` admits for reads
+  # (#1659). `authorize_with: :error`: a refused read must fail the job, not
+  # read as "comment deleted".
+  defp comment(event, comment_id, tenant)
        when event in @comment_events and is_binary(comment_id) do
     case CMS.get_comment(comment_id,
            actor: Notifications.system(),
@@ -235,15 +292,15 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
            tenant: tenant
          ) do
       {:ok, nil} -> {:skip, :comment_gone}
-      {:ok, comment} -> {:ok, Notifications.snippet(comment.body)}
+      {:ok, comment} -> {:ok, comment}
       {:error, error} -> {:error, error}
     end
   end
 
-  defp excerpt(event, _comment_id, _tenant) when event in @comment_events,
+  defp comment(event, _comment_id, _tenant) when event in @comment_events,
     do: {:skip, :comment_gone}
 
-  defp excerpt(_event, _comment_id, _tenant), do: {:ok, nil}
+  defp comment(_event, _comment_id, _tenant), do: {:ok, nil}
 
   # A fixed reason and the job id: never the address.
   defp skip(%Oban.Job{id: id}, reason) do

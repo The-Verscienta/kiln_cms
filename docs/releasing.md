@@ -1116,7 +1116,9 @@ the job args are the contract.
   backoff: eight attempts, the last about 15 hours 21 minutes after the
   first. Once a new node takes it, the mail goes out: delayed, not lost. A
   job queued by an old node is delivered by a new one, but only to an
-  account that existed when the job was queued and still holds its address.
+  account that existed when the job was queued and still holds its address,
+  and only if it passes its event's rule and the suppression lists
+  ([Who workflow and task mail goes to](data-flows.md#who-workflow-and-task-mail-goes-to)).
 - **A task digest can go out twice** across the deploy. The digest job is
   unique for 20 hours by its args, and an old-shape and a new-shape digest
   for the same person have different args. It takes a digest run that failed

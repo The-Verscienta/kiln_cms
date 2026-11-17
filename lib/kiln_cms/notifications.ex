@@ -72,6 +72,14 @@ defmodule KilnCMS.Notifications do
   erased in the meantime is "An editor". The second decision only narrows the
   first.
 
+  It re-checks each event's own rule too (#3037, `entitled/3`), through the
+  same functions the enqueue used (`KilnCMS.Accounts.Scoping.has_tier?/3`,
+  `comment_audience_ids/2`, `mention_roster_member?/2`), so the two sides
+  cannot drift: a review request goes only to someone still an admin of the
+  site, a published or returned-to-draft notice only to the content's author
+  now, a comment notice only to someone still on the thread or the author,
+  and a mention only to someone still on the mention roster.
+
   Best-effort, like the other two: a notification that cannot be written is
   logged and dropped, never raised into the editorial action that caused it.
   The triggering changes (`KilnCMS.CMS.Changes.NotifyWorkflowEmail`,
@@ -574,20 +582,35 @@ defmodule KilnCMS.Notifications do
   # `:for_document` branch instead — `:for_block`'s `block_id` argument is
   # `allow_nil? false` and would raise given nil.
   defp thread_audience(comment, record) do
-    participants =
-      thread_participants(comment)
-      |> Enum.map(& &1.author_id)
-
-    # authorize?: false — an `Accounts.User` read (self-only policy) — a system
-    # grant there would cover every account on the deployment, for one name.
-    author = record |> Ash.load!(:author, authorize?: false) |> Map.get(:author)
-
-    [author_id(author) | participants]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
+    comment
+    |> comment_audience_ids(Map.get(record, :author_id))
     |> Enum.map(&user_by_id/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.filter(&wants?(&1, :comment))
+  end
+
+  @doc """
+  The ids of the accounts a comment event on `comment`'s thread is for:
+  everyone with a comment on that block's thread, plus `content_author_id`,
+  the author of the content it is on (nil for none).
+
+  The one rule for both sides of a comment mail (#3037): `dispatch_comment/4`
+  builds its thread audience from it when the comment is written, and
+  `KilnCMS.Notifications.WorkflowMailWorker` asks it again when the mail is
+  sent, so a recipient is mailed only while they are still on the thread or
+  still the author. Preferences and erasure are not part of it: each caller
+  takes those from `wants?/2` (through `mail_recipient/2` at send time).
+
+  The thread is read as `system/0` and fails closed: a refused read raises
+  rather than answering "nobody".
+  """
+  @spec comment_audience_ids(struct(), String.t() | nil) :: [String.t()]
+  def comment_audience_ids(comment, content_author_id) do
+    participants = comment |> thread_participants() |> Enum.map(& &1.author_id)
+
+    [content_author_id | participants]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
   end
 
   # As `system/0`, which `CMS.Comment` admits for reads (#1659). Fails CLOSED:
@@ -603,9 +626,6 @@ defmodule KilnCMS.Notifications do
       tenant: comment.org_id
     )
   end
-
-  defp author_id(%{id: id}), do: id
-  defp author_id(_author), do: nil
 
   defp user_by_id(id) do
     # authorize?: false — an `Accounts.User` read (self-only policy): a system
@@ -660,8 +680,11 @@ defmodule KilnCMS.Notifications do
     User
     |> Ash.read!(authorize?: false)
     |> Enum.filter(fn user ->
-      (MapSet.member?(member_ids, user.id) or not MapSet.member?(assigned_ids, user.id)) and
-        wants?(user, :comment)
+      on_mention_roster?(
+        user,
+        MapSet.member?(member_ids, user.id),
+        MapSet.member?(assigned_ids, user.id)
+      )
     end)
   rescue
     # A mention that cannot resolve its candidate list simply does not fire —
@@ -669,22 +692,54 @@ defmodule KilnCMS.Notifications do
     _error -> []
   end
 
-  # Every user who is scoped to at least one org.
-  #
-  # One `MapSet.new/1` call, on a list built by the function below: constructing
-  # a MapSet on two branches (the read and its rescue) gives dialyzer two
-  # different internal representations for the same opaque type and it rejects
-  # the later `member?/2`.
-  defp assigned_user_ids, do: MapSet.new(assigned_ids())
+  @doc """
+  Whether `user` is on `mention_roster(org)` now, decided from that one
+  account's membership rows rather than by loading the roster (#3037): the
+  mention mail asks it when the job runs, so a person who has since left the
+  roster (their membership on the site deactivated, a membership on another
+  site added, comment mail muted) is not mailed.
 
-  defp assigned_ids do
+  The same rule as `mention_roster/1`, through the same predicate. That
+  includes the roster's reading of an account with no membership rows at
+  all as unscoped, so on every org's roster: a person removed from the only
+  site they belonged to (removal deletes the row) is on every roster again.
+
+  Unlike `mention_roster/1`, a read that fails raises: a caller deciding
+  whether to send must not read a failure as either answer.
+  """
+  @spec mention_roster_member?(struct() | String.t() | nil, User.t()) :: boolean()
+  def mention_roster_member?(org, %User{id: user_id} = user) do
+    org_id = KilnCMS.Accounts.org_id(org)
+
+    # authorize?: false — this account's membership rows, every status: the
+    # policy is self-only, and the roster's own reads above skip it for the
+    # same reason. Every row, as `assigned_ids/0` reads them, because any row
+    # at all scopes the account.
+    rows = KilnCMS.Accounts.list_memberships_for_user!(user_id, authorize?: false)
+    member? = Enum.any?(rows, &(&1.organization_id == org_id and &1.status == :active))
+
+    on_mention_roster?(user, member?, rows != [])
+  end
+
+  # The mention roster's rule, for `mention_roster/1` and
+  # `mention_roster_member?/2` alike: an active member of the org, or an
+  # account scoped to no org at all, that has not muted comment mail.
+  defp on_mention_roster?(user, member?, scoped?),
+    do: (member? or not scoped?) and wants?(user, :comment)
+
+  # Every user who is scoped to at least one org: a membership row on any
+  # org, of any status.
+  #
+  # Raises when the read fails, and `mention_roster/1` turns that into an
+  # empty roster. It used to answer an empty set itself, which read as
+  # "nobody is scoped to any org" and put every account on every roster
+  # (#3037).
+  defp assigned_user_ids do
     # authorize?: false — a membership read for the mention roster: its policy
     # is self-only, and a system grant would read the whole account graph.
     KilnCMS.Accounts.OrgMembership
     |> Ash.read!(authorize?: false)
-    |> Enum.map(& &1.user_id)
-  rescue
-    _error -> []
+    |> MapSet.new(& &1.user_id)
   end
 
   # The comment channels, from the one already-filtered audience — the
@@ -1020,6 +1075,65 @@ defmodule KilnCMS.Notifications do
         {:error, error}
     end
   end
+
+  @doc """
+  Whether a queued workflow mail for `event` may still go to `user` (#3037):
+  `:ok`, or `{:skip, reason}` when they are no longer who the event is for.
+
+  `mail_recipient/2` asks whether the account may be mailed at all; this asks
+  whether it is still entitled to *this* mail. Each event re-checks its own
+  rule, the one its enqueue applied, through the same function:
+
+    * `"submitted_for_review"`: still an admin of the site
+      (`KilnCMS.Accounts.Scoping.has_tier?/3`, as `users_with_tier/2` chose);
+    * `"published"`, `"returned_to_draft"`: still the content's author;
+    * `"comment_added"`, `"comment_resolved"`: still on the comment's thread,
+      or the content's author (`comment_audience_ids/2`);
+    * `"comment_mention"`: still on the site's mention roster
+      (`mention_roster_member?/2`), or still on the comment's thread or the
+      author (the thread notice a mention replaces).
+
+  `context` carries what the rule needs: `:org_id` (the site), `:author_id`
+  (the content's author now) and `:comment` (the comment, as it is now).
+  Event names are the job's strings, matched explicitly and never turned into
+  atoms. A read that fails raises: it is never read as either answer.
+  """
+  @spec entitled(String.t(), User.t(), map()) :: :ok | {:skip, atom()}
+  def entitled("submitted_for_review", %User{id: user_id}, %{org_id: org_id}) do
+    if Scoping.has_tier?(org_id, user_id, [:admin]), do: :ok, else: {:skip, :not_an_admin}
+  end
+
+  def entitled(event, %User{id: user_id}, %{author_id: author_id})
+      when event in ["published", "returned_to_draft"] do
+    if author_id == user_id, do: :ok, else: {:skip, :not_the_author}
+  end
+
+  def entitled(event, %User{id: user_id}, %{comment: comment, author_id: author_id})
+      when event in ["comment_added", "comment_resolved"] do
+    if user_id in comment_audience_ids(comment, author_id),
+      do: :ok,
+      else: {:skip, :not_on_the_thread}
+  end
+
+  # A mention is also a thread notice: `dispatch_comment/4` takes the people
+  # it names out of the thread audience, so a participant who was mentioned
+  # has only this job. Off the roster but still on the thread or the author,
+  # they are still sent it, as the thread notice they would otherwise have
+  # had. A legacy job's context has no comment, so only the roster counts.
+  def entitled("comment_mention", %User{} = user, %{org_id: org_id} = context) do
+    cond do
+      mention_roster_member?(org_id, user) -> :ok
+      on_the_thread?(user, context) -> :ok
+      true -> {:skip, :not_on_the_roster}
+    end
+  end
+
+  def entitled(_event, _user, _context), do: {:skip, :unknown_event}
+
+  defp on_the_thread?(%User{id: user_id}, %{comment: %{} = comment} = context),
+    do: user_id in comment_audience_ids(comment, Map.get(context, :author_id))
+
+  defp on_the_thread?(_user, _context), do: false
 
   defp predates?(%User{inserted_at: %DateTime{} = created}, %DateTime{} = queued_at),
     do: DateTime.compare(created, queued_at) != :gt
