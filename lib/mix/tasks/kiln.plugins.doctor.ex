@@ -23,7 +23,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     * backup destinations (#2220) implement `Kiln.BackupDestination` with a
       usable `kind/0` (lowercase letters, digits and `_`, at most 32
       characters) — it is stored on every destination of that adapter — that
-      is neither one of Kiln's own (`local`, `rclone`) nor another module's,
+      is neither one of Kiln's own (`local`, `rclone`, `s3`) nor another module's,
       and that implement `abort_upload/3` when `supports/0` declares
       `:resume` (#2223);
     * human-verification providers (#2249) pass
@@ -667,7 +667,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
           "letters, digits and _, at most 32 characters"
       end
 
-    core = MapSet.new(["local", "rclone"])
+    core = MapSet.new(Destination.core_kinds())
 
     taken =
       for {plugin, mod, {:ok, kind}} <- kinded, kind in core do

@@ -175,7 +175,8 @@ defmodule KilnCMS.Backups.Retention do
        before the environment or the other rows were what they are now.
        Nothing is pruned on a destination that is, contains or is inside
        `BACKUP_RCLONE_REMOTE`, or another stored destination; nor on one
-       whose location can't be told (a plugin's kind) while
+       whose location can't be told (a plugin's kind) or can't be compared
+       with an rclone remote (an S3 bucket, #2221) while
        `BACKUP_RCLONE_REMOTE` is set, since nothing can show the two apart.
     1. **Inventory.** The destination's `list/1`, through
        `KilnCMS.Backups.Destination.call/4`, grouped into units as `scan/1`
@@ -1405,6 +1406,11 @@ defmodule KilnCMS.Backups.Retention do
 
   defp clear_of_env(_location, nil), do: :ok
   defp clear_of_env(:unknown, _env), do: {:error, :env_overlap_unknown}
+
+  # An S3 bucket and an rclone remote can't be compared: the remote may name
+  # the same bucket under any name (#2221, decided conservative per ADR 0064).
+  defp clear_of_env({:s3, _host, _port, _bucket, _prefix}, _env),
+    do: {:error, :env_overlap_unknown}
 
   defp clear_of_env(location, env) do
     if Destination.overlap?(location, env), do: {:error, :env_overlap}, else: :ok

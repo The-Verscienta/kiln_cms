@@ -14,7 +14,7 @@ defmodule KilnCMS.Backups.DestinationTest do
 
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups.{Destination, Redact}
-  alias KilnCMS.Backups.Destination.{Local, Rclone}
+  alias KilnCMS.Backups.Destination.{Local, Rclone, S3}
   alias KilnCMS.Test.BackupDestinations.{Fake, ResumableFake}
 
   @secret "fake-secret-token-123"
@@ -37,9 +37,14 @@ defmodule KilnCMS.Backups.DestinationTest do
     test "lists Kiln's own adapters, then the plugins', then the test extras, in a fixed order" do
       registry = Destination.registry()
 
-      assert [Rclone, Local | rest] = registry
+      assert [Rclone, Local, S3 | rest] = registry
       assert rest == [KilnDepFixture.BackupDestination, Fake, ResumableFake]
       assert Destination.registry() == registry
+    end
+
+    test "core_kinds/0 names Kiln's own kinds, the ones no plugin can take" do
+      assert Destination.core_kinds() == ["rclone", "local", "s3"]
+      assert Destination.adapter("s3") == {:ok, S3}
     end
 
     test "finds an adapter by kind, and an unknown kind is not installed" do
@@ -374,6 +379,57 @@ defmodule KilnCMS.Backups.DestinationTest do
       refute Destination.backup_file?("kiln-20260101-000000.keep")
       refute Destination.backup_file?("kiln-test-abcdef.txt")
       refute Destination.backup_file?("notes.txt")
+    end
+  end
+
+  describe "S3 locations (#2221)" do
+    defp s3(settings) do
+      %Config{
+        kind: "s3",
+        settings:
+          Map.merge(
+            %{"endpoint" => "https://s3.test", "region" => "us-east-1", "bucket" => "kiln"},
+            settings
+          )
+      }
+    end
+
+    test "normalize the host's case, the default port and the prefix's slashes" do
+      a = Destination.location(s3(%{"endpoint" => "https://S3.Test", "prefix" => "/site/a/"}))
+      b = Destination.location(s3(%{"endpoint" => "https://s3.test:443", "prefix" => "site/a"}))
+
+      assert a == {:s3, "s3.test", 443, "kiln", ["site", "a"]}
+      assert a == b
+    end
+
+    test "overlap on the same store and bucket when one prefix holds the other" do
+      root = Destination.location(s3(%{}))
+      site = Destination.location(s3(%{"prefix" => "site"}))
+      other = Destination.location(s3(%{"prefix" => "sites"}))
+
+      assert Destination.overlap?(root, site)
+      assert Destination.overlap?(site, root)
+      refute Destination.overlap?(site, other)
+
+      refute Destination.overlap?(
+               site,
+               Destination.location(s3(%{"bucket" => "else", "prefix" => "site"}))
+             )
+
+      refute Destination.overlap?(
+               site,
+               Destination.location(
+                 s3(%{"endpoint" => "https://s3.test:9000", "prefix" => "site"})
+               )
+             )
+    end
+
+    test "are never compared with an rclone remote" do
+      refute Destination.overlap?(Destination.location(s3(%{})), {:rclone, "r2", ["kiln"]})
+    end
+
+    test "fix the endpoint, bucket and prefix once stored" do
+      assert Destination.location_fields("s3") == ["endpoint", "bucket", "prefix"]
     end
   end
 end

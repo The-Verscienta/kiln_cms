@@ -92,6 +92,36 @@ defmodule KilnCMS.Webhooks.SafeUrl do
 
   def resolve_host_pinned(_), do: {:error, "must be a host name"}
 
+  @doc """
+  Every address `host` resolves to, under this module's resolver and DNS
+  timeout, without judging them: `{:ok, addresses}`, `:no_dns` when DNS
+  resolution is disabled (test env), or `{:error, message}`. For a caller
+  with rules of its own about which addresses it may reach (a backup
+  destination's `BACKUP_S3_PRIVATE_HOSTS`, #2221), applied with
+  `blocked_address?/1`.
+  """
+  @spec lookup(String.t()) :: {:ok, [:inet.ip_address()]} | :no_dns | {:error, String.t()}
+  def lookup(host) when is_binary(host) do
+    base = host |> String.trim() |> String.downcase() |> host_only()
+
+    cond do
+      ip_literal?(base) ->
+        {:ok, address} = :inet.parse_address(String.to_charlist(base))
+        {:ok, [address]}
+
+      not resolve_dns?() ->
+        :no_dns
+
+      true ->
+        case resolve_addresses(base) do
+          {:ok, []} -> {:error, "hostname could not be resolved"}
+          {:ok, addresses} -> {:ok, addresses}
+          {:error, :timeout} -> {:error, "hostname resolution timed out"}
+          {:error, _reason} -> {:error, "hostname could not be resolved"}
+        end
+    end
+  end
+
   # Resolve the host to the one address the caller should pin to. IP literals
   # pin to themselves; hostnames resolve once here (and every answer must be
   # safe, matching `validate/1`'s all-or-nothing check). When DNS resolution is
@@ -241,55 +271,61 @@ defmodule KilnCMS.Webhooks.SafeUrl do
 
   defp blocked_ip?(address), do: blocked_address?(address)
 
+  @doc """
+  Whether `address` (an `:inet.ip_address()` tuple) is one this module never
+  connects to: private, loopback, link-local, multicast, reserved, or an
+  IPv6 form that tunnels or maps to one of those.
+  """
+  @spec blocked_address?(:inet.ip_address()) :: boolean()
   # IPv4
-  defp blocked_address?({a, b, c, _}), do: ipv4_blocked?(a, b, c)
+  def blocked_address?({a, b, c, _}), do: ipv4_blocked?(a, b, c)
 
   # IPv6 loopback (::1) and unspecified (::) — match before the generic mapped clauses
-  defp blocked_address?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
-  defp blocked_address?({0, 0, 0, 0, 0, 0, 0, 0}), do: true
+  def blocked_address?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  def blocked_address?({0, 0, 0, 0, 0, 0, 0, 0}), do: true
 
   # IPv4-mapped ::ffff:a.b.c.d → re-check under the IPv4 rules
-  defp blocked_address?({0, 0, 0, 0, 0, 0xFFFF, g7, g8}),
+  def blocked_address?({0, 0, 0, 0, 0, 0xFFFF, g7, g8}),
     do: blocked_address?(v4_from_groups(g7, g8))
 
   # IPv4-compatible ::a.b.c.d (deprecated) → re-check under the IPv4 rules
-  defp blocked_address?({0, 0, 0, 0, 0, 0, g7, g8}),
+  def blocked_address?({0, 0, 0, 0, 0, 0, g7, g8}),
     do: blocked_address?(v4_from_groups(g7, g8))
 
   # IPv6 ULA fc00::/7 (first 7 bits == 1111110)
-  defp blocked_address?({g1, _, _, _, _, _, _, _})
-       when Bitwise.band(g1, 0xFE00) == 0xFC00,
-       do: true
+  def blocked_address?({g1, _, _, _, _, _, _, _})
+      when Bitwise.band(g1, 0xFE00) == 0xFC00,
+      do: true
 
   # IPv6 link-local fe80::/10 (first 10 bits == 1111111010)
-  defp blocked_address?({g1, _, _, _, _, _, _, _})
-       when Bitwise.band(g1, 0xFFC0) == 0xFE80,
-       do: true
+  def blocked_address?({g1, _, _, _, _, _, _, _})
+      when Bitwise.band(g1, 0xFFC0) == 0xFE80,
+      do: true
 
   # NAT64 64:ff9b::/96 (RFC 6052): a translator forwards it to the IPv4
   # address in the last 32 bits, so that address decides. On a NAT64 network
   # `[64:ff9b::a00:5]` is `10.0.0.5`.
-  defp blocked_address?({0x64, 0xFF9B, 0, 0, 0, 0, g7, g8}),
+  def blocked_address?({0x64, 0xFF9B, 0, 0, 0, 0, g7, g8}),
     do: blocked_address?(v4_from_groups(g7, g8))
 
   # Local-use NAT64 64:ff9b:1::/48 (RFC 8215): never a public destination.
-  defp blocked_address?({0x64, 0xFF9B, 1, _, _, _, _, _}), do: true
+  def blocked_address?({0x64, 0xFF9B, 1, _, _, _, _, _}), do: true
 
   # 6to4 2002::/16 (RFC 3056): the next 32 bits are the IPv4 address of the
   # relay the packet is tunnelled to.
-  defp blocked_address?({0x2002, g2, g3, _, _, _, _, _}),
+  def blocked_address?({0x2002, g2, g3, _, _, _, _, _}),
     do: blocked_address?(v4_from_groups(g2, g3))
 
   # Teredo 2001::/32 (tunnels to an obfuscated IPv4 address) and the
   # documentation range 2001:db8::/32: neither is a real destination.
-  defp blocked_address?({0x2001, g2, _, _, _, _, _, _}) when g2 in [0, 0xDB8], do: true
+  def blocked_address?({0x2001, g2, _, _, _, _, _, _}) when g2 in [0, 0xDB8], do: true
 
   # IPv6 multicast ff00::/8
-  defp blocked_address?({g1, _, _, _, _, _, _, _})
-       when Bitwise.band(g1, 0xFF00) == 0xFF00,
-       do: true
+  def blocked_address?({g1, _, _, _, _, _, _, _})
+      when Bitwise.band(g1, 0xFF00) == 0xFF00,
+      do: true
 
-  defp blocked_address?(_), do: false
+  def blocked_address?(_), do: false
 
   # The RFC 6890 special-purpose registry, as one clause per range rather than
   # one boolean expression: the expression form crossed credo's complexity

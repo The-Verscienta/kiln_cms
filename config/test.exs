@@ -517,3 +517,14 @@ config :kiln_cms, KilnCMS.Backups.Destination,
 # of this file. Down here so docs/environment-variables.md's line anchor into
 # this file stays put.
 config :kiln_cms, :private_args_scrub_on_boot, false
+
+# S3 backup destinations (#2221): requests go to their own `Req.Test` stub
+# (`KilnCMS.Test.FakeS3`), files of a few KiB already go in several parts,
+# ranged reads are small, and retries don't wait. Down here so
+# docs/environment-variables.md's line anchor into this file stays put.
+config :kiln_cms, KilnCMS.Backups.Destination.S3,
+  req_options: [plug: {Req.Test, KilnCMS.Backups.Destination.S3}],
+  min_part_bytes: 1024,
+  get_chunk_bytes: 1500
+
+config :kiln_cms, KilnCMS.Backups.Retry, base_ms: 1, cap_ms: 4, margin_ms: 1_000

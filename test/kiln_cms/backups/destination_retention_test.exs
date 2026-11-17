@@ -370,6 +370,23 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       assert deletes() == []
     end
 
+    test "an S3 destination is skipped while BACKUP_RCLONE_REMOTE is set: a remote may name " <>
+           "the same bucket (#2221)",
+         %{dir: dir} do
+      env_remote!("r2:kiln")
+      id = Ecto.UUID.generate()
+
+      config = %Config{
+        id: id,
+        key: "dest:" <> id,
+        kind: "s3",
+        settings: %{"endpoint" => "https://s3.test", "region" => "auto", "bucket" => "kiln"},
+        secrets: %{}
+      }
+
+      assert {:error, :env_overlap_unknown} = prune(dir, config)
+    end
+
     @tag :tmp_dir
     test "a destination overlapping another stored one is skipped; its own row is not an overlap",
          %{dir: dir, tmp_dir: tmp_dir} do
