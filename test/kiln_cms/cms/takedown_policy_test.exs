@@ -285,6 +285,14 @@ defmodule KilnCMS.CMS.TakedownPolicyTest do
 
   defp run(ctx, actor), do: apply(CMS, ctx.fun, [record!(ctx), %{}, opts(ctx, actor)])
 
+  # The scheduled takedowns accept only the record their trigger picks: a
+  # passed embargo end with the matching expiry action (#2746).
+  defp record!(%{fun: :unpublish_scheduled_post} = ctx),
+    do: published!(ctx, %{unpublish_at: in_days(-1)})
+
+  defp record!(%{fun: :archive_scheduled_post} = ctx),
+    do: published!(ctx, %{unpublish_at: in_days(-1), expiry_action: :archive})
+
   defp record!(%{from: :published} = ctx), do: published!(ctx)
   defp record!(%{from: :draft} = ctx), do: post!(ctx)
 

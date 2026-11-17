@@ -195,14 +195,20 @@ defmodule KilnCMS.CMS.MediaAltTextTest do
     test "the scheduled publish path is gated too" do
       require_alt!()
       actor = admin()
-      p = page(%{blocks: [image_block(image())]}, actor)
+      # Due, as the worker's record would be: `:publish_scheduled` refuses a
+      # record its trigger would not pick (#2746), which would pass the
+      # `{:error, _}` below with the gate gone. The message pins the gate.
+      due = DateTime.add(DateTime.utc_now(), -60, :second)
+      p = page(%{blocks: [image_block(image())], scheduled_at: due}, actor)
 
       # The unattended path is precisely where a refusal has no human to read
       # the error, so it must not be the one that silently bypasses the gate.
-      assert {:error, _} =
+      assert {:error, error} =
                p
                |> Ash.Changeset.for_update(:publish_scheduled, %{}, actor: actor)
                |> Ash.update()
+
+      assert Exception.message(error) =~ "no alt text"
     end
   end
 

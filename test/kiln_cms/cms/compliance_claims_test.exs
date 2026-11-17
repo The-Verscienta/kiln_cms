@@ -376,11 +376,18 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
   describe "the scheduled publish gate" do
     # Two independent `validate` lines in the resource, so dropping one is
     # silent. A claim that must not go live by hand must not go live by
-    # scheduler either.
+    # scheduler either. Each page is due, as the scheduler's record is:
+    # `:publish_scheduled` refuses a record its trigger would not pick
+    # (#2746), and the gate is what these tests are about.
     test "refuses a scheduled publish carrying an error-severity claim" do
       gate!()
       actor = admin()
-      p = page(%{blocks: [text_block("Our product is government approved.")]}, actor)
+
+      p =
+        page(
+          %{blocks: [text_block("Our product is government approved.")], scheduled_at: due()},
+          actor
+        )
 
       assert {:error, error} = Ash.update(p, %{}, action: :publish_scheduled, actor: actor)
       assert Exception.message(error) =~ "government approved"
@@ -389,10 +396,14 @@ defmodule KilnCMS.CMS.ComplianceClaimsTest do
     test "lets a clean scheduled publish through" do
       gate!()
       actor = admin()
-      p = page(%{blocks: [text_block("Garden sheds are pleasant.")]}, actor)
+
+      p =
+        page(%{blocks: [text_block("Garden sheds are pleasant.")], scheduled_at: due()}, actor)
 
       assert {:ok, published} = Ash.update(p, %{}, action: :publish_scheduled, actor: actor)
       assert published.state == :published
     end
+
+    defp due, do: DateTime.add(DateTime.utc_now(), -60, :second)
   end
 end

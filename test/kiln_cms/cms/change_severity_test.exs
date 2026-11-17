@@ -383,7 +383,9 @@ defmodule KilnCMS.CMS.ChangeSeverityTest do
 
     test "a scheduled publish defaults to :notable", %{admin: admin} do
       list_safety(admin, %{"page" => ["title"]})
-      page = CMS.create_page!(%{title: "Later", slug: slug()}, actor: admin)
+      # Due, as the record the scheduler picks is (#2746).
+      due = DateTime.add(DateTime.utc_now(), -60, :second)
+      page = CMS.create_page!(%{title: "Later", slug: slug(), scheduled_at: due}, actor: admin)
       CMS.publish_scheduled_page!(page, %{}, authorize?: false)
 
       assert severity(page, :publish_scheduled) == :notable

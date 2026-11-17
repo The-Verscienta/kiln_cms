@@ -3388,6 +3388,20 @@ defmodule KilnCMS.CMS.Content do
           # scaffold create defers `required`, and a title-only write never
           # checks it. Nothing publishes with one empty.
           validate KilnCMS.CMS.Validations.RequiredCustomFields, before_action?: true
+          # A compare-and-swap (#2746), as on `:publish` (#879): the UPDATE
+          # lands only while the row still satisfies the trigger's `where`,
+          # word for word. The worker reads the record, then spends its
+          # before_action phase in the checkpoint and gates above; a publish,
+          # an archive or a reschedule in that window turns this write into a
+          # `StaleRecord`, which AshOban cancels as `:trigger_no_longer_applies`.
+          # Nothing fires: the side effects below run on a committed write only.
+          change filter(
+                   expr(
+                     ^ref(:state) in [:draft, :in_review] and not is_nil(^ref(:scheduled_at)) and
+                       ^ref(:scheduled_at) <= now()
+                   )
+                 )
+
           change transition_state(:published)
           change set_attribute(:published_at, &DateTime.utc_now/0)
           change set_attribute(:scheduled_at, nil)
@@ -3507,6 +3521,17 @@ defmodule KilnCMS.CMS.Content do
           # record whose `expiry_action` is `:unpublish` — the scheduled mirror
           # of `:unpublish`, clearing the schedule so the trigger can't re-fire.
           require_atomic? false
+          # A compare-and-swap on the trigger's `where` (#2746), as on
+          # `:publish_scheduled`: an archive, an unpublish, an extended
+          # `unpublish_at` or a switched `expiry_action` since the worker's
+          # read is a `StaleRecord`, and the job is cancelled.
+          change filter(
+                   expr(
+                     ^ref(:state) == :published and not is_nil(^ref(:unpublish_at)) and
+                       ^ref(:unpublish_at) <= now() and ^ref(:expiry_action) == :unpublish
+                   )
+                 )
+
           change transition_state(:draft)
           change set_attribute(:unpublish_at, nil)
           # Same fold as `:unpublish` (docs/working-copy.md).
@@ -3540,6 +3565,15 @@ defmodule KilnCMS.CMS.Content do
         # published again, by a deadline nobody re-set.
         update :archive_scheduled do
           require_atomic? false
+          # The same compare-and-swap as `:unpublish_scheduled` (#2746), on
+          # this trigger's `where`.
+          change filter(
+                   expr(
+                     ^ref(:state) == :published and not is_nil(^ref(:unpublish_at)) and
+                       ^ref(:unpublish_at) <= now() and ^ref(:expiry_action) == :archive
+                   )
+                 )
+
           change transition_state(:archived)
           change set_attribute(:unpublish_at, nil)
           # Same fold as `:unpublish` (docs/working-copy.md).
