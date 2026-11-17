@@ -696,6 +696,12 @@ of work:
   ([backups.md](backups.md#several-nodes-and-the-backup-lock)). Its job is
   canceled first, so Lifeline never re-runs it. The reasoning is in
   [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md).
+- **Form mail and automation jobs keep their args when discarded this way.**
+  A job that finishes normally drops the submitted form data or the
+  automation payload from its row; one Lifeline discards ran none of its
+  code, so it keeps them until `KilnCMS.Jobs.PrivateArgsScrub` next runs
+  (daily, and ten minutes after each boot;
+  [Job args retention](data-flows.md#job-args-retention)).
 - **`max_attempts: 1` workers are discarded, not re-run:** demo reset, slug
   regeneration, content-release go-live/rollback. A release left in
   `publishing` or `rolling_back` is freed with the admin-only **abandon**

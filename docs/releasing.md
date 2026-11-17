@@ -1066,6 +1066,39 @@ without breaking it. A new kind of artifact destination key, or a new
 status inside an artifact's `destinations` map, would still be refused by
 it the same way.
 
+### Rolling back past form mail jobs that carry ids
+
+From the release after v1.10.1 (#2992), the form notification and
+autoresponder jobs carry `form_id`, `org_id` and `submission_id`, and the
+worker reads the submission when it runs. A release before it knows only
+the old shape, which carried the submitted `data`. No migration is
+involved; the job args are the contract.
+
+- **During a rolling deploy**, an old node that picks up a new-shape job
+  fails it, and Oban retries it on the mail backoff (five attempts over about
+  81 minutes). Once a new node takes it, the mail goes out: delayed, not
+  lost. A job queued by an old node is still delivered by a new one.
+- **After rolling back**, every new-shape job still queued fails all five
+  attempts and is discarded. The staff notifications and confirmations for
+  those submissions are never sent; the submissions themselves are stored
+  and on the Entries tab. To avoid it, let the `mail` queue drain before you
+  roll back (no `NotificationWorker` or `AutoresponderWorker` job in
+  `available`, `scheduled` or `retryable`).
+- The boot-time run of `KilnCMS.Jobs.PrivateArgsScrub` can land on an old
+  node during the deploy, which has no such worker, so the attempt fails and
+  the job can end up discarded. That is harmless: the daily run, and the
+  next boot, do the same work.
+
+The automation jobs change shape the same way one release later. This
+release already reads a sealed `"sealed"` payload as well as the plain
+`"payload"` it still writes, so the release that switches the writers can
+run beside it.
+
+To drop the private args that finished jobs still hold, for instance after
+restoring a backup taken before the upgrade, run
+`bin/kiln_cms eval 'KilnCMS.Release.scrub_job_args()'`
+([Job args retention](data-flows.md#job-args-retention)).
+
 ### What zero-downtime does and does not cover
 
 The policy makes the **schema** safe for two releases at once. Kiln's boot

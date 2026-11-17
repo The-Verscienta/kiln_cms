@@ -5,8 +5,9 @@ defmodule KilnCMS.Forms.SystemActorAuthorizationTest do
   run as `Forms.system/0` instead of `authorize?: false` (#1659), and that the
   reads they decide on fail CLOSED when that grant is gone.
 
-  Every grant has a refusal next to it: the system records a submission but
-  cannot read, re-mark or delete one; it reads a form and its fields, active or
+  Every grant has a refusal next to it: the system records a submission and
+  reads one back by the id a mail job names (#2992), but cannot list, re-mark
+  or delete one; it reads a form and its fields, active or
   not, but cannot edit either; it reads the site's embed default but cannot
   save it.
 
@@ -138,12 +139,49 @@ defmodule KilnCMS.Forms.SystemActorAuthorizationTest do
       end
     end
 
-    test "the system reads, re-marks and deletes no submission" do
+    test "the system reads one submission back by id for delivery; no actor and an editor cannot" do
+      form = form!()
+      submission = submission!(form)
+
+      assert {:ok, %{id: id, data: %{"email" => "a@example.com"}}} =
+               CMS.get_form_submission_for_delivery(submission.id,
+                 actor: system(),
+                 authorize_with: :error,
+                 tenant: org_id()
+               )
+
+      assert id == submission.id
+
+      for actor <- [nil, user(:editor)] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 CMS.get_form_submission_for_delivery(submission.id,
+                   actor: actor,
+                   authorize_with: :error,
+                   tenant: org_id()
+                 )
+      end
+    end
+
+    test "the system lists, reads through the plain read, re-marks and deletes no submission" do
       form = form!()
       submission = submission!(form)
 
       assert {:error, _} =
                CMS.get_form_submission(submission.id, actor: system(), tenant: org_id())
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.recent_form_submissions(form.id,
+                 actor: system(),
+                 authorize_with: :error,
+                 tenant: org_id()
+               )
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.export_form_submissions(form.id,
+                 actor: system(),
+                 authorize_with: :error,
+                 tenant: org_id()
+               )
 
       assert {:error, %Ash.Error.Forbidden{}} =
                CMS.mark_form_submission_spam(submission, actor: system(), tenant: org_id())
@@ -191,9 +229,25 @@ defmodule KilnCMS.Forms.SystemActorAuthorizationTest do
       assert stored_submissions(form) == []
     end
 
+    test "a refused submission read is an error, never \"deleted\"" do
+      form = form!()
+      submission = submission!(form)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Forms.with_actor(nil, fn -> Forms.delivery_submission(submission.id, org_id()) end)
+
+      assert {:ok, %{id: id}} = Forms.delivery_submission(submission.id, org_id())
+      assert id == submission.id
+    end
+
     test "the notification worker fails the job instead of dropping the mail" do
       form = inactive_form!(%{notify_email: "team@example.com"})
-      args = %{"form_id" => form.id, "org_id" => org_id(), "data" => %{"m" => "hi"}}
+
+      args = %{
+        "form_id" => form.id,
+        "org_id" => org_id(),
+        "submission_id" => submission!(form).id
+      }
 
       assert {:error, %Ash.Error.Forbidden{}} =
                Forms.with_actor(nil, fn -> perform_job(NotificationWorker, args) end)
@@ -219,12 +273,13 @@ defmodule KilnCMS.Forms.SystemActorAuthorizationTest do
           tenant: org_id()
         )
 
-      args = %{
-        "form_id" => form.id,
-        "org_id" => org_id(),
-        "to" => "v@x.test",
-        "data" => %{"email" => "v@x.test"}
-      }
+      submission =
+        CMS.create_form_submission!(%{form_id: form.id, data: %{"email" => "v@x.test"}},
+          authorize?: false,
+          tenant: org_id()
+        )
+
+      args = %{"form_id" => form.id, "org_id" => org_id(), "submission_id" => submission.id}
 
       assert {:error, %Ash.Error.Forbidden{}} =
                Forms.with_actor(nil, fn -> perform_job(AutoresponderWorker, args) end)

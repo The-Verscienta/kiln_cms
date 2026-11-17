@@ -7,6 +7,8 @@ defmodule KilnCMS.CMS.FormSubmission do
 
   Written exclusively by `KilnCMS.Forms.submit/3` (validation, honeypot, and
   rate limiting happen there); admin-only to read, moderate, delete, or export.
+  The form pipeline's mail workers read one submission back by id
+  (`:for_delivery`, #2992), so their jobs carry no submitted data.
 
   ## Moderation (#477)
 
@@ -137,6 +139,17 @@ defmodule KilnCMS.CMS.FormSubmission do
 
       prepare build(sort: [inserted_at: :desc])
     end
+
+    # The one submission a form mail job was queued for (#2992): the
+    # notification and autoresponder workers carry the submission's id, not
+    # its data, and read it back here when they run, as `Forms.system/0`.
+    # Scoped by the action itself to the one id the job names, so the grant
+    # below cannot list submissions.
+    read :for_delivery do
+      get? true
+      argument :id, :uuid, allow_nil?: false
+      filter expr(id == ^arg(:id))
+    end
   end
 
   policies do
@@ -147,11 +160,13 @@ defmodule KilnCMS.CMS.FormSubmission do
 
     # Submission contents are visitor-provided data — admin eyes only. The
     # accept pipeline (`KilnCMS.Forms.submit/3`) writes, after validating, as
-    # `KilnCMS.Forms.system/0` (#1659): admitted to `:create` alone, so the
-    # system can record a submission but never read, re-mark or delete one.
+    # `KilnCMS.Forms.system/0` (#1659), and the two form mail workers read the
+    # one submission their job names back through `:for_delivery` (#2992).
+    # Admitted to those two actions alone: the system can record a submission
+    # and read one by id, but never list, re-mark or delete one.
     policy always() do
       authorize_if KilnCMS.CMS.Checks.OrgAdmin
-      forbid_unless action(:create)
+      forbid_unless action([:create, :for_delivery])
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :forms}
     end
   end
