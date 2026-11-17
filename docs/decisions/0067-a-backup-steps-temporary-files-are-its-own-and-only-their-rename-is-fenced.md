@@ -1,0 +1,143 @@
+# 0067. A backup step's temporary files are its own, and only their rename is fenced
+
+- **Status** — accepted (2026-11-17).
+- **References** — [#2818](https://github.com/The-Verscienta/kiln_cms/issues/2818)
+  (no file write inside the lock transaction),
+  [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819) (a step
+  that outlives its Cancel can still write its `.partial` files), both
+  follow-ups of [#2538](https://github.com/The-Verscienta/kiln_cms/issues/2538);
+  [ADR 0039](0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md),
+  amended by this record;
+  [ADR 0045](0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md)
+  for the Run writes, which this leaves as they were.
+- **Changelog** — the Unreleased section of
+  [CHANGELOG.md](../../CHANGELOG.md): Upgrade notes and Fixed
+  ([long form](../changelog/unreleased.md#backup-step-files-fenced)).
+
+## The problem
+
+A backup step is fenced by its lease (ADR 0039): chain, epoch and job id. A
+step that outlived its Cancel or its take-back, on a node that missed the
+signal, must not change what the step that took over has written. Before this
+record two things fell short of that.
+
+- **The fence held the lock while it wrote.** `state.json` was written inside
+  `Chain.while_holding/2`, which runs in the transaction holding the
+  cluster-wide `pg_advisory_xact_lock`. On a backup directory that stalls (a
+  hung NFS mount), the write blocked in the kernel and Cancel, new requests
+  and every node's heartbeat sweep waited behind it until their query timed
+  out. Cancel could not stop the stuck backup. The failure manifest was
+  written the same way.
+- **The step's own files were not fenced at all.** The dump and each media
+  part were written to fixed names (`kiln-db-<stamp>.dump.partial`,
+  `<part>.partial`, `partNN.run.list`) and renamed into place unconditionally.
+  A resume of the same stamp writes the same names, so a step that outlived
+  its Cancel could write into the resume's temporary file, or rename its own
+  file over the resume's verified one. Only the 150-second wait after a
+  Cancel kept them apart, and a heartbeat hung on a half-open connection can
+  stretch past it.
+
+## Decision
+
+- **A step's temporary files are its own.** Every file a step writes goes to
+  `<name>.<job>-<attempt>.partial` (`KilnCMS.Backups.Artifact.partial_name/2`,
+  `Artifact.tag/2`): the dump, each media part and its `partNN.<tag>.run.list`,
+  the checksum sidecars, `state.json`, `plan.json` and its
+  `partNN.<tag>.list` lists, and `manifest.json`. No two writers share a
+  temporary name, so the one that lost the lock can remove its own on any
+  error without touching anyone else's. The attempt keeps a retried job's
+  files apart from a late write of the attempt before it.
+- **The contents are written outside the lock.** A step writes, verifies
+  (`pg_restore --list`, `tar -tzf`), sets the mode and hashes its file under
+  that name with no lock held.
+- **Only the rename is fenced.** The rename into place is
+  `Chain.fenced_rename/3`: a `while_holding/2` around one `File.rename/2`.
+  A superseded step's rename is refused with `{:error, :superseded}`, the
+  step removes its temporary file and cancels itself. The rename is the last
+  thing a writer does, so a refused or failed one leaves the file under the
+  final name as it was.
+- **A delete is a fenced rename too.** A step that must delete something of
+  the chain's (a leftover work directory at a fresh start, an earlier plan's
+  media files, the work directory at the finish, a dump whose sidecar failed)
+  moves it, in one fenced transaction, into a trash entry on its own file
+  system (`.work/.trash/`, `db/.kiln-trash/`, `media/.kiln-trash/`) and
+  deletes the entry after the lock is released. The start step clears what a
+  crash left there. A rename that fails with `:exdev` deletes that path in
+  place, under the lock: the one delete left inside it.
+- **Every reader accepts both shapes.** `Artifact.parse_file/1` and
+  `parse_sidecar_name/1`, and through them retention, the importer and
+  History, report a tagged name as `partial?: true`, as they do an untagged
+  one. `scripts/backup.sh` keeps writing the untagged `<name>.partial`, and
+  its prune and verify, and `restore.sh`, match either.
+- **The start step reads the directory id before the lock.**
+  `Chain.begin_step/1` reads `.kiln-dir-id` (`DirId.current/1`) first. Only
+  the first start on a directory with no id creates one, inside the lock and
+  only once the job is known to be current.
+
+**What this does not do.** The rule met is "no file *content* is written
+under the lock". A rename, a move into the trash and the finish step's
+marker sync (#3013) are still file-system calls inside the lock transaction,
+and can still hang on a stalled mount. The window shrinks from "every state
+write" to "the mount stalls between the write and the rename"; a stalled
+directory can still hold Cancel back.
+
+## Rejected
+
+- **Per-chain temporary names** (`<name>.<chain>.partial`, the option on
+  #2819). Two attempts of one job are one chain, so a timed-out attempt's
+  late write and its retry would still share a name. Job and attempt are
+  finer, and are what the step already has.
+- **Random or UUID tags.** Nothing could tell from the name which job left
+  it, and the tag regex could not be narrow enough for `backup.sh`'s prune to
+  match it safely.
+- **Check the lease, then rename outside the lock.** The lease can be lost
+  between the check and the rename; the rename must run while the lock is
+  held.
+- **Keep writing the contents inside the lock.** That is the stall #2818
+  is about.
+- **Hash after the rename.** The final file is then briefly unverified under
+  its real name, and a superseded step would hash a file that may be the
+  resume's.
+- **`O_EXCL` temporary files, or `flock`.** Neither fences against a step
+  whose lease is gone, and `flock` is unreliable on the network file systems
+  this is for.
+- **Tag the files `backup.sh` writes.** Cron takes no lock and has no lease;
+  a tag would fence nothing.
+- **Drop the 150-second wait after a Cancel.** Off-site uploads and the prune
+  step are not fenced by this record and still rely on it.
+
+## Consequences
+
+- A step that outlived its Cancel can't replace or delete the backup's
+  `state.json`, dump, media parts, sidecars, plan or manifest. Its refused
+  rename leaves no temporary file behind.
+- A media part or dump that fails on every attempt leaves a file already
+  under its final name (from an earlier attempt) as it was, which can leave it
+  without a matching sidecar until retention ages the stamp out. Nothing
+  trusts it: a resume reuses a file only on a recorded hash match (ADR 0037).
+- Operators see `.kiln-trash/` in `db/` and `media/`, and `.work/.trash/`;
+  they are normally empty.
+- An older node's readers and an older `backup.sh` don't parse tagged names.
+  The host's `backup.sh` is updated in the same rollout; until then an app
+  backup is still protected by its `.work/<stamp>/`.
+- **Still not fenced:** the off-site uploads (including a local
+  destination's `<target>.partial`) and the prune step (`Retention.run/2`);
+  `interrupt/4`'s failure manifest and `finished_from_outside/3`'s removal of
+  the work directory, which run from the reclaim with no lease. A retry of the
+  same job, including one Oban's Lifeline rescues, holds the same lease as an
+  earlier attempt that is still running: their temporary files are apart,
+  but both renames are admitted.
+
+## When to revisit
+
+- If a stalled mount holding Cancel back through a rename is seen in
+  practice, the renames have to move out of the lock transaction too, which
+  needs a fence that does not hold a transaction open across a file-system
+  call.
+- When the off-site steps or the prune step get a lease check, extend this
+  record rather than starting another: the rule is the same.
+- If the lease gains a per-attempt epoch (so a retried or Lifeline-rescued
+  job no longer shares its lease with the attempt before it), the last
+  consequence above goes away.
+- If `backup.sh` ever takes the backup lock, its temporary files should be
+  tagged and fenced the same way.
