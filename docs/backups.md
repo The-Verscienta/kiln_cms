@@ -18,6 +18,10 @@ same on a laptop and on the VPS).
   /opt/kiln_cms/scripts/backup.sh all >> /var/log/kiln-backup.log 2>&1
 ```
 
+The app's `DATABASE_SSL` doesn't reach this line: when the database is on
+another host, add `?sslmode=require` (or `verify-full`) to its
+`DATABASE_URL` ([How the backup tools choose TLS](#how-the-backup-tools-choose-tls-2830)).
+
 > **Client tools must match the server's major version** — a `pg_dump` older
 > than the server refuses to run ("server version mismatch"). On the VPS use
 > the distro's `postgresql-client-17`; on macOS/Homebrew, put
@@ -1064,10 +1068,10 @@ not recognize a tagged name:
 ### Which database URL the backup tools accept (#2719)
 
 `pg_dump`, `pg_restore` and `psql` read a connection string as a URL only
-when it starts with `postgres://` or `postgresql://`. Kiln documents
-`DATABASE_URL` as `ecto://…`, so every Kiln path that hands a URL to them
-rewrites a leading `ecto://` (in any case) to `postgres://` first, and changes
-nothing else in the string:
+when it starts with `postgres://` or `postgresql://`, in lower case. Kiln
+documents `DATABASE_URL` as `ecto://…`, so every Kiln path that hands a URL to
+them rewrites a leading `ecto://` (in any case) to `postgres://` first, and
+lower-cases a `POSTGRES://` or `PostgreSQL://` scheme:
 
 | Path | Reads |
 |---|---|
@@ -1077,29 +1081,74 @@ nothing else in the string:
 | `scripts/restore.sh` | `RESTORE_DATABASE_URL` |
 | `scripts/staging.sh` | `PROD_DATABASE_URL`, `STAGING_DATABASE_URL` |
 
-So `ecto://`, `postgres://` and `postgresql://` all work, and the query
-string (`?sslmode=require`, several hosts, an IPv6 `[::1]`) reaches libpq as
-you wrote it.
+So `ecto://`, `postgres://` and `postgresql://` all work, and the host part
+(several hosts, an IPv6 `[::1]`) reaches libpq as you wrote it.
 
-**Ecto-only query parameters are not translated.** libpq refuses any
-parameter it doesn't know, by name:
+**The query parameters only Ecto reads are translated (#2833).** libpq
+refuses any parameter it doesn't know, by name
+(`pg_dump: error: invalid URI query parameter: "pool_size"`), so before a URL
+reaches the tools, every path above changes the ones Ecto itself defines.
+Keys and values are compared after percent-decoding, as both Ecto and libpq
+decode them (`%73sl=%66alse` is `ssl=false`):
+
+| In the URL | What the tools get | Why |
+|---|---|---|
+| `ssl=false` | `sslmode=disable`, in the same place | Ecto reads it as "no TLS" for the app's own connection, whatever `DATABASE_SSL` says, so the tools connect the same way |
+| `pool_size`, `timeout`, `idle_interval` | dropped (and a `?` left with nothing after it) | Ecto's pool settings; none changes which server is reached or how securely |
+| `ssl=true` | kept: libpq reads it as `sslmode=require` | but see [How the backup tools choose TLS](#how-the-backup-tools-choose-tls-2830): when the app verifies the server, it is replaced by the stronger mode |
+| anything else | kept as written | |
 
 ```text
-pg_dump: error: invalid URI query parameter: "pool_size"
+ecto://kiln:…@db/kiln_prod?ssl=false&pool_size=10   →   postgres://kiln@db/kiln_prod?sslmode=disable
 ```
 
-`ssl=true` is the exception: libpq reads it itself, as `sslmode=require`,
-while `ssl=false` is refused like `pool_size`. When the app's `DATABASE_URL`
-carries such a parameter, set `BACKUP_DATABASE_URL` to the same connection
-without it for the in-app backup, and give `backup.sh` a `DATABASE_URL` in
-libpq's form:
+Anything else libpq doesn't know still fails by name. That includes
+`ssl=1` and `ssl=FALSE` (Ecto reads neither as `false`) and Ecto's
+`socket_dir`, which is kept on purpose: it decides which server the app
+reaches, and dropping it would point the dump at another one. For a socket,
+write libpq's form, `postgres:///kiln_prod?host=/run/postgresql`, in
+`BACKUP_DATABASE_URL` (in-app) or in `DATABASE_URL` on the cron line.
+
+Only the URL given to the tools is translated. `restore.sh drill` and
+`staging.sh up` still print the URL as you wrote it (password removed), and
+`staging.sh` hands `STAGING_DATABASE_URL` to the app's migrate and scrub
+commands untranslated: Ecto reads `ssl=false` and `pool_size` itself there.
+
+**A `key=value` connection string is accepted only without a password
+(#2831).** A string that is not a `postgres://` or `postgresql://` URL after
+the scheme rewrite is passed through unchanged when it carries no secret, and
+refused before any tool runs when it does:
+
+| String | Result |
+|---|---|
+| `host=/run/postgresql dbname=kiln_prod` | passed through as written |
+| `kiln_prod` (a bare database name) | passed through as written |
+| `host=db password=hunter2 dbname=kiln` | refused |
+| `host=db sslpassword=… dbname=kiln` | refused |
+| `dbname='postgres://kiln:hunter2@db/kiln'` | refused (libpq would expand it into that URL) |
+| `mysql://u:pw@h/db`, or a URL with a leading space | refused (contains `://` but is not a URL libpq reads) |
+
+The reason: libpq's `key=value` syntax (quoting, backslash escapes, a
+`dbname` that is itself a URL) can't be rewritten safely, so a password in
+it would sit in the tool's command line for the whole dump, and libpq
+echoes an unreadable string back in its errors. Keywords are case-sensitive:
+`PASSWORD=hunter2` is not a password keyword, and libpq refuses it by
+naming it, without printing the value. A refused string fails with:
+
+```text
+BACKUP_DATABASE_URL (or DATABASE_URL) is not a postgres:// URL and holds a password or another URL, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read. Write it as a postgres:// URL, password included (postgres:///database?host=/socket/dir for a Unix socket), or put the password in PGPASSWORD or ~/.pgpass.
+```
+
+The scripts print the same sentence after `error: DATABASE_URL`,
+`RESTORE_DATABASE_URL`, `PROD_DATABASE_URL` or `STAGING_DATABASE_URL`, and
+`backup.sh all` records it in the failure manifest. In the app, the backup
+fails at once (no retry), and a demo reset or golden capture fails with it.
+Rewrite the string as a URL, password included:
 
 ```bash
-BACKUP_DATABASE_URL=postgres://kiln:…@postgres/kiln_prod?sslmode=require
+# was: host=/run/postgresql user=kiln password=hunter2 dbname=kiln_prod
+BACKUP_DATABASE_URL=postgres://kiln:hunter2@/kiln_prod?host=/run/postgresql
 ```
-
-A `key=value` connection string (`host=postgres dbname=kiln_prod`) is passed
-through as written; see the next section for why a URL is better.
 
 ### The database password stays out of the pg_dump command line (#2726)
 
@@ -1117,7 +1166,7 @@ gives it to the one `pg_dump`, `pg_restore` or `psql` that needs it as
 | `postgres://kiln@db/kiln?sslmode=require&password=hunter2` | `postgres://kiln@db/kiln?sslmode=require` | `hunter2` |
 | `postgres://kiln:a@db/kiln?password=b` | `postgres://kiln@db/kiln` | `b` |
 | `postgres://kiln@db/kiln` | `postgres://kiln@db/kiln` | not set: yours, or `~/.pgpass`, applies |
-| `host=db password=hunter2 dbname=kiln` | as written, password included | not set |
+| `host=db password=hunter2 dbname=kiln` | refused, nothing runs ([above](#which-database-url-the-backup-tools-accept-2719)) | |
 
 The URL is split where libpq splits it:
 
@@ -1129,17 +1178,147 @@ The URL is split where libpq splits it:
 - **A `password=` query parameter is moved too**, also when its name is
   escaped (`pass%77ord=`). With a password in both places, the query one
   wins, as in libpq.
-- **A URL without a password** (or with an empty one, `kiln:@db`) is left as
-  written, apart from `ecto://`, so your own `PGPASSWORD` or `~/.pgpass`
-  decides.
-- **A `key=value` string is not a URL** and is passed as it is, password
-  included. Use a URL.
+- **A URL without a password** (or with an empty one, `kiln:@db`) keeps its
+  user part as written (only the scheme and Ecto's query parameters change),
+  so your own `PGPASSWORD` or `~/.pgpass` decides.
+- **A `key=value` string with a password is refused** (#2831), and one
+  without is passed as it is. Use a URL.
 
 The scripts don't print it either. `restore.sh drill` suggests a
 `STAGING_DATABASE_URL=… ./scripts/staging.sh scrub` line with the password
 removed, and `staging.sh up` prints the staging `DATABASE_URL=` the same way;
 both say "password not shown". Put the password back in the URL, or export
 `PGPASSWORD`, before using them.
+
+### How the backup tools choose TLS (#2830)
+
+The app's own database connection is encrypted unless `DATABASE_SSL` is off,
+and verifies the server when `DATABASE_SSL_CACERTFILE` is set
+([database TLS](environment-variables.md#database-tls)). libpq's default is
+weaker: `sslmode=prefer` falls back to cleartext without a word when TLS
+fails, and never checks the certificate. So the in-app backup and the demo
+reset and golden capture give `pg_dump` and `psql` a `PGSSLMODE` (and
+sometimes `PGSSLROOTCERT`) that matches the app's connection, in their own
+environment only:
+
+| The app connects with | The tools get |
+|---|---|
+| `DATABASE_SSL` off (or `ssl=false` in the URL the app reads) | nothing: libpq's default (`prefer`) |
+| `DATABASE_SSL` on (the default), no `DATABASE_SSL_CACERTFILE` | `PGSSLMODE=require`: encrypted, certificate not checked, as the app does |
+| `DATABASE_SSL` on with `DATABASE_SSL_CACERTFILE=/path/ca.pem` | `PGSSLMODE=verify-full`, `PGSSLROOTCERT=/path/ca.pem` |
+| any other configuration that verifies the server (`ssl: true`, `cacerts`, set in code) | `PGSSLMODE=verify-full`, `PGSSLROOTCERT=system` (the system trust store; libpq 16 or later) |
+
+The rule follows the Repo's effective `:ssl` option, after Ecto has merged
+the URL's own `ssl=` into it, so it cannot disagree with the connection the
+app is actually using.
+
+**Your explicit choice wins, even a weaker one.** Nothing is added when:
+
+- the URL has `sslmode=` or `requiressl=` in its query
+  (`?sslmode=verify-full&sslrootcert=/etc/kiln/ca.pem`), or
+- `PGSSLMODE` is set, and not blank, in the app's environment (the tools
+  inherit it).
+
+That is by design: it lets you reach a backup host the app's settings don't
+fit (a replica over a private network, a cert issued to a different name).
+It also means `?sslmode=disable`, or `PGSSLMODE=prefer`, makes the backup
+weaker than the app, and Kiln does not warn about it.
+
+Two settings are **not** treated as that choice, because neither alone makes
+libpq require TLS:
+
+- **A root certificate alone** (`sslrootcert=` in the URL, or a non-blank
+  `PGSSLROOTCERT` in the environment). Your certificate is kept and no
+  `PGSSLROOTCERT` is added; `PGSSLMODE` is still set to the mode in the
+  table, except that `require` becomes `verify-full` when the certificate is
+  `system` (libpq refuses `system` with a weaker mode).
+- **Ecto's `ssl=true` in the URL.** libpq reads it as `sslmode=require`.
+  When the app only requires TLS, it stays and nothing is added. When the
+  app verifies the server, `ssl=true` is removed from the tools' URL and
+  `PGSSLMODE=verify-full` applies, so the backup is never weaker than the
+  app.
+
+A Unix-socket connection is unaffected: libpq does not use TLS over a
+socket, whatever `PGSSLMODE` says.
+
+**What can now fail, and the fix.** With `DATABASE_SSL` on (the default),
+an in-app backup now requires TLS where it used to fall back to cleartext:
+
+- `BACKUP_DATABASE_URL` points at another server that offers no TLS: the
+  run fails with `pg_dump exited 1: … server does not support SSL, but SSL
+  was required`. Add `?sslmode=disable` (or `prefer`) to that URL if the
+  link is private, or enable TLS on that server.
+- With `DATABASE_SSL_CACERTFILE` set, `BACKUP_DATABASE_URL` names a host the
+  certificate doesn't list (an IP address, an internal alias): libpq's
+  `verify-full` checks the name in that URL. Use a name on the
+  certificate, or set `?sslmode=verify-ca&sslrootcert=/path/ca.pem` to
+  check the chain without the name.
+- `DATABASE_SSL_CACERTFILE` holds only an intermediate CA. The app's
+  connection accepts a chain that ends at it; libpq needs the root
+  certificate too. Put the root (and the intermediate) in the file.
+
+**Cron and the other scripts don't read `DATABASE_SSL`.** `backup.sh`,
+`restore.sh` and `staging.sh` run outside the app, and a cron line can't see
+the app's `DATABASE_SSL`, so they add no TLS settings of their own. Put the
+mode in the URL itself:
+
+```cron
+17 3 * * * kiln  DATABASE_URL='postgres://kiln:…@db.example.com/kiln_prod?sslmode=verify-full&sslrootcert=/etc/kiln/ca.pem' \
+  BACKUP_DIR=/var/backups/kiln \
+  /opt/kiln_cms/scripts/backup.sh all >> /var/log/kiln-backup.log 2>&1
+```
+
+(`?sslmode=require` to encrypt without checking the certificate, as the app
+does without a CA file.) An exported `PGSSLMODE`/`PGSSLROOTCERT` works too.
+
+### When pg_dump waits for a table lock (#2844)
+
+`pg_dump` takes a shared lock on every table it dumps. A migration,
+`VACUUM FULL` or another long transaction holding a conflicting lock used to
+make it wait for as long as that lock was held: forever in cron, and up to
+the step's 2-hour job timeout in the app. Every `pg_dump` Kiln runs (the
+in-app backup, `backup.sh db`/`all`, and the demo golden capture) is now
+given `--lock-wait-timeout`, set by `BACKUP_LOCK_WAIT_SECONDS`:
+
+- **Default 600** (10 minutes). Any whole number of seconds from 1 to 3600.
+  Anything else (`0`, `10m`, `5000`) keeps 600 and warns: at boot in the
+  app, on stderr from `backup.sh`. There is no "wait forever": pg_dump reads
+  `0` that way, so it is refused.
+- **It applies to each `LOCK TABLE`** separately. A dump blocked on several
+  tables in turn can wait several times the value.
+- **Set it for both paths**, in the app's environment and on the cron line;
+  each reads its own copy.
+- `pg_restore`, `psql` and `staging.sh` don't take it.
+
+To change it, set the variable and restart the app (or edit the cron line):
+
+```bash
+BACKUP_LOCK_WAIT_SECONDS=120
+```
+
+**What a lock timeout looks like.** pg_dump implements the option as a
+statement timeout around each `LOCK TABLE`, so its own words don't mention a
+lock. Kiln recognizes that pair and records:
+
+```text
+pg_dump waited longer than BACKUP_LOCK_WAIT_SECONDS (600 s) for a table lock and gave up: another session held a conflicting lock (a migration, VACUUM FULL, a long transaction). pg_dump said: pg_dump: error: query failed: ERROR:  canceling statement due to statement timeout / pg_dump: detail: Query was: LOCK TABLE public.pages IN ACCESS SHARE MODE
+```
+
+(That is the cron manifest's form, one line. The app keeps pg_dump's line
+break where the ` / ` is.)
+
+In the app, this is the dump step's error in the run's log, and the step is
+retried like any failed dump (after 1, 5 and 15 minutes); the run's error
+when it fails for good. From cron, `backup.sh all` writes it to the failure
+manifest, which the Backups page shows under **Last run failed**: the last
+five lines of pg_dump's stderr, newlines joined with ` / `, a URL password of
+6 or more characters replaced with `***`, cut to 500 characters. Any other
+`pg_dump` failure is recorded the same way, as `pg_dump exited <status>:
+<its last lines>`, where the manifest used to say only `backup.sh exited
+<status> - see the backup log`. pg_dump's full stderr is still in the log.
+
+Find what holds the lock with `pg_locks` joined to `pg_stat_activity`, and
+schedule backups away from migrations and maintenance windows.
 
 ### How an in-app backup runs (#2218)
 
@@ -3809,7 +3988,7 @@ The app reads them in production only.
 
 | Variable | Script | Meaning |
 |---|---|---|
-| `DATABASE_URL` | backup | source DB (read-only): `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_dump` as `PGPASSWORD` only ([connection URLs](#which-database-url-the-backup-tools-accept-2719)) |
+| `DATABASE_URL` | backup | source DB (read-only): `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_dump` as `PGPASSWORD` only, and a `key=value` string with a password is refused ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The app's `DATABASE_SSL` doesn't reach the script: put `sslmode=` in this URL to require TLS ([TLS](#how-the-backup-tools-choose-tls-2830)) |
 | `BACKUP_DIR` | backup + app | local backup root (default `/var/backups/kiln`) |
 | `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set and `S3_BUCKET` is not |
 | `BACKUP_KEEP_DAYS` | backup + app | local retention, 1 to 2147483647 days (default 14; anything else keeps 14 and warns): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)); an in-app schedule may keep its own backups longer or shorter ([per schedule](#set-how-long-a-schedule-keeps-its-backups)) |
@@ -3819,14 +3998,15 @@ The app reads them in production only.
 | `KILN_BACKUP_SCHEDULER_CRON` | app | when the app checks its [in-app schedules](#schedule-backups-in-the-app) (default `* * * * *`; `false` turns every schedule off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
 | `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
+| `BACKUP_LOCK_WAIT_SECONDS` | backup + app | how long `pg_dump` waits for each table lock before it gives up, 1 to 3600 (default 600; anything else keeps 600 and warns). Also the demo golden capture's ([lock waits](#when-pg_dump-waits-for-a-table-lock-2844)) |
 | `TMPDIR` | backup | where `backup.sh` builds the media file lists (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused copy fails the run, and so does a failed one, unless an in-app backup reached another [destination](#send-backups-to-several-destinations) (then it is partly off-site). The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_LOCAL_DESTINATION_ROOTS` | app | comma-separated absolute directories a **Directory on this server** destination may be under (default unset: that kind isn't offered). One relative or `..` entry drops the whole list with a boot warning ([details](#let-backups-be-written-to-a-directory-on-this-server)). Read in production and development |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
-| `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; Ecto-only query parameters are refused by libpq ([connection URLs](#which-database-url-the-backup-tools-accept-2719)) |
+| `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; `ssl=false` becomes `sslmode=disable` and Ecto's pool options are dropped ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The tools' TLS follows the app's unless this URL sets `sslmode` ([TLS](#how-the-backup-tools-choose-tls-2830)) |
 | `RCLONE_CONFIG`, `RCLONE_CONFIG_<NAME>_*`, `RCLONE_RETRIES` | rclone | read by `rclone` itself, which inherits the environment of whichever path runs it: the named remote's configuration file or settings, and rclone's retry count (default 3). Kiln does not read them. `kiln_offsite` is reserved ([above](#off-site-credentials-stay-out-of-the-rclone-command-line-2690)) |
-| `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill`: `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_restore`/`psql` as `PGPASSWORD` only |
+| `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill`: `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_restore`/`psql` as `PGPASSWORD` only, and a `key=value` string with a password is refused. Put `sslmode=` in it to require TLS |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |
 | `RESTORE_CONFIRM=yes` | restore | skip the interactive confirmation |
 | `RESTORE_REQUIRE_CHECKSUM=1` | restore | `media`: abort when there is no checksum sidecar (default: warn and continue for a legacy single archive) |
