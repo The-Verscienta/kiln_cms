@@ -1,6 +1,8 @@
 # 0067. A backup step's temporary files are its own, and only their rename is fenced
 
-- **Status** — accepted (2026-11-17).
+- **Status** — accepted (2026-11-17). Amended 2026-11-17 by
+  [#2832](https://github.com/The-Verscienta/kiln_cms/issues/2832) (every
+  manifest writer has a temporary name of its own; see "Amendment").
 - **References** — [#2818](https://github.com/The-Verscienta/kiln_cms/issues/2818)
   (no file write inside the lock transaction),
   [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819) (a step
@@ -67,8 +69,11 @@ record two things fell short of that.
 - **Every reader accepts both shapes.** `Artifact.parse_file/1` and
   `parse_sidecar_name/1`, and through them retention, the importer and
   History, report a tagged name as `partial?: true`, as they do an untagged
-  one. `scripts/backup.sh` keeps writing the untagged `<name>.partial`, and
-  its prune and verify, and `restore.sh`, match either.
+  one. `scripts/backup.sh` keeps writing the untagged `<name>.partial` for
+  its dump, parts and sidecars, and its prune and verify, and `restore.sh`,
+  match either. *Amended (#2832):* its manifest is the exception,
+  `manifest.json.<pid>-<random>.partial`, and so is a manifest the app writes
+  without a step, `manifest.json.<random digits>.partial`; see "Amendment".
 - **The start step reads the directory id before the lock.**
   `Chain.begin_step/1` reads `.kiln-dir-id` (`DirId.current/1`) first. Only
   the first start on a directory with no id creates one, inside the lock and
@@ -141,3 +146,37 @@ directory can still hold Cancel back.
   consequence above goes away.
 - If `backup.sh` ever takes the backup lock, its temporary files should be
   tagged and fenced the same way.
+
+## Amendment (2026-11-17, #2832): every manifest writer has a temporary name of its own
+
+`manifest.json` has more writers than a step: `scripts/backup.sh`, and
+`Manifest.write/3` called without a lease, when a backup interrupted on
+another node is recorded from outside its step (`interrupt/4`). Both wrote
+through the untagged `manifest.json.partial`, so a cron run and an in-app
+write finishing together could interleave in one file and publish a mix of
+the two, or fail a rename the other had already done. Two of the Rejected
+points above read as if they forbid the fix, and neither does.
+
+- **"Random or UUID tags."** Rejected there as the tag of a *step's* files,
+  where the name has to say which job left it. A write with no step has no
+  job to name, so `Manifest.write/3` without a `:tag` now tags with a random
+  positive integer (`manifest.json.<digits>.partial`; random rather than
+  `System.unique_integer/1`, because the nodes of a cluster share the
+  directory). Digits only, so the narrow tag regex the rejection protects,
+  `\A\d+(?:-\d+)?\z` (`Artifact.tag?/1`), is unchanged, and `backup.sh
+  prune` matches the same shape. Steps keep their `<job>-<attempt>` tags.
+- **"Tag the files `backup.sh` writes."** Rejected there because a tag would
+  fence nothing, and that still holds: cron takes no lock. `backup.sh` now
+  tags one file, its manifest temporary, as
+  `manifest.json.<pid>-<random>.partial` with the random half between 100000
+  and 132767, above any attempt number, so it never takes a step's name. It
+  creates the file exclusively and picks another number when the name is
+  taken. The tag is for uniqueness, not fencing: the PID alone collides
+  between containers that share `BACKUP_DIR`. Its dump, parts and sidecars
+  keep the untagged `<name>.partial`.
+
+A leftover manifest temporary file older than the partial grace (60 minutes)
+is removed by the start step's sweep, and now by `backup.sh prune` as well,
+whichever of the three writers left it. The untagged `manifest.json.partial`
+of an older `backup.sh` is removed by neither: it may still be that script's
+live file. The fence itself, and every other rule above, is unchanged.

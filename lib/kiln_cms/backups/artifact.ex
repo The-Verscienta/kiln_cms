@@ -218,10 +218,13 @@ defmodule KilnCMS.Backups.Artifact do
   @doc """
   The temporary name a file is written under before it is renamed to `name`.
 
-  With no tag it is `name <> ".partial"` (what `scripts/backup.sh` and the
-  older releases write). With a tag it is `name <> ".<tag>.partial"`, where the
-  tag is a backup step's job id, or its job id and attempt as `"<id>-<attempt>"`
-  (`tag/2`). `parse_file/1` and `parse_sidecar_name/1` read both shapes.
+  With no tag it is `name <> ".partial"` (what `scripts/backup.sh` writes for
+  its data files, and what older releases write). With a tag it is
+  `name <> ".<tag>.partial"`, where the tag is a backup step's job id, or its
+  job id and attempt as `"<id>-<attempt>"` (`tag/2`). `Manifest.write/3`
+  without a tag picks a random integer one, and `backup.sh` writes its manifest
+  through `manifest.json.<pid>-<random>.partial` (#2832): a unique name, not a
+  fence. `parse_file/1` and `parse_sidecar_name/1` read both shapes.
   """
   @spec partial_name(String.t(), String.t() | pos_integer() | nil) :: String.t()
   def partial_name(name, nil) when is_binary(name), do: name <> ".partial"

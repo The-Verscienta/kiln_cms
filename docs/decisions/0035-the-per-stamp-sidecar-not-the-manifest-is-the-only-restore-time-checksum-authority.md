@@ -1,7 +1,10 @@
 # 0035. The per-stamp sidecar, not the manifest, is the only restore-time checksum authority
 
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
-  #2418 in 1.9.0.
+  #2418 in 1.9.0. Amended 2026-11-17 by
+  [#2877](https://github.com/The-Verscienta/kiln_cms/issues/2877)
+  (`restore.sh db` and `drill` verify the dump against its sidecar; see
+  "Amendment").
 - **References** — [#2424](https://github.com/The-Verscienta/kiln_cms/issues/2424)
   (this record), [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218),
   [#2418](https://github.com/The-Verscienta/kiln_cms/pull/2418),
@@ -59,6 +62,11 @@ An operator restoring from a bare directory, or from the remote, has neither.
   media set: parts but no sidecar").
 - **`backup.sh verify` reads the same sidecars**, for the newest dump and the
   newest complete media set, and fails a part set that has none.
+- **`scripts/restore.sh db` and `drill` verify a dump against its sidecar,
+  `kiln-db-<stamp>.sha256`, before they touch a database** (#2877, see
+  "Amendment"), by the same rules: well formed, listing exactly the dump,
+  matching it. A dump without one restores with a warning, or aborts with
+  `RESTORE_REQUIRE_CHECKSUM=1`.
 
 The manifest and the History row keep their hashes for what they are for: the
 console's report on the last backup, and History. Inside a run, the digests
@@ -88,10 +96,11 @@ copy; those are the backup's own checks, not a restore's.
   can rewrite its sidecar too. Integrity, not authenticity. At-rest encryption
   is [#2224](https://github.com/The-Verscienta/kiln_cms/issues/2224), still
   open; nothing signs a backup.
-- `restore.sh db` does not check `kiln-db-<stamp>.sha256` today; `pg_restore`
-  reads the dump's own structure, and `backup.sh verify` and a manual
-  `sha256sum -c` check the digest. The sidecar is still the file to check it
-  against.
+- `restore.sh db` and `drill` check `kiln-db-<stamp>.sha256` before the
+  confirmation prompt, `createdb` and `pg_restore` (#2877). A dump the
+  operator renamed, or gave as a symlink under another name, has no stamp to
+  find its sidecar by, and restores unverified with a warning unless
+  `RESTORE_REQUIRE_CHECKSUM=1` is set.
 - Removing a set's sidecar makes `restore.sh` refuse the parts until an
   operator says otherwise. That is the intended direction: a part set without a
   sidecar is indistinguishable from an incomplete one.
@@ -102,5 +111,33 @@ copy; those are the backup's own checks, not a restore's.
   signature, not a plain digest, would then be the thing a restore trusts.
 - An in-app restore, which would have the History row available and would have
   to choose between it and the sidecar.
-- If `restore.sh db` gains a checksum step: it should read the db sidecar, by
-  this record.
+- ~~If `restore.sh db` gains a checksum step: it should read the db sidecar, by
+  this record.~~ Done by #2877; see "Amendment".
+
+## Amendment (2026-11-17, #2877): `restore.sh db` and `drill` verify the dump
+
+The revisit point above came due: `restore.sh db` restored a truncated or
+altered dump without reading its sidecar, while `restore.sh media` refused
+anything unverified. Now both database commands call one check,
+`verify_dump`, before anything else they do to a database: before the
+confirmation prompt, `createdb` and `pg_restore`.
+
+- **The sidecar is found by the dump's name.** For
+  `kiln-db-<stamp>.dump` it is `kiln-db-<stamp>.sha256` in the same
+  directory. A symlink given as the dump is not resolved: the sidecar is
+  looked for beside the link, under the link's name.
+- **The rules are the media path's.** The sidecar must be well formed
+  (`sidecar_well_formed`), list exactly the dump and nothing else, and match
+  it (`sha256sum -c`, or `shasum -a 256 -c`). Any failure stops with
+  "… — nothing was restored".
+- **A missing sidecar is handled as a legacy single archive's.** A dump from
+  before checksums has none, so it restores after a loud warning, and
+  `RESTORE_REQUIRE_CHECKSUM=1` turns that into a refusal. The same applies
+  to a dump not named `kiln-db-<stamp>.dump`, which has no stamp to find a
+  sidecar by. There is no counterpart to the part-set refusal: a dump is one
+  file, renamed into place only after `pg_restore --list` accepted it, so
+  even a dump whose run was killed before its sidecar was written is whole.
+- **Still never the manifest.** A dump without a sidecar is not checked
+  against `manifest.json`'s hash, for the reasons under Rejected.
+
+Every other rule above is unchanged.

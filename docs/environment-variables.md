@@ -400,8 +400,8 @@ unless this URL sets `sslmode`
 
 **Read only by the scripts.** `scripts/backup.sh` also reads `BACKUP_PING_URL`
 (a URL it `curl`s after a successful run), `BACKUP_TRIGGER` (the label in the
-manifest, default `cron`) and `TMPDIR` (where it builds the media file lists,
-default `/tmp`). `scripts/restore.sh` reads `RESTORE_DATABASE_URL`,
+manifest, default `cron`) and `TMPDIR` (where it builds the media file lists
+and records the program it is running, default `/tmp`). `scripts/restore.sh` reads `RESTORE_DATABASE_URL`,
 `RESTORE_MEDIA_DIR`, `RESTORE_CONFIRM`, `RESTORE_REQUIRE_CHECKSUM` and
 `RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM`. None of them is read by the app; see
 [backups.md](backups.md#environment-reference) for each one.

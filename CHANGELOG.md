@@ -99,6 +99,9 @@ Every summary line below that was shortened links to its own entry there.
 - **In-app backups and demo resets now require TLS when the app does, refuse a `key=value` database URL with a password, and give up after `BACKUP_LOCK_WAIT_SECONDS` (600 s) on a table lock; `?ssl=false` becomes `sslmode=disable`. Cron: put `sslmode` in `DATABASE_URL`. No migration; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#backup-pg-tools-connection-upgrade))
 
+- **Copy the new `scripts/backup.sh` and `scripts/restore.sh` to every host. `RESTORE_REQUIRE_CHECKSUM=1` now also makes `restore.sh db` and `drill` refuse a dump with no `kiln-db-<stamp>.sha256` (an old one, or a renamed one). No migration; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#backup-script-hardening-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -106,6 +109,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`mix kiln.staging.scrub` and `Release.scrub_staging/0` now refuse, changing nothing, while an overlay or plugin domain owns a non-content table with no `staging_scrub/0` entry: add `{:purge, R}`, `{:rewrite, R, set: [...]}` or `{:keep, R, "reason"}` for each and require `{:kiln_plugin, "~> 1.5"}`.**
   ([long form](docs/changelog/unreleased.md#plugin-staging-scrub-refuses-undeclared))
+
+- **Field sync import refuses a non-default `"sections"` entry no field carries (a hand-edited file that imported before now fails, nothing written). An entry at the default deletes the stored layout, and a section the import empties loses its layout, without `--prune`.**
+  ([long form](docs/changelog/unreleased.md#field-sync-section-entries-stricter))
 
 ### Known issues
 
@@ -190,6 +196,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The API key reuse email names the key's owner by display name, or "account" and their id, instead of their email address.**
   ([long form](docs/changelog/unreleased.md#api-key-reuse-alert-names-owner))
 
+- **`backup.sh` stops at once on `HUP`, `INT` or `TERM`: it stops the running `pg_dump`, `tar` or `rclone` (`TERM`, then `KILL` after 5 s) and cleans up, instead of waiting for it to finish; a second signal no longer cuts the cleanup short.**
+  ([long form](docs/changelog/unreleased.md#backup-sh-signals-stop-child))
+
 - **The email telling someone a platform admin removed their passkey or authenticator app names that admin by display name ("an administrator" when they have none) instead of their email address.**
   ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044) · [long form](docs/changelog/unreleased.md#factor-removed-notice-names-admin))
 
@@ -200,6 +209,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
   ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))
+
+- **A section's layout is deleted with its last field by every route (rename, cleared section, delete, join graduation, sync), so a later field no longer inherits it; a section rename in the fields admin decides from the fields as they are at Save.**
+  ([#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) · [long form](docs/changelog/unreleased.md#section-layouts-kept-in-step))
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
@@ -266,6 +278,15 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A database dump stuck behind a table lock gives up after `BACKUP_LOCK_WAIT_SECONDS` (default 600) and says so; a failed cron `pg_dump` records its own error in the manifest.**
   ([long form](docs/changelog/unreleased.md#backup-pg-dump-lock-wait))
+
+- **A cron `backup.sh` and an in-app backup finishing together no longer publish a mixed `manifest.json`: every writer uses its own temporary name, and leftovers are removed after an hour (also by `backup.sh prune`).**
+  ([long form](docs/changelog/unreleased.md#backup-manifest-temp-names))
+
+- **A `pg_dump`, `tar` or `rclone` left running by a `backup.sh` killed with `kill -9` is now stopped by the script's heartbeat within 5 minutes.**
+  ([long form](docs/changelog/unreleased.md#backup-sh-orphaned-child))
+
+- **`restore.sh db` and `drill` verify the dump against its `kiln-db-<stamp>.sha256` before touching the database and refuse a mismatch; with no sidecar they warn and continue.**
+  ([long form](docs/changelog/unreleased.md#restore-db-verifies-checksum))
 
 ### Security
 
