@@ -199,6 +199,42 @@ carries the reasoning.
   ([#2818](https://github.com/The-Verscienta/kiln_cms/issues/2818),
   [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819))
 
+<a id="workflow-task-mail-ids-upgrade"></a>
+
+- **Workflow and task mail jobs now carry ids. No migration. Drain the `mail` queue before rolling back: those queued by this release fail eight times on the previous one and are discarded. Upgrading straight from 1.9.x, old-shape mail still waiting is not sent.**
+  Review requests, published and returned-to-draft mail, comment and
+  mention mail, task assignments and task digests now carry the recipient's,
+  the content's, the actor's and the comment's or task's ids, and the worker
+  reads the rest when it runs (see the Fixed entry *Workflow and task mail
+  queued before an erasure is no longer sent*).
+
+  During a rolling deploy, a node of the previous release that picks up a
+  job of the new shape fails it, on purpose: the new args have no `to`,
+  `title` or task `kind`, so the old code cannot send it anywhere. Oban
+  retries it on the mail backoff (eight attempts, the last about 15 hours 21
+  minutes after the first) until a node of this release delivers it. A job
+  queued by an old node is delivered by a new one, but only to an account
+  that existed when the job was queued and still holds its address. A task
+  digest may go out twice across the deploy: the old-shape and new-shape
+  digests for one person have different args, so the 20-hour uniqueness
+  does not merge them. That takes a digest run that failed part-way and
+  was retried on the other release.
+
+  **Rolling back** is safe for the data, but every workflow or task mail job
+  this release queued that has not run yet fails all eight attempts and is
+  discarded. Each failure reaches Sentry (ids only), and the discarded jobs
+  show as delivery failures on `/editor/mail` under the domain "unknown". Let
+  the `mail` queue drain first.
+
+  **Skipping a release:** v1.10.0's migration
+  `20261113071933_require_second_factor` gave every existing account the
+  migration's time as `users.inserted_at`. On an upgrade straight from
+  1.9.x, an old-shape job still waiting was queued before that time, so it
+  finds its recipient created after the job and sends nothing: mail lost,
+  not misdelivered. Drain the `mail` queue first if those mails matter. See
+  [Rolling back past workflow and task mail jobs that carry ids](../releasing.md#rolling-back-past-workflow-and-task-mail-jobs-that-carry-ids).
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019))
+
 <a id="erasure-backfill-2514-steps-upgrade"></a>
 
 - **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: their audiences, push subscriptions, private saved views and notifications. No migration; rolling back is safe.**
@@ -819,6 +855,35 @@ carries the reasoning.
   carries. See [Side effects](../forms.md#side-effects).
   Refs #2992.
 
+<a id="workflow-task-mail-send-time-checks"></a>
+
+- **Workflow and task mail checks again when it sends: an event muted since it was queued is not sent, nor is mail about content trashed or deleted, a comment deleted, or a task completed, deleted or reassigned in the meantime.**
+  The mail used to carry everything from the moment of the event and was
+  sent whatever had changed while it waited or retried. Now each job reads
+  the recipient, the content, the comment or the task back when it runs:
+
+  - A recipient who turned the event off in `/editor/settings` (**Email
+    notifications**) after it was queued gets nothing. Task mail has no
+    preference, so only erasure stops it.
+  - The mail goes to the address the account holds when it is sent.
+  - The title, the comment excerpt and the task's note and due date are
+    their values then. An actor erased since is "An editor" (or "A
+    reviewer"); an actor who renamed themselves appears under the new name.
+  - Nothing is sent for content trashed or deleted since, a comment deleted
+    since, or a task completed, deleted or reassigned since (the new
+    assignee gets their own mail). A digest still lists an item whose content
+    is gone, titled by its content type, as before.
+
+  A mail not sent for one of these reasons completes its job and logs one
+  `info` line with the job id and the reason, never the address; it is not a
+  delivery failure on `/editor/mail`. A read that fails, a refused one
+  included, fails the job, which retries. A job queued by the previous
+  release is checked against the recipient's erasure and preference, not
+  against the content, comment or task, and is sent with what it carries.
+
+  No migration.
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019))
+
 ## Fixed
 
 <a id="staging-up-stops-on-a-failed-copy"></a>
@@ -1243,18 +1308,87 @@ carries the reasoning.
     still hold them; see the Upgrade notes entry.
   - A form mail job that carries neither the ids nor the data (a previous
     release's job whose data was dropped after it sent, then rescued by
-    Lifeline) is canceled with "form submission no longer in the job"
-    instead of crashing.
+    Lifeline) completes without sending, and logs "submission no longer in
+    the job, nothing sent" at `info`, instead of crashing. It is not
+    canceled, so it is not listed as a delivery failure on `/editor/mail`.
 
   Not covered yet: this release still writes automation payloads in plain
   text, so they are in pending job rows and Oban's log lines until the next
-  release seals them (see Known issues). A `form.submitted` webhook keeps
-  the submission in its delivery row for 30 days
-  ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)), and
-  workflow and task mail jobs keep the recipient's address
-  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019)). No
+  release seals them (see Known issues), and a `form.submitted` webhook
+  keeps the submission in its delivery row for 30 days
+  ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)). No
   migration. See [Job args retention](../data-flows.md#job-args-retention).
   Refs #2992.
+
+<a id="workflow-task-mail-erased-recipient"></a>
+
+- **Workflow and task mail queued before an erasure is no longer sent to the erased person, and their jobs carry ids instead of the address, title, names and excerpt. Erasure also strips the address from finished mail jobs.**
+  Review requests, published and returned-to-draft mail, comment and
+  mention mail, task assignments and task digests put the recipient's
+  address in the job when the event happened. A job still waiting or
+  retrying when the person was erased (a mail job can retry for about 15
+  hours) was sent to their real address, and the address, the title, the
+  actor's name and the comment excerpt or task note sat in `oban_jobs`, in
+  Oban's log lines and in Sentry events for as long as the row lived.
+
+  - A workflow mail job now carries `user_id`, `org_id`, the content's
+    `kind` and `id`, `actor_id` and, for a comment event, `block_id` and
+    `comment_id`; a task assignment `user_id`, `org_id`, `task_id` and
+    `actor_id`; a digest `user_id`, `org_id` and its list of content ids and
+    due dates. The worker reads the account when it runs
+    (`KilnCMS.Notifications.mail_recipient/2`) and sends nothing to one
+    erased since, or with no address left. See the Changed entry for the
+    other checks it makes then.
+  - A job queued by the previous release still carries the address. It is
+    delivered only if an account that existed when the job was queued still
+    holds that address (erasure replaces it, so an erased person's job finds
+    none, and an address registered again since belongs to somebody else),
+    and the address, title, actor name and excerpt or note are dropped from
+    its row when it finishes and by `KilnCMS.Jobs.PrivateArgsScrub`. Such a
+    job carries the actor's name rather than their id, so it still says the
+    name of an actor erased since.
+  - `KilnCMS.SentryFilter` drops those keys, and every stack frame's
+    variables, from Sentry events of both workers.
+  - Erasure now strips `to` from every finished (completed, canceled,
+    discarded) job on the `mail` queue addressed to the erased account,
+    account mail included (`KilnCMS.Mail.forget_recipient/1`). The delivery
+    panels list such a failure under the domain "unknown".
+
+  Not covered yet: account mail (sign-in alerts, second-factor notices,
+  registration mail, security alerts) still carries the address while it
+  waits and is sent to it after an erasure
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035)), and an
+  account mail job running while the erasure runs keeps the address in its
+  row until the Pruner deletes it. Workflow and task mail does not consult the suppression lists
+  ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)) or check
+  at send time that the recipient may still see the content
+  ([#3037](https://github.com/The-Verscienta/kiln_cms/issues/3037)). See
+  [Job args retention](../data-flows.md#job-args-retention) and
+  [What erasure does not reach](../data-flows.md#what-erasure-does-not-reach).
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019))
+
+<a id="data-flows-personal-data-rows"></a>
+
+- **Docs: the data-flows guide lists the personal data held outside accounts, with retention and erasure for each, and what erasure does not reach.**
+  `docs/data-flows.md` said the only personal data Kiln stores is account
+  data and auth tokens, and its table had no row for form submissions, the
+  two mail suppression lists, fediverse followers, the fediverse and webhook
+  delivery logs or queued jobs, so a records-of-processing or DPIA built
+  from it missed them. Each now has a row: what is stored, how long it is
+  kept, how it is removed, what erasure does to it and what the staging
+  scrub does. The newsletter row gains its retention (none: unsubscribed and
+  never-confirmed rows are kept until a site admin deletes them). The
+  retention table gains the spam submission prune, the webhook ledger prune
+  and its retraction payload scrub, and the fediverse ledger prune, and says
+  which personal data is on no schedule. The webhook ledger's 30 days and
+  the spam submissions' 30 days are compile-time settings
+  (`config :kiln_cms, :webhooks, delivery_retention_days:`,
+  `config :kiln_cms, :forms, spam_retention_days:`): changing either needs a
+  rebuild, and neither has an environment variable. A new section,
+  [What erasure does not reach](../data-flows.md#what-erasure-does-not-reach),
+  lists form submissions, suppression entries, webhook payloads, account
+  mail already queued and backups. No code change.
+  ([#2978](https://github.com/The-Verscienta/kiln_cms/issues/2978))
 
 <a id="erasure-refuses-platform-role"></a>
 

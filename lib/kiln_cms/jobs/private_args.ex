@@ -19,6 +19,13 @@ defmodule KilnCMS.Jobs.PrivateArgs do
       it cannot be read back by id. Readers accept it either in the clear
       (`"payload"`) or sealed (`"sealed"`, `seal/1`), so a later release can
       switch the writers to the sealed form while a rolling deploy runs both.
+    * `KilnCMS.Notifications.WorkflowMailWorker` and
+      `KilnCMS.Notifications.TaskMailWorker` carried the recipient's address,
+      the content's title, the actor's name and a comment excerpt or task note
+      (#3019). They now carry ids and read the rest back when they run; those
+      keys are only in jobs queued by an earlier release. Registered for the
+      Sentry filter too: a failure in their helpers holds the recipient's
+      account in its stack frames.
 
   Whichever shape a job carries, the keys `registry/0` names are dropped from
   its row once the job is finished (`finishing/3`), and
@@ -27,7 +34,8 @@ defmodule KilnCMS.Jobs.PrivateArgs do
   and drops the stack frames' variables, for a job of a registered worker.
 
   `KilnCMS.Mail` keeps its own mail-message keys (`KilnCMS.Mail.forget_body/1`,
-  `KilnCMS.Mail.Scrub`); this module covers the jobs that are not mail.
+  `KilnCMS.Mail.Scrub`) for the account mail it queues; this module covers
+  every other worker's.
   """
   import Ecto.Query, only: [from: 2]
 
@@ -43,7 +51,9 @@ defmodule KilnCMS.Jobs.PrivateArgs do
     "KilnCMS.Forms.NotificationWorker" => ~w(data),
     "KilnCMS.Forms.AutoresponderWorker" => ~w(data to),
     "KilnCMS.Automation.DispatchWorker" => ~w(payload sealed),
-    "KilnCMS.Automation.RuleWorker" => ~w(payload sealed)
+    "KilnCMS.Automation.RuleWorker" => ~w(payload sealed),
+    "KilnCMS.Notifications.WorkflowMailWorker" => ~w(to title actor_name excerpt),
+    "KilnCMS.Notifications.TaskMailWorker" => ~w(to note actor_name)
   }
 
   @doc "Every registered worker name and the arg keys `forget/2` drops from its jobs."

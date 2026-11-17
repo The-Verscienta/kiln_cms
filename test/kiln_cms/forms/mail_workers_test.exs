@@ -593,13 +593,14 @@ defmodule KilnCMS.Forms.MailWorkersTest do
 
   describe "a job holding neither shape (#2992)" do
     # A legacy job whose data `finishing/3` already dropped, re-queued by
-    # Lifeline: the mail went out, so it cancels rather than crashing on
-    # every remaining attempt.
-    test "both workers cancel it and send nothing" do
+    # Lifeline: the mail went out, so it completes (a cancelled mail job reads
+    # as a delivery failure on /editor/mail) rather than crashing on every
+    # remaining attempt.
+    test "both workers complete it and send nothing" do
       args = %{"form_id" => Ecto.UUID.generate(), "org_id" => Ecto.UUID.generate()}
 
-      assert {:cancel, _} = perform_job(NotificationWorker, args)
-      assert {:cancel, _} = perform_job(AutoresponderWorker, args)
+      assert :ok = perform_job(NotificationWorker, args)
+      assert :ok = perform_job(AutoresponderWorker, args)
       assert_no_email_sent()
     end
   end

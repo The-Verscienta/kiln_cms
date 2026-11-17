@@ -966,6 +966,37 @@ defmodule KilnCMS.Mail do
       :ok
   end
 
+  @finished_states ~w(completed cancelled discarded)
+
+  @doc """
+  Drop `address` from every finished job on the `mail` queue addressed to it
+  (#3019) — a step of erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`).
+
+  Account mail (`enqueue!/2`) keeps its recipient in a finished job's args,
+  for the delivery panel, until the Pruner deletes the row; a workflow or task
+  mail job queued before #3019 keeps it too. Both shapes are matched, case
+  insensitively: `["name", "address"]` and a bare address. Only the `"to"`
+  key goes; the delivery panel lists such a failure as "unknown".
+
+  A job still waiting to run keeps its address: workflow and task mail check
+  the recipient again when they run, and account mail does not yet.
+  """
+  @spec forget_recipient(String.t()) :: :ok
+  def forget_recipient(address) when is_binary(address) do
+    address = String.downcase(address)
+
+    Ecto.Query.from(j in Oban.Job,
+      where:
+        j.queue == "mail" and j.state in ^@finished_states and
+          (fragment("lower(?->'to'->>1)", j.args) == ^address or
+             fragment("lower(?->>'to')", j.args) == ^address),
+      update: [set: [args: fragment("? - 'to'", j.args)]]
+    )
+    |> KilnCMS.Repo.update_all([])
+
+    :ok
+  end
+
   @doc false
   # The keys `forget_body/1` drops, shared with `KilnCMS.Mail.Scrub`.
   @spec body_keys() :: [String.t()]

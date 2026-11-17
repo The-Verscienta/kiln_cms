@@ -87,6 +87,9 @@ Every summary line below that was shortened links to its own entry there.
 - **In-app backups name their temporary files `<name>.<job>-<attempt>.partial`. No migration; update the host's `scripts/backup.sh` in the same rollout, since an older copy doesn't recognize the new names. Rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#backup-step-files-fenced-upgrade))
 
+- **Workflow and task mail jobs now carry ids (no migration). Drain the `mail` queue before rolling back: those queued by this release fail eight times on the previous one and are discarded. Upgrading straight from 1.9.x, old-shape mail still waiting is not sent.**
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-ids-upgrade))
+
 - **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: audiences, push subscriptions, private saved views and notifications (its result gains those four keys). No migration; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#erasure-backfill-2514-steps-upgrade))
 
@@ -169,6 +172,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Form mail built from the stored submission when the job runs: a submission deleted or marked spam before then sends nothing, and no confirmation goes out if its email field was removed or renamed, or the autoresponder switched off, since.**
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-mail-reads-stored-submission))
 
+- **Workflow and task mail checks again when it sends: an event muted since it was queued is not sent, nor is mail about content trashed or deleted, a comment deleted, or a task completed, deleted or reassigned in the meantime.**
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-send-time-checks))
+
 ### Fixed
 
 - **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
@@ -218,6 +224,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Form mail jobs carry only ids, and form data and automation payloads are dropped from a job's row when it finishes and from Sentry events. Automation payloads stay plain while pending (Known issues).**
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-automation-job-args))
+
+- **Workflow and task mail queued before an erasure is no longer sent to the erased person; the jobs carry ids, not the address, title or names, and erasure strips the address from finished mail jobs.**
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-erased-recipient))
+
+- **Docs: the data-flows guide lists the personal data held outside accounts (form submissions, suppression lists, fediverse followers, delivery logs, queued jobs), with retention and erasure for each, and what erasure does not reach.**
+  ([#2978](https://github.com/The-Verscienta/kiln_cms/issues/2978) · [long form](docs/changelog/unreleased.md#data-flows-personal-data-rows))
 
 - **An erased account can no longer be given a platform role, temporary role or audiences, and `mix kiln.deprecations` and its boot job leave erased accounts out.**
   ([long form](docs/changelog/unreleased.md#erasure-refuses-platform-role))

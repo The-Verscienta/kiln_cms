@@ -1099,6 +1099,48 @@ restoring a backup taken before the upgrade, run
 `bin/kiln_cms eval 'KilnCMS.Release.scrub_job_args()'`
 ([Job args retention](data-flows.md#job-args-retention)).
 
+### Rolling back past workflow and task mail jobs that carry ids
+
+From the release after v1.10.1 (#3019), workflow mail
+(`KilnCMS.Notifications.WorkflowMailWorker`: review requests, published and
+returned-to-draft mail, comment and mention mail) and task mail
+(`KilnCMS.Notifications.TaskMailWorker`: a task assigned, the daily digest)
+carry ids, and the worker reads the recipient, the address and the rest when
+it runs. A release before it knows only the old shape, which carried the
+address (`to`), the title and the actor's name. No migration is involved;
+the job args are the contract.
+
+- **During a rolling deploy**, an old node that picks up a new-shape job
+  fails it (the new args have no `to`, `title` or task `kind`, on purpose,
+  so the old code cannot send it anywhere), and Oban retries it on the mail
+  backoff: eight attempts, the last about 15 hours 21 minutes after the
+  first. Once a new node takes it, the mail goes out: delayed, not lost. A
+  job queued by an old node is delivered by a new one, but only to an
+  account that existed when the job was queued and still holds its address.
+- **A task digest can go out twice** across the deploy. The digest job is
+  unique for 20 hours by its args, and an old-shape and a new-shape digest
+  for the same person have different args. It takes a digest run that failed
+  part-way on one release and was retried on the other.
+- **After rolling back**, every new-shape job still queued fails all eight
+  attempts and is discarded. Those mails are never sent. The in-app
+  notifications were written when the event happened; a digest has none. Each failure reaches
+  Sentry, with ids only, and the discarded jobs are listed as delivery
+  failures on `/editor/mail` (and the site's `/editor/site-mail`) under the
+  domain "unknown". To avoid it, let the `mail` queue drain before you roll
+  back (no `WorkflowMailWorker` or `TaskMailWorker` job in `available`,
+  `scheduled` or `retryable`).
+- **Upgrading from a release before v1.10.0**, skipping one: v1.10.0's
+  migration `20261113071933_require_second_factor` gave every existing
+  account the migration's time as its creation time (`users.inserted_at`).
+  An old-shape job still waiting when you upgrade straight from 1.9.x was
+  queued before that time, so it finds its recipient "created after the
+  job" and sends nothing. The mail is lost, not misdelivered. Drain the
+  `mail` queue before such an upgrade if those mails matter.
+
+Old-shape jobs drop their address, title, actor name and excerpt or note
+from their row when they finish, and `KilnCMS.Jobs.PrivateArgsScrub` drops
+them from rows that finished under the previous release.
+
 ### What zero-downtime does and does not cover
 
 The policy makes the **schema** safe for two releases at once. Kiln's boot

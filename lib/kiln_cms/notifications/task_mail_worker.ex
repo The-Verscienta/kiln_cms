@@ -8,18 +8,114 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   (`KilnCMS.Mail.deliver_for_worker/2`, same retry/backoff), but its own
   worker: a task's recipient is already known (the assignee), and the digest
   body is a per-assignee list rather than a single `Kiln.Tokens` template.
+
+  ## Read back when it runs (#3019)
+
+  The job carries ids: the assignee (`user_id`), the site, and for an
+  assignment the task (`task_id`) and the assigning account (`actor_id`); a
+  digest's `items` are content ids and due dates. The assignee must still be
+  one when the job runs (`KilnCMS.Notifications.mail_recipient/2`): an
+  account erased since, or left with no address, is sent nothing, and the mail
+  goes to the address the account holds now. An assignment reads the task
+  back, and sends nothing for a task deleted, completed or reassigned since;
+  the note and due date are the task's now, and an assigner erased since is
+  "An editor". A digest whose content is gone keeps its line, titled by the
+  content type, as before.
+
+  A skip finishes the job (`:ok`, logged with the job id and the reason), not
+  a cancel, so it is not listed as a delivery failure on `/editor/mail`. A
+  read that fails, including a refused one, fails the job, which retries.
+
+  The args name the job's type under `"event"`, not `"kind"`, on purpose:
+  the previous release's clauses match on `"kind"` alone and would build an
+  email with no recipient from a job of this shape. Without it an old node
+  fails the job during a rolling deploy and a new node delivers it on retry.
+
+  A job queued by the release before this one carries `"kind"`, the address,
+  the note and the actor's name. It is delivered only while an account that
+  existed when it was queued still holds that address, and those keys are
+  dropped from its row once it finishes (`KilnCMS.Jobs.PrivateArgs`).
   """
   use Oban.Worker, queue: :mail, max_attempts: 8
   use KilnCMSWeb, :verified_routes
 
   import Swoosh.Email
 
+  require Logger
+
+  alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.Jobs.PrivateArgs
   alias KilnCMS.Mail
+  alias KilnCMS.Notifications
   alias KilnCMS.Notifications.Link
 
   @impl Oban.Worker
-  def perform(%Oban.Job{id: id, args: %{"kind" => "assigned"} = args}) do
+  def perform(
+        %Oban.Job{
+          args: %{"event" => "assigned", "user_id" => user_id, "task_id" => task_id} = args
+        } =
+          job
+      )
+      when is_binary(user_id) and is_binary(task_id) do
+    tenant = args["org_id"]
+
+    with {:ok, user} <- Notifications.mail_recipient(user_id, nil),
+         {:ok, task} <- open_task(task_id, user_id, tenant) do
+      %{
+        "to" => to_string(user.email),
+        "task_id" => task.id,
+        "content_type" => task.content_type,
+        "content_id" => task.content_id,
+        "block_id" => task.block_id,
+        "org_id" => tenant,
+        "due_on" => task.due_on && Date.to_iso8601(task.due_on),
+        "note" => task.note,
+        "actor_name" => Notifications.actor_name_now(args["actor_id"])
+      }
+      |> deliver_assigned(job)
+    else
+      {:skip, reason} -> skip(job, reason)
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  def perform(%Oban.Job{args: %{"event" => "digest", "user_id" => user_id} = args} = job)
+      when is_binary(user_id) do
+    case Notifications.mail_recipient(user_id, nil) do
+      {:ok, user} -> args |> Map.put("to", to_string(user.email)) |> deliver_digest(job)
+      {:skip, reason} -> skip(job, reason)
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  # Queued by the release before #3019, with the address, note and actor name
+  # in the args. Remove no earlier than the release after this one: the
+  # Pruner deletes finished rows after a week, and a retrying mail job is done
+  # within a day.
+  def perform(%Oban.Job{args: %{"kind" => kind, "to" => to} = args} = job)
+      when kind in ["assigned", "digest"] and is_binary(to) do
+    PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
+      case Notifications.mail_recipient_by_address(to, job.inserted_at, nil) do
+        {:ok, _user} when kind == "assigned" -> deliver_assigned(args, job)
+        {:ok, _user} -> deliver_digest(args, job)
+        {:skip, reason} -> skip(job, reason)
+        {:error, error} -> {:error, error}
+      end
+    end)
+  end
+
+  # Neither shape: a legacy job whose keys were already dropped
+  # (`PrivateArgs.finishing/3` forgets before Oban acks the job, so a node
+  # lost in between leaves it executing without them, and Lifeline re-queues
+  # it). The mail went out; nothing is left to send.
+  def perform(%Oban.Job{id: id}) do
+    # `:ok`, not `{:cancel, _}`: see `WorkflowMailWorker`'s catch-all.
+    Logger.info("task mail job #{id}: notification no longer in the job, nothing sent")
+    :ok
+  end
+
+  defp deliver_assigned(args, %Oban.Job{id: id}) do
     args
     |> build_assigned_email()
     |> Mail.ensure_message_id("task-#{id}")
@@ -27,11 +123,36 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
     |> Mail.deliver_for_worker(org_id: args["org_id"])
   end
 
-  def perform(%Oban.Job{id: id, args: %{"kind" => "digest"} = args}) do
+  defp deliver_digest(args, %Oban.Job{id: id}) do
     args
     |> build_digest_email()
     |> Mail.ensure_message_id("task-digest-#{id}")
     |> Mail.deliver_for_worker(org_id: args["org_id"])
+  end
+
+  # The task as it is now, read as the notifier's system actor, which
+  # `CMS.Task` admits for reads (#1659), with `authorize_with: :error` so a
+  # refused read fails the job rather than reading as "task deleted". Sent only
+  # while the task is still open and still this assignee's.
+  defp open_task(task_id, user_id, tenant) do
+    case CMS.get_task(task_id,
+           actor: Notifications.system(),
+           authorize_with: :error,
+           not_found_error?: false,
+           tenant: tenant
+         ) do
+      {:ok, nil} -> {:skip, :task_gone}
+      {:ok, %{status: :done}} -> {:skip, :task_done}
+      {:ok, %{assignee_id: ^user_id} = task} -> {:ok, task}
+      {:ok, _reassigned} -> {:skip, :task_reassigned}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  # A fixed reason and the job id: never the address.
+  defp skip(%Oban.Job{id: id}, reason) do
+    Logger.info("task mail job #{id} not sent: #{reason}")
+    :ok
   end
 
   @impl Oban.Worker
