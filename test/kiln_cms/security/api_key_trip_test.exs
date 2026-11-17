@@ -111,10 +111,19 @@ defmodule KilnCMS.Security.ApiKeyTripTest do
     {:ok, <<_random::binary-size(32), id::binary-size(16)>>} =
       AshAuthentication.Base.bindecode62(middle)
 
-    token = :crypto.strong_rand_bytes(32) <> id
+    token = nonzero_lead_bytes(32) <> id
 
     "#{prefix}_#{AshAuthentication.Base.encode62(token)}_" <>
       AshAuthentication.Base.encode62(:erlang.crc32(token))
+  end
+
+  # `encode62/1` raises on a leading zero byte (one draw in 256), so redraw
+  # until the first byte isn't zero, as a real key's generator has to.
+  defp nonzero_lead_bytes(size) do
+    case :crypto.strong_rand_bytes(size) do
+      <<0, _::binary>> -> nonzero_lead_bytes(size)
+      bytes -> bytes
+    end
   end
 
   defp forged, do: "kiln_" <> Base.encode32(:crypto.strong_rand_bytes(40), padding: false)

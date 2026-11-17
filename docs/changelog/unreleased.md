@@ -1279,6 +1279,33 @@ carries the reasoning.
     `baseUrl` or attribute. Both now trim in a loop, with the same result.
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947))
 
+
+<a id="codeql-second-pass"></a>
+
+- **`/embed.js` builds the iframe from the parsed `data-kiln-origin` URL, and resize messages now work when that URL has a path. `kiln-types` can no longer emit code from a hostile schema's format version or type names. Third-party Actions are pinned to commit SHAs.**
+  The second pass over the open CodeQL alerts (26 of them).
+  - **`js/xss-through-dom`, `priv/static/embed.js`.** The earlier fix checked
+    the protocol of the parsed URL but then used the raw attribute. The iframe
+    `src` is now built from the parsed URL (`origin` plus the trimmed path), so
+    the value that was checked is the value used. Resize messages are matched
+    against the URL's real origin. Before, a `data-kiln-origin` with a path
+    (`https://cms.example.com/kiln`) was compared whole against
+    `event.origin`, so the frame never resized.
+  - **`js/http-to-file-access`, `clients/js/src/cli.ts`.** Writing the fetched
+    schema's declarations to `--out` is what `kiln-types` is for. What the alert
+    pointed at: the emitter put `x-kiln.artifact_format_version` into a `//`
+    comment as is, and `$defs` names into type names as is. A server, or
+    anyone on the path to an `http://` one, could end the comment with a line
+    break, or a name with `;`, and have code written into a `.ts` file that the
+    integrator then compiles. Line breaks in the comment become spaces, and type
+    names keep only identifier characters. Property keys, string literals and
+    doc comments were already escaped.
+  - **`actions/unpinned-tag` (24 alerts).** `erlef/setup-beam` and the
+    `docker/*` actions are pinned to the commit of the tag they used before,
+    with the version in a comment. A new `.github/dependabot.yml` bumps them in
+    one grouped PR a month. GitHub's own `actions/*` stay on tags; the rule
+    doesn't flag them.
+
 <a id="referrer-suppression-partner-bounds"></a>
 
 - **A referrer breakdown published with `"< n"` and one `"hidden"` category no longer lets a reader recover the suppressed counts exactly; breakdowns that would have done so are now hidden whole.**

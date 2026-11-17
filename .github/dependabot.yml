@@ -1,0 +1,17 @@
+# Keeps the commit-SHA pins on third-party Actions current (CodeQL
+# `actions/unpinned-tag`). Dependabot reads the `# vX.Y.Z` comment after each
+# pin and bumps both together. One grouped PR a month; npm, Hex and Docker
+# updates stay manual.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"

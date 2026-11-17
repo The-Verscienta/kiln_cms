@@ -64,7 +64,7 @@ runs:
   using: composite
   steps:
     - name: Set up Elixir/OTP
-      uses: erlef/setup-beam@v1
+      uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
       with:
         # Reads .tool-versions — the single source of truth (#600). Do not
         # restate the versions here; `mix kiln.toolchain.check` guards the
