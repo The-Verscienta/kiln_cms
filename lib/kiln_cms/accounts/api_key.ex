@@ -301,7 +301,11 @@ defmodule KilnCMS.Accounts.ApiKey do
   end
 
   calculations do
-    calculate :valid, :boolean, expr(is_nil(revoked_at) and expires_at > now())
+    # An erased account's key is never valid, revoked or not: it is refused at
+    # sign-in (`User.valid_api_keys`), so it must not show as active either.
+    calculate :valid,
+              :boolean,
+              expr(is_nil(revoked_at) and expires_at > now() and is_nil(user.anonymized_at))
   end
 
   identities do

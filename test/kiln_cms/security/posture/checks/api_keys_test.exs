@@ -47,6 +47,15 @@ defmodule KilnCMS.Security.Posture.Checks.ApiKeysTest do
     assert %{status: :pass} = run()
   end
 
+  test "an erased account's unrevoked key does not count: it no longer signs in",
+       %{operator: operator} do
+    owner = user(:admin)
+    mint!(owner, operator, %{access: :read_write})
+    Ash.Seed.update!(owner, %{anonymized_at: DateTime.utc_now()})
+
+    assert %{status: :n_a, facts: %{valid_keys: 0}} = run()
+  end
+
   test "a platform admin's read-write key fails, named with its owner", %{operator: operator} do
     mint!(user(:editor), operator)
     mint!(operator, operator, %{access: :read_write, name: "robot"})
