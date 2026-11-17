@@ -78,6 +78,9 @@ Every summary line below that was shortened links to its own entry there.
 - **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release (`:erasure_backfill_on_boot`, default on). No migration; rolling back is safe, and what it deleted stays deleted.**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-backfill-newsletter-upgrade))
 
+- **The boot-time erasure backfill now also demotes the site memberships of accounts erased before this release (its result gains `memberships`). No migration; rolling back is safe.**
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#erasure-backfill-memberships-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -139,6 +142,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **A document whose `:user` custom field names an erased person is refused on its next save that changes custom fields ("must be a person on this site"), as for a removed member.**
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#user-field-erased-person))
+
 - **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
 - **The content list can sort by a single-valued reference or media field too (Sort by → Field), by the target's current title or filename.**
@@ -168,6 +174,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Erasure now deletes the account's linked newsletter subscriptions on every site, so the person's real address stops receiving newsletters, and Export my data lists them (without tokens).**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-deletes-newsletter-subscriptions))
+
+- **Erasure now demotes every site membership of the account (viewer, no temporary tier, no audiences), so an erased person is on no roster, gets no mail and can't be given a tier back. Team marks the row Erased.**
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#erasure-demotes-site-memberships))
+
+- **A payment webhook for an erased member is acknowledged and changes nothing, instead of reviving the canceled membership, and no longer deadlocks with that member's erasure.**
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#billing-webhook-erased-account))
 
 ### Security
 

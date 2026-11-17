@@ -60,7 +60,7 @@ your deployment.
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
 | Web Push subscriptions | `push_subscriptions` | Yes | One row per browser a user turned push notifications on in: the push service endpoint and its keys, a coarse browser label, and which VAPID key it was made against. Deleted on erasure (#2514) and by the staging scrub. |
 | Saved views | `saved_views` | Pseudonymous | A named content-list filter and its owner's id. A private view is deleted on erasure (#2514); a shared one is the team's and stays, pointing at the anonymized account. |
-| Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
+| Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure, on the account and on every site membership (#2774). |
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
 | Newsletter subscribers | `newsletter_subscribers`, `newsletter_segment_memberships` | Yes | One row per address on a site's list: the **email address**, an optional name, the opt-in status and when it was confirmed or unsubscribed, the tokens behind the confirm and unsubscribe links, and the segments it is on. A paying member's row is linked to their account (`user_id`) by the billing sync. Linked rows are in the account's self-export (without the tokens) and are deleted, with their segment memberships, when the account is erased (#2991). A row at the same address that was never linked is not the account's and stays. Purged by the staging scrub. See [Newsletter](newsletter.md#when-a-member-account-is-erased). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
@@ -162,7 +162,8 @@ These kinds of email leave the system via the configured Swoosh adapter:
   memory for the length of the visit
   ([When the emailed code is asked for](two-factor-auth.md#when-the-emailed-code-is-asked-for)).
 - **Workflow email** — review-requested / published / changes-requested
-  notifications to the relevant admins or author.
+  notifications to the relevant admins or author. Nothing goes to an erased
+  account (#2774).
 - **Registration email** (#2251), about a site's registration approval queue:
   - to each of the site's admins, "Registrations are waiting for approval on
     (site)", once an applicant has confirmed their address. It names the site
@@ -487,6 +488,29 @@ Either way, it:
     queued to one of those rows is canceled when it comes to run, and the
     billing sync never links an erased account to a list again. If any site's
     delete fails, the erasure raises so it can be retried.
+15. **Demotes every site membership** (#2774). Each `org_memberships` row of
+    the account stays, as the record of who belonged where, but grants
+    nothing: its tier drops to `:viewer`, and its temporary tier and its
+    audiences are cleared. Its status is kept, and so are its type scopes,
+    field grants and custom role, which only ever narrow what a tier allows.
+    The demotion writes no role-change event to the security log. Before
+    this, the row kept its tier, so the tombstone stayed a site admin or
+    editor on the rosters below and kept reading gated content.
+
+Once erased, the account is on no site's roster and has no tier or audience
+anywhere, whatever a row it left still holds: it is not offered as a task
+assignee, in a `:user` custom field's picker or as a review-request
+recipient, and it gets no workflow or registration mail, no in-app
+notification, no task-assigned notice and no task digest. A task that names
+it as assignee (one assigned before the erasure) still fires its
+`task.assigned` webhook, which is the task's event, not the person's. No
+one can give it a tier back: editing its membership, granting it a temporary
+tier or setting its audiences is refused
+(`KilnCMS.Accounts.Errors.AccountErased`); removing the membership still
+works. A document whose `:user` custom field names the erased person is
+refused with "must be a person on this site" on its next save that changes
+its custom fields, as for someone removed from the site; pick another person
+or clear the field.
 
 Erasure works on an account, and an invitation is not one: an invitation to
 the person's address is left as it is. To remove one, revoke it on **Team**
@@ -503,15 +527,17 @@ address instead would delete a stranger's row wherever the address was
 reused. To remove such a row, a site admin deletes it on **Newsletter**
 (`/editor/newsletter`) on that site.
 
-Accounts erased by a release before step 14 existed still have their linked
-rows. A background job, `KilnCMS.Accounts.ErasureBackfill`, deletes them
-about 10 minutes after the first boot of the release that added it; see
-[Newsletter](newsletter.md#when-a-member-account-is-erased).
+Accounts erased by a release before step 14 or step 15 existed still have
+their linked rows, and memberships that still grant a tier, a temporary tier
+or audiences. A background job, `KilnCMS.Accounts.ErasureBackfill`, deletes
+the rows and demotes the memberships the way erasure now does, about 10
+minutes after the first boot of the release that added each step; see
+[Newsletter](newsletter.md#accounts-erased-before-this-release).
 
 The account **row is retained** (with no personal data) so authorship links and
-referential integrity in content/version history are preserved. Membership rows
-are likewise retained, scrubbed, so the entitlement audit trail stays
-referentially intact.
+referential integrity in content/version history are preserved. Paid
+membership rows are likewise retained, scrubbed, so the entitlement audit trail
+stays referentially intact, and so are site memberships, demoted (step 15).
 
 > **Operator action required: cancel the subscription at the payment provider.**
 > Step 8 is **local only** — Kiln does not call the provider during erasure. Two
@@ -521,7 +547,12 @@ referentially intact.
 > terminate real customers' billing from a staging environment.
 >
 > So after erasing a paying member, **cancel or refund their subscription in the
-> provider's dashboard**. Until you do, they remain billed. Kiln keeps no
+> provider's dashboard**. Until you do, they remain billed. The provider keeps
+> sending webhooks for that subscription (a renewal each period, say). Kiln
+> acknowledges each one and changes nothing (#2774): the membership stays
+> canceled with no provider ids, and no membership event or `membership.*`
+> webhook is recorded, so access is never revived; but the charge still goes
+> through at the provider. Kiln keeps no
 > invoices; invoice retention is the provider's obligation as controller of its
 > own records.
 
