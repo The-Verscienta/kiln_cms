@@ -10,8 +10,8 @@ defmodule KilnCMS.Backups.Worker do
       before the upgrade still starts a backup — through the lock, as a request.
     * `run/3`, the release-console entry point (deprecated): it requests a
       backup and waits for its chain to settle; it no longer runs one inline.
-    * Delegates to `KilnCMS.Backups.Steps` for the functions other modules and
-      tests call by this name (`split_credentials/1` from `KilnCMS.Demo.Restore`).
+    * `split_credentials/1`, with the `{url, env}` shape it always had (the
+      step chain uses `KilnCMS.Backups.Steps.split_credentials/1`).
       `offsite_step/3`, `offsite_results/2` and `copy_offsite/2` copy to the
       env destination (`BACKUP_RCLONE_REMOTE`) only, as they always did, for
       the release console; the step chain sends to every destination, one
@@ -111,6 +111,20 @@ defmodule KilnCMS.Backups.Worker do
   defdelegate sweep_work_dirs(dir), to: Steps
   @doc false
   defdelegate sweep_work_dirs(dir, now), to: Steps
-  @doc "See `KilnCMS.Backups.Steps.split_credentials/1`."
-  defdelegate split_credentials(url), to: Steps
+
+  @doc """
+  `{url, env}`: `url` without its password, which moves to a `PGPASSWORD`
+  entry in `env` (see `KilnCMS.Backups.Steps.split_credentials/1`). Kept in
+  the shape the release console has always called it with.
+
+  Raises `ArgumentError` for a string `KilnCMS.Backups.PgUrl.split/1`
+  refuses (#2831); the message says why and never holds the string.
+  """
+  @spec split_credentials(String.t() | nil) :: {String.t() | nil, [{String.t(), String.t()}]}
+  def split_credentials(url) do
+    case Steps.split_credentials(url) do
+      {:ok, split} -> split
+      {:error, :refused_conninfo} -> raise ArgumentError, Backups.describe_refused_conninfo()
+    end
+  end
 end

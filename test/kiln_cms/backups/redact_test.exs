@@ -41,6 +41,20 @@ defmodule KilnCMS.Backups.RedactTest do
     assert out == "pg_dump failed: bad *** here"
   end
 
+  test "leaves the TLS settings a backup passes readable, by name (#2830)" do
+    env = [
+      {"PGSSLMODE", "require"},
+      {"PGSSLROOTCERT", "/etc/kiln/ca.pem"},
+      {"PGPASSWORD", "required"}
+    ]
+
+    assert Redact.text("SSL was required; root /etc/kiln/ca.pem", Enum.take(env, 2)) ==
+             "SSL was required; root /etc/kiln/ca.pem"
+
+    # The same value under a secret's name is still removed.
+    assert Redact.text("SSL was required", env) == "SSL was ***"
+  end
+
   test "skips a secret too short to redact without wrecking ordinary words" do
     assert Redact.text("pg_dump: error", [{"PGPASSWORD", "pg"}]) == "pg_dump: error"
   end

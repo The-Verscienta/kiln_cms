@@ -329,6 +329,13 @@ argument. Its closing `DATABASE_URL=` line, which says "password not shown",
 leaves the password out: put it back, or export `PGPASSWORD`, before you use
 that line
 ([backups.md](backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726)).
+For the tools, `ssl=false` in either URL becomes `sslmode=disable` and Ecto's
+`pool_size`, `timeout` and `idle_interval` are left out, while the line it
+prints and the URL it hands to migrate and scrub keep your query as written. A
+`key=value` string with a password is refused before anything runs
+([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
+The script does not read `DATABASE_SSL`: to require TLS for the copy, put
+`sslmode=require` (or `verify-full`) in the URL.
 
 `up` dumps production with `--exclude-table-data=oban_jobs`: the clone gets the job
 table but none of production's queued jobs. The scrub purges the table anyway, for a

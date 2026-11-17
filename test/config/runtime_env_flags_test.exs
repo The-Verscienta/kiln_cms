@@ -57,6 +57,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
             GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
             BACKUP_ENABLED OEMBED_ENABLED BACKUP_MEDIA_PART_MB BACKUP_MEDIA_EXCLUDE
+            BACKUP_LOCK_WAIT_SECONDS
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
@@ -1045,6 +1046,40 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
         refute stderr =~ var
         assert get_in(config, [:kiln_cms, :config_warnings]) == []
+      end
+    end
+  end
+
+  describe "BACKUP_LOCK_WAIT_SECONDS (#2844)" do
+    @lock_path [:kiln_cms, KilnCMS.Backups, :lock_wait_ms]
+
+    test "is read in seconds and stored in milliseconds" do
+      assert get_in(eval(%{"BACKUP_LOCK_WAIT_SECONDS" => " 30 "}), @lock_path) == 30_000
+      assert get_in(eval(%{"BACKUP_LOCK_WAIT_SECONDS" => "1"}), @lock_path) == 1000
+      assert get_in(eval(%{"BACKUP_LOCK_WAIT_SECONDS" => "3600"}), @lock_path) == 3_600_000
+    end
+
+    test "unset or blank writes nothing, so the 600 s default stands, silently" do
+      for value <- [nil, "", "  "] do
+        {config, stderr} = eval_io(%{"BACKUP_LOCK_WAIT_SECONDS" => value}, :prod)
+        assert get_in(config, @lock_path) == nil
+        refute stderr =~ "BACKUP_LOCK_WAIT_SECONDS"
+      end
+    end
+
+    test "0, out of range or unparseable values keep the default and warn naming the range" do
+      for value <- ["0", "-5", "3601", "abc", "1.5", "10s"] do
+        {config, stderr} = eval_io(%{"BACKUP_LOCK_WAIT_SECONDS" => value}, :prod)
+
+        assert get_in(config, @lock_path) == nil,
+               "BACKUP_LOCK_WAIT_SECONDS=#{inspect(value)} must be refused, not clamped"
+
+        assert stderr =~ "from 1 to 3600"
+
+        assert {"BACKUP_LOCK_WAIT_SECONDS", ^value, {:integer_in, 1, 3600}} =
+                 config
+                 |> get_in([:kiln_cms, :config_warnings])
+                 |> Enum.find(&(elem(&1, 0) == "BACKUP_LOCK_WAIT_SECONDS"))
       end
     end
   end

@@ -287,6 +287,53 @@ carries the reasoning.
   [docs/newsletter.md](../newsletter.md#accounts-erased-before-this-release).
   ([#3010](https://github.com/The-Verscienta/kiln_cms/issues/3010))
 
+<a id="backup-pg-tools-connection-upgrade"></a>
+
+- **In-app backups and demo resets now require TLS whenever the app does, refuse a `key=value` database URL that carries a password, and give up after `BACKUP_LOCK_WAIT_SECONDS` (default 600) waiting for a table lock. Check `BACKUP_DATABASE_URL` and the cron line before upgrading. No migration; rolling back is safe.**
+  What can start failing, and what to do:
+
+  - **TLS (#2830).** With `DATABASE_SSL` on (the default), `pg_dump` and
+    `psql` now get `PGSSLMODE=require`, or `verify-full` with
+    `DATABASE_SSL_CACERTFILE` as `PGSSLROOTCERT` when that is set, instead
+    of libpq's `prefer`. A `BACKUP_DATABASE_URL` that points at another
+    server without TLS, or (with a CA file) at a host name the certificate
+    doesn't list, now fails the backup: add `?sslmode=…` to that URL (an
+    explicit `sslmode` wins). Unix sockets are unaffected. A
+    `DATABASE_SSL_CACERTFILE` holding only an intermediate CA, which the
+    app's own connection accepts, fails the backup: libpq needs the root,
+    so add it to the file.
+  - **`key=value` strings (#2831).** `BACKUP_DATABASE_URL`, `DATABASE_URL`
+    (when the backup uses it), and the scripts' `DATABASE_URL`,
+    `RESTORE_DATABASE_URL`, `PROD_DATABASE_URL` and `STAGING_DATABASE_URL`
+    are refused, before any tool runs, when they are not a `postgres://`
+    URL and carry a `password` or `sslpassword` keyword or a `://`. Rewrite
+    them as `postgres://user:password@host/db` (or
+    `postgres://user:password@/db?host=/socket/dir`). A passwordless one
+    (`host=/run/postgresql dbname=kiln_prod`) still works.
+  - **Lock waits (#2844).** `pg_dump` now gives up after
+    `BACKUP_LOCK_WAIT_SECONDS` (default 600, range 1 to 3600) waiting for
+    each table lock. If your backups overlap long migrations or
+    maintenance, raise it, in the app's environment and on the cron line.
+  - **`?ssl=false` (#2833).** In the URL the backup tools read, it now
+    becomes `sslmode=disable` (how the app itself connects) instead of
+    failing with `invalid URI query parameter`.
+  - **Cron.** The app's `DATABASE_SSL` never reaches `scripts/backup.sh`,
+    and the script derives no TLS setting of its own: put `sslmode=require`
+    (or `verify-full` with `sslrootcert=`) in the `DATABASE_URL` on the
+    cron line.
+
+  Copy the new `scripts/backup.sh`, `restore.sh` and `staging.sh` to every
+  host that runs them. Rolling back the pin restores the old behavior;
+  nothing is stored. See
+  [How the backup tools choose TLS](../backups.md#how-the-backup-tools-choose-tls-2830),
+  [Which database URL the backup tools accept](../backups.md#which-database-url-the-backup-tools-accept-2719)
+  and
+  [When pg_dump waits for a table lock](../backups.md#when-pg_dump-waits-for-a-table-lock-2844).
+  ([#2830](https://github.com/The-Verscienta/kiln_cms/issues/2830),
+  [#2831](https://github.com/The-Verscienta/kiln_cms/issues/2831),
+  [#2833](https://github.com/The-Verscienta/kiln_cms/issues/2833),
+  [#2844](https://github.com/The-Verscienta/kiln_cms/issues/2844))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -1534,6 +1581,52 @@ carries the reasoning.
   [docs/data-flows.md](../data-flows.md#subject-rights-workflows).
   ([#3010](https://github.com/The-Verscienta/kiln_cms/issues/3010))
 
+<a id="backup-url-ecto-query-params"></a>
+
+- **The backup tools accept an `ecto://` URL with Ecto's own query parameters: `ssl=false` becomes `sslmode=disable`, and `pool_size`, `timeout` and `idle_interval` are left out.**
+  Since #2719 the URL reached libpq with its query as written, and libpq
+  refuses a parameter it doesn't know by name
+  (`invalid URI query parameter: "pool_size"`), so an app `DATABASE_URL`
+  with any of them failed every in-app backup until `BACKUP_DATABASE_URL`
+  was set. `KilnCMS.Backups.PgUrl.normalize/1` and `pg_conn_split` in
+  `backup.sh`, `restore.sh` and `staging.sh` now translate the parameters
+  Ecto itself defines, matching keys and values after percent-decoding:
+  `ssl=false` becomes `sslmode=disable` in place (Ecto reads it as "no
+  TLS" for the app's connection, so the tools connect the same way), and
+  the three pool options are dropped. Everything else is kept: `ssl=true`
+  (libpq reads it as `sslmode=require`), and options libpq still refuses
+  by name, such as `ssl=1` and `socket_dir`, which changes which server is
+  reached and so can't be dropped safely. Only the URL given to the tools
+  changes: the URL `restore.sh drill` and `staging.sh up` print, and the one
+  `staging.sh` hands to migrate and scrub, keep the query as written. A
+  `POSTGRES://` or `PostgreSQL://` scheme is lower-cased, since libpq
+  reads only lower case as a URL. See
+  [Which database URL the backup tools accept](../backups.md#which-database-url-the-backup-tools-accept-2719).
+  ([#2833](https://github.com/The-Verscienta/kiln_cms/issues/2833))
+
+<a id="backup-pg-dump-lock-wait"></a>
+
+- **A database dump stuck behind a table lock now gives up after `BACKUP_LOCK_WAIT_SECONDS` (default 600) and says so, instead of waiting forever in cron or for two hours in the app.**
+  Neither path passed `--lock-wait-timeout`, so a dump that started while a
+  migration or `VACUUM FULL` held an `ACCESS EXCLUSIVE` lock waited as long
+  as the lock did. The in-app backup, `scripts/backup.sh` and the demo
+  golden capture now pass `--lock-wait-timeout=<ms>` from
+  `BACKUP_LOCK_WAIT_SECONDS`: a whole number of seconds from 1 to 3600,
+  below the backup step's 2-hour job timeout; anything else, `0` included
+  (pg_dump reads `0` as "wait forever"), keeps 600 and warns, at boot and
+  on the script's stderr. pg_dump applies it to each `LOCK TABLE`, so a
+  dump blocked on several tables can wait several times the value.
+  `pg_restore`, `psql` and `staging.sh` don't take it. pg_dump reports the
+  timeout as a statement timeout on `LOCK TABLE`, so the run or manifest
+  error now reads "pg_dump waited longer than BACKUP_LOCK_WAIT_SECONDS
+  (600 s) for a table lock and gave up: …", followed by pg_dump's own
+  lines. A failed `pg_dump` under cron also records its last lines of
+  stderr (a URL password of 6 or more characters replaced with `***`, cut
+  to 500 characters) in the failure manifest, where it used to record only
+  `backup.sh exited <status> - see the backup log`. See
+  [When pg_dump waits for a table lock](../backups.md#when-pg_dump-waits-for-a-table-lock-2844).
+  ([#2844](https://github.com/The-Verscienta/kiln_cms/issues/2844))
+
 ## Security
 
 <a id="backup-state-json-remote"></a>
@@ -1546,3 +1639,51 @@ carries the reasoning.
   holds only the redacted label (`key=value` credentials replaced with
   `***`). A `state.json` written by 1.10 or earlier keeps its value until
   that backup is resumed or its `.work/<stamp>/` directory is deleted.
+
+<a id="backup-pg-tools-tls"></a>
+
+- **In-app backups and demo resets connect to the database with the app's TLS settings, so a dump no longer falls back to cleartext or skips the certificate check the app makes.**
+  `pg_dump` and `psql` got only a URL, so libpq used its default
+  `sslmode=prefer`: it silently drops to an unencrypted connection when TLS
+  fails and never verifies the server, while the app requires TLS by
+  default (`DATABASE_SSL`) and verifies against `DATABASE_SSL_CACERTFILE`
+  when one is set. They now get `PGSSLMODE` (and `PGSSLROOTCERT`) derived
+  from the Repo's effective `:ssl` option, in their own environment:
+  nothing when TLS is off, `require` without a CA file, `verify-full` with
+  the CA file as `PGSSLROOTCERT` with one, and `verify-full` against the
+  system trust store (`PGSSLROOTCERT=system`, libpq 16 or later) for any
+  other verifying configuration. An explicit choice wins, even a weaker
+  one: `sslmode` or `requiressl` in the URL, or a non-blank `PGSSLMODE` in
+  the app's environment. A root certificate alone (`sslrootcert=` or
+  `PGSSLROOTCERT`) is kept but doesn't stop the mode being set, and
+  Ecto's `ssl=true` in the URL is replaced by the mode when the app
+  verifies the server, so it never makes the backup weaker than the app.
+  `PGSSLMODE` and `PGSSLROOTCERT` are left out of the error redaction, so
+  "SSL was required" stays readable. The scripts derive nothing: cron
+  requires TLS with `sslmode` in its `DATABASE_URL`. See Upgrade notes and
+  [How the backup tools choose TLS](../backups.md#how-the-backup-tools-choose-tls-2830).
+  ([#2830](https://github.com/The-Verscienta/kiln_cms/issues/2830))
+
+<a id="backup-conninfo-password-refused"></a>
+
+- **A `key=value` database connection string that carries a password is refused, instead of putting the password in the command line of `pg_dump`, `pg_restore` or `psql`.**
+  #2726 moved the password out of argv for URLs only; a libpq `key=value`
+  string (`host=db password=… dbname=kiln`) went through unchanged, its
+  password readable by every user on the host through `ps` and
+  `/proc/<pid>/cmdline` for the whole dump. libpq's quoting, escapes and a
+  `dbname` that expands into a URL make such a string unsafe to rewrite, so
+  the app (`KilnCMS.Backups.PgUrl.split/1`, now
+  `{:ok, {url, env}} | {:error, :refused_conninfo}`) and the three scripts
+  refuse it when one of its keywords is `password` or `sslpassword`, or it
+  holds `://` (another scheme, or a `dbname` libpq would expand). The
+  error says how to write it as a URL and never contains the string. An
+  in-app backup fails at once without retrying, a demo reset or golden
+  capture fails with the same message, and each script stops before any
+  tool runs. A passwordless `key=value` string and a bare database name
+  pass through as before; `PASSWORD=` (libpq keywords are case-sensitive)
+  is left to libpq, which refuses it by name without printing the value.
+  For the release console, `KilnCMS.Backups.Worker.split_credentials/1`
+  keeps its `{url, env}` return and raises `ArgumentError` on a refused
+  string. See
+  [Which database URL the backup tools accept](../backups.md#which-database-url-the-backup-tools-accept-2719).
+  ([#2831](https://github.com/The-Verscienta/kiln_cms/issues/2831))

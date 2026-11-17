@@ -30,6 +30,24 @@ pg_tools_exclusion =
     [:pg_tools]
   end
 
+# The backup connection strings checked against libpq's own parser
+# (`KilnCMS.Test.Libpq`, #2831, #2833): python3 with libpq, through ctypes.
+# Excluded on a machine without them, like :pg_tools. Never under CI: a runner
+# that lost python3 or libpq must fail these tests, not skip them green.
+libpq_exclusion =
+  cond do
+    KilnCMS.Test.Libpq.available?() ->
+      []
+
+    System.get_env("CI") not in [nil, ""] ->
+      IO.puts(:stderr, "note: CI is set, so the :libpq tests run (and fail) without libpq")
+      []
+
+    true ->
+      IO.puts(:stderr, "note: excluding :libpq tests — needs python3 and libpq (pg_config)")
+      [:libpq]
+  end
+
 # PDF metadata stripping (#807) really shells out to qpdf, for the same reason
 # the backup tests really shell out to pg_dump: the claim under test is that
 # an uploaded PDF comes back with no `/Info` and no XMP, and only qpdf's actual
@@ -191,6 +209,7 @@ else
     exclude:
       [strict_tenancy: true] ++
         pg_tools_exclusion ++
+        libpq_exclusion ++
         qpdf_exclusion ++
         ffmpeg_exclusion ++
         no_ffmpeg_exclusion ++

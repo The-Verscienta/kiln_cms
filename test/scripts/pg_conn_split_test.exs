@@ -3,7 +3,7 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
   `pg_conn_split` (with its helper `pg_conn_decode`), the shell copy of
   `KilnCMS.Backups.PgUrl.split/1` that
   `scripts/backup.sh`, `scripts/restore.sh` and `scripts/staging.sh` each
-  carry (#2719, #2726).
+  carry (#2719, #2726, #2831, #2833).
 
   Each script has to run alone (hosts copy `backup.sh` by itself), so the
   function is copied rather than sourced. This holds the copies byte for byte
@@ -47,26 +47,42 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
   defp assert_table!(bash) do
     function = function!(hd(@scripts))
 
-    for {label, input, _url, _password} <- KilnCMS.Test.PgUrlCases.cases() do
-      {url, env} = PgUrl.split(input)
-      expected = {url, List.keyfind(env, "PGPASSWORD", 0, {nil, nil}) |> elem(1)}
+    display_urls = KilnCMS.Test.PgUrlCases.display_urls()
 
-      assert shell_split(bash, function, input) == expected, label
+    for {label, input, _url, _password} <- KilnCMS.Test.PgUrlCases.cases() do
+      shell = shell_split(bash, function, input)
+
+      case PgUrl.split(input) do
+        {:ok, {url, env}} ->
+          password = env |> List.keyfind("PGPASSWORD", 0, {nil, nil}) |> elem(1)
+          assert {shell.url, shell.password} == {url, password}, label
+          assert shell.error == "", label
+
+          # What a script prints, or hands the app as its DATABASE_URL: the
+          # password gone, the query as written (#2833).
+          assert shell.display == Map.get(display_urls, input, url), label
+
+        {:error, :refused_conninfo} ->
+          assert shell.error =~ "is not a postgres:// URL", label
+          assert {shell.url, shell.display, shell.password} == {"", "", nil}, label
+      end
     end
   end
 
   # Runs the extracted function on `input` (an argument, never interpolated
-  # into the script) and reads back what it set.
+  # into the script) and reads back what it set, one field per line; the
+  # password, which may hold a newline, last.
   defp shell_split(bash, function, input) do
     script = """
     #{function}
     pg_conn_split "$1"
-    printf '%s\\n%s\\n%s' "$PG_CONN_URL" "$PG_CONN_HAS_PASSWORD" "$PG_CONN_PASSWORD"
+    printf '%s\\n%s\\n%s\\n%s\\n%s' "$PG_CONN_URL" "$PG_CONN_HAS_PASSWORD" \\
+      "$PG_CONN_DISPLAY_URL" "$PG_CONN_ERROR" "$PG_CONN_PASSWORD"
     """
 
     {out, 0} = System.cmd(bash, ["-c", script, "pg_conn_split_test", input])
-    [url, has, password] = String.split(out, "\n", parts: 3)
-    {url, if(has == "1", do: password)}
+    [url, has, display, error, password] = String.split(out, "\n", parts: 5)
+    %{url: url, display: display, error: error, password: if(has == "1", do: password)}
   end
 
   # Both functions, since pg_conn_split calls pg_conn_decode.

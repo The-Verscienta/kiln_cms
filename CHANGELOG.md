@@ -96,6 +96,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: audiences, push subscriptions, private saved views and notifications (its result gains those four keys). No migration; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#erasure-backfill-2514-steps-upgrade))
 
+- **In-app backups and demo resets now require TLS when the app does, refuse a `key=value` database URL with a password, and give up after `BACKUP_LOCK_WAIT_SECONDS` (600 s) on a table lock; `?ssl=false` becomes `sslmode=disable`. Cron: put `sslmode` in `DATABASE_URL`. No migration; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#backup-pg-tools-connection-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -249,10 +252,22 @@ Every summary line below that was shortened links to its own entry there.
 - **Export my data now lists the account's site memberships, in any status, with what each grants.**
   ([long form](docs/changelog/unreleased.md#export-lists-site-memberships))
 
+- **The backup tools accept an `ecto://` URL with Ecto's own query parameters: `ssl=false` becomes `sslmode=disable`, and `pool_size`, `timeout` and `idle_interval` are left out.**
+  ([long form](docs/changelog/unreleased.md#backup-url-ecto-query-params))
+
+- **A database dump stuck behind a table lock gives up after `BACKUP_LOCK_WAIT_SECONDS` (default 600) and says so; a failed cron `pg_dump` records its own error in the manifest.**
+  ([long form](docs/changelog/unreleased.md#backup-pg-dump-lock-wait))
+
 ### Security
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
   ([long form](docs/changelog/unreleased.md#backup-state-json-remote))
+
+- **In-app backups and demo resets connect with the app's TLS settings (`PGSSLMODE`/`PGSSLROOTCERT` from `DATABASE_SSL`), so a dump no longer falls back to cleartext or skips the app's certificate check.**
+  ([long form](docs/changelog/unreleased.md#backup-pg-tools-tls))
+
+- **A `key=value` database connection string carrying a password is refused, instead of putting the password in `pg_dump`'s, `pg_restore`'s or `psql`'s command line.**
+  ([long form](docs/changelog/unreleased.md#backup-conninfo-password-refused))
 
 ## [1.10.1] - 2026-11-16
 

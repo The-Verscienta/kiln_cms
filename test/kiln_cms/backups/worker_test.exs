@@ -256,6 +256,26 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert {nil, []} = Worker.split_credentials(nil)
     end
 
+    test "split_credentials keeps its {url, env} shape; Steps' returns {:ok, _}" do
+      # The release console calls Worker.split_credentials/1 (deprecated
+      # surface, signature kept); the step chain uses the tagged one.
+      assert {"postgres://u@h/db", [{"PGPASSWORD", "pw"}]} =
+               Worker.split_credentials("postgres://u:pw@h/db")
+
+      assert {:ok, {"postgres://u@h/db", [{"PGPASSWORD", "pw"}]}} =
+               KilnCMS.Backups.Steps.split_credentials("postgres://u:pw@h/db")
+    end
+
+    test "split_credentials raises a readable error for a refused string (#2831)" do
+      error =
+        assert_raise ArgumentError, fn ->
+          Worker.split_credentials("host=db password=hunter2 dbname=kiln")
+        end
+
+      assert error.message =~ "is not a postgres:// URL"
+      refute error.message =~ "hunter2"
+    end
+
     @tag :pg_tools
     test "the recorded error never carries the database password", %{dir: dir} do
       # `pg_dump`'s stderr echoes the connection string it was given, and this
