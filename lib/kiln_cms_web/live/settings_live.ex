@@ -41,8 +41,9 @@ defmodule KilnCMSWeb.SettingsLive do
      # The client and org the credential changes below are logged with (#2241).
      |> assign(:security_context, KilnCMS.Security.AuthEvents.context(socket))
      |> assign(:form, prefs_form(user))
-     # The registration-notice switch (#2251), for anyone who would get the
-     # notice on some site: the flag is one per account, across every site.
+     # The registration-notice switch (#2251), and the webhook-failure one
+     # beside it, for anyone who would get those notices on some site: each
+     # flag is one per account, across every site.
      |> assign(
        :registration_notices?,
        KilnCMS.Notifications.Registrations.administers_any_site?(user)
@@ -1311,6 +1312,16 @@ defmodule KilnCMSWeb.SettingsLive do
                   label={
                     gettext(
                       "New registrations — email me when someone is waiting for approval on a site I administer"
+                    )
+                  }
+                />
+                <.input
+                  :if={@registration_notices?}
+                  field={@form[:notify_on_webhook_failure]}
+                  type="checkbox"
+                  label={
+                    gettext(
+                      "Webhook failures — email me when a webhook on a site I administer stops delivering, or is switched off"
                     )
                   }
                 />

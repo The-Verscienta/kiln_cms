@@ -365,6 +365,14 @@ carries the reasoning.
   [#2847](https://github.com/The-Verscienta/kiln_cms/issues/2847),
   [#2877](https://github.com/The-Verscienta/kiln_cms/issues/2877))
 
+<a id="webhook-failure-alerts-upgrade"></a>
+
+- **Run `mix ash.migrate` (new `users.notify_on_webhook_failure`, boolean, default `true`).**
+  The column backs the new **Webhook failures** email switch. Every existing
+  account starts with it on. Rolling back to 1.10 is safe: 1.10 ignores the
+  column, and shows a `webhook_failing` or `webhook_disabled` notice in the
+  bell as a neutral line rather than failing to load it (#2509).
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -476,6 +484,33 @@ carries the reasoning.
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992))
 
 ## Added
+
+<a id="webhook-failure-alerts"></a>
+
+- **Site admins are told when a webhook stops getting through.**
+  A webhook endpoint auto-disables after 10 deliveries in a row exhaust their
+  retries, and until now nothing said so: the site that the webhook rebuilds
+  just stopped showing new content, and the only sign was a **Disabled**
+  badge on `/editor/webhooks`. Now `KilnCMS.Webhooks.HealthNotice` tells the
+  site's admins at two points: **"A webhook is failing"** on the first
+  exhausted delivery in a row, and **"A webhook was switched off"** when it
+  auto-disables. Each is a bell notice linking to `/editor/webhooks` and an
+  email (`KilnCMS.Accounts.User.Senders.SendWebhookFailure`).
+  - **One notice, not one per publish.** Both events collapse per endpoint
+    while unread (`:webhook_failing`, `:webhook_disabled`, `content_type`
+    `"webhook_endpoint"`, `content_id` the endpoint), and the email goes only
+    with a new notice. Opening `/editor/webhooks` marks them read.
+  - **Who:** the same admins the registration notice reaches: standing
+    platform admins and active site admin members, not temporary platform
+    admins or erased accounts.
+  - **Mute:** `notify_on_webhook_failure` (**Your settings → Email
+    notifications → Webhook failures**) mutes the email only. It is in the
+    self-export and reset to on by erasure.
+  - **Masked:** the notice and email name the endpoint by its masked URL and
+    carry no error text, which can echo the URL back (ADR 0028).
+  - Retractions are unchanged: they never count toward auto-disable, and a
+    lost one keeps its own "Retraction not delivered" notice.
+  See [Failure alerts](../webhooks.md#failure-alerts).
 
 <a id="flexible-content"></a>
 
@@ -1922,6 +1957,50 @@ carries the reasoning.
   and the amendment to
   [ADR 0035](../decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
   ([#2877](https://github.com/The-Verscienta/kiln_cms/issues/2877))
+
+<a id="av-strip-transient-read-retries"></a>
+
+- **A deferred A/V metadata strip that can't read the private upload because of a passing fault (an object-store timeout or `5xx`, a full temp disk) now retries, instead of leaving a good upload for the quarantine reaper to delete. The reaper and a refused strip now purge the row before deleting its private file.**
+  Applies under `KILN_AV_STRIP_MODE=deferred`. `KilnCMS.Media.AVStripWorker`
+  treated every failed read of the quarantined upload, other than an
+  unresolvable site store, as "the file is not there": it logged
+  "private blob unreadable", completed the job, and left the row
+  quarantined. Twenty-four hours later (`KILN_MEDIA_QUARANTINE_MAX_AGE_HOURS`)
+  `KilnCMS.Media.QuarantineReaper` deleted the file and the row, so one S3
+  timeout cost the editor the upload. Now only an answer that means the file
+  is definitely missing (`:enoent`, `:not_found`, an HTTP `404`) completes
+  the job that way. Any other read error fails the job, which Oban retries
+  up to 5 attempts with backoff, logging
+  "could not read its private blob (…); will retry." If every attempt fails,
+  the reaper removes the row after its window, as before. An S3 bucket that
+  answers `403` for a missing key (credentials without `s3:ListBucket`)
+  retries too, then ends with the reaper. Uploads already reaped this way
+  can't be recovered; upload the file again.
+
+  The reaper and the strip's refusal under `REQUIRE_AV_METADATA_STRIP=true`
+  used to delete the private file first and then purge the row. Both now
+  purge first and delete the file only when the purge succeeds, as
+  **Delete permanently** in the media trash does. A purge that fails keeps the file with
+  its row and logs "…; its private blob is kept." For a refusal the job
+  also fails, so Oban redoes the refusal within minutes, where before a
+  failed purge left a quarantined row with no file until the reaper took
+  it. If the file delete fails after a successful purge, nothing sweeps the
+  leftover file: the log line "Reaped media <id> left its private blob
+  <key> behind" (or "Purged media …" for a refusal) names the key so you
+  can remove it from the private bucket.
+
+  This also resolves the 1.10.0 known issue "a quarantined upload released
+  while the quarantine reaper sweeps can stay in the library without its
+  original file". On a closer reading that state could not occur: only the
+  strip job releases a quarantine, after it has stored the stripped copy at
+  the public key, and it deletes the private file itself right after. A
+  reaper deleting the private file during that release removed a file
+  the released item no longer used. No item needs repair. The change in
+  order matters for the failure cases above.
+
+  No migration or configuration change; rolling back is safe.
+  ([#2723](https://github.com/The-Verscienta/kiln_cms/issues/2723),
+  [#2835](https://github.com/The-Verscienta/kiln_cms/issues/2835))
 
 ## Security
 

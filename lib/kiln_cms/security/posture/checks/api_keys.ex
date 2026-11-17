@@ -46,7 +46,9 @@ defmodule KilnCMS.Security.Posture.Checks.ApiKeys do
   def run(%{now: now}) do
     query =
       Accounts.ApiKey
-      |> Ash.Query.filter(is_nil(revoked_at) and expires_at > ^now)
+      # The keys that still sign in: an erased account's is refused at sign-in
+      # (`User.valid_api_keys`) even before the erasure backfill revokes it.
+      |> Ash.Query.filter(is_nil(revoked_at) and expires_at > ^now and is_nil(user.anonymized_at))
       |> Ash.Query.sort(name: :asc)
       |> Ash.Query.load(user: [:org_memberships])
 

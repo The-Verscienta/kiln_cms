@@ -681,6 +681,80 @@ defmodule KilnCMS.Reporting.ViewsTest do
       assert "sections" in names
     end
 
+    # A reference sub-field's snapshot sits inside a flexible field's items and
+    # a group's rows, and carries a draft's title and slug (#2282). The views
+    # cut every snapshot-shaped object to `{id, type}` at any depth, and leave
+    # a media snapshot (it has a `url`) and the rest of the value as stored.
+    test "a reference snapshot inside an item or a group row shows id and type only", ctx do
+      %{admin: admin, role: role} = ctx
+
+      id = Ecto.UUID.generate()
+      media_id = Ecto.UUID.generate()
+
+      snap = %{
+        "id" => id,
+        "type" => "page",
+        "slug" => "sent-nest-slug-9a",
+        "title" => "SENT-NEST-9a"
+      }
+
+      media = %{"id" => media_id, "url" => "/m/pic.png", "alt" => "keep me"}
+
+      field!(admin, %{name: "blocks", field_type: :flexible})
+      field!(admin, %{name: "visits", field_type: :group})
+      page = page!(admin, %{})
+
+      inject!("pages", page.id, %{
+        "blocks" => [
+          %{
+            "_id" => "1",
+            "_type" => "card",
+            "cta" => snap,
+            "pic" => media,
+            "more" => [%{"_id" => "2", "_type" => "inner", "cta" => snap}]
+          }
+        ],
+        "visits" => [%{"doctor" => snap, "note" => "plain"}]
+      })
+
+      dump = ReportingRole.dump(role)
+
+      for table <- ~w(pages pages_field_values) do
+        refute dump[table] =~ "SENT-NEST-9a"
+        refute dump[table] =~ "sent-nest-slug-9a"
+      end
+
+      assert [] == ReportingRole.leaks(role, ["SENT-NEST-9a", "sent-nest-slug-9a"])
+
+      %{rows: [[blocks, visits]]} =
+        ReportingRole.as(role, fn ->
+          KilnCMS.Repo.query!(
+            "SELECT custom_fields -> 'blocks', custom_fields -> 'visits' " <>
+              "FROM kiln_reporting_v1.pages WHERE id = $1",
+            [Ecto.UUID.dump!(page.id)]
+          )
+        end)
+
+      cut = %{"id" => id, "type" => "page"}
+      assert [%{"cta" => ^cut, "pic" => ^media, "more" => [%{"cta" => ^cut}]}] = blocks
+      assert [%{"doctor" => ^cut, "note" => "plain"}] = visits
+
+      json =
+        ReportingRole.as(role, fn ->
+          KilnCMS.Repo.query!(
+            "SELECT value_json FROM kiln_reporting_v1.pages_field_values " <>
+              "WHERE field_name = 'blocks'"
+          ).rows
+        end)
+
+      assert [[[%{"cta" => ^cut}]]] = json
+    end
+
+    test "the strip helper's depth is the snapshot walks' depth" do
+      assert KilnCMS.Reporting.ViewSql.strip_depth() ==
+               2 * KilnCMS.CMS.FieldDefinition.max_flexible_depth() + 2
+    end
+
     test "an item type never joins a dynamic type's view either", ctx do
       %{admin: admin, role: role} = ctx
 
@@ -758,7 +832,12 @@ defmodule KilnCMS.Reporting.ViewsTest do
       for resource <- [KilnCMS.CMS.Page, KilnCMS.CMS.Post, KilnCMS.CMS.Entry],
           %{name: name, up: up, down: down} <-
             AshPostgres.DataLayer.Info.custom_statements(resource),
-          name in [:reporting_schema, :reporting_view, :reporting_field_values_view] do
+          name in [
+            :reporting_schema,
+            :reporting_strip_function,
+            :reporting_view,
+            :reporting_field_values_view
+          ] do
         refute up =~ ~r/\bDROP\b|\bRENAME\b/i
         refute up =~ "\\"
         refute up =~ "\#{"

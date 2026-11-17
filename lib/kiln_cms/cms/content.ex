@@ -2577,6 +2577,11 @@ defmodule KilnCMS.CMS.Content do
             down unquote(KilnCMS.Reporting.ViewSql.keep_schema())
           end
 
+          statement :reporting_strip_function do
+            up unquote(KilnCMS.Reporting.ViewSql.strip_function())
+            down unquote(KilnCMS.Reporting.ViewSql.keep_function())
+          end
+
           statement :reporting_view do
             up unquote(KilnCMS.Reporting.ViewSql.records_view(table, to_string(type), dynamic?))
             down unquote(KilnCMS.Reporting.ViewSql.drop_records_view(table))

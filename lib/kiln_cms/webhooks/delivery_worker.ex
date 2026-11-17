@@ -27,6 +27,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   alias KilnCMS.Deprecations
   alias KilnCMS.SafeFetch
   alias KilnCMS.Webhooks
+  alias KilnCMS.Webhooks.HealthNotice
   alias KilnCMS.Webhooks.RetractionLost
   alias KilnCMS.Webhooks.SlackFormat
 
@@ -209,13 +210,23 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
 
       # Bump health only for a live endpoint that truly exhausted its retries —
       # a failed ping against an already-disabled endpoint proves nothing new.
+      # The first failure in a row, and the one that switches the endpoint
+      # off, are told to the site's admins (`HealthNotice`).
       is_struct(delivery.endpoint, KilnCMS.CMS.WebhookEndpoint) and delivery.endpoint.active ->
-        delivery.endpoint
-        |> CMS.record_webhook_failure(%{}, actor: Webhooks.system(), tenant: delivery.org_id)
-        |> log_unrecorded(delivery, "endpoint failure")
+        record_endpoint_failure(delivery)
 
       true ->
         :ok
+    end
+  end
+
+  defp record_endpoint_failure(delivery) do
+    case CMS.record_webhook_failure(delivery.endpoint, %{},
+           actor: Webhooks.system(),
+           tenant: delivery.org_id
+         ) do
+      {:ok, endpoint} -> HealthNotice.surface(delivery.endpoint, endpoint)
+      error -> log_unrecorded(error, delivery, "endpoint failure")
     end
   end
 

@@ -8,9 +8,15 @@ defmodule KilnCMS.Media.QuarantineReaper do
   failure at upload time), or a node that died mid-strip after the last
   attempt, leaves a row that is `quarantined: true` forever — invisible to
   readers, unservable, and a private blob nobody will ever promote. This
-  sweeps them: any quarantined item older than `max_age_hours/0` has its
-  private blob deleted and its row purged (the hard delete; a soft-deleted
-  quarantined row would still be a private blob).
+  sweeps them: any quarantined item older than `max_age_hours/0` has its row
+  purged (the hard delete; a soft-deleted quarantined row would still be a
+  private blob), then its private blob deleted.
+
+  Row first, blob only on a successful purge (#2835), as the admin purge in
+  `MediaLive` does: a purge that fails or is refused (the strip released the
+  item after the scan read it) keeps the blob with its row. A quarantined
+  item has no variants or derivatives to delete: derivation is enqueued only
+  on release.
 
   Hourly by default (`config :kiln_cms, :media_quarantine_reaper_cron`,
   `KILN_MEDIA_QUARANTINE_REAPER_CRON`; `false` disables). The window is
@@ -56,24 +62,47 @@ defmodule KilnCMS.Media.QuarantineReaper do
     |> Enum.count(&reap/1)
   end
 
-  defp reap(item) do
+  # Public only so a test can hand it a struct the row has moved on from.
+  @doc false
+  @spec reap(struct()) :: boolean()
+  def reap(item) do
     Logger.warning(
       "Reaping quarantined media #{item.id} (#{item.filename}): its metadata strip never " <>
         "completed within #{max_age_hours()}h. Re-upload the file."
     )
 
-    Storage.delete_private(item.storage_key, item)
+    # Taken before the purge, which is what decides whether it may go.
+    key = item.storage_key
 
     case CMS.purge_quarantined_media_item(item, actor: Media.system(), tenant: item.org_id) do
       :ok ->
-        true
+        delete_private(item, key)
 
       {:ok, _} ->
-        true
+        delete_private(item, key)
 
       {:error, reason} ->
-        Logger.error("Could not purge quarantined media #{item.id}: #{inspect(reason)}")
+        Logger.error(
+          "Could not purge quarantined media #{item.id}: #{inspect(reason)}; its private blob is kept."
+        )
+
         false
     end
+  end
+
+  # The row is gone either way, so it counts. A failed delete leaves a private
+  # blob with no row, which nothing sweeps; logged with the key.
+  defp delete_private(item, key) do
+    case Storage.delete_private(key, item) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "Reaped media #{item.id} left its private blob #{key} behind: #{inspect(reason)}"
+        )
+    end
+
+    true
   end
 end
