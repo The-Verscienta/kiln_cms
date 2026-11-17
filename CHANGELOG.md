@@ -296,6 +296,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`restore.sh db` and `drill` verify the dump against its `kiln-db-<stamp>.sha256` before touching the database and refuse a mismatch; with no sidecar they warn and continue.**
   ([long form](docs/changelog/unreleased.md#restore-db-verifies-checksum))
 
+- **A deferred A/V strip retries a passing read failure (a timeout, a `5xx`) instead of leaving the upload for the quarantine reaper, which now deletes a file only after purging its row. The 1.10.0 known issue #2835 could not occur; nothing to repair.**
+  ([long form](docs/changelog/unreleased.md#av-strip-transient-read-retries))
+
 ### Security
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**

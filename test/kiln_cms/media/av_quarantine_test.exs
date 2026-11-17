@@ -5,12 +5,45 @@ defmodule KilnCMS.Media.AVQuarantineTest do
   refuses it, `AVStripWorker` promotes and releases it, and `QuarantineReaper`
   removes one that never completes.
 
-  `async: false` — swaps `:av_metadata_strip` (VM-global) and the Local storage
-  roots.
+  `async: false` — swaps `:av_metadata_strip` (VM-global), the Local storage
+  roots and, in some tests, the storage adapter itself (`HookedStorage`).
   """
   use KilnCMSWeb.ConnCase, async: false
 
   import ExUnit.CaptureLog
+
+  defmodule HookedStorage do
+    @moduledoc false
+    # The Local adapter, except that a private range read first consults
+    # `Application.get_env(:kiln_cms, __MODULE__)`: an `{:error, _}` there is
+    # returned instead of the bytes, and a 0-arity function is run before the
+    # read. Installed as the storage adapter by `hooked_storage/1`.
+    alias KilnCMS.Storage.Local
+
+    defdelegate store(key, source_path), to: Local
+    defdelegate fetch(key), to: Local
+    defdelegate delete(key), to: Local
+    defdelegate url(key), to: Local
+    defdelegate store_private(key, source_path), to: Local
+    defdelegate fetch_private(key), to: Local
+    defdelegate delete_private(key), to: Local
+    defdelegate private_available?, to: Local
+    defdelegate fetch_range(key, first, last), to: Local
+
+    def fetch_private_range(key, first, last) do
+      case Application.get_env(:kiln_cms, __MODULE__) do
+        {:error, _reason} = error ->
+          error
+
+        hook when is_function(hook, 0) ->
+          hook.()
+          Local.fetch_private_range(key, first, last)
+
+        nil ->
+          Local.fetch_private_range(key, first, last)
+      end
+    end
+  end
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
@@ -130,6 +163,23 @@ defmodule KilnCMS.Media.AVQuarantineTest do
 
   defp strip_job_args(item),
     do: %{"media_item_id" => item.id, "org_id" => item.org_id, "ext" => ".mp4"}
+
+  # Installs `HookedStorage` as the storage adapter, with `hook` as its
+  # private-range behaviour, for the rest of the test.
+  defp hooked_storage(hook) do
+    previous = Application.fetch_env(:kiln_cms, KilnCMS.Storage)
+    Application.put_env(:kiln_cms, KilnCMS.Storage, adapter: HookedStorage)
+    Application.put_env(:kiln_cms, HookedStorage, hook)
+
+    on_exit(fn ->
+      Application.delete_env(:kiln_cms, HookedStorage)
+
+      case previous do
+        {:ok, value} -> Application.put_env(:kiln_cms, KilnCMS.Storage, value)
+        :error -> Application.delete_env(:kiln_cms, KilnCMS.Storage)
+      end
+    end)
+  end
 
   describe "Ingest under :deferred" do
     test "stages the upload privately as quarantined, queues the strip and NOT derivation" do
@@ -251,6 +301,43 @@ defmodule KilnCMS.Media.AVQuarantineTest do
       assert all_enqueued(worker: KilnCMS.Media.AVWorker) == []
     end
 
+    # #2723: only a blob that is definitely missing completes the job. A read
+    # that merely failed is retried, and the upload is still there to strip.
+    test "a transient read error fails the job for a retry, and keeps the upload" do
+      editor = user(%{role: :editor})
+      item = quarantined_upload!(editor)
+      hooked_storage({:error, :eio})
+
+      log =
+        capture_log(fn ->
+          assert {:error, :eio} = AVStripWorker.perform(%Oban.Job{args: strip_job_args(item)})
+        end)
+
+      assert log =~ "will retry"
+      refute log =~ "private blob unreadable"
+
+      assert CMS.get_media_item!(item.id, actor: editor).quarantined
+      assert {:ok, _} = Storage.fetch_private(item.storage_key)
+      assert {:error, _} = Storage.fetch(item.storage_key)
+    end
+
+    test "an object store's 404, or a :not_found, completes the job like a missing file" do
+      editor = user(%{role: :editor})
+
+      for reason <- [{:http_error, 404, %{status_code: 404, body: ""}}, :not_found] do
+        item = quarantined_upload!(editor)
+        hooked_storage({:error, reason})
+
+        log =
+          capture_log(fn ->
+            assert :ok = AVStripWorker.perform(%Oban.Job{args: strip_job_args(item)})
+          end)
+
+        assert log =~ "private blob unreadable"
+        assert CMS.get_media_item!(item.id, actor: editor).quarantined
+      end
+    end
+
     test ":sync (the default) is unchanged — the item lands released, publicly stored" do
       Application.put_env(:kiln_cms, :av_metadata_strip, :sync)
       actor = user(%{role: :editor})
@@ -362,6 +449,31 @@ defmodule KilnCMS.Media.AVQuarantineTest do
       assert all_enqueued(worker: KilnCMS.Media.AVWorker) == []
     end
 
+    # #2835: the row goes first, and the blob only once it has. Here the
+    # item is released while its blob is being read, so the refusal's purge
+    # is refused (`:purge_quarantined` takes only a quarantined row).
+    test "a refusal whose purge fails keeps the private blob, and fails the job" do
+      Application.put_env(:kiln_cms, :require_av_metadata_strip, true)
+      editor = user(%{role: :editor})
+      item = quarantined_upload!(editor)
+
+      hooked_storage(fn ->
+        CMS.release_media_quarantine(item, %{},
+          actor: KilnCMS.Media.system(),
+          tenant: item.org_id
+        )
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, _} = AVStripWorker.perform(%Oban.Job{args: strip_job_args(item)})
+        end)
+
+      assert log =~ "could not be purged"
+      assert {:ok, _} = CMS.get_media_item(item.id, actor: editor)
+      assert {:ok, _} = Storage.fetch_private(item.storage_key)
+    end
+
     test "is a no-op for an item that is gone or already released" do
       editor = user(%{role: :editor})
       item = quarantined_upload!(editor)
@@ -416,6 +528,35 @@ defmodule KilnCMS.Media.AVQuarantineTest do
 
       assert {:ok, %{quarantined: true}} = CMS.get_media_item(fresh.id, actor: editor)
       assert {:ok, _} = Storage.fetch_private(fresh.storage_key)
+    end
+
+    # #2835: the strip promoted and released the item after the reaper's
+    # scan read it, and has not yet deleted the private copy. The reaper
+    # holds the stale, still-quarantined struct; its purge is refused, and
+    # nothing of the item may go.
+    test "an item released after the scan read it keeps its row and both blobs" do
+      editor = user(%{role: :editor})
+      held = quarantined_upload!(editor)
+
+      {:ok, original} = Storage.fetch_private(held.storage_key)
+      public = Path.join(System.tmp_dir!(), "q-public-#{System.unique_integer([:positive])}")
+      File.write!(public, original)
+      on_exit(fn -> File.rm(public) end)
+
+      {:ok, _} = Storage.store(held.storage_key, public)
+
+      {:ok, _} =
+        CMS.release_media_quarantine(held, %{},
+          actor: KilnCMS.Media.system(),
+          tenant: held.org_id
+        )
+
+      log = capture_log(fn -> refute QuarantineReaper.reap(held) end)
+      assert log =~ "Could not purge quarantined media #{held.id}"
+
+      assert {:ok, %{quarantined: false}} = CMS.get_media_item(held.id, actor: editor)
+      assert {:ok, _} = Storage.fetch(held.storage_key)
+      assert {:ok, _} = Storage.fetch_private(held.storage_key)
     end
 
     test "never touches a released item, however old" do
