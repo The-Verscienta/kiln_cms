@@ -67,6 +67,33 @@ defmodule KilnCMS.Backups.NoticesTest do
       assert [%Notice{scope: ^scope}] = notices()
     end
 
+    test "a clean pass in a directory with an id also clears the id-less scope", %{dir: dir} do
+      # Written while the directory's id couldn't be read.
+      Notices.retention({:local, dir}, {:skipped, {:policy, :invalid_policy}})
+      assert [%Notice{scope: "local"}] = notices()
+
+      id = with_dir_id(dir)
+      Notices.retention({:local, dir}, {:stopped, {:delete, "kiln-db-x.dump", :eacces}, 1})
+      assert notices() |> Enum.map(& &1.scope) |> Enum.sort() == ["local", "local:" <> id]
+
+      assert :ok = Notices.retention({:local, dir}, :ok)
+      assert notices() == []
+    end
+
+    test "a long reason and label are cut, not refused", %{dir: dir} do
+      Notices.retention({:local, dir}, {:skipped, String.duplicate("x", 2_000)})
+      assert [%Notice{reason: reason}] = notices()
+      assert String.length(reason) <= 500
+
+      Notices.retention(
+        {:destination, "dest:long", String.duplicate("y", 2_000)},
+        {:skipped, :env_overlap}
+      )
+
+      assert %Notice{label: label} = Enum.find(notices(), &(&1.scope == "dest:long"))
+      assert String.length(label) <= 200
+    end
+
     test "a destination is scoped by its key and keeps its label" do
       Notices.retention({:destination, "dest:abc", "Offsite bucket"}, {:skipped, :env_overlap})
 

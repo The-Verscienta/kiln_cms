@@ -30,6 +30,11 @@ defmodule KilnCMS.Backups.Notices do
   (`KilnCMS.Backups.DirId.current/1`), else `"local"`: directories without an
   id share that one row, since nothing else tells them apart. A stored
   destination is `"dest:<id>"`, its key.
+
+  A clean local pass clears both `"local:<dir id>"` and `"local"`, so a
+  notice written while the id couldn't be read doesn't outlive the problem.
+  A local retention notice therefore clears only on the next in-app backup
+  whose retention runs cleanly in that directory: nothing else looks at it.
   """
 
   require Ash.Query
@@ -102,15 +107,7 @@ defmodule KilnCMS.Backups.Notices do
   def scope_key({:destination, key, _label}), do: {key, nil}
 
   defp write_retention(scope, :ok, _opts) do
-    {key, _dir_id} = scope_key(scope)
-
-    case Backups.clear_backup_notices(:retention, key,
-           actor: Backups.system(),
-           bulk_options: [return_errors?: true]
-         ) do
-      %Ash.BulkResult{status: :success} -> :ok
-      %Ash.BulkResult{errors: errors} -> {:error, errors}
-    end
+    scope |> clear_keys() |> Enum.reduce_while(:ok, &clear_retention/2)
   end
 
   defp write_retention(scope, {:skipped, reason}, opts),
@@ -135,6 +132,27 @@ defmodule KilnCMS.Backups.Notices do
       total: nil,
       at: DateTime.utc_now()
     })
+  end
+
+  # A clean local pass also clears `"local"`: a notice written there while the
+  # directory's id couldn't be read would otherwise outlive the problem.
+  defp clear_keys({:local, _dir} = scope) do
+    case scope_key(scope) do
+      {"local", nil} -> ["local"]
+      {key, _dir_id} -> [key, "local"]
+    end
+  end
+
+  defp clear_keys(scope), do: [scope |> scope_key() |> elem(0)]
+
+  defp clear_retention(key, :ok) do
+    case Backups.clear_backup_notices(:retention, key,
+           actor: Backups.system(),
+           bulk_options: [return_errors?: true]
+         ) do
+      %Ash.BulkResult{status: :success} -> {:cont, :ok}
+      %Ash.BulkResult{errors: errors} -> {:halt, {:error, errors}}
+    end
   end
 
   defp label({:destination, _key, label}), do: label

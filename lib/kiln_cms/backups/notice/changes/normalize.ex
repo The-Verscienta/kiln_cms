@@ -3,6 +3,9 @@ defmodule KilnCMS.Backups.Notice.Changes.Normalize do
   Bounds and scrubs what a `KilnCMS.Backups.Notice` carries (#2487): `reason`
   is redacted and capped at 500 characters, like a run's log line, `label` at
   200, like a run's destination label, and `units` keeps its first ten.
+
+  `reason` and `label` arrive as the action's arguments and are set from
+  them here, so the columns' `max_length` can never refuse the write.
   """
   use Ash.Resource.Change
 
@@ -19,9 +22,19 @@ defmodule KilnCMS.Backups.Notice.Changes.Normalize do
   @impl true
   def change(changeset, _opts, _context) do
     changeset
-    |> normalize(:reason, &Redact.text(&1, [], @max_reason))
-    |> normalize(:label, &Redact.text(&1, [], @max_label))
+    |> from_argument(:reason, &Redact.text(&1, [], @max_reason))
+    |> from_argument(:label, &Redact.text(&1, [], @max_label))
     |> normalize(:units, &Enum.take(&1, @max_units))
+  end
+
+  defp from_argument(changeset, field, fun) do
+    value =
+      case Ash.Changeset.get_argument(changeset, field) do
+        nil -> nil
+        value -> fun.(value)
+      end
+
+    Ash.Changeset.force_change_attribute(changeset, field, value)
   end
 
   defp normalize(changeset, field, fun) do

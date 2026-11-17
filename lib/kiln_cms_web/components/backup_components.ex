@@ -77,28 +77,49 @@ defmodule KilnCMSWeb.BackupComponents do
   @doc """
   The alarm lines for retention that was skipped or stopped part-way (#2487),
   one per place in `Backups.status/0`'s `retention`, as `%{id: id, text: text}`:
-  `id` is `"local"` for the backup directory and `"dest-<id>"` for a
-  destination. Each names the backup whose prune it was by its date. The
-  reason stays English, as the run log says it. The Backups page and the home
-  strip both say them.
+  `id` is `"local-<dir id>"` for a backup directory with a `.kiln-dir-id`,
+  `"local"` for one without, and `"dest-<id>"` for a destination. Each names
+  the backup whose prune it was by its date. When more than one backup
+  directory has a line (a cluster whose nodes back up to their own disks),
+  each local line also names its directory by the first eight characters of
+  its id. The reason stays English, as the run log says it. The Backups page
+  and the home strip both say them.
   """
   @spec retention_lines(map()) :: [%{id: String.t(), text: String.t()}]
-  def retention_lines(%{retention: notices}) when is_list(notices),
-    do: Enum.map(notices, &retention_line/1)
+  def retention_lines(%{retention: notices}) when is_list(notices) do
+    several_local? = Enum.count(notices, &(&1.scope == :local)) > 1
+    Enum.map(notices, &retention_line(&1, several_local?))
+  end
 
   def retention_lines(_status), do: []
 
-  defp retention_line(%{scope: :local} = n) do
-    %{id: "local", text: retention_text(n, nil)}
+  defp retention_line(%{scope: :local} = n, several_local?) do
+    text = retention_text(n, nil)
+    text = if several_local?, do: with_directory(text, n[:dir_id]), else: text
+
+    %{id: local_line_id(n[:dir_id]), text: text}
   end
 
-  defp retention_line(%{scope: {:destination, "dest:" <> id}} = n) do
+  defp retention_line(%{scope: {:destination, "dest:" <> id}} = n, _several_local?) do
     %{id: "dest-" <> id, text: retention_text(n, n.label)}
   end
 
-  defp retention_line(%{scope: {:destination, key}} = n) do
+  defp retention_line(%{scope: {:destination, key}} = n, _several_local?) do
     %{id: "dest-" <> key, text: retention_text(n, n.label)}
   end
+
+  defp local_line_id(nil), do: "local"
+  defp local_line_id(dir_id), do: "local-" <> dir_id
+
+  defp with_directory(text, nil),
+    do: gettext("%{line} (backup directory without an id)", line: text)
+
+  defp with_directory(text, dir_id),
+    do:
+      gettext("%{line} (backup directory %{id})",
+        line: text,
+        id: String.slice(dir_id, 0, 8)
+      )
 
   defp retention_text(%{outcome: :skipped} = n, nil),
     do:

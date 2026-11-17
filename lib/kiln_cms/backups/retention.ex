@@ -114,9 +114,10 @@ defmodule KilnCMS.Backups.Retention do
   A host whose `scripts/backup.sh` predates the hold markers ignores them,
   and its cron prune deletes what a schedule keeps. Each sync spots that from
   the `.hold` markers the scan listed, before any is written or removed
-  (`held_deleted_candidates/2`): a held unit with no member left but its
-  sidecar (such a script deletes the data files and leaves the `.sha256`), or
-  none at all, whose stamp has no `.work/` directory, whose Run is not
+  (`held_deleted_candidates/2`): a held unit with no member left at all (the
+  v1.9.x script's `remove_unit` deletes the sidecar too), or none but its
+  sidecar (v1.8 and older prune with `find` by age, which can leave the
+  `.sha256`), whose stamp has no `.work/` directory, whose Run is not
   running, and whose Run doesn't record the app pruning that kind here (the
   app's own deletes, one that stopped part-way included). The scan's held
   stamps are part of the one Run read, so this adds no query. Such a unit's
@@ -614,9 +615,9 @@ defmodule KilnCMS.Backups.Retention do
   @doc false
   # The held units deleted outside the app (#2931), pure: every
   # `{stamp, kind}` the scan found a `.hold` for (`inventory.held`) whose
-  # unit has no member left but its sidecar (a `backup.sh prune` older than
-  # the hold markers deletes the data files and leaves the `.sha256`), or none
-  # at all. Not one whose stamp has a `.work/` directory or whose Run is
+  # unit has no member left (a v1.9.x `backup.sh`'s `remove_unit` deletes the
+  # sidecar too), or none but its sidecar (v1.8 and older prune with `find` by
+  # age, which can leave the `.sha256`). Not one whose stamp has a `.work/` directory or whose Run is
   # running (a backup still writing it), nor one whose Run records the app
   # pruning it here (`Recorder.mark_pruned/2`, the artifact or any of its
   # parts: retention's own deletes, a pass that stopped part-way included,

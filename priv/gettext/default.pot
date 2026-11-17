@@ -1025,6 +1025,16 @@ msgstr ""
 msgid "%{label}: %{message}"
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{line} (backup directory %{id})"
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{line} (backup directory without an id)"
+msgstr ""
+
 #: lib/kiln_cms_web/promotion_warning.ex
 #, elixir-autogen, elixir-format
 msgid "%{list} and %{last}"

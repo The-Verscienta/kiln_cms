@@ -16,7 +16,10 @@ defmodule KilnCMS.Backups.Notice do
     * `:retention` is a **state**, per place retention runs: a skip
       (`outcome: :skipped`) or a part-way stop (`:stopped`, with how many files
       it removed first) upserts the row, and a clean pass over the same place
-      deletes it (`clear`). `stamp` is the backup whose prune it was.
+      deletes it (`clear`). `stamp` is the backup whose prune it was. A local
+      one clears only on the next in-app backup whose retention runs cleanly
+      in that directory (which clears `"local"` too, see
+      `KilnCMS.Backups.Notices`).
     * `:held_deleted` is an **event**: each detection upserts the row with its
       `at`, and the panels show it for eight days. A second detection in the
       same scope merges into the row (`KilnCMS.Backups.Notices.held_deleted/2`).
@@ -59,15 +62,19 @@ defmodule KilnCMS.Backups.Notice do
         :kind,
         :scope,
         :dir_id,
-        :label,
         :outcome,
-        :reason,
         :deleted,
         :stamp,
         :units,
         :total,
         :at
       ]
+
+      # Arguments, not accepted attributes, so `Changes.Normalize` cuts them
+      # before the columns' `max_length` sees them: a long reason never
+      # refuses the write that records it.
+      argument :label, :string
+      argument :reason, :string
 
       upsert? true
       upsert_identity :unique_scope
@@ -125,8 +132,12 @@ defmodule KilnCMS.Backups.Notice do
     # The backup directory's `.kiln-dir-id`, for a local scope that has one.
     attribute :dir_id, :uuid, public?: true
 
-    # A destination's name, as the run recorded it.
-    attribute :label, :string, public?: true
+    # A destination's name, as the run recorded it. `Changes.Normalize` cuts
+    # it to 200 characters; the ceiling is the backstop.
+    attribute :label, :string do
+      constraints max_length: KilnCMS.Limits.line()
+      public? true
+    end
 
     # `:retention` only.
     attribute :outcome, KilnCMS.Types.KnownAtom do
@@ -134,7 +145,12 @@ defmodule KilnCMS.Backups.Notice do
       public? true
     end
 
-    attribute :reason, :string, public?: true
+    # Redacted and cut to 500 characters by `Changes.Normalize`; the ceiling
+    # is the backstop.
+    attribute :reason, :string do
+      constraints max_length: KilnCMS.Limits.line()
+      public? true
+    end
 
     # Files removed before a `:stopped` pass broke off.
     attribute :deleted, :integer do

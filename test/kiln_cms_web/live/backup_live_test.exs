@@ -3068,6 +3068,43 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
     end
 
+    test "two backup directories: one line each, own ids, each naming its directory",
+         %{conn: conn} do
+      good_backup!()
+      a = Ash.UUID.generate()
+      b = Ash.UUID.generate()
+
+      # Both directories are reported by a live node, so both lines show.
+      for id <- [a, b] do
+        Backups.beat_node!(
+          %{
+            node: "node-#{System.unique_integer([:positive])}",
+            boot_id: Ash.UUID.generate(),
+            dir_id: id
+          },
+          actor: Backups.system()
+        )
+
+        notice!(%{scope: "local:" <> id, dir_id: id})
+      end
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      for id <- [a, b] do
+        assert has_element?(
+                 lv,
+                 "#backup-headline-retention-local-#{id}",
+                 "(backup directory #{String.slice(id, 0, 8)})"
+               )
+      end
+
+      html = render(lv)
+      assert length(Regex.scan(~r/data-role="retention-notice"/, html)) == 2
+      assert length(Regex.scan(~r/id="backup-headline-retention-local/, html)) == 2
+
+      refute has_element?(lv, "#backup-headline-retention-local")
+    end
+
     test "a destination's line names it; one no longer pruned shows nothing", %{conn: conn} do
       good_backup!()
 

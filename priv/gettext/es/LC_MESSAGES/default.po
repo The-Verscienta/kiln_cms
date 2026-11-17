@@ -1025,6 +1025,16 @@ msgstr "%{label}: %{count} en este intervalo de alertas"
 msgid "%{label}: %{message}"
 msgstr "%{label}: %{message}"
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{line} (backup directory %{id})"
+msgstr "%{line} (directorio de copias %{id})"
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{line} (backup directory without an id)"
+msgstr "%{line} (directorio de copias sin identificador)"
+
 #: lib/kiln_cms_web/promotion_warning.ex
 #, elixir-autogen, elixir-format
 msgid "%{list} and %{last}"
