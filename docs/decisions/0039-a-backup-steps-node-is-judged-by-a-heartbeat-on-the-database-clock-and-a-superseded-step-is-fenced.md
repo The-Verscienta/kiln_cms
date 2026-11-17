@@ -7,7 +7,10 @@
   [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819) (a step's
   files are written outside the lock and only their rename is fenced; see
   "Amendment" and
-  [ADR 0067](0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md)).
+  [ADR 0067](0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md)),
+  and by [#2848](https://github.com/The-Verscienta/kiln_cms/issues/2848) (the
+  self-fence runs in a watchdog apart from the heartbeat's tick; see
+  "Amendment (2026-11-17, #2848)").
 - **References** — [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218)
   (owner decision 9 of 2026-11-09, in its comments; PR #2537),
   [#2538](https://github.com/The-Verscienta/kiln_cms/issues/2538),
@@ -125,6 +128,10 @@ a slow one.
   that stalls every beat for minutes), the thresholds, fixed in `Heartbeat`
   and `Chain` rather than configured, need revisiting together: the
   self-fence must stay below the reclaim.
+- If the self-fence stops live steps on nodes whose heartbeat round is only
+  slow (a sweep or prune that takes about a minute; see the #2848
+  amendment), the 90 seconds, or what a round may do before it beats, needs
+  revisiting, again below the 180-second reclaim.
 
 ## Amendment (2026-11-17, #2818, #2819): a step's files are its own and only their rename is fenced
 
@@ -156,3 +163,42 @@ The fence itself (chain, epoch and job id) is unchanged. So is its gap: a
 later attempt of the same job, an Oban retry or a Lifeline rescue, holds the
 same lease as an earlier attempt still running, and the renames of both are
 admitted. Every other rule above is unchanged.
+
+## Amendment (2026-11-17, #2848): the self-fence runs in a watchdog, and fires on no successful beat
+
+The Decision's third point ("A node that cannot beat stops its own steps
+first") had the heartbeat's tick do the kill. The tick also does file I/O on
+`BACKUP_DIR`: since #2789 it reads, and may create, `.kiln-dir-id` on every
+beat, and its sweep cleans up after interrupted runs. On a hard-mounted NFS
+export that hangs, that I/O blocks the tick, and a fence inside the tick
+never runs, while the other nodes still reclaim the step at 180 seconds. Two
+nodes could then write the same backup.
+
+- **The kill is done by `KilnCMS.Backups.Fence`**, a process apart from the
+  heartbeat that does no file or database I/O. Every 5 seconds it compares
+  the time of the last successful beat (each one is cast to it) with
+  `Heartbeat.fence_after_ms/0` (90 seconds), and when it is reached kills
+  every process in `KilnCMS.Backups.StepRegistry`. It starts with the
+  heartbeat (`heartbeat?: true`) and not without it. The tick still fences
+  too, when it gets that far.
+- **It fires on no successful beat for 90 seconds, not only on failed
+  beats.** A tick that is stuck, or only slow, counts the same as one whose
+  beat the database refused. So a heartbeat round (beat, canceled-step stop,
+  sweep, prune) that, with the 30-second pause after it, keeps the next beat
+  from succeeding within 90 seconds stops this node's steps. That is the
+  budget a round now has: about a minute. Stopping a live step that way only
+  interrupts it; letting it run on beside a reclaim could cost the backup.
+- **A restarted watchdog counts from its own start.** It keeps the last beat
+  in its own state, so after a crash it waits up to another 90 seconds (plus
+  one 5-second check) before it can fire. A tick that still runs fences on
+  its own count meanwhile; only a stuck one goes unfenced for that time. A
+  restarted watchdog has no record of the beats before it, and firing at once
+  would stop the steps of a healthy node.
+- **The id read can no longer block the beat.** It runs in a task under
+  `KilnCMS.Backups.DirIdReaders` (at most four at a time), waited on for 5
+  seconds (`dir_id_timeout_ms`). While it is held up the beat reports no id,
+  so the last-good marker sync stops routing to that node; no second read
+  starts until the first ends.
+
+The thresholds (90 and 180 seconds) and the reclaim are unchanged. Every
+other rule above is unchanged.

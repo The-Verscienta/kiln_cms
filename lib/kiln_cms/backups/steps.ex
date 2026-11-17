@@ -2905,6 +2905,7 @@ defmodule KilnCMS.Backups.Steps do
         do: remove_partial(path)
 
     sweep_manifest_partials(dir, cutoff)
+    sweep_dir_id_temps(dir, cutoff)
   end
 
   # A tagged `manifest.json.<tag>.partial` at the directory's root, left when
@@ -2922,6 +2923,24 @@ defmodule KilnCMS.Backups.Steps do
           |> String.replace_prefix("manifest.json.", "")
           |> String.replace_suffix(".partial", ""),
         Artifact.tag?(tag),
+        older?(path, cutoff),
+        do: remove_partial(path)
+
+    :ok
+  end
+
+  # A `.kiln-dir-id.<uuid>.tmp` at the directory's root, left when its writer
+  # stopped between writing the backup-directory id and removing the temporary
+  # file (`KilnCMS.Backups.DirId.publish/2`, #2849). Each name is a random
+  # UUID and a publish lasts a moment, so one older than the grace is
+  # abandoned. Nothing reads it. `backup.sh prune` removes them too, for hosts
+  # whose only writer is a heartbeat.
+  @dir_id_temp ~r/\A\.kiln-dir-id\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp\z/
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp sweep_dir_id_temps(dir, cutoff) do
+    for path <- Path.wildcard(Path.join(dir, ".kiln-dir-id.*.tmp"), match_dot: true),
+        Regex.match?(@dir_id_temp, Path.basename(path)),
         older?(path, cutoff),
         do: remove_partial(path)
 

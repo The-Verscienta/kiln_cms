@@ -13,6 +13,8 @@ defmodule KilnCMS.Backups.Heartbeat do
        (`KilnCMS.Backups.DirId.ensure_existing/1`), so the sync can reach a
        directory only `scripts/backup.sh` writes to (#2789). An id it can't
        create is reported as none, with one warning per reason per boot.
+       That read runs in a task of its own (below), so a backup directory
+       that hangs never holds up the beat.
     2. **Stop canceled steps**, after a successful beat only (below).
     3. **Sweep**: `KilnCMS.Backups.Chain.reclaim_stale/0` (a holder whose node
        has not beaten for 180 s, or
@@ -25,12 +27,39 @@ defmodule KilnCMS.Backups.Heartbeat do
   ## Self-fence
 
   A node that cannot beat (the database is unreachable from here, the beat is
-  refused) will soon be declared stale by the others, and its step requeued
-  elsewhere. So it stops its own steps first: once its last successful beat is
-  90 s old, it kills every process registered in
-  `KilnCMS.Backups.StepRegistry` (a step job registers itself), and
-  `KilnCMS.ExternalCommand`'s watchers kill the `pg_dump`, `tar` or `rclone`
-  each started. Two nodes must never write the same backup's files at once.
+  refused, or the heartbeat itself is stuck) will soon be declared stale by
+  the others, and its step requeued elsewhere. So it stops its own steps
+  first: once its last successful beat is 90 s old, it kills every process
+  registered in `KilnCMS.Backups.StepRegistry` (a step job registers itself),
+  and `KilnCMS.ExternalCommand`'s watchers kill the `pg_dump`, `tar` or
+  `rclone` each started. Two nodes must never write the same backup's files
+  at once.
+
+  The kill is done by `KilnCMS.Backups.Fence`, a watchdog process that does no
+  file or database I/O and that each successful beat reports to, so it fires
+  within a few seconds of the threshold even while a tick is blocked on a
+  hung `BACKUP_DIR` (#2848). The tick fences too, when it gets that far.
+
+  ## The backup-directory id read (#2848)
+
+  The id is read (and, with the marker sync on, created) in a task under
+  `KilnCMS.Backups.DirIdReaders`, which the tick waits on for at most 5 s.
+  One that takes longer is left running, and this heartbeat starts no other
+  until it has finished: a process blocked in a file operation on a hung
+  mount can't be killed, so one per tick would pile up. A read that answers
+  after the tick stopped waiting ends the stall, and the next tick reads
+  afresh. Every beat a read holds up
+  reports no id: the directory is hung, so the marker sync stops routing to
+  this node until it answers again. A stall logs one warning when it starts
+  and a line when it clears, and each beat it holds up emits
+  `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]`. A read that crashes,
+  or answers with something other than `{:ok, id}` or `{:error, reason}`,
+  also reports no id.
+
+  The supervisor runs at most four reads at a time, so heartbeats restarted
+  on a hung mount can't pile up blocked readers; a tick that finds it full
+  starts none and beats with no id. Nothing in the id read stops a beat: an
+  error in it is logged and the beat goes out with no id.
 
   ## A step whose job was canceled (#2538)
 
@@ -63,14 +92,16 @@ defmodule KilnCMS.Backups.Heartbeat do
 
   Started after Oban in `KilnCMS.Application` when `config :kiln_cms,
   KilnCMS.Backups, heartbeat?: true` (the default; the test build turns it
-  off and drives `tick/1` directly). The thresholds are fixed, not configured.
+  off and drives `tick/1` directly). The thresholds are fixed, not configured;
+  the id read's wait is `config :kiln_cms, KilnCMS.Backups, dir_id_timeout_ms:`
+  (5000 by default).
   """
   use GenServer
 
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{DirId, MarkerSyncWorker}
+  alias KilnCMS.Backups.{DirId, Fence, MarkerSyncWorker}
 
   require Logger
 
@@ -78,6 +109,8 @@ defmodule KilnCMS.Backups.Heartbeat do
   @fence_after_ms 90_000
   @prune_every_ms :timer.hours(1)
   @terminal_job_states ["cancelled", "completed", "discarded"]
+  @dir_id_timeout_ms 5_000
+  @readers KilnCMS.Backups.DirIdReaders
 
   @type state :: %{
           node: String.t(),
@@ -86,8 +119,19 @@ defmodule KilnCMS.Backups.Heartbeat do
           beat_ok?: boolean(),
           started: integer(),
           last_prune: integer() | nil,
-          dir_id_warned: MapSet.t()
+          dir_id_warned: MapSet.t(),
+          dir_id_task: dir_id_task() | nil,
+          dir_id_stalled?: boolean(),
+          readers_full?: boolean()
         }
+
+  @typep dir_id_task :: %{
+           ref: reference(),
+           pid: pid(),
+           dir: Path.t(),
+           ensure?: boolean(),
+           since: integer()
+         }
 
   @doc false
   def start_link(opts \\ []) do
@@ -121,6 +165,23 @@ defmodule KilnCMS.Backups.Heartbeat do
   @impl GenServer
   def handle_info(:tick, state), do: {:noreply, tick_and_schedule(state)}
 
+  # The id read's answer, after the tick stopped waiting for it. It ends the
+  # stall; the next tick reads afresh.
+  def handle_info({ref, result}, %{dir_id_task: %{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    {_id, state} = read_done(state, {:result, result})
+    {:noreply, state}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{dir_id_task: %{ref: ref}} = state) do
+    {_id, state} = read_done(state, :none)
+    {:noreply, state}
+  end
+
+  # Anything else, a stray reply or `:DOWN` included, is not a reason to stop
+  # beating.
+  def handle_info(_message, state), do: {:noreply, state}
+
   defp tick_and_schedule(state) do
     state = tick(state)
     Process.send_after(self(), :tick, @interval_ms)
@@ -140,7 +201,10 @@ defmodule KilnCMS.Backups.Heartbeat do
       beat_ok?: false,
       started: now_ms(),
       last_prune: nil,
-      dir_id_warned: MapSet.new()
+      dir_id_warned: MapSet.new(),
+      dir_id_task: nil,
+      dir_id_stalled?: false,
+      readers_full?: false
     }
   end
 
@@ -185,13 +249,43 @@ defmodule KilnCMS.Backups.Heartbeat do
       state
   end
 
+  # The id read outside the beat's rescue, so a beat that raises still keeps
+  # track of a read in flight. An error in the id read itself is no reason
+  # not to beat (`init/1` ticks at once, so a raise here would crash-loop the
+  # heartbeat and stop the application): it is logged and the beat goes out
+  # with no id. The parts that handle a read in flight rescue their own
+  # errors, so this keeps its tracking too.
   defp beat(state) do
-    {dir_id, state} = dir_id(state)
+    {dir_id, state} =
+      try do
+        dir_id(state)
+      rescue
+        error ->
+          log_dir_id_error(Exception.message(error))
+          {nil, state}
+      catch
+        kind, reason ->
+          log_dir_id_error(inspect({kind, reason}))
+          {nil, state}
+      end
+
+    beat(state, dir_id)
+  end
+
+  defp log_dir_id_error(message) do
+    Logger.warning(
+      "Backup heartbeat: the backup-directory id read failed, beating with no id: " <> message
+    )
+  end
+
+  defp beat(state, dir_id) do
     attrs = %{node: state.node, boot_id: state.boot_id, dir_id: dir_id}
 
     case Backups.beat_node(attrs, actor: Backups.system()) do
       {:ok, _beat} ->
-        Map.merge(state, %{last_beat: now_ms(), beat_ok?: true})
+        at = now_ms()
+        Fence.beat(at)
+        Map.merge(state, %{last_beat: at, beat_ok?: true})
 
       {:error, error} ->
         Logger.warning("Backup heartbeat failed: #{Exception.message(error)}")
@@ -203,22 +297,142 @@ defmodule KilnCMS.Backups.Heartbeat do
       Map.put(state, :beat_ok?, false)
   end
 
-  # The id to report, and the state with any warning noted. With the marker
-  # sync off nothing routes by a cron-only directory's id, so none is created.
+  # The id to report, and the state with the read's progress: the answer of
+  # a read that ends during this tick, none while one is held up. A read
+  # still running from an earlier tick is only checked, never waited on
+  # again or joined by a second one (see "The backup-directory id read").
   defp dir_id(state) do
-    if MarkerSyncWorker.enabled?() do
-      case DirId.ensure_existing() do
-        {:ok, id} -> {id, state}
-        {:error, :enoent} -> {nil, state}
-        {:error, reason} -> {nil, warn_dir_id(state, reason)}
+    {id, state} =
+      case state.dir_id_task do
+        nil -> state |> start_read() |> await_read(dir_id_timeout_ms())
+        _running -> await_read(state, 0)
       end
-    else
-      case DirId.current() do
-        {:ok, id} -> {id, state}
-        _ -> {nil, state}
+
+    if state.dir_id_task, do: {nil, stalled(state)}, else: {id, state}
+  end
+
+  # `Backups.dir/0` and the marker sync's switch are read here, in the
+  # heartbeat's own process, and handed to the task.
+  defp start_read(state) do
+    dir = Backups.dir()
+    ensure? = MarkerSyncWorker.enabled?()
+    reader = dir_id_reader()
+    task = Task.Supervisor.async_nolink(@readers, fn -> reader.(dir, ensure?) end)
+
+    %{
+      state
+      | dir_id_task: %{ref: task.ref, pid: task.pid, dir: dir, ensure?: ensure?, since: now_ms()},
+        readers_full?: false
+    }
+  rescue
+    # `async_nolink/2` raises when the supervisor already runs `max_children`
+    # reads (heartbeats restarted while earlier reads hang): no read this
+    # tick, one warning until a read starts again.
+    error in RuntimeError ->
+      if state.readers_full? do
+        state
+      else
+        Logger.warning(
+          "Backup heartbeat couldn't start the backup-directory id read: " <>
+            Exception.message(error) <>
+            " (earlier reads of #{Backups.dir()} are still hung?). Beating with no id."
+        )
+
+        %{state | readers_full?: true}
       end
+  catch
+    # The supervisor isn't running (it is started before the heartbeat, so
+    # only while the application stops): the beat goes out with what it has.
+    :exit, reason ->
+      Logger.warning(
+        "Backup heartbeat couldn't start the backup-directory id read: " <>
+          inspect(reason)
+      )
+
+      state
+  end
+
+  defp await_read(%{dir_id_task: nil} = state, _timeout), do: {nil, state}
+
+  defp await_read(%{dir_id_task: %{ref: ref}} = state, timeout) do
+    receive do
+      {^ref, result} ->
+        Process.demonitor(ref, [:flush])
+        read_done(state, {:result, result})
+
+      {:DOWN, ^ref, :process, _pid, _reason} ->
+        read_done(state, :none)
+    after
+      timeout -> {nil, state}
     end
   end
+
+  # The id a finished read gives: none for one that crashed (`:none`) or
+  # answered something unexpected. The read is over either way.
+  defp read_done(%{dir_id_task: task} = state, outcome) do
+    if state.dir_id_stalled? do
+      Logger.info(
+        "Backup heartbeat: the backup-directory id read of #{task.dir} finished after " <>
+          "#{div(now_ms() - task.since, 1000)} s"
+      )
+    end
+
+    state = %{state | dir_id_task: nil, dir_id_stalled?: false}
+
+    case outcome do
+      {:result, result} -> dir_id_result(state, task.ensure?, result)
+      :none -> {nil, state}
+    end
+  end
+
+  # With the marker sync off nothing routes by a cron-only directory's id, so
+  # the read creates none, and its errors are not worth a warning.
+  defp dir_id_result(state, _ensure?, {:ok, id}), do: {id, state}
+  defp dir_id_result(state, _ensure?, {:error, :enoent}), do: {nil, state}
+  defp dir_id_result(state, true, {:error, reason}), do: {nil, warn_dir_id(state, reason)}
+  defp dir_id_result(state, false, {:error, _reason}), do: {nil, state}
+
+  defp dir_id_result(state, _ensure?, other) do
+    log_dir_id_error("unexpected answer " <> inspect(other))
+    {nil, state}
+  end
+
+  defp stalled(%{dir_id_task: task} = state) do
+    waited = now_ms() - task.since
+
+    :telemetry.execute(
+      [:kiln_cms, :backups, :heartbeat, :dir_id_timeout],
+      %{count: 1, waited_ms: waited},
+      %{node: state.node}
+    )
+
+    if state.dir_id_stalled? do
+      state
+    else
+      Logger.warning(
+        "Backup heartbeat: reading the id of the backup directory #{task.dir} has taken " <>
+          "more than #{div(waited, 1000)} s (a hung mount?). Beating with no id, so the " <>
+          "last-good marker sync stops routing here; no other read starts until this one " <>
+          "finishes."
+      )
+
+      %{state | dir_id_stalled?: true}
+    end
+  end
+
+  @doc false
+  # What the read task runs (the default `dir_id_reader`).
+  @spec read_dir_id(Path.t(), boolean()) :: {:ok, String.t()} | {:error, term()}
+  def read_dir_id(dir, true), do: DirId.ensure_existing(dir)
+  def read_dir_id(dir, false), do: DirId.current(dir)
+
+  # `config :kiln_cms, KilnCMS.Backups, dir_id_reader:` (a two-argument
+  # function, tests only) and `dir_id_timeout_ms:`.
+  defp dir_id_reader, do: Keyword.get(backups_env(), :dir_id_reader, &read_dir_id/2)
+
+  defp dir_id_timeout_ms, do: Keyword.get(backups_env(), :dir_id_timeout_ms, @dir_id_timeout_ms)
+
+  defp backups_env, do: Application.get_env(:kiln_cms, KilnCMS.Backups, [])
 
   defp warn_dir_id(state, reason) do
     if MapSet.member?(state.dir_id_warned, reason) do
@@ -283,32 +497,13 @@ defmodule KilnCMS.Backups.Heartbeat do
     end
   end
 
+  # The tick's own fence; `KilnCMS.Backups.Fence` also fires while a tick is
+  # stuck.
   defp fence(state) do
     since = state.last_beat || state.started
-
-    if now_ms() - since >= @fence_after_ms do
-      case step_pids() do
-        [] ->
-          :ok
-
-        pids ->
-          Logger.error(
-            "Backup heartbeat: no successful beat for #{div(now_ms() - since, 1000)} s; " <>
-              "stopping #{length(pids)} backup step(s) on this node before another node " <>
-              "takes them over"
-          )
-
-          Enum.each(pids, &Process.exit(&1, :kill))
-      end
-    end
-
+    elapsed = now_ms() - since
+    if elapsed >= @fence_after_ms, do: Fence.kill_steps(elapsed)
     state
-  end
-
-  defp step_pids do
-    KilnCMS.Backups.StepRegistry
-    |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
-    |> Enum.uniq()
   end
 
   # The Lock's `:reclaim_stale` action: `Chain.reclaim_stale/0`, then

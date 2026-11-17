@@ -17,7 +17,7 @@ defmodule KilnCMS.Backups.HeartbeatTest do
   import ExUnit.CaptureLog
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, Heartbeat, StepWorker}
+  alias KilnCMS.Backups.{Chain, DirId, Fence, Heartbeat, StepWorker}
   alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
 
@@ -306,6 +306,298 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       Backups.with_actor(nil, fn -> Heartbeat.tick(fresh) end)
 
       assert Process.alive?(step)
+    end
+  end
+
+  # #2848: the tick does file I/O on BACKUP_DIR, which a hung mount blocks, so
+  # the fence also runs in a watchdog of its own.
+  describe "the fence watchdog" do
+    defp sleeping_step do
+      parent = self()
+
+      step =
+        spawn(fn ->
+          {:ok, _} = Registry.register(KilnCMS.Backups.StepRegistry, "chain", "archive")
+          send(parent, :registered)
+          Process.sleep(:infinity)
+        end)
+
+      assert_receive :registered
+      on_exit(fn -> Process.exit(step, :kill) end)
+      {step, Process.monitor(step)}
+    end
+
+    test "kills the registered steps when the heartbeat is stuck after a beat", %{dir: dir} do
+      File.mkdir_p!(dir)
+      start_supervised!({Fence, fence_after_ms: 300, check_ms: 20})
+
+      heartbeat =
+        start_supervised!({Heartbeat, name: :fence_test_heartbeat, node: "stuck@node"})
+
+      # Its first tick beat (the row is there), then it hangs.
+      :sys.get_state(heartbeat)
+      assert beat_of("stuck@node")
+      :ok = :sys.suspend(heartbeat)
+
+      {step, ref} = sleeping_step()
+
+      log =
+        capture_log([level: :error], fn ->
+          assert_receive {:DOWN, ^ref, :process, ^step, :killed}, 2_000
+        end)
+
+      assert log =~ "stopping 1 backup step"
+      assert Process.alive?(heartbeat)
+    end
+
+    test "kills nothing while beats keep coming" do
+      fence =
+        start_supervised!({Fence, name: :fence_test_fresh, fence_after_ms: 300, check_ms: 20})
+
+      {step, ref} = sleeping_step()
+
+      for _ <- 1..15 do
+        Fence.beat(fence, System.monotonic_time(:millisecond))
+        Process.sleep(40)
+      end
+
+      refute_received {:DOWN, ^ref, :process, ^step, _}
+      assert Process.alive?(step)
+    end
+
+    test "ignores stray messages" do
+      fence = start_supervised!({Fence, name: :fence_test_stray})
+      send(fence, {make_ref(), :late})
+      send(fence, :whatever)
+      assert %{last_beat: _} = :sys.get_state(fence)
+    end
+  end
+
+  # #2848: the backup-directory id is read in a task the tick waits on for a
+  # short while only, and never more than one at a time.
+  describe "a backup-directory id read that hangs" do
+    # Every read announces itself and blocks until released with its answer.
+    defp blocking_reader!(timeout_ms \\ 50) do
+      parent = self()
+
+      reader = fn _dir, _ensure? ->
+        send(parent, {:reader, self()})
+
+        receive do
+          {:release, result} -> result
+        end
+      end
+
+      # A failed test must not leave a blocked read to the next one.
+      on_exit(fn -> Enum.each(readers(), &Process.exit(&1, :kill)) end)
+      put_backups_env(dir_id_reader: reader, dir_id_timeout_ms: timeout_ms)
+    end
+
+    defp put_backups_env(opts) do
+      env = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.merge(env, opts))
+    end
+
+    defp release(reader, result) do
+      ref = Process.monitor(reader)
+      send(reader, {:release, result})
+      assert_receive {:DOWN, ^ref, :process, ^reader, _}
+    end
+
+    defp readers, do: Task.Supervisor.children(KilnCMS.Backups.DirIdReaders)
+
+    # A directory that holds backups and has an id, read once for real.
+    defp read_once!(dir, state) do
+      File.mkdir_p!(Path.join(dir, "db"))
+      {:ok, id} = DirId.local(dir)
+      state = Heartbeat.tick(state)
+      assert beat_of(state.node).dir_id == id
+      {id, state}
+    end
+
+    test "the tick returns within the timeout and beats with no id when none was read", %{
+      state: state
+    } do
+      blocking_reader!()
+
+      {micros, {state, log}} =
+        :timer.tc(fn -> with_log([level: :warning], fn -> Heartbeat.tick(state) end) end)
+
+      assert micros < 2_000_000
+      assert %{beat_ok?: true, dir_id_task: %{}} = state
+      assert beat_of("this@node").dir_id == nil
+      assert log =~ "has taken more than"
+
+      assert_received {:reader, reader}
+      release(reader, {:error, :enoent})
+    end
+
+    test "beats with no id while a read is held up, though an id was read before", %{
+      dir: dir,
+      state: state
+    } do
+      {id, state} = read_once!(dir, state)
+      blocking_reader!()
+
+      {state, first} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+      assert beat_of("this@node").dir_id == nil
+      assert first =~ "Beating with no id"
+
+      # Still hung: still no id, and one warning per stall.
+      {state, second} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+      assert beat_of("this@node").dir_id == nil
+      assert second == ""
+
+      # It answers: the next tick reports the id again.
+      assert_received {:reader, reader}
+      release(reader, {:ok, id})
+      state = Heartbeat.tick(state)
+      assert beat_of("this@node").dir_id == id
+      assert %{dir_id_task: nil, dir_id_stalled?: false} = state
+    end
+
+    test "single-flight: ticks while a read hangs start no other read", %{state: state} do
+      blocking_reader!()
+
+      state = state |> Heartbeat.tick() |> Heartbeat.tick() |> Heartbeat.tick()
+
+      assert_received {:reader, reader}
+      refute_received {:reader, _}
+      assert readers() == [reader]
+      assert state.dir_id_task.pid == reader
+
+      release(reader, {:error, :enoent})
+    end
+
+    test "a read that finishes late is used by the next tick; no task is left", %{
+      state: state
+    } do
+      blocking_reader!()
+      state = Heartbeat.tick(state)
+      assert_received {:reader, reader}
+
+      fresh = Ash.UUID.generate()
+      release(reader, {:ok, fresh})
+      refute Process.alive?(reader)
+
+      state = Heartbeat.tick(state)
+      assert beat_of("this@node").dir_id == fresh
+      assert %{dir_id_task: nil, dir_id_stalled?: false} = state
+      # The answer came in: no new read was needed for this beat.
+      refute_received {:reader, _}
+      assert readers() == []
+    end
+
+    test "a read that crashes reports no id", %{dir: dir, state: state} do
+      {_id, state} = read_once!(dir, state)
+      put_backups_env(dir_id_reader: fn _dir, _ensure? -> raise "boom" end)
+
+      state = Heartbeat.tick(state)
+
+      assert %{beat_ok?: true, dir_id_task: nil} = state
+      assert beat_of("this@node").dir_id == nil
+    end
+
+    test "a read that answers something unexpected reports no id and ends the read", %{
+      dir: dir,
+      state: state
+    } do
+      {_id, state} = read_once!(dir, state)
+      put_backups_env(dir_id_reader: fn _dir, _ensure? -> :unexpected end)
+
+      {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+
+      assert %{beat_ok?: true, dir_id_task: nil} = state
+      assert beat_of("this@node").dir_id == nil
+      assert log =~ "unexpected answer :unexpected"
+      assert readers() == []
+    end
+
+    test "an error in the id read is logged and the beat still goes out", %{state: state} do
+      # Waiting on the read raises (an invalid `after` timeout).
+      put_backups_env(dir_id_reader: fn _dir, _ensure? -> {:error, :enoent} end)
+      put_backups_env(dir_id_timeout_ms: :not_a_timeout)
+      on_exit(fn -> Enum.each(readers(), &Process.exit(&1, :kill)) end)
+
+      {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+
+      assert %{beat_ok?: true} = state
+      assert beat_of("this@node").dir_id == nil
+      assert log =~ "the backup-directory id read failed, beating with no id"
+    end
+
+    test "with the readers full, a tick starts none and beats with no id", %{state: state} do
+      blocking_reader!()
+
+      # Four heartbeats (restarted ones, say) each hold a hung read: the
+      # supervisor's limit.
+      [first | others] =
+        for n <- 1..4 do
+          held = Heartbeat.tick(Heartbeat.new_state(node: "held-#{n}@node"))
+          assert_received {:reader, reader}
+          assert held.dir_id_task.pid == reader
+          reader
+        end
+
+      {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+
+      refute_received {:reader, _}
+      assert %{beat_ok?: true, dir_id_task: nil, readers_full?: true} = state
+      assert beat_of("this@node").dir_id == nil
+      assert log =~ "maximum number of tasks"
+      assert length(readers()) == 4
+
+      # One warning while full.
+      {state, again} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+      assert again == ""
+
+      # Room again: the next tick reads.
+      release(first, {:error, :enoent})
+      state = Heartbeat.tick(state)
+      assert_received {:reader, third}
+      assert %{readers_full?: false, dir_id_task: %{pid: ^third}} = state
+
+      Enum.each([third | others], &release(&1, {:error, :enoent}))
+      assert readers() == []
+    end
+
+    test "the read's late answer reaches the running heartbeat; stray messages are ignored", %{
+      state: state
+    } do
+      blocking_reader!()
+      state = Heartbeat.tick(state)
+      assert_received {:reader, reader}
+      %{ref: ref} = state.dir_id_task
+
+      fresh = Ash.UUID.generate()
+      release(reader, {:ok, fresh})
+      # What the GenServer would get between ticks: the reply, then nothing
+      # (its monitor is flushed).
+      assert_received {^ref, {:ok, ^fresh}}
+
+      assert {:noreply, %{dir_id_task: nil, dir_id_stalled?: false} = after_reply} =
+               Heartbeat.handle_info({ref, {:ok, fresh}}, state)
+
+      # A duplicate reply, a stale :DOWN and anything else change nothing.
+      for message <- [
+            {ref, {:ok, Ash.UUID.generate()}},
+            {:DOWN, ref, :process, reader, :normal},
+            {make_ref(), :late},
+            :unexpected
+          ] do
+        assert Heartbeat.handle_info(message, after_reply) == {:noreply, after_reply}
+      end
+
+      # A :DOWN for the read in flight ends it with no new id.
+      blocking_reader!()
+      state = Heartbeat.tick(after_reply)
+      assert_received {:reader, second}
+      %{ref: second_ref} = state.dir_id_task
+
+      assert {:noreply, %{dir_id_task: nil}} =
+               Heartbeat.handle_info({:DOWN, second_ref, :process, second, :killed}, state)
+
+      release(second, {:error, :enoent})
     end
   end
 
