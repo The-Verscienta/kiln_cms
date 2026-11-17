@@ -627,16 +627,37 @@ of that happens on the request:
    (a system-only action), deletes the private blob, and only then enqueues
    derivation** (`AVWorker` — probe, poster), which fetches from public storage
    and must not run before promotion.
-4. Failure outcomes are the table's, one step later: a transient one
-   (`insufficient_space`, `timeout`) is retried by Oban; a standing one (no
-   ffmpeg, un-remuxable container) is **refused** under
-   `REQUIRE_AV_METADATA_STRIP=true` — row purged, private blob deleted, error
-   logged naming the item — and otherwise promoted as it arrived with the
-   same `:warning`.
+4. Failure outcomes are the table's, one step later:
+   - **The private blob can't be read.** If the store says it is definitely
+     missing (`:enoent`, `:not_found`, an HTTP `404`), there is nothing to
+     strip: the job completes, logs "private blob unreadable", and leaves the
+     row to the reaper. Any other read error (an object-store timeout or
+     `5xx`, a full temp disk, an S3 `403`) fails the job, and Oban retries it
+     up to 5 attempts with backoff (#2723). A storage hiccup therefore costs
+     a few minutes, not the upload.
+   - **The strip fails for a passing reason** (`insufficient_space`,
+     `timeout`): retried the same way.
+   - **The strip fails for a standing reason** (no ffmpeg, a container that
+     can't be remuxed): under `REQUIRE_AV_METADATA_STRIP=true` the upload is
+     **refused**: an error naming the item is logged, the row is purged, and
+     only then is the private blob deleted. If the purge fails, the blob is
+     kept with its row and the job fails, so Oban redoes the refusal. Without
+     `REQUIRE_AV_METADATA_STRIP` the upload is promoted as it arrived, with
+     the same `:warning`.
 5. `KilnCMS.Media.QuarantineReaper` (hourly, `KILN_MEDIA_QUARANTINE_REAPER_CRON`)
    removes any item still quarantined after `KILN_MEDIA_QUARANTINE_MAX_AGE_HOURS`
-   (24): a strip job that was never queued or never succeeded must not leave a
-   private blob and a permanently held row.
+   (24): a strip job that was never queued or never succeeded, retries
+   included, must not leave a private blob and a permanently held row. It
+   purges the row first and deletes the private blob only when the purge
+   succeeds (#2835). A purge that fails or is refused (the strip released
+   the item after the reaper listed it) leaves the blob alone, and the item
+   is not counted as reaped.
+
+If a private blob delete fails *after* a successful purge, in either path,
+the blob has no row and nothing sweeps it. The error log names its key:
+"Reaped media <id> left its private blob <key> behind: …" from the reaper,
+"Purged media <id> left its private blob <key> behind: …" from a refusal.
+Delete that key from the private store by hand.
 
 Both purges, the worker's refusal in step 4 and the reaper's, go through
 `CMS.purge_quarantined_media_item` (`:purge_quarantined`), not the trash's

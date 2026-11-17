@@ -267,6 +267,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A database dump stuck behind a table lock gives up after `BACKUP_LOCK_WAIT_SECONDS` (default 600) and says so; a failed cron `pg_dump` records its own error in the manifest.**
   ([long form](docs/changelog/unreleased.md#backup-pg-dump-lock-wait))
 
+- **A deferred A/V strip retries a passing read failure (a timeout, a `5xx`) instead of leaving the upload for the quarantine reaper, which now deletes a file only after purging its row. The 1.10.0 known issue #2835 could not occur; nothing to repair.**
+  ([long form](docs/changelog/unreleased.md#av-strip-transient-read-retries))
+
 ### Security
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
