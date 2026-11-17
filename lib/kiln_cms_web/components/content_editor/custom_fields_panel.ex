@@ -299,6 +299,15 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
           name={"#{@form.name}[custom_fields][#{@definition.name}]"}
           value={input_value(@form, @definition)}
           errors={custom_field_errors(@form, @definition.name)}
+          ctx={
+            %{
+              media: @media,
+              actor: @actor,
+              tenant: @tenant,
+              locked: Localization.locked?(@localization, {:custom, @definition.name}),
+              source: %{id: @record && @record.id, type: to_string(@kind)}
+            }
+          }
         />
         <.held_list
           :if={@held?}

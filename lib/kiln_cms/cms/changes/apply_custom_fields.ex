@@ -243,17 +243,49 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # the caller had re-sent exactly those values. Every other key is absent from
   # the "payload", so it merges through untouched — the editable pass never
   # re-resolves a `:reference`, and never re-checks a value nobody sent.
+  #
+  # A `:group` or `:flexible` field holding a `:media` sub-field anywhere in
+  # its tree (#2282) is re-resolved whole, with `refs: :keep`: the media
+  # snapshots inside it are re-taken, every `:reference` sub-value in it is
+  # returned as stored (this pass runs as the `:media` system actor, which has
+  # no content READ — resolving a reference would fail the record, and a
+  # reference is never this task's to refresh), and constraints are not
+  # re-judged (nothing but a snapshot can move).
   defp resnapshot_media(changeset, context) do
     existing = merge_base(changeset)
 
     supplied =
-      for %{field_type: :media, name: name} <- definitions_for(changeset),
+      for %{name: name} = definition <- definitions_for(changeset),
+          media_bearing?(definition),
           Map.has_key?(existing, name),
           into: %{},
           do: {name, existing[name]}
 
-    apply_definitions(changeset, existing, :strict, context, supplied)
+    apply_definitions(changeset, existing, :strict, context, supplied, :keep)
   end
+
+  @doc """
+  Whether a top-level definition holds `:media` values: a `:media` field, or a
+  `:group` / `:flexible` field with a `:media` sub-field anywhere in its tree.
+  `KilnCMS.Media.Resnapshot` asks it to find the fields it visits.
+  """
+  @spec media_bearing?(map()) :: boolean()
+  def media_bearing?(%{field_type: :media}), do: true
+
+  def media_bearing?(%{field_type: :group} = definition),
+    do: definition |> loaded_group_fields() |> Enum.any?(&media_bearing?/1)
+
+  def media_bearing?(%{field_type: :flexible} = definition) do
+    definition
+    |> FieldDefinition.item_types()
+    |> Enum.flat_map(&loaded_group_fields/1)
+    |> Enum.any?(&media_bearing?/1)
+  end
+
+  def media_bearing?(_definition), do: false
+
+  defp loaded_group_fields(%{group_fields: fields}) when is_list(fields), do: fields
+  defp loaded_group_fields(_definition), do: []
 
   # `:convert_custom_field` (`mix kiln.fields.convert`): the rows parsed out of
   # the source field ride in the changeset context as `convert_custom_field:
@@ -399,7 +431,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp merge_base(%{action_type: :create}), do: %{}
   defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
-  defp apply_definitions(changeset, existing, mode, context, supplied \\ nil) do
+  # `refs` is `:resolve` for every write but the media re-snapshot (`:keep`,
+  # see `resnapshot_media/2`).
+  defp apply_definitions(changeset, existing, mode, context, supplied \\ nil, refs \\ :resolve) do
     {all_defs, held} = scope_for(changeset)
     # A held list (#2680) is held beside the unknown types, but stays declared.
     {stale, defs} = Enum.split_with(all_defs, &FieldDefinition.held_list?/1)
@@ -425,7 +459,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # Value constraints (#2276) are skipped for machinery that carries values
     # the record already holds (a restore, a copy): `custom_fields_constraints:
     # :skip` in the changeset context.
-    check? = changeset.context[:custom_fields_constraints] != :skip
+    check? = changeset.context[:custom_fields_constraints] != :skip and refs == :resolve
     # `required_when` (#2277) binds an ordinary write only: a restore, a copy
     # and the media/convert passes (which hand their own `supplied`) skip it.
     required_when? = mode == :strict and is_nil(supplied)
@@ -471,7 +505,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       Enum.reduce(
         editable,
         {%{}, []},
-        &accumulate(&1, supplied, existing, {read_opts, mode, check?}, &2)
+        &accumulate(&1, supplied, existing, {read_opts, mode, check?}, &2, refs)
       )
 
     {cleaned, errors} = apply_computed(computed, changeset, cleaned, errors)
@@ -862,15 +896,23 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # Three-way per key: a field the caller *supplied* is coerced/cleared; a field
   # they omitted keeps its `existing` stored value (the merge); a field with
   # neither falls to its default (fresh field / create).
-  defp accumulate(def, supplied, existing, {read_opts, mode, check?}, {cleaned, errors}) do
+  defp accumulate(
+         def,
+         supplied,
+         existing,
+         {read_opts, mode, check?},
+         {cleaned, errors},
+         refs \\ :resolve
+       ) do
     ctx = {read_opts, mode, check?}
+    env = %{read_opts: read_opts, refs: refs}
 
     cond do
       Map.has_key?(supplied, def.name) ->
         def
         |> resolve_field(
           Map.get(supplied, def.name),
-          read_opts,
+          env,
           {mode, grandfather(check?, Map.get(existing, def.name))}
         )
         |> constrain(def, Map.get(existing, def.name), check?)
@@ -887,7 +929,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
       true ->
         def
-        |> resolve_field(nil, read_opts, {mode, grandfather(check?, nil)})
+        |> resolve_field(nil, env, {mode, grandfather(check?, nil)})
         |> constrain(def, nil, check?)
         |> select(def, nil, ctx)
         |> with_links(def, def.default, nil, ctx)
@@ -954,9 +996,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # the writer, restricted to the added ids plus the selection's own filter —
   # the same evaluator and read action the picker uses, so the two agree. A
   # system actor and `authorize?: false` skip the filter (the evaluator says
-  # so) but the target was already resolved above. References cannot be group
-  # sub-fields or link fields (`Validations.GroupField`, `LinkField`), so the
-  # top-level pass is the only one.
+  # so) but the target was already resolved above. A reference sub-field of an
+  # item or group row (#2282) carries no `selection` (`ClearReferenceOptions`
+  # drops it off a top-level field), so this pass is the top level's only.
   defp select({:ok, value} = ok, %{field_type: :reference} = def, stored, {read_opts, _, true}) do
     selection = ReferenceSelection.normalize(Map.get(def, :selection))
     stored_ids = snapshot_ids(stored)
@@ -1136,13 +1178,17 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # --- groups ------------------------------------------------------------------
 
-  defp resolve_field(%{field_type: :group} = def, raw, _read_opts, {mode, held}),
-    do: resolve_group(def, raw, mode, held)
+  # `env` carries what a nested `:media` / `:reference` sub-field resolves
+  # with: the write's `read_opts` (the caller and the writing tenant, #1659 —
+  # never a system actor, never empty) and `refs` (`:keep` on the media
+  # re-snapshot). It is threaded to every sub-field, however deep.
+  defp resolve_field(%{field_type: :group} = def, raw, env, {mode, held}),
+    do: resolve_group(def, raw, mode, held, env)
 
-  defp resolve_field(%{field_type: :flexible} = def, raw, _read_opts, {mode, held}),
-    do: resolve_flexible(def, raw, def.name, mode, held)
+  defp resolve_field(%{field_type: :flexible} = def, raw, env, {mode, held}),
+    do: resolve_flexible(def, raw, def.name, mode, held, env)
 
-  defp resolve_field(def, raw, read_opts, _mode), do: resolve(def, raw, read_opts)
+  defp resolve_field(def, raw, env, _mode), do: resolve(def, raw, env.read_opts)
 
   # Whether a coerced group row still has to meet its sub-fields' constraints:
   # not when constraints are off, nor when the field already stores that row.
@@ -1152,7 +1198,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # A group's value from what the caller sent: `:skip` when there are no rows
   # and none are required, else one coerced object (or a list of them), or
   # every problem found, each under its path.
-  defp resolve_group(def, raw, mode, held) do
+  defp resolve_group(def, raw, mode, held, env) do
     rows =
       raw
       |> group_rows()
@@ -1160,12 +1206,19 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       |> Enum.reject(fn {row, _index} -> blank_row?(row) end)
 
     cond do
-      rows == [] and def.required -> {:error, "is required"}
-      rows == [] -> :skip
-      def.multiple -> coerce_rows(rows, def, mode, held)
+      rows == [] and def.required ->
+        {:error, "is required"}
+
+      rows == [] ->
+        :skip
+
+      def.multiple ->
+        coerce_rows(rows, def, mode, held, env)
+
       # A single group handed a list (stored while the field was `multiple`)
       # keeps its first row, as a single media field keeps its first image.
-      true -> rows |> hd() |> elem(0) |> coerce_row(def, def.name, mode, held) |> one_row()
+      true ->
+        rows |> hd() |> elem(0) |> coerce_row(def, def.name, mode, held, env) |> one_row()
     end
   end
 
@@ -1178,10 +1231,10 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   defp blank_row?(row), do: blank?(row)
 
-  defp coerce_rows(rows, def, mode, held) do
+  defp coerce_rows(rows, def, mode, held, env) do
     {kept, problems} =
       Enum.reduce(rows, {[], []}, fn {row, index}, {kept, problems} ->
-        case coerce_row(row, def, "#{def.name}[#{index}]", mode, held) do
+        case coerce_row(row, def, "#{def.name}[#{index}]", mode, held, env) do
           {:ok, cleaned} -> {[cleaned | kept], problems}
           {:errors, found} -> {kept, problems ++ found}
         end
@@ -1198,7 +1251,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # One object: each sub-field coerced from its key (or its default when the
   # key is absent), and every key no sub-field declares refused.
-  defp coerce_row(%{} = row, def, path, mode, held) when not is_struct(row) do
+  defp coerce_row(%{} = row, def, path, mode, held, env) when not is_struct(row) do
     given = stringify_keys(row)
 
     subs =
@@ -1208,7 +1261,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
     {cleaned, problems} =
       Enum.reduce(subs, {%{}, []}, fn sub, {cleaned, problems} ->
-        case sub_value(sub, Map.get(given, sub.name)) do
+        case sub_value(sub, Map.get(given, sub.name), env) do
           :skip -> {cleaned, problems}
           {:ok, value} -> {Map.put(cleaned, sub.name, value), problems}
           {:error, message} -> {cleaned, [{"#{path}.#{sub.name}", sub.label, message} | problems]}
@@ -1229,16 +1282,38 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     end
   end
 
-  defp coerce_row(_row, def, path, _mode, _held),
+  defp coerce_row(_row, def, path, _mode, _held, _env),
     do: {:errors, [{path, def.label, "must be an object"}]}
 
-  # Sub-fields are scalar (`FieldDefinition.link_field_types/0`), so a nested
-  # object or list is refused before it reaches a coercion that would
-  # stringify it.
-  defp sub_value(_sub, value) when is_map(value) or is_list(value),
+  # A sub-field of a group row or an item holds one value. A `:media` or
+  # `:reference` one (#2282, "group parity") holds one snapshot, resolved
+  # exactly as the top-level field of that type is: from the id the value
+  # names (a bare id, or a snapshot a client round-trips — never trusted, it is
+  # rebuilt from the record), read as the CALLER under the writing tenant
+  # (`env.read_opts`, #1659), so a target the writer cannot read is refused
+  # like a missing one. Never `[]`, never a system actor.
+  #
+  # `refs: :keep` (the media re-snapshot) returns a `:reference` sub-value as
+  # stored: that pass runs as the media actor, which cannot read content.
+  #
+  # Every other sub-field is scalar (`FieldDefinition.link_field_types/0`), so
+  # a nested object or list is refused before it reaches a coercion that would
+  # stringify it; a list is refused for a media or reference one too — a
+  # sub-field is never a gallery (`ClearMultiple`).
+  defp sub_value(%{field_type: type}, value, _env)
+       when type in [:media, :reference] and is_list(value),
+       do: {:error, FieldValue.not_single()}
+
+  defp sub_value(%{field_type: :reference} = sub, value, %{refs: :keep}),
+    do: if(blank_for?(sub, value), do: :skip, else: {:ok, value})
+
+  defp sub_value(%{field_type: type} = sub, value, env) when type in [:media, :reference],
+    do: resolve(Map.put(sub, :multiple, false), value, env.read_opts)
+
+  defp sub_value(_sub, value, _env) when is_map(value) or is_list(value),
     do: {:error, FieldValue.not_single()}
 
-  defp sub_value(sub, value), do: resolve(sub, value, [])
+  defp sub_value(sub, value, _env), do: resolve(sub, value, [])
 
   # A blank key no sub-field declares asks for nothing, as at the top level.
   defp undefined_sub_fields(_given, _subs, _def, _path, mode) when mode in [:drop, :import],
@@ -1263,7 +1338,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # problem found, each under its path (`sections[2].headline`). `path` is the
   # field's own path — its name at the top level, an item's path plus the
   # sub-field's name when nested. `held` is `:skip` or `{:rows, stored_items}`.
-  defp resolve_flexible(def, raw, path, mode, held) do
+  defp resolve_flexible(def, raw, path, mode, held, env) do
     case flexible_input(raw) do
       {:ok, items} ->
         items = Enum.reject(Enum.with_index(items), fn {item, _index} -> blank_item?(item) end)
@@ -1271,7 +1346,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         cond do
           items == [] and def.required -> {:error, "is required"}
           items == [] -> :skip
-          true -> coerce_items(items, def, path, mode, held)
+          true -> coerce_items(items, def, path, mode, held, env)
         end
 
       :error ->
@@ -1297,7 +1372,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp blank_item_value?(value) when is_list(value), do: Enum.all?(value, &blank_item?/1)
   defp blank_item_value?(value), do: blank_item?(value)
 
-  defp coerce_items(items, def, path, mode, held) do
+  defp coerce_items(items, def, path, mode, held, env) do
     types = FieldDefinition.item_types(def)
     stored = flexible_stored(held)
 
@@ -1308,7 +1383,14 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
     {kept, problems, _used} =
       Enum.reduce(items, {[], [], MapSet.new()}, fn {item, index}, {kept, problems, used} ->
-        ctx = %{def: def, types: types, mode: mode, stored: stored_by_id, unchanged: unchanged}
+        ctx = %{
+          def: def,
+          types: types,
+          mode: mode,
+          stored: stored_by_id,
+          unchanged: unchanged,
+          env: env
+        }
 
         case coerce_item(item, "#{path}[#{index}]", ctx, used) do
           {{:ok, cleaned}, used} -> {[cleaned | kept], problems, used}
@@ -1496,11 +1578,11 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         do: :skip,
         else: {:rows, List.wrap(Map.get(stored, sub.name))}
 
-    resolve_flexible(sub, Map.get(given, sub.name), sub_path, ctx.mode, held)
+    resolve_flexible(sub, Map.get(given, sub.name), sub_path, ctx.mode, held, ctx.env)
   end
 
-  defp item_value(sub, given, _stored, _sub_path, _ctx),
-    do: sub_value(sub, Map.get(given, sub.name))
+  defp item_value(sub, given, _stored, _sub_path, ctx),
+    do: sub_value(sub, Map.get(given, sub.name), ctx.env)
 
   # A blank key no sub-field declares asks for nothing, as at the top level.
   defp undefined_item_keys(_given, _subs, _path, _type, mode) when mode in [:drop, :import],

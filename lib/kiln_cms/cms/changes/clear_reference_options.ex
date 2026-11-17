@@ -10,6 +10,13 @@ defmodule KilnCMS.CMS.Changes.ClearReferenceOptions do
   submits neither, and a stored cap or delete rule would otherwise linger on a
   field that has no targets to apply it to. A link field (R3) is never a
   reference, so it is cleared too.
+
+  A reference that is not top-level (#2282: a sub-field of an item type or a
+  group) is cleared the same way, though it is a reference: its connections
+  live inside a row, not in a record-level field, so a cap (`max_sources`), a
+  delete rule (`on_target_delete`), a schema.org property and a `selection`
+  would each claim something nothing honors. Item references behave as
+  `on_target_delete: :keep` and are uncapped.
   """
   use Ash.Resource.Change
 
@@ -17,7 +24,8 @@ defmodule KilnCMS.CMS.Changes.ClearReferenceOptions do
 
   @impl true
   def change(changeset, _opts, _context) do
-    if Ash.Changeset.get_attribute(changeset, :field_type) == :reference do
+    if Ash.Changeset.get_attribute(changeset, :field_type) == :reference and
+         KilnCMS.CMS.FieldDefinition.top_level?(changeset) do
       normalize_selection(changeset)
     else
       changeset

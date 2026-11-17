@@ -1,15 +1,19 @@
 # Flexible content — plan for mixed typed items inside a custom field
 
 **Status:** PR 1 of 7 (section 9: model and write path) merged (#2969);
-PR 2 (admin Item types panel, editor cards, field-sync `item_types`) built on
-branch `feat/2282-flexible-content-pr2-10fc7a`, not yet merged; PRs 3 to 7 are
-plan only. Design record for
+PR 2 (admin Item types panel, editor cards, field-sync `item_types`) merged
+(#2980); PR 3 is on its own branch (below); PRs 4 to 7 are plan only. Design record for
 [#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282), written from a
 read of the model as it stood on 2026-11-10 (after custom-field waves 1–5). Read
 the resources for current behavior and this for *why*. Nothing here is a
 decision until the PR that carries it merges; the open questions are in §10.
 The decisions PR 1 makes are argued in
 [ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+
+**PR 3 (media and reference inside items)** is built on branch
+`feat/2282-flexible-content-pr3-media-reference`, not yet merged; where it
+differs from this plan is listed under "Where PR 3 differs" below the PR 2
+list. PRs 4 to 7 are plan only.
 
 **Where PR 2 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -31,6 +35,31 @@ unchanged below):
   holds items, even with data loss allowed.
 - Purging an item type's items runs in the destroy's own transaction, not
   after the commit.
+
+**Where PR 3 differs from this plan** (the code is right; this text is
+unchanged below):
+
+- **Groups are not lifted.** §10 decision 1 lifts `:media`/`:reference` for
+  groups and items through one list; PR 3 lifts `item_field_types/0` only. The
+  write path (`sub_value`, `coerce_row`) already handles a group row, but
+  `GroupField` keeps a plain group on `link_field_types/0` because the editor
+  has no row pickers, and a group value nobody can enter is a dead end. A
+  follow-up adds the row pickers and lifts the group list.
+- **Single-valued only.** No gallery and no list of references inside an item:
+  `ClearMultiple` clears `multiple` on a media or reference sub-field (this
+  was not already so; the plan assumed it).
+- **The reference-edge path is the definition path** (`sections.hero.cta`), in
+  the existing `ContentLink.field` string: no column, no migration.
+- **Item references are `:keep`, uncapped, with no inverse or link fields**;
+  the GraphQL/JSON:API reference edits stay top-level.
+- **Not changed here: `SchemaExport`'s GraphQL fragment for a repeating
+  group's rows.** `SchemaExport.GraphQL.group_row/0` selects scalar values
+  only; a row's media or reference is not fetched by the generated fragment.
+  Because groups are not lifted and flexible fields are exported as generic
+  JSON until PR 5, no value can reach it yet; it changes with the goldens in
+  PR 5, once.
+- `FieldDisplay`, the fired-artifact refresh, the re-fire graph, `Resnapshot`
+  and the maintenance task cover items, as listed in §6.
 
 **Where PR 1 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -113,7 +142,8 @@ But a group is the wrong shape in four ways, and each is a deliberate work item:
 2. **Scalar sub-fields only** (`@link_field_types`: string, text, integer,
    float, boolean, date, datetime, url, select). No media, no reference, no
    nesting (`validations/group_field.ex`). A flexible field without an image
-   picker is useless, so this limit must be lifted for items (§6, PR 3).
+   picker is useless, so this limit is lifted for items (§6, PR 3, done; groups
+   follow).
 3. **Rows carry no identity**, so rows are addressed by position, merged
    wholesale, diffed as one opaque value. Items get an `_id` (§3).
 4. **No settings/content split.** → `item_setting` flag on a sub-field (§2).

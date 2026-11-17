@@ -2244,8 +2244,12 @@ fills it in. The design is in
    type**. Renaming an item type later keeps the items editors already added:
    they move to the new name.
 5. Each item type shows its own **Fields in each item** panel. Click **Add a
-   field**, pick the kind of value (the plain types, or **Flexible content**
-   for a list of its own, up to 3 levels deep), and save. Tick **Required on
+   field**, pick the kind of value (the plain types, **Media** for one picture
+   from the media library, **Reference** for a link to one record, or
+   **Flexible content** for a list of its own, up to 3 levels deep), and save.
+   A reference asks which types of record it **Links to** and nothing else: no
+   limit on how many items may point at one record, no reverse list, and
+   deleting the target leaves the link as it was. Tick **Required on
    every item** to make a value mandatory.
 6. Tick **Setting** on a field that configures the item (a background, a
    width) rather than being content. A setting is stored under the item's
@@ -2321,8 +2325,15 @@ What the definition rows are:
   width): its value is stored under the item's `_settings`, not beside the
   content. Sub-fields take the plain types, and also `:flexible`, so an item
   can hold its own list, **3 levels deep at most**
-  (`KilnCMS.CMS.FieldDefinition.max_flexible_depth/0`). Media and reference
-  sub-fields are not allowed yet.
+  (`KilnCMS.CMS.FieldDefinition.max_flexible_depth/0`). They may also be a
+  single `:media` or `:reference` (never a list: `multiple` is cleared). A
+  reference needs `target_type` or `target_types`; its `max_sources`,
+  `on_target_delete`, inverse, `selection` and link fields are cleared (an item
+  reference behaves as `on_target_delete: :keep`). The value is the same
+  snapshot a top-level field stores, rebuilt from the record on every write and
+  masked when the reader cannot read it. Its reference edge is keyed by the
+  definition path, `sections.hero.cta`. A plain `:group` still takes only the
+  plain types.
 
 1. As an admin, create the field, an item type, and its sub-fields:
 

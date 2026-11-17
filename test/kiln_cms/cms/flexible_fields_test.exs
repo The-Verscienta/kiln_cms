@@ -367,15 +367,28 @@ defmodule KilnCMS.CMS.FlexibleFieldsTest do
       end
     end
 
-    test "refuse a group, a media snapshot, a reference and a computed field", %{
-      admin: admin,
-      hero: hero
-    } do
-      for type <- [:group, :media, :reference, :computed] do
+    test "refuse a group and a computed field", %{admin: admin, hero: hero} do
+      for type <- [:group, :computed] do
         assert error_message!(fn ->
                  sub!(admin, hero, %{name: unique("f"), field_type: type})
                end) =~ "can't be used inside an item type"
       end
+    end
+
+    test "take a media snapshot and a reference (#2282, PR 3), one value each", %{
+      admin: admin,
+      hero: hero
+    } do
+      assert %{field_type: :media, multiple: false} =
+               sub!(admin, hero, %{name: unique("m"), field_type: :media, multiple: true})
+
+      assert %{field_type: :reference, multiple: false} =
+               sub!(admin, hero, %{
+                 name: unique("r"),
+                 field_type: :reference,
+                 target_type: "page",
+                 multiple: true
+               })
     end
 
     test "are not allowed to be a setting when nested flexible, or outside an item type", ctx do

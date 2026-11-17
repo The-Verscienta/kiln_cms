@@ -296,4 +296,84 @@ defmodule KilnCMSWeb.FlexibleItemsTest do
       refute FlexibleItems.at_minimum?([%{}], %{min_items: nil})
     end
   end
+
+  describe "media and reference sub-fields (#2282)" do
+    defp media_def do
+      flexible("sections", [
+        type("hero", [
+          sub("headline"),
+          sub("image", %{field_type: :media, multiple: false}),
+          sub("link", %{field_type: :reference, multiple: false, target_type: "page"}),
+          sub("either", %{
+            field_type: :reference,
+            multiple: false,
+            target_types: ["page", "post"],
+            item_setting: true
+          }),
+          sub("gallery", %{field_type: :media, multiple: true})
+        ])
+      ])
+    end
+
+    @items [%{"_id" => "a", "_type" => "hero", "headline" => "x"}]
+
+    test "put_value/6 sets and clears one sub-field of the item it names" do
+      assert {:ok, [%{"image" => "m1", "headline" => "x"}]} =
+               FlexibleItems.put_value(@items, media_def(), "a", "image", :media, "m1")
+
+      assert {:ok, [%{"image" => ""}]} =
+               FlexibleItems.put_value(@items, media_def(), "a", "image", :media, "")
+    end
+
+    test "put_value/6 refuses an unknown item, sub-field, other type or a list sub-field" do
+      for {id, sub, type} <- [
+            {"gone", "image", :media},
+            {"a", "nope", :media},
+            {"a", "headline", :media},
+            {"a", "image", :reference},
+            {"a", "link", :media},
+            {"a", "gallery", :media}
+          ] do
+        assert :error = FlexibleItems.put_value(@items, media_def(), id, sub, type, "m1")
+      end
+    end
+
+    test "a reference that allows several types stores the picker's token as a map" do
+      assert {:ok, [%{"_settings" => %{"either" => %{"type" => "post", "id" => "p1"}}}]} =
+               FlexibleItems.put_value(@items, media_def(), "a", "either", :reference, "post:p1")
+
+      assert {:ok, [%{"link" => "p1"}]} =
+               FlexibleItems.put_value(@items, media_def(), "a", "link", :reference, "p1")
+    end
+
+    test "normalize/2 turns a posted token into the map the write needs" do
+      params = %{
+        "custom_fields" => %{
+          "sections" => %{
+            "0" => %{
+              "_id" => "a",
+              "_type" => "hero",
+              "image" => "m1",
+              "_settings" => %{"either" => "page:p1"}
+            }
+          }
+        }
+      }
+
+      assert %{"custom_fields" => %{"sections" => [item]}} =
+               FlexibleItems.normalize(params, [media_def()])
+
+      assert item["image"] == "m1"
+      assert item["_settings"]["either"] == %{"type" => "page", "id" => "p1"}
+    end
+
+    test "an id is never an item's summary" do
+      type = hd(FlexibleItems.type(media_def(), %{"_type" => "hero"}) |> List.wrap())
+
+      assert FlexibleItems.summary(
+               %{"image" => "3f1c0b5a-0000-4000-8000-000000000000"},
+               type
+             ) == nil
+    end
+  end
 end

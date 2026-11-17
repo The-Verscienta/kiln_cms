@@ -97,9 +97,7 @@ load. `Validations.FlexibleField` and `Validations.GroupField` enforce it when
 an item type or a nested flexible sub-field is created; tests run a
 three-level fixture and the cap and cap + 1.
 
-Media and reference sub-fields inside items are not yet allowed
-(`item_field_types/0` is the plain types and `:flexible`); that is PR 3 of the
-plan.
+Media and reference sub-fields inside items came with PR 3 (below).
 
 ### The item-count cap
 
@@ -282,9 +280,83 @@ The admin form disables the type select on a flexible field.
 
 ### What is not done yet
 
-No per-item-type grants, no search of items,
-no per-item diff, no typed GraphQL or client export (PR 3 to PR 7 of the
-plan). The values are served as generic JSON objects until then.
+No per-item-type grants, no search of items, no per-item diff, no typed GraphQL
+or client export (PR 4 to PR 7 of the plan). The values are served as generic
+JSON objects until then.
+
+## Media and reference inside items (PR 3, #2282)
+
+An item type's sub-field may now be a `:media` or a `:reference`
+(`FieldDefinition.item_field_types/0`). What it decides, and what it does not:
+
+- **One value, never a list.** A media or reference sub-field holds a single
+  snapshot. `Changes.ClearMultiple` clears `multiple` (and `min_items` /
+  `max_items`) on a media or reference that is a sub-field, so there is no
+  gallery and no list of references inside an item. A multiple one stays a
+  record-level field.
+- **Written as the caller, rebuilt from the database.** `ApplyCustomFields`
+  resolves an item's sub-value exactly as it does a top-level one: as the
+  actor and under the write's tenant, never as a system actor, with the same
+  by-id rule (`"select/…"`, a bare id or a snapshot map all resolve through the
+  id). A snapshot a client sends is never trusted: it is rebuilt from the
+  record, so a forged title, slug or url is replaced. An id the caller cannot
+  read, from another site, trashed or unknown is refused at the item's path
+  (`sections[0].rows[1].cta`).
+- **Edges are keyed by definition path.** `ContentLink.field` for an item
+  reference is the dotted path of definitions, not of values or positions:
+  `sections.hero.cta`, a nested one `sections.columns.cells.cell.link`, a group
+  row `visits.doctor`. It needs no migration, no column and no identity change
+  (the key was already a string). Two items pointing at one target make one
+  edge; reordering or removing items follows the values; renaming a field, item
+  type or sub-field rewrites the edges by prefix, and destroying one deletes
+  them (the prefix match escapes `_` and `%`, so `hero_a` never matches
+  `heroxa`). A working copy makes edges only when it is published.
+- **A reference inside an item is `on_target_delete: :keep` and uncapped.** No
+  `max_sources`, no inverse (reverse list), no `selection`, no link fields (the
+  "details on each connection" of a top-level reference) and no schema.org
+  property: `ClearReferenceOptions` and `ClearInverse` clear them on every
+  non-top-level reference, and `FieldDefinition.link_fields/1` answers `[]` for
+  one. Deleting a target therefore leaves the snapshot in place, as `:keep`
+  does at the top level, and a later write naming it is refused. The
+  GraphQL/JSON:API add/remove edits (`ReferenceEdits`) stay top-level only.
+- **Masking recurses.** A snapshot of a record the reader cannot read is
+  masked (the key is `nil`) wherever it sits: `ReferenceSnapshots` walks lists
+  and maps to the depth cap plus one, skipping an item (a map with `_id` or
+  `_type`), so a snapshot is recognised by shape. The same walk runs in the
+  read-side preparation, in `Firing.CustomFields` (the fired `:json` artifact,
+  with one batched read per type) and for a point-in-time read. A fired
+  artifact refreshes a media item's variants and a renamed target's title
+  inside items, and the re-fire graph (`Firing.References`) sees item media and
+  references, so renaming a target or re-processing an image re-fires the
+  documents that show it only through an item.
+- **No private sub-fields.** `private` is top-level only
+  (`Validations.PrivateField`), so a hidden value never sits inside an item.
+- **The editor addresses an item, not a field.** The pickers inside an item
+  card send the item's `_id` address (`sections/<id>/cells/<id>`) and the
+  sub-field name, nothing else: not the type, not a value, not a field name to
+  trust. The server resolves both against the live form parameters at event
+  time (`FlexibleItems.put_value/6`), checks the top-level field is editable
+  (write grant, localization lock), and does nothing when the address no longer
+  names an item or the sub-field is not a single media or reference of its
+  item type. A reorder between opening a drawer and picking cannot misdirect
+  the pick. A reference that allows several types posts a `type:id` token that
+  is turned into the `%{"id", "type"}` map before it reaches the form.
+- **Groups are not lifted yet.** The write path handles a group row's media
+  and reference sub-fields (the code is shared), but
+  `Validations.GroupField` keeps a plain group on `link_field_types/0` until
+  the editor has row pickers; a group is a follow-up to PR 3. The GraphQL
+  `GroupValue` shape does not change, and `SchemaExport`'s query fragment for
+  a repeating group's rows still selects only scalar values (see the plan).
+
+### Rollback
+
+No migration. The previous release does not know that an item sub-field may
+be a media or a reference: its `sub_value` refuses any map or list, so
+**re-saving a record that holds an item media or reference in release N-1 fails
+validation** at that sub-field. Reads work: the stored snapshots are returned
+as stored, and the fired artifacts keep what was fired. The definitions of
+those sub-fields load (`field_type` is a known atom there). Roll forward, or
+delete the sub-field first (which purges its values).
 
 ## What was rejected
 

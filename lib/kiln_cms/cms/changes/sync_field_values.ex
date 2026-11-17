@@ -360,7 +360,11 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   # Already removed in the destroy's own transaction when `purge_items?` asked
   # for it (`purge_items/2`).
   defp item_type_operations(%{action_type: :destroy} = changeset, steps, _definition),
-    do: if(purge_requested?(changeset), do: [], else: [{:item, steps, :purge_type}])
+    do:
+      if(purge_requested?(changeset),
+        do: [{:item_links, steps}],
+        else: [{:item, steps, :purge_type}]
+      )
 
   defp item_type_operations(%{action_type: :update} = changeset, steps, definition) do
     if changeset.data.name == definition.name,
@@ -579,6 +583,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     query(sql, bound, "rewrote the #{inspect(op_name(op))} items of #{inspect(steps)} in")
   end
 
+  # Only the edges (`execute_links/4`) of an item type destroyed with its items.
+  defp execute({:item_links, _steps}, _table, _filter, _params), do: :ok
+
   defp op_name(op) when is_atom(op), do: op
   defp op_name(op), do: elem(op, 0)
 
@@ -604,26 +611,37 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   # them, a rename moves them to the new key. Scoped by the same table, org
   # and type as the value statement, through the edge's source. Edges of any
   # other field type match nothing (`kind = 'reference'`).
+  #
+  # An edge of a reference inside a group row or an item (#2282) is keyed by
+  # its dotted definition path (`KilnCMS.CMS.ContentLinks.desired/2`:
+  # `sections.hero.cta`), so a field's edges are the ones at its own name and
+  # everything under `name.`: a purge or a rename of a group, a flexible field,
+  # a sub-field or an item type acts on that whole prefix. Field names hold
+  # no dot, so a prefix never matches a sibling (`sections` vs `sections2`);
+  # `LIKE`'s own wildcards (`_` is common in names) are escaped.
   # sobelow_skip ["SQL.Query"]
   defp execute_links({:purge, name}, table, filter, params) do
     """
     DELETE FROM content_links
-     WHERE kind = 'reference' AND field = $1
-       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(1)})
+     WHERE kind = 'reference' AND (field = $1::text OR field LIKE $2::text)
+       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(2)})
     """
-    |> query([name | params], "deleted the #{inspect(name)} reference links of")
+    |> query(
+      [name, under(name) | params],
+      "deleted the #{inspect(name)} reference links of"
+    )
   end
 
   # sobelow_skip ["SQL.Query"]
   defp execute_links({:rename, from, to}, table, filter, params) do
     """
     UPDATE content_links
-       SET field = $2
-     WHERE kind = 'reference' AND field = $1
-       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(2)})
+       SET field = $2::text || substr(field, char_length($1::text) + 1)
+     WHERE kind = 'reference' AND (field = $1::text OR field LIKE $3::text)
+       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(3)})
     """
     |> query(
-      [from, to | params],
+      [from, to, under(from) | params],
       "moved the #{inspect(from)} reference links to #{inspect(to)} on"
     )
   end
@@ -644,13 +662,44 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
 
   defp execute_links({:reshape, _name, :to_list}, _table, _filter, _params), do: :ok
 
-  # Items are not edges either (a flexible field holds no reference yet).
-  defp execute_links({:item, _steps, _op}, _table, _filter, _params), do: :ok
+  # An item tree's edges follow their values: the path of the sub-field or
+  # item type the operation names, as `ContentLinks.desired/2` keys them.
+  defp execute_links({:item, steps, op}, table, filter, params) do
+    prefix = edge_path(steps)
 
-  # A group's rows are not edges.
-  defp execute_links({:purge_sub_field, _field, _name}, _table, _filter, _params), do: :ok
+    case op do
+      {:rename_field, from, to, _setting?} ->
+        execute_links(
+          {:rename, prefix <> "." <> from, prefix <> "." <> to},
+          table,
+          filter,
+          params
+        )
 
-  defp execute_links({:rename_sub_field, _field, _from, _to}, _table, _filter, _params), do: :ok
+      {:purge_field, name, _setting?} ->
+        execute_links({:purge, prefix <> "." <> name}, table, filter, params)
+
+      # `steps` end in the item type under its old name.
+      {:rename_type, to} ->
+        renamed = edge_path(Enum.drop(steps, -1) ++ [{elem(List.last(steps), 0), to}])
+        execute_links({:rename, prefix, renamed}, table, filter, params)
+
+      :purge_type ->
+        execute_links({:purge, prefix}, table, filter, params)
+    end
+  end
+
+  # An item type destroyed with `purge_items?` already lost its items in the
+  # destroy's own transaction; its edges go here, with the rest of the sync.
+  defp execute_links({:item_links, steps}, table, filter, params),
+    do: execute_links({:purge, edge_path(steps)}, table, filter, params)
+
+  # A group's sub-field edges are `group.sub`.
+  defp execute_links({:purge_sub_field, field, name}, table, filter, params),
+    do: execute_links({:purge, field <> "." <> name}, table, filter, params)
+
+  defp execute_links({:rename_sub_field, field, from, to}, table, filter, params),
+    do: execute_links({:rename, field <> "." <> from, field <> "." <> to}, table, filter, params)
 
   # A link field's copy on the parent field's edges (R3): the edge's
   # `metadata` is the connection's `"link"` map.
@@ -677,6 +726,16 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
       [field, from, to | params],
       "moved link value #{inspect(from)} to #{inspect(to)} on the links of"
     )
+  end
+
+  # `{flexible field, item type}` steps as the dotted prefix of their edges.
+  defp edge_path(steps),
+    do: Enum.map_join(steps, ".", fn {field, type} -> field <> "." <> type end)
+
+  # `LIKE` pattern for "everything under `path.`", wildcards in names escaped.
+  defp under(path) do
+    escaped = String.replace(path, ["\\", "%", "_"], &("\\" <> &1))
+    escaped <> ".%"
   end
 
   # sobelow_skip ["SQL.Query"]

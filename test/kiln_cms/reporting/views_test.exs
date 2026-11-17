@@ -755,6 +755,78 @@ defmodule KilnCMS.Reporting.ViewsTest do
                2 * KilnCMS.CMS.FieldDefinition.max_flexible_depth() + 2
     end
 
+
+    # Media and reference sub-fields of an item type or a group (#2282, the
+    # type list lifts in a later step: the sub-field's type is set directly,
+    # as a later release writes it). Their stored snapshots sit inside the
+    # parent field's own value, never at the top of `custom_fields`, so a
+    # stray top-level key sharing their name (or their item type's) joins no
+    # view, and the snapshot is reachable only through the parent's raw JSON.
+    test "media and reference sub-fields of an item type or a group never join a view", ctx do
+      %{admin: admin, role: role} = ctx
+
+      flexible = field!(admin, %{name: "blocks", field_type: :flexible})
+
+      card =
+        field!(admin, %{
+          name: "card",
+          field_type: :group,
+          flex_of_id: flexible.id,
+          content_type: nil
+        })
+
+      group = field!(admin, %{name: "visits", field_type: :group})
+
+      for {parent, name, type} <- [
+            {card, "pic", :media},
+            {card, "cta", :reference},
+            {group, "photo", :media},
+            {group, "doctor", :reference}
+          ] do
+        sub = field!(admin, %{name: name, group_of_id: parent.id, content_type: nil})
+        Ash.Seed.update!(sub, %{field_type: type})
+      end
+
+      page = page!(admin, %{})
+
+      inject!("pages", page.id, %{
+        "blocks" => [
+          %{
+            "_id" => "1",
+            "_type" => "card",
+            "pic" => %{"id" => "SENT-PIC-7a", "url" => "SENT-PICURL-7a"},
+            "cta" => %{"id" => "SENT-CTA-7b", "title" => "SENT-CTATITLE-7b"}
+          }
+        ],
+        "visits" => [%{"doctor" => %{"id" => "SENT-DOC-7c"}}],
+        "card" => "SENT-CARD-7d",
+        "pic" => "SENT-STRAYPIC-7e",
+        "cta" => "SENT-STRAYCTA-7f",
+        "photo" => "SENT-STRAYPHOTO-7g",
+        "doctor" => "SENT-STRAYDOC-7h"
+      })
+
+      dump = ReportingRole.dump(role)
+
+      for stray <- ~w(SENT-CARD-7d SENT-STRAYPIC-7e SENT-STRAYCTA-7f SENT-STRAYPHOTO-7g
+                      SENT-STRAYDOC-7h) do
+        refute dump["pages"] =~ stray
+        refute dump["pages_field_values"] =~ stray
+      end
+
+      names =
+        ReportingRole.as(role, fn ->
+          KilnCMS.Repo.query!(
+            "SELECT DISTINCT field_name FROM kiln_reporting_v1.pages_field_values"
+          ).rows
+          |> List.flatten()
+        end)
+
+      for sub <- ~w(card pic cta photo doctor), do: refute(sub in names)
+      assert "blocks" in names
+      assert "visits" in names
+    end
+
     test "an item type never joins a dynamic type's view either", ctx do
       %{admin: admin, role: role} = ctx
 

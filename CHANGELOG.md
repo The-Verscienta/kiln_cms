@@ -377,6 +377,10 @@ What's new, with examples and migration steps: [docs/whats-new/v1.11.md](docs/wh
 - **A new custom field type, Flexible content: an ordered list of items of different kinds (a hero, a quote), defined under Fields (Item types panel) and edited as cards in the content editor. Field-sync files now carry `item_types`, which 1.10 refuses.**
   ([long form](docs/changelog/v1.11.0.md#flexible-content))
 
+- **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
+  Re-saving such a record on the previous release fails validation; reads work.
+  ([long form](docs/changelog/unreleased.md#flexible-media-reference))
+
 - **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
   Served as generic JSON, filterable only for "Empty or not", not sortable. Country-driven labels, region lists and schema.org output are not yet.
   ([#2279](https://github.com/The-Verscienta/kiln_cms/issues/2279) · [long form](docs/changelog/v1.11.0.md#address-field-type))

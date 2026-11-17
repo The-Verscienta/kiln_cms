@@ -11,9 +11,10 @@ defmodule KilnCMS.CMS.Validations.GroupField do
       group that is not a field of a type;
     * it is one of the plain types (`FieldDefinition.link_field_types/0`), so
       a group never holds a group, a media snapshot or a reference; under an
-      item type it may also be a `:flexible` field
-      (`FieldDefinition.item_field_types/0`), so an item can hold a list of its
-      own, as deep as `FieldDefinition.max_flexible_depth/0` allows;
+      item type it may also be a `:flexible` field, a single `:media` or a
+      single `:reference` (`FieldDefinition.item_field_types/0`), so an item can
+      hold a list of its own, as deep as `FieldDefinition.max_flexible_depth/0`
+      allows;
     * it is a *setting* (`item_setting`) only under an item type, and then a
       plain type — never a nested flexible field;
     * it stays with the group it was created under — moving a sub-field to
