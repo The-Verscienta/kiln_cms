@@ -1,14 +1,36 @@
 # Flexible content — plan for mixed typed items inside a custom field
 
-**Status:** PR 1 of 7 (section 9: model and write path) built on branch
-`feat/2282-flexible-content-pr1-394939`, not yet merged; PRs 2 to 7 are plan
-only. Design record for
+**Status:** PR 1 of 7 (section 9: model and write path) merged (#2969);
+PR 2 (admin Item types panel, editor cards, field-sync `item_types`) built on
+branch `feat/2282-flexible-content-pr2-10fc7a`, not yet merged; PRs 3 to 7 are
+plan only. Design record for
 [#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282), written from a
 read of the model as it stood on 2026-11-10 (after custom-field waves 1–5). Read
 the resources for current behavior and this for *why*. Nothing here is a
 decision until the PR that carries it merges; the open questions are in §10.
 The decisions PR 1 makes are argued in
 [ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+
+**Where PR 2 differs from this plan** (the code is right; this text is
+unchanged below):
+
+- Item types reorder with up and down arrows only; there is no dragging in the
+  Item types panel. Item cards in the editor do drag.
+- The editor's **Add item** menu appends the new card at the end of the list,
+  not after the focused card.
+- A `visible_when` or `required_when` that reads across the boundary between an
+  item's content and its settings is applied by the server on the next render
+  or save, but does not live-toggle in the browser.
+- `item_setting` is a checkbox (**Setting**) that is fixed once the sub-field
+  exists.
+- A retype to or from `:flexible` is refused by the resource
+  (`Validations.FlexibleRetype`), which PR 1 left open; the admin disables the
+  type select on a flexible field.
+- `FieldSync` carries `item_types` and writes `item_setting` only when `true`
+  (the `@pending_keys` list is gone). An import cannot delete an item type that
+  holds items, even with data loss allowed.
+- Purging an item type's items runs in the destroy's own transaction, not
+  after the commit.
 
 **Where PR 1 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -32,7 +54,7 @@ unchanged below):
 - The reporting views needed no change: a test shows item types never join.
 - `FieldCondition` needed only to refuse conditions on a `:flexible` field; its
   scope is sibling-based, so no owner walk was added there.
-- Retyping an existing field to or from `:flexible` is not guarded (ADR 0065).
+- Retyping an existing field to or from `:flexible` was not guarded in PR 1; PR 2 refuses it (see above, ADR 0065).
 
 **Goal:** a custom field whose value is an **ordered list of items of different
 types** (hero, quote, feature grid, …), each type with its own sub-fields and a

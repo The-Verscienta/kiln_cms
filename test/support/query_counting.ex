@@ -17,11 +17,18 @@ defmodule KilnCMS.Test.QueryCounting do
   the view, so it cannot query during the next measurement.
   `assert_same_queries/3` compares two measurements by total and per table,
   and names the tables that moved when they differ.
+
+  A warm-up before the first measurement goes through `warm_up/1`, which
+  empties the node's TTL caches first, so every entry the measurements read
+  was filled by the warm-up and has its whole lifetime ahead (#2647).
   """
 
   import ExUnit.Assertions
   import Phoenix.ConnTest, only: [get: 2]
   import Phoenix.LiveViewTest
+
+  alias KilnCMS.Cache.Hosts
+  alias KilnCMS.Security.IpBlocklist
 
   @endpoint KilnCMSWeb.Endpoint
 
@@ -81,6 +88,53 @@ defmodule KilnCMS.Test.QueryCounting do
   @spec settle_busts() :: :ok
   def settle_busts do
     _ = :sys.get_state(KilnCMS.Cache.ClusterBust)
+    :ok
+  end
+
+  @doc """
+  Runs `fun` unmeasured, to fill the caches the measurements after it read,
+  and returns its result. Call it once before the first measurement, never
+  inside one: the measured loads must find the caches warm.
+
+  A warm-up only pins the entries it fills itself. An entry an earlier test
+  filled 59 seconds ago is read from the cache during the warm-up and then
+  expires inside a measured window, which pays one extra query and makes two
+  equal measurements differ by one (68 vs 69 `ip_block_rules`, #2647). So this
+  first waits for the busts already sent (`settle_busts/0`), then empties every
+  cache with a TTL that a measured request can fill:
+
+    * `KilnCMS.Cache.cache_name/0`: org settings, branding, code injection,
+      security.txt, the admin allowlist, the two-factor policy, the type and
+      field registries (60 s to 60 min);
+    * `KilnCMS.Cache.generation_cache_name/0`: the last-known admin allowlist
+      (24 h) beside the generation tokens;
+    * `KilnCMS.Security.IpBlocklist` (1 min), read by `KilnCMSWeb.Plugs.IpBlock`
+      on every request;
+    * `KilnCMS.Cache.Hosts` (1 and 5 min), the host-to-site resolution;
+    * `KilnCMS.Firing.Cache` (60 min), the fired artifact bodies.
+
+  Every entry the warm-up then fills has its whole TTL (at least a minute)
+  ahead of the measurement. It waits for busts again afterwards, so one the
+  warm-up itself sent has landed before the first measurement.
+
+  These caches are one per node, so only an `async: false` module may call
+  this (`KilnCMS.AsyncGlobalStateTest` flags an async caller).
+  """
+  @spec warm_up((-> result)) :: result when result: term()
+  def warm_up(fun) do
+    settle_busts()
+    cold_caches()
+    result = fun.()
+    settle_busts()
+    result
+  end
+
+  defp cold_caches do
+    {:ok, _} = Cachex.clear(KilnCMS.Cache.cache_name())
+    {:ok, _} = Cachex.clear(KilnCMS.Cache.generation_cache_name())
+    :ok = IpBlocklist.clear()
+    :ok = Hosts.clear()
+    _count = KilnCMS.Firing.Cache.clear()
     :ok
   end
 

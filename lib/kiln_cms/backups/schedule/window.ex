@@ -72,6 +72,13 @@ defmodule KilnCMS.Backups.Schedule.Window do
   @span_days %{weekly: 8, fortnightly: 15, monthly: 32}
 
   @doc """
+  The hours one `interval` spans (monthly as 31 days), or nil for one this
+  release doesn't know.
+  """
+  @spec interval_hours(term()) :: pos_integer() | nil
+  def interval_hours(interval), do: Map.get(@hours, interval)
+
+  @doc """
   How long after the last good backup a component covered by a schedule of
   `interval` is called stale: the interval plus half of it, at least six
   hours of slack. Daily gives 36, the same as `BACKUP_STALE_AFTER_HOURS`'s

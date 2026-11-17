@@ -3,7 +3,8 @@
 Stand up a throwaway copy of your **production content** to test an upgrade, try a
 migration, review a redesign, or reproduce a bug — then throw it away. The copy is
 **scrubbed of personal data and outbound secrets by default**, so it is safe to run
-somewhere less locked-down than production and to hand to a reviewer.
+somewhere less locked-down than production and to hand to a reviewer, once you have
+checked the few things it keeps ([What the scrub keeps](#what-the-scrub-keeps)).
 
 This is the actionable, self-host-friendly slice of the "managed cloud / hosting"
 discussion ([#334](https://github.com/The-Verscienta/kiln_cms/issues/334)). A hosted
@@ -59,7 +60,8 @@ is PII-free using the same code path production erasure uses. Nothing new decide
 
 `KilnCMS.Staging.Scrub` is the one place that turns a production clone into a
 safe-to-share environment. Everything it does is a purge or a de-activation — it never
-sends mail, fires a webhook, or contacts a subprocessor.
+sends mail, fires a webhook, or contacts a subprocessor, and it deletes every queued job
+so that nothing on the clone does so later on production's behalf.
 
 | What | Action | Why |
 |------|--------|-----|
@@ -81,15 +83,60 @@ sends mail, fires a webhook, or contacts a subprocessor.
 | **Security alert dispatches** | purged (`security_alert_dispatches_purged`) | A [security alert](security-alerts.md) still to be sent would mail and notify production's admins from the clone, about production events. |
 | **Paid memberships** | scrubbed (`memberships_scrubbed`) | Provider customer/subscription ids nulled and the status set to canceled. **Scrubbed, not deleted**: `billing_membership_events` references them, and the entitlement trail should stay referentially intact — the same audit-retention decision as content history. What must go is the live external reference. |
 | **Membership tiers** | deactivated (`tiers_deactivated`) | The catalogue shape keeps staging useful; the price pointer is replaced with a per-row tombstone so nothing in the clone can bill a real account. (Per-row because `provider_price_id` is `NOT NULL` with a per-org unique index.) |
+| **Queued jobs** | purged, every state (`oban_jobs_purged`) | A cloned job is production's work: its args carry recipients, message bodies, form data and outbound URLs, and running it on the clone would mail, notify or call out on production's behalf. Deleted rather than canceled, because a canceled job keeps its args. Purged first, before anything else runs, and again last, for any job the scrub's own work queued. `scripts/staging.sh up` doesn't copy the rows in the first place. |
+| **Newsletter subscribers** | purged (`newsletter_subscribers_purged`) | Readers' addresses and names, with live confirm and unsubscribe tokens. |
+| **Newsletter segment memberships** | purged (`newsletter_segment_memberships_purged`) | Which subscriber is in which segment. Deleted before the subscribers; the segments themselves stay. |
+| **Form submissions** | purged (`form_submissions_purged`) | Free-form visitor input: whatever a contact form asked for, names and addresses included. The forms and their fields stay. |
+| **Form notification addresses** | cleared (`form_notify_emails_cleared`) | Each form's `notify_email` is a production inbox. The form stays, with no address to mail. |
+| **Mail suppression list** | purged (`suppressed_recipients_purged`) | The instance's list of addresses not to mail: recipients' addresses and nothing else. |
+| **Per-site mail suppression lists** | purged (`site_suppressed_recipients_purged`) | The same, per site. |
+| **Webhook delivery log** | purged (`webhook_deliveries_purged`) | Each delivery keeps its payload, and a `form.submitted` payload is the submission itself. |
+| **Federation deliveries** | purged (`federation_deliveries_purged`) | Pending deliveries would post production's activities to real fediverse inboxes. |
+| **Federation followers** | purged (`federation_followers_purged`) | Remote people's actor and inbox URIs. |
+| **Site federation identities** | purged (`federation_sites_purged`) | Each row holds the private key that signs as the production site's actor. With it gone, the clone federates with no one. |
+| **Web Push subscriptions** | purged (`push_subscriptions_purged`) | Browsers' push endpoints and keys. Anonymizing an account already deletes its subscriptions; this catches any row that step did not reach. |
+| **Web Push (VAPID) keys** | purged (`vapid_keys_purged`) | Each site's push identity, production's. |
+| **Social accounts** | deactivated (`social_accounts_deactivated`) | Switched off and their stored credential removed, so the clone cannot post as production. Not deleted, because deleting an account deletes its post history with it. |
+| **Automation rules** | deactivated (`automation_rules_disabled`) | Every rule is switched off, and a `send_email` rule loses its `to` address, a production inbox. The rules stay so you can see them. |
+| **Per-site mail relays** | purged (`mail_relays_purged`) | Production's relay host, username, encrypted password and From address. A site with no row falls back to the staging host's own mail configuration, as the mail settings purge does. |
+| **Per-site SSO providers** | purged (`sso_providers_purged`) | Production's identity provider (issuer, client id) and its encrypted client secret. |
+| **Per-site AI providers** | purged (`ai_providers_purged`) | Production's AI provider, base URL and encrypted API key. |
+| **Per-site Meilisearch settings** | purged (`meilisearch_sites_purged`) | Production's Meilisearch URL, index name and encrypted API key: the clone must not write into production's index. |
+| **Rate-limit counters** | purged (`throttle_counters_purged`) | Keyed on hashed client identifiers from production traffic. |
+| **Idempotency keys** | purged (`idempotent_requests_purged`) | Each row caches the response production sent, which carries whatever that response did. |
+| **Backup lock** | purged (`backup_locks_purged`) | Names production's nodes and backup jobs the scrub deletes. An empty table is a free lock for the staging host's own backups. |
+| **Backup node heartbeats** | purged (`backup_node_beats_purged`) | Production's node ids. |
 | **A fresh staging admin** | provisioned, opt-in (`admin_provisioned`) | Because every real account is anonymized (nobody can sign in), the scrub can seed **one** known admin from `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` so the environment is usable. |
 
 The names in parentheses are the keys of the summary map `KilnCMS.Staging.scrub!/1`
-returns. The summary the scrub prints lists only users anonymized, API keys, auth
-tokens, webhooks, mail settings, search queries and the staging admin; call
-`scrub!/1` from `rpc` (path 3 below) to see every count.
+returns. The summary the scrub prints lists every one of them, sorted, with the
+underscores as spaces (`oban jobs purged`), then the staging admin.
 
 The scrub is **idempotent** — re-running it anonymizes only accounts that aren't already
 anonymized and re-purges empty tables cheaply.
+
+### What the scrub keeps
+
+A scrubbed clone still holds a few things to know about before you share it:
+
+- **Media storage settings.** Storage profiles (`storage_profiles`, `site_storages`)
+  keep their S3 endpoint, bucket names and access key id, and the secret access key
+  encrypted under production's `SECRET_KEY_BASE`. Media breaks without them, so they
+  stay. A clone with its own `SECRET_KEY_BASE` cannot decrypt the secret, but it still
+  names production's buckets: point staging at its own storage before anyone uploads.
+- **The content-signing key** (`provenance_settings`), for the same reason and under the
+  same encryption: removing it would break governance on the clone.
+- **Webhook endpoints** are de-activated, not deleted: their URLs and encrypted signing
+  secrets stay.
+- **Free text written by staff.** Comment bodies, task notes and the `grantor` of a
+  content consent are kept with the content they belong to. The accounts that wrote
+  them are anonymized, but a name or address typed into the text is not.
+- **Tables a plugin owns.** The scrub only knows the core schema. Check what your
+  plugins store before sharing a clone.
+
+Every core table is accounted for: a test classifies each one as scrubbed (from
+`KilnCMS.Staging.Scrub.dispositions/0`) or kept with a reason, so a new table cannot
+reach a clone without someone deciding.
 
 > **The scrub never contacts a payment provider.** Erasing a member cancels their
 > membership *locally* only, precisely so this path — which runs over a clone of
@@ -108,12 +155,17 @@ staging (the recipe below does).
 
 ## Running the scrub
 
-The scrub core (`KilnCMS.Staging.scrub!/1`) is callable three ways, so it works in dev
-and in a production-style OTP release (which has no Mix):
+The scrub core (`KilnCMS.Staging.scrub!/1`) is callable three ways, so it works from a
+checkout and from a production-style OTP release (which has no Mix). Paths 1 and 2 scrub
+a clone that is not serving yet; path 3 is only for re-scrubbing a node that is already a
+scrubbed clone.
 
 ```bash
-# 1. Mix (dev, or any checkout with Mix available):
+# 1. Mix, from a checkout. MIX_ENV=prod is required (see below):
+MIX_ENV=prod \
 DATABASE_URL="$STAGING_DATABASE_URL" \
+SECRET_KEY_BASE="$(openssl rand -base64 48)" \
+TOKEN_SIGNING_SECRET="$(openssl rand -base64 48)" \
   mix kiln.staging.scrub --yes \
     --admin-email you@example.com --admin-password 'a-strong-password'
 
@@ -122,11 +174,31 @@ KILN_STAGING_SCRUB=confirm \
 STAGING_ADMIN_EMAIL=you@example.com STAGING_ADMIN_PASSWORD='a-strong-password' \
   /app/bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'
 
-# 3. Release, against an already-running staging node:
-/app/bin/kiln_cms rpc 'KilnCMS.Staging.scrub!(confirm?: true, admin_email: "you@example.com", admin_password: "…")'
+# 3. Release, re-scrubbing a running node that is already a scrubbed clone:
+/app/bin/kiln_cms rpc 'KilnCMS.Staging.scrub!(confirm?: true, allow_live?: true, admin_email: "you@example.com", admin_password: "…")'
 ```
 
-`scripts/staging.sh up` uses path **2** for you.
+`scripts/staging.sh` uses path **1** by default (`KILN_BIN=mix`), and path **2** when
+`KILN_BIN` names a release's `bin/kiln_cms`.
+
+**Path 1 reads `DATABASE_URL` only under `MIX_ENV=prod`.** The dev configuration
+hard-codes the `kiln_cms_dev` database, so without `MIX_ENV=prod` the task ignores
+`DATABASE_URL` and targets your dev database instead. The scrub then refuses, because
+`kiln_cms_dev` doesn't look ephemeral, but `scripts/staging.sh`'s `mix ecto.migrate`
+step has already run against it. A prod boot also needs the variables it always
+requires, `SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET` among them
+([environment-variables.md](environment-variables.md)). The task starts the
+application with Oban inert (`KilnCMS.Staging.inert_oban_config/1`: no queue runs a job
+and no Oban plugin runs) and the backup heartbeat off, so no job cloned from production
+can run before the scrub deletes it. Path 2 starts the repo alone, with no Oban at all.
+
+**Path 3 refuses a node whose Oban runs jobs** unless you pass `allow_live?: true`. A
+serving node's queues could execute the clone's copy of production's jobs (mail,
+webhooks, federation deliveries) before the scrub deletes them, so on a fresh clone use
+path 1 or 2. With `allow_live?: true`, the scrub first pauses every queue on every node
+of the cluster and prints "Oban is live on this node: every queue is now paused.
+Restart the application after the scrub to resume them." The queues stay paused until
+you do: restart the staging application once the scrub finishes.
 
 ### Safety guards
 
@@ -140,12 +212,15 @@ the guards exist so a mistyped `DATABASE_URL` can't scrub production:
   `--force` / `KILN_STAGING_FORCE=true`, but the name check is your seat-belt.
 - **The target is always printed first** (`database@host`) so you can see what you're
   about to scrub before it happens.
+- **A node whose Oban queues are running is refused** (path 3 without
+  `allow_live?: true`), with "Refusing to scrub from a node whose Oban queues are
+  running." Run the scrub before serving instead (path 1 or 2).
 
 ## `scripts/staging.sh` — the one-command recipe
 
 `scripts/staging.sh` is a thin, dependency-light wrapper around `pg_dump` / `psql` and
-the release scrub. It is deliberately plain shell so it works the same on a laptop and
-on the production VPS.
+the scrub (path 1 or 2 above). It is deliberately plain shell so it works the same on a
+laptop and on the production VPS.
 
 ```bash
 ./scripts/staging.sh up      # dump PROD_DATABASE_URL → create+restore STAGING_DATABASE_URL → migrate → scrub
@@ -160,7 +235,7 @@ on the production VPS.
 | `PROD_DATABASE_URL` | yes (`up`) | Source to `pg_dump`. Read-only; the script never writes to it. |
 | `STAGING_DATABASE_URL` | yes | Throwaway target. Its **name must look ephemeral** (see guards). |
 | `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` | recommended | Seed one usable admin; without them you can't sign in to staging. |
-| `KILN_BIN` | no (default `mix`) | How to run migrate + scrub: `mix` for a checkout, or a release bin path like `/app/bin/kiln_cms` in Docker. |
+| `KILN_BIN` | no (default `mix`) | How to run migrate + scrub: `mix` for a checkout, or a release bin path like `/app/bin/kiln_cms` in Docker. With `mix`, also export `MIX_ENV=prod` and the variables a prod boot needs, or migrate and scrub target your dev database (see [Running the scrub](#running-the-scrub)). |
 
 Both URLs may be `postgres://`, `postgresql://` or `ecto://`. The script gives
 each password only to its own `pg_dump` or `psql`, as `PGPASSWORD`, never as an
@@ -168,6 +243,10 @@ argument. Its closing `DATABASE_URL=` line, which says "password not shown",
 leaves the password out: put it back, or export `PGPASSWORD`, before you use
 that line
 ([backups.md](backups.md#the-database-password-stays-out-of-the-pg_dump-command-line-2726)).
+
+`up` dumps production with `--exclude-table-data=oban_jobs`: the clone gets the job
+table but none of production's queued jobs. The scrub purges the table anyway, for a
+clone made some other way, such as a restored backup.
 
 The script never sets `KILN_STAGING_FORCE`; the ephemeral-name guard stays in force
 unless you invoke the scrub yourself.
@@ -185,8 +264,9 @@ scrubbed database — no new build, no new service definition:
    ```
 2. **Clone + migrate + scrub** with the release image already on the host:
    ```bash
-   # Dump prod and restore into the throwaway DB
-   pg_dump --no-owner --no-privileges "$PROD_DATABASE_URL" | psql "$STAGING_DATABASE_URL"
+   # Dump prod (without its queued jobs) and restore into the throwaway DB
+   pg_dump --no-owner --no-privileges --exclude-table-data=oban_jobs \
+     "$PROD_DATABASE_URL" | psql "$STAGING_DATABASE_URL"
 
    # Run the same image, pointed at the clone, to migrate then scrub — nothing served yet
    docker run --rm \
@@ -297,9 +377,10 @@ the gaps the *data* carries — the *config* is already inert:
   every account's authenticator-app (TOTP) secret. A
   clone with its own `SECRET_KEY_BASE` cannot decrypt any of them, as long as
   `PREVIOUS_SECRET_KEY_BASE` is not production's: leave it unset on staging. The scrub
-  also deletes the DKIM key and the billing keys outright, the billing keys before
-  anything else, and clears every account's authenticator app, recovery codes and
-  passkeys as it anonymizes the account (`KilnCMS.Accounts.Changes.AnonymizeUser`).
+  also deletes the DKIM key, the billing keys (before anything else), each site's
+  ActivityPub key, VAPID keys, mail relay, SSO and AI provider and Meilisearch settings,
+  and social account credentials outright, and clears every account's authenticator
+  app, recovery codes and passkeys as it anonymizes the account (`KilnCMS.Accounts.Changes.AnonymizeUser`).
 - **A distinct `SECRET_KEY_BASE`** invalidates every cloned session cookie and every
   production-signed preview token automatically.
 

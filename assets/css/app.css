@@ -1291,6 +1291,19 @@
   .table-zebra tbody tr:nth-child(2n) td {
     background: color-mix(in oklch, var(--color-base-200) 32%, transparent);
   }
+
+  /* A flexible-content item card's body and its Settings section (#2282).
+     Both are hidden by CSS only: their inputs stay in the DOM, so a collapsed
+     card still posts everything it holds. The state is a data attribute a
+     `JS` command toggles (and `ignore_attributes` keeps across patches); an
+     error forces the body open whatever the writer collapsed. Child
+     combinators, so a nested card's state never reaches its parent's. */
+  .flex-card[data-collapsed="true"]:not([data-errors="true"]) > .flex-card-body {
+    display: none;
+  }
+  .flex-settings:not([data-open="true"]):not([data-errors="true"]) > .flex-settings-body {
+    display: none;
+  }
 }
 
 /* This file is for your main application CSS */

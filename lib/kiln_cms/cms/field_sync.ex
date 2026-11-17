@@ -28,7 +28,10 @@ defmodule KilnCMS.CMS.FieldSync do
   read from the action, so an attribute added later is covered without
   touching this module) except the four owner ids, which become the nesting:
   a `:reference` field holds its link fields under `"link_fields"`, a
-  `:group` its sub-fields under `"group_fields"`. A key a hand-written file
+  `:group` its sub-fields under `"group_fields"`, and a `:flexible` field its
+  item types under `"item_types"` (each an ordinary `:group` entry, itself
+  holding `"group_fields"`, so a flexible sub-field nests its own
+  `"item_types"` down to the depth cap). A key a hand-written file
   leaves out takes the attribute's default, so a file means the same thing to
   every environment. Role and membership field *grants* are not field
   attributes — they live on roles and are not part of this document.
@@ -54,7 +57,11 @@ defmodule KilnCMS.CMS.FieldSync do
   import: an owner without it (a file written before layouts existed) leaves
   that owner's layouts as they are, even with `prune?: true`; an owner with
   it, `[]` included, declares all its layouts. A file this release writes
-  cannot be imported by a release that predates #2280: every field carries
+  cannot be imported by a release that predates #2280 (and a file with a
+  `:flexible` field's `"item_types"` or an `"item_setting": true` key cannot be
+  imported by one that predates #2282; `"item_setting"` is left out of the file
+  when it is `false`, so a site with no flexible fields exports the same file as
+  before): every field carries
   `"width"`, a key such a release refuses as unknown. The same holds, from
   #2432, for `"step"`, `"prefix"` and `"suffix"` (a number's editor options,
   `null` when unset); a file without them still imports unchanged.
@@ -88,6 +95,7 @@ defmodule KilnCMS.CMS.FieldSync do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldSection
+  alias KilnCMS.CMS.FlexiblePath
   alias KilnCMS.CMS.SectionLayouts
   alias KilnCMS.CMS.TypeDefinition
   alias KilnCMS.Repo
@@ -96,20 +104,19 @@ defmodule KilnCMS.CMS.FieldSync do
   @version 1
 
   @owner_keys ~w(content_type type_definition_id link_of_id group_of_id flex_of_id)a
-  # Attributes of the flexible-content model (#2282) the file does not carry
-  # yet: an item type is a child row (`flex_of_id`) and `item_setting` marks
-  # one of its sub-fields, so both arrive together with the `"item_types"`
-  # child list. Until then export and import leave item types and their
-  # sub-fields alone: `FieldDefinition.parent_id/1` keeps them out of the
-  # top-level list, and no child list reaches them, so a prune never deletes
-  # one either.
-  @pending_keys ~w(item_setting)a
   # Attributes of a field that belong to one site and are not synced (#2285):
   # `selection` names tag and category ids, which differ per site, and fields
   # of its targets that this import may not have created yet.
   @site_keys ~w(selection)a
   @rules ~w(visible_when required_when)
-  @child_lists [{"link_fields", :reference}, {"group_fields", :group}]
+  # An item type (#2282) is a `:group` row owned by its flexible field
+  # (`flex_of_id`), listed under it as `"item_types"`; its own sub-fields are
+  # its `"group_fields"`, and one of them may be a flexible field in turn.
+  @child_lists [
+    {"link_fields", :reference},
+    {"group_fields", :group},
+    {"item_types", :flexible}
+  ]
   @section_owner_keys ~w(content_type type_definition_id)a
 
   @type report :: map()
@@ -131,7 +138,7 @@ defmodule KilnCMS.CMS.FieldSync do
     FieldDefinition
     |> Ash.Resource.Info.action(:create)
     |> Map.fetch!(:accept)
-    |> Enum.reject(&(&1 in @owner_keys or &1 in @site_keys or &1 in @pending_keys))
+    |> Enum.reject(&(&1 in @owner_keys or &1 in @site_keys))
     |> Enum.map(&Atom.to_string/1)
     |> Enum.sort()
   end
@@ -243,11 +250,19 @@ defmodule KilnCMS.CMS.FieldSync do
   end
 
   defp field_doc(field, children) do
-    Enum.reduce(@child_lists, attrs_doc(field, field_keys()), fn {key, type}, acc ->
+    doc = field |> attrs_doc(field_keys()) |> omit_false_setting()
+
+    Enum.reduce(@child_lists, doc, fn {key, type}, acc ->
       subs = if field.field_type == type, do: Map.get(children, field.id, []), else: []
       if subs == [], do: acc, else: Map.put(acc, key, field_docs(subs, children))
     end)
   end
+
+  # `item_setting` (#2282) is written only when set, so the files of a site with
+  # no flexible fields do not change and an older reader, which refuses an
+  # unknown key, still reads them. A missing key imports as `false`.
+  defp omit_false_setting(%{"item_setting" => false} = doc), do: Map.delete(doc, "item_setting")
+  defp omit_false_setting(doc), do: doc
 
   defp attrs_doc(record, keys),
     do: Map.new(keys, fn key -> {key, jsonify(Map.get(record, String.to_existing_atom(key)))} end)
@@ -462,7 +477,11 @@ defmodule KilnCMS.CMS.FieldSync do
 
       true ->
         parse_children(
-          fill(Map.drop(field, child_keys), FieldDefinition, field_keys()),
+          fill(
+            field |> Map.drop(child_keys) |> flexible_default(),
+            FieldDefinition,
+            field_keys()
+          ),
           field,
           here
         )
@@ -482,7 +501,8 @@ defmodule KilnCMS.CMS.FieldSync do
             {key, {:error, ["#{here}: \"#{key}\" must be a list"]}}
 
           true ->
-            {subs, problems} = parse_fields(field[key], here, [])
+            {subs, problems} = field[key] |> item_type_defaults(key) |> parse_fields(here, [])
+            problems = problems ++ item_type_problems(key, subs, here)
             {key, if(problems == [], do: {:ok, subs}, else: {:error, problems})}
         end
       end
@@ -498,6 +518,33 @@ defmodule KilnCMS.CMS.FieldSync do
         {:error, problems}
     end
   end
+
+  # A flexible field is always a list (`Changes.ClearMultiple` stores it so):
+  # a hand-written entry may leave `"multiple"` out.
+  defp flexible_default(%{"field_type" => "flexible"} = field),
+    do: Map.put_new(field, "multiple", true)
+
+  defp flexible_default(field), do: field
+
+  # An item type is a group that is always a list of items: an entry may leave
+  # both out (`Changes.ClearMultiple` stores them anyway), so a hand-written
+  # file imports to the same rows every time.
+  defp item_type_defaults(types, "item_types"),
+    do:
+      Enum.map(types, fn
+        %{} = type -> type |> Map.put_new("field_type", "group") |> Map.put_new("multiple", true)
+        other -> other
+      end)
+
+  defp item_type_defaults(subs, _key), do: subs
+
+  defp item_type_problems("item_types", subs, here) do
+    for %{"field_type" => type, "name" => name} <- subs, type != "group" do
+      "#{here}.#{name}: an item type is a \"group\", not #{inspect(type)}"
+    end
+  end
+
+  defp item_type_problems(_key, _subs, _here), do: []
 
   # No `"sections"` key: a file from before layouts existed. It says nothing
   # about them, so the import leaves them alone (`nil`, not `[]`).
@@ -836,6 +883,7 @@ defmodule KilnCMS.CMS.FieldSync do
 
   defp kid_of?(%{link_of_id: id}, "link_fields"), do: not is_nil(id)
   defp kid_of?(%{group_of_id: id}, "group_fields"), do: not is_nil(id)
+  defp kid_of?(%{flex_of_id: id}, "item_types"), do: not is_nil(id)
   defp kid_of?(_kid, _key), do: false
 
   defp op_for(kind, path, attrs, record, changes) do
@@ -898,6 +946,11 @@ defmodule KilnCMS.CMS.FieldSync do
       match?({true, false}, changes["multiple"]) and holds_data?(record) ->
         "it stops being a list, so each record keeps only its first item"
 
+      # A sub-field of an item type stores its value under the item's key or
+      # under `_settings`; flipping the flag leaves stored values behind.
+      Map.has_key?(changes, "item_setting") and holds_data?(record) ->
+        "moving it between content and settings leaves the stored values where they were"
+
       true ->
         nil
     end
@@ -906,11 +959,54 @@ defmodule KilnCMS.CMS.FieldSync do
   defp data_loss(_op), do: nil
 
   # Records hold a value under the field's key (a sub-field: under its
-  # parent's). An orphaned or unresolvable owner holds none we can reach.
-  # sobelow_skip ["SQL.Query"]
+  # parent's). An item type, or a sub-field of one (#2282), has no key of its
+  # own: its values are inside the items of its flexible field, so it holds
+  # data when an item of the type exists (`FlexiblePath`). An orphaned or
+  # unresolvable owner holds none we can reach.
   defp holds_data?(record) do
-    record = governing(record)
+    case item_scope(record) do
+      %{} = item_type -> items_stored?(item_type)
+      nil -> key_stored?(governing(record))
+    end
+  end
 
+  # The item type whose items hold `record`'s values: itself, or the item type
+  # a sub-field hangs off. Nested flexible fields need no further walk: the
+  # path from the item type climbs to the top-level flexible field.
+  defp item_scope(%{flex_of_id: id} = record) when not is_nil(id), do: record
+
+  defp item_scope(%{group_of_id: id} = record) when not is_nil(id) do
+    case parent_record(record, id) do
+      %{flex_of_id: flex_id} = parent when not is_nil(flex_id) -> parent
+      _plain_group -> nil
+    end
+  end
+
+  defp item_scope(_record), do: nil
+
+  # Fails closed on a read that failed, like `FlexiblePath.items_exist?/3`: an
+  # unreadable answer must not let a blocked import through as "no data".
+  defp items_stored?(item_type) do
+    case FlexiblePath.item_path_detailed(item_type, item_type.org_id) do
+      {:ok, top, steps} ->
+        case SyncFieldValues.target(top) do
+          {:ok, table, filter, params} ->
+            FlexiblePath.items_exist?(table, steps, {filter, params})
+
+          :error ->
+            false
+        end
+
+      {:error, :gone} ->
+        false
+
+      {:error, _unreadable_or_too_deep} ->
+        true
+    end
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp key_stored?(record) do
     case SyncFieldValues.target(record) do
       {:ok, table, filter, params} ->
         sql =
@@ -1200,7 +1296,7 @@ defmodule KilnCMS.CMS.FieldSync do
         {:error, "its parent field #{parent_path} was not found"}
 
       parent ->
-        {:ok, %{if(key == "link_fields", do: "link_of_id", else: "group_of_id") => parent.id}}
+        {:ok, %{owner_column(key) => parent.id}}
     end
   end
 
@@ -1212,6 +1308,10 @@ defmodule KilnCMS.CMS.FieldSync do
       nil -> {:ok, %{"content_type" => type}}
     end
   end
+
+  defp owner_column("link_fields"), do: "link_of_id"
+  defp owner_column("item_types"), do: "flex_of_id"
+  defp owner_column("group_fields"), do: "group_of_id"
 
   defp messages(error) when is_binary(error), do: [error]
 

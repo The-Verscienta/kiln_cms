@@ -25,6 +25,15 @@ export function initRevealSection(root = document) {
   })
 }
 
+// The same, asked for by the server: `/editor/backups?run=<id>` pushes
+// `kiln:reveal` with the id of that run's History row (#2875). LiveView
+// dispatches a pushed event on `window` as `phx:<name>`.
+export function initServerReveal(target = window) {
+  target.addEventListener("phx:kiln:reveal", ({detail}) => {
+    if (detail && typeof detail.id === "string") revealWhenReady(detail.id)
+  })
+}
+
 export function revealWhenReady(id, deadline = performance.now() + WAIT_MS) {
   const target = document.getElementById(id)
   if (target && rendered(target)) return reveal(target)

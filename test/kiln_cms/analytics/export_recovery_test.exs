@@ -138,45 +138,60 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
     {views, published}
   end
 
-  # Every assignment consistent with the file, from the recipient's side.
+  # Every breakdown consistent with the file, from the recipient's side.
   #
   # They know the algorithm — it is documented, and Kiln is open source — so the
-  # shape of the published row tells them which branch produced it, and the two
-  # branches constrain a `"hidden"` cell very differently:
+  # shape of the published row tells them which branch produced it:
   #
-  #   * **Partial** — some categories exact, one `"hidden"`. That one is the
-  #     *partner*: the largest of the categories that were not naturally low, so
-  #     it is `0` or at least the threshold, and at least every published exact.
-  #     Modelling it as anything looser would make this test weaker than a real
-  #     reader, which is the mistake #620 shipped.
-  #   * **Whole breakdown** — every category `"hidden"`, the #1073 fallback. No
-  #     partner was chosen, so nothing distinguishes these cells and each ranges
-  #     over the entire residual. Applying the partner constraint here says the
-  #     file is inconsistent with its own algorithm, which is a statement about
-  #     the model rather than about recoverability.
+  #   * **Partial** — some categories exact, one `"hidden"` partner. The reader
+  #     tries every breakdown with the file's view total, the same exacts and
+  #     each `"< n"` in its range, the partner taking what is left, and keeps
+  #     the ones `Analytics.suppress_referrer_group/1` would have written into
+  #     the file identically. Re-running the algorithm carries everything they
+  #     know about the partner — the largest of the categories that are not
+  #     naturally low, the first one on a tie — without restating it here. An
+  #     earlier version let the partner be `0` or anything from the threshold
+  #     up, a weaker reader than a real one, and it passed a file whose
+  #     suppressed counts were pinned (#2752).
+  #   * **Whole breakdown** — every category `"hidden"`, the #1073 fallback.
+  #     Searched here only as a reader who does *not* know the algorithm, each
+  #     cell over the whole residual. A reader who does can discard every
+  #     breakdown the algorithm would have published partially, and for some
+  #     small totals that leaves one; that is tracked separately (#2981), and
+  #     these cases do not claim to cover it.
   #
-  # Lazy and truncated at two, because "more than one" is the entire question
-  # and a `"hidden"` category otherwise ranges over the whole residual.
+  # Lazy and truncated at two, because "more than one" is the entire question.
   defp consistent({views, published}) do
-    exacts =
-      for {_source, cell} <- published,
-          {n, ""} <- [Integer.parse(cell)],
-          do: n
+    if Enum.all?(published, fn {_source, cell} -> cell == "hidden" end) do
+      ranges = for {source, _cell} <- published, do: {source, 0..views//1}
+      views |> assignments(ranges) |> Enum.take(2)
+    else
+      readings(views, published)
+    end
+  end
 
-    residual = views - Enum.sum(exacts)
-    floor = Enum.max([@threshold | exacts])
-    whole? = exacts == [] and Enum.all?(published, fn {_s, cell} -> cell == "hidden" end)
+  defp readings(views, published) do
+    exact = for {source, cell} <- published, {n, ""} <- [Integer.parse(cell)], do: {source, n}
+    lows = for {source, "< " <> n} <- published, do: {source, 1..(String.to_integer(n) - 1)//1}
+    # No partner when every suppressed category is naturally low: the lows
+    # then carry the whole residual on their own.
+    partner = for {source, "hidden"} <- published, do: {source, 0..views//1}
+    residual = views - (exact |> Enum.map(&elem(&1, 1)) |> Enum.sum())
+    file = Map.new(published)
 
-    ranges =
-      for {source, cell} <- published, Integer.parse(cell) == :error do
-        case cell do
-          "hidden" when whole? -> {source, Enum.to_list(0..residual//1)}
-          "hidden" -> {source, [0] ++ Enum.to_list(floor..max(floor, residual)//1)}
-          "< " <> n -> {source, Enum.to_list(1..(String.to_integer(n) - 1)//1)}
-        end
-      end
+    residual
+    |> assignments(partner ++ lows)
+    |> Stream.map(&Map.new(exact ++ &1))
+    |> Stream.filter(&(as_written(&1) == file))
+    |> Enum.take(2)
+  end
 
-    residual |> assignments(ranges) |> Enum.take(2)
+  # The cells `suppress_referrer_group/1` would have written for a candidate.
+  defp as_written(candidate) do
+    candidate
+    |> Map.new(fn {source, hits} -> {String.to_existing_atom(source), hits} end)
+    |> KilnCMS.Analytics.suppress_referrer_group()
+    |> Map.new(fn {source, _hits, display} -> {to_string(source), to_string(display)} end)
   end
 
   defp assignments(0, []), do: [[]]
@@ -186,20 +201,30 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
     values
     |> Stream.filter(&(&1 <= residual))
     |> Stream.flat_map(fn value ->
-      residual |> Kernel.-(value) |> assignments(rest) |> Enum.map(&[{source, value} | &1])
+      residual |> Kernel.-(value) |> assignments(rest) |> Stream.map(&[{source, value} | &1])
     end)
   end
 
   # The four breakdowns #1073 brute-forced and found exactly recoverable under
-  # the old algorithm. Every one of them reaches the export through the same
-  # decision, so they are the cases that must survive a round trip through a
-  # file — not just through the function.
+  # the old algorithm, and the shapes #2752 found the same way. Every one of
+  # them reaches the export through the same decision, so they are the cases
+  # that must survive a round trip through a file — not just through the
+  # function.
   @cases [
     {"one low count and four genuine zeros", %{direct: 3}},
     {"one low count beside three large ones", %{direct: 2, search: 40, social: 50, other: 60}},
     {"one low count where every other category equals the threshold",
      %{direct: 4, search: 5, social: 5, other: 5}},
-    {"two low counts and three genuine zeros", %{direct: 1, internal: 1}}
+    {"two low counts and three genuine zeros", %{direct: 1, internal: 1}},
+    # #2752: a published 5 bounds the partner below by 5, which the earlier
+    # search did not know, so it accepted a file that pinned both low counts.
+    {"two low counts beside two at the threshold", %{direct: 1, search: 1, social: 5, other: 5}},
+    # The zeros ahead of `social` would have won a tie at 0, so the partner is
+    # not 0 either — which the issue's one-line fix still missed.
+    {"two low counts with zeros ahead of the partner", %{search: 1, social: 5, other: 1}},
+    # Every category naturally low: published partially with no `"hidden"`
+    # partner at all, so the reader has only the lows to split the residual.
+    {"every category naturally low", %{direct: 1, internal: 1, search: 1, social: 1, other: 2}}
   ]
 
   for {name, breakdown} <- @cases do

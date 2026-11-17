@@ -24,6 +24,8 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
 
   alias KilnCMS.CMS.FieldWidgets
   alias KilnCMSWeb.ContentEditor.Conditional
+  alias KilnCMSWeb.ContentEditor.FlexibleComponents
+  alias KilnCMSWeb.ContentEditor.FlexibleItems
   alias KilnCMSWeb.ContentEditor.GroupRows
   alias KilnCMSWeb.ContentEditor.Localization
 
@@ -289,8 +291,15 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
           tenant={@tenant}
           source={%{id: @record && @record.id, type: to_string(@kind)}}
         />
+        <FlexibleComponents.flexible_field
+          :if={@definition.field_type == :flexible}
+          definition={@input_definition}
+          name={"#{@form.name}[custom_fields][#{@definition.name}]"}
+          value={input_value(@form, @definition)}
+          errors={custom_field_errors(@form, @definition.name)}
+        />
         <.custom_field_input
-          :if={@definition.field_type != :reference}
+          :if={@definition.field_type not in [:reference, :flexible]}
           definition={@input_definition}
           name={"#{@form.name}[custom_fields][#{@definition.name}]"}
           value={input_value(@form, @definition)}
@@ -607,6 +616,10 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   # value `custom_field_value/2` prefers has already dropped a blank row, so
   # "Add row" would add nothing anyone could see.
   defp input_value(form, %{field_type: :group, name: name}), do: GroupRows.posted(form, name)
+
+  # A flexible field likewise: its cards as posted, blank ones included.
+  defp input_value(form, %{field_type: :flexible, name: name}),
+    do: FlexibleItems.posted(form, name)
 
   # A scalar list likewise (phrases, numbers, dates, …; a multiple select's
   # chips are not edited in place): an item emptied in place keeps its row

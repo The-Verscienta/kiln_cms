@@ -24,8 +24,8 @@ UI" workflow, scoped to fields.
   `link_of_id`, `group_of_id`, `flex_of_id`, `item_setting`, `help_text`, `position`, `default`, `compute`,
   `private`, `validation`). Field types: `:string`,
   `:text`, `:integer`, `:float`, `:boolean`, `:date`, `:datetime`, `:url`,
-  `:select`, `:media`, `:reference`, `:group`, `:flexible` (code only for now, see
-  "Define a flexible field from code"), `:user`, `:geolocation`,
+  `:select`, `:media`, `:reference`, `:group`, `:flexible` (see
+  "Build flexible content in the admin"), `:user`, `:geolocation`,
   `:datetime_range`, `:recurrence`, `:computed`, the six format types
   `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (see
   "Built-in format types" below) and the composite `:range`, `:key_value` and
@@ -2187,17 +2187,96 @@ What the editor can see go wrong:
   value already taken, shows in the **New *Type*** form, and nothing is
   created.
 
+### Build flexible content in the admin
+
+A `:flexible` field holds an ordered list of items of **different kinds** (a
+hero, a quote, a feature grid), each kind with its own fields. The items are
+data with settings, not page layout: your theme decides how each kind looks.
+You need the admin role to define one; any editor who may edit the record
+fills it in. The design is in
+[ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+
+**Define the field and its item types (admin)**
+
+1. Open `/editor/fields`. Under **Add a field**, keep **This field holds** on
+   **A value**, tick the content types under **Content types**, and fill in
+   **Label** (`Sections`) and **Machine name** (`sections`).
+2. Choose **Flexible content** as the **Field type**. The form explains that
+   you add the kinds once the field is saved. Optionally set **How many
+   items** (**Minimum** and **Maximum**) for the whole field.
+3. Click **Add field**. The new row under **Defined fields** carries an
+   **Item types** panel that says "No item types yet".
+4. In the panel, click **Add an item type**. Fill in **Label** (`Hero`),
+   **Machine name** (filled in from the label until you change it), an
+   optional **Help text** (shown in the editor's add menu), and **Most items
+   of this kind** if one value should hold only so many. Click **Save item
+   type**. Renaming an item type later keeps the items editors already added:
+   they move to the new name.
+5. Each item type shows its own **Fields in each item** panel. Click **Add a
+   field**, pick the kind of value (the plain types, or **Flexible content**
+   for a list of its own, up to 3 levels deep), and save. Tick **Required on
+   every item** to make a value mandatory.
+6. Tick **Setting** on a field that configures the item (a background, a
+   width) rather than being content. A setting is stored under the item's
+   `_settings`, apart from its content, and shows in the editor under a
+   collapsed **Settings** heading. **Setting** is fixed once the field is
+   created: to change it, add a new field and delete the old one.
+7. Reorder item types with the up and down arrows beside each one (there is
+   no dragging in this panel). Use **Edit** to change one, and the trash
+   button to delete it.
+
+A sub-field's **Visible when** and **Required when** conditions can read both
+the item's content fields and its settings.
+
+**Fill it in (editor)**
+
+1. Open a record of that type. The field shows its items as cards under its
+   label, with a count ("3 of 10 items" when there is a maximum).
+2. Click **Add item** and pick a kind. The card is added at the end of the
+   list (not after the card you last touched). A kind whose own maximum is
+   reached shows "Full" and can't be picked; at the field's maximum the
+   button is disabled and the field says "That's the most this field holds."
+3. Fill in the card. Click its title bar to collapse or expand it. **Settings**
+   at the bottom of a card is collapsed by default; its inputs are still
+   saved when it is closed. A card with an error is shown expanded, with a
+   "Needs attention" mark.
+4. Reorder cards by dragging the handle, or with the up and down buttons
+   (**Move item N up** / **Move item N down**). **Duplicate** copies a card,
+   nested items included, right after it; **Remove** (the trash button) deletes it. A field with a minimum
+   disables **Remove** at that minimum.
+5. Save as usual. A card you added but left blank is dropped on save, since an
+   untouched card is no item.
+
+If a card says "This item's type no longer exists on this field, so it can't
+be edited. Saving removes it.", its item type was deleted. The card is locked
+(no editing, moving or duplicating) and only **Remove** works; its content is
+not posted back, so saving drops it.
+
+If the field shows "This field has no item types yet. An admin adds them under
+Custom fields.", define at least one item type first.
+
+**Deleting.** Deleting an item type, or a whole flexible field, asks first and
+shows how many stored items go with it ("1 stored item is removed from your
+content permanently. This can't be undone."). If the count changes between
+the question and your click, the dialog shows the new number and asks again.
+If the items can't be counted it says so. A flexible field's type can't be
+changed, and no other field can become one: the **Field type** select is
+disabled when editing it.
+
+**What can go wrong in the admin**
+
+| You see | Meaning |
+|---|---|
+| "is already an item type of this field" | The machine name is taken within this flexible field. |
+| "A flexible field can't be changed to another type, or the other way round. Add a new field and delete this one." | The hint beside the disabled **Field type** select when you edit a flexible field. |
+| "Couldn't delete that. Check the count and try again." | The delete was refused or failed, most likely because an item was saved after the count; the dialog shows the number again, so confirm again. |
+| "Couldn't save the new order of item types." | The reorder was not saved; try again. |
+
 ### Define a flexible field from code
 
-A `:flexible` field holds an ordered list of items of **different types** (a
-hero, a quote), each type with its own sub-fields. It is the first release of
-the feature (#2282): the model and the write path work, and there is **no
-admin screen or editor input yet**. The Fields screen does not offer the type,
-and the content editor shows a flexible field as its label and an item count
-with the note "Edited through the API; item editing arrives with the next
-release." (no input, so saving keeps the stored items). Define it from code or
-a release task, as an admin. The design is in
-[ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+The admin screens above are the usual way in. The same model can be defined
+from code or a release task, as an admin, which is useful for seeding and
+tests.
 
 What the definition rows are:
 
@@ -2306,16 +2385,19 @@ Things to know:
   CMS.destroy_field_definition(hero, %{purge_items?: true}, actor: admin)
   ```
 
-  The check and the removal are not one step: an item saved between them is
-  removed too. Deleting the whole flexible field removes its item types, their
+  The guard check and the removal are not one step: an item saved between
+  them is removed too. The removal itself runs in the destroy's own
+  transaction, so the type and its items go together or not at all. Deleting
+  the whole flexible field removes its item types, their
   sub-fields and every item, without the guard, as deleting a group does.
 - **Copies, restores and imports.** A copy or a version restore drops an item
   whose `_type` the field no longer has, with a warning in the log. A JSON
   import fails that row instead, naming the path (`sections[2]._type`).
 - **Field sync.** `mix kiln.fields.export` and `import` carry the flexible
-  field but **not** its item types or their sub-fields yet
-  ([Syncing field definitions](field-sync.md)); define the item types on the
-  target site from code until the file format carries them.
+  field, its item types (an `"item_types"` list) and their sub-fields, to the
+  depth cap ([Syncing field definitions](field-sync.md#flexible-fields)).
+- **No retyping.** `field_type` can't change to or from `:flexible`, from the
+  admin, a field-sync import or the code interface; the update is refused.
 
 **What can go wrong**
 
@@ -2332,6 +2414,7 @@ Things to know:
 | `a flexible field can only be added to an item type` | A `:flexible` sub-field of a plain group. |
 | `can't be deleted while documents hold hero items; …` | The item type guard; remove the items, or destroy with `purge_items?: true`. |
 | `can't be deleted: whether documents hold hero items could not be checked; …` | The check failed (a read error, or the chain is past the cap). Try again, or destroy with `purge_items?: true`. |
+| `a field can't be changed to or from a flexible field: add a new field and delete this one` | An update changing `field_type` to or from `:flexible`. |
 | `an item type stays in the flexible field it was added to` / `can't change once the sub-field exists` | `flex_of_id` and `item_setting` can't change on update. |
 
 ### Delete a field of an unknown type

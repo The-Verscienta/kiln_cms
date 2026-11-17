@@ -206,6 +206,79 @@ defmodule KilnCMS.CMS.FlexiblePath do
     end
   end
 
+  @doc """
+  How many stored items of the last step's type exist in `table` (under the
+  `filter` tail), reached through `steps`: the number `items_exist?/3` tests
+  for being non-zero. `:error` when the count cannot be read (it must not read
+  as "none").
+  """
+  @spec count_items(String.t(), steps(), {function(), list()}) ::
+          {:ok, non_neg_integer()} | :error
+  # As `items_exist?/3`: `table` is a resource's own table, everything else a
+  # generated `$n` placeholder or a bound parameter.
+  # sobelow_skip ["SQL.Query"]
+  def count_items(table, steps, {filter, filter_params}) do
+    {_params, jsonpath} = op_params(:purge_type, steps)
+    bound = step_params(steps)
+    path_index = length(bound) + 1
+
+    sql = """
+    SELECT count(*) FROM #{table} AS t,
+           LATERAL jsonb_path_query(t.custom_fields, $#{path_index}::text::jsonpath, #{vars(length(steps))}) AS item
+     WHERE true#{filter.(path_index)}
+    """
+
+    case KilnCMS.Repo.query(sql, bound ++ [jsonpath] ++ filter_params) do
+      {:ok, %{rows: [[count]]}} when is_integer(count) -> {:ok, count}
+      _error -> :error
+    end
+  end
+
+  @doc """
+  How many stored items deleting `definition` would remove, for the fields
+  screen to show before it asks: the items of an **item type**, or, for a
+  **flexible field** (top-level or nested), the items of each of its item types
+  (what sits inside an item goes with it and is not counted again).
+  `{:ok, 0}` for any other definition; `:error` when a link of the chain does
+  not resolve or the count cannot be read, which a caller must treat as
+  "unknown", not "none".
+  """
+  @spec count_stored(map(), term()) :: {:ok, non_neg_integer()} | :error
+  def count_stored(%{flex_of_id: id} = item_type, tenant) when not is_nil(id) do
+    with {:ok, top, steps} <- item_path(item_type, tenant),
+         {:ok, table, filter, params} <- KilnCMS.CMS.Changes.SyncFieldValues.target(top) do
+      count_items(table, steps, {filter, params})
+    else
+      _unresolved -> :error
+    end
+  end
+
+  def count_stored(%{field_type: :flexible, id: id}, tenant) do
+    with {:ok, item_types} <- item_types_of(id, tenant) do
+      Enum.reduce_while(item_types, {:ok, 0}, &add_count(&1, &2, tenant))
+    end
+  end
+
+  def count_stored(_definition, _tenant), do: {:ok, 0}
+
+  defp add_count(item_type, {:ok, total}, tenant) do
+    case count_stored(item_type, tenant) do
+      {:ok, count} -> {:cont, {:ok, total + count}}
+      :error -> {:halt, :error}
+    end
+  end
+
+  defp item_types_of(flexible_id, tenant) do
+    case KilnCMS.CMS.list_field_definitions(
+           actor: KilnCMS.CMS.Housekeeping.system(:cms_registry),
+           tenant: tenant,
+           query: [filter: [flex_of_id: flexible_id]]
+         ) do
+      {:ok, item_types} -> {:ok, item_types}
+      {:error, _error} -> :error
+    end
+  end
+
   defp field(i), do: "$#{2 * i + 1}::text"
   defp type(i), do: "$#{2 * i + 2}::text"
 

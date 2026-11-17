@@ -219,7 +219,10 @@ cmd_up() {
   (
     # shellcheck disable=SC2030,SC2031 # PGPASSWORD is meant for this subshell only
     if [ "$prod_has" = 1 ]; then export PGPASSWORD="$prod_pw"; fi
-    pg_dump --no-owner --no-privileges "$prod_url"
+    # Production's queued jobs carry recipients and payloads (#2721): copy the
+    # table, not its rows. The scrub purges oban_jobs too, for a clone made
+    # some other way (a restored backup).
+    pg_dump --no-owner --no-privileges --exclude-table-data=oban_jobs "$prod_url"
   ) | (
     # shellcheck disable=SC2030,SC2031 # PGPASSWORD is meant for this subshell only
     if [ "$staging_has" = 1 ]; then export PGPASSWORD="$staging_pw"; fi

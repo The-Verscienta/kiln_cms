@@ -4,11 +4,11 @@ Status: in progress. Tracking epic: #2216 (children are checklisted there).
 #2217 (backup history) is built; #2218 (split archives and checksums) is built
 except for the Oban job-per-step chain, which stays open as a follow-up;
 #2219 has its retention module (per-component units, recovery-point markers,
-fail-closed prune), the schedules and scheduler (daily to monthly), the
+fail-closed prune), the schedules and scheduler, the
 Schedule tab that manages them, and each schedule's keep settings (keep the
 newest N, keep for a number of days, held for `backup.sh` by `.hold`
-markers) built, with sub-daily intervals still to come pending an owner
-decision;
+markers) built, and sub-daily intervals (every 2, 4, 8 or 12 hours, which
+must set their own keep days) built;
 #2220 (off-site destinations: the `Kiln.BackupDestination` contract, Local
 and Rclone destinations, one step per destination with a "partly off-site"
 outcome, and retention on each destination) is built, with S3 (#2221) still

@@ -69,18 +69,21 @@ defmodule KilnCMSWeb.LiveHostUriTest do
   end
 
   describe ":assign_current_org vouches host_uri" do
-    setup do
-      KilnCMS.Cache.Hosts.clear()
-      on_exit(&KilnCMS.Cache.Hosts.clear/0)
-      :ok
-    end
-
+    # Each org gets a unique slug, so its host has never been resolved and its
+    # `KilnCMS.Cache.Hosts` entry starts cold. On exit only that host's entry
+    # is dropped: `Hosts.clear/0` empties the node-wide cache under every
+    # other async test (#2839).
     defp org(slug) do
-      Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
-        name: slug,
-        slug: "#{slug}-#{System.unique_integer([:positive])}",
-        status: :active
-      })
+      org =
+        Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{
+          name: slug,
+          slug: "#{slug}-#{System.unique_integer([:positive])}",
+          status: :active
+        })
+
+      host = host_for(org)
+      on_exit(fn -> Cachex.del(KilnCMS.Cache.Hosts.cache_name(), host) end)
+      org
     end
 
     defp host_for(o), do: "#{o.slug}.#{KilnCMSWeb.Tenant.base_host()}"
