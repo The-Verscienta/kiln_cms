@@ -152,7 +152,18 @@ estimate says N + 1.
   in the app. The upgrade note asks for the script first, and the Schedule
   tab asks when host cron backed a component up in the last eight days.
   Detecting an orphan hold (a `.hold` whose backup cron deleted anyway) is a
-  follow-up.
+  follow-up. *Amended (#2931):* each hold sync now reports a held unit whose
+  data is gone (no member left, or only its `.sha256` sidecar, as the
+  `find`-based prune of 1.8 and older leaves) and that the app didn't prune
+  itself (no `.work/<stamp>`, its Run not running and not marked `pruned`
+  here), once, when it removes that stale `.hold`: a warning, a
+  `[:kiln_cms, :backups, :hold, :deleted_outside]` event, and a warning on
+  the Backups page and the Schedule tab for eight days
+  (`Retention.held_deleted_candidates/2`, stored as a `Backups.Notice`, see
+  [ADR 0066](0066-an-operator-facing-backup-problem-is-a-notice-row-not-a-run-log-line-or-a-security-event.md)).
+  A unit with only its sidecar left is no longer held. The keep settings
+  always say the script must be this release's. It is still after the fact:
+  the backup is gone by the time the app sees it.
 - **A schedule change made while a marker-sync job is executing** may wait
   for the next slot (15 minutes by default) or the next in-app backup: the
   job is unique while one is available, scheduled, executing or retryable, so

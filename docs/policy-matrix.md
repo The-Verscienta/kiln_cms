@@ -513,13 +513,17 @@ heartbeats) and [ADR 0045](decisions/0045-a-backup-run-write-never-shares-the-lo
 |--------|:-----:|:------:|:-----:|:------:|:---------:|:-----:|
 | `read`, `report`, `clear` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
-Backup problems the Backups page and Home must show (#2487, #2931): retention
-skipped or stopped part-way, and a held backup deleted outside the app.
-Instance-wide and tenant-less. System-only, like `NodeBeat`: the backup
-pipeline writes the rows and `Backups.status/0` reads them, both as
-`Backups.system/0`; a platform admin sees them only through the pages that
-call `status/0`, which check `platform_admin?` first. Not exposed through
-GraphQL, JSON:API or MCP.
+Backup problems an operator must hear about (#2487, #2931), one row per kind
+and place: retention skipped or stopped part-way (shown on the Backups page
+and Home), and a held backup deleted outside the app (shown on the Backups
+page and the Schedule tab). Instance-wide and tenant-less. System-only, like
+`NodeBeat`: the backup pipeline writes the rows (`KilnCMS.Backups.Notices`)
+and `Backups.status/0` reads them, both as `Backups.system/0`, the reads with
+`authorize_with: :error`. A platform admin sees them only through the pages
+that call `status/0`, which check `platform_admin?` first; every person,
+platform admin included, is refused the resource itself. Not exposed through
+GraphQL, JSON:API or MCP. Why a row of its own:
+[ADR 0066](decisions/0066-an-operator-facing-backup-problem-is-a-notice-row-not-a-run-log-line-or-a-security-event.md).
 
 ## Backup schedules — `Backups.Schedule`
 

@@ -106,6 +106,7 @@ so that nothing on the clone does so later on production's behalf.
 | **Idempotency keys** | purged (`idempotent_requests_purged`) | Each row caches the response production sent, which carries whatever that response did. |
 | **Backup lock** | purged (`backup_locks_purged`) | Names production's nodes and backup jobs the scrub deletes. An empty table is a free lock for the staging host's own backups. |
 | **Backup node heartbeats** | purged (`backup_node_beats_purged`) | Production's node ids. |
+| **Backup notices** | purged (`backup_notices_purged`) | Production's retention and held-backup warnings, naming its backup directories and destinations. The staging host's own backups report their own (#2487). |
 | **A fresh staging admin** | provisioned, opt-in (`admin_provisioned`) | Because every real account is anonymized (nobody can sign in), the scrub can seed **one** known admin from `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` so the environment is usable. |
 
 The names in parentheses are the keys of the summary map `KilnCMS.Staging.scrub!/1`
