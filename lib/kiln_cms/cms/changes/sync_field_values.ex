@@ -72,7 +72,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
 
   Destroying an item type removes its items only because
   `Validations.ItemTypeInUse` let the destroy through (no items, or
-  `purge_items?: true`). Destroying a whole flexible field, or a nested one, is
+  `purge_items?: true`); with `purge_items?: true` the items are removed in the
+  destroy's own transaction (an `after_action`), so the type and its items go
+  together or not at all. Destroying a whole flexible field, or a nested one, is
   the group's behavior: the key is purged here. The database cascades from the
   field to its item types and their sub-fields **without** passing through this
   module, which is safe because the values went with the key.
@@ -92,6 +94,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   def change(changeset, _opts, context) do
     changeset
     |> Ash.Changeset.after_action(&rewrite_conditions(&1, &2, context))
+    |> Ash.Changeset.after_action(&purge_items(&1, &2))
     |> Ash.Changeset.after_transaction(&sync(&1, &2))
   end
 
@@ -124,6 +127,55 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp rewrite_conditions(_changeset, definition, _context), do: {:ok, definition}
+
+  # Destroying an item type with `purge_items?: true` removes its items in the
+  # destroy's own transaction (#2282): the type and its items go together or
+  # not at all, and no write that commits between the guard and the purge can
+  # outlive the type with the purge still pending. A concurrent save that
+  # lands after this statement but before the commit can still add an item of
+  # the type (the window ADR 0065 accepts); `ApplyCustomFields` refuses it on
+  # the next write that names the field. A failure here rolls the destroy
+  # back, rather than being logged as the post-commit statements are.
+  defp purge_items(
+         %{action_type: :destroy} = changeset,
+         %{flex_of_id: flex_id, name: name} = definition
+       )
+       when not is_nil(flex_id) do
+    if purge_requested?(changeset) do
+      previous = %{definition | name: name}
+
+      case FlexiblePath.item_path_detailed(previous, definition.org_id) do
+        {:ok, top, steps} -> purge_type_items(top, steps, definition)
+        # The flexible field went first and took every value with it.
+        {:error, :gone} -> {:ok, definition}
+        {:error, reason} -> {:error, "could not purge the items of #{name}: #{reason}"}
+      end
+    else
+      {:ok, definition}
+    end
+  end
+
+  defp purge_items(_changeset, definition), do: {:ok, definition}
+
+  defp purge_requested?(changeset),
+    do: Ash.Changeset.get_argument(changeset, :purge_items?) == true
+
+  defp purge_type_items(top, steps, definition) do
+    with false <- KilnCMS.CMS.FieldDefinition.orphaned?(top),
+         {:ok, table, filter, params} <- target(top) do
+      {sql, bound} = FlexiblePath.update_sql(table, steps, :purge_type, {filter, params})
+
+      case KilnCMS.Repo.query(sql, bound) do
+        {:ok, _result} -> {:ok, definition}
+        {:error, error} -> {:error, error}
+      end
+    else
+      # An orphaned owner governs no table; an unresolvable one is the same
+      # case `run/3` logs after the commit.
+      true -> {:ok, definition}
+      :error -> {:ok, definition}
+    end
+  end
 
   defp rewrite_dependent(dependent, {:ok, definition} = acc, from, opts) do
     rewritten = %{
@@ -296,8 +348,10 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   defp item_field_operations(_changeset, _steps, _definition), do: []
 
   # `steps` end in the item type under its old name.
-  defp item_type_operations(%{action_type: :destroy}, steps, _definition),
-    do: [{:item, steps, :purge_type}]
+  # Already removed in the destroy's own transaction when `purge_items?` asked
+  # for it (`purge_items/2`).
+  defp item_type_operations(%{action_type: :destroy} = changeset, steps, _definition),
+    do: if(purge_requested?(changeset), do: [], else: [{:item, steps, :purge_type}])
 
   defp item_type_operations(%{action_type: :update} = changeset, steps, definition) do
     if changeset.data.name == definition.name,
