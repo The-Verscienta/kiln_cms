@@ -45,7 +45,12 @@ defmodule KilnCMS.CMS.FieldSync do
   entry per stored layout of a section some field of the owner carries. A
   section with no entry is the default accordion, so the export leaves out a
   layout at the defaults, and an entry at the defaults stores nothing: it
-  removes the row its section has, if any, with or without `prune?`. The key is optional on
+  removes the row its section has, if any, with or without `prune?`. An
+  entry for a section no top-level field carries once the import is done
+  (no field in the file, nor a stored one it keeps) is refused (#2881): it
+  would lay nothing out until a later field inherited it. A field the import
+  moves out of a section, or deletes, takes the section's layout with it
+  when no other field carries the section. The key is optional on
   import: an owner without it (a file written before layouts existed) leaves
   that owner's layouts as they are, even with `prune?: true`; an owner with
   it, `[]` included, declares all its layouts. A file this release writes
@@ -80,6 +85,7 @@ defmodule KilnCMS.CMS.FieldSync do
   alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Changes.SyncFieldValues
+  alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldSection
   alias KilnCMS.CMS.SectionLayouts
@@ -295,10 +301,12 @@ defmodule KilnCMS.CMS.FieldSync do
   end
 
   defp plan_and_run(owners, scope, {apply?, prune?, allow?, expect}) do
-    report = owners |> plan(scope, prune?) |> build_report(apply?)
+    {ops, errors} = plan(owners, scope, prune?)
+    report = %{build_report(ops, apply?) | errors: errors}
 
     cond do
       expect != nil and digest(report) != expect -> {:error, :stale}
+      report.errors != [] -> {:error, report}
       report.blocked != [] and not allow? -> {:error, report}
       true -> execute(report, scope, apply?)
     end
@@ -554,30 +562,125 @@ defmodule KilnCMS.CMS.FieldSync do
   # --- planning --------------------------------------------------------------
 
   # One op per row, parents before children. `existing` is the stored record.
+  # Returns the ops and the problems that refuse the whole plan.
   defp plan(owners, scope, prune?) do
     types = Map.new(CMS.list_type_definitions!(scope), &{&1.name, &1})
     fields = CMS.list_field_definitions!(scope)
     sections = CMS.list_field_sections!(scope)
     by_children = Enum.group_by(fields, &FieldDefinition.parent_id/1)
+    hidden = unregistered_fields(scope, fields)
 
     type_ops = Enum.flat_map(owners, &type_op(&1, types))
 
-    field_ops =
-      Enum.flat_map(owners, fn owner ->
+    # The stored fields an import keeps whatever the file says: a field of
+    # an unregistered type always, and every other one unless it prunes.
+    kept = if prune?, do: hidden, else: hidden ++ fields
+
+    planned =
+      Enum.map(owners, fn owner ->
         existing = existing_top(owner, types, fields)
-        top = field_ops(owner.fields, existing, by_children, "#{owner.type}", [], prune?)
-        top
+        field_ops = field_ops(owner.fields, existing, by_children, "#{owner.type}", [], prune?)
+        carried = carried_after(owner, existing_top(owner, types, kept))
+        rows = existing_owned(owner, types, sections)
+
+        section_ops =
+          owner
+          |> section_ops(rows, prune?)
+          |> left_behind(owner, rows, left_names(field_ops) -- MapSet.to_list(carried))
+
+        {field_ops, section_ops, ghost_sections(owner, carried)}
       end)
 
-    section_ops =
-      Enum.flat_map(owners, fn owner ->
-        section_ops(owner, existing_owned(owner, types, sections), prune?)
-      end)
-
-    type_ops ++ field_ops ++ section_ops
+    {type_ops ++
+       Enum.flat_map(planned, &elem(&1, 0)) ++ Enum.flat_map(planned, &elem(&1, 1)),
+     Enum.flat_map(planned, &elem(&1, 2))}
   end
 
-  # An owner without a `"sections"` key declares no layouts: none is touched.
+  # The section names an owner's top-level fields carry once the import is
+  # done: the file's fields, and the stored ones it keeps (`stored`: those
+  # the file does not name and will not delete).
+  defp carried_after(owner, stored) do
+    named = MapSet.new(owner.fields, & &1["name"])
+
+    MapSet.new(
+      Enum.map(owner.fields, & &1["section"]) ++
+        for(field <- stored, not MapSet.member?(named, field.name), do: field.section)
+    )
+  end
+
+  # The sections the import's own field writes take a top-level field out of.
+  defp left_names(field_ops) do
+    for %{kind: :field, parent: [], existing: %{section: section}} = op <- field_ops,
+        is_binary(section),
+        leaves_section?(op),
+        uniq: true,
+        do: section
+  end
+
+  # A stored layout of a section the import leaves with no field is deleted,
+  # and the plan says so (#2881) rather than listing it as kept: whatever the
+  # file says about it (nothing, or no `"sections"` key at all). The
+  # reconcile after the writes is the backstop. An orphan no write of this
+  # import made is left as it was.
+  defp left_behind(section_ops, owner, rows, emptied) do
+    ops =
+      Enum.map(section_ops, fn
+        %{op: :untouched} = op ->
+          if section_name(op) in emptied, do: %{op | op: :delete}, else: op
+
+        op ->
+          op
+      end)
+
+    planned = MapSet.new(ops, &section_name/1)
+
+    ops ++
+      for row <- rows, row.name in emptied, not MapSet.member?(planned, row.name) do
+        %{
+          op: :delete,
+          kind: :section,
+          path: "#{owner.type}/section/#{row.name}",
+          attrs: nil,
+          changes: %{},
+          existing: row,
+          owner: owner.type
+        }
+      end
+  end
+
+  # The fields of a type this release does not register (#2605): no read
+  # above returns them, and no import writes them, but each still carries its
+  # section.
+  defp unregistered_fields(scope, fields) do
+    shown = MapSet.new(fields, & &1.id)
+
+    scope
+    |> Keyword.put(:context, FieldDefinition.all_types_context())
+    |> CMS.list_field_definitions!()
+    |> Enum.reject(&MapSet.member?(shown, &1.id))
+  end
+
+  # A layout entry no top-level field carries after the import
+  # (`carried_after/2`) lays nothing out, and the next field filed under that
+  # name would inherit it (#2881). The export never writes one, so the file
+  # was edited by hand: refused, as an unknown key is, rather than stored or
+  # silently dropped. An entry at the defaults stores nothing, so it is never
+  # a ghost.
+  defp ghost_sections(%{sections: nil}, _carried), do: []
+
+  defp ghost_sections(owner, carried) do
+    for section <- owner.sections,
+        not FieldSection.default?(section),
+        not MapSet.member?(carried, section["name"]) do
+      %{
+        path: "#{owner.type}/section/#{section["name"]}",
+        messages: ["no field of #{owner.type} is in this section, so its layout lays nothing out"]
+      }
+    end
+  end
+
+  # An owner without a `"sections"` key declares no layouts: none is touched,
+  # but for a section the import's field writes leave empty (`left_behind/4`).
   defp section_ops(%{sections: nil}, _existing, _prune?), do: []
 
   # Matched by name within the owner, as fields are. The path cannot collide
@@ -889,31 +992,63 @@ defmodule KilnCMS.CMS.FieldSync do
          {:ok, ids} <- run_phase(ops, :fields, ids, opts),
          {:ok, ids} <- run_phase(ops, :rules, ids, opts),
          {:ok, ids} <- run_phase(ops, :deletes, ids, opts) do
-      drop_section_layouts(ops, ids, opts)
+      reconcile_section_layouts(ops, ids, opts)
     end
   end
 
-  # A deleted field that was the last of its section takes the section's
-  # layout with it, as a delete in the fields admin does. Read after every
-  # delete has run, so a section op's own delete is already done.
-  defp drop_section_layouts(ops, ids, opts) do
-    ops
-    |> Enum.filter(
-      &match?(%{kind: :field, op: :delete, existing: %{section: s}} when is_binary(s), &1)
-    )
-    |> Enum.flat_map(fn %{existing: record} ->
-      case SectionLayouts.owner_of(record) do
-        nil -> []
-        owner -> [{owner, record.section}]
-      end
-    end)
-    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
-    |> Enum.reduce_while({:ok, ids}, fn {owner, names}, {:ok, ids} ->
-      case SectionLayouts.prune(owner, [only: names] ++ opts) do
-        :ok -> {:cont, {:ok, ids}}
-        {:error, error} -> {:halt, {:error, [%{path: "sections", messages: messages(error)}]}}
-      end
-    end)
+  # The per-write prune deferred above, once every write has run, dry runs
+  # included (#2881): a section a field left (moved to another section, or
+  # deleted) keeps its layout only while some top-level field still carries
+  # it, as in the fields admin. The candidates are those sections and the
+  # file's own section names; `SectionLayouts.prune_names/2` reads what is
+  # stored now, counting a field of an unregistered type as a carrier.
+  defp reconcile_section_layouts(ops, ids, opts) do
+    candidates = left_sections(ops) ++ file_sections(ops, ids)
+
+    case SectionLayouts.prune_names(candidates, opts) do
+      :ok -> {:ok, ids}
+      {:error, error} -> {:error, [%{path: "sections", messages: messages(error)}]}
+    end
+  end
+
+  defp left_sections(ops) do
+    for %{kind: :field, existing: %{section: section} = record} = op <- ops,
+        is_binary(section),
+        leaves_section?(op),
+        owner = SectionLayouts.owner_of(record),
+        not is_nil(owner),
+        do: {owner, [section]}
+  end
+
+  defp leaves_section?(%{op: :delete}), do: true
+  defp leaves_section?(%{op: :update, changes: changes}), do: Map.has_key?(changes, "section")
+  defp leaves_section?(_op), do: false
+
+  # The sections the file lays out (not the rows it leaves untouched). A
+  # section op's owner is the type's name; a dynamic type the import created
+  # is in `ids` by now.
+  defp file_sections(ops, ids) do
+    for %{kind: :section, op: op, owner: type} = section_op <- ops,
+        op != :untouched,
+        owner = section_owner(type, ids),
+        not is_nil(owner),
+        do: {owner, [section_name(section_op)]}
+  end
+
+  defp section_name(%{existing: %{name: name}}), do: name
+  defp section_name(%{attrs: %{"name" => name}}), do: name
+
+  defp section_owner(type, ids) do
+    case Map.get(ids, "type:#{type}") do
+      %{id: id} ->
+        {:dynamic, id}
+
+      nil ->
+        case Enum.find(ContentTypes.types(), &(Atom.to_string(&1) == type)) do
+          nil -> nil
+          atom -> {:compiled, atom}
+        end
+    end
   end
 
   defp run_phase(ops, phase, ids, opts) do

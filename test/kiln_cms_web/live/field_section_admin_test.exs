@@ -345,6 +345,29 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       refute Map.has_key?(layouts(), "Identity")
     end
 
+    test "clearing the section of its last field drops its layout (#2881)", %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "latin", 0, "Identity")
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      lv
+      |> form("#edit-field-#{latin.id}", field_definition: %{section: ""})
+      |> render_submit()
+
+      assert CMS.get_field_definition!(latin.id, actor: admin).section == nil
+      assert layouts() == %{}
+      # No field of the type has a section now, so no panel is left to prune
+      # it from: the save itself had to.
+      refute has_element?(lv, ~s([data-field-section="Identity"]))
+    end
+
     test "renaming a section on its last field takes its layout along", %{conn: conn} do
       admin = authed_user(:admin)
       latin = field!(admin, "latin", 0, "Identity")
@@ -458,6 +481,47 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
       assert html =~ "You can&#39;t change custom fields."
       assert layouts(tenant: site) == %{}
+    end
+  end
+
+  describe "authorization on a rename" do
+    test "an admin demoted after opening the edit form cannot move a section's last field",
+         %{conn: conn} do
+      platform_admin = authed_user(:admin)
+      site = org("fsadmin-rename")
+      latin = field!(platform_admin, "latin", 0, "Identity", tenant: site)
+
+      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+        actor: platform_admin,
+        tenant: site
+      )
+
+      user = authed_user(:editor)
+
+      membership =
+        Ash.Seed.seed!(Accounts.OrgMembership, %{
+          user_id: user.id,
+          organization_id: site.id,
+          role: :admin
+        })
+
+      {:ok, lv, _html} = conn |> org_conn(site) |> log_in(user) |> live(~p"/editor/fields")
+      render_click(lv, "edit", %{"id" => latin.id})
+
+      Ash.Seed.update!(membership, %{role: :editor})
+
+      html =
+        lv
+        |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
+        |> render_submit()
+
+      refute html =~ "Saved."
+
+      assert CMS.get_field_definition!(latin.id, actor: platform_admin, tenant: site).section ==
+               "Identity"
+
+      assert %{"Identity" => %{display: :tab}} = layouts(tenant: site)
+      refute Map.has_key?(layouts(tenant: site), "Names")
     end
   end
 

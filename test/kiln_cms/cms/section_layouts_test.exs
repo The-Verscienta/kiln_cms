@@ -115,6 +115,35 @@ defmodule KilnCMS.CMS.SectionLayoutsTest do
       assert %{"Slay Specs" => %{display: :tab}} = layouts()
     end
 
+    test "a move from a dynamic type to a compiled one prunes the layout it left (#2881)",
+         %{admin: admin} do
+      type =
+        CMS.create_type_definition!(
+          %{name: "slay_move_#{System.unique_integer([:positive])}", label: "Slay"},
+          actor: admin
+        )
+
+      latin =
+        field!(admin, "slay_latin", "Slay Identity", %{
+          content_type: nil,
+          type_definition_id: type.id
+        })
+
+      CMS.create_field_section!(
+        %{type_definition_id: type.id, name: "Slay Identity", display: :tab},
+        actor: admin
+      )
+
+      CMS.update_field_definition!(
+        latin,
+        %{content_type: :page, type_definition_id: nil},
+        actor: admin
+      )
+
+      assert CMS.field_sections_for_definition!(type.id, authorize?: false) == []
+      assert layouts() == %{}
+    end
+
     test "a write that leaves the section alone reads nothing and keeps it", %{admin: admin} do
       latin = field!(admin, "slay_latin", "Slay Identity")
       layout!(admin, "Slay Identity")
@@ -251,6 +280,52 @@ defmodule KilnCMS.CMS.SectionLayoutsTest do
       assert {:error, _error} = CMS.destroy_field_definition(latin, actor: admin)
       assert {:ok, _still_there} = CMS.get_field_definition(latin.id, actor: admin)
       assert stored_layout_count() == 1
+    end
+  end
+
+  describe "who may move a section's last field" do
+    test "an editor's rename is refused, and the layouts are as they were", %{admin: admin} do
+      latin = field!(admin, "slay_latin", "Slay Identity")
+      layout!(admin, "Slay Identity")
+      editor = user(:editor)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               CMS.update_field_definition(
+                 latin,
+                 %{section: "Slay Names", carry_section_layout?: true},
+                 actor: editor
+               )
+
+      assert {:error, %Ash.Error.Forbidden{}} = CMS.destroy_field_definition(latin, actor: editor)
+
+      assert CMS.get_field_definition!(latin.id, actor: admin).section == "Slay Identity"
+      assert %{"Slay Identity" => %{display: :tab}} = layouts()
+      refute Map.has_key?(layouts(), "Slay Names")
+    end
+
+    # The layout writes run as the field write's own actor: whoever may move
+    # a field out of its section may also read, carry and prune its layout,
+    # so an allowed field write never fails on the layout's policy, and a
+    # refused one never reaches it.
+    test "whoever may write a field may write and read its section's layout", %{admin: admin} do
+      latin = field!(admin, "slay_latin", "Slay Identity")
+      row = layout!(admin, "Slay Identity")
+
+      for actor <- [admin, user(:editor), user(:viewer), nil] do
+        field_write? =
+          CMS.can_update_field_definition?(actor, latin, %{section: "Slay Names"}) or
+            CMS.can_destroy_field_definition?(actor, latin)
+
+        if field_write? do
+          assert CMS.can_create_field_section?(actor, %{content_type: :page, name: "Slay N"})
+          assert CMS.can_update_field_section?(actor, row, %{display: :fieldset})
+          assert CMS.can_destroy_field_section?(actor, row)
+          assert CMS.can_list_field_sections?(actor)
+          assert CMS.can_list_field_definitions?(actor)
+        end
+
+        assert field_write? == (actor == admin)
+      end
     end
   end
 
