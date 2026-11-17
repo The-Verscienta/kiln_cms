@@ -523,12 +523,18 @@ defmodule KilnCMS.Backups.WorkerTest do
       fresh = Path.join(dir, "manifest.json.48212-1.partial")
       cron = Path.join(dir, "manifest.json.partial")
       odd = Path.join(dir, "manifest.json.notatag.partial")
+      # backup.sh's `<pid>-<random>` and an untagged Manifest.write's random
+      # digits (#2832).
+      script = Path.join(dir, "manifest.json.12345-6789.partial")
+      random = Path.join(dir, "manifest.json.3141592653589793238.partial")
 
-      for path <- [stale, fresh, cron, odd], do: File.write!(path, "{}")
-      for path <- [stale, cron, odd], do: File.touch!(path, old)
+      for path <- [stale, fresh, cron, odd, script, random], do: File.write!(path, "{}")
+      for path <- [stale, cron, odd, script, random], do: File.touch!(path, old)
 
       assert :ok = BackupChain.run()
       refute File.exists?(stale)
+      refute File.exists?(script)
+      refute File.exists?(random)
       assert File.exists?(fresh)
       assert File.exists?(cron)
       assert File.exists?(odd)

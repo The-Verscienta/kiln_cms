@@ -2,7 +2,7 @@ defmodule KilnCMS.Backups.ManifestTest do
   # Pure file I/O in a private tmp dir.
   use ExUnit.Case, async: true
 
-  alias KilnCMS.Backups.Manifest
+  alias KilnCMS.Backups.{Artifact, Manifest}
 
   @hex String.duplicate("cd", 32)
 
@@ -188,6 +188,104 @@ defmodule KilnCMS.Backups.ManifestTest do
       manifest = %Manifest{finished_at: DateTime.utc_now(), trigger: "manual", ok: true}
       assert :ok = Manifest.write(dir, manifest, tag: 5, rename: &File.rename/2)
       assert %Manifest{trigger: "manual", ok: true} = Manifest.read(dir)
+      assert Path.wildcard(Path.join(dir, "*.partial")) == []
+    end
+  end
+
+  describe "untagged writes get a temporary name of their own (#2832)" do
+    test "a random digits tag, different on every write", %{dir: dir} do
+      parent = self()
+
+      spy = fn from, to ->
+        send(parent, {:tmp, from})
+        File.rename(from, to)
+      end
+
+      for _ <- 1..2, do: assert(:ok = Manifest.write(dir, %Manifest{ok: true}, rename: spy))
+
+      assert_received {:tmp, first}
+      assert_received {:tmp, second}
+      assert first != second
+
+      for tmp <- [first, second] do
+        assert Path.dirname(tmp) == dir
+        assert [_, tag] = Regex.run(~r/\Amanifest\.json\.(\d+)\.partial\z/, Path.basename(tmp))
+        assert Artifact.tag?(tag)
+      end
+
+      assert Path.wildcard(Path.join(dir, "*.partial")) == []
+    end
+
+    # The untagged name is an older backup.sh's, possibly mid-write.
+    test "never touches manifest.json.partial, whether the write lands or fails", %{dir: dir} do
+      cron = Manifest.path(dir) <> ".partial"
+      File.write!(cron, "cron, half written")
+
+      assert :ok = Manifest.write(dir, %Manifest{ok: true})
+
+      assert {:error, :x} =
+               Manifest.write(dir, %Manifest{ok: false}, rename: fn _, _ -> {:error, :x} end)
+
+      assert File.read!(cron) == "cron, half written"
+      assert Manifest.read(dir).ok == true
+    end
+
+    test "a writer paused before its rename keeps its own file while another publishes",
+         %{dir: dir} do
+      parent = self()
+
+      paused = fn from, to ->
+        send(parent, {:paused, self(), from})
+
+        receive do
+          :go -> File.rename(from, to)
+        end
+      end
+
+      a = %Manifest{trigger: "cron", ok: true, keep_days: 1}
+      b = %Manifest{trigger: "manual", ok: false, keep_days: 2}
+
+      task = Task.async(fn -> Manifest.write(dir, a, rename: paused) end)
+      assert_receive {:paused, pid, a_tmp}, 5_000
+      a_json = File.read!(a_tmp)
+
+      assert :ok = Manifest.write(dir, b)
+      assert %Manifest{trigger: "manual"} = Manifest.read(dir)
+      assert File.read!(a_tmp) == a_json
+
+      send(pid, :go)
+      assert :ok = Task.await(task)
+      assert %Manifest{trigger: "cron", ok: true, keep_days: 1} = Manifest.read(dir)
+      assert Path.wildcard(Path.join(dir, "*.partial")) == []
+    end
+
+    test "many writers racing: every read is one writer's complete manifest", %{dir: dir} do
+      written = for n <- 1..50, do: %Manifest{trigger: "w#{n}", ok: rem(n, 2) == 0, keep_days: n}
+
+      # Each one's exact bytes, written alone.
+      expected =
+        MapSet.new(written, fn m ->
+          alone = Path.join(dir, "alone")
+          :ok = Manifest.write(alone, m)
+          File.read!(Manifest.path(alone))
+        end)
+
+      path = Manifest.path(dir)
+      :ok = Manifest.write(dir, hd(written))
+
+      reader = Task.async(fn -> for _ <- 1..2_000, do: File.read(path) end)
+
+      results =
+        written
+        |> Enum.map(fn m -> Task.async(fn -> Manifest.write(dir, m) end) end)
+        |> Task.await_many(30_000)
+
+      assert Enum.all?(results, &(&1 == :ok))
+
+      reads = for {:ok, raw} <- Task.await(reader, 30_000), do: raw
+      assert reads != []
+      for raw <- reads, do: assert(MapSet.member?(expected, raw), raw)
+      assert MapSet.member?(expected, File.read!(path))
       assert Path.wildcard(Path.join(dir, "*.partial")) == []
     end
   end

@@ -116,6 +116,31 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert {_, 0} = System.cmd("bash", [@restore, "media", archive], env: restore_env(ctx))
     end
 
+    # restore.sh verifies the dump against the sidecar this script wrote
+    # before it touches the database (#2877).
+    test "restore.sh db verifies the dump it wrote", ctx do
+      assert {_, 0} = backup(ctx, "db")
+      assert [dump] = Path.wildcard(Path.join(ctx.backups, "db/kiln-db-*.dump"))
+      stub!(ctx.bin, "createdb", "#!/bin/sh\nexit 0\n")
+
+      restore_env = [
+        {"RESTORE_DATABASE_URL", "postgres://kiln@db/kiln_restore"},
+        {"RESTORE_CONFIRM", "yes"},
+        {"RESTORE_REQUIRE_CHECKSUM", "1"},
+        {"PATH", ctx.bin <> ":" <> System.get_env("PATH")}
+      ]
+
+      assert {out, 0} =
+               System.cmd("bash", [@restore, "db", dump],
+                 env: restore_env,
+                 stderr_to_stdout: true
+               )
+
+      assert out =~ "==> Verifying checksum from #{Path.basename(dump, ".dump")}.sha256"
+      assert out =~ "#{Path.basename(dump)}: OK"
+      assert out =~ "Restore complete"
+    end
+
     test "no .partial is left behind", ctx do
       assert {_, 0} = backup(ctx, "all")
       assert Path.wildcard(Path.join(ctx.backups, "**/*.partial")) == []
@@ -746,6 +771,149 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     end
   end
 
+  describe "manifest.json temporary names (#2832)" do
+    test "cron and the app finishing together: each writes its own file, the last rename wins",
+         ctx do
+      {fifo, flag} = stall_at_manifest_mv!(ctx)
+      task = Task.async(fn -> backup(ctx, "all") end)
+      wait_until(fn -> File.exists?(flag) end)
+
+      # cron's temporary file, complete, waiting for its rename.
+      assert [cron_tmp] = Path.wildcard(Path.join(ctx.backups, "manifest.json.*.partial"))
+      assert Path.basename(cron_tmp) =~ ~r/\Amanifest\.json\.\d+-\d+\.partial\z/
+      assert %{"trigger" => "cron"} = cron_tmp |> File.read!() |> Jason.decode!()
+
+      app = %KilnCMS.Backups.Manifest{trigger: "manual", ok: true, keep_days: 3}
+      assert :ok = KilnCMS.Backups.Manifest.write(ctx.backups, app)
+      assert manifest!(ctx)["trigger"] == "manual"
+      assert %{"trigger" => "cron"} = cron_tmp |> File.read!() |> Jason.decode!()
+
+      release(fifo)
+      assert {_, 0} = Task.await(task, 60_000)
+      assert %{"trigger" => "cron", "ok" => true} = manifest!(ctx)
+      assert Path.wildcard(Path.join(ctx.backups, "*.partial")) == []
+    end
+
+    test "two cron runs finishing together both succeed, and the paused one lands last", ctx do
+      {fifo, flag} = stall_at_manifest_mv!(ctx)
+      first = Task.async(fn -> backup(ctx, "all") end)
+      wait_until(fn -> File.exists?(flag) end)
+      assert [first_tmp] = Path.wildcard(Path.join(ctx.backups, "manifest.json.*.partial"))
+      first_stamp = first_tmp |> File.read!() |> Jason.decode!() |> Map.fetch!("stamp")
+
+      # A different stamp: stamps have one-second resolution.
+      Process.sleep(1100)
+      assert {_, 0} = backup(ctx, "all")
+      refute manifest!(ctx)["stamp"] == first_stamp
+      assert File.exists?(first_tmp)
+
+      release(fifo)
+      assert {_, 0} = Task.await(first, 60_000)
+      assert %{"stamp" => ^first_stamp, "ok" => true} = manifest!(ctx)
+      assert Path.wildcard(Path.join(ctx.backups, "*.partial")) == []
+    end
+
+    # $RANDOM seeded, and the script sourced so its PID is the wrapper's: the
+    # wrapper knows the first names the run will pick and takes them first,
+    # one as a symlink to a file outside the directory, one as another
+    # writer's file.
+    test "a name already taken is skipped, never written through or removed", ctx do
+      victim = Path.join(ctx.tmp, "victim")
+      File.write!(victim, "untouched")
+      other = "another writer's"
+
+      wrapper = ~S"""
+      set -- $("$BASH" -c 'RANDOM=42; echo $RANDOM $RANDOM')
+      ln -s "$VICTIM" "$BACKUP_DIR/manifest.json.$$-$1.partial"
+      printf '%s' "$OTHER" > "$BACKUP_DIR/manifest.json.$$-$2.partial"
+      echo "$$ $1 $2" > "$TAKEN"
+      RANDOM=42
+      set -- all
+      . "$SCRIPT"
+      """
+
+      taken = Path.join(ctx.tmp, "taken")
+
+      extra = [
+        {"VICTIM", victim},
+        {"OTHER", other},
+        {"TAKEN", taken},
+        {"SCRIPT", @script}
+      ]
+
+      assert {_, 0} =
+               System.cmd("bash", ["-c", wrapper],
+                 env: merge_env(env(ctx), extra),
+                 stderr_to_stdout: true
+               )
+
+      [pid, r1, r2] = taken |> File.read!() |> String.split()
+      link = Path.join(ctx.backups, "manifest.json.#{pid}-#{r1}.partial")
+      file = Path.join(ctx.backups, "manifest.json.#{pid}-#{r2}.partial")
+
+      assert File.read!(victim) == "untouched"
+      assert {:ok, %{type: :symlink}} = File.lstat(link)
+      assert File.read!(file) == other
+      assert %{"ok" => true, "trigger" => "cron"} = manifest!(ctx)
+
+      assert Enum.sort(Path.wildcard(Path.join(ctx.backups, "*.partial"))) ==
+               Enum.sort([link, file])
+    end
+
+    test "prune removes a manifest temporary file past the grace, and only that", ctx do
+      old = 120
+
+      gone = [
+        abandoned!(ctx, "manifest.json.4242.partial", old),
+        abandoned!(ctx, "manifest.json.48211-2.partial", old),
+        abandoned!(ctx, "manifest.json.3141592653589793238.partial", old)
+      ]
+
+      kept = [
+        abandoned!(ctx, "manifest.json.4243.partial", 10),
+        abandoned!(ctx, "manifest.json.partial", old),
+        abandoned!(ctx, "manifest.json.notatag.partial", old),
+        abandoned!(ctx, "manifest.json.1-2-3.partial", old),
+        abandoned!(ctx, "manifest.json.4244.partial.bak", old)
+      ]
+
+      target = abandoned!(ctx, "elsewhere", old)
+      link = Path.join(ctx.backups, "manifest.json.9.partial")
+      File.ln_s!(target, link)
+
+      assert {out, 0} = backup(ctx, "prune")
+
+      for f <- gone do
+        refute File.exists?(f)
+        assert out =~ f
+      end
+
+      assert Enum.all?(kept, &File.exists?/1)
+      assert {:ok, %{type: :symlink}} = File.lstat(link)
+      assert File.exists?(target)
+    end
+
+    test "prune keeps a manifest temporary file whose age it can't tell", ctx do
+      real_find = System.find_executable("find")
+
+      stub!(ctx.bin, "find", """
+      #!/bin/sh
+      for a in "$@"; do [ "$a" = "-mmin" ] && exit 1; done
+      exec #{real_find} "$@"
+      """)
+
+      stale = abandoned!(ctx, "manifest.json.4242.partial", 120)
+      assert {out, 0} = backup(ctx, "prune")
+      assert out =~ "could not check the age of #{stale}; kept it"
+      assert File.exists?(stale)
+    end
+
+    test "the grace agrees with the app's" do
+      [_, grace] = Regex.run(~r/^PARTIAL_GRACE_MIN=(\d+)$/m, File.read!(@script))
+      assert String.to_integer(grace) * 60 == Retention.partial_grace_s()
+    end
+  end
+
   describe "prune and the schedules' keep rules (#2219)" do
     # Cron has no schedules: it sees what they keep only through the `.hold`
     # markers the app writes from its plan (and the newest verified backup
@@ -1349,6 +1517,32 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "interrupted by SIGTERM"
       assert media_dir_listing(ctx) == []
       assert Path.wildcard(Path.join(ctx.backups, "**/*.partial")) == []
+      assert File.ls!(ctx.scratch) == []
+
+      manifest = manifest!(ctx)
+      refute manifest["ok"]
+      assert manifest["error"] == "interrupted by SIGTERM"
+    end
+
+    # The dump runs as a background child the script waits for (#2847): the
+    # signal interrupts the wait at once, on_exit stops the dump, then cleans
+    # up as it does mid-part.
+    test "SIGTERM during the dump stops it, cleans up and records the failure", ctx do
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      for a in "$@"; do
+        case "$a" in --file=*) printf 'PGDMP half a dump' > "${a#--file=}" ;; esac
+      done
+      kill -TERM "$PPID"
+      n=0; while [ "$n" -lt 600 ]; do #{System.find_executable("sleep")} 0.05; n=$((n+1)); done
+      """)
+
+      {elapsed, {out, 143}} = :timer.tc(fn -> backup(ctx, "all") end)
+      assert elapsed < 10_000_000
+      assert out =~ "interrupted by SIGTERM"
+      refute out =~ "Terminated"
+      assert Path.wildcard(Path.join(ctx.backups, "**/*.partial")) == []
+      assert Path.wildcard(Path.join(ctx.backups, "db/*")) == []
       assert File.ls!(ctx.scratch) == []
 
       manifest = manifest!(ctx)
@@ -2417,6 +2611,46 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     refute manifest["ok"]
     assert manifest["error"] =~ @no_null_list
     assert [%{"kind" => "db", "sha256" => ^hex}] = manifest["artifacts"]
+  end
+
+  # backup.sh's manifest rename blocks until the test releases the fifo; the
+  # flag says it is blocked. Only the first run pauses.
+  defp stall_at_manifest_mv!(ctx) do
+    real_mv = System.find_executable("mv")
+    fifo = Path.join(ctx.tmp, "release")
+    flag = Path.join(ctx.tmp, "stalled")
+    {_, 0} = System.cmd("mkfifo", [fifo])
+    # A failed assertion must not leave the script blocked for ever.
+    on_exit(fn -> release(fifo) end)
+
+    stub!(ctx.bin, "mv", """
+    #!/bin/sh
+    for last in "$@"; do :; done
+    case "$last" in
+      */manifest.json)
+        if [ ! -e "#{flag}" ]; then : > "#{flag}"; cat "#{fifo}" > /dev/null; fi ;;
+    esac
+    exec #{real_mv} "$@"
+    """)
+
+    {fifo, flag}
+  end
+
+  # Opened read-write, so this never waits for a reader.
+  defp release(fifo), do: System.cmd("sh", ["-c", ~s(exec 3<>"$1"; printf go >&3), "sh", fifo])
+
+  defp wait_until(fun, tries \\ 400) do
+    cond do
+      fun.() ->
+        :ok
+
+      tries == 0 ->
+        flunk("timed out waiting")
+
+      true ->
+        Process.sleep(25)
+        wait_until(fun, tries - 1)
+    end
   end
 
   defp stub!(bin, name, body) do

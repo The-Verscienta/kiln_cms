@@ -19,7 +19,12 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
   `pg_dump` / `pg_restore` are stubbed on `PATH`; tar and the rest are real.
   Sparse files keep the 16 MB parts cheap. The script is started through a
   wrapper that exports its real PID (`KILN_TEST_SCRIPT_PID`), so a stub kills
-  the script itself whichever subshell it runs in. `async: false`: it spawns
+  the script itself whichever subshell it runs in.
+
+  The script's long-running children (pg_dump, tar, rclone) die with it
+  (#2847): a signal it traps stops the child at once, and when it is killed
+  outright the heartbeat stops the child at its next check. A stub standing in
+  for one logs its PID and then runs on, as the real program would. `async: false`: it spawns
   the script and shares the tmp namespace with the other backup tests.
   """
   use KilnCMS.DataCase, async: false
@@ -377,6 +382,189 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
     end
   end
 
+  describe "children die with the script (#2847)" do
+    test "SIGKILL during pg_dump: the heartbeat stops the dump", ctx do
+      child_runs_on!(ctx, "pg_dump", "--file=*", kill: "KILL")
+
+      assert {_, status} = backup(ctx)
+      assert status != 0
+      assert_child_stopped!(ctx)
+
+      # The killed run's evidence stays for the Importer and prune (#2478).
+      assert [_] = Path.wildcard(Path.join(ctx.backups, "db/kiln-db-*.dump.partial"))
+      assert [_] = Path.wildcard(Path.join(ctx.backups, "media/kiln-media-*.sha256.partial"))
+    end
+
+    test "SIGKILL during a media part: the heartbeat stops tar", ctx do
+      child_runs_on!(ctx, "tar", "*-czf*part02.tar.gz.partial*", kill: "KILL")
+
+      assert {_, status} = backup(ctx)
+      assert status != 0
+      assert_child_stopped!(ctx)
+    end
+
+    test "SIGKILL during an off-site copy: the heartbeat stops rclone", ctx do
+      child_runs_on!(ctx, "rclone", "copy", kill: "KILL")
+
+      assert {_, status} = backup(ctx, "bash", [{"BACKUP_RCLONE_REMOTE", "stub:x"}])
+      assert status != 0
+      assert_child_stopped!(ctx)
+    end
+
+    for {signal, code} <- [{"TERM", 143}, {"INT", 130}] do
+      test "SIG#{signal} during pg_dump stops the dump at once and cleans up", ctx do
+        child_runs_on!(ctx, "pg_dump", "--file=*", kill: unquote(signal))
+        assert_stopped_at_once!(ctx, unquote(signal), unquote(code), "bash")
+      end
+    end
+
+    # A second signal while on_exit runs must not cut the cleanup short. The
+    # dump ignores TERM, so on_exit is still waiting for it when the second
+    # signal arrives; it then gets KILL.
+    for {signal, code} <- [{"INT", 130}, {"TERM", 143}] do
+      test "a second SIG#{signal} during the cleanup does not stop it", ctx do
+        signal = unquote(signal)
+        child = Path.join(ctx.tmp, "child")
+
+        stub!(ctx.bin, "pg_dump", """
+        #!/bin/sh
+        trap '' TERM
+        echo $$ > "#{child}"
+        for a in "$@"; do
+          case "$a" in --file=*) printf 'PGDMP half a dump' > "${a#--file=}" ;; esac
+        done
+        exec >/dev/null 2>&1
+        kill -#{signal} "$KILN_TEST_SCRIPT_PID"
+        #{@real_sleep} 0.5
+        kill -#{signal} "$KILN_TEST_SCRIPT_PID"
+        #{runs_on()}
+        """)
+
+        {elapsed, {out, status}} = :timer.tc(fn -> backup(ctx) end)
+        assert status == unquote(code)
+        assert elapsed < 20_000_000
+        assert gone?(read_child!(ctx))
+        assert out =~ "interrupted by SIG#{signal}"
+        assert Path.wildcard(Path.join(ctx.backups, "**/*.partial")) == []
+        assert File.ls!(ctx.scratch) == []
+        error = "interrupted by SIG#{signal}"
+        assert %Manifest{ok: false, error: ^error} = Manifest.read(ctx.backups)
+      end
+    end
+
+    # The dump has ended and its PID now runs something else (here the
+    # stub execs `sleep`, and the script is killed only after that): the
+    # heartbeat must leave that process alone.
+    test "a PID that no longer runs the program is not stopped", ctx do
+      child = Path.join(ctx.tmp, "child")
+
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo $$ > "#{child}"
+      (
+        #{await_heartbeat(ctx)}
+        #{@real_sleep} 0.3
+        kill -KILL "$KILN_TEST_SCRIPT_PID"
+      ) </dev/null >/dev/null 2>&1 &
+      exec >/dev/null 2>&1
+      exec #{@real_sleep} 5
+      """)
+
+      assert {_, status} = backup(ctx)
+      assert status != 0
+      heartbeat_gone!(ctx)
+      pid = read_child!(ctx)
+      on_exit(fn -> System.cmd("kill", ["-KILL", pid], stderr_to_stdout: true) end)
+      refute gone?(pid)
+    end
+
+    # A file the heartbeat can't trust names no process to stop: empty, a PID
+    # with no program (torn mid-write), or a program cut short.
+    test "a torn child file never stops a process", ctx do
+      for line <- ["", "PID", "PID pg_d"] do
+        victim = Path.join(ctx.tmp, "victim")
+
+        stub!(ctx.bin, "pg_dump", """
+        #!/bin/sh
+        #{@real_sleep} 30 </dev/null >/dev/null 2>&1 &
+        echo $! > "#{victim}"
+        line=$(echo "#{line}" | sed "s/PID/$!/")
+        # After the script has recorded this stub, so the torn line is the last.
+        for f in "$TMPDIR"/kiln-backup-child.*; do :; done
+        n=0
+        while [ ! -s "$f" ] && [ "$n" -lt 1000 ]; do #{@real_sleep} 0.01; n=$((n+1)); done
+        printf '%s' "$line" > "$f"
+        #{await_heartbeat(ctx)}
+        kill -KILL "$KILN_TEST_SCRIPT_PID"
+        """)
+
+        assert {_, status} = backup(ctx)
+        assert status != 0
+        heartbeat_gone!(ctx)
+        pid = victim |> File.read!() |> String.trim()
+        refute gone?(pid), inspect(line)
+        System.cmd("kill", ["-KILL", pid])
+        File.rm!(victim)
+        File.rm_rf!(ctx.backups)
+        File.mkdir_p!(ctx.backups)
+      end
+    end
+
+    # The heartbeat stops a child only when the script is definitely gone: a
+    # `ps` that fails once says nothing, and the loop goes on.
+    test "a ps that fails once while the script lives leaves the child alone", ctx do
+      real_ps = System.find_executable("ps")
+      dumping = Path.join(ctx.tmp, "dumping")
+      failed = Path.join(ctx.tmp, "failed")
+      after_log = Path.join(ctx.tmp, "after")
+
+      # The first `ps` once the dump runs fails; the loop's later ones are
+      # logged.
+      stub!(ctx.bin, "ps", """
+      #!/bin/sh
+      if [ -e "#{dumping}" ] && [ ! -e "#{failed}" ]; then : > "#{failed}"; exit 1; fi
+      if [ -e "#{failed}" ]; then echo x >> "#{after_log}"; fi
+      exec #{real_ps} "$@"
+      """)
+
+      # A dump that lasts until the loop has checked twice after the failure.
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      for a in "$@"; do
+        case "$a" in --file=*) printf 'PGDMP pretend dump' > "${a#--file=}" ;; esac
+      done
+      : > "#{dumping}"
+      n=0
+      while [ "$n" -lt 1000 ]; do
+        c=0
+        [ -e "#{after_log}" ] && c=$(wc -l < "#{after_log}")
+        [ "$((c))" -ge 2 ] && exit 0
+        #{@real_sleep} 0.01; n=$((n+1))
+      done
+      exit 1
+      """)
+
+      assert {_, 0} = backup(ctx)
+      assert File.exists?(failed)
+      assert %Manifest{ok: true} = Manifest.read(ctx.backups)
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
+
+    test "under bash 3.2 too: SIGKILL, then SIGTERM, during pg_dump", ctx do
+      child_runs_on!(ctx, "pg_dump", "--file=*", kill: "KILL")
+      assert {_, status} = backup(ctx, ShellTools.bash32())
+      assert status != 0
+      assert_child_stopped!(ctx)
+
+      for dir <- [ctx.backups, ctx.scratch], do: File.rm_rf!(dir) && File.mkdir_p!(dir)
+      child_runs_on!(ctx, "pg_dump", "--file=*", kill: "TERM")
+      assert_stopped_at_once!(ctx, "TERM", 143, ShellTools.bash32())
+    end
+  end
+
   describe "a live run is never taken for a dead one (#2478)" do
     test "a run stalled for hours keeps its partials fresh; it is pending, then succeeds",
          ctx do
@@ -455,10 +643,12 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
 
   # --- helpers ---------------------------------------------------------------
 
-  defp backup(ctx, bash \\ "bash"), do: run_script(ctx, @script, ["all"], bash)
+  defp backup(ctx, bash \\ "bash", extra \\ []),
+    do: run_script(ctx, @script, ["all"], bash, extra)
 
   # Through a wrapper that exports the script's own PID: `exec` keeps it.
-  defp run_script(ctx, script, args, bash \\ "bash") do
+  # `extra` overrides (or adds to) the environment.
+  defp run_script(ctx, script, args, bash \\ "bash", extra \\ []) do
     env = [
       {"RESTORE_MEDIA_DIR", Path.join(ctx.tmp, "restored")},
       {"RESTORE_REQUIRE_CHECKSUM", nil},
@@ -478,6 +668,7 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       {"PATH", ctx.bin <> ":" <> System.get_env("PATH")}
     ]
 
+    env = Enum.reduce(extra, env, fn {k, v}, acc -> List.keystore(acc, k, 0, {k, v}) end)
     wrapper = ~s(export KILN_TEST_SCRIPT_PID=$$; exec "$0" "$@")
     System.cmd(bash, ["-c", wrapper, bash, script | args], env: env, stderr_to_stdout: true)
   end
@@ -509,6 +700,74 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
     log = Path.join(ctx.tmp, "heartbeat")
 
     ~s{n=0; while [ ! -s "#{log}" ] && [ "$n" -lt 1000 ]; do #{@real_sleep} 0.01; n=$((n+1)); done}
+  end
+
+  # A stub for `program` that, when an argument matches `pattern`, writes the
+  # file named by `--file=` (if any), logs its PID, signals the script
+  # (`kill:`; for KILL only once the heartbeat has logged) and then runs on as
+  # the real program would, with its output closed so the caller's pipe ends
+  # with the script. Any other call does what the default stub does.
+  defp child_runs_on!(ctx, program, pattern, kill: signal) do
+    child = Path.join(ctx.tmp, "child")
+    real = System.find_executable(program)
+    wait = if signal == "KILL", do: await_heartbeat(ctx), else: ":"
+
+    otherwise =
+      cond do
+        program == "pg_dump" -> ""
+        real -> "exec #{real} \"$@\""
+        true -> "exit 0"
+      end
+
+    stub!(ctx.bin, program, """
+    #!/bin/sh
+    hit=0
+    for a in "$@"; do
+      case "$a" in #{pattern}) hit=1 ;; esac
+      case "$a" in --file=*) printf 'PGDMP half a dump' > "${a#--file=}" ;; esac
+    done
+    case "$*" in #{pattern}) hit=1 ;; esac
+    if [ "$hit" = 1 ]; then
+      echo $$ > "#{child}"
+      #{wait}
+      exec >/dev/null 2>&1
+      kill -#{signal} "$KILN_TEST_SCRIPT_PID"
+      #{runs_on()}
+    fi
+    #{otherwise}
+    """)
+  end
+
+  # Thirty seconds of work in short sleeps (never `exec sleep`: the PID must
+  # stay the stub's, so the guard sees the program's name).
+  defp runs_on,
+    do: ~s{n=0; while [ "$n" -lt 600 ]; do #{@real_sleep} 0.05; n=$((n+1)); done}
+
+  defp read_child!(ctx), do: ctx.tmp |> Path.join("child") |> File.read!() |> String.trim()
+
+  # The heartbeat stopped the child within its 50 ms interval (5 s here), then
+  # exited, removing the child file.
+  defp assert_child_stopped!(ctx) do
+    pid = read_child!(ctx)
+    wait_until(fn -> gone?(pid) end)
+    heartbeat_gone!(ctx)
+    assert Path.wildcard(Path.join(ctx.scratch, "kiln-backup-child.*")) == []
+  end
+
+  # A trapped signal stops the child at once: the script exits with `code`
+  # in seconds, not after the child's 30, the child is gone when it returns,
+  # and on_exit cleaned up and recorded the failure.
+  defp assert_stopped_at_once!(ctx, signal, code, bash) do
+    {elapsed, {out, status}} = :timer.tc(fn -> backup(ctx, bash) end)
+    assert status == code
+    assert elapsed < 10_000_000
+    assert gone?(read_child!(ctx))
+    assert out =~ "interrupted by SIG#{signal}"
+    refute out =~ "Terminated"
+    assert Path.wildcard(Path.join(ctx.backups, "**/*.partial")) == []
+    assert File.ls!(ctx.scratch) == []
+    error = "interrupted by SIG#{signal}"
+    assert %Manifest{ok: false, error: ^error} = Manifest.read(ctx.backups)
   end
 
   defp heartbeat_pids(ctx),
