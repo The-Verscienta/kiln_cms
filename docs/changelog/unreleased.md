@@ -58,6 +58,25 @@ carries the reasoning.
   without the same limit.
   See [docs/releasing.md](../releasing.md#rolling-back-past-backup-destinations).
 
+## Breaking
+
+<a id="staging-scrub-refuses-live-node"></a>
+
+- **`KilnCMS.Staging.scrub!/1` refuses to run on a node whose Oban executes jobs, so `bin/kiln_cms rpc 'KilnCMS.Staging.scrub!(…)'` against a serving staging node now raises unless you pass `allow_live?: true`.**
+  A serving node's queues could run the clone's copy of production's jobs
+  (mail, webhooks, federation deliveries) before the scrub deleted them, so
+  scrubbing a fresh clone that way was never safe. The error reads
+  "Refusing to scrub from a node whose Oban queues are running." Scrub a new
+  clone before it serves, with `mix kiln.staging.scrub` or
+  `bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'` (what
+  `scripts/staging.sh` runs). To re-scrub a node that is already a scrubbed
+  clone, add `allow_live?: true`: the scrub then pauses every queue on every
+  node of the cluster first, and they stay paused until you restart the
+  application. A node counts as live in any Oban `testing` mode but
+  `:manual`, including `:inline`. No migration; rolling back is safe.
+  See [docs/staging-environments.md](../staging-environments.md#running-the-scrub).
+  Refs #2721.
+
 ## Added
 
 <a id="number-field-options"></a>
@@ -308,6 +327,46 @@ carries the reasoning.
   saved view naming one falls back to the default order. No migration.
 
 ## Fixed
+
+<a id="staging-scrub-personal-data"></a>
+
+- **The staging scrub now removes newsletter subscribers, form submissions, mail suppression lists, federation followers and keys, per-site integrations and every queued job from a production clone, and nothing cloned from production can run before it does.**
+  A scrubbed clone still held readers' addresses and form input, and
+  production's queued jobs, whose args carry recipients, bodies and outbound
+  URLs, could execute on the clone and mail or call out on production's
+  behalf. The scrub now:
+  - deletes newsletter subscribers and their segment memberships, form
+    submissions, the instance and per-site suppression lists, the webhook
+    delivery log, federation deliveries, followers and each site's federation
+    identity (its signing key), push subscriptions and VAPID keys, per-site
+    mail relay, SSO, AI and Meilisearch settings, rate-limit counters,
+    idempotency keys, the backup lock and node heartbeats;
+  - clears every form's notification address, switches off social accounts
+    and drops their credentials (their post history stays), and disables
+    every automation rule, removing a `send_email` rule's `to`;
+  - deletes `oban_jobs` in every state, first and again last. A canceled job
+    keeps its args, so canceling was not enough.
+
+  `mix kiln.staging.scrub` used to start the whole application, Oban queues
+  and plugins included, before scrubbing, so a cloned job could run in that
+  gap. It now boots with Oban inert (`testing: :manual`) and the backup
+  heartbeat off. `scripts/staging.sh up` dumps production with
+  `--exclude-table-data=oban_jobs`, so the clone never gets the rows. The
+  printed summary now lists every count the scrub returns.
+
+  A test classifies every table in the schema as scrubbed
+  (`KilnCMS.Staging.Scrub.dispositions/0`) or kept with a reason, so a new
+  table cannot reach a clone unexamined. What a clone still keeps (media
+  storage settings, the content-signing key, staff free text in comments and
+  tasks, plugin tables) is listed in
+  [docs/staging-environments.md](../staging-environments.md#what-the-scrub-keeps).
+
+  If you run the scrub with `KILN_BIN=mix` (the `scripts/staging.sh`
+  default), it needs `MIX_ENV=prod`: under any other environment Mix ignores
+  `DATABASE_URL`, and in dev the migrate step runs against `kiln_cms_dev`
+  (the scrub then refuses that name). This
+  was already true; the guide said otherwise. Re-scrub any clone you mean to
+  share. No migration. Fixes #2721.
 
 <a id="codeql-embed-origin-hardening"></a>
 

@@ -68,6 +68,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
   ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
 
+### Breaking
+
+- **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
+  ([long form](docs/changelog/unreleased.md#staging-scrub-refuses-live-node))
+
 ### Added
 
 - **Number fields: Step, Prefix and Suffix in the Validation fieldset and a Slider editor input. Field-sync exports now carry `step`, `prefix` and `suffix`, which a release before this one refuses as unknown keys.**
@@ -94,6 +99,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
 
 ### Fixed
+
+- **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
+  ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
