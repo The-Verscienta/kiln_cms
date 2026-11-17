@@ -210,6 +210,8 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The `kiln_reporting_v1` views show a reference inside a group row or a flexible item as `{id, type}` only, never the target's title or slug.** Hardening ahead of reference sub-fields inside items; a migration re-creates the six views with the same columns. ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282))
+
 - **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
   ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020) · [long form](docs/changelog/unreleased.md#staging-up-stops-on-a-failed-copy))
 
