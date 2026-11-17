@@ -829,11 +829,15 @@ defmodule KilnCMS.Notifications do
   # nothing new; a second comment, mention or task does. A registration
   # notice is about a site's queue, not one applicant (#2251): a second
   # sign-up while the first notice is unread changes nothing an admin does.
+  # A webhook health notice is about one endpoint's state: a second failure
+  # streak while the first notice is unread is the same news.
   @collapsing_events [
     :submitted_for_review,
     :published,
     :returned_to_draft,
-    :registration_pending
+    :registration_pending,
+    :webhook_failing,
+    :webhook_disabled
   ]
 
   defp collapses?(%{event: event} = attrs),

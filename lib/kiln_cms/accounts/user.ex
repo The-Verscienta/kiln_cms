@@ -197,6 +197,7 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_comment,
       :notify_on_registration,
       :notify_on_security_alert,
+      :notify_on_webhook_failure,
       :nav_preset,
       :status_marks,
       :content_list_columns
@@ -306,7 +307,8 @@ defmodule KilnCMS.Accounts.User do
         :notify_on_return_to_draft,
         :notify_on_comment,
         :notify_on_registration,
-        :notify_on_security_alert
+        :notify_on_security_alert,
+        :notify_on_webhook_failure
       ]
 
       # The validation below compares the actor with the row being changed.
@@ -1786,6 +1788,16 @@ defmodule KilnCMS.Accounts.User do
     # for every site the account administers; only the account holder can
     # change it (`Validations.OwnSecurityAlertMute`).
     attribute :notify_on_security_alert, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
+    # Webhook health: email me when a webhook on a site I administer stops
+    # getting its deliveries through, or is switched off for it
+    # (`KilnCMS.Webhooks.HealthNotice`). Mutes the email only — the bell row is
+    # always written. One flag for every site the account administers.
+    attribute :notify_on_webhook_failure, :boolean do
       default true
       allow_nil? false
       public? true

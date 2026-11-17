@@ -475,7 +475,8 @@ defmodule KilnCMS.Accounts do
         notify_on_return_to_draft: user.notify_on_return_to_draft,
         notify_on_comment: user.notify_on_comment,
         notify_on_registration: user.notify_on_registration,
-        notify_on_security_alert: user.notify_on_security_alert
+        notify_on_security_alert: user.notify_on_security_alert,
+        notify_on_webhook_failure: user.notify_on_webhook_failure
       },
       # Paid memberships (#337 Phase 2). The provider ids ARE included: they are
       # identifiers a subprocessor holds about this person, so GDPR Art. 15/20

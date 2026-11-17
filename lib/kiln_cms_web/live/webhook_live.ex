@@ -56,6 +56,7 @@ defmodule KilnCMSWeb.WebhookLive do
      |> assign(:revealed_urls, MapSet.new())
      |> assign(:form, create_form(actor, socket.assigns.current_org))
      |> load_endpoints()
+     |> mark_health_notices_read()
      |> load_deliveries()}
   end
 
@@ -320,6 +321,23 @@ defmodule KilnCMSWeb.WebhookLive do
     |> update(:revealed, &MapSet.intersection(&1, listed))
     |> update(:rotated, &MapSet.intersection(&1, listed))
     |> update(:revealed_urls, &MapSet.intersection(&1, listed))
+  end
+
+  # Opening the page is reading the news: the signed-in admin's own unread
+  # webhook health notices for this site's endpoints are marked read
+  # (`KilnCMS.Webhooks.HealthNotice`), so the next failure streak is news
+  # again. Only once connected, so the dead render does not do it twice. A
+  # failure costs an unread badge, so it is not the page's business.
+  defp mark_health_notices_read(socket) do
+    if connected?(socket) do
+      %{actor: user, current_org: org, endpoints: endpoints} = socket.assigns
+
+      for endpoint <- endpoints, event <- KilnCMS.Webhooks.HealthNotice.events() do
+        KilnCMS.Notifications.mark_read_about(user, org.id, event, endpoint.id)
+      end
+    end
+
+    socket
   end
 
   # A Slack endpoint has no secret to copy (Slack checks none), so nothing is
