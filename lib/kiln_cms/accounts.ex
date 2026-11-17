@@ -128,6 +128,9 @@ defmodule KilnCMS.Accounts do
       define :grant_membership_temporary_role, action: :grant_temporary_role
       define :expire_membership_role_grant, action: :expire_role_grant
 
+      # Erasure's write (#2774), system-only: see `Changes.AnonymizeUser`.
+      define :erase_org_membership, action: :erase
+
       # Registration approval (#2251) — see `KilnCMS.Accounts.Registrations`.
       # `queue_registration` is system-only (`Changes.QueueRegistration`); the
       # queue and the two decisions are an admin of the membership's own org.

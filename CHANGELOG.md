@@ -78,6 +78,9 @@ Every summary line below that was shortened links to its own entry there.
 - **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release (`:erasure_backfill_on_boot`, default on). No migration; rolling back is safe, and what it deleted stays deleted.**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-backfill-newsletter-upgrade))
 
+- **The boot-time erasure backfill now also demotes the site memberships of accounts erased before this release (its result gains `memberships`). No migration; rolling back is safe.**
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#erasure-backfill-memberships-upgrade))
+
 - **About 10 minutes after boot and daily, a job drops form submission data and automation payloads from finished jobs (`KILN_PRIVATE_ARGS_SCRUB_CRON`). No migration. Drain the `mail` queue before rolling back: form mail queued by this release fails on the previous one and is lost.**
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#private-job-args-upgrade))
 
@@ -145,17 +148,25 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **A document whose `:user` custom field names an erased person is refused on its next save that changes custom fields ("must be a person on this site"), as for a removed member.**
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#user-field-erased-person))
+
 - **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
 - **The content list can sort by a single-valued reference or media field too (Sort by → Field), by the target's current title or filename.**
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
 - **Telemetry: `[:kiln_cms, :backups, :retention, :skipped | :stopped]` now also fire for destinations (`scope: :destination`); local events carry `scope: :local`. Match on `scope` to count local only.**
   ([long form](docs/changelog/unreleased.md#backup-retention-telemetry-scope))
+- **Contributors: the backup script tests also run in CI under bash 3.2.57 and under bsdtar, and check that busybox tar is refused. The docs now say `backup.sh all` keeps its verified database dump when it refuses a tar.**
+  ([long form](docs/changelog/unreleased.md#backup-scripts-portability-ci))
 
 - **Form mail built from the stored submission when the job runs: a submission deleted or marked spam before then sends nothing, and no confirmation goes out if its email field was removed or renamed, or the autoresponder switched off, since.**
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-mail-reads-stored-submission))
 
 ### Fixed
+
+- **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
+  ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020) · [long form](docs/changelog/unreleased.md#staging-up-stops-on-a-failed-copy))
 
 - **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
   ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))
@@ -180,6 +191,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Erasure now deletes the account's linked newsletter subscriptions on every site, so the person's real address stops receiving newsletters, and Export my data lists them (without tokens).**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-deletes-newsletter-subscriptions))
+
+- **Erasure now demotes every site membership of the account (viewer, no temporary tier, no audiences), so an erased person is on no roster, gets no mail and can't be given a tier back. Team marks the row Erased.**
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#erasure-demotes-site-memberships))
+
+- **A payment webhook for an erased member is acknowledged and changes nothing, instead of reviving the canceled membership, and no longer deadlocks with that member's erasure.**
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#billing-webhook-erased-account))
 
 - **Form mail jobs carry only ids, and form data and automation payloads are dropped from a job's row when it finishes and from Sentry events. Automation payloads stay plain while pending (Known issues).**
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-automation-job-args))

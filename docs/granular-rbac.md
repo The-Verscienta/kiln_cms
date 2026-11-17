@@ -413,6 +413,9 @@ reads `Scoping.effective_tier/2`. Semantics:
 - a membership that is not `:active` (a registration [awaiting approval](account-administration.md#approving-registrations),
   or rejected, #2251) grants **no tier** on its org, and still makes the
   account affiliated.
+- an **erased** account (#2774) has **no tier** on any org, whatever its
+  memberships hold; erasure demotes them too
+  ([Removing an account](account-administration.md#removing-an-account)).
 
 So `/editor/team`'s tier select now *governs*: an org can promote a global
 viewer to site editor, or demote a global editor to site viewer, without

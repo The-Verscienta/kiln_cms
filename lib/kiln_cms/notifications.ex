@@ -57,6 +57,13 @@ defmodule KilnCMS.Notifications do
   is absent from their inbox as well as from their mail and their phone. There
   is no second preference lookup and no second recipient list to drift.
 
+  An erased account (`anonymized_at` set) is never a recipient on any
+  channel (#2774): `wants?/2` refuses it first, whatever its preferences say,
+  and the rosters it would be found on leave it out
+  (`KilnCMS.Accounts.Scoping.users_with_tier/2`). The task mail paths that
+  do not go through `wants?/2` (`KilnCMS.Notifications.Tasks`,
+  `KilnCMS.Notifications.TaskDigestWorker`) skip it themselves.
+
   Best-effort, like the other two: a notification that cannot be written is
   logged and dropped, never raised into the editorial action that caused it.
   The triggering changes (`KilnCMS.CMS.Changes.NotifyWorkflowEmail`,
@@ -905,6 +912,12 @@ defmodule KilnCMS.Notifications do
     }
 
   # Per-user opt-out (issue #46). Unknown/legacy users default to opted-in.
+  #
+  # An erased account wants nothing (#2774). Erasure resets every preference
+  # to its default (on), and its address is a tombstone, so without this an
+  # author or thread participant erased since would still get an inbox row
+  # and a mail job.
+  defp wants?(%{anonymized_at: %DateTime{}}, _event), do: false
   defp wants?(%{notify_on_review_request: enabled?}, :submitted_for_review), do: enabled?
   defp wants?(%{notify_on_publish: enabled?}, :published), do: enabled?
   defp wants?(%{notify_on_return_to_draft: enabled?}, :returned_to_draft), do: enabled?

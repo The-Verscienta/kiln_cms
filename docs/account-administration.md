@@ -1646,9 +1646,60 @@ with its content in a state the admin is told about.
 
 A content type whose documents **could not be read** is reported by name — on the
 confirmation screen ("could not be counted") and in the result — never folded into
-a success count. Erasure also clears the account's temporary grant and any
-per-site grants, and **revokes its API keys**: a surviving key would sign the
-tombstone straight back in.
+a success count. Erasure also clears the account's temporary grant, demotes
+every site membership it holds, and **revokes its API keys**: a surviving key
+would sign the tombstone straight back in.
+
+**Site memberships are kept, and grant nothing** (#2774). Each membership row
+stays on its site's Team page as the record that the person belonged there,
+but its tier drops to *Viewer* and its temporary tier and audiences are
+cleared. Its status, type scopes, field grants and custom role are left as
+they were: they only narrow what a tier allows, so clearing them would widen
+the row. No role-change event is written to the security log for the
+demotion. An erased account then has no tier and no audiences on any site,
+whatever a membership row says, and is on no roster: it can't be assigned a
+task, picked in a `:user` custom field or sent a review request, and it gets
+no workflow mail, in-app notification, task-assigned notice or task digest.
+
+### Remove an erased member from a site
+
+An erased account's membership stays on each site's **Team** page until you
+remove it. You need the platform admin role.
+
+1. On the site, open **Team** (`/editor/team`).
+2. Find the member's row. Its address is the tombstone
+   (`anonymized-<id>@deleted.invalid`), it reads **On this site:** *No access*,
+   and under that an **Erased** badge and the note "This account was erased.
+   It holds no tier here and cannot be given one; the row is kept as a record
+   until you remove it." The row has no **Edit** button.
+3. Click the trash icon on the row (its label is "Remove" and the address),
+   and confirm **Remove this member from the site?**. You see "Member
+   removed." and the row is gone.
+
+Keep the row instead if you want the site's member list to show that the
+person once belonged; it grants nothing either way.
+
+**What is refused for an erased account.** Every write that could give it
+access back fails with `KilnCMS.Accounts.Errors.AccountErased`, whose message
+is "belongs to an account that was erased":
+
+- any edit of its membership (`Accounts.update_org_membership/3`: tier,
+  custom role, scopes or audiences), which is why the Team page offers no
+  **Edit** for it;
+- granting its membership a temporary tier
+  (`Accounts.grant_membership_temporary_role/3`);
+- saving **Audiences** on its `/editor/accounts/:id` page, which shows that
+  message as the error. The panel is still on the page;
+- adding it to a site, as before.
+
+Removing the membership is not refused.
+
+**A `:user` custom field that names an erased person.** The field must name
+someone on the site's roster, and an erased account is on none. So a document
+whose `:user` field names them keeps the stored value, but its next save that
+changes its custom fields is refused with "must be a person on this site", the
+same as for a member removed from the site. Pick someone else in the field, or
+clear it, and save again.
 
 ## The last admin
 

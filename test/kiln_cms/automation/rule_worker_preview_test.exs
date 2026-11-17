@@ -99,6 +99,31 @@ defmodule KilnCMS.Automation.RuleWorkerPreviewTest do
              ) == []
     end
 
+    # #2774: an erased author is no editor, whatever their membership said.
+    test "passes over an erased author to the configured assignee" do
+      author = user(:viewer)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: author.id,
+        organization_id: org_id(),
+        role: :editor
+      })
+
+      record = page(author)
+      fallback = user(:editor)
+      KilnCMS.Accounts.anonymize_user!(author, actor: user(:admin))
+
+      assert [{:task, task}] =
+               preview(
+                 :create_task,
+                 %{"assignee_id" => fallback.id},
+                 record,
+                 "page.health_overdue"
+               )
+
+      assert task.assignee_id == fallback.id
+    end
+
     test "on an editorial event it has no author to assign — as the real reaction wouldn't" do
       # Only the health sweep's payload names the author; a publish carries the
       # serialized document, which doesn't. With no fallback, the real worker

@@ -18,6 +18,10 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
 
   alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive}
 
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
+
   @script Path.expand("../../scripts/restore.sh", __DIR__)
   @stamp "20260805-031700"
 
@@ -316,8 +320,9 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
       tar!(Path.join(ctx.backups, name), [{"a/../../evil", "pwned"}])
       write_sidecar!(ctx.backups, [name])
 
-      assert {_out, status} = restore(ctx, [Path.join(ctx.backups, name)])
+      assert {out, status} = restore(ctx, [Path.join(ctx.backups, name)])
       assert status != 0
+      assert out =~ "refusing to extract"
       refute File.exists?(Path.join(Path.dirname(ctx.dest), "evil"))
       assert nothing_extracted?(ctx)
     end

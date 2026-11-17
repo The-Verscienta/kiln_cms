@@ -248,6 +248,29 @@ the checkout session **and** the subscription it creates: session metadata does
 not propagate to the subscription, and the subscription is what carries every
 later event.
 
+### When the member was erased
+
+Erasing an account cancels its paid memberships in Kiln, drops their provider
+customer and subscription ids, and clears the audiences on every one of its
+site memberships ([Data flows](data-flows.md#subject-rights-workflows)). It
+does not cancel the subscription at the provider: do that in the provider's
+dashboard, or the person stays billed.
+
+Until you do, the provider keeps sending that subscription's events (a renewal
+each period, say), and the event still finds the membership through the
+metadata checkout stamped on the subscription. Kiln acknowledges the event
+(`200`), records it as processed, and changes nothing (#2774): the membership
+stays `canceled` with no provider ids, no entitlement event is recorded, no
+`membership.activated` or `membership.canceled` webhook is sent, and no
+audience or newsletter segment is granted. An admin's uncomp that reaches an erased
+account's membership is the same no-op. Before this, a renewal set the
+membership `active` again and re-sent `membership.activated` for the erased
+person.
+
+A webhook and an erasure of the same person can no longer deadlock: a
+membership transition now locks the account's row before the membership row,
+the order erasure uses.
+
 ## Webhook events
 
 A site can tell another system when a membership starts or stops granting
@@ -348,6 +371,7 @@ The audience a reader holds is resolved **per organization**, from their
 | member of this org (an active membership) | that membership's audiences |
 | registration on this org awaiting approval, or rejected (#2251) | `[]`, whatever the row holds |
 | member elsewhere, none here | `[]` — **fail-closed** |
+| an erased account (#2774) | `[]` on every site, whatever its rows hold |
 | no memberships at all | `[]` |
 | anonymous | `[]`, with no database lookup |
 

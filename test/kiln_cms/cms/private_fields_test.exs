@@ -336,6 +336,24 @@ defmodule KilnCMS.CMS.PrivateFieldsTest do
       assert Exception.message(error) =~ "must be a person on this site"
     end
 
+    # #2774: an erased account is on no site's roster, so a document naming
+    # one is refused on its next write of the field, as for a removed member.
+    test "naming an erased person is refused on the next save", ctx do
+      editor = user(:editor)
+      entry = entry!(ctx.admin, ctx.type, %{"owner" => editor.id})
+
+      KilnCMS.Accounts.anonymize_user!(editor, actor: ctx.admin)
+
+      # A form save: every field resubmitted, one of them changed (a map equal
+      # to the stored one is no change at all).
+      fields = %{"owner" => editor.id, "motto" => "edited"}
+
+      assert {:error, error} =
+               CMS.update_entry(entry, %{custom_fields: fields}, actor: ctx.admin)
+
+      assert Exception.message(error) =~ "must be a person on this site"
+    end
+
     test "is never delivered", ctx do
       entry = entry!(ctx.admin, ctx.type, %{"owner" => ctx.admin.id})
       KilnCMS.DataCase.drain_oban()
