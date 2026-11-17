@@ -10,7 +10,6 @@ defmodule KilnCMS.Scripts.ShellPortabilityTest do
   """
   use ExUnit.Case, async: true
 
-
   @moduletag :shell_portability
 
   if System.get_env("KILN_EXPECT_BASH", "") == "",
