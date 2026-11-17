@@ -92,7 +92,7 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterQueriesTest do
     seed_rows(many, 30)
 
     # Warm the one-off caches (registries, settings) so both runs see the same ones.
-    filtered_queries(conn, few)
+    warm_up(fn -> filtered_queries(conn, few) end)
 
     many_queries = filtered_queries(conn, many)
     few_queries = filtered_queries(conn, few)
@@ -117,7 +117,7 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterQueriesTest do
     end
 
     plain = %{"type" => "page", "q" => "nothing#{uniq()}"}
-    definition_reads(conn, plain)
+    warm_up(fn -> definition_reads(conn, plain) end)
 
     assert one_read.() >= 1
     # `live/2` runs handle_params twice: the static render, then the connected one.

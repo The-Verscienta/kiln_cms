@@ -157,7 +157,9 @@ estimate says N + 1.
   for the next slot (15 minutes by default) or the next in-app backup: the
   job is unique while one is available, scheduled, executing or retryable, so
   `SyncHolds` queues nothing then, and the executing job may have read the
-  schedules before the change.
+  schedules before the change. *Amended (#2932):* an executing job no longer
+  counts toward the uniqueness, so the change queues one more job, which
+  waits on the backup lock and reads the committed schedules.
 - **With `KILN_BACKUP_MARKER_SYNC_CRON=false`**, holds move only on the app's
   own backups and prunes; a cron-only deployment then has none.
 - **Rolling back to 1.9.x** ignores the keep settings and deletes `.hold`
@@ -167,7 +169,9 @@ estimate says N + 1.
   keeps their backups, until they are deleted by hand.
 - **Sub-daily intervals stay refused** (`Validations.IntervalAvailable`).
   A keep count is a minimum, not a cap; whether a sub-daily schedule must set
-  its own `keep_days` is an open owner question on #2219.
+  its own `keep_days` is an open owner question on #2219. *Amended (#2219):*
+  the owner chose that it must; sub-daily intervals are open, and
+  `Validations.SubDailyKeepsDays` requires `keep_days` for them.
 
 ## When to revisit
 

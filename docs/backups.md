@@ -576,10 +576,15 @@ Things to know:
   cron delete what a schedule keeps.
 - **With `KILN_BACKUP_MARKER_SYNC_CRON=false`**, holds move only when an
   in-app backup succeeds or prunes; a schedule change does not queue a sync.
-- **A schedule change made while a marker sync is running** waits for the
-  next slot (15 minutes by default) or the next in-app backup: the job is
-  unique while one is queued or running, and the running one may have read
-  the schedules before the change.
+- **A schedule change made while a marker sync is running** queues one more
+  sync, which waits for the running one to release the backup lock and then
+  reads the change (#2932). One already queued absorbs the change. While an
+  in-app backup holds the lock, the sync writes nothing and the backup
+  syncs the markers when it succeeds; if it fails, the next slot (15 minutes
+  by default) does.
+- **History shows them**: a row whose backup a `.hold` names has a **Kept by
+  a schedule: Database** or **Kept by a schedule: Media** badge
+  ([Backup history](#backup-history-2217)).
 - **Don't delete a `.hold` by hand** while the app keeps them in step: until
   the next sync, cron can delete the backup it named.
 - **Rolling back to 1.9.x** ignores the schedules and their keep settings:
@@ -1405,13 +1410,13 @@ account.
    | Field | What it takes |
    |---|---|
    | **What to back up** | **Database**, **Media**, or both. **Media** is greyed out, with "Media isn't archived on this deployment, so a schedule can't include it.", when the media are in S3 or there is no `MEDIA_DIR`. |
-   | **How often** | **Every day**, **Every week**, **Every 2 weeks** or **Every month**. More often than daily [is not available yet](#sub-daily-schedules-are-not-available-yet). |
-   | **At** | The local time, `HH:MM`, in the schedule's time zone. |
+   | **How often** | **Every 2 hours**, **Every 4 hours**, **Every 8 hours**, **Every 12 hours**, **Every day**, **Every week**, **Every 2 weeks** or **Every month**. The four sub-daily ones need **Keep for (days)** ([Back up more often than daily](#back-up-more-often-than-daily)). |
+   | **At** | The local time, `HH:MM`, in the schedule's time zone. For a sub-daily schedule, the first backup of the day; the hint under the box says "One backup at this time, and the others every 8 hours around the clock." |
    | **Starting on** | The first local date it may fire. Every week and every 2 weeks take their weekday from it (every 2 weeks also its week), every month its day of the month (the 31st becomes the month's last day). |
    | **Time zone** | An IANA name such as `Europe/Paris`. The box suggests about thirty common zones as you type, and takes any zone the time zone database knows. |
    | **Enabled** | Ticked, it runs; unticked, it is saved paused. |
    | **Keep the newest** | Optional, 1 to 1000: how many of this schedule's newest backups of each component to keep however old. Empty for none. |
-   | **Keep for (days)** | Optional, 1 to 3650: how long this schedule's own backups are kept. Empty keeps them for `BACKUP_KEEP_DAYS` (the hint under the box gives this deployment's value). |
+   | **Keep for (days)** | 1 to 3650: how long this schedule's own backups are kept. Optional for daily and longer, where empty keeps them for `BACKUP_KEEP_DAYS` (the hint under the box gives this deployment's value). Required for a sub-daily schedule. |
 
    The two keep fields are under **How long to keep its backups**, and are
    explained in
@@ -1499,6 +1504,7 @@ nothing is read or changed first.
 | "must have 1 or more items" under **What to back up** | Every box is unticked. Tick **Database**, **Media** or both. |
 | "This schedule changed since you opened it, so it wasn't saved. …" | Someone changed the schedule since you clicked **Edit** (above). Nothing you entered was saved; it is shown beside the stored values. |
 | "must be at least as long as the schedule's interval, unless a number of backups to keep is set" under **Keep for (days)** | **Keep for (days)** is shorter than one interval (1 day for daily, 7 weekly, 14 every 2 weeks, 31 monthly) and **Keep the newest** is empty. The schedule would keep nothing of its own but the newest backup. Raise the days or set **Keep the newest**. |
+| "is required for a schedule that runs more often than daily" under **Keep for (days)** | **How often** is every 2, 4, 8 or 12 hours and **Keep for (days)** is empty ([Back up more often than daily](#back-up-more-often-than-daily)). |
 | "That schedule no longer exists." | It was deleted in another tab or by another admin. |
 | "This schedule can't be edited here: it can only be paused, resumed or deleted." | The schedule holds a value the form can't offer ([A schedule the tab can only pause, resume or delete](#a-schedule-the-tab-can-only-pause-resume-or-delete)). |
 | "Only a platform admin can change backup schedules." | The schedule's policy refused the write: the account is not a platform admin. |
@@ -1506,8 +1512,9 @@ nothing is read or changed first.
 
 ### A schedule the tab can only pause, resume or delete
 
-The form offers what this release and this deployment can run: daily to
-monthly, the database, and the media when there is a media directory. A
+The form offers what this release and this deployment can run: every
+interval from every 2 hours to monthly, the database, and the media when
+there is a media directory. A
 schedule that stores anything else has no **Edit** button, only **Pause** or
 **Resume** and **Delete**, and its card says why:
 
@@ -1515,9 +1522,6 @@ schedule that stores anything else has no **Edit** button, only **Pause** or
   know, …": an interval or component written by a newer release, seen after
   rolling back. Its cadence reads "An interval this release doesn't know
   (`<value>`)" when the interval is the unknown value.
-- "Schedules more often than daily can't be edited here yet. You can pause,
-  resume or delete it.": an `every_2h` to `every_12h` interval written from
-  a console.
 - "This schedule backs up media, which isn't archived on this deployment,
   …": the media directory was removed after the schedule was made.
 
@@ -1556,13 +1560,13 @@ is admin.
    | Field | Values | Default |
    |---|---|---|
    | `components` | `[:db]`, `[:media]` or `[:db, :media]` (de-duplicated and put in that order) | required |
-   | `interval` | `:daily`, `:weekly`, `:fortnightly` or `:monthly` ([sub-daily ones are refused](#sub-daily-schedules-are-not-available-yet)) | required |
+   | `interval` | `:every_2h`, `:every_4h`, `:every_8h`, `:every_12h`, `:daily`, `:weekly`, `:fortnightly` or `:monthly` | required |
    | `time_of_day` | local wall time in `time_zone`, cut to the minute | required |
    | `starts_on` | a local date in `time_zone`; nothing fires before it. Weekly and fortnightly take their weekday from it, fortnightly also its week parity, monthly its day of the month (the 31st becomes the month's last day) | required |
    | `time_zone` | an IANA zone such as `"Europe/Paris"` | `"Etc/UTC"` |
    | `enabled` | `true` or `false` | `true` |
    | `keep_count` | 1 to 1000: keep this schedule's newest N backups of each component, however old ([below](#set-how-long-a-schedule-keeps-its-backups)) | `nil` (none) |
-   | `keep_days` | 1 to 3650: how long this schedule's own backups are kept; at least one interval long unless `keep_count` is set | `nil` (`BACKUP_KEEP_DAYS`) |
+   | `keep_days` | 1 to 3650: how long this schedule's own backups are kept; at least one interval long unless `keep_count` is set; required for the four sub-daily intervals ([below](#back-up-more-often-than-daily)) | `nil` (`BACKUP_KEEP_DAYS`) |
 
 2. Open the **Schedule** tab (`/editor/backups/schedules`): the schedule is
    a card there, as in the steps above.
@@ -1591,7 +1595,7 @@ that resubmits the same values records nothing.
 | Error | Meaning |
 |---|---|
 | `time_zone`: "is not a known time zone" | The zone isn't in the time zone database. Use an IANA name (`"Europe/Paris"`, `"America/New_York"`), not an abbreviation (`"CET"`). |
-| `interval`: "schedules more often than daily aren't available yet; choose daily or longer" | `:every_2h`, `:every_4h`, `:every_8h` or `:every_12h` ([below](#sub-daily-schedules-are-not-available-yet)). |
+| `keep_days`: "is required for a schedule that runs more often than daily" | A sub-daily `interval` with no `keep_days`, on a create, a switch to a sub-daily interval, a change that clears `keep_days`, or any change but `enabled` to a sub-daily schedule that has none ([below](#back-up-more-often-than-daily)). |
 | `keep_days`: "must be at least as long as the schedule's interval, unless a number of backups to keep is set" | `keep_days` below 1 (daily), 7 (weekly), 14 (fortnightly) or 31 (monthly) with no `keep_count`. Checked when the interval or either keep field changes. |
 | `keep_count`: "must be less than or equal to 1000", `keep_days`: "… 3650", or either "must be greater than or equal to 1" | A keep value out of range. |
 | `components`: "media isn't archived on this deployment" | `:media` on a deployment with no media directory (S3 media, or no `MEDIA_DIR`). |
@@ -1604,8 +1608,8 @@ that resubmits the same values records nothing.
 Everything on the tab comes from the same status the alarm uses, so a "Next
 run" shown there is one the scheduler will act on. Each schedule's card shows:
 
-- **Its cadence**, such as "Every day at 03:00 (Europe/Paris)", "Every week
-  on Thursday at 02:30 (Etc/UTC)", "Every 2 weeks on Thursday at 02:30
+- **Its cadence**, such as "Every 8 hours from 03:00 (Europe/Paris)", "Every
+  day at 03:00 (Europe/Paris)", "Every week on Thursday at 02:30 (Etc/UTC)", "Every 2 weeks on Thursday at 02:30
   (Etc/UTC), from 2026-01-01" or "Every month on day 15 at 03:00 (Etc/UTC)",
   and what it backs up ("Database", "Database + Media").
 - **"Next run: in 16 hours"** (or "due now") only when the schedule can fire
@@ -1631,6 +1635,9 @@ run" shown there is one the scheduler will act on. Each schedule's card shows:
   30 days" with **Keep the newest** set, otherwise "Keeps its backups for 30
   days", or "Keeps its backups for 14 days (BACKUP_KEEP_DAYS)" with neither
   set.
+- **"This schedule runs more often than daily without Keep for (days), …"**
+  on a sub-daily schedule stored without keep days
+  ([Back up more often than daily](#back-up-more-often-than-daily)).
 
 Above the list, a warning box appears when any of these holds:
 
@@ -1851,7 +1858,8 @@ The same from a release console, with the admin and schedule fetched as in
 
 **What the estimate means for the disk.** "Keeps about N backups at a time"
 is the larger of the backups younger than **Keep for (days)** (one per
-interval, plus one) and **Keep the newest** plus one, and never under two.
+interval, counted in hours, plus one) and **Keep the newest** plus one, and
+never under two.
 The plus one is the backup being made: the prune runs while it is still in
 flight, so it keeps N finished backups beside it, and N + 1 sets are on disk
 until the next prune. Budget for that with large media archives.
@@ -1865,23 +1873,82 @@ until the next prune. Budget for that with large media archives.
 | "Backup retention skipped: couldn't read the backup schedules (…); nothing was deleted" in the server log and the run's log | The prune couldn't read the schedules, so it deleted nothing ([When retention is skipped or stops](#when-retention-is-skipped-or-stops)). |
 | Backups past `BACKUP_KEEP_DAYS` disappear from a cron-pruned directory | The host's `backup.sh` predates the hold marker, or the app can't see the directory or reach it with the marker sync ([The hold markers](#the-hold-markers)). |
 
-### Sub-daily schedules are not available yet
+### Back up more often than daily
 
-`:every_2h`, `:every_4h`, `:every_8h` and `:every_12h` exist in the schema but
-are refused when a schedule is created or its interval changed, with
-"schedules more often than daily aren't available yet; choose daily or
-longer". Every run is a full set, and **Keep the newest** is a minimum, not a
-cap, so a schedule kept by age alone keeps about:
+A schedule can back up every 2, 4, 8 or 12 hours, for a site whose content
+changes through the day (part of #2219). You need a platform admin account
+([Schedule backups in the app](#schedule-backups-in-the-app)).
+
+Every run is a full set, a database dump (and a media archive, if the
+schedule covers media), and **Keep the newest** is a minimum, not a cap. Kept
+by age alone, a schedule keeps about
 
 > runs per day × `BACKUP_KEEP_DAYS`
 
-sets of each component. With the default 14 days, a daily schedule keeps
-about 14 sets of each component it covers; a two-hourly one would keep
-12 × 14 = 168, each a full database dump (and a full media archive, if it
-covers media). Whether sub-daily schedules open once they must set their own
-**Keep for (days)** is still to be decided (#2219). Need more than one backup
-a day now? Run host cron more often, where you control what `backup.sh prune`
-keeps.
+sets of each component: 12 × 14 = 168 for a two-hourly schedule on the
+default 14 days. So a sub-daily schedule must set its own **Keep for
+(days)**.
+
+1. On **Backups** → **Schedule**, click **Add a schedule** (or **Edit** on a
+   schedule's card).
+2. Under **What to back up**, tick **Database** only, unless your media
+   change as often. A media archive every few hours is the costly part.
+3. In **How often**, choose **Every 2 hours**, **Every 4 hours**, **Every 8
+   hours** or **Every 12 hours**. **Keep for (days)** is now marked
+   required, its hint reads "Required for a schedule that runs more often
+   than daily.", and the hint under **At** reads "One backup at this time,
+   and the others every 2 hours around the clock."
+4. In **At**, enter the first backup of the day. The others follow every N
+   hours, wrapping past midnight: 03:00 every 8 hours backs up at 03:00,
+   11:00 and 19:00 local time. On a daylight-saving night two of them can be
+   an hour closer together or further apart.
+5. In **Keep for (days)**, enter how long to keep this schedule's backups,
+   say `2`. The preview reads "Keeps about 25 backups at a time of each of:
+   Database." for every 2 hours kept 2 days (2 × 12, plus the one being
+   made).
+6. Click **Save schedule**. The card reads "Every 2 hours from 03:00
+   (Europe/Paris)" and "Keeps its backups for 2 days".
+
+From a release console, the same with `interval: :every_2h` and a
+`keep_days` ([Manage schedules from a release console](#manage-schedules-from-a-release-console)):
+
+```elixir
+KilnCMS.Backups.create_backup_schedule(
+  %{components: [:db], interval: :every_2h, time_of_day: ~T[03:00:00],
+    starts_on: Date.utc_today(), time_zone: "Europe/Paris", keep_days: 2},
+  actor: admin
+)
+```
+
+How it behaves:
+
+- **Keep for (days) is required** when the schedule is created, switched to
+  a sub-daily interval, or has its keep days cleared, and on any edit of a
+  sub-daily schedule that has none. **Pause**, **Resume** and **Delete**
+  never need it.
+- **A sub-daily schedule stored without keep days** (written past the form,
+  from a console) still fires, and its backups are kept for
+  `BACKUP_KEEP_DAYS`. Its card reads "This schedule runs more often than
+  daily without Keep for (days), so its backups are kept for
+  BACKUP_KEEP_DAYS. Set Keep for (days) to edit it; you can still pause,
+  resume or delete it." **Edit** opens with **Keep for (days)** empty, so
+  saving it means setting one.
+- **A backup that outlasts the interval** never overlaps the next. The next
+  window queues behind it ("Last window: queued behind another backup"),
+  and a window after that joins the queued request ("Last window: joined a
+  queued backup"), so at most one backup waits.
+- **The alarm gets stricter**: a component a sub-daily schedule covers is
+  stale after 8 to 18 hours, not the default 36
+  ([below](#how-a-schedule-sets-the-alarm-threshold)).
+- **The scheduler job must check at least as often as the interval.** Only
+  the latest due window fires, so with `KILN_BACKUP_SCHEDULER_CRON` coarser
+  than the interval (say `0 */6 * * *` for a two-hourly schedule) the
+  windows in between are skipped and logged as missed
+  ([The scheduler job](#the-scheduler-job)). The default, every minute, is
+  fine.
+- **Rolling back to 1.10** keeps the schedule firing on its keep days, and
+  its Schedule tab shows it with "Schedules more often than daily can't be
+  edited here yet. You can pause, resume or delete it."
 
 ### How a schedule sets the alarm threshold
 
@@ -1898,6 +1965,10 @@ shortest such schedule on that component:
 
 | Interval | Stale after |
 |---|---|
+| every 2 hours | 8 h |
+| every 4 hours | 10 h |
+| every 8 hours | 14 h |
+| every 12 hours | 18 h |
 | daily | 36 h |
 | weekly | 252 h |
 | fortnightly | 504 h |
@@ -1931,7 +2002,9 @@ a clone never runs production's schedules against its own backup directory.
 `KILN_BACKUP_SCHEDULER_CRON` (default `* * * * *`) is when the scheduler checks
 the schedules, not when they fire: a window is the schedule's own time, so a
 coarser cadence such as `*/5 * * * *` only makes a backup start up to five
-minutes late. Every minute leaves about 10 000 completed job rows a week, which
+minutes late. A cadence coarser than a schedule's interval skips windows,
+since only the latest due one fires
+([Back up more often than daily](#back-up-more-often-than-daily)). Every minute leaves about 10 000 completed job rows a week, which
 Oban prunes after 7 days. `false` (also `off`, `no`, `0` or blank) turns every
 schedule off, and the Backups page says so; an unparseable value does the same
 and warns on stderr at boot. It is read in every environment, and
@@ -2815,10 +2888,14 @@ on-disk markers protect, so you don't need a shell to check:
 | `couldn't check in time` | The read of the backup directory didn't answer within 5 seconds ([below](#what-history-reads-from-disk)). |
 | `couldn't check` | The read of the backup directory failed outright. |
 
-The page has no badge yet for a backup a schedule holds
-([hold markers](#the-hold-markers)); list `db/` and `media/` on the host, or
-run the dry run in
-[Set how long a schedule keeps its backups](#set-how-long-a-schedule-keeps-its-backups).
+- A **Kept by a schedule: Database** or **Kept by a schedule: Media** badge:
+  that component's `kiln-<stamp>.hold` names this backup, because a
+  schedule's **Keep the newest** or **Keep for (days)** holds it, so
+  `backup.sh prune` keeps it too ([The hold markers](#the-hold-markers)).
+  Hover it for "Kept by backup.sh prune: a schedule's keep settings hold this
+  backup (kiln-<stamp>.hold)". Like the other marker badges, it is missing
+  while the page's read of the directory is `checking…`, and when that read
+  failed or timed out.
 
 The markers are read from this server's `BACKUP_DIR` whenever the page loads
 History (opening it, paging, after an action, and on each refresh while a

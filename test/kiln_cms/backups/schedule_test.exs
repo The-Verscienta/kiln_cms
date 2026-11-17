@@ -76,21 +76,103 @@ defmodule KilnCMS.Backups.ScheduleTest do
                Backups.update_backup_schedule(s, %{enabled: false}, actor: admin)
     end
 
-    # D2: every run is a full set and retention is age-only until keep N.
-    test "sub-daily intervals are refused until keep-N retention exists" do
+    # Every run is a full set: a sub-daily schedule kept for BACKUP_KEEP_DAYS
+    # alone would keep 12 sets a day of it.
+    test "sub-daily intervals are accepted with keep_days (#2219)" do
       for interval <- [:every_2h, :every_4h, :every_8h, :every_12h] do
+        assert {:ok, %{interval: ^interval, keep_days: 2}} =
+                 create(%{interval: interval, keep_days: 2})
+
         assert {:error, error} = create(%{interval: interval})
-        assert Exception.message(error) =~ "schedules more often than daily aren't available yet"
+        assert error_fields(error) == [:keep_days]
+
+        assert Exception.message(error) =~
+                 "is required for a schedule that runs more often than daily"
       end
 
       for interval <- [:daily, :weekly, :fortnightly, :monthly] do
-        assert {:ok, %{interval: ^interval}} = create(%{interval: interval})
+        assert {:ok, %{interval: ^interval, keep_days: nil}} = create(%{interval: interval})
       end
     end
 
-    test "keep fields don't lift the sub-daily refusal (#2219)" do
-      assert {:error, error} = create(%{interval: :every_2h, keep_count: 12, keep_days: 2})
-      assert :interval in error_fields(error)
+    test "a keep count alone doesn't do for a sub-daily schedule (#2219)" do
+      assert {:error, error} = create(%{interval: :every_2h, keep_count: 12})
+      assert :keep_days in error_fields(error)
+
+      assert {:ok, %{keep_count: 12, keep_days: 1}} =
+               create(%{interval: :every_2h, keep_count: 12, keep_days: 1})
+    end
+
+    test "switching to a sub-daily interval needs keep_days; clearing it is refused (#2219)" do
+      admin = platform_admin()
+      {:ok, s} = create(%{}, admin)
+
+      assert {:error, error} =
+               Backups.update_backup_schedule(s, %{interval: :every_2h}, actor: admin)
+
+      assert :keep_days in error_fields(error)
+
+      assert {:ok, s} =
+               Backups.update_backup_schedule(s, %{interval: :every_2h, keep_days: 3},
+                 actor: admin
+               )
+
+      assert {:error, error} = Backups.update_backup_schedule(s, %{keep_days: nil}, actor: admin)
+      assert :keep_days in error_fields(error)
+
+      assert %{interval: :every_2h, keep_days: 3} =
+               Backups.get_backup_schedule!(s.id, actor: Backups.system())
+
+      # Back to daily, the days may go.
+      assert {:ok, %{interval: :daily, keep_days: nil}} =
+               Backups.update_backup_schedule(s, %{interval: :daily, keep_days: nil},
+                 actor: admin
+               )
+    end
+
+    # A row written from a console (or by a release that allowed it) without
+    # keep_days: it keeps firing, and must stay pausable and deletable.
+    test "a sub-daily row without keep_days can be paused, resumed and deleted, not edited (#2219)" do
+      admin = platform_admin()
+      s = force!(schedule!(%{}, admin), interval: "every_2h")
+      assert %{interval: :every_2h, keep_days: nil} = s
+
+      assert {:ok, s} = Backups.update_backup_schedule(s, %{enabled: false}, actor: admin)
+      assert {:ok, s} = Backups.update_backup_schedule(s, %{enabled: true}, actor: admin)
+
+      # A form resubmits every field: unchanged, it passes.
+      assert {:ok, s} =
+               Backups.update_backup_schedule(
+                 s,
+                 %{
+                   components: [:db],
+                   interval: :every_2h,
+                   time_of_day: ~T[03:00:00],
+                   starts_on: ~D[2026-01-01],
+                   time_zone: "Etc/UTC",
+                   enabled: true,
+                   keep_count: nil,
+                   keep_days: nil
+                 },
+                 actor: admin
+               )
+
+      for change <- [%{time_of_day: ~T[04:00:00]}, %{keep_count: 5}, %{interval: :every_4h}] do
+        assert {:error, error} = Backups.update_backup_schedule(s, change, actor: admin),
+               inspect(change)
+
+        assert :keep_days in error_fields(error)
+      end
+
+      assert {:ok, %{keep_days: 2} = edited} =
+               Backups.update_backup_schedule(s, %{time_of_day: ~T[04:00:00], keep_days: 2},
+                 actor: admin
+               )
+
+      assert Time.compare(edited.time_of_day, ~T[04:00:00]) == :eq
+
+      s = force!(s, keep_days: nil)
+      assert :ok = Backups.destroy_backup_schedule(s, actor: admin)
     end
 
     test "keep fields out of range are refused (#2219)" do

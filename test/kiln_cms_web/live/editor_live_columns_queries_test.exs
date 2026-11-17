@@ -118,7 +118,7 @@ defmodule KilnCMSWeb.EditorLiveColumnsQueriesTest do
     seed_rows(many, 30)
 
     # Warm the one-off caches (registries, settings) so both runs see the same ones.
-    list_queries(conn, few)
+    warm_up(fn -> list_queries(conn, few) end)
 
     many_queries = list_queries(conn, many)
     few_queries = list_queries(conn, few)

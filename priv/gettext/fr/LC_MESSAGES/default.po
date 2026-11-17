@@ -9596,6 +9596,16 @@ msgstr "Toutes les %{hours} heures à partir de %{time} (%{zone})"
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
+msgid "Every 12 hours"
+msgstr "Toutes les 12 heures"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every 2 hours"
+msgstr "Toutes les 2 heures"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
 msgid "Every 2 weeks"
 msgstr "Toutes les 2 semaines"
 
@@ -9603,6 +9613,16 @@ msgstr "Toutes les 2 semaines"
 #, elixir-autogen, elixir-format
 msgid "Every 2 weeks on %{weekday} at %{time} (%{zone}), from %{date}"
 msgstr "Toutes les 2 semaines le %{weekday} à %{time} (%{zone}), à partir du %{date}"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every 4 hours"
+msgstr "Toutes les 4 heures"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every 8 hours"
+msgstr "Toutes les 8 heures"
 
 #: lib/kiln_cms/security/posture/checks/second_factor.ex
 #, elixir-autogen, elixir-format
@@ -12383,6 +12403,16 @@ msgstr[1] "Conserve ses %{count} sauvegardes les plus récentes, et toutes celle
 #, elixir-autogen, elixir-format
 msgid "Kept"
 msgstr "Conservé"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kept by a schedule: %{component}"
+msgstr "Conservée par une planification : %{component}"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Kept by backup.sh prune: a schedule's keep settings hold this backup (kiln-<stamp>.hold)"
+msgstr "Conservée par backup.sh prune : les réglages de conservation d’une planification retiennent cette sauvegarde (kiln-<stamp>.hold)"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -15771,6 +15801,11 @@ msgstr "Une fois le champ enregistré, ajoutez sous lui, dans la liste ci-dessou
 msgid "One %{type}"
 msgstr "Un %{type}"
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "One backup at this time, and the others every %{hours} hours around the clock."
+msgstr "Une sauvegarde à cette heure, puis les autres toutes les %{hours} heures sur 24 heures."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "One choice"
@@ -18737,6 +18772,11 @@ msgstr "Obligatoire"
 msgid "Required disclaimer"
 msgstr "Avertissement obligatoire"
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Required for a schedule that runs more often than daily."
+msgstr "Obligatoire pour une planification plus fréquente qu’une fois par jour."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Required on every connection"
@@ -19815,11 +19855,6 @@ msgstr "Dépublication planifiée le"
 #, elixir-autogen, elixir-format
 msgid "Schedules"
 msgstr "Planifications"
-
-#: lib/kiln_cms_web/live/backup_schedule_live.ex
-#, elixir-autogen, elixir-format
-msgid "Schedules more often than daily can't be edited here yet. You can pause, resume or delete it."
-msgstr "Les planifications plus fréquentes qu'une fois par jour ne peuvent pas encore être modifiées ici. Vous pouvez la suspendre, la reprendre ou la supprimer."
 
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
@@ -24631,6 +24666,11 @@ msgstr "Cette planification ne peut pas être modifiée ici : elle peut seulemen
 #, elixir-autogen, elixir-format
 msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
 msgstr "Cette planification a changé depuis que vous l'avez ouverte : elle n'a donc pas été enregistrée. Le formulaire contient maintenant les valeurs enregistrées, avec ce que vous avez saisi à côté : saisissez de nouveau les modifications que vous voulez garder, puis enregistrez."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule runs more often than daily without Keep for (days), so its backups are kept for BACKUP_KEEP_DAYS. Set Keep for (days) to edit it; you can still pause, resume or delete it."
+msgstr "Cette planification s’exécute plus d’une fois par jour sans « Conserver pendant (jours) » : ses sauvegardes sont donc conservées selon BACKUP_KEEP_DAYS. Renseignez « Conserver pendant (jours) » pour la modifier ; vous pouvez toujours la mettre en pause, la reprendre ou la supprimer."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format

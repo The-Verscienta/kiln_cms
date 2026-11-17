@@ -1306,6 +1306,22 @@ defmodule KilnCMSWeb.BackupLive do
             >
               {gettext("Last good: %{component}", component: component_label(component))}
             </span>
+            <%!-- A schedule's keep N or keep days holds this unit (#2219, #2933).
+                 `@markers` is empty until the disk read answers and leaves out
+                 an unreadable directory, so neither draws a badge. --%>
+            <span
+              :for={component <- Markers.held_components(@markers, run.stamp)}
+              data-role="held"
+              data-component={component}
+              title={
+                gettext(
+                  "Kept by backup.sh prune: a schedule's keep settings hold this backup (kiln-<stamp>.hold)"
+                )
+              }
+              class="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-primary-ink"
+            >
+              {gettext("Kept by a schedule: %{component}", component: component_label(component))}
+            </span>
             <span class="ml-auto tabular-nums text-base-content/70">
               {humanize_bytes(total_bytes(run))}
             </span>

@@ -1940,6 +1940,55 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute has_element?(lv, ~s|#backup-run-#{plain.id} [data-role="last-good"]|)
     end
 
+    test "a schedule's hold markers badge each held component of their rows (#2933)", %{
+      conn: conn,
+      dir: dir
+    } do
+      both = seed_run!(dir, 1, stamp: "20260101-010000")
+      db_only = seed_run!(dir, 2, stamp: "20260102-020000")
+      plain = seed_run!(dir, 3, stamp: "20260103-030000")
+
+      touch_marker!(dir, "db", "kiln-20260101-010000.hold")
+      touch_marker!(dir, "media", "kiln-20260101-010000.hold")
+      touch_marker!(dir, "db", "kiln-20260102-020000.hold")
+
+      lv = mount_admin(conn)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{both.id} [data-role="held"][data-component="db"]|,
+               "Kept by a schedule: Database"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{both.id} [data-role="held"][data-component="media"]|,
+               "Kept by a schedule: Media"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{both.id} [data-role="held"][title*="kiln-<stamp>.hold"]|
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{db_only.id} [data-role="held"][data-component="db"]|,
+               "Kept by a schedule: Database"
+             )
+
+      refute has_element?(
+               lv,
+               ~s|#backup-run-#{db_only.id} [data-role="held"][data-component="media"]|
+             )
+
+      # A hold is not a last-good marker or a recovery point.
+      refute has_element?(lv, ~s|#backup-run-#{both.id} [data-role="last-good"]|)
+      refute has_element?(lv, ~s|#backup-run-#{both.id} [data-role="recovery-point"]|)
+
+      refute has_element?(lv, ~s|#backup-run-#{plain.id} [data-role="held"]|)
+    end
+
     test "the summary names each component's last-good stamp, even off this page", %{
       conn: conn,
       dir: dir
@@ -2064,9 +2113,11 @@ defmodule KilnCMSWeb.BackupLiveTest do
       dir: dir
     } do
       touch_marker!(dir, "db", "kiln-20250101-010000.good")
+      touch_marker!(dir, "db", "kiln-20250101-010000.hold")
       conn = log_in(conn, authed_user(:editor))
 
       assert {:error, {:redirect, _}} = live(conn, ~p"/editor/backups")
+      refute conn |> get(~p"/editor/backups") |> response(302) =~ "Kept by a schedule"
     end
   end
 
@@ -2206,6 +2257,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
          %{conn: conn, dir: dir} do
       stall_disk!()
       run = seed_run!(dir, 1)
+      touch_marker!(dir, "db", "kiln-#{run.stamp}.hold")
 
       {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
       assert_receive {:disk_read, pid, [id]}
@@ -2220,10 +2272,18 @@ defmodule KilnCMSWeb.BackupLiveTest do
                ~s|#backup-last-good [data-component="db"][data-state="checking"]|
              )
 
+      # Markers come with the read: no hold badge until it answers.
+      refute has_element?(lv, ~s|#backup-run-#{run.id} [data-role="held"]|)
+
       release(pid)
 
       assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="present"]|, "on disk")
       refute has_element?(lv, "#backup-disk-checking")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role="held"][data-component="db"]|
+             )
     end
 
     test "one read at a time: refreshes while it is out start one more, not one each",

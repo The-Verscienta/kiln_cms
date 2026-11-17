@@ -20,6 +20,7 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Chain, DirId, Heartbeat, MarkerSyncWorker}
+  alias KilnCMS.Test.BackupSchedules
 
   @moduletag :capture_log
 
@@ -60,6 +61,36 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
 
         {:ok, row}
       end)
+  end
+
+  # What Oban does to a job it starts: the next insert sees it as running.
+  defp executing!(%Oban.Job{id: id}) do
+    {1, _} =
+      KilnCMS.Repo.update_all(from(j in Oban.Job, where: j.id == ^id),
+        set: [state: "executing", attempted_at: DateTime.utc_now()]
+      )
+
+    :ok
+  end
+
+  # Every file of `stamp` in `db/` and `media/`, made `days` days old.
+  defp age!(dir, stamp, days) do
+    at = System.os_time(:second) - days * 86_400
+
+    for sub <- ["db", "media"],
+        name <- File.ls!(Path.join(dir, sub)),
+        String.contains?(name, stamp),
+        do: File.touch!(Path.join([dir, sub, name]), at)
+
+    :ok
+  end
+
+  # The `.hold` markers in `dir`, as `"db/<name>"`, sorted.
+  defp holds(dir) do
+    for sub <- ["db", "media"],
+        name <- Enum.sort(File.ls!(Path.join(dir, sub))),
+        String.ends_with?(name, ".hold"),
+        do: "#{sub}/#{name}"
   end
 
   defp beat!(dir_id) do
@@ -262,13 +293,107 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       refute File.exists?(DirId.path(dir))
     end
 
-    test "one live job per directory: the next slot does not stack another behind it" do
+    test "one waiting job per directory: the next slot does not stack another behind it" do
       dir_id = Ash.UUID.generate()
 
       assert {:ok, %{conflict?: false}} = Oban.insert(MarkerSyncWorker.new(%{"dir" => dir_id}))
       assert {:ok, %{conflict?: true}} = Oban.insert(MarkerSyncWorker.new(%{"dir" => dir_id}))
       assert {:ok, %{conflict?: false}} = Oban.insert(MarkerSyncWorker.new(%{}))
       assert {:ok, %{conflict?: true}} = Oban.insert(MarkerSyncWorker.new(%{}))
+    end
+
+    test "a snoozing job (scheduled) still counts as waiting" do
+      dir_id = Ash.UUID.generate()
+
+      assert {:ok, %{state: "scheduled"}} =
+               Oban.insert(MarkerSyncWorker.new(%{"dir" => dir_id}, schedule_in: 30))
+
+      assert {:ok, %{conflict?: true}} = Oban.insert(MarkerSyncWorker.new(%{"dir" => dir_id}))
+    end
+
+    test "a running job does not (#2932): one more queues behind it, and only one" do
+      dir_id = Ash.UUID.generate()
+      {:ok, running} = Oban.insert(MarkerSyncWorker.new(%{"dir" => dir_id}))
+      executing!(running)
+
+      assert {:ok, %{conflict?: false}} = Oban.insert(MarkerSyncWorker.new(%{"dir" => dir_id}))
+      assert {:ok, %{conflict?: true}} = Oban.insert(MarkerSyncWorker.new(%{"dir" => dir_id}))
+    end
+
+    test "the fan-out queues a directory's job while that directory's last one runs (#2932)" do
+      other = Ash.UUID.generate()
+      beat!(other)
+      {:ok, running} = Oban.insert(MarkerSyncWorker.new(%{"dir" => other}))
+      executing!(running)
+
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+
+      assert [%{args: %{"dir" => ^other}, id: id}] = all_enqueued(worker: MarkerSyncWorker)
+      refute id == running.id
+    end
+
+    test "the fan-out queues nothing while that directory's job snoozes" do
+      other = Ash.UUID.generate()
+      beat!(other)
+      {:ok, snoozing} = Oban.insert(MarkerSyncWorker.new(%{"dir" => other}, schedule_in: 30))
+
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+
+      assert [%{id: id}] = all_enqueued(worker: MarkerSyncWorker)
+      assert id == snoozing.id
+    end
+  end
+
+  describe "a schedule change while a sync runs (#2932)" do
+    setup %{dir: dir} do
+      # Two cron backups: one a day old, one 20 days old, past
+      # BACKUP_KEEP_DAYS (14) but inside the 30 days the change asks for.
+      cron_backup!(dir, @cron)
+      cron_backup!(dir, @old)
+      age!(dir, @cron, 1)
+      age!(dir, @old, 20)
+
+      # The create queues the sync that is about to run.
+      schedule = BackupSchedules.schedule!(%{keep_days: 7})
+      assert [job] = all_enqueued(worker: MarkerSyncWorker)
+      %{schedule: schedule, job: job}
+    end
+
+    test "queues a second sync, which writes the holds the change asks for",
+         %{dir: dir, schedule: schedule, job: job} do
+      # The running sync read the schedules before the change: keep_days 7
+      # lowers nothing below the 14-day floor, so it holds nothing.
+      assert :ok = perform_job(MarkerSyncWorker, job.args)
+      assert holds(dir) == []
+      executing!(job)
+
+      assert {:ok, _} =
+               Backups.update_backup_schedule(schedule, %{keep_days: 30},
+                 actor: BackupSchedules.platform_admin()
+               )
+
+      assert [%{id: id, args: %{}}] = all_enqueued(worker: MarkerSyncWorker)
+      refute id == job.id
+
+      assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :default)
+
+      # The schedule backs up the database only, so media keeps the 14-day
+      # floor and needs no hold.
+      assert holds(dir) == ["db/kiln-#{@old}.hold", "db/kiln-#{@cron}.hold"]
+    end
+
+    test "a sync still waiting is not doubled: it reads the change when it runs",
+         %{dir: dir, schedule: schedule, job: job} do
+      assert {:ok, _} =
+               Backups.update_backup_schedule(schedule, %{keep_days: 30},
+                 actor: BackupSchedules.platform_admin()
+               )
+
+      assert [%{id: id}] = all_enqueued(worker: MarkerSyncWorker)
+      assert id == job.id
+
+      assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :default)
+      assert holds(dir) == ["db/kiln-#{@old}.hold", "db/kiln-#{@cron}.hold"]
     end
   end
 

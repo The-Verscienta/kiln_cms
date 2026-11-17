@@ -72,6 +72,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
   ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
 
+### Breaking
+
+- **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
+  ([long form](docs/changelog/unreleased.md#staging-scrub-refuses-live-node))
+
 ### Known issues
 
 - **An all-hidden referrer breakdown can still be recovered at a small view total (five 1s at the default threshold).**
@@ -99,6 +104,12 @@ Every summary line below that was shortened links to its own entry there.
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
 
+- **Backup schedules can run every 2, 4, 8 or 12 hours. A schedule that runs more often than daily must set Keep for (days), and its alarm threshold drops to 8 to 18 hours.**
+  ([#2219](https://github.com/The-Verscienta/kiln_cms/issues/2219) · [long form](docs/changelog/unreleased.md#backup-sub-daily-schedules))
+
+- **Backups → History badges each backup a schedule's keep settings hold: "Kept by a schedule: Database" or "… Media".**
+  ([#2933](https://github.com/The-Verscienta/kiln_cms/issues/2933) · [long form](docs/changelog/unreleased.md#backup-history-held-badge))
+
 - **Color fields can be limited to a palette (`validation["palette"]`, shown as swatches in the editor) and JSON fields can carry a JSON Schema (`validation["json_schema"]`, draft 2020-12, local `$ref` only, bounded, never fetches); both are checked when a value changes. No migration.**
   ([long form](docs/changelog/unreleased.md#color-palette-json-schema))
 
@@ -114,11 +125,17 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
+  ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))
+
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
 
 - **A referrer breakdown with `"< n"` and one `"hidden"` category no longer lets a reader who knows the rule recover the suppressed counts; such breakdowns now show every category hidden.**
   ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752) · [long form](docs/changelog/unreleased.md#referrer-suppression-partner-bounds))
+
+- **A backup schedule change made while a marker sync is running now reaches the `.hold` markers right after that sync, not at the next 15-minute slot.**
+  ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932) · [long form](docs/changelog/unreleased.md#backup-hold-sync-after-change))
 
 ### Security
 

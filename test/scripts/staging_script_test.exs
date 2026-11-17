@@ -71,6 +71,19 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
     end
   end
 
+  # #2721: production's queued jobs carry recipients and payloads; the clone
+  # gets the table without its rows.
+  test "pg_dump leaves out the rows of oban_jobs", ctx do
+    assert {_out, 0} =
+             up(ctx,
+               prod: "postgres://prod@prod-db/kiln_prod",
+               staging: "postgres://stage@stage-db/kiln_staging"
+             )
+
+    assert ["pg_dump", _password | dump_args] = Enum.find(calls(ctx), &(hd(&1) == "pg_dump"))
+    assert "--exclude-table-data=oban_jobs" in dump_args
+  end
+
   test "the closing hint prints the staging URL without its password", ctx do
     assert {out, 0} =
              up(ctx,

@@ -64,7 +64,12 @@ Full flow, recipe, and the serve step live in
       `staging` / `preview` / `ephemeral` / `tmp` / `scratch`) — the scrub refuses
       otherwise, which is the seat-belt against scrubbing prod. (`--force` /
       `KILN_STAGING_FORCE=true` overrides, so don't set those casually.)
-- [ ] Run `./scripts/staging.sh up` (dump → restore → migrate → **scrub**).
+- [ ] Run `./scripts/staging.sh up` (dump → restore → migrate → **scrub**). With
+      the default `KILN_BIN=mix`, export `MIX_ENV=prod` and the variables a prod
+      boot requires (`SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET`) first: under any
+      other `MIX_ENV`, Mix ignores `DATABASE_URL` and migrates your dev database
+      ([staging-environments.md](staging-environments.md#running-the-scrub)).
+      Or set `KILN_BIN` to a release's `bin/kiln_cms`.
 - [ ] Confirm the scrub summary printed non-zero `users anonymized` and, if you
       set the admin vars, `staging admin: <email>`.
 - [ ] Serve it as a **second** Coolify app from the **same image/repo**, differing
@@ -94,12 +99,22 @@ Full flow, recipe, and the serve step live in
 - [ ] **Never run the scrub against production.** It anonymizes every account,
       purges API keys/tokens/search queries, de-activates webhooks, drops the
       mail settings (incl. the DKIM private key), deletes the backup history
-      and both security logs (the sites' and the instance's), and pauses every
-      in-app backup schedule. The confirmation flag +
+      and both security logs (the sites' and the instance's), pauses every
+      in-app backup schedule, and deletes every queued job, newsletter
+      subscriber, form submission, suppression list entry, federation
+      follower and per-site integration (mail relay, SSO, AI, Meilisearch). The confirmation flag +
       ephemeral-name guard exist to prevent a mistyped `DATABASE_URL` — respect them.
 - [ ] **Scrub before exposing** the staging box. `scripts/staging.sh up` and the
       `bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'` path both scrub *before*
       anything serves; if you clone and serve by hand, run the scrub first.
+      A serving node is refused (its queues could run production's cloned
+      jobs first); `allow_live?: true` over `rpc` is only for re-scrubbing a
+      clone that was already scrubbed, and leaves every queue paused until you
+      restart it.
+- [ ] Before sharing the clone, read
+      [what the scrub keeps](staging-environments.md#what-the-scrub-keeps):
+      media storage settings, the content-signing key, staff free text, and
+      plugin tables.
 - [ ] A **distinct staging `SECRET_KEY_BASE`** is what invalidates cloned session
       cookies and prod-signed preview tokens — generate a fresh one, don't reuse
       prod's.

@@ -170,6 +170,22 @@ defmodule KilnCMS.Backups.ScheduleWindowTest do
       assert 1 in gaps_in_hours(spring)
     end
 
+    test "America/New_York every 4 h and 12 h across both transitions (#2219)" do
+      for {interval, hours} <- [every_4h: 4, every_12h: 12] do
+        s = s(interval: interval, time_of_day: ~T[02:00:00], time_zone: "America/New_York")
+
+        for {from, to} <- [{~D[2026-03-07], ~D[2026-03-09]}, {~D[2026-10-31], ~D[2026-11-02]}] do
+          list = occurrences(s, from, to)
+          assert list == Enum.uniq(list)
+          assert Enum.sort(list, DateTime) == list
+          assert length(list) == 3 * div(24, hours), "#{interval} fires every slot once"
+
+          assert Enum.all?(gaps_in_hours(list), &(&1 in (hours - 1)..(hours + 1))),
+                 "#{interval}: #{inspect(gaps_in_hours(list))}"
+        end
+      end
+    end
+
     test "Pacific/Chatham and Asia/Kolkata offsets" do
       chatham = s(time_zone: "Pacific/Chatham")
       # +13:45 in March (daylight time).
@@ -255,5 +271,21 @@ defmodule KilnCMS.Backups.ScheduleWindowTest do
     assert Window.stale_after_hours(:weekly) == 252
     assert Window.stale_after_hours(:monthly) == 1116
     assert Window.stale_after_hours(%UnknownAtom{value: "x"}) == nil
+  end
+
+  test "stale_after_hours of the sub-daily intervals: 4h 10, 8h 14, 12h 18 (#2219)" do
+    assert Window.stale_after_hours(:every_4h) == 10
+    assert Window.stale_after_hours(:every_8h) == 14
+    assert Window.stale_after_hours(:every_12h) == 18
+  end
+
+  test "interval_hours: the hours one interval spans, nil for an unknown one" do
+    assert Window.interval_hours(:every_2h) == 2
+    assert Window.interval_hours(:every_12h) == 12
+    assert Window.interval_hours(:daily) == 24
+    assert Window.interval_hours(:weekly) == 168
+    assert Window.interval_hours(:monthly) == 744
+    assert Window.interval_hours(%UnknownAtom{value: "every_90m"}) == nil
+    assert Window.interval_hours(nil) == nil
   end
 end

@@ -128,7 +128,11 @@ defmodule KilnCMS.Backups.Markers do
 
   def last_good_components(_markers, _stamp), do: []
 
-  @doc "The components whose hold marker names `stamp`, in `[:db, :media]` order."
+  @doc """
+  The components whose hold marker names `stamp`, in `[:db, :media]` order.
+  The History row badges each one "Kept by a schedule" (#2933). An unreadable
+  directory has no hold stamps, so it contributes no component here.
+  """
   @spec held_components(t(), String.t() | nil) :: [component()]
   def held_components(%{hold: hold}, stamp) when is_binary(stamp),
     do: Enum.filter(@components, &MapSet.member?(hold[&1], stamp))

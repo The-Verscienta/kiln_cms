@@ -58,13 +58,13 @@ your deployment.
 | Verified API keys | **memory only**, on each node | Pseudonymous (transient) | The SHA-256 of each API key that authenticated on the node recently, with the key's id and when the entry was written (an entry lasts 5 minutes and is rewritten at most every 2.5 minutes while the key is in use) (#2245, `KilnCMS.Security.ApiKeyTrip`), so a rate-limit refusal can tell a real key from a forged one without a database read. Never the key itself, a user or an address. At most 10,000 entries; swept every minute, gone on restart, never shared between nodes or written to disk. |
 | Site invitations | `invitations` | Yes | One row per address a platform admin invited to a site (#2135): the **email address**, the site, the tier and custom role, who sent it, when it expires and how often it was sent, and the SHA-256 of the link's token (never the token). The person may have no account. Removed when the invitation is accepted or revoked; otherwise usable for 7 days and deleted by the daily prune 30 days after that, so an address is kept at most about 37 days. Not touched by erasure (see below); deleted by the staging scrub. |
 | Recorded search queries | `search_queries` | Possibly | Query text only — **no** actor/IP. See *Search query retention (#213) + disclosure (#220)* below. |
-| Web Push subscriptions | `push_subscriptions` | Yes | One row per browser a user turned push notifications on in: the push service endpoint and its keys, a coarse browser label, and which VAPID key it was made against. Deleted on erasure (#2514). |
+| Web Push subscriptions | `push_subscriptions` | Yes | One row per browser a user turned push notifications on in: the push service endpoint and its keys, a coarse browser label, and which VAPID key it was made against. Deleted on erasure (#2514) and by the staging scrub. |
 | Saved views | `saved_views` | Pseudonymous | A named content-list filter and its owner's id. A private view is deleted on erasure (#2514); a shared one is the team's and stays, pointing at the anonymized account. |
 | Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
 | Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Purged on retention and by the staging scrub. |
-| Idempotency keys | `idempotent_requests` | Pseudonymous (transient) | One row per `Idempotency-Key` a caller used on a write ([api.md](api.md)), holding the key, the acting user's id, a hash of the request and **the response that was sent** — so it carries whatever that response did. Pruned hourly, 24-hour lifetime. |
+| Idempotency keys | `idempotent_requests` | Pseudonymous (transient) | One row per `Idempotency-Key` a caller used on a write ([api.md](api.md)), holding the key, the acting user's id, a hash of the request and **the response that was sent** — so it carries whatever that response did. Pruned hourly, 24-hour lifetime. Purged by the staging scrub. |
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |
 | Daily view buckets | `content_view_days` | No | One counter per content item per UTC day, for 7d/30d trends — no visitor data. Purged on retention (below). |
 | Daily referrer buckets | `referrer_days` | No | One counter per content item per coarse source category (`direct`/`internal`/`search`/`social`/`other`) per UTC day — never a raw referrer URL or host. Off by default (`KILN_ANALYTICS_REFERRERS`, #619); turning it back off stops new writes but does not clear rows already recorded — those still age out on the retention purge (below). |
@@ -650,5 +650,9 @@ of production carries every editor's email, live API keys, webhook signing secre
 the DKIM private key, **and live payment-provider credentials and subscription
 ids** into a less-locked-down box. KilnCMS ships a **scrub** that
 reuses the `:anonymize` erasure action above (plus the same retention purges) to make
-a clone PII-free and secret-free by default. See
-[`staging-environments.md`](staging-environments.md).
+a clone PII-free and secret-free by default. Beyond accounts it deletes newsletter
+subscribers, form submissions, both mail suppression lists, federation followers,
+deliveries and keys, push subscriptions, idempotency keys, the webhook delivery log
+and every queued job, whose args carry recipients and payloads. See
+[`staging-environments.md`](staging-environments.md), which lists every table it
+touches and [what it keeps](staging-environments.md#what-the-scrub-keeps).
