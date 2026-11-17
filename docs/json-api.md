@@ -1195,7 +1195,7 @@ Each row carries `name` (the permanent machine key), `label`, `plural_label`,
 custom-field schema (`name`, `label`, `field_type`, `required`, `options`,
 `default`, `help_text`, `position`, …) — the keys an entry's `custom_fields`
 map takes, `validation`: the field's value constraints (`min`, `max`,
-`min_length`, `max_length`, `pattern`, `pattern_message`, `unique`; `{}` when
+`min_length`, `max_length`, `pattern`, `pattern_message`, `unique`, and `palette` (color) or `json_schema` (JSON); `{}` when
 none), which a write to `custom_fields` is checked against — see
 [Constrain the values of a field](extending-content.md#constrain-the-values-of-a-field) —
 and `visible_when` / `required_when`, the field's conditional rules (or `null`); see
