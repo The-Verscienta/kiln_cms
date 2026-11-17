@@ -90,6 +90,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Workflow and task mail jobs now carry ids (no migration). Drain the `mail` queue before rolling back: those queued by this release fail eight times on the previous one and are discarded. Upgrading straight from 1.9.x, old-shape mail still waiting is not sent.**
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-ids-upgrade))
 
+- **Account mail jobs now record the account they are for. No migration, nothing to drain. During a rolling deploy old nodes send without the new check; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#account-mail-names-account-upgrade))
+
 - **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: audiences, push subscriptions, private saved views and notifications (its result gains those four keys). No migration; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#erasure-backfill-2514-steps-upgrade))
 
@@ -175,6 +178,12 @@ Every summary line below that was shortened links to its own entry there.
 - **Workflow and task mail checks again when it sends: an event muted since it was queued is not sent, nor is mail about content trashed or deleted, a comment deleted, or a task completed, deleted or reassigned in the meantime.**
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-send-time-checks))
 
+- **The "Someone tried to create a (site) account with your address" notice is not sent if no account holds the address by the time it is queued.**
+  ([long form](docs/changelog/unreleased.md#registration-notice-needs-account))
+
+- **The API key reuse email names the key's owner by display name, or "account" and their id, instead of their email address.**
+  ([long form](docs/changelog/unreleased.md#api-key-reuse-alert-names-owner))
+
 ### Fixed
 
 - **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
@@ -227,6 +236,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Workflow and task mail queued before an erasure is no longer sent to the erased person; the jobs carry ids, not the address, title or names, and erasure strips the address from finished mail jobs.**
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-erased-recipient))
+
+- **Account mail (password resets, sign-in links, alerts) queued before an erasure is no longer sent to the erased person: it is sent only while its account holds the address, and erasure withholds it.**
+  ([long form](docs/changelog/unreleased.md#account-mail-erased-recipient))
 
 - **Docs: the data-flows guide lists the personal data held outside accounts (form submissions, suppression lists, fediverse followers, delivery logs, queued jobs), with retention and erasure for each, and what erasure does not reach.**
   ([#2978](https://github.com/The-Verscienta/kiln_cms/issues/2978) · [long form](docs/changelog/unreleased.md#data-flows-personal-data-rows))

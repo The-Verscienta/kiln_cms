@@ -76,7 +76,7 @@ your deployment.
 | Fediverse followers | `federation_followers` | Yes | One row per remote account following a site (#491): its actor URI, its inbox and shared inbox URIs, when it followed and its delivery counters. An actor URI names a person on another server. Removed when that account sends `Undo{Follow}`, when an admin blocks it or its instance, and after 12 deliveries to it fail in a row; at most 50,000 per site. Published only as a count (`GET /actor/followers`). Not touched by erasure: a follower is not an account here. Purged by the staging scrub. The block list (`federation_blocks`: an actor URI or a host, and a reason) is moderation data and is kept by the scrub. See [ActivityPub federation](federation.md#delivery). |
 | Fediverse delivery log | `federation_deliveries` | Pseudonymous | One row per activity per follower inbox: the inbox URI, the activity as sent (published content), the document's id, the state, the attempts and the last error. Deleted 30 days after it was written (fixed). Not touched by erasure. Purged by the staging scrub. |
 | Webhook delivery log | `webhook_deliveries` | Yes | One row per delivery: the event, a snapshot of the endpoint URL, and the **payload as sent**, which for `form.submitted` is the submission, for `membership.*` the member's email address and user id, and for `security.*` user ids and an IP network or address (see [Webhooks](#webhooks-opt-in-per-endpoint)). Deleted 30 days after it was written; the window is `config :kiln_cms, :webhooks, delivery_retention_days:`, read at compile time, so changing it needs a rebuild. A failed retraction (#1926) is kept, and its payload is cut to the document's identity at the same age. No row can be deleted before then ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)), and erasure does not rewrite the log. Purged by the staging scrub. |
-| Queued jobs | `oban_jobs` | Yes (transient) | A background job's args, mostly ids. Account mail (sign-in links, password resets, second-factor and security notices, registration mail) carries the recipient's address in the clear, and the message sealed until the job finishes. Form mail and workflow and task mail queued by this release carry ids only; jobs queued by an earlier release can carry the form data, or the address, title, actor name and excerpt or note. Automation jobs carry the event's document. Oban's Pruner deletes a row 7 days after the job finishes. Private keys are dropped when the job finishes and by a daily scrub, and erasure strips the address from finished mail jobs. Purged by the staging scrub. See [Job args retention](#job-args-retention). |
+| Queued jobs | `oban_jobs` | Yes (transient) | A background job's args, mostly ids. Account mail (sign-in links, password resets, second-factor and security notices, registration mail) carries the recipient's address in the clear, the id of the account it is for, and the message sealed until the job finishes. Form mail and workflow and task mail queued by this release carry ids only; jobs queued by an earlier release can carry the form data, or the address, title, actor name and excerpt or note. Automation jobs carry the event's document. Oban's Pruner deletes a row 7 days after the job finishes. Private keys are dropped when the job finishes and by a daily scrub, and erasure withholds the account's mail still waiting to run (its address and message removed) and strips the address from finished mail jobs. Purged by the staging scrub. See [Job args retention](#job-args-retention). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
 | Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Purged on retention and by the staging scrub. |
 | Idempotency keys | `idempotent_requests` | Pseudonymous (transient) | One row per `Idempotency-Key` a caller used on a write ([api.md](api.md)), holding the key, the acting user's id, a hash of the request and **the response that was sent** — so it carries whatever that response did. Pruned hourly, 24-hour lifetime. Purged by the staging scrub. |
@@ -315,9 +315,13 @@ not:
   is a credential. The sealed message is dropped from the row when the job
   finishes, and from a Sentry event's `extra.args`. The recipient's address
   stays in the row until the Pruner deletes it, or until the person is
-  erased, which strips it from finished mail jobs (#3019). A job still
-  waiting to run keeps it, and is not checked against erasure when it runs
-  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035)).
+  erased, which strips it from finished mail jobs (#3019). Account mail also
+  carries the id of the account it is for (`user_id`), and is sent only
+  while that account still exists, is not erased, and holds the address the
+  job is addressed to (#3035). Otherwise the job drops the address and the
+  message and completes without sending. Erasure drops them from the
+  account's jobs still waiting to run; see
+  [Account mail still waiting to run](#account-mail-still-waiting-to-run).
 - **Workflow and task mail** (#3019). Review requests, published and
   returned-to-draft mail, comment and mention mail, task assignments and
   task digests carry ids: the recipient (`user_id`), the site, the content,
@@ -379,12 +383,47 @@ What is not covered:
   default), and there is no way to delete one row before then
   ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)). The
   webhook's job itself carries only the delivery's id.
-- **Account mail still waiting to run** keeps the recipient's address after
-  the person is erased, and is still sent to it
-  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035)). An
-  account mail job that is running while the erasure runs is not finished
-  yet, so erasure does not strip it either: its row keeps the address until
-  the Pruner deletes it.
+- An **account mail job already running** when the erasure commits can
+  still deliver its message. Erasure removes the address and the message
+  from its row, and if that attempt fails, the retry is withheld.
+
+### Account mail still waiting to run
+
+Account mail is mail about an account, to that account's address: a
+password reset, a magic link to an account, a confirmation, a sign-in unlock
+link, a "you were added to a site" notice, registration notices and
+decisions, second-factor notices, sign-in alerts, security alerts and API
+key reuse alerts (#3035). Each job names the account it is for (`"user_id"`
+in its args). Mail to an address with no account behind it is not account
+mail: a site invitation, a newsletter confirmation, a magic link requested
+for a bare address. Its job has a `"user_id"` of `null`.
+
+**When it runs**, `KilnCMS.Mail.DeliveryWorker` reads the account. It sends
+the mail only while the account exists, is not erased, and still holds the
+address the job is addressed to (compared case-insensitively). Otherwise it
+removes the address and the message from the row, logs one `info` line with
+the job id and the reason (`erased`, `no_account`, `no_address` or
+`address_mismatch`, never the address), and completes the job. Nothing went
+wrong, so it is not listed as a delivery failure on `/editor/mail`. The same
+check stops mail queued to an address the account has changed since. An
+account that cannot be read fails the attempt, which retries on the mail
+backoff; if the last attempt fails too, the address and the message are
+removed from the row and the job is discarded.
+
+**When the account is erased**, every account mail job for it not yet
+finished (`available`, `scheduled`, `retryable`, `executing` or
+`suspended`) is withheld in the erasure's transaction
+(`KilnCMS.Mail.withhold_pending/2`): it loses its address and its message
+and gains `"withheld": "erased"`. When it runs it completes without sending
+anything. A request that read the old address before the erasure committed
+can still queue a job after it; that job names the account, so the check
+when it runs stops it.
+
+Jobs queued by v1.10.x carry no `"user_id"` key. For one release the
+erasure also withholds those still waiting that are addressed to the
+account's address, whoever they were for, because nothing in the row says.
+That includes mail to the address that was not the account's, such as an
+invitation or a newsletter confirmation queued by the previous release.
 
 ### Security log retention (#2241)
 
@@ -625,13 +664,20 @@ Either way, it:
     The demotion writes no role-change event to the security log. Before
     this, the row kept its tier, so the tombstone stayed a site admin or
     editor on the rosters below and kept reading gated content.
-16. **Strips its address from finished mail jobs** (#3019): every completed,
-    canceled or discarded job on the `mail` queue addressed to the address the
-    account held before step 1 loses its `to`, matched case-insensitively.
-    Until the Pruner deletes those rows (7 days after each job finished), the
-    delivery panels on `/editor/mail` and `/editor/site-mail` list such a
-    failure under the domain "unknown". Jobs still waiting to run are left
-    alone; see [What erasure does not reach](#what-erasure-does-not-reach).
+16. **Withholds its account mail still waiting to run, and strips its address
+    from finished mail jobs** (#3019, #3035). Every account mail job for the
+    account that has not finished, a running one included, loses its address
+    and its message and is completed unsent when it runs
+    ([Account mail still waiting to run](#account-mail-still-waiting-to-run)).
+    Every completed, canceled or discarded job on the `mail` queue for the
+    account, or addressed to the address it held before step 1 (matched
+    case-insensitively), loses its `to`. Until the Pruner deletes those rows
+    (7 days after each job finished), the delivery panels on `/editor/mail`
+    and `/editor/site-mail` list such a failure under the domain "unknown".
+    Mail queued by this release to the address but not for the account (an
+    invitation, a newsletter confirmation) that has not run yet is left
+    alone; see
+    [What erasure does not reach](#what-erasure-does-not-reach).
 
 Once erased, the account is on no site's roster and has no tier or audience
 anywhere, whatever a row it left still holds: it is not offered as a task
@@ -681,7 +727,9 @@ account is also left out of the legacy-audiences report
 no fallback, and moving it would give it a membership, which is refused.
 Step 16 has no backfill: a finished account mail job addressed to someone
 erased before it existed keeps the address until the Pruner deletes the row,
-at most 7 days after the job finished. A finished workflow or task mail job
+at most 7 days after the job finished. Account mail for someone erased
+before #3035 that is still waiting to run carries no account id and is not
+checked when it runs. A finished workflow or task mail job
 of the previous release loses it to the job args scrub
 ([Job args retention](#job-args-retention)).
 
@@ -722,11 +770,26 @@ data about the person that it leaves as it is:
   payload that named them stays in the delivery log until it is pruned, 30
   days by default, and no single row can be deleted before then
   ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)).
-- **Account mail already queued.** A sign-in alert, second-factor notice,
-  registration mail or security alert queued to their address before the
-  erasure still carries that address, and is still sent to it when it runs
-  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035)). Workflow
-  and task mail is not: it checks the recipient again when it runs.
+- **Account mail already being sent.** A job that is running when the
+  erasure commits may have checked its recipient before the commit, and can
+  then still deliver to the old address. A later attempt of the same
+  job is withheld
+  ([Account mail still waiting to run](#account-mail-still-waiting-to-run)).
+- **Account mail queued by an old node during the upgrade.** While a rolling
+  deploy from v1.10.x runs both releases, a node of the old release queues
+  account mail without an account id, and sends the new release's jobs
+  without checking the account. A job of either kind that runs on an old
+  node after an erasure can still reach the old address. Erasure withholds
+  the old-shape jobs addressed to the account's address that have not run
+  yet; it cannot stop one an old node has already started.
+- **Mail to the address that is not account mail.** A site invitation, a
+  newsletter confirmation or a magic link requested for a bare address is
+  queued to the address, not to an account, so it is not checked against
+  the account when it runs and erasure does not withhold it, as for a
+  newsletter row at the address that was never linked to the account. Revoke
+  a pending invitation on **Team** (`/editor/team`). For this release only,
+  erasure does withhold such mail queued by v1.10.x to the account's address,
+  because those jobs cannot be told apart from account mail.
 - **Their name in workflow or task mail queued by the release before
   #3019.** Such a job carries the acting person's name rather than their
   account's id, so it still says that name if it runs after they were

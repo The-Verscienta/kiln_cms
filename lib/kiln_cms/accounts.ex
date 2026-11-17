@@ -457,6 +457,37 @@ defmodule KilnCMS.Accounts do
   def has_second_factor?(%{totp?: totp?, passkeys: passkeys}), do: totp? or passkeys > 0
 
   @doc """
+  Whether mail may still go to the account `user` (an account or its id)
+  names, now (#3019, #3035): `{:ok, user}` with the account as it is now,
+  `{:skip, reason}` when nothing is to be sent to it, or `{:error, error}`
+  when it could not be read.
+
+  An account erased since (`:erased`), gone (`:no_account`) or holding no
+  address (`:no_address`) is skipped. A mail job can wait hours for a retry,
+  so the workers that send account mail ask this when they run, not only the
+  code that queued them. Preferences are not this function's business:
+  `KilnCMS.Notifications.mail_recipient/2` adds them for the mail they govern.
+  """
+  @spec mail_recipient(KilnCMS.Accounts.User.t() | String.t()) ::
+          {:ok, KilnCMS.Accounts.User.t()}
+          | {:skip, :erased | :no_account | :no_address}
+          | {:error, term()}
+  def mail_recipient(%KilnCMS.Accounts.User{anonymized_at: %DateTime{}}), do: {:skip, :erased}
+  def mail_recipient(%KilnCMS.Accounts.User{email: nil}), do: {:skip, :no_address}
+  def mail_recipient(%KilnCMS.Accounts.User{} = user), do: {:ok, user}
+
+  def mail_recipient(user_id) when is_binary(user_id) do
+    # authorize?: false — an `Accounts.User` read (self-only policy) of the one
+    # account a mail job already names, only to decide whether it still goes:
+    # a system grant would cover every account on the deployment.
+    case get_user(user_id, authorize?: false, not_found_error?: false) do
+      {:ok, %KilnCMS.Accounts.User{} = user} -> mail_recipient(user)
+      {:ok, nil} -> {:skip, :no_account}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  @doc """
   A JSON-serializable snapshot of a user's own data for an access/portability
   request (GDPR Art. 15/20, #212): profile fields and notification preferences,
   paid memberships, the newsletter subscriptions linked to the account

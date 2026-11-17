@@ -615,7 +615,8 @@ an account here.
 4. **An address that already has an account** gets no new account and no
    change to the existing one. Its owner is emailed "Someone tried to create a
    (site) account with your address", with links to sign in or reset their
-   password.
+   password. The mail is queued for that account, so it is not sent if the
+   account is erased, or no longer holds the address, before it goes out.
 
 A mistake in the form itself, such as a password shorter than 8 characters or
 two passwords that don't match, is still shown on the page, the same way for
@@ -1669,8 +1670,12 @@ whatever a membership row says, and is on no roster: it can't be assigned a
 task, picked in a `:user` custom field or sent a review request, and it gets
 no workflow mail, in-app notification, task-assigned notice or task digest,
 including workflow and task mail that was queued before the erasure (#3019).
-Account mail already queued to the old address, such as a sign-in alert, is
-still sent ([What erasure does not reach](data-flows.md#what-erasure-does-not-reach)).
+Account mail still waiting to be sent, such as a sign-in alert or a password
+reset, is withheld and never goes out (#3035): it completes unsent and is
+not listed as a delivery failure on `/editor/mail`. A mail already being
+sent as the erasure commits can still arrive, and an invitation to the
+person's address is not account mail and is kept
+([What erasure does not reach](data-flows.md#what-erasure-does-not-reach)).
 
 ### Remove an erased member from a site
 

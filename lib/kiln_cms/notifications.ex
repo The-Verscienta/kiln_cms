@@ -979,23 +979,13 @@ defmodule KilnCMS.Notifications do
   """
   @spec mail_recipient(User.t() | String.t(), atom() | nil) ::
           {:ok, User.t()} | {:skip, atom()} | {:error, term()}
-  def mail_recipient(%User{anonymized_at: %DateTime{}}, _preference), do: {:skip, :erased}
-  def mail_recipient(%User{email: nil}, _preference), do: {:skip, :no_address}
-
-  def mail_recipient(%User{} = user, preference) do
-    if is_nil(preference) or wants?(user, preference),
-      do: {:ok, user},
-      else: {:skip, :muted}
-  end
-
-  def mail_recipient(user_id, preference) when is_binary(user_id) do
-    # authorize?: false — an `Accounts.User` read (self-only policy), as
-    # `user_by_id/1`: a system grant would cover every account on the
-    # deployment, for the one recipient the job already names.
-    case Accounts.get_user(user_id, authorize?: false, not_found_error?: false) do
-      {:ok, %User{} = user} -> mail_recipient(user, preference)
-      {:ok, nil} -> {:skip, :no_account}
-      {:error, error} -> {:error, error}
+  def mail_recipient(user_or_id, preference) do
+    # The account half is `Accounts.mail_recipient/1`, which account mail
+    # (`KilnCMS.Mail.DeliveryWorker`) asks too (#3035); this adds preferences.
+    with {:ok, user} <- Accounts.mail_recipient(user_or_id) do
+      if is_nil(preference) or wants?(user, preference),
+        do: {:ok, user},
+        else: {:skip, :muted}
     end
   end
 

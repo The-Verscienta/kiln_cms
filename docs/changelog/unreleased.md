@@ -235,6 +235,34 @@ carries the reasoning.
   [Rolling back past workflow and task mail jobs that carry ids](../releasing.md#rolling-back-past-workflow-and-task-mail-jobs-that-carry-ids).
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019))
 
+<a id="account-mail-names-account-upgrade"></a>
+
+- **Account mail jobs now record the account they are for. No migration, and nothing to drain: during a rolling deploy old nodes send without the new check, and rolling back is safe.**
+  Account mail (`KilnCMS.Mail.DeliveryWorker`) gains a `"user_id"` key in
+  its args, and keeps the address and the sealed message it carried before,
+  so both releases can send it (see the Fixed entry *Account mail queued
+  before an erasure is no longer sent to the erased person*).
+
+  - **During a rolling deploy**, a node of the previous release sends a job
+    of the new shape without checking the account, as it sent all account
+    mail before, and queues jobs with no `"user_id"`, which a new node sends
+    unchecked too. So until the last old node stops, an erasure can miss
+    account mail: a job an old node runs after the erasure, or one it queues
+    from a request that read the address before the erasure committed, can
+    still reach the old address.
+  - **A job the erasure withheld** has no message left. A node of the
+    previous release that picks one up cancels it with "message no longer
+    available: the job carries no subject or body". Nothing is delivered;
+    it is listed as a delivery failure on `/editor/mail` under the domain
+    "unknown" until the Pruner deletes the row.
+  - **Rolling back** is safe: new-shape jobs still queued are sent by the
+    previous release without the check, and withheld ones are canceled as
+    above. The `mail` queue needs no draining.
+
+  See
+  [Account mail that names its account](../releasing.md#account-mail-that-names-its-account).
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035))
+
 <a id="erasure-backfill-2514-steps-upgrade"></a>
 
 - **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: their audiences, push subscriptions, private saved views and notifications. No migration; rolling back is safe.**
@@ -884,6 +912,30 @@ carries the reasoning.
   No migration.
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019))
 
+<a id="registration-notice-needs-account"></a>
+
+- **The "Someone tried to create a (site) account with your address" notice is not sent if no account holds the address by the time it is queued.**
+  The notice goes to the owner of an existing account when someone tries to
+  register with its address. It is now queued for that account, read again
+  after the registration's transaction (about a millisecond, on the path
+  that already queues a job), so it is checked like other account mail when
+  it is sent. If the account was erased between the refused registration and
+  that read, nothing is sent. The person registering sees the same answer
+  either way. See
+  [What happens when someone registers](../account-administration.md#what-happens-when-someone-registers).
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035))
+
+<a id="api-key-reuse-alert-names-owner"></a>
+
+- **The API key reuse email names the key's owner by display name, or "account" and their id, instead of their email address.**
+  When a rotated-away drafts-only API key is presented again and the
+  platform admins are mailed directly ("A drafts-only API key on (site) was
+  used after it was rotated"), the body said "acting as" the owner's email
+  address. It now says their display name, or `account <id>` when they have
+  none or are erased, so the mail queued to each admin holds nobody else's
+  address. Nothing else about the alert changed.
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035))
+
 ## Fixed
 
 <a id="staging-up-stops-on-a-failed-copy"></a>
@@ -1351,21 +1403,72 @@ carries the reasoning.
     variables, from Sentry events of both workers.
   - Erasure now strips `to` from every finished (completed, canceled,
     discarded) job on the `mail` queue addressed to the erased account,
-    account mail included (`KilnCMS.Mail.forget_recipient/1`). The delivery
+    account mail included (`KilnCMS.Mail.forget_recipient/2`). The delivery
     panels list such a failure under the domain "unknown".
 
-  Not covered yet: account mail (sign-in alerts, second-factor notices,
-  registration mail, security alerts) still carries the address while it
-  waits and is sent to it after an erasure
-  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035)), and an
-  account mail job running while the erasure runs keeps the address in its
-  row until the Pruner deletes it. Workflow and task mail does not consult the suppression lists
+  Account mail (sign-in alerts, second-factor notices, registration mail,
+  security alerts) waiting to run when the person is erased is covered by
+  the Fixed entry *Account mail queued before an erasure is no longer sent
+  to the erased person*
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035)).
+  Not covered yet: workflow and task mail does not consult the suppression lists
   ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)) or check
   at send time that the recipient may still see the content
   ([#3037](https://github.com/The-Verscienta/kiln_cms/issues/3037)). See
   [Job args retention](../data-flows.md#job-args-retention) and
   [What erasure does not reach](../data-flows.md#what-erasure-does-not-reach).
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019))
+
+<a id="account-mail-erased-recipient"></a>
+
+- **Account mail queued before an erasure is no longer sent to the erased person: each job names its account and is sent only while that account still holds the address, and erasure withholds the account's mail still waiting.**
+  Account mail (password resets, magic links to an account, confirmations,
+  sign-in unlock links, "you were added to a site" notices, registration
+  notices and decisions, second-factor notices, sign-in alerts, security
+  alerts and API key reuse alerts) carried only the address. A job still
+  waiting or retrying when the person was erased (a mail job can retry for
+  about 15 hours) was sent to their real address.
+
+  - `KilnCMS.Mail.enqueue!/2` takes `user_id:`, and every job it queues now
+    writes a `"user_id"` key: the account's id for account mail, `null` for
+    mail to an address with no account behind it (site invitations,
+    newsletter confirmations, a magic link to a bare address). `user_id:`
+    with more than one `to` raises `ArgumentError`.
+  - `KilnCMS.Mail.DeliveryWorker` reads the account when it runs
+    (`KilnCMS.Accounts.mail_recipient/1`) and sends only while it exists, is
+    not erased, and holds the address the job is addressed to (compared
+    case-insensitively), so mail queued to an address the account has
+    changed since is not sent either. Otherwise it drops the address and the
+    message from the row (`KilnCMS.Mail.forget_message/1`), logs one `info`
+    line with the job id and the reason (`erased`, `no_account`,
+    `no_address`, `address_mismatch`), never the address, and completes the
+    job: it is not a delivery failure on `/editor/mail`. An account that
+    cannot be read fails the attempt, which retries; the last one drops the
+    message first.
+  - Erasure withholds every account mail job for the account that has not
+    finished, a running one included (`KilnCMS.Mail.withhold_pending/2`): the
+    job loses its address and message, gains `"withheld": "erased"`, and
+    completes unsent when it runs. A job queued afterwards from a request
+    that read the old address is stopped by the check when it runs. Finished
+    jobs lose their `to` by account as well as by address
+    (`KilnCMS.Mail.forget_recipient/2`).
+  - Jobs queued by v1.10.x have no `"user_id"` key and are sent as before.
+    For this release, erasure also withholds those not yet finished that are
+    addressed to the erased address, whoever they were for, which includes
+    an invitation or newsletter confirmation of the old shape to that
+    address.
+
+  Not covered: a job already running when the erasure commits can still
+  deliver; during a rolling deploy, nodes of the previous release send
+  without the check (see the Upgrade notes entry); and mail to an address
+  that is not account mail (an invitation, a newsletter confirmation, a
+  magic link to a bare address) is neither checked when it is sent nor
+  withheld by erasure, as erasure keeps a newsletter row at the address that
+  was never linked to the account. See
+  [Account mail still waiting to run](../data-flows.md#account-mail-still-waiting-to-run)
+  and
+  [What erasure does not reach](../data-flows.md#what-erasure-does-not-reach).
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035))
 
 <a id="data-flows-personal-data-rows"></a>
 

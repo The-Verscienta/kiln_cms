@@ -1141,6 +1141,41 @@ Old-shape jobs drop their address, title, actor name and excerpt or note
 from their row when they finish, and `KilnCMS.Jobs.PrivateArgsScrub` drops
 them from rows that finished under the previous release.
 
+### Account mail that names its account
+
+From the release after v1.10.1 (#3035), account mail
+(`KilnCMS.Mail.DeliveryWorker`: password resets, magic links, confirmations,
+sign-in unlock links, membership and registration notices, second-factor
+notices, sign-in alerts, security alerts, API key reuse alerts) records the
+account it is for in a `"user_id"` key, and the worker sends it only while
+that account exists, is not erased, and still holds the job's address.
+Erasure withholds the account's jobs that have not finished: it removes their
+address and message and adds `"withheld": "erased"`. The address and the
+sealed message are still written as before, so both releases can send a
+job of the new shape. No migration is involved, and the `mail` queue needs no
+draining in either direction.
+
+- **During a rolling deploy**, an old node sends a new-shape job without the
+  account check, as it sent every account mail before. An erasure that
+  commits while old nodes run can therefore miss mail: a request served by an
+  old node that read the address before the erasure committed queues a job
+  with no account id, and a job of either shape that an old node picks up is
+  sent to the address it carries. The gap closes when the last old node
+  stops.
+- **A withheld job that an old node picks up** finds no message and is
+  canceled with "message no longer available: the job carries no subject or
+  body". Nothing is delivered. It shows as a delivery failure on
+  `/editor/mail` under the domain "unknown" until the Pruner deletes the row,
+  7 days later.
+- **Old-shape jobs** (no `"user_id"` key) are sent by a new node as before,
+  without the account check. Erasure withholds those not yet finished that
+  are addressed to the erased account's address, which also catches an
+  invitation or newsletter confirmation of the old shape to that address.
+  That branch is needed for one release only.
+- **After rolling back**, new-shape jobs still queued are sent by the old
+  release without the account check, and a withheld one is canceled as
+  above. Nothing else changes.
+
 ### What zero-downtime does and does not cover
 
 The policy makes the **schema** safe for two releases at once. Kiln's boot
