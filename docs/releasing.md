@@ -904,7 +904,7 @@ The same hazard, and the same two-step rule, covers:
   embedded attribute a release before adding a value, as for a column.
 - **An `:atom` column without `one_of`.** It fails the same way on a value the
   older release has no atom for. `FieldDefinition.field_type` was one: the
-  `key_value` and `telephone` types added since v1.8.0 break v1.8.0's
+  `key_value`, `telephone` and `address` types added since v1.8.0 break v1.8.0's
   field-definition reads
   ([#2605](https://github.com/The-Verscienta/kiln_cms/issues/2605)).
 
@@ -974,14 +974,14 @@ DELETE FROM api_keys WHERE access = 'draft_write';
 **Custom fields** of a type added since v1.8.0 need a decision per field,
 because deleting a field deletes the values every record holds in it:
 
-1. **Find the `key_value` and `telephone` fields.** v1.8.0 has no atom for
-   either, so while one exists every field-definition read fails there: the
+1. **Find the `key_value`, `telephone` and `address` fields.** v1.8.0 has no
+   atom for any of them, so while one exists every field-definition read fails there: the
    Fields screen, the content editor, every save of a record with custom
    fields, and delivery.
 
    ```sql
    SELECT org_id, content_type, type_definition_id, name, field_type
-   FROM field_definitions WHERE field_type IN ('key_value', 'telephone');
+   FROM field_definitions WHERE field_type IN ('key_value', 'telephone', 'address');
    ```
 
 2. **Back up.** A database backup keeps the values. A field export
@@ -997,7 +997,7 @@ because deleting a field deletes the values every record holds in it:
          KilnCMS.CMS.list_field_definitions!(
            authorize?: false,
            tenant: org.id,
-           query: [filter: [field_type: [in: [:key_value, :telephone]]]]
+           query: [filter: [field_type: [in: [:key_value, :telephone, :address]]]]
          ) do
      KilnCMS.CMS.destroy_field_definition!(field, authorize?: false, tenant: org.id)
    end
@@ -1006,7 +1006,7 @@ because deleting a field deletes the values every record holds in it:
    A field that another field's condition reads is refused ("is used in the
    conditions of …; remove those conditions first"): remove the condition
    and run the loop again. A plain
-   `DELETE FROM field_definitions WHERE field_type IN ('key_value', 'telephone');`
+   `DELETE FROM field_definitions WHERE field_type IN ('key_value', 'telephone', 'address');`
    also unblocks v1.8.0, but leaves the values in each record's
    `custom_fields` until v1.8.0 next saves it, and running nodes keep the
    rows cached until they restart.

@@ -29,7 +29,8 @@ UI" workflow, scoped to fields.
   `:datetime_range`, `:recurrence`, `:computed`, the six format types
   `:email`, `:telephone`, `:color`, `:slug`, `:time` and `:json` (see
   "Built-in format types" below) and the composite `:range`, `:key_value` and
-  `:link` (see "Range and key-value and link fields") — plus
+  `:link` (see "Range and key-value and link fields") and the structured
+  `:address` (see "Address fields") — plus
   anything a plugin registers (see
   [plugin-extensibility.md](plugin-extensibility.md)).
 - **Required fields (`required: true`)**: every create or save that sends
@@ -525,10 +526,10 @@ import all run the same check, and the stored value is the tidied one.
 | --- | --- | --- | --- |
 | `:email` | email input | `Ada@example.com` (domain lowercased, local part keeps its case) | Shape check only: one `@`, a dotted domain, at most 254 characters. It cannot tell whether the mailbox exists. |
 | `:telephone` | telephone input | E.164, `+442079460958` | A format check only: spaces, dashes, dots and brackets are stripped and a leading `00` becomes `+`; what is left must be `+`, a non-zero digit and 6 to 14 more digits. Kiln has no numbering-plan data, so a real number cannot be told from a plausible one. A domestic number (`020 7946 0958`) or one with an extension is refused: include the country code. |
-| `:color` | text input with a pattern | lowercase `#rrggbb` (`#F80` becomes `#ff8800`) | Named colours, `rgb()` and alpha are refused. It is a text input, not `type="color"`, because a colour picker cannot be empty and would fill every optional colour field with `#000000` on save. |
+| `:color` | text input with a pattern | lowercase `#rrggbb` (`#F80` becomes `#ff8800`) | Named colours, `rgb()` and alpha are refused. An admin can limit it to a palette (see [Constrain the values of a field](#constrain-the-values-of-a-field)). It is a text input, not `type="color"`, because a colour picker cannot be empty and would fill every optional colour field with `#000000` on save. |
 | `:slug` | text input with a pattern | `cafe-menu` | Typed text is slugified (`Café Menu!` becomes `cafe-menu`), at most 128 characters; input with nothing left is refused. Not filled from another field: to derive a slug, use a `:computed` field. Can be made unique (see [Constrain the values of a field](#constrain-the-values-of-a-field)); values are compared once tidied, so `Hello World` and `hello-world` collide. |
 | `:time` | time input | `"09:30"` (24-hour, zero-padded, no date or zone) | Accepts `H:MM`, `HH:MM`, `HH:MM:SS`; seconds are dropped. |
-| `:json` | monospace textarea, pretty-printed | the object or array itself | See below. |
+| `:json` | monospace textarea, pretty-printed | the object or array itself | See below. An admin can attach a JSON Schema (see [Constrain the values of a field](#constrain-the-values-of-a-field)). |
 
 In the API, `:email`, `:telephone`, `:color`, `:slug` and `:time` are strings;
 `:json` is the generic JSON value. The schema export describes the formats
@@ -546,13 +547,12 @@ indexed (not the keys), so flag only a field whose contents are prose worth
 finding.
 
 **Names are reserved.** `email`, `telephone`, `color`, `slug`, `time`,
-`json`, `range`, `key_value` and `link` can no longer be used for a type an overlay or plugin registers; rename
+`json`, `range`, `key_value`, `link` and `address` can no longer be used for a type an overlay or plugin registers; rename
 it (`mix kiln.plugins.doctor` fails otherwise). A stored field definition
 that already used one of these names as its `field_type` is now cast by the
 built-in type: values that do not pass its check are refused on the next save.
 
-**Not yet:** number options (step, prefix, suffix, slider), a colour
-palette, and JSON Schema validation of a `:json` value.
+**Not yet:** number options (step, prefix, suffix, slider).
 
 ### Range and key-value and link fields
 
@@ -621,6 +621,57 @@ not be greater than the maximum*; *each line must be key=value*; *every value
 needs a key*; *has a repeated key (x)*; *a key may not contain "="*; *address
 must be an http(s) URL, a mailto: address, a /path or a #fragment*; *rel must be
 one or more of: noopener, noreferrer, nofollow, sponsored, ugc, external*.
+
+### Address fields
+
+An `:address` field holds one postal address as a single object, checked the
+same way in the editor, the API and imports, and served through GraphQL as the
+generic JSON value. Pick it in `/editor/fields` (an admin task). The editor
+shows a **Country** select (every ISO 3166-1 country, blank first), then
+**Address line 1**, **Address line 2**, **City or town**, **State, province or
+region** and **Postal code**.
+
+```json
+{
+  "country": "GB",
+  "address_line1": "10 Downing Street",
+  "locality": "London",
+  "postal_code": "SW1A 1AA"
+}
+```
+
+- **Country** is an ISO 3166-1 alpha-2 code, upper-cased (`gb` is stored as
+  `GB`); a name such as "United Kingdom" is refused. It is required as soon as
+  any other part is filled in. A form where every part is blank is an empty
+  field, not an address.
+- **Text parts** are trimmed, single-line, and capped (200 characters for each
+  line, 100 for the city and the region, 16 for the postal code). Blank parts
+  are not stored, and a key other than the six above is refused.
+- **Postal code** is upper-cased with its spacing made canonical. For US, CA,
+  GB, DE, FR, NL, AU, ES, IT, JP, CH, SE, BR and IN the format is checked too
+  (`k1a0b1` is stored as `K1A 0B1`, `1234ab` as `1234 AB`, and a five-digit US
+  code with a letter in it is refused). Every other country takes free text, so
+  a code is never refused for a country Kiln has no rule for. This is a format
+  check, not a lookup: it cannot tell a real postcode from a well-formed one.
+- **No licensed dataset ships.** The country list is the public ISO 3166-1
+  assignment (English names) and the postal formats are a small hand-written
+  table.
+- **Search.** A `searchable` flag indexes the lines, city, region and postal
+  code, not the country code.
+- **Lists and queries.** Like the other composite types, an address is not a
+  Columns picker column and cannot be sorted; a `custom_filter` answers only
+  "Empty or not" (`null`). `multiple` is cleared and validation constraints
+  are refused.
+
+**Not yet:** labels and required parts that follow the country (a US "State"
+and "ZIP code", a UK "County"), administrative-area lists, a schema.org
+`PostalAddress` in the JSON-LD output, and looking up coordinates for a
+`:geolocation` field.
+
+**What can go wrong.** *needs a country* (a part is given without one);
+*country must be an ISO 3166-1 alpha-2 code (like GB or US)*; *postal code is
+not a valid United States postal code* (the country is named); *address line 1
+must be a single line*; *locality is too long (at most 100)*.
 
 ### Make a field hold a list of values
 
@@ -1049,6 +1100,8 @@ editor sees the failure as an error under the field, naming it.
 | `pattern` | the same text types | A regular expression the **whole** value must match |
 | `pattern_message` | with `pattern` | The sentence an editor reads when it does not match |
 | `unique` | `:string`, `:url`, `:integer`, `:float`, `:date`, `:datetime`, `:slug` | No other document may hold the same value |
+| `palette` | `:color` | The hex colors the field may hold: 1 to 64 entries, `#rgb` or `#rrggbb` |
+| `json_schema` | `:json` | A JSON Schema (draft 2020-12) the value must satisfy |
 
 A plain `:text` field takes the text rules but not `unique`. A rich `:text`
 field takes no constraints (its value is HTML, so its length means nothing),
@@ -1060,7 +1113,7 @@ valid regular expression.
 **Set them** in `/editor/fields` (admin only): open or create a field, and the
 form shows a **Validation (optional)** group with only the controls its type
 takes (*Minimum value*, *Maximum value*, *Minimum length*, *Maximum length*,
-*Pattern*, *Message when it doesn't match*, *Unique*). Or send `validation` on
+*Pattern*, *Message when it doesn't match*, *Palette*, *JSON Schema*, *Unique*). Or send `validation` on
 the field definition (it is a public attribute, so it appears in the JSON:API
 field-definition payload and the OpenAPI document):
 
@@ -1140,8 +1193,65 @@ so it can gate a deploy.
 The schema export reports a field's rules as annotations, not as JSON Schema
 assertions, because a stored value may predate a rule: `x-kiln-minimum`,
 `x-kiln-maximum`, `x-kiln-min-length`, `x-kiln-max-length`, `x-kiln-pattern`
-and `x-kiln-unique`. `pattern_message` is not exported. On a `multiple`
+and `x-kiln-unique`, plus `x-kiln-palette` (a color field's normalized hex list) and
+`x-kiln-json-schema` (a JSON field's schema, whole). `pattern_message` is not exported. On a `multiple`
 string field the text rules apply to each item.
+
+#### Limit a color field to a palette
+
+1. In `/editor/fields` (admin only), open or create a `:color` field.
+2. In **Validation (optional)**, fill **Palette** with hex colors separated by
+   commas or spaces, for example `#0f172a, #2563eb, #f59e0b`, and save.
+3. Open a document of that type. The field now shows one swatch per color
+   (and **None** when the field isn't required) instead of a text input.
+
+Through the API the same rule applies: a color outside the palette is refused
+with *Accent (accent) must be one of the palette colors*, while `#F80` is accepted when
+`#ff8800` is in the palette (values are compared after tidying). A field
+default must be in the palette. A color stored before the palette narrowed
+stays as the current value until someone changes it. An empty palette, more than
+64 entries or an entry that isn't a hex color is refused when the definition
+is saved (*expected 1 to 64 hex colors such as #ff8800*).
+
+#### Check a JSON field against a JSON Schema
+
+1. In `/editor/fields`, open or create a `:json` field.
+2. Paste a schema into **JSON Schema** and save:
+
+   ```json
+   {
+     "type": "object",
+     "required": ["dosage"],
+     "properties": {"dosage": {"type": "integer", "minimum": 3}}
+   }
+   ```
+
+3. Saving `{"dosage": 1}` to the field, in the editor or the API, now fails with
+   *Spec (spec) doesn't match its JSON Schema: /dosage: value 1 is lower than minimum 3*
+   (the `#/dosage` part is the JSON Pointer of the offending value; at most
+   five problems are listed).
+
+The schema is admin input that runs on every write, so it is bounded and
+cannot reach out:
+
+- Draft 2020-12 only; `$schema`, if present, must be
+  `https://json-schema.org/draft/2020-12/schema`. `format` is an annotation,
+  not asserted.
+- At most 16 KB encoded, 16 levels deep and 1,000 values.
+- `$ref` must point inside the schema (`"$ref": "#/$defs/dose"`). A `$ref` not
+  starting with `#`, and `$id`, `$dynamicRef`, `$recursiveRef` and
+  `$dynamicAnchor`, are refused when the definition is saved. Nothing is ever
+  fetched.
+- A check has a 1-second deadline; a schema too expensive to evaluate (a
+  pathological `pattern`) fails the write with *took too long to check
+  against the schema*.
+- The value must first pass the JSON field's own limits (64 KB, 32 levels,
+  5,000 values). Values stored before the schema was set aren't rechecked until
+  they are next written.
+
+A definition that breaks these is refused on save with *json_schema is not
+valid: …* (for example *may only reference itself (a "$ref" starting with
+"#")*, or *expected a JSON Schema object*).
 
 ### Geolocation fields
 

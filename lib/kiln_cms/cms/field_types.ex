@@ -79,7 +79,9 @@ defmodule KilnCMS.CMS.FieldTypes do
     # Composite values (#2278), all stored as JSON and served as generic JSON.
     KilnCMS.CMS.FieldTypes.Range,
     KilnCMS.CMS.FieldTypes.KeyValue,
-    KilnCMS.CMS.FieldTypes.Link
+    KilnCMS.CMS.FieldTypes.Link,
+    # A structured postal address (#2279): one object, validated and normalized.
+    KilnCMS.CMS.FieldTypes.Address
   ]
 
   # name → module, baked at compile time (plugins are compile-time code, D4).

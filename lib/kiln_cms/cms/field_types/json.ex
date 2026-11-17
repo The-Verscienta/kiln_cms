@@ -12,6 +12,14 @@ defmodule KilnCMS.CMS.FieldTypes.Json do
   values. The limits are enforced on the decoded term, so a deeply nested or
   very wide document is refused with a message rather than stored or crashing.
 
+  An admin may attach a **JSON Schema** (`validation["json_schema"]`, #2434,
+  draft 2020-12, see `KilnCMS.CMS.FieldSchema` for its bounds and why it can
+  never fetch a remote `$ref`). The value is checked against it when it is
+  written, after the limits above, by `KilnCMS.CMS.FieldConstraints`, and a failure names the offending part
+  (`/dosage: value 1 is lower than minimum 3`). A value already stored, or
+  restored from a version, is not re-judged by a schema set after it: only a
+  changed value is checked.
+
   A string or key containing a NUL character is refused: Postgres `jsonb`
   cannot store `\\u0000`.
 
@@ -48,10 +56,10 @@ defmodule KilnCMS.CMS.FieldTypes.Json do
   def json_schema(_definition), do: %{"type" => ["object", "array", "null"]}
 
   @impl Kiln.FieldType
-  def cast(value, _definition) when is_binary(value) do
+  def cast(value, definition) when is_binary(value) do
     with true <- byte_size(value) <= @max_input_bytes and String.valid?(value),
          {:ok, decoded} <- Jason.decode(value) do
-      cast(decoded, nil)
+      cast(decoded, definition)
     else
       false -> {:error, "must be valid JSON of at most #{div(@max_bytes, 1024)} KB"}
       {:error, _decode_error} -> {:error, "must be valid JSON"}

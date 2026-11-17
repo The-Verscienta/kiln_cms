@@ -62,6 +62,10 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Overlays and plugins: the field type name `address` is now built in. Rename a type that uses it.**
+  ([long form](docs/changelog/unreleased.md#address-field-type-name-upgrade))
+
+
 - **Run `mix ash.migrate` (new nullable `field_definitions.flex_of_id` and `item_setting`, part of #2282). Nothing changes for existing fields; rolling back is safe.**
   ([#2969](https://github.com/The-Verscienta/kiln_cms/pull/2969) · [long form](docs/changelog/unreleased.md#flexible-item-types-upgrade))
 
@@ -75,6 +79,13 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
+  Served as generic JSON, filterable only for "Empty or not", not sortable. Country-driven labels, region lists and schema.org output are not yet.
+  ([#2279](https://github.com/The-Verscienta/kiln_cms/issues/2279) · [long form](docs/changelog/unreleased.md#address-field-type))
+
+
+
+
 - **Number fields: Step, Prefix and Suffix in the Validation fieldset and a Slider editor input. Field-sync exports now carry `step`, `prefix` and `suffix`, which a release before this one refuses as unknown keys.**
   ([long form](docs/changelog/unreleased.md#number-field-options))
 
@@ -87,6 +98,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
   ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
+
+- **Color fields can be limited to a palette (`validation["palette"]`, shown as swatches in the editor) and JSON fields can carry a JSON Schema (`validation["json_schema"]`, draft 2020-12, local `$ref` only, bounded, never fetches); both are checked when a value changes. No migration.**
+  ([long form](docs/changelog/unreleased.md#color-palette-json-schema))
 
 - **A content type can build every record's title from its fields with a title template (`{{ field.last_name }}, {{ field.first_name }}`): editors no longer type one, and existing titles are re-derived.**
   ([long form](docs/changelog/unreleased.md#computed-titles))

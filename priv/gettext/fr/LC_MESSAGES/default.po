@@ -2128,6 +2128,11 @@ msgstr "Un plugin présentant un problème de sécurité connu ou un paquet modi
 msgid "A point on a map: latitude, longitude and zoom. For a shop, a venue or where a photo was taken."
 msgstr "Un point sur une carte : latitude, longitude et zoom. Pour une boutique, un lieu ou l'endroit où une photo a été prise."
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "A postal address: country, lines, city, region and postal code. For an office, a venue or a clinic. Cannot be filtered or sorted."
+msgstr "Une adresse postale : pays, lignes, ville, région et code postal. Pour un bureau, un lieu ou une clinique. Ne peut être ni filtrée ni triée."
+
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
 msgid "A preview. Nothing is sent, posted or saved."
@@ -3242,6 +3247,16 @@ msgstr "Adresse bloquée automatiquement"
 #, elixir-autogen, elixir-format
 msgid "Address blocked."
 msgstr "Adresse bloquée."
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Address line 1"
+msgstr "Adresse, ligne 1"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Address line 2"
+msgstr "Adresse, ligne 2"
 
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
@@ -5434,6 +5449,11 @@ msgstr "Les cases à cocher n'affichent que les options. Choisissez Étiquettes 
 msgid "Checked %{time}."
 msgstr "Vérifié le %{time}."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checked against a JSON Schema."
+msgstr "Vérifié selon un schéma JSON."
+
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checked at %{time}."
@@ -5735,6 +5755,11 @@ msgstr "Termes choisis"
 #, elixir-autogen, elixir-format
 msgid "Citation"
 msgstr "Source"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "City or town"
+msgstr "Ville"
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
@@ -7194,6 +7219,11 @@ msgstr "Compté à partir du plus récent de ces moments : la création du compt
 #, elixir-autogen, elixir-format
 msgid "Counting…"
 msgstr "Décompte…"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Country"
+msgstr "Pays"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -9720,6 +9750,11 @@ msgstr "Toutes les semaines"
 msgid "Every week on %{weekday} at %{time} (%{zone})"
 msgstr "Toutes les semaines le %{weekday} à %{time} (%{zone})"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every write is checked against it (JSON Schema draft 2020-12, up to 16 KB). References must point inside the schema; nothing is fetched. Leave empty for no check."
+msgstr "Chaque écriture est vérifiée selon ce schéma (JSON Schema draft 2020-12, 16 Ko maximum). Les références doivent pointer à l'intérieur du schéma ; rien n'est récupéré. Laissez vide pour ne rien vérifier."
+
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -11239,6 +11274,11 @@ msgstr "Retenu : le service de vérification était injoignable."
 msgid "Help text"
 msgstr "Texte d'aide"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hex colors editors may choose, separated by commas (up to 64). Leave empty to allow any color."
+msgstr "Couleurs hexadécimales proposées aux éditeurs, séparées par des virgules (64 maximum). Laissez vide pour autoriser toute couleur."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Hex or the notices feed could not be reached; these results are unknown, not OK."
@@ -12203,6 +12243,11 @@ msgstr "Sa date de relecture est passée depuis plus d’une semaine : vérifiez
 msgid "JSON API"
 msgstr "API JSON"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "JSON Schema"
+msgstr "Schéma JSON"
+
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -12859,6 +12904,13 @@ msgstr "Mode clair"
 #, elixir-autogen, elixir-format
 msgid "Limit it when what you link to is scarce — a seat, a slot, a featured place. Once a record is full, editors see it as full in the picker. Lowering the number later never removes links that already exist."
 msgstr "Limitez-le quand ce que vous reliez est rare — une place, un créneau, une mise en avant. Une fois un enregistrement complet, les éditeurs le voient comme complet dans le sélecteur. Baisser le nombre plus tard ne retire jamais les liens existants."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Limited to %{count} color."
+msgid_plural "Limited to %{count} colors."
+msgstr[0] "Limité à %{count} couleur."
+msgstr[1] "Limité à %{count} couleurs."
 
 #: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
 #, elixir-autogen, elixir-format
@@ -15053,6 +15105,7 @@ msgstr "Personne n’a été déconnecté. Réessayez."
 msgid "Nobody would receive this — the audience has no confirmed subscribers. Add subscribers below and confirm them first."
 msgstr "Personne ne le recevrait : l’audience n’a aucun abonné confirmé. Ajoutez des abonnés ci-dessous et confirmez-les d’abord."
 
+#: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "None"
@@ -16462,6 +16515,11 @@ msgstr "Pagination"
 msgid "Paid memberships: connect a payment provider, then sell tiers that grant readers access to gated content."
 msgstr "Abonnements payants : connectez un prestataire de paiement, puis vendez des niveaux qui donnent aux lecteurs accès au contenu réservé."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Palette"
+msgstr "Palette"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Panel content"
@@ -17054,6 +17112,11 @@ msgstr "Publie sur Bluesky ou Mastodon quand un article est publié."
 #, elixir-autogen, elixir-format
 msgid "Post to social media"
 msgstr "Publier sur les réseaux sociaux"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Postal code"
+msgstr "Code postal"
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
@@ -20156,6 +20219,11 @@ msgstr "Sélectionner %{name}"
 msgid "Select %{title}"
 msgstr "Sélectionner %{title}"
 
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "Select a country"
+msgstr "Sélectionnez un pays"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select a field on the canvas to edit it, or add one from the palette."
@@ -21580,6 +21648,11 @@ msgstr "Au départ"
 #, elixir-autogen, elixir-format
 msgid "State"
 msgstr "État"
+
+#: lib/kiln_cms/cms/field_types/address.ex
+#, elixir-autogen, elixir-format
+msgid "State, province or region"
+msgstr "État, province ou région"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -28143,6 +28216,11 @@ msgstr "ne peut pas lire %{refs} : le titre est construit à partir de ce modèl
 msgid "can't read the private field %{names}: a title is public"
 msgstr "ne peut pas lire le champ privé %{names} : un titre est public"
 
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "can't use \"%{key}\""
+msgstr "ne peut pas utiliser « %{key} »"
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "category"
@@ -28253,6 +28331,11 @@ msgstr "types de contenu · %{terms} termes de taxonomie"
 #, elixir-autogen, elixir-format
 msgid "control"
 msgstr "contrôle"
+
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "could not be checked against the schema"
+msgstr "n'a pas pu être vérifié selon le schéma"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -28385,6 +28468,11 @@ msgstr "désactivée (identité conservée)"
 #, elixir-autogen, elixir-format
 msgid "disabled — every federation route 404s until the operator sets KILN_FEDERATION_ENABLED"
 msgstr "désactivée — toutes les routes de fédération répondent 404 tant que l'opérateur n'a pas défini KILN_FEDERATION_ENABLED"
+
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "doesn't match the schema"
+msgstr "ne correspond pas au schéma"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -28623,6 +28711,11 @@ msgstr "a pour %{field} une valeur qu'il n'accepte pas : %{reason}"
 msgid "has expired"
 msgstr "a expiré"
 
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "has more than %{max} values"
+msgstr "contient plus de %{max} valeurs"
+
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "hidden"
@@ -28745,6 +28838,11 @@ msgstr "est inférieur à"
 msgid "is more than"
 msgstr "est supérieur à"
 
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "is nested more than %{max} levels deep"
+msgstr "est imbriqué sur plus de %{max} niveaux"
+
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/components/field_selection_components.ex
 #, elixir-autogen, elixir-format
@@ -28755,6 +28853,11 @@ msgstr "n'est pas"
 #, elixir-autogen, elixir-format
 msgid "is not %{value}"
 msgstr "n'est pas %{value}"
+
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "is not a valid JSON Schema"
+msgstr "n'est pas un schéma JSON valide"
 
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
@@ -28826,6 +28929,11 @@ msgstr "repasse en brouillon"
 #, elixir-autogen, elixir-format
 msgid "is submitted for review"
 msgstr "est soumis à relecture"
+
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "is too large (at most %{kb} KB)"
+msgstr "est trop volumineux (%{kb} Ko maximum)"
 
 #: lib/kiln_cms/cms/titles.ex
 #, elixir-autogen, elixir-format
@@ -28989,6 +29097,11 @@ msgstr "découverte des langues pour construire des sélecteurs de langue."
 msgid "low"
 msgstr "faible"
 
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "may only reference itself (a \"$ref\" starting with \"#\")"
+msgstr "ne peut référencer que lui-même (un « $ref » commençant par « # »)"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "media"
@@ -29021,6 +29134,11 @@ msgstr "manquant"
 msgid "more conversions than impressions — these counters are not trustworthy"
 msgstr "plus de conversions que d'impressions — ces compteurs ne sont pas fiables"
 
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "must be a JSON object"
+msgstr "doit être un objet JSON"
+
 #: lib/kiln_cms/cms/validations/form_field_config.ex
 #, elixir-autogen, elixir-format
 msgid "must be a whole number from 1 to %{max}"
@@ -29035,6 +29153,11 @@ msgstr "doit être un nombre entier dans un champ entier"
 #, elixir-autogen, elixir-format
 msgid "must be greater than zero"
 msgstr "doit être supérieur à zéro"
+
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "must use draft 2020-12 (\"$schema\": \"%{draft}\")"
+msgstr "doit utiliser le draft 2020-12 (« $schema » : « %{draft} »)"
 
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
@@ -29808,6 +29931,11 @@ msgstr "trop volumineux (max %{mb} Mo)"
 #, elixir-autogen, elixir-format
 msgid "too many files at once (max %{count})"
 msgstr "trop de fichiers à la fois (max %{count})"
+
+#: lib/kiln_cms/cms/field_schema.ex
+#, elixir-autogen, elixir-format
+msgid "took too long to check against the schema"
+msgstr "a pris trop de temps à vérifier selon le schéma"
 
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
