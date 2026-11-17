@@ -107,6 +107,30 @@ carries the reasoning.
   See [docs/newsletter.md](../newsletter.md#accounts-erased-before-this-release).
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991))
 
+<a id="erasure-backfill-memberships-upgrade"></a>
+
+- **The boot-time erasure backfill now also demotes the site memberships of accounts erased before this release. No migration; rolling back is safe.**
+  Erasure now strips an account's site memberships of every grant (see
+  *Erasure demotes the account's site memberships* under Fixed). For
+  accounts erased earlier, the same job that deletes their newsletter rows,
+  `KilnCMS.Accounts.ErasureBackfill`, now first finds every membership of an
+  erased account that still grants something (a tier above `:viewer`, a
+  temporary tier, or an audience) and demotes it the way erasure does: tier
+  `:viewer`, no temporary tier, no audiences. The rows stay. The job is the
+  one queued on each boot for the newsletter step above
+  (`:erasure_backfill_on_boot`, default on), and its
+  result map gains `memberships`, the number of rows demoted:
+  `%{memberships: 4, newsletter_accounts: 0, newsletter_subscribers: 0, failed: 0}`.
+  An account whose memberships can't be demoted is logged at warning
+  (`erasure backfill could not demote the memberships of <id>`) and counted
+  under `failed`, and the job retries as for the newsletter step. Until the
+  job has run, those rows already decide nothing: an erased account has no
+  tier and no audiences anywhere and is on no roster, whatever its rows hold.
+  Rolling back is safe: the previous release works with demoted rows, and
+  what it demoted stays demoted. See
+  [docs/newsletter.md](../newsletter.md#accounts-erased-before-this-release).
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -586,6 +610,19 @@ carries the reasoning.
 
 ## Changed
 
+<a id="user-field-erased-person"></a>
+
+- **A document whose `:user` custom field names an erased person is refused on its next save that changes its custom fields, with "must be a person on this site".**
+  The field must name someone on the writing site's roster, and an erased
+  account is now on none (#2774). This is the rule that already applied to
+  someone removed from the site: the stored value stays and is not
+  delivered (the field is private), but saving the document again with a
+  change to its custom fields fails until an editor picks another person or
+  clears the field. The picker no longer offers the erased person. No
+  migration. See
+  [Account administration](../account-administration.md#remove-an-erased-member-from-a-site).
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774))
+
 <a id="sort-reference-media"></a>
 
 - **`custom_sort` (JSON:API) and `customSort` (GraphQL) now sort a single-valued reference or media field, by its target's current title (a media item's current filename).**
@@ -848,6 +885,70 @@ carries the reasoning.
   [docs/newsletter.md](../newsletter.md#when-a-member-account-is-erased) and
   [docs/data-flows.md](../data-flows.md#subject-rights-workflows).
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991))
+
+<a id="erasure-demotes-site-memberships"></a>
+
+- **Erasure now demotes every site membership of the account, so an erased person is no longer a site admin or editor, an assignee, a mail recipient or a reader of gated content.**
+  Erasure left the account's site memberships as they were. The tombstone
+  kept its site tier, a live temporary tier and its audiences: it was still
+  on the admin and editor rosters (the task assignee picker, the `:user`
+  custom-field picker, review-request and registration-notice recipients),
+  and its membership still granted gated content. Now:
+  - each membership row stays, as the record of who belonged where, and is
+    demoted (`OrgMembership.:erase`): tier `:viewer`, no temporary tier, no
+    audiences. Its status, type scopes, field grants and custom role are
+    kept; they only narrow a tier, so clearing them would widen the row. No
+    role-change event is written to the security log;
+  - an erased account has no tier and no audiences on any site and is on no
+    roster, whatever a row still holds (`KilnCMS.Accounts.Scoping`);
+  - it gets no workflow mail, no in-app notification, no task-assigned
+    notice and no task digest. A task already naming it as assignee still
+    fires `task.assigned`, the task's event;
+  - editing its membership, granting it a temporary tier or saving its
+    audiences on `/editor/accounts/:id` is refused with
+    `KilnCMS.Accounts.Errors.AccountErased` ("belongs to an account that was
+    erased"). Removing the membership still works;
+  - the Team page (`/editor/team`) marks the row with an **Erased** badge and
+    a note, and offers no **Edit** for it, only removal.
+
+  Erasure now locks the account's row before any other row it writes, so a
+  membership edit or temporary tier racing it either commits first and is
+  demoted, or waits and is refused. `OrgMembership.:erase` is refused to
+  every actor, platform admins included; erasure and its backfill call it
+  with `authorize?: false`. The staging scrub runs the same erasure, so a
+  scrubbed clone's site admins hold no tier and the staging admin the scrub
+  creates is the one admin. Accounts erased before this release are handled
+  by the boot backfill; see the Upgrade notes entry. No migration. See
+  [docs/data-flows.md](../data-flows.md#subject-rights-workflows) and
+  [docs/account-administration.md](../account-administration.md#removing-an-account).
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774))
+
+<a id="billing-webhook-erased-account"></a>
+
+- **A payment webhook for an erased member no longer revives their canceled membership, and can no longer deadlock with that member's erasure.**
+  Erasure cancels an account's paid memberships and drops their provider
+  ids, but does not cancel the subscription at the provider, which keeps
+  sending its events. A renewal for an erased member found the membership
+  through the subscription's metadata, set it `active` again with the
+  provider ids back, recorded an `activated` event and sent
+  `membership.activated`. Now a membership transition locks the account's
+  row first (`KilnCMS.Billing.Changes.SettleErasedAccount`) and, for an erased
+  account, succeeds without changing anything: the provider gets its `200`
+  and the event is recorded as processed, the row stays `canceled` with no
+  provider ids, and no entitlement event, `membership.*` webhook, audience or
+  newsletter segment follows. An admin's uncomp reaching an erased member's
+  membership is the same no-op. **You still have to cancel the subscription
+  at the provider**; until you do, the person is billed.
+
+  The same lock fixes a deadlock: a transition locked the membership row
+  first and the account second (in the entitlement recompute), while an
+  erasure of the same person holds the account and cancels that membership.
+  Every path now takes the account first. A newsletter tier sync racing an
+  erasure was already safe, since it runs inside that transition after the
+  account is locked; a test now pins it (#3006). No migration. See
+  [docs/memberships.md](../memberships.md#when-the-member-was-erased).
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774),
+  [#3006](https://github.com/The-Verscienta/kiln_cms/issues/3006))
 
 ## Security
 

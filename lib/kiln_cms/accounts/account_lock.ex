@@ -14,8 +14,15 @@ defmodule KilnCMS.Accounts.AccountLock do
 
     * every `OrgMembership` create (`Changes.LockAccount`, resource-wide),
       and the two approvals, before they lock the membership;
+    * `OrgMembership` `:update` and `:grant_temporary_role` (#2774), first:
+      an erasure demotes every membership it finds, and a tier written after
+      it would put one back on the tombstone;
     * `Billing.Membership` `:start` and `:comp`, and the entitlement
       recompute's write in `KilnCMS.Billing.Entitlements`, first;
+    * `Billing.Membership` `:apply_provider_state` and `:uncomp`, first
+      (`KilnCMS.Billing.Changes.SettleErasedAccount`): for an erased account
+      the transition is a successful no-op rather than a refusal, so a late
+      webhook settles without reviving the membership erasure cancelled;
     * `ApiKey` `:create`;
     * the three updates that confirm an unconfirmed account
       (`:confirm_new_user`, `:reset_password_with_token`,
@@ -31,14 +38,22 @@ defmodule KilnCMS.Accounts.AccountLock do
       committed (READ COMMITTED takes a fresh snapshot per statement), and the
       account is kept.
 
+  Every erasure takes the row `exclusive/1` too, not only a rejected
+  registration's (#2774): `Changes.AnonymizeUser` locks it before any other
+  row it writes, so a membership edit or a billing transition waiting on the
+  account sees the tombstone, and one that got there first is demoted or
+  cancelled by the erasure after it commits.
+
   `FOR KEY SHARE` is the weakest mode that conflicts with `FOR UPDATE`, so
   writers never wait on each other. A foreign-key insert takes it too, which
   covers a create path nobody listed (an `api_keys` row, say), but only in one
   direction: it waits for an erasure, then succeeds against the tombstone.
   That is why the paths above lock explicitly and re-read `anonymized_at`.
 
-  **Lock order** is the users row first, then any membership row, on every
-  path, so no two of them can deadlock.
+  **Lock order** is the users row first, then any membership row (site or
+  paid), on every path, so no two of them can deadlock. A billing
+  transition used to take its membership row first and the account in the
+  recompute after it, and deadlocked with an erasure cancelling that row.
 
   Both functions must run inside a transaction (they raise otherwise): a row
   lock taken outside one ends with its statement and protects nothing.

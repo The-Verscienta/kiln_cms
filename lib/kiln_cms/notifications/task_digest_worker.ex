@@ -90,6 +90,9 @@ defmodule KilnCMS.Notifications.TaskDigestWorker do
     |> Enum.each(fn {_assignee_id, tasks} -> enqueue_digest(tasks, org_id) end)
   end
 
+  # An erased assignee gets no digest (#2774): its address is a tombstone.
+  defp enqueue_digest([%{assignee: %{anonymized_at: %DateTime{}}} | _], _org_id), do: :ok
+
   defp enqueue_digest([%{assignee: assignee} | _] = tasks, org_id) do
     if assignee && assignee.email do
       %{

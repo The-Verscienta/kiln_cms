@@ -47,6 +47,7 @@ defmodule KilnCMS.Accounts.Scoping do
   org gets.
   """
 
+  require Ash.Expr
   require Ash.Query
 
   alias KilnCMS.Accounts
@@ -192,6 +193,10 @@ defmodule KilnCMS.Accounts.Scoping do
           [atom()]
   def audiences(nil, _subject), do: []
 
+  # An erased account reads nothing gated, whatever a row it left still holds
+  # (#2774); erasure empties them, and this answers before they are read.
+  def audiences(%{anonymized_at: %DateTime{}}, _subject), do: []
+
   def audiences(actor, subject) do
     case affiliation(actor, audience_org_id(subject)) do
       {:member, %{status: :active} = membership} -> list_of(membership, :audiences)
@@ -230,7 +235,9 @@ defmodule KilnCMS.Accounts.Scoping do
     * a user with **no memberships at all** keeps `User.role`, but only on the
       **default org** (pre-#336 single-org data): on any *other* org a
       membership-less account is `:none`, so a legacy global editor can't reach
-      a second site by switching hosts.
+      a second site by switching hosts;
+    * an **erased** account (`anonymized_at` set) is `:none` everywhere
+      (#2774), whatever its rows still hold.
 
   `subject` may be the query/changeset under authorization, a raw org id
   (what the web layer passes from `current_org`), an `%Organization{}`, or nil
@@ -273,7 +280,7 @@ defmodule KilnCMS.Accounts.Scoping do
     * `{tier, :legacy, user}` — a membership-less account on the default org,
       from `User.role`;
     * `{:none, :none, nil}` — no tier here (foreign org, a membership-less
-      account off the default org, no actor).
+      account off the default org, an erased account, no actor).
 
   `record` is the row whose grant columns govern the tier. `effective_tier/2`
   IS `elem(tier_source(actor, subject), 0)`, so a page rendering from this
@@ -339,6 +346,14 @@ defmodule KilnCMS.Accounts.Scoping do
   # The one decision every entry point shares. `resolve` returns `{org_id,
   # affiliation}` and is a thunk so the platform branch — most policy checks'
   # hot path — pays neither the org resolution nor the membership lookup.
+  #
+  # An erased account has no tier anywhere (#2774). Erasure demotes its
+  # account and every membership it held, so this is the second line: a row
+  # erased by an earlier release, before `KilnCMS.Accounts.ErasureBackfill`
+  # reaches it, still says admin. An actor read without `anonymized_at`
+  # (a partial struct) is decided as before.
+  defp decide(%{anonymized_at: %DateTime{}}, _resolve), do: {:none, :none, nil}
+
   defp decide(actor, resolve) do
     if RoleGrant.effective_role(actor) == :admin,
       do: {:admin, :platform, actor},
@@ -418,6 +433,9 @@ defmodule KilnCMS.Accounts.Scoping do
   (`KilnCMS.Notifications`) and the task assignee picker, which must offer
   exactly the people `KilnCMS.CMS.Validations.AssigneeIsEditor` then accepts.
 
+  An erased account (`anonymized_at` set) is never on a roster (#2774),
+  whatever its rows still say: it has no tier anywhere (`effective_tier/2`).
+
   The same three branches, as one query (so one row per user however many
   match):
 
@@ -447,6 +465,12 @@ defmodule KilnCMS.Accounts.Scoping do
   @spec users_with_tier_query(struct() | String.t() | nil, [:admin | :editor | :viewer]) ::
           Ash.Query.t()
   def users_with_tier_query(org, tiers) when is_list(tiers) do
+    # An erased account is on no roster, whatever its rows say (#2774).
+    Ash.Query.filter(Accounts.User, is_nil(anonymized_at) and ^tiered(org, tiers))
+  end
+
+  # The three branches of `users_with_tier_query/2`, as one expression.
+  defp tiered(org, tiers) do
     org_id = Accounts.org_id(org)
     platform? = :admin in tiers
     legacy? = org_id == Accounts.default_org_id()
@@ -462,8 +486,7 @@ defmodule KilnCMS.Accounts.Scoping do
     admin_tier = RoleGrant.expression([:admin])
     wanted = RoleGrant.expression(tiers)
 
-    Ash.Query.filter(
-      Accounts.User,
+    Ash.Expr.expr(
       (^platform? and ^admin_tier) or
         (not (^admin_tier) and
            exists(

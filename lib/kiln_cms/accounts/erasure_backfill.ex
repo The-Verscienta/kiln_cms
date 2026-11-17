@@ -5,8 +5,15 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
   Erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`) gains steps over time,
   and an account erased before a step existed keeps whatever that step would
   have removed. This pass finds those accounts and runs the missing steps on
-  them. Today there is one:
+  them. Today there are two:
 
+    * **Site memberships that still grant (#2774).** Erasure left the
+      account's memberships as they were, so a tombstone kept its site tier,
+      a live temporary tier and its audiences: it stayed on the admin and
+      assignee rosters and could read gated content. Every membership of an
+      erased account that still grants something (`AnonymizeUser.granting/0`)
+      is demoted with `OrgMembership.:erase`, as erasure now does. The rows
+      stay, as erasure keeps them.
     * **Newsletter subscriptions (#2991).** Erasure did not delete the
       subscriber rows linked to the account, so a confirmed subscription kept
       mailing the person's real address after they asked to be forgotten. For
@@ -30,7 +37,8 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
   Only the orgs where an account still has rows are visited, not every org
   for every account.
 
-  An account whose rows could not be deleted is logged (at warning) and
+  An account whose memberships could not be demoted, or whose rows could not
+  be deleted, is logged (at warning) and
   counted under `:failed`, and the pass goes on to the next one. A run with
   any failure ends the job in error, so Oban retries it with backoff, up to
   three attempts; the uniqueness window covers the job's own retries, not
@@ -49,13 +57,20 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
 
   import Ecto.Query, only: [from: 2]
 
+  require Ash.Query
   require Logger
 
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Changes.AnonymizeUser
+  alias KilnCMS.Accounts.OrgMembership
+
   @typedoc """
-  What a run changed: how many erased accounts had their newsletter rows
-  deleted, how many rows that was, and how many accounts failed.
+  What a run changed: how many memberships of erased accounts were demoted,
+  how many erased accounts had their newsletter rows deleted and how many
+  rows that was, and how many accounts failed (at either step).
   """
   @type result :: %{
+          memberships: non_neg_integer(),
           newsletter_accounts: non_neg_integer(),
           newsletter_subscribers: non_neg_integer(),
           failed: non_neg_integer()
@@ -70,7 +85,7 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
         Logger.warning("erasure backfill: #{inspect(result)}; retrying")
         {:error, "erasure backfill failed for #{result.failed} account(s)"}
 
-      result.newsletter_accounts > 0 ->
+      result.memberships > 0 or result.newsletter_accounts > 0 ->
         Logger.info("erasure backfill: #{inspect(result)}")
         :ok
 
@@ -83,15 +98,56 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
   @spec run(keyword()) :: result()
   def run(opts \\ []) do
     repo = Keyword.get(opts, :repo, KilnCMS.Repo)
+    empty = %{memberships: 0, newsletter_accounts: 0, newsletter_subscribers: 0, failed: 0}
+
+    demoted =
+      granting_memberships()
+      |> Enum.group_by(& &1.user_id, & &1.id)
+      |> Enum.sort_by(fn {user_id, _ids} -> user_id end)
+      |> Enum.reduce(empty, &demote_memberships/2)
 
     repo
     |> erased_with_subscribers()
     |> Enum.group_by(fn {user_id, _org_id, _count} -> user_id end)
     |> Enum.sort_by(fn {user_id, _rows} -> user_id end)
-    |> Enum.reduce(
-      %{newsletter_accounts: 0, newsletter_subscribers: 0, failed: 0},
-      &forget_newsletter/2
+    |> Enum.reduce(demoted, &forget_newsletter/2)
+  end
+
+  # The memberships of erased accounts that still grant something. Global
+  # (memberships are not tenant-scoped), so one read covers every site.
+  defp granting_memberships do
+    query =
+      OrgMembership
+      |> Ash.Query.filter(not is_nil(user.anonymized_at) and ^AnonymizeUser.granting())
+      |> Ash.Query.select([:id, :user_id])
+
+    # authorize?: false — a sweep over every account's memberships; the read
+    # policy is self-only, and `:erase` below is refused to every actor.
+    Accounts.list_org_memberships!(authorize?: false, query: query)
+  end
+
+  defp demote_memberships({user_id, ids}, acc) do
+    # authorize?: false — as `granting_memberships/0`; the filter pins the
+    # write to the rows that read found.
+    OrgMembership
+    |> Ash.Query.filter(id in ^ids and ^AnonymizeUser.granting())
+    |> Ash.bulk_update!(:erase, %{},
+      authorize?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
     )
+
+    %{acc | memberships: acc.memberships + length(ids)}
+  rescue
+    # One account's failure must not stop the rest of the pass, as below.
+    error ->
+      Logger.warning(
+        "erasure backfill could not demote the memberships of #{user_id}: " <>
+          Exception.message(error)
+      )
+
+      %{acc | failed: acc.failed + 1}
   end
 
   # Each erased account's linked subscriber rows, counted per org. Read

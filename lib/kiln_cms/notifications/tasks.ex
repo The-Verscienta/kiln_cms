@@ -42,6 +42,11 @@ defmodule KilnCMS.Notifications.Tasks do
     # deployment to learn one address the assignment already decided (#1659).
     task = Ash.load!(task, [:assignee], authorize?: false)
 
+    # An erased assignee is told nothing (#2774): no inbox row, no mail to the
+    # tombstone address. The `task.assigned` event below still fires — it is
+    # the task's, not the person's.
+    task = if erased?(task.assignee), do: %{task | assignee: nil}, else: task
+
     if task.assignee do
       Notifications.record_in_app(%{
         user_id: task.assignee_id,
@@ -109,6 +114,9 @@ defmodule KilnCMS.Notifications.Tasks do
       "due_on" => task.due_on && Date.to_iso8601(task.due_on)
     }
   end
+
+  defp erased?(%{anonymized_at: %DateTime{}}), do: true
+  defp erased?(_assignee), do: false
 
   defp actor_name(%{name: name}) when is_binary(name) and name != "", do: name
   defp actor_name(_actor), do: nil

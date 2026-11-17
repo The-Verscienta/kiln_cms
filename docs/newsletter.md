@@ -276,6 +276,12 @@ boot queues it to run about 10 minutes later, at most once a day. It finds
 every erased account (`anonymized_at` set) that still has linked rows and
 deletes them the same way erasure now does. A second run finds nothing to do.
 
+The same job also demotes the site memberships of accounts erased before
+#2774, which kept their tier, temporary tier and audiences: each one that
+still grants something drops to `:viewer` with neither, as erasure now does
+([Data flows](data-flows.md#subject-rights-workflows), erasure step 15).
+It runs first, before the newsletter step.
+
 - To run it by hand:
 
   ```bash
@@ -283,12 +289,14 @@ deletes them the same way erasure now does. A second run finds nothing to do.
   ```
 
   `run/0` returns what it did, for example
-  `%{newsletter_accounts: 2, newsletter_subscribers: 3, failed: 0}` (two erased
-  accounts had three rows between them). Wrap the call in `IO.inspect/1` to
-  print it.
+  `%{memberships: 4, newsletter_accounts: 2, newsletter_subscribers: 3, failed: 0}`
+  (four memberships of erased accounts demoted; two erased accounts had three
+  newsletter rows between them). Wrap the call in `IO.inspect/1` to print it.
 - To stop the boot from queuing it, set
   `config :kiln_cms, :erasure_backfill_on_boot, false`.
-- An account whose rows could not be deleted is logged at warning
-  (`erasure backfill could not forget newsletter rows for <id>`) and counted
+- An account whose rows could not be deleted, or whose memberships could not
+  be demoted, is logged at warning
+  (`erasure backfill could not forget newsletter rows for <id>`, or
+  `erasure backfill could not demote the memberships of <id>`) and counted
   under `failed`. The job then ends in error and Oban retries it, up to three
   attempts in all; each retry only finds what is still left.
