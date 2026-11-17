@@ -316,9 +316,9 @@ defmodule KilnCMS.Accounts.ErasureGrantsTest do
   end
 
   describe "nothing is sent to an erased account" do
+    # By account id: the jobs carry no address since #3019.
     defp workflow_jobs_to(user) do
-      address = to_string(user.email)
-      Enum.filter(all_enqueued(worker: WorkflowMailWorker), &(&1.args["to"] == address))
+      Enum.filter(all_enqueued(worker: WorkflowMailWorker), &(&1.args["user_id"] == user.id))
     end
 
     defp inbox_rows(user) do
@@ -406,12 +406,16 @@ defmodule KilnCMS.Accounts.ErasureGrantsTest do
       # Not vacuous: the live assignee is mailed and has an inbox row.
       assert_enqueued(
         worker: TaskMailWorker,
-        args: %{"kind" => "assigned", "task_id" => control.id}
+        args: %{"event" => "assigned", "task_id" => control.id}
       )
 
       assert inbox_rows(live) == 1
 
-      refute_enqueued(worker: TaskMailWorker, args: %{"kind" => "assigned", "task_id" => task.id})
+      refute_enqueued(
+        worker: TaskMailWorker,
+        args: %{"event" => "assigned", "task_id" => task.id}
+      )
+
       assert inbox_rows(assignee) == 0
     end
 
@@ -424,9 +428,9 @@ defmodule KilnCMS.Accounts.ErasureGrantsTest do
 
       assert :ok = TaskDigestWorker.send_digests(site.id, Date.add(Date.utc_today(), 3))
 
-      digests = all_enqueued(worker: TaskMailWorker) |> Enum.map(& &1.args["to"])
-      assert to_string(live.email) in digests
-      refute to_string(assignee.email) in digests
+      digests = all_enqueued(worker: TaskMailWorker) |> Enum.map(& &1.args["user_id"])
+      assert live.id in digests
+      refute assignee.id in digests
     end
   end
 

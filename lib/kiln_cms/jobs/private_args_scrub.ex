@@ -7,8 +7,10 @@ defmodule KilnCMS.Jobs.PrivateArgsScrub do
   Some rows keep them anyway:
 
     * jobs that finished under a release before that, which kept the
-      submitted form data, the autoresponder's address and every automation
-      event's document snapshot until the Pruner deleted the row;
+      submitted form data, the autoresponder's address, every automation
+      event's document snapshot and, before #3019, a workflow or task mail's
+      recipient address, title, actor name and excerpt or note, until the
+      Pruner deleted the row;
     * a job killed mid-run (past the shutdown grace period, or by its
       timeout), which `Oban.Lifeline` discards hours later
       (`oban_rescue_after_minutes`) without running any of the job's code.

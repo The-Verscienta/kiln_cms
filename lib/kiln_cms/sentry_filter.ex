@@ -71,11 +71,14 @@ defmodule KilnCMS.SentryFilter do
       adapter crash, before the delivery path stopped recording them) is
       replaced whole;
     * a job of a worker `KilnCMS.Jobs.PrivateArgs` registers (form mail
-      jobs queued before #2992, automation jobs) holds a visitor's submission
-      or a document snapshot. Its registered keys are dropped from
-      `extra.args`, named by `extra.worker`. The variables of every stack
-      frame are dropped too: a `FunctionClauseError` in the worker's own
-      helpers quotes their arguments there, and those are the same payload.
+      jobs queued before #2992, automation jobs, workflow and task mail jobs
+      queued before #3019) holds a visitor's submission, a document snapshot,
+      or a recipient's address and what the mail quoted. Its registered
+      keys are dropped from `extra.args`, named by `extra.worker`. The
+      variables of every stack frame are dropped too: a `FunctionClauseError`
+      in the worker's own helpers quotes their arguments there, and those are
+      the same payload (or, for a mail job of the current shape, the
+      recipient's account it read back).
 
   ## URLs and process dumps
 

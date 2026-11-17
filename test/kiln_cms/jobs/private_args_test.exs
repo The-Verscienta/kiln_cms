@@ -36,6 +36,13 @@ defmodule KilnCMS.Jobs.PrivateArgsTest do
     test "keys/1 answers for a module or the stored name, and [] for any other worker" do
       assert PrivateArgs.keys(KilnCMS.Forms.AutoresponderWorker) == ~w(data to)
       assert PrivateArgs.keys("KilnCMS.Automation.RuleWorker") == ~w(payload sealed)
+
+      # Workflow and task mail queued before #3019 (the address and what the
+      # mail quoted). A digest's `items` are ids and dates, and stay.
+      assert PrivateArgs.keys(KilnCMS.Notifications.WorkflowMailWorker) ==
+               ~w(to title actor_name excerpt)
+
+      assert PrivateArgs.keys("KilnCMS.Notifications.TaskMailWorker") == ~w(to note actor_name)
       assert PrivateArgs.keys(KilnCMS.Mail.DeliveryWorker) == []
       assert PrivateArgs.keys(nil) == []
       refute PrivateArgs.registered?("KilnCMS.Newsletter.SendWorker")

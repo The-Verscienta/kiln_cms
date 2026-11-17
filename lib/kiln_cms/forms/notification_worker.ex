@@ -14,6 +14,8 @@ defmodule KilnCMS.Forms.NotificationWorker do
   still delivered, and the `data` is dropped from its row once it finishes
   (`KilnCMS.Jobs.PrivateArgs`).
   """
+  require Logger
+
   use Oban.Worker, queue: :mail, max_attempts: 5
 
   import Swoosh.Email
@@ -56,7 +58,12 @@ defmodule KilnCMS.Forms.NotificationWorker do
   # (`PrivateArgs.finishing/3` forgets before Oban acks it, so a node lost in
   # between leaves it executing with no data, and Lifeline re-queues it). The
   # mail went out; nothing is left to send.
-  def perform(%Oban.Job{}), do: {:cancel, "form submission no longer in the job"}
+  def perform(%Oban.Job{id: id}) do
+    # `:ok`, not `{:cancel, _}`: a cancelled `mail` job is listed as a delivery
+    # failure on /editor/mail, and nothing failed here.
+    Logger.info("form notification job #{id}: submission no longer in the job, nothing sent")
+    :ok
+  end
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}), do: Mail.backoff_seconds(attempt)

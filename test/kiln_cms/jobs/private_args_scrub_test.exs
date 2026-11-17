@@ -46,17 +46,50 @@ defmodule KilnCMS.Jobs.PrivateArgsScrubTest do
         "completed"
       )
 
+    # Workflow and task mail as the release before #3019 queued it.
+    workflow =
+      row!(
+        KilnCMS.Notifications.WorkflowMailWorker,
+        %{
+          "to" => "editor@example.com",
+          "event" => "comment_added",
+          "kind" => "page",
+          "id" => "p1",
+          "title" => "secret",
+          "actor_name" => "Ada",
+          "excerpt" => "secret"
+        },
+        "completed"
+      )
+
+    task =
+      row!(
+        KilnCMS.Notifications.TaskMailWorker,
+        %{
+          "kind" => "assigned",
+          "to" => "editor@example.com",
+          "task_id" => "t1",
+          "note" => "secret",
+          "actor_name" => "Ada"
+        },
+        "discarded"
+      )
+
     assert %{
              "KilnCMS.Forms.NotificationWorker" => 1,
              "KilnCMS.Forms.AutoresponderWorker" => 1,
              "KilnCMS.Automation.DispatchWorker" => 1,
-             "KilnCMS.Automation.RuleWorker" => 1
+             "KilnCMS.Automation.RuleWorker" => 1,
+             "KilnCMS.Notifications.WorkflowMailWorker" => 1,
+             "KilnCMS.Notifications.TaskMailWorker" => 1
            } = PrivateArgsScrub.run()
 
     assert Map.keys(args(notification)) == ["form_id"]
     assert Map.keys(args(autoresponder)) == ["form_id"]
     assert args(dispatch) == %{"event" => "post.published"}
     assert Map.keys(args(rule)) |> Enum.sort() == ["event", "rule_id"]
+    assert args(workflow) == %{"event" => "comment_added", "kind" => "page", "id" => "p1"}
+    assert args(task) == %{"kind" => "assigned", "task_id" => "t1"}
   end
 
   test "cancelled and discarded rows are finished too (a job Lifeline discarded)" do
