@@ -2460,6 +2460,11 @@ msgstr "Une adresse web avec un libellé facultatif, et s'il s'ouvre dans un nou
 msgid "A web address. For a link to an external site, a source or a download."
 msgstr "Une adresse web. Pour un lien vers un site externe, une source ou un téléchargement."
 
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "A webhook is failing"
+msgstr "Un webhook est en échec"
+
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "A webhook that receives security alerts got a new signing secret"
@@ -2479,6 +2484,11 @@ msgstr "Un webhook qui reçoit les alertes de sécurité a été supprimé"
 #, elixir-autogen, elixir-format
 msgid "A webhook that receives security alerts was switched off after failed deliveries"
 msgstr "Un webhook qui reçoit les alertes de sécurité a été désactivé après des échecs de livraison"
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "A webhook was switched off"
+msgstr "Un webhook a été désactivé"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -26881,6 +26891,11 @@ msgstr "Webhook supprimé."
 #, elixir-autogen, elixir-format
 msgid "Webhook endpoints"
 msgstr "Endpoints de webhook"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Webhook failures — email me when a webhook on a site I administer stops delivering, or is switched off"
+msgstr "Échecs de webhooks — m'envoyer un e-mail quand un webhook d'un site que j'administre cesse de livrer ou est désactivé"
 
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format

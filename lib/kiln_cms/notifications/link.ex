@@ -36,6 +36,12 @@ defmodule KilnCMS.Notifications.Link do
   the editor cannot open it. It links to the document's governance trail,
   which lists the failed delivery.
 
+  ## A webhook health notice links to the webhooks page
+
+  `:webhook_failing` and `:webhook_disabled` are about an endpoint, not a
+  document: `content_id` is the endpoint's id. They link to `/editor/webhooks`,
+  where its deliveries, last error and Disabled badge are.
+
   ## A registration notice links to the queue
 
   `:registration_pending` (#2251) is about a site's registration queue, not a
@@ -99,6 +105,9 @@ defmodule KilnCMS.Notifications.Link do
   def editor_path(%{event: %UnknownAtom{}}), do: ~p"/editor/inbox"
   def editor_path(%{event: :registration_pending}), do: ~p"/editor/registrations"
 
+  def editor_path(%{event: event}) when event in [:webhook_failing, :webhook_disabled],
+    do: ~p"/editor/webhooks"
+
   def editor_path(%{event: :security_alert}), do: ~p"/editor/security-log"
   def editor_path(%{event: :security_notice}), do: ~p"/editor/security-alerts"
 
@@ -136,7 +145,13 @@ defmodule KilnCMS.Notifications.Link do
   end
 
   def editor_url(%{event: event} = subject)
-      when event in [:retraction_lost, :security_alert, :security_notice],
+      when event in [
+             :retraction_lost,
+             :security_alert,
+             :security_notice,
+             :webhook_failing,
+             :webhook_disabled
+           ],
       do: KilnCMSWeb.Endpoint.url() <> editor_path(subject)
 
   def editor_url(%{content_type: content_type, content_id: content_id} = subject),

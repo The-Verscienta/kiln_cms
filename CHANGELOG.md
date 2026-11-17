@@ -102,6 +102,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Copy the new `scripts/backup.sh` and `scripts/restore.sh` to every host. `RESTORE_REQUIRE_CHECKSUM=1` now also makes `restore.sh db` and `drill` refuse a dump with no `kiln-db-<stamp>.sha256` (an old one, or a renamed one). No migration; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#backup-script-hardening-upgrade))
 
+- **Run `mix ash.migrate` (new `users.notify_on_webhook_failure`, default `true`). Rolling back is safe; 1.10 shows the new webhook notices as a neutral line.**
+  ([long form](docs/changelog/unreleased.md#webhook-failure-alerts-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -122,6 +125,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#automation-payload-plain-in-pending-jobs))
 
 ### Added
+
+- **Site admins are told when a webhook stops getting through: a bell notice and an email on the first delivery that exhausts its retries, and again when the endpoint is auto-disabled. The email can be turned off under Your settings.**
+  ([long form](docs/changelog/unreleased.md#webhook-failure-alerts))
 
 - **A new custom field type, Flexible content: an ordered list of items of different kinds (a hero, a quote), defined under Fields (Item types panel) and edited as cards in the content editor. Field-sync files now carry `item_types`, which 1.10 refuses.**
   ([long form](docs/changelog/unreleased.md#flexible-content))

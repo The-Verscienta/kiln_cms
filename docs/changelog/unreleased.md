@@ -365,6 +365,14 @@ carries the reasoning.
   [#2847](https://github.com/The-Verscienta/kiln_cms/issues/2847),
   [#2877](https://github.com/The-Verscienta/kiln_cms/issues/2877))
 
+<a id="webhook-failure-alerts-upgrade"></a>
+
+- **Run `mix ash.migrate` (new `users.notify_on_webhook_failure`, boolean, default `true`).**
+  The column backs the new **Webhook failures** email switch. Every existing
+  account starts with it on. Rolling back to 1.10 is safe: 1.10 ignores the
+  column, and shows a `webhook_failing` or `webhook_disabled` notice in the
+  bell as a neutral line rather than failing to load it (#2509).
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -476,6 +484,33 @@ carries the reasoning.
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992))
 
 ## Added
+
+<a id="webhook-failure-alerts"></a>
+
+- **Site admins are told when a webhook stops getting through.**
+  A webhook endpoint auto-disables after 10 deliveries in a row exhaust their
+  retries, and until now nothing said so: the site that the webhook rebuilds
+  just stopped showing new content, and the only sign was a **Disabled**
+  badge on `/editor/webhooks`. Now `KilnCMS.Webhooks.HealthNotice` tells the
+  site's admins at two points: **"A webhook is failing"** on the first
+  exhausted delivery in a row, and **"A webhook was switched off"** when it
+  auto-disables. Each is a bell notice linking to `/editor/webhooks` and an
+  email (`KilnCMS.Accounts.User.Senders.SendWebhookFailure`).
+  - **One notice, not one per publish.** Both events collapse per endpoint
+    while unread (`:webhook_failing`, `:webhook_disabled`, `content_type`
+    `"webhook_endpoint"`, `content_id` the endpoint), and the email goes only
+    with a new notice. Opening `/editor/webhooks` marks them read.
+  - **Who:** the same admins the registration notice reaches: standing
+    platform admins and active site admin members, not temporary platform
+    admins or erased accounts.
+  - **Mute:** `notify_on_webhook_failure` (**Your settings → Email
+    notifications → Webhook failures**) mutes the email only. It is in the
+    self-export and reset to on by erasure.
+  - **Masked:** the notice and email name the endpoint by its masked URL and
+    carry no error text, which can echo the URL back (ADR 0028).
+  - Retractions are unchanged: they never count toward auto-disable, and a
+    lost one keeps its own "Retraction not delivered" notice.
+  See [Failure alerts](../webhooks.md#failure-alerts).
 
 <a id="flexible-content"></a>
 

@@ -79,6 +79,10 @@ defmodule KilnCMSWeb.NotificationText do
   # Actor-less by nature: a delivery the pipeline gave up on (#1926).
   def headline(%{event: :retraction_lost}), do: gettext("Retraction not delivered")
 
+  # Actor-less: the delivery pipeline decided (`KilnCMS.Webhooks.HealthNotice`).
+  def headline(%{event: :webhook_failing}), do: gettext("A webhook is failing")
+  def headline(%{event: :webhook_disabled}), do: gettext("A webhook was switched off")
+
   # Actor-less by design (#2251): the row is about the site's queue, and names
   # no applicant — not in the bell, not in the email.
   def headline(%{event: :registration_pending}),

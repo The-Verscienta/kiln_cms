@@ -301,6 +301,12 @@ defmodule KilnCMS.Notifications.Notification do
                     # A retraction webhook that exhausted its retries (#1926),
                     # to the site's admins — `KilnCMS.Webhooks.RetractionLost`.
                     :retraction_lost,
+                    # A webhook endpoint gave up its first delivery in a row,
+                    # or was auto-disabled after too many, to the site's admins
+                    # — `KilnCMS.Webhooks.HealthNotice`. `content_type`
+                    # "webhook_endpoint", `content_id` the endpoint.
+                    :webhook_failing,
+                    :webhook_disabled,
                     # Someone confirmed their address and waits for approval
                     # (#2251), to the site's admins — one row per admin and
                     # site, about the queue rather than the applicant
