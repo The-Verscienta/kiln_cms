@@ -217,6 +217,43 @@ defmodule KilnCMS.Newsletter.SystemActorAuthorizationTest do
                  tenant: send.org_id
                )
     end
+
+    # Erasure's delete (#2991): the one other write keyed on `user_id`, after
+    # `:link_member`. Closed to every person, the site's admin included.
+    test "only the system actor may forget a member's rows" do
+      admin = user(:admin)
+      member = user(:viewer)
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      sub =
+        Newsletter.link_member_subscriber!(member.id, %{email: to_string(member.email)},
+          authorize?: false,
+          tenant: org_id
+        )
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Newsletter.forget_member_subscriber(sub, actor: admin, tenant: org_id)
+
+      for label <- [:automation, :mail, :billing, :notifications, :operator] do
+        refute Ash.can?({sub, :forget_member}, KilnCMS.SystemActor.new(label), tenant: org_id),
+               "Subscriber :forget_member admitted #{inspect(label)}"
+      end
+
+      assert Newsletter.get_subscriber!(sub.id, authorize?: false, tenant: org_id)
+
+      assert :ok =
+               Newsletter.forget_member_subscriber(sub,
+                 actor: Newsletter.system(),
+                 tenant: org_id
+               )
+
+      assert {:ok, nil} =
+               Newsletter.get_subscriber(sub.id,
+                 authorize?: false,
+                 tenant: org_id,
+                 not_found_error?: false
+               )
+    end
   end
 
   describe "SendWorker fails closed" do

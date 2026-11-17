@@ -609,6 +609,14 @@ defmodule KilnCMS.Accounts.RegistrationErasureTest do
                "(Changes.AnonymizeUser scrubs or deletes it)."
     end
 
+    # Erasure deletes the account's linked subscriber rows (#2991), so they
+    # no longer stop one; they blocked while erasure left them mailing the
+    # address.
+    test "count linked newsletter subscriptions as handled, not blocking" do
+      assert {"newsletter_subscribers", "user_id"} in Erasure.handled()
+      refute {"newsletter_subscribers", "user_id"} in Erasure.blocking()
+    end
+
     # Read off the registry, so a project overlay's own content types block an
     # erasure without listing anything.
     test "block on every content type's author and its versions' user" do
