@@ -54,10 +54,10 @@ jobs:
       tarball: ${{ steps.pack.outputs.tarball }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version-file: .tool-versions
           cache: npm
@@ -144,7 +144,7 @@ jobs:
       # job publishes the downloaded tarball, never this checkout; it comes
       # first because a checkout empties the workspace, artifact included.
       # (client-js-v0.3.0, the first run to get this far, failed without it.)
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: .tool-versions
           sparse-checkout-cone-mode: false
@@ -154,14 +154,14 @@ jobs:
           name: npm-tarball
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ needs.js-build.outputs.tarball }}
 
       - name: Set up Node (npm registry auth)
         # `registry-url` makes setup-node write an `.npmrc` that reads the
         # token from NODE_AUTH_TOKEN, so the token never lands in a file.
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version-file: .tool-versions
           registry-url: https://registry.npmjs.org
@@ -211,7 +211,7 @@ jobs:
       tarball: ${{ steps.build.outputs.tarball }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -294,7 +294,7 @@ jobs:
         working-directory: clients/elixir/kiln_client
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -317,7 +317,7 @@ jobs:
           path: attested
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: attested/${{ needs.hex-build.outputs.tarball }}
 
@@ -364,7 +364,7 @@ jobs:
       tarball: ${{ steps.build.outputs.tarball }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -452,7 +452,7 @@ jobs:
         working-directory: sdk/kiln_plugin
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir/OTP
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
@@ -475,7 +475,7 @@ jobs:
           path: attested
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: attested/${{ needs.plugin-build.outputs.tarball }}
 

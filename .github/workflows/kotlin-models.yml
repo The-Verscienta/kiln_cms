@@ -87,19 +87,19 @@ jobs:
       KOTLINX_SERIALIZATION_JSON_SHA256: 879eb73e46cb63253ab0fa7cca4448f5c96bca1a16ff377abcb71ebab60e0631
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Mix (toolchain, cache, deps, compile)
         uses: ./.github/actions/setup-mix
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Cache the Kotlin compiler and serialization runtime
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/kiln-kotlin
           key: kotlin-${{ env.KOTLIN_VERSION }}-${{ env.KOTLIN_SHA256 }}-serialization-${{ env.KOTLINX_SERIALIZATION_VERSION }}-${{ env.KOTLINX_SERIALIZATION_CORE_SHA256 }}-${{ env.KOTLINX_SERIALIZATION_JSON_SHA256 }}

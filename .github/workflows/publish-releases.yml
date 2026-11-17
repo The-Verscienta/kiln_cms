@@ -54,7 +54,7 @@ jobs:
       # merge-back; until then, re-run this by hand once it has merged).
       # Full history so a release CHANGELOG.md has no dated heading for can be
       # dated by its tag.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
@@ -77,7 +77,7 @@ jobs:
       # Mix.install's build of earmark_parser/req/jason, keyed on the scripts
       # that pin them.
       - name: Cache Mix.install
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/mix/installs
           key: ${{ runner.os }}-publish-releases-${{ hashFiles('.tool-versions') }}-${{ hashFiles('scripts/publish_releases.exs') }}

@@ -88,7 +88,7 @@ runs:
     - name: Restore deps and _build (and save on a miss)
       id: cache
       if: inputs.save-cache == 'true'
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: |
           deps
@@ -101,7 +101,7 @@ runs:
     - name: Restore deps and _build
       id: restore
       if: inputs.save-cache != 'true'
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@v6
       with:
         path: |
           deps
