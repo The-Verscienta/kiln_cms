@@ -1,8 +1,9 @@
 defmodule KilnCMSWeb.FlexibleFieldEditorTest do
   @moduledoc """
-  A `:flexible` custom field in the content editor (#2282, PR 1): until the
-  items UI arrives it is shown read-only, as a count and a note, and posts
-  nothing, so a save keeps the stored items.
+  A `:flexible` custom field in the content editor (#2282): the stored items
+  are shown as cards (PR 2 replaced PR 1's read-only count and note;
+  `FlexibleEditorTest` covers editing them), and a save that touches nothing
+  else posts them back unchanged, ids included.
   """
   use KilnCMSWeb.ConnCase, async: true
 
@@ -82,14 +83,19 @@ defmodule KilnCMSWeb.FlexibleFieldEditorTest do
     %{admin: admin, page: page, lv: lv}
   end
 
-  test "shows a count and a note, and no input for the key", %{lv: lv} do
+  test "shows a count and a card per item, with no read-only note", %{lv: lv} do
     assert has_element?(lv, "#custom-field-sections", "Sections")
     assert has_element?(lv, "#custom-field-sections", "2 items")
-    assert has_element?(lv, "#custom-field-sections", "Edited through the API")
-    refute has_element?(lv, ~s([name^="form[custom_fields][sections]"]))
+    refute has_element?(lv, "#custom-field-sections", "Edited through the API")
+    assert has_element?(lv, "#custom-field-sections-items > li", "one")
+    assert has_element?(lv, ~s(input[name="form[custom_fields][sections][1][text]"][value=two]))
   end
 
-  test "saving keeps the stored items", %{lv: lv, admin: admin, page: page} do
+  test "saving something else keeps the stored items, ids and all", %{
+    lv: lv,
+    admin: admin,
+    page: page
+  } do
     before = CMS.get_page!(page.id, actor: admin).custom_fields["sections"]
     assert length(before) == 2
 

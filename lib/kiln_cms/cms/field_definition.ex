@@ -701,6 +701,9 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # options that only fit a plain value (#2282).
     validate KilnCMS.CMS.Validations.FlexibleField
 
+    # A field is never retyped to or from `:flexible` (#2282).
+    validate KilnCMS.CMS.Validations.FlexibleRetype, on: :update
+
     # An item type with stored items is not deleted by accident (#2282).
     validate KilnCMS.CMS.Validations.ItemTypeInUse, on: :destroy
 

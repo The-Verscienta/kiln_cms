@@ -25,7 +25,11 @@ defmodule KilnCMS.CMS.FieldSyncVersionTest do
   # Added since 1.9.0 under ADR 0047's second option: version 1 stays, and a
   # release that predates a key refuses a file carrying it as unknown.
   #   * `step`, `prefix`, `suffix` (#2432): a number's editor options.
-  @added_field_keys ~w(prefix step suffix)
+  #   * `item_setting` (#2282): a flexible field's per-item setting flag. The
+  #     export writes it only when `true`, so a site without flexible fields
+  #     exports the same file as before; a file carrying it needs 1.10+.
+  #     (`item_types` is a nested list, not a field key.)
+  @added_field_keys ~w(item_setting prefix step suffix)
 
   @v1_section_keys ~w(display initially name)
 

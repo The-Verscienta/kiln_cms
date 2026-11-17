@@ -904,11 +904,14 @@ const Hooks = {
   // order of `data-sort-id`s and pushes a "reorder" event to the LiveView —
   // or the event `data-sort-event` names, with `data-sort-field` as `field`,
   // for a list that is one of several on the page (a group field's rows).
+  // `data-sort-handle` names the handle selector when a list nests inside
+  // another one's items (a flexible field's item cards): each list then picks
+  // out its own handles and a drag in the inner list never starts the outer.
   Sortable: {
     mounted() {
       this.sorter = Sortable.create(this.el, {
         animation: 150,
-        handle: "[data-drag-handle]",
+        handle: this.el.dataset.sortHandle || "[data-drag-handle]",
         ghostClass: "opacity-40",
         onEnd: () => {
           const order = Array.from(this.el.children)

@@ -41,6 +41,18 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   as one sentence from both sides. The steps only reword the stored options
   (`target_type(s)`, `multiple`, `min_items`/`max_items`, `max_sources`,
   `inverse_label`/`inverse_name`, `on_target_delete`).
+
+  A `:flexible` field (#2282) holds an ordered list of items of different
+  kinds, and carries its **item types** under it, as "Item types": a hero, a
+  quote, a feature grid. An item type is a `:group` row owned through
+  `flex_of_id`; it is added, edited, ordered and deleted in place like a link
+  field, and carries its own "Fields in each item" (the same sub-field panel,
+  plus a "Setting" flag that files a value under the item's settings rather
+  than its content). An item's sub-field may itself be a flexible field, down to
+  `FieldDefinition.max_flexible_depth/0` levels, each with its own panel. The
+  items are data with settings, not page layout. Deleting an item type, or a
+  whole flexible field, first counts the stored items it removes and asks again
+  if that number moved (`delete_confirm`).
   """
   use KilnCMSWeb, :live_view
 
@@ -71,6 +83,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   alias KilnCMS.CMS.FieldSection
   alias KilnCMS.CMS.FieldTypes
   alias KilnCMS.CMS.FieldWidgets
+  alias KilnCMS.CMS.FlexiblePath
   alias KilnCMS.CMS.SectionLayouts
   alias KilnCMS.CMS.Validations.FieldCondition
   alias KilnCMSWeb.ComputedBuilder
@@ -87,12 +100,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
      |> assign(:page_title, gettext("Custom fields"))
      |> assign(:content_types, ContentTypes.all())
      |> assign(:dynamic_types, ContentTypes.dynamic_all(org))
-     # `:flexible` (#2282) is API-only until its item-types panel ships, so the
-     # picker does not offer a field the screen cannot finish defining.
-     |> assign(:field_types, FieldDefinition.field_types() -- [:flexible])
+     # The new-field picker offers `:flexible` (#2282); an existing field's edit
+     # form does not (a field is never retyped to or from it,
+     # `Validations.FlexibleRetype`), and a sub-field's picker is its own list.
+     |> assign(:field_types, FieldDefinition.field_types())
      |> assign(:target_types, ContentTypes.options(org))
      |> assign(:edit, nil)
      |> assign(:link_form, nil)
+     |> assign(:item_form, nil)
+     |> assign(:delete_confirm, nil)
      |> assign(:default_scopes, [])
      |> assign(:samples, %{})
      # The builder's static lists, built once: each is a page of gettext
@@ -368,23 +384,24 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # small create form scoped to it. Which of the two the parent is decides the
   # column the new row is owned through (`link_params/3`).
   def handle_event("link_new", %{"parent" => parent_id}, socket) when is_binary(parent_id) do
-    case Enum.find(socket.assigns.definitions, &(&1.id == parent_id)) do
-      %{field_type: type} when type in [:reference, :group] ->
+    case link_parent(socket.assigns, parent_id) do
+      nil ->
+        {:noreply, socket}
+
+      kind ->
         form = link_create_form(socket.assigns.actor, socket.assigns.current_org, parent_id)
 
         {:noreply,
          assign(socket, :link_form, %{
            parent: parent_id,
-           kind: child_kind(type),
+           kind: kind,
            id: nil,
            form: form,
            name_edited?: false,
            conds: ConditionsBuilder.new(),
-           cond_siblings: link_siblings(socket.assigns, parent_id, nil, child_kind(type))
+           cond_siblings: link_siblings(socket.assigns, parent_id, nil, kind),
+           type_options: sub_field_type_options(socket.assigns, kind, parent_id, nil)
          })}
-
-      _other ->
-        {:noreply, socket}
     end
   end
 
@@ -395,22 +412,19 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
       link ->
         form = link_edit_form(link, socket.assigns.actor, socket.assigns.current_org)
+        parent = FieldDefinition.parent_id(link)
+        kind = link_kind(socket.assigns, link)
 
         {:noreply,
          assign(socket, :link_form, %{
-           parent: FieldDefinition.parent_id(link),
-           kind: if(link.group_of_id, do: :group, else: :link),
+           parent: parent,
+           kind: kind,
            id: id,
            form: form,
            name_edited?: true,
            conds: ConditionsBuilder.new(link),
-           cond_siblings:
-             link_siblings(
-               socket.assigns,
-               FieldDefinition.parent_id(link),
-               id,
-               if(link.group_of_id, do: :group, else: :link)
-             )
+           cond_siblings: link_siblings(socket.assigns, parent, id, kind),
+           type_options: sub_field_type_options(socket.assigns, kind, parent, link)
          })}
     end
   end
@@ -487,6 +501,174 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       _ -> {:noreply, socket}
     end
   end
+
+  # --- item types of a flexible field (#2282) ---------------------------------
+
+  # "Add an item type" under a flexible field (top-level or an item's own
+  # sub-field): a small create form scoped to it. Every event here looks its
+  # target up in what this page loaded for this site, so an id from another
+  # site, or one that is not an item type or flexible field, does nothing; the
+  # writes themselves run as the actor and are refused for anyone but an admin.
+  def handle_event("item_type_new", %{"parent" => flex_id}, socket) when is_binary(flex_id) do
+    if Map.has_key?(socket.assigns.flexible_index, flex_id) do
+      {:noreply,
+       socket
+       |> assign(:delete_confirm, nil)
+       |> assign(:item_form, %{
+         parent: flex_id,
+         id: nil,
+         form: item_create_form(socket.assigns.actor, socket.assigns.current_org, flex_id),
+         name_edited?: false
+       })}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("item_type_edit", %{"id" => id}, socket) when is_binary(id) do
+    case Map.get(socket.assigns.item_type_index, id) do
+      nil ->
+        {:noreply, socket}
+
+      item_type ->
+        {:noreply,
+         socket
+         |> assign(:delete_confirm, nil)
+         |> assign(:item_form, %{
+           parent: item_type.flex_of_id,
+           id: id,
+           form: item_edit_form(item_type, socket.assigns.actor, socket.assigns.current_org),
+           name_edited?: true
+         })}
+    end
+  end
+
+  def handle_event("item_type_cancel", _params, socket),
+    do: {:noreply, assign(socket, :item_form, nil)}
+
+  def handle_event(
+        "item_type_validate",
+        %{"item_type" => params} = event,
+        %{assigns: %{item_form: %{} = itf}} = socket
+      )
+      when is_map(params) do
+    name_edited? =
+      itf.id != nil or name_edited?(event["_target"], params, itf.name_edited?, "item_type")
+
+    params = if name_edited?, do: params, else: suggest_name(params)
+
+    form =
+      itf.form
+      |> AshPhoenix.Form.validate(item_params(params, itf))
+      |> refuse_duplicate_item(params, itf, socket.assigns)
+
+    {:noreply, assign(socket, :item_form, %{itf | form: form, name_edited?: name_edited?})}
+  end
+
+  def handle_event(
+        "item_type_save",
+        %{"item_type" => params},
+        %{assigns: %{item_form: %{} = itf}} = socket
+      )
+      when is_map(params) do
+    params = if itf.id == nil and blank?(params["name"]), do: suggest_name(params), else: params
+
+    form =
+      itf.form
+      |> AshPhoenix.Form.validate(item_params(params, itf, socket.assigns))
+      |> refuse_duplicate_item(params, itf, socket.assigns)
+
+    result =
+      if form.source.valid?,
+        do: AshPhoenix.Form.submit(form, params: item_params(params, itf, socket.assigns)),
+        else: AshPhoenix.Form.submit(form, params: nil)
+
+    case result do
+      {:ok, _item_type} ->
+        {:noreply,
+         socket
+         |> assign(:item_form, nil)
+         |> load_definitions()
+         |> put_flash(:info, gettext("Saved."))}
+
+      {:error, form} ->
+        {:noreply, assign(socket, :item_form, %{itf | form: form})}
+    end
+  end
+
+  # A change or submit from a form no longer open (cancelled in another tab).
+  def handle_event(event, _params, socket) when event in ["item_type_validate", "item_type_save"],
+    do: {:noreply, socket}
+
+  def handle_event("item_type_move", %{"id" => id, "dir" => dir}, socket)
+      when is_binary(id) and dir in ["up", "down"] do
+    with %{} = item_type <- Map.get(socket.assigns.item_type_index, id),
+         flex_id = item_type.flex_of_id,
+         ids = socket.assigns.item_types |> Map.get(flex_id, []) |> Enum.map(& &1.id),
+         index when is_integer(index) <- Enum.find_index(ids, &(&1 == id)),
+         target = if(dir == "up", do: index - 1, else: index + 1),
+         true <- target >= 0 and target < length(ids) do
+      moved = ids |> List.delete_at(index) |> List.insert_at(target, id)
+
+      {:noreply,
+       reorder_children(
+         socket,
+         socket.assigns.item_types,
+         flex_id,
+         moved,
+         gettext("Couldn't save the new order of item types.")
+       )}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  # Deleting an item type, or a whole flexible field, removes the items editors
+  # stored under it, so the screen counts them first and asks once. The count
+  # lives in the socket, never in the client: confirming counts again and
+  # shows the new number instead of deleting when it moved, and whether the
+  # items are purged along with the type is decided here from that count.
+  def handle_event("item_delete", %{"id" => id}, socket) when is_binary(id) do
+    case deletable_items_owner(socket.assigns, id) do
+      nil ->
+        {:noreply, socket}
+
+      {_kind, definition} ->
+        {:noreply,
+         socket
+         |> assign(:item_form, nil)
+         |> assign(:delete_confirm, %{
+           id: id,
+           counted: count_stored(socket.assigns, definition),
+           changed?: false
+         })}
+    end
+  end
+
+  def handle_event(
+        "item_delete_confirm",
+        %{"id" => id},
+        %{assigns: %{delete_confirm: %{id: id} = pending}} = socket
+      )
+      when is_binary(id) do
+    with {kind, definition} <- deletable_items_owner(socket.assigns, id),
+         counted when counted == pending.counted <- count_stored(socket.assigns, definition) do
+      {:noreply, destroy_with_items(socket, kind, definition, counted)}
+    else
+      nil ->
+        {:noreply, assign(socket, :delete_confirm, nil)}
+
+      # The count moved since it was shown: show the new number and ask again.
+      new_count ->
+        {:noreply,
+         assign(socket, :delete_confirm, %{pending | counted: new_count, changed?: true})}
+    end
+  end
+
+  def handle_event("item_delete_confirm", _params, socket), do: {:noreply, socket}
+
+  def handle_event("item_delete_cancel", _params, socket),
+    do: {:noreply, assign(socket, :delete_confirm, nil)}
 
   # --- order (#1818) ---------------------------------------------------------
 
@@ -783,7 +965,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # A group's sub-fields read each other; a reference's link fields carry no
   # conditions.
-  defp link_siblings(assigns, parent_id, id, :group),
+  defp link_siblings(assigns, parent_id, id, kind) when kind in [:group, :item],
     do: cond_siblings(%{id: id, group_of_id: parent_id}, assigns.current_org, nil)
 
   defp link_siblings(_assigns, _parent_id, _id, _kind), do: []
@@ -810,14 +992,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # The rules for the params the resource validates. A type that carries none
   # (a group or computed field) sends both as nil so a stale row can't fail it.
-  defp put_rules(params, _conds, type, _siblings) when type in ["group", "computed"],
+  defp put_rules(params, _conds, type, _siblings) when type in ["group", "computed", "flexible"],
     do: Map.merge(params, %{"visible_when" => nil, "required_when" => nil})
 
   defp put_rules(params, conds, _type, siblings),
     do: Map.merge(params, ConditionsBuilder.rule_params(conds, siblings))
 
-  defp put_link_rules(params, %{kind: :group, cond_siblings: siblings}, conds, type),
-    do: put_rules(params, conds, type, siblings)
+  defp put_link_rules(params, %{kind: kind, cond_siblings: siblings}, conds, type)
+       when kind in [:group, :item],
+       do: put_rules(params, conds, type, siblings)
 
   defp put_link_rules(params, _lf, _conds, _type), do: params
 
@@ -1156,13 +1339,51 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp child_kind(:group), do: :group
   defp child_kind(_reference), do: :link
 
+  # What a "Add a field/detail" button's parent is: a reference field (`:link`),
+  # a group (`:group`) or an item type (`:item`, #2282), looked up in what this
+  # page loaded for this site. `nil` for anything else.
+  defp link_parent(assigns, parent_id) do
+    if Map.has_key?(assigns.item_type_index, parent_id) do
+      :item
+    else
+      case Enum.find(assigns.definitions, &(&1.id == parent_id)) do
+        %{field_type: type} when type in [:reference, :group] -> child_kind(type)
+        _other -> nil
+      end
+    end
+  end
+
+  defp link_kind(assigns, %{group_of_id: parent}) when not is_nil(parent),
+    do: if(Map.has_key?(assigns.item_type_index, parent), do: :item, else: :group)
+
+  defp link_kind(_assigns, _link), do: :link
+
+  # The "Kind of value" choices of a sub-field form. An item's sub-fields may
+  # be flexible fields in turn, until the depth cap; an existing flexible
+  # sub-field keeps its own type in the list (its select is disabled).
+  defp sub_field_type_options(assigns, :item, item_type_id, link) do
+    item_type = Map.fetch!(assigns.item_type_index, item_type_id)
+
+    depth =
+      Map.get(assigns.flexible_depths, item_type.flex_of_id, FieldDefinition.max_flexible_depth())
+
+    types =
+      if depth < FieldDefinition.max_flexible_depth() or (link && link.field_type == :flexible),
+        do: FieldDefinition.item_field_types(),
+        else: FieldDefinition.item_field_types() -- [:flexible]
+
+    Enum.map(types, &{type_label(&1), &1})
+  end
+
+  defp sub_field_type_options(_assigns, _kind, _parent, _link), do: link_type_options()
+
   # The same option/default clean-up as a field's own form. A new link field
   # (or group sub-field) is pinned to the parent it was opened under and goes
   # to the end of its list; an edit never moves it.
   defp link_params(params, link_form, assigns \\ nil)
 
   defp link_params(params, %{id: nil, parent: parent_id, kind: kind}, assigns) do
-    column = if kind == :group, do: "group_of_id", else: "link_of_id"
+    column = if kind in [:group, :item], do: "group_of_id", else: "link_of_id"
     params = params |> normalize() |> without_unique() |> Map.put(column, parent_id)
 
     case assigns do
@@ -1174,8 +1395,18 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp link_params(params, _link_form, _assigns),
     do: params |> normalize() |> without_unique() |> Map.drop(["link_of_id", "group_of_id"])
 
-  defp reorder_links(socket, parent_id, order) do
-    by_id = socket.assigns.link_fields |> Map.get(parent_id, []) |> Map.new(&{&1.id, &1})
+  defp reorder_links(socket, parent_id, order),
+    do:
+      reorder_children(
+        socket,
+        socket.assigns.link_fields,
+        parent_id,
+        order,
+        gettext("Couldn't save the new order of details.")
+      )
+
+  defp reorder_children(socket, children, parent_id, order, failure) do
+    by_id = children |> Map.get(parent_id, []) |> Map.new(&{&1.id, &1})
     opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
 
     failed =
@@ -1188,13 +1419,144 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     socket = load_definitions(socket)
 
-    if failed == [],
-      do: socket,
-      else: put_flash(socket, :error, gettext("Couldn't save the new order of details."))
+    if failed == [], do: socket, else: put_flash(socket, :error, failure)
   end
 
   defp link_type_options do
     Enum.map(FieldDefinition.link_field_types(), &{type_label(&1), &1})
+  end
+
+  # --- item-type helpers (#2282) -----------------------------------------------
+
+  defp item_create_form(actor, org, flex_id) do
+    FieldDefinition
+    |> AshPhoenix.Form.for_create(:create,
+      actor: actor,
+      tenant: org,
+      as: "item_type",
+      id: "item_type_new_#{flex_id}",
+      params: %{"field_type" => "group"}
+    )
+    |> to_form()
+  end
+
+  defp item_edit_form(item_type, actor, org) do
+    item_type
+    |> AshPhoenix.Form.for_update(:update,
+      actor: actor,
+      tenant: org,
+      as: "item_type",
+      id: "item_type_#{item_type.id}"
+    )
+    |> to_form()
+  end
+
+  # The four things an item type takes from the form. A new one is pinned to
+  # the flexible field it was opened under, is a group (always a list of
+  # items), and goes to the end of its list; an edit never moves it.
+  defp item_params(params, item_form, assigns \\ nil)
+
+  defp item_params(params, %{id: nil, parent: flex_id}, assigns) do
+    params
+    |> Map.take(~w(label name help_text max_items))
+    |> Map.merge(%{"field_type" => "group", "flex_of_id" => flex_id, "multiple" => "true"})
+    |> then(fn params ->
+      case assigns do
+        nil -> params
+        assigns -> Map.put(params, "position", length(Map.get(assigns.item_types, flex_id, [])))
+      end
+    end)
+  end
+
+  defp item_params(params, _item_form, _assigns),
+    do: Map.take(params, ~w(label name help_text max_items))
+
+  # The unique name of an item type is per flexible field; the database's
+  # identity error names no input, so the name is checked here against the
+  # item types this page lists for the field.
+  defp refuse_duplicate_item(form, params, itf, assigns) do
+    name = params["name"]
+
+    taken? =
+      assigns.item_types
+      |> Map.get(itf.parent, [])
+      |> Enum.any?(&(&1.name == name and &1.id != itf.id))
+
+    if blank?(name) or not taken? do
+      form
+    else
+      AshPhoenix.Form.add_error(
+        form,
+        Ash.Error.Changes.InvalidAttribute.exception(
+          field: :name,
+          message: gettext("is already an item type of this field")
+        )
+      )
+    end
+  end
+
+  # The definition a delete asks about: an item type or a flexible field (top
+  # level or an item's own sub-field) this page loaded for this site.
+  defp deletable_items_owner(assigns, id) do
+    case {Map.get(assigns.item_type_index, id), Map.get(assigns.flexible_index, id)} do
+      {%{} = item_type, _flexible} -> {:item_type, item_type}
+      {nil, %{} = flexible} -> {:flexible, flexible}
+      {nil, nil} -> nil
+    end
+  end
+
+  # How many stored items deleting `definition` removes, or `:unknown` when it
+  # could not be counted (which the confirmation says rather than showing 0).
+  defp count_stored(assigns, definition) do
+    case FlexiblePath.count_stored(definition, assigns.current_org) do
+      {:ok, count} -> count
+      :error -> :unknown
+    end
+  end
+
+  defp destroy_with_items(socket, kind, definition, counted) do
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    # Only an item type's destroy takes the flag, and only because the admin
+    # was shown that items exist (or could not be counted) and confirmed.
+    result =
+      case kind do
+        :item_type ->
+          CMS.destroy_field_definition(definition, %{purge_items?: counted != 0},
+            actor: actor,
+            tenant: org
+          )
+
+        :flexible ->
+          CMS.destroy_field_definition(definition, actor: actor, tenant: org)
+      end
+
+    case result do
+      :ok ->
+        socket
+        |> assign(:delete_confirm, nil)
+        |> assign(:edit, nil)
+        |> drop_section_layout(definition)
+        |> load_definitions()
+        |> put_flash(
+          :info,
+          if(kind == :item_type,
+            do: gettext("Item type deleted."),
+            else: gettext("Field deleted.")
+          )
+        )
+
+      {:error, _error} ->
+        # Most likely an item saved since the count: show the number again.
+        socket
+        |> assign(:delete_confirm, %{
+          id: definition.id,
+          counted: count_stored(socket.assigns, definition),
+          changed?: true
+        })
+        |> put_flash(:error, gettext("Couldn't delete that. Check the count and try again."))
+    end
   end
 
   # --- order helpers ---------------------------------------------------------
@@ -1310,30 +1672,23 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end
   end
 
-  # Item types (`flex_of_id`) and the sub-fields hanging off them.
-  defp without_item_types(rows) do
-    item_type_ids =
-      for %{flex_of_id: id} = row <- rows, not is_nil(id), into: MapSet.new(), do: row.id
-
-    Enum.reject(rows, fn row ->
-      FieldDefinition.item_type?(row) or MapSet.member?(item_type_ids, row.group_of_id)
-    end)
-  end
-
   defp load_definitions(socket) do
-    {links, definitions} =
-      CMS.list_field_definitions!(
-        actor: socket.assigns.actor,
-        tenant: socket.assigns.current_org,
-        query: [sort: [position: :asc, name: :asc]],
-        context: FieldDefinition.all_types_context()
+    # The item types of a flexible field (#2282) are listed under it, and their
+    # sub-fields under them (as a group's are, keyed by the item type).
+    {item_types, rows} =
+      Enum.split_with(
+        CMS.list_field_definitions!(
+          actor: socket.assigns.actor,
+          tenant: socket.assigns.current_org,
+          query: [sort: [position: :asc, name: :asc]],
+          context: FieldDefinition.all_types_context()
+        ),
+        &FieldDefinition.item_type?/1
       )
-      # The item types of a flexible field (#2282) and their sub-fields have
-      # no panel here yet: leave them out rather than list them as links.
-      |> without_item_types()
-      # Link fields (R3) are listed under their reference field, and a
-      # group's sub-fields under their group — not as fields of a type.
-      |> Enum.split_with(&(not is_nil(FieldDefinition.parent_id(&1))))
+
+    # Link fields (R3) are listed under their reference field, and a
+    # group's sub-fields under their group — not as fields of a type.
+    {links, definitions} = Enum.split_with(rows, &(not is_nil(FieldDefinition.parent_id(&1))))
 
     # A link field or sub-field of an unknown type (#2605) is listed with the
     # other unknown-type fields, under its parent's name: its parent's editor
@@ -1371,6 +1726,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> Enum.sort()
     )
     |> assign(:link_fields, Enum.group_by(links, &FieldDefinition.parent_id/1))
+    |> assign(:item_types, Enum.group_by(item_types, & &1.flex_of_id))
+    |> assign(:item_type_index, Map.new(item_types, &{&1.id, &1}))
+    |> assign_flexible_index(owned ++ links, item_types)
     |> assign(:grouped, grouped)
     # Each type's section layouts (#2280), by owner, for its Sections panel.
     |> assign(
@@ -1381,6 +1739,35 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> assign(:orphaned, Enum.sort_by(orphaned, &{to_string(&1.content_type), &1.name}))
     |> assign(:unknown_type, unknown_type ++ unknown_links)
     |> assign_selection_catalog(owned)
+  end
+
+  # Every flexible field this site's page lists, top-level or an item's
+  # sub-field, by id; and how deep each sits (1 for a top-level one), which
+  # decides whether a new sub-field of its item types may be flexible too.
+  defp assign_flexible_index(socket, rows, item_types) do
+    flexible = for %{field_type: :flexible} = row <- rows, into: %{}, do: {row.id, row}
+    items = Map.new(item_types, &{&1.id, &1})
+
+    socket
+    |> assign(:flexible_index, flexible)
+    |> assign(
+      :flexible_depths,
+      Map.new(flexible, fn {id, field} -> {id, flexible_depth(field, flexible, items, 1)} end)
+    )
+  end
+
+  # A chain longer than this is malformed; stop rather than loop.
+  defp flexible_depth(_field, _flexible, _items, depth) when depth > 10, do: depth
+
+  defp flexible_depth(%{group_of_id: nil}, _flexible, _items, depth), do: depth
+
+  defp flexible_depth(%{group_of_id: item_id}, flexible, items, depth) do
+    with %{flex_of_id: owner_id} <- Map.get(items, item_id),
+         %{} = owner <- Map.get(flexible, owner_id) do
+      flexible_depth(owner, flexible, items, depth + 1)
+    else
+      _broken -> depth
+    end
   end
 
   # What the "Which records can be picked" step offers (#2285): the site's tags
@@ -1835,9 +2222,22 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # Whether the reference-target select applies to the form's current type.
   defp reference?(form), do: to_string(form[:field_type].value) == "reference"
 
-  # Whether the Conditions disclosure applies: not to a group as a whole or a
-  # computed field (`Validations.FieldCondition`).
-  defp conditions?(form), do: to_string(form[:field_type].value) not in ["group", "computed"]
+  # Whether the Conditions disclosure applies: not to a group or a flexible
+  # field as a whole, or a computed field (`Validations.FieldCondition`).
+  defp conditions?(form),
+    do: to_string(form[:field_type].value) not in ["group", "computed", "flexible"]
+
+  # Whether the form is for a flexible field (#2282).
+  defp flexible?(form), do: to_string(form[:field_type].value) == "flexible"
+
+  # A flexible field's own type cannot be changed, and no other field can become
+  # one (`Validations.FlexibleRetype`): the edit form's picker leaves it out of
+  # every field but a flexible one, and disables the select there.
+  defp edit_type_options(field_types, %{field_type: :flexible}),
+    do: value_type_options(field_types)
+
+  defp edit_type_options(field_types, _definition),
+    do: value_type_options(field_types -- [:flexible])
 
   # Whether the compute-formula textarea applies (a `:computed` field, #429).
   defp computed?(form), do: to_string(form[:field_type].value) == "computed"
@@ -1892,6 +2292,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   # Core types humanize; plugin field types carry their own label.
+  defp type_label(:flexible), do: gettext("Flexible content")
+
   defp type_label(type) do
     case KilnCMS.CMS.FieldTypes.get(type) do
       nil -> Phoenix.Naming.humanize(type)
@@ -1965,6 +2367,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     do:
       gettext(
         "Structured rows, each with the same typed fields — one, or a list. For dosages with an amount and a unit, or a product's specifications."
+      )
+
+  defp core_type_description(:flexible),
+    do:
+      gettext(
+        "An ordered list of items of different kinds — a hero, a quote, a feature grid — each kind with its own fields and settings. The items are data with settings, not page layout: your theme decides how they look. Add the kinds once the field is saved."
       )
 
   defp core_type_description(:geolocation),
@@ -2148,6 +2556,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     # The warning outlives the toggle: retyping a list field to another type
     # narrows it just the same (`SyncFieldValues`), so it shows then too.
     ~H"""
+    <div :if={@type == :flexible} class="sm:col-span-2">
+      <.item_bounds_fieldset form={@form} id={"#{@id}-bounds"} />
+      <p id={"#{@id}-item-types-hint"} class="mt-2 text-xs text-base-content/70">
+        {gettext(
+          "Once the field is saved, add the kinds of item it can hold — a hero, a quote — under it in the list below. Each kind has its own fields and settings."
+        )}
+      </p>
+    </div>
     <div :if={@holds? || @narrowing || @retyped_list} class="sm:col-span-2">
       <fieldset :if={@holds?}>
         <legend class="mb-1 block text-sm font-medium">{gettext("Holds")}</legend>
@@ -2295,6 +2711,49 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     """
   end
 
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+
+  # How many items a flexible field holds, as the admin's min/max (#2282).
+  defp item_bounds_fieldset(assigns) do
+    ~H"""
+    <fieldset
+      id={@id}
+      class="rounded-lg border border-base-content/10 bg-base-200/40 p-3"
+    >
+      <legend class="px-1 text-sm font-medium">
+        {gettext("How many items")}
+        <span class="font-normal text-base-content/70">{gettext("(optional)")}</span>
+      </legend>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <.input
+          field={@form[:min_items]}
+          type="number"
+          min="0"
+          step="1"
+          inputmode="numeric"
+          label={gettext("Minimum")}
+          placeholder={gettext("No minimum")}
+        />
+        <.input
+          field={@form[:max_items]}
+          type="number"
+          min="1"
+          step="1"
+          inputmode="numeric"
+          label={gettext("Maximum")}
+          placeholder={gettext("No limit")}
+        />
+      </div>
+      <p class="mt-2 text-xs text-base-content/70">
+        {gettext(
+          "Leave a box empty for no limit. A field with no maximum is still capped, at 100 items unless the site is configured otherwise."
+        )}
+      </p>
+    </fieldset>
+    """
+  end
+
   # A list of phrases or a typed list (#2289) — what the field list badges
   # "list"; a multiple select is badged by its own words.
   defp scalar_list?(type), do: type == :string or type in @typed_list_types
@@ -2395,6 +2854,17 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       {nil, max} -> ngettext("At most one row.", "At most %{count} rows.", max)
       {same, same} -> ngettext("Exactly one row.", "Exactly %{count} rows.", same)
       {min, max} -> gettext("Between %{min} and %{max} rows.", min: min, max: max)
+    end
+  end
+
+  # A flexible field's item bounds in the list, when it has any (#2282).
+  defp items_summary(%{min_items: min, max_items: max}) do
+    case {min, max} do
+      {nil, nil} -> gettext("Any number of items.")
+      {min, nil} -> ngettext("At least one item.", "At least %{count} items.", min)
+      {nil, max} -> ngettext("At most one item.", "At most %{count} items.", max)
+      {same, same} -> ngettext("Exactly one item.", "Exactly %{count} items.", same)
+      {min, max} -> gettext("Between %{min} and %{max} items.", min: min, max: max)
     end
   end
 
@@ -4126,8 +4596,24 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # --- render ----------------------------------------------------------------
 
+  # What the item-type and sub-field panels read, which nest inside each other
+  # (an item type's sub-field may be a flexible field with panels of its own),
+  # so it travels as one map.
+  defp panel_ctx(assigns) do
+    Map.take(assigns, [
+      :item_types,
+      :link_fields,
+      :link_form,
+      :item_form,
+      :delete_confirm,
+      :target_types
+    ])
+  end
+
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :ctx, panel_ctx(assigns))
+
     ~H"""
     <Layouts.console
       flash={@flash}
@@ -4286,7 +4772,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               siblings={@cond_siblings}
               ctx="create"
             />
-            <label class="flex items-center gap-2 self-end text-sm">
+            <label :if={!flexible?(@form)} class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[names_record]" value="false" />
               <input
                 type="checkbox"
@@ -4297,7 +4783,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               />
               {gettext("Names the record (search finds it by this value)")}
             </label>
-            <label class="flex items-center gap-2 self-end text-sm">
+            <label :if={!flexible?(@form)} class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[searchable]" value="false" />
               <input
                 type="checkbox"
@@ -4516,6 +5002,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     >
                       {rows_summary(definition)}
                     </p>
+                    <p
+                      :if={definition.field_type == :flexible}
+                      id={"field-#{definition.id}-item-bounds"}
+                      class="text-xs text-base-content/70"
+                    >
+                      {items_summary(definition)}
+                    </p>
                   </div>
                   <div class="flex shrink-0 items-center gap-1">
                     <button
@@ -4548,7 +5041,21 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     >
                       {gettext("Edit")}
                     </button>
+                    <%!-- A flexible field's delete counts the items it removes and
+                          asks on the page (`item_delete`), not in a browser dialog. --%>
                     <button
+                      :if={definition.field_type == :flexible}
+                      type="button"
+                      id={"field-#{definition.id}-delete"}
+                      phx-click="item_delete"
+                      phx-value-id={definition.id}
+                      aria-label={gettext("Delete field")}
+                      class="rounded px-2 py-1 text-xs text-base-content/70 hover:bg-base-200 hover:text-error"
+                    >
+                      <.icon name="hero-trash" class="size-4" />
+                    </button>
+                    <button
+                      :if={definition.field_type != :flexible}
                       type="button"
                       phx-click="delete"
                       phx-value-id={definition.id}
@@ -4577,7 +5084,20 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     links={Map.get(@link_fields, definition.id, [])}
                     link_form={@link_form}
                     target_types={@target_types}
+                    ctx={@ctx}
                   />
+                </div>
+                <div
+                  :if={!editing?(@edit, definition.id) and definition.field_type == :flexible}
+                  class="sm:pl-10"
+                >
+                  <.delete_items_confirm
+                    :if={@delete_confirm && @delete_confirm.id == definition.id}
+                    pending={@delete_confirm}
+                    definition={definition}
+                    kind={:flexible}
+                  />
+                  <.item_types_panel flexible={definition} ctx={@ctx} />
                 </div>
 
                 <.form
@@ -4625,12 +5145,29 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                       catalog={@selection_catalog}
                     />
                   <% else %>
+                    <%!-- A flexible field is never retyped (and nothing becomes one),
+                          so its select is read-only; the hidden twin keeps the type
+                          in the post. --%>
                     <.input
                       field={@edit.form[:field_type]}
                       type="select"
                       label={gettext("Field type")}
-                      options={value_type_options(@field_types)}
-                      hint={type_description(@edit.form[:field_type].value, @field_types)}
+                      options={edit_type_options(@field_types, definition)}
+                      hint={
+                        if definition.field_type == :flexible,
+                          do:
+                            gettext(
+                              "A flexible field can't be changed to another type, or the other way round. Add a new field and delete this one."
+                            ),
+                          else: type_description(@edit.form[:field_type].value, @field_types)
+                      }
+                      disabled={definition.field_type == :flexible}
+                    />
+                    <input
+                      :if={definition.field_type == :flexible}
+                      type="hidden"
+                      name={@edit.form[:field_type].name}
+                      value="flexible"
                     />
                     <.input field={@edit.form[:label]} label={gettext("Label")} />
                     <.compute_builder
@@ -4833,6 +5370,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :links, :list, required: true
   attr :link_form, :any, required: true
   attr :target_types, :list, required: true
+  # The state the nested item-type panels of a flexible sub-field read.
+  attr :ctx, :map, default: %{}
 
   # A reference field's link fields (R3), worded for someone setting up a
   # relationship rather than a schema: "Details on each connection". A group's
@@ -4843,6 +5382,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     assigns =
       assigns
       |> assign(:group?, group?)
+      # An item type's sub-fields (#2282): "Fields in each item".
+      |> assign(:item?, FieldDefinition.item_type?(assigns.definition))
       |> assign(
         :root,
         if(group?,
@@ -4872,9 +5413,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     >
       <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h4 id={"#{@root}-heading"} class="text-sm font-medium">
-          {if @group?,
-            do: gettext("Fields in each row"),
-            else: gettext("Details on each connection")}
+          {cond do
+            @item? -> gettext("Fields in each item")
+            @group? -> gettext("Fields in each row")
+            true -> gettext("Details on each connection")
+          end}
         </h4>
         <button
           :if={!(@open && is_nil(@open.id))}
@@ -4888,7 +5431,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           {if @group?, do: gettext("Add a field"), else: gettext("Add a detail")}
         </button>
       </div>
-      <p :if={@group?} class="mt-0.5 text-xs text-base-content/60">
+      <p :if={@item?} class="mt-0.5 text-xs text-base-content/70">
+        {gettext(
+          "What an editor fills in for each %{type} item. A plain value, or a list of items of its own. Tick Setting on a value that configures the item (a background, a width) rather than content: settings are stored apart from the content.",
+          type: @definition.label
+        )}
+      </p>
+      <p :if={@group? and !@item?} class="mt-0.5 text-xs text-base-content/70">
         {if @definition.multiple,
           do:
             gettext(
@@ -4914,6 +5463,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               <code class="text-xs text-base-content/60">{link.name}</code>
               <span class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70">
                 {type_label(link.field_type)}
+              </span>
+              <span
+                :if={link.item_setting}
+                id={"link-field-#{link.id}-setting"}
+                title={gettext("Stored apart from the item's content")}
+                class="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-base-content/70"
+              >
+                {gettext("setting")}
               </span>
               <span
                 :if={link.required}
@@ -4967,13 +5524,27 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                 {gettext("Edit")}
               </button>
               <button
+                :if={link.field_type == :flexible}
+                type="button"
+                id={"link-field-#{link.id}-delete"}
+                phx-click="item_delete"
+                phx-value-id={link.id}
+                aria-label={gettext("Delete field %{label}", label: link.label)}
+                class="rounded px-2 py-1 text-xs text-base-content/70 hover:bg-base-200 hover:text-error"
+              >
+                <.icon name="hero-trash" class="size-4" />
+              </button>
+              <button
+                :if={link.field_type != :flexible}
                 type="button"
                 phx-click="delete"
                 phx-value-id={link.id}
                 data-confirm={
-                  if @group?,
-                    do: gettext("Delete this field? Its value is removed from every row."),
-                    else: gettext("Delete this detail? Its value is removed from every connection.")
+                  cond do
+                    @item? -> gettext("Delete this field? Its value is removed from every item.")
+                    @group? -> gettext("Delete this field? Its value is removed from every row.")
+                    true -> gettext("Delete this detail? Its value is removed from every connection.")
+                  end
                 }
                 aria-label={
                   if @group?,
@@ -4993,12 +5564,24 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             group?={@group?}
             open={@open}
           />
+          <%!-- A flexible sub-field of an item type has item types of its own. --%>
+          <div :if={link.field_type == :flexible and !(@open && @open.id == link.id)} class="mt-2">
+            <.delete_items_confirm
+              :if={@ctx[:delete_confirm] && @ctx.delete_confirm.id == link.id}
+              pending={@ctx.delete_confirm}
+              definition={link}
+              kind={:flexible}
+            />
+            <.item_types_panel flexible={link} ctx={@ctx} />
+          </div>
         </li>
       </ol>
       <p :if={@links == [] and !@open} class="mt-2 text-xs text-base-content/50">
-        {if @group?,
-          do: gettext("No fields yet — editors see nothing to fill in until you add one."),
-          else: gettext("No details yet.")}
+        {cond do
+          @item? -> gettext("No fields yet — an item of this type is empty until you add one.")
+          @group? -> gettext("No fields yet — editors see nothing to fill in until you add one.")
+          true -> gettext("No details yet.")
+        end}
       </p>
       <.link_field_form
         :if={@open && is_nil(@open.id)}
@@ -5007,6 +5590,261 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         group?={@group?}
         open={@open}
       />
+    </div>
+    """
+  end
+
+  attr :flexible, :map, required: true
+  attr :ctx, :map, required: true
+
+  # A flexible field's item types (#2282), worded for someone defining the
+  # kinds of item an editor can add: label, machine name, help text and a cap
+  # per kind. Each kind opens the "Fields in each item" list under it.
+  defp item_types_panel(assigns) do
+    flexible = assigns.flexible
+    ctx = assigns.ctx
+
+    assigns =
+      assigns
+      |> assign(:root, "field-#{flexible.id}-item-types")
+      |> assign(:items, Map.get(ctx.item_types, flexible.id, []))
+      |> assign(:open, ctx.item_form && ctx.item_form.parent == flexible.id && ctx.item_form)
+
+    ~H"""
+    <div
+      id={@root}
+      role="group"
+      aria-labelledby={"#{@root}-heading"}
+      class="mt-3 rounded-md border border-base-content/10 bg-base-200/30 p-3"
+    >
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 id={"#{@root}-heading"} class="text-sm font-medium">{gettext("Item types")}</h4>
+        <button
+          :if={!(@open && is_nil(@open.id))}
+          type="button"
+          id={"#{@root}-add"}
+          phx-click="item_type_new"
+          phx-value-parent={@flexible.id}
+          class="inline-flex cursor-pointer items-center gap-1 rounded text-xs font-medium text-primary-ink transition-colors hover:underline"
+        >
+          <.icon name="hero-plus" class="size-3.5" />
+          {gettext("Add an item type")}
+        </button>
+      </div>
+      <p class="mt-0.5 text-xs text-base-content/70">
+        {gettext(
+          "The kinds of item an editor can add to this field — a hero, a quote, a feature grid. Each kind has its own fields and settings. The items are data with settings, not page layout: your theme decides how each kind looks."
+        )}
+      </p>
+
+      <ol :if={@items != []} id={"#{@root}-list"} class="mt-2 divide-y divide-base-content/10">
+        <li
+          :for={{item, index} <- Enum.with_index(@items)}
+          id={"item-type-#{item.id}"}
+          class="py-2"
+        >
+          <div :if={!(@open && @open.id == item.id)} class="flex items-center justify-between gap-3">
+            <div class="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+              <span class="font-medium">{item.label}</span>
+              <code class="text-xs text-base-content/70">{item.name}</code>
+              <span
+                :if={item.max_items}
+                id={"item-type-#{item.id}-max"}
+                class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+              >
+                {ngettext("at most one", "at most %{count}", item.max_items)}
+              </span>
+              <span :if={item.help_text} class="text-xs text-base-content/70">{item.help_text}</span>
+            </div>
+            <div class="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                phx-click="item_type_move"
+                phx-value-id={item.id}
+                phx-value-dir="up"
+                disabled={index == 0}
+                aria-label={gettext("Move %{label} up", label: item.label)}
+                class="btn btn-sm btn-ghost px-1.5"
+              >
+                <.icon name="hero-chevron-up" class="size-4" />
+              </button>
+              <button
+                type="button"
+                phx-click="item_type_move"
+                phx-value-id={item.id}
+                phx-value-dir="down"
+                disabled={index == length(@items) - 1}
+                aria-label={gettext("Move %{label} down", label: item.label)}
+                class="btn btn-sm btn-ghost px-1.5"
+              >
+                <.icon name="hero-chevron-down" class="size-4" />
+              </button>
+              <button
+                type="button"
+                id={"item-type-#{item.id}-edit"}
+                phx-click="item_type_edit"
+                phx-value-id={item.id}
+                class="btn btn-sm btn-default"
+              >
+                {gettext("Edit")}
+              </button>
+              <button
+                type="button"
+                id={"item-type-#{item.id}-delete"}
+                phx-click="item_delete"
+                phx-value-id={item.id}
+                aria-label={gettext("Delete item type %{label}", label: item.label)}
+                class="rounded px-2 py-1 text-xs text-base-content/70 hover:bg-base-200 hover:text-error"
+              >
+                <.icon name="hero-trash" class="size-4" />
+              </button>
+            </div>
+          </div>
+          <.delete_items_confirm
+            :if={@ctx.delete_confirm && @ctx.delete_confirm.id == item.id}
+            pending={@ctx.delete_confirm}
+            definition={item}
+            kind={:item_type}
+          />
+          <.item_type_form
+            :if={@open && @open.id == item.id}
+            form={@open.form}
+            id={"item-type-form-#{item.id}"}
+            open={@open}
+          />
+          <.link_fields_panel
+            :if={!(@open && @open.id == item.id)}
+            definition={item}
+            links={Map.get(@ctx.link_fields, item.id, [])}
+            link_form={@ctx.link_form}
+            target_types={@ctx.target_types}
+            ctx={@ctx}
+          />
+        </li>
+      </ol>
+      <p :if={@items == [] and !@open} class="mt-2 text-xs text-base-content/70">
+        {gettext("No item types yet — editors can't add anything to this field until you add one.")}
+      </p>
+      <.item_type_form
+        :if={@open && is_nil(@open.id)}
+        form={@open.form}
+        id={"item-type-form-new-#{@flexible.id}"}
+        open={@open}
+      />
+    </div>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
+  attr :open, :map, required: true
+
+  defp item_type_form(assigns) do
+    ~H"""
+    <.form
+      for={@form}
+      id={@id}
+      phx-change="item_type_validate"
+      phx-submit="item_type_save"
+      class="mt-2 grid gap-3 rounded-md border border-base-content/10 bg-base-100 p-3 sm:grid-cols-2"
+    >
+      <.input field={@form[:label]} label={gettext("Label")} placeholder={gettext("Hero")} />
+      <.input
+        field={@form[:name]}
+        label={gettext("Machine name")}
+        placeholder="hero"
+        hint={
+          if @open.id,
+            do: gettext("Renaming keeps the items editors already added: they move to the new name."),
+            else: gettext("Filled in from the label until you change it.")
+        }
+      />
+      <.input field={@form[:help_text]} label={gettext("Help text")} />
+      <.input
+        field={@form[:max_items]}
+        type="number"
+        min="1"
+        step="1"
+        inputmode="numeric"
+        label={gettext("Most items of this kind")}
+        placeholder={gettext("No limit")}
+        hint={gettext("Per field value. Leave empty for no limit beyond the field's own.")}
+      />
+      <div class="flex gap-2 sm:col-span-2">
+        <.button type="submit" variant="primary">{gettext("Save item type")}</.button>
+        <button type="button" phx-click="item_type_cancel" class="btn btn-sm btn-default">
+          {gettext("Cancel")}
+        </button>
+      </div>
+    </.form>
+    """
+  end
+
+  attr :pending, :map, required: true
+  attr :definition, :map, required: true
+  attr :kind, :atom, required: true, values: [:item_type, :flexible]
+
+  # Asked before an item type or a flexible field is deleted: how many stored
+  # items go with it, counted just now. A confirm that finds the number moved
+  # shows the new one and asks again (`item_delete_confirm`).
+  defp delete_items_confirm(assigns) do
+    ~H"""
+    <div
+      id={"item-delete-#{@definition.id}"}
+      role="alertdialog"
+      aria-labelledby={"item-delete-#{@definition.id}-title"}
+      class="mt-2 space-y-2 rounded-md border border-error/40 bg-error/5 p-3 text-sm"
+    >
+      <p id={"item-delete-#{@definition.id}-title"} class="font-medium">
+        {if @kind == :item_type,
+          do: gettext("Delete the %{label} item type?", label: @definition.label),
+          else: gettext("Delete the %{label} field?", label: @definition.label)}
+      </p>
+      <p
+        :if={@pending.changed?}
+        id={"item-delete-#{@definition.id}-changed"}
+        role="alert"
+        class="text-warning-ink"
+      >
+        {gettext(
+          "The number of stored items changed since you last looked. Check it and confirm again."
+        )}
+      </p>
+      <p id={"item-delete-#{@definition.id}-count"} data-count={@pending.counted}>
+        <%= cond do %>
+          <% @pending.counted == :unknown -> %>
+            {gettext(
+              "The stored items couldn't be counted. Any that exist are removed permanently, and this can't be undone."
+            )}
+          <% @pending.counted == 0 -> %>
+            {gettext("No stored items use it.")}
+          <% true -> %>
+            {ngettext(
+              "1 stored item is removed from your content permanently. This can't be undone.",
+              "%{count} stored items are removed from your content permanently. This can't be undone.",
+              @pending.counted
+            )}
+        <% end %>
+      </p>
+      <div class="flex gap-2">
+        <button
+          type="button"
+          id={"item-delete-#{@definition.id}-confirm"}
+          phx-click="item_delete_confirm"
+          phx-value-id={@definition.id}
+          class="btn btn-sm btn-danger"
+        >
+          {gettext("Delete")}
+        </button>
+        <button
+          type="button"
+          id={"item-delete-#{@definition.id}-cancel"}
+          phx-click="item_delete_cancel"
+          class="btn btn-sm btn-default"
+        >
+          {gettext("Cancel")}
+        </button>
+      </div>
     </div>
     """
   end
@@ -5036,16 +5874,56 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         placeholder={if @group?, do: "unit", else: "quantity"}
         hint={gettext("Filled in from the label until you change it.")}
       />
+      <%!-- An existing flexible sub-field keeps its type (never retyped); its
+            hidden twin keeps the type in the post. --%>
       <.input
         field={@form[:field_type]}
         type="select"
         label={gettext("Kind of value")}
-        options={link_type_options()}
+        options={@open.type_options}
+        disabled={@open.id != nil and flexible?(@form)}
+      />
+      <input
+        :if={@open.id != nil and flexible?(@form)}
+        type="hidden"
+        name={@form[:field_type].name}
+        value="flexible"
       />
       <.input field={@form[:help_text]} label={gettext("Help text")} />
       <.options_field form={@form} id={"#{@id}-options"} />
       <.default_field form={@form} />
       <.validation_field form={@form} id={"#{@id}-validation"} nested? />
+      <.item_bounds_fieldset
+        :if={@open.kind == :item and flexible?(@form)}
+        form={@form}
+        id={"#{@id}-bounds"}
+      />
+      <%!-- Where an item's value is filed. Fixed once the field exists: stored
+            items keep the value where it was saved. A flexible field cannot be
+            a setting. --%>
+      <label
+        :if={@open.kind == :item and !flexible?(@form)}
+        id={"#{@id}-setting"}
+        class="flex items-start gap-2 text-sm sm:col-span-2"
+      >
+        <input type="hidden" name={@form[:item_setting].name} value="false" />
+        <input
+          type="checkbox"
+          name={@form[:item_setting].name}
+          value="true"
+          checked={@form[:item_setting].value in [true, "true"]}
+          disabled={@open.id != nil}
+          class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <span>
+          {gettext("Setting")}
+          <span class="block text-xs text-base-content/70">
+            {gettext(
+              "A value that configures the item — a background, a width, an alignment — rather than content. Settings are stored apart from the content, and a setting is fixed once the field exists."
+            )}
+          </span>
+        </span>
+      </label>
       <label class="flex items-center gap-2 self-end text-sm">
         <input type="hidden" name={@form[:required].name} value="false" />
         <input
@@ -5055,9 +5933,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           checked={@form[:required].value in [true, "true"]}
           class="size-4 rounded border border-base-content/30 accent-primary"
         />
-        {if @group?,
-          do: gettext("Required on every row"),
-          else: gettext("Required on every connection")}
+        {cond do
+          @open.kind == :item -> gettext("Required on every item")
+          @group? -> gettext("Required on every row")
+          true -> gettext("Required on every connection")
+        end}
       </label>
       <.conditions_field
         :if={@group? and conditions?(@form)}

@@ -24,11 +24,11 @@ carries the reasoning.
 
 - **Run `mix ash.migrate` (new `field_definitions.flex_of_id`, nullable, and `item_setting`, default `false`; part of #2282). Nothing changes for existing fields; rolling back is safe.**
   Both are additions with a default or null, so the previous release keeps
-  working against them. They are the first step of flexible content (a custom
-  field holding mixed typed items), which reaches the API only: there is no
-  admin screen or editor input yet, so no site has one until an admin defines
-  it from code (`docs/extending-content.md`, "Define a flexible field from
-  code"). After a rollback, such a field reads on the previous release as a
+  working against them. They carry flexible content (a custom
+  field holding mixed typed items). A site has none until an admin defines
+  one, in the fields admin or from code (see the *Flexible content* entry
+  under Added, and `docs/extending-content.md`, "Build flexible content in
+  the admin"). After a rollback, such a field reads on the previous release as a
   field of an unknown type (hidden, its items kept; delete it from the
   Fields screen) and its item types as ownerless groups that nothing loads.
   Details in [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
@@ -91,6 +91,44 @@ carries the reasoning.
   Refs #2721.
 
 ## Added
+
+<a id="flexible-content"></a>
+
+- **A new custom field type, Flexible content: an ordered list of items of different kinds (a hero, a quote), each kind with its own fields and settings, defined in the fields admin and edited as cards in the content editor (#2282).**
+  The model and write path came in the *Run `mix ash.migrate`* upgrade note
+  above (no new migration here). What this adds:
+  - **Admin.** Under `/editor/fields`, **Flexible content** is a field type.
+    A flexible field has an **Item types** panel: add, edit, reorder (arrows
+    only) and delete item types, each with a label, machine name, help text
+    and a per-type maximum. Each item type has **Fields in each item**, with
+    a **Setting** checkbox for values that configure the item (stored apart
+    from its content) and, to 3 levels deep, nested flexible sub-fields.
+    The checkbox is fixed once the field exists. Renaming an item type keeps
+    its items. Deleting an item type or a flexible field shows how many stored
+    items go with it and recounts on confirm.
+  - **Editor.** The field shows its items as cards: **Add item** (appends at
+    the end, respects the field's and each type's maximum), drag or move
+    up/down, **Duplicate**, **Remove**, collapse, and a collapsed **Settings**
+    section. An item whose type was deleted shows as a locked card that only
+    **Remove** works on, and saving drops it. This replaces the read-only
+    "Edited through the API" note from the first release.
+  - **Field sync.** An export carries `"item_types"` (each with its
+    `"group_fields"`, nested to the depth cap); `item_setting` is written
+    only when `true`. **A file with `item_types` or `item_setting: true` does
+    not import on 1.10**; a site with no flexible fields exports the same file
+    as before. An import cannot delete an item type that still holds items,
+    even with `--allow-data-loss`: it is refused with a message naming
+    `purge_items?`.
+  - **Retyping.** A field can no longer be changed to or from `flexible`
+    (admin, import or code): add a new field and delete the old one.
+  - **Purge.** Deleting an item type with `purge_items?: true` removes its
+    items in the destroy's own transaction. An item saved between the guard
+    and the purge is still removed with the type.
+  Guide:
+  [Build flexible content in the admin](../extending-content.md#build-flexible-content-in-the-admin);
+  record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
+  Not yet: per-item-type grants, search of items, typed GraphQL and client
+  export (later PRs of the plan).
 
 <a id="address-field-type"></a>
 
