@@ -344,7 +344,7 @@ defmodule KilnCMS.Accounts.SignInAlert do
     |> to(to_string(user.email))
     |> subject(subject_line)
     |> html_body(html)
-    |> Mail.enqueue!()
+    |> Mail.enqueue!(user_id: user.id)
   end
 
   # Users are global (they hold memberships, not an `org_id`), and the sign-in

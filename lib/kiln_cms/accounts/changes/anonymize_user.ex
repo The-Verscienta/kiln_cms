@@ -40,8 +40,12 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   receiving newsletters. A row added by hand at the same address and never
   linked is not the account's and is kept.
 
-  Finished jobs on the `mail` queue lose the address they were sent to
-  (#3019, `KilnCMS.Mail.forget_recipient/1`): the address is read from the
+  Account mail still waiting to run is withheld (#3035,
+  `KilnCMS.Mail.withhold_pending/2`): it loses its address and message and is
+  completed unsent, and a job queued with the old address after this ran is
+  caught when it runs (`KilnCMS.Mail.DeliveryWorker` checks the account
+  again). Finished jobs on the `mail` queue lose the address they were sent
+  to (#3019, `KilnCMS.Mail.forget_recipient/2`). The address is read from the
   row before the tombstone replaces it. Workflow and task mail still waiting
   to run carry no address and check the recipient again when they run.
   """
@@ -110,8 +114,9 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       # Private ones only; shared views are the team's (#2514).
       :ok = KilnCMS.CMS.SavedViews.forget_private_views(user.id, Accounts.list_org_ids())
       :ok = KilnCMS.Notifications.forget_recipient(user.id)
-      # The address finished mail jobs were sent to (#3019).
-      :ok = forget_mail_address(changeset)
+      # Account mail still waiting to run is withheld (#3035), and finished
+      # mail jobs lose the address they were sent to (#3019).
+      :ok = forget_mail(changeset, user)
       :ok = History.anonymize_actor(user.id)
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
       # Their name, snapshotted into other people's inboxes (#1320).
@@ -242,10 +247,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
     end
   end
 
-  defp forget_mail_address(%{context: %{erased_address: address}}) when is_binary(address),
-    do: KilnCMS.Mail.forget_recipient(address)
-
-  defp forget_mail_address(_changeset), do: :ok
+  defp forget_mail(changeset, user) do
+    address = changeset.context[:erased_address]
+    :ok = KilnCMS.Mail.withhold_pending(address, user.id)
+    KilnCMS.Mail.forget_recipient(address, user.id)
+  end
 
   # Clear the account's own temporary grant. `role: :viewer` alone did nothing
   # while a grant was live — the effective tier stayed the granted one, which put

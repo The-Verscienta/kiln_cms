@@ -35,7 +35,7 @@ defmodule KilnCMS.Accounts.User.Senders.SendMagicLink do
       |> to(address)
       |> subject("Your #{site} sign-in link")
       |> html_body(body(token, site))
-      |> Mail.enqueue!()
+      |> Mail.enqueue!(user_id: account_id(user_or_email))
     else
       # Silently, and identically to the address-doesn't-exist path: the request
       # action already answers `:ok` either way so it can't be used to probe for
@@ -46,6 +46,11 @@ defmodule KilnCMS.Accounts.User.Senders.SendMagicLink do
 
   defp recipient(%{email: email}), do: to_string(email)
   defp recipient(email), do: to_string(email)
+
+  # A link to an account is account mail, checked again when it is sent
+  # (`KilnCMS.Mail.enqueue!/2`, #3035); one to a bare address has no account.
+  defp account_id(%{id: id}) when is_binary(id), do: id
+  defp account_id(_email), do: nil
 
   defp body(token, site) do
     url = url(~p"/magic_link/#{token}")

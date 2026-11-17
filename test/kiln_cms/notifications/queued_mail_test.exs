@@ -660,7 +660,7 @@ defmodule KilnCMS.Notifications.QueuedMailTest do
       job
     end
 
-    test "account mail and legacy workflow mail, finished, lose the address; pending keep it" do
+    test "account mail and legacy workflow mail, finished, lose the address" do
       person = user(:editor)
       bystander = user(:editor)
       addr = address(person)
@@ -682,8 +682,10 @@ defmodule KilnCMS.Notifications.QueuedMailTest do
 
       # The rest of a finished row stays: only the address goes.
       assert row(workflow.id).args["event"] == "submitted_for_review"
-      # A job still waiting to run keeps it; another person's row is untouched.
-      assert row(pending.id).args["to"] == ["", addr]
+      # A job still waiting to run is withheld (#3035,
+      # `KilnCMS.Mail.AccountMailErasureTest`); another person's row is untouched.
+      assert row(pending.id).args["withheld"] == "erased"
+      refute Map.has_key?(row(pending.id).args, "to")
       assert row(other.id).args["to"] == ["", address(bystander)]
     end
   end

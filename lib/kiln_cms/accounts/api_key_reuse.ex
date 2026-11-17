@@ -196,7 +196,7 @@ defmodule KilnCMS.Accounts.ApiKeyReuse do
   defp alert_admins(key) do
     site = KilnCMS.Branding.for_org(nil).site_name
     url = url(~p"/editor/api-keys")
-    owner = if match?(%{email: _}, key.user), do: to_string(key.user.email), else: key.user_id
+    owner = owner_label(key)
 
     for admin <- Accounts.Scoping.platform_admins() do
       new()
@@ -211,11 +211,18 @@ defmodule KilnCMS.Accounts.ApiKeyReuse do
       stopped authenticating. Find out where the key leaked, then mint a new one:</p>
       <p><a href="#{url}">#{url}</a></p>
       """)
-      |> Mail.enqueue!()
+      |> Mail.enqueue!(user_id: admin.id)
     end
 
     :ok
   end
+
+  # The key's owner by display name, else by account id: never by address,
+  # so the mail queued to each admin holds nobody else's (#3035).
+  defp owner_label(%ApiKey{user: %{name: name, anonymized_at: nil}}) when name not in [nil, ""],
+    do: to_string(name)
+
+  defp owner_label(%ApiKey{user_id: user_id}), do: "account #{user_id}"
 
   defp escape(text), do: text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 end

@@ -166,7 +166,7 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
     |> to(to_string(user.email))
     |> subject("A second factor was added to your #{site} account")
     |> html_body(body(escape(site), factor, details))
-    |> Mail.enqueue!(org_id: relay_org(user))
+    |> Mail.enqueue!(org_id: relay_org(user), user_id: user.id)
   end
 
   # `nil` (the instance relay) when the instance has one, or when no site
@@ -189,7 +189,7 @@ defmodule KilnCMS.Accounts.SecondFactorNotice do
     |> to(to_string(user.email))
     |> subject("A second factor was removed from your #{site} account")
     |> html_body(removed_body(escape(site), factor, remover, details))
-    |> Mail.enqueue!()
+    |> Mail.enqueue!(user_id: user.id)
   end
 
   # `:owner` when the account's owner removed it (or nobody we can name did),
