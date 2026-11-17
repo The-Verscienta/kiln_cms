@@ -46,14 +46,19 @@ defmodule KilnCMS.Backups.Heartbeat do
   `KilnCMS.Backups.DirIdReaders`, which the tick waits on for at most 5 s.
   One that takes longer is left running, and this heartbeat starts no other
   until it has finished: a process blocked in a file operation on a hung
-  mount can't be killed, so one per tick would pile up. Its answer is used
-  when it comes, at the next tick. Until then each beat reports the last id
-  this heartbeat read, while that read is younger than the marker sync's beat
-  window (10 minutes), and none after: an id that old may no longer be the
-  directory's, and the sync stops routing to a node that reports none. A
-  stall logs one warning when it starts and a line when it clears, and each
-  beat it holds up emits `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]`.
-  A read that crashes counts as no new id.
+  mount can't be killed, so one per tick would pile up. A read that answers
+  by the next tick is used by that tick's beat. Every beat a read holds up
+  reports no id: the directory is hung, so the marker sync stops routing to
+  this node until it answers again. A stall logs one warning when it starts
+  and a line when it clears, and each beat it holds up emits
+  `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]`. A read that crashes,
+  or answers with something other than `{:ok, id}` or `{:error, reason}`,
+  also reports no id.
+
+  The supervisor runs at most four reads at a time, so heartbeats restarted
+  on a hung mount can't pile up blocked readers; a tick that finds it full
+  starts none and beats with no id. Nothing in the id read stops a beat: an
+  error in it is logged and the beat goes out with no id.
 
   ## A step whose job was canceled (#2538)
 
@@ -114,10 +119,9 @@ defmodule KilnCMS.Backups.Heartbeat do
           started: integer(),
           last_prune: integer() | nil,
           dir_id_warned: MapSet.t(),
-          dir_id: String.t() | nil,
-          dir_id_at: integer() | nil,
           dir_id_task: dir_id_task() | nil,
-          dir_id_stalled?: boolean()
+          dir_id_stalled?: boolean(),
+          readers_full?: boolean()
         }
 
   @typep dir_id_task :: %{
@@ -160,14 +164,18 @@ defmodule KilnCMS.Backups.Heartbeat do
   @impl GenServer
   def handle_info(:tick, state), do: {:noreply, tick_and_schedule(state)}
 
-  # The id read's answer, after the tick stopped waiting for it.
+  # The id read's answer, after the tick stopped waiting for it. It ends the
+  # stall; the next tick reads afresh.
   def handle_info({ref, result}, %{dir_id_task: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    {:noreply, read_done(state, {:result, result})}
+    {_id, state} = read_done(state, {:result, result})
+    {:noreply, state}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{dir_id_task: %{ref: ref}} = state),
-    do: {:noreply, read_done(state, :none)}
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{dir_id_task: %{ref: ref}} = state) do
+    {_id, state} = read_done(state, :none)
+    {:noreply, state}
+  end
 
   # Anything else, a stray reply or `:DOWN` included, is not a reason to stop
   # beating.
@@ -193,10 +201,9 @@ defmodule KilnCMS.Backups.Heartbeat do
       started: now_ms(),
       last_prune: nil,
       dir_id_warned: MapSet.new(),
-      dir_id: nil,
-      dir_id_at: nil,
       dir_id_task: nil,
-      dir_id_stalled?: false
+      dir_id_stalled?: false,
+      readers_full?: false
     }
   end
 
@@ -242,10 +249,32 @@ defmodule KilnCMS.Backups.Heartbeat do
   end
 
   # The id read outside the beat's rescue, so a beat that raises still keeps
-  # track of a read in flight.
+  # track of a read in flight. An error in the id read itself is no reason
+  # not to beat (`init/1` ticks at once, so a raise here would crash-loop the
+  # heartbeat and stop the application): it is logged and the beat goes out
+  # with no id. The parts that handle a read in flight rescue their own
+  # errors, so this keeps its tracking too.
   defp beat(state) do
-    {dir_id, state} = dir_id(state)
+    {dir_id, state} =
+      try do
+        dir_id(state)
+      rescue
+        error ->
+          log_dir_id_error(Exception.message(error))
+          {nil, state}
+      catch
+        kind, reason ->
+          log_dir_id_error(inspect({kind, reason}))
+          {nil, state}
+      end
+
     beat(state, dir_id)
+  end
+
+  defp log_dir_id_error(message) do
+    Logger.warning(
+      "Backup heartbeat: the backup-directory id read failed, beating with no id: " <> message
+    )
   end
 
   defp beat(state, dir_id) do
@@ -267,18 +296,18 @@ defmodule KilnCMS.Backups.Heartbeat do
       Map.put(state, :beat_ok?, false)
   end
 
-  # The id to report, and the state with the read's progress. A read still
-  # running from an earlier tick is only checked, never waited on again or
-  # joined by a second one (see "The backup-directory id read").
+  # The id to report, and the state with the read's progress: the answer of
+  # a read that ends during this tick, none while one is held up. A read
+  # still running from an earlier tick is only checked, never waited on
+  # again or joined by a second one (see "The backup-directory id read").
   defp dir_id(state) do
-    state =
+    {id, state} =
       case state.dir_id_task do
         nil -> state |> start_read() |> await_read(dir_id_timeout_ms())
         _running -> await_read(state, 0)
       end
 
-    state = if state.dir_id_task, do: stalled(state), else: state
-    {reported_dir_id(state), state}
+    if state.dir_id_task, do: {nil, stalled(state)}, else: {id, state}
   end
 
   # `Backups.dir/0` and the marker sync's switch are read here, in the
@@ -291,8 +320,25 @@ defmodule KilnCMS.Backups.Heartbeat do
 
     %{
       state
-      | dir_id_task: %{ref: task.ref, pid: task.pid, dir: dir, ensure?: ensure?, since: now_ms()}
+      | dir_id_task: %{ref: task.ref, pid: task.pid, dir: dir, ensure?: ensure?, since: now_ms()},
+        readers_full?: false
     }
+  rescue
+    # `async_nolink/2` raises when the supervisor already runs `max_children`
+    # reads (heartbeats restarted while earlier reads hang): no read this
+    # tick, one warning until a read starts again.
+    error in RuntimeError ->
+      if state.readers_full? do
+        state
+      else
+        Logger.warning(
+          "Backup heartbeat couldn't start the backup-directory id read: " <>
+            Exception.message(error) <>
+            " (earlier reads of #{Backups.dir()} are still hung?). Beating with no id."
+        )
+
+        %{state | readers_full?: true}
+      end
   catch
     # The supervisor isn't running (it is started before the heartbeat, so
     # only while the application stops): the beat goes out with what it has.
@@ -305,7 +351,7 @@ defmodule KilnCMS.Backups.Heartbeat do
       state
   end
 
-  defp await_read(%{dir_id_task: nil} = state, _timeout), do: state
+  defp await_read(%{dir_id_task: nil} = state, _timeout), do: {nil, state}
 
   defp await_read(%{dir_id_task: %{ref: ref}} = state, timeout) do
     receive do
@@ -316,11 +362,12 @@ defmodule KilnCMS.Backups.Heartbeat do
       {:DOWN, ^ref, :process, _pid, _reason} ->
         read_done(state, :none)
     after
-      timeout -> state
+      timeout -> {nil, state}
     end
   end
 
-  # A read that crashed (`:none`) leaves the last id, and its age, as they were.
+  # The id a finished read gives: none for one that crashed (`:none`) or
+  # answered something unexpected. The read is over either way.
   defp read_done(%{dir_id_task: task} = state, outcome) do
     if state.dir_id_stalled? do
       Logger.info(
@@ -332,12 +379,8 @@ defmodule KilnCMS.Backups.Heartbeat do
     state = %{state | dir_id_task: nil, dir_id_stalled?: false}
 
     case outcome do
-      {:result, result} ->
-        {id, state} = dir_id_result(state, task.ensure?, result)
-        %{state | dir_id: id, dir_id_at: now_ms()}
-
-      :none ->
-        state
+      {:result, result} -> dir_id_result(state, task.ensure?, result)
+      :none -> {nil, state}
     end
   end
 
@@ -347,6 +390,11 @@ defmodule KilnCMS.Backups.Heartbeat do
   defp dir_id_result(state, _ensure?, {:error, :enoent}), do: {nil, state}
   defp dir_id_result(state, true, {:error, reason}), do: {nil, warn_dir_id(state, reason)}
   defp dir_id_result(state, false, {:error, _reason}), do: {nil, state}
+
+  defp dir_id_result(state, _ensure?, other) do
+    log_dir_id_error("unexpected answer " <> inspect(other))
+    {nil, state}
+  end
 
   defp stalled(%{dir_id_task: task} = state) do
     waited = now_ms() - task.since
@@ -362,22 +410,14 @@ defmodule KilnCMS.Backups.Heartbeat do
     else
       Logger.warning(
         "Backup heartbeat: reading the id of the backup directory #{task.dir} has taken " <>
-          "more than #{div(waited, 1000)} s (a hung mount?). Beating with the last id read, " <>
-          "for at most #{MarkerSyncWorker.beat_window_s()} s; no other read starts until " <>
-          "this one finishes."
+          "more than #{div(waited, 1000)} s (a hung mount?). Beating with no id, so the " <>
+          "last-good marker sync stops routing here; no other read starts until this one " <>
+          "finishes."
       )
 
       %{state | dir_id_stalled?: true}
     end
   end
-
-  # The last id read, while that read is younger than the marker sync's beat
-  # window; none after.
-  defp reported_dir_id(%{dir_id_at: at} = state) when is_integer(at) do
-    if now_ms() - at < MarkerSyncWorker.beat_window_s() * 1000, do: state.dir_id
-  end
-
-  defp reported_dir_id(_state), do: nil
 
   @doc false
   # What the read task runs (the default `dir_id_reader`).

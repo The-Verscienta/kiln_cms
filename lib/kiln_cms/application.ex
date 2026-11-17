@@ -147,8 +147,11 @@ defmodule KilnCMS.Application do
       {Registry, keys: :duplicate, name: KilnCMS.Backups.StepRegistry},
       # The heartbeat's backup-directory id reads (#2848), each in a task of
       # its own so a hung BACKUP_DIR can't hold up a beat. Single-flight per
-      # heartbeat, so one at a time on a running node. Before the heartbeat.
-      {Task.Supervisor, name: KilnCMS.Backups.DirIdReaders},
+      # heartbeat, so one at a time on a running node; at most four, so
+      # heartbeats restarted on a hung mount can't pile up blocked readers
+      # (each holds a dirty I/O scheduler, of which the VM has ten). Before
+      # the heartbeat.
+      {Task.Supervisor, name: KilnCMS.Backups.DirIdReaders, max_children: 4},
       # The self-fence's watchdog (#2848): kills this node's steps when the
       # heartbeat has not beaten for 90 s, even while a tick is stuck.
       backup_fence(),

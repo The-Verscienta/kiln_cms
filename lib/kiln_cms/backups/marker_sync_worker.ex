@@ -130,14 +130,6 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   end
 
   @doc """
-  Seconds a beat counts as live for routing: a node whose last beat is older
-  gets no routed job. The heartbeat reports a stale directory id no longer
-  than this (#2848).
-  """
-  @spec beat_window_s() :: pos_integer()
-  def beat_window_s, do: @beat_window_s
-
-  @doc """
   Whether the job runs on this deployment: `KILN_BACKUP_MARKER_SYNC_CRON`
   resolves to a cron expression (not `false`, blank or unparseable). The
   heartbeat creates backup-directory ids only while it does.

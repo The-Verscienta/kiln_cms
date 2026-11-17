@@ -432,7 +432,7 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       release(reader, {:error, :enoent})
     end
 
-    test "beats with the last id read while it is young, then with none", %{
+    test "beats with no id while a read is held up, though an id was read before", %{
       dir: dir,
       state: state
     } do
@@ -440,19 +440,20 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       blocking_reader!()
 
       {state, first} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
-      assert beat_of("this@node").dir_id == id
-      assert first =~ "Beating with the last id read"
-
-      # Still hung, the read now older than the marker sync's beat window.
-      window_ms = KilnCMS.Backups.MarkerSyncWorker.beat_window_s() * 1000
-      old = %{state | dir_id_at: System.monotonic_time(:millisecond) - window_ms}
-      {_state, second} = with_log([level: :warning], fn -> Heartbeat.tick(old) end)
       assert beat_of("this@node").dir_id == nil
-      # One warning per stall.
+      assert first =~ "Beating with no id"
+
+      # Still hung: still no id, and one warning per stall.
+      {state, second} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+      assert beat_of("this@node").dir_id == nil
       assert second == ""
 
+      # It answers: the next tick reports the id again.
       assert_received {:reader, reader}
       release(reader, {:ok, id})
+      state = Heartbeat.tick(state)
+      assert beat_of("this@node").dir_id == id
+      assert %{dir_id_task: nil, dir_id_stalled?: false} = state
     end
 
     test "single-flight: ticks while a read hangs start no other read", %{state: state} do
@@ -481,20 +482,83 @@ defmodule KilnCMS.Backups.HeartbeatTest do
 
       state = Heartbeat.tick(state)
       assert beat_of("this@node").dir_id == fresh
-      assert %{dir_id: ^fresh, dir_id_task: nil, dir_id_stalled?: false} = state
+      assert %{dir_id_task: nil, dir_id_stalled?: false} = state
       # The answer came in: no new read was needed for this beat.
       refute_received {:reader, _}
       assert readers() == []
     end
 
-    test "a read that crashes keeps the last id read", %{dir: dir, state: state} do
-      {id, state} = read_once!(dir, state)
+    test "a read that crashes reports no id", %{dir: dir, state: state} do
+      {_id, state} = read_once!(dir, state)
       put_backups_env(dir_id_reader: fn _dir, _ensure? -> raise "boom" end)
 
       state = Heartbeat.tick(state)
 
-      assert %{beat_ok?: true, dir_id_task: nil, dir_id: ^id} = state
-      assert beat_of("this@node").dir_id == id
+      assert %{beat_ok?: true, dir_id_task: nil} = state
+      assert beat_of("this@node").dir_id == nil
+    end
+
+    test "a read that answers something unexpected reports no id and ends the read", %{
+      dir: dir,
+      state: state
+    } do
+      {_id, state} = read_once!(dir, state)
+      put_backups_env(dir_id_reader: fn _dir, _ensure? -> :unexpected end)
+
+      {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+
+      assert %{beat_ok?: true, dir_id_task: nil} = state
+      assert beat_of("this@node").dir_id == nil
+      assert log =~ "unexpected answer :unexpected"
+      assert readers() == []
+    end
+
+    test "an error in the id read is logged and the beat still goes out", %{state: state} do
+      # Waiting on the read raises (an invalid `after` timeout).
+      put_backups_env(dir_id_reader: fn _dir, _ensure? -> {:error, :enoent} end)
+      put_backups_env(dir_id_timeout_ms: :not_a_timeout)
+      on_exit(fn -> Enum.each(readers(), &Process.exit(&1, :kill)) end)
+
+      {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+
+      assert %{beat_ok?: true} = state
+      assert beat_of("this@node").dir_id == nil
+      assert log =~ "the backup-directory id read failed, beating with no id"
+    end
+
+    test "with the readers full, a tick starts none and beats with no id", %{state: state} do
+      blocking_reader!()
+
+      # Four heartbeats (restarted ones, say) each hold a hung read: the
+      # supervisor's limit.
+      [first | others] =
+        for n <- 1..4 do
+          held = Heartbeat.tick(Heartbeat.new_state(node: "held-#{n}@node"))
+          assert_received {:reader, reader}
+          assert held.dir_id_task.pid == reader
+          reader
+        end
+
+      {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+
+      refute_received {:reader, _}
+      assert %{beat_ok?: true, dir_id_task: nil, readers_full?: true} = state
+      assert beat_of("this@node").dir_id == nil
+      assert log =~ "maximum number of tasks"
+      assert length(readers()) == 4
+
+      # One warning while full.
+      {state, again} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+      assert again == ""
+
+      # Room again: the next tick reads.
+      release(first, {:error, :enoent})
+      state = Heartbeat.tick(state)
+      assert_received {:reader, third}
+      assert %{readers_full?: false, dir_id_task: %{pid: ^third}} = state
+
+      Enum.each([third | others], &release(&1, {:error, :enoent}))
+      assert readers() == []
     end
 
     test "the read's late answer reaches the running heartbeat; stray messages are ignored", %{
@@ -511,7 +575,7 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       # (its monitor is flushed).
       assert_received {^ref, {:ok, ^fresh}}
 
-      assert {:noreply, %{dir_id: ^fresh, dir_id_task: nil} = after_reply} =
+      assert {:noreply, %{dir_id_task: nil, dir_id_stalled?: false} = after_reply} =
                Heartbeat.handle_info({ref, {:ok, fresh}}, state)
 
       # A duplicate reply, a stale :DOWN and anything else change nothing.
@@ -530,7 +594,7 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       assert_received {:reader, second}
       %{ref: second_ref} = state.dir_id_task
 
-      assert {:noreply, %{dir_id: ^fresh, dir_id_task: nil}} =
+      assert {:noreply, %{dir_id_task: nil}} =
                Heartbeat.handle_info({:DOWN, second_ref, :process, second, :killed}, state)
 
       release(second, {:error, :enoent})
