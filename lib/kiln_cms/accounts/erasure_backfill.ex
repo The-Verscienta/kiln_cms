@@ -5,7 +5,7 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
   Erasure (`KilnCMS.Accounts.Changes.AnonymizeUser`) gains steps over time,
   and an account erased before a step existed keeps whatever that step would
   have removed. This pass finds those accounts and runs the missing steps on
-  them. Today there are three:
+  them. Today there are four:
 
     * **Site memberships that still grant (#2774).** Erasure left the
       account's memberships as they were, so a tombstone kept its site tier,
@@ -30,6 +30,13 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
       also put the tombstone in the legacy-audiences report
       (`User.:legacy_audience_accounts`, which now leaves erased accounts out
       as well).
+    * **API keys.** Erasure did not always revoke the account's API keys,
+      so an account erased before it did can still hold unrevoked ones.
+      Every unrevoked key of an erased account is revoked with
+      `ApiKey.:revoke`, as erasure does, in one statement across every site
+      (keys are not tenant-scoped). Such a key is refused at sign-in either
+      way (`User.valid_api_keys` leaves erased owners out); revoking it
+      also shows it as revoked to an admin and records it in the audit log.
 
   ## When it runs
 
@@ -45,8 +52,9 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
   Only the orgs where an account still has rows are visited, not every org
   for every account.
 
-  An account whose memberships could not be demoted, or whose rows could not
-  be deleted or audiences cleared, is logged (at warning) and
+  An account whose memberships could not be demoted, whose rows could not
+  be deleted, or whose audiences or API keys could not be cleared or
+  revoked, is logged (at warning) and
   counted under `:failed`, and the pass goes on to the next one. A run with
   any failure ends the job in error, so Oban retries it with backoff, up to
   three attempts; the uniqueness window covers the job's own retries, not
@@ -69,6 +77,7 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.ApiKey
   alias KilnCMS.Accounts.Changes.AnonymizeUser
   alias KilnCMS.Accounts.OrgMembership
   alias KilnCMS.Accounts.PushSubscription
@@ -79,7 +88,7 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
   how many erased accounts had their newsletter rows deleted and how many
   rows that was; how many erased accounts had their audiences cleared; how
   many push subscriptions, private saved views and notifications were
-  deleted; and how many failures there were (an account counts once for
+  deleted; how many API keys were revoked; and how many failures there were (an account counts once for
   each step that failed for it).
   """
   @type result :: %{
@@ -90,6 +99,7 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
           push_subscriptions: non_neg_integer(),
           saved_views: non_neg_integer(),
           notifications: non_neg_integer(),
+          api_keys: non_neg_integer(),
           failed: non_neg_integer()
         }
 
@@ -124,6 +134,7 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
       push_subscriptions: 0,
       saved_views: 0,
       notifications: 0,
+      api_keys: 0,
       failed: 0
     }
 
@@ -142,6 +153,7 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
     |> remove_push_subscriptions(repo)
     |> forget_per_org(erased_with_rows(repo, :saved_views), :saved_views)
     |> forget_per_org(erased_with_rows(repo, :notifications), :notifications)
+    |> revoke_api_keys()
   end
 
   # The memberships of erased accounts that still grant something. Global
@@ -308,6 +320,51 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
       Logger.warning(
         "erasure backfill could not delete the push subscriptions of #{accounts} " <>
           "erased account(s): " <> Exception.message(error)
+      )
+
+      %{acc | failed: acc.failed + accounts}
+  end
+
+  # Every unrevoked API key of an erased account, in one statement: keys are
+  # not tenant-scoped.
+  defp revoke_api_keys(acc) do
+    query =
+      ApiKey
+      |> Ash.Query.filter(is_nil(revoked_at) and not is_nil(user.anonymized_at))
+      |> Ash.Query.select([:id, :user_id])
+
+    # authorize?: false — a sweep over every account's keys, as
+    # `AnonymizeUser.revoke_api_keys/1` revokes them: the owner is erased, so
+    # no actor is admitted to these rows, and the filter pins the read to
+    # unrevoked keys of erased accounts.
+    keys = Accounts.list_all_api_keys!(authorize?: false, query: query)
+    revoke_api_keys(acc, keys, Enum.map(keys, & &1.id))
+  end
+
+  defp revoke_api_keys(acc, [], []), do: acc
+
+  defp revoke_api_keys(acc, keys, ids) do
+    # authorize?: false — as the read above; the filter pins the write to the
+    # keys it found, still unrevoked and still an erased account's.
+    ApiKey
+    |> Ash.Query.filter(id in ^ids and is_nil(revoked_at) and not is_nil(user.anonymized_at))
+    |> Accounts.revoke_api_key!(
+      authorize?: false,
+      bulk_options: [
+        strategy: [:atomic, :atomic_batches, :stream],
+        return_records?: false,
+        return_errors?: true
+      ]
+    )
+
+    %{acc | api_keys: acc.api_keys + length(ids)}
+  rescue
+    error ->
+      accounts = keys |> Enum.uniq_by(& &1.user_id) |> length()
+
+      Logger.warning(
+        "erasure backfill could not revoke the API keys of #{accounts} erased account(s): " <>
+          Exception.message(error)
       )
 
       %{acc | failed: acc.failed + accounts}

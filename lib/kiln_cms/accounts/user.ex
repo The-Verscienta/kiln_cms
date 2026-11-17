@@ -1928,8 +1928,14 @@ defmodule KilnCMS.Accounts.User do
 
     # The `api_key` strategy trusts this relationship to be *valid* keys only, so
     # revoked/expired keys are filtered out here (not at sign-in time).
+    #
+    # An erased account's API key never signs in, revoked or not: an account
+    # erased before erasure revoked keys can still hold live ones
+    # (`ErasureBackfill` revokes them). Filtering here, rather
+    # than on the sign-in read, makes such a key take the same path as a
+    # revoked one, so the refusal cannot be told apart from any other.
     has_many :valid_api_keys, KilnCMS.Accounts.ApiKey do
-      filter expr(is_nil(revoked_at) and expires_at > now())
+      filter expr(is_nil(revoked_at) and expires_at > now() and is_nil(user.anonymized_at))
     end
 
     # Org memberships (epic #336): which organizations this (global) user belongs

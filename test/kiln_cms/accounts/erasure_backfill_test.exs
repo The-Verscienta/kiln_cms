@@ -6,7 +6,8 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
   deleting its linked newsletter subscriptions (#2991), which erasure used to
   leave mailing the real address; and #2514's steps, deleting its push
   subscriptions, private saved views and own notifications and clearing the
-  audiences on its row.
+  audiences on its row; and revoking its API keys, which erasure used to
+  leave live.
   """
   use KilnCMS.DataCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
@@ -29,6 +30,7 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
     push_subscriptions: 0,
     saved_views: 0,
     notifications: 0,
+    api_keys: 0,
     failed: 0
   }
 
@@ -442,6 +444,65 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
 
       assert :ok = perform_job(ErasureBackfill, %{})
       refute push_exists?(rows.push)
+    end
+  end
+
+  describe "API keys" do
+    defp mint(owner) do
+      admin = user(%{role: :admin})
+
+      Accounts.mint_api_key!(owner.id, "reader", DateTime.add(DateTime.utc_now(), 30, :day),
+        actor: admin
+      )
+    end
+
+    # Erased with its keys left unrevoked, as erasure did before it revoked them.
+    defp tombstone_with_keys(n) do
+      owner = user()
+      keys = for _ <- 1..n, do: mint(owner)
+
+      Ash.Seed.update!(owner, %{
+        email: "anonymized-#{owner.id}@deleted.invalid",
+        name: nil,
+        anonymized_at: DateTime.utc_now()
+      })
+
+      keys
+    end
+
+    defp revoked_at(key), do: Accounts.get_api_key!(key.id, authorize?: false).revoked_at
+
+    test "revokes an erased account's live keys and leaves a live account's alone" do
+      keys = tombstone_with_keys(2)
+      live = mint(user())
+
+      assert ErasureBackfill.run() == %{@nothing | api_keys: 2}
+
+      assert Enum.all?(keys, &revoked_at/1)
+      refute revoked_at(live)
+    end
+
+    test "leaves a key erasure already revoked as it was" do
+      [key] = tombstone_with_keys(1)
+      admin = user(%{role: :admin})
+      revoked = Accounts.revoke_api_key!(key, actor: admin)
+
+      assert ErasureBackfill.run() == @nothing
+      assert revoked_at(key) == revoked.revoked_at
+    end
+
+    test "a second run finds nothing to do" do
+      tombstone_with_keys(2)
+
+      assert %{api_keys: 2} = ErasureBackfill.run()
+      assert ErasureBackfill.run() == @nothing
+    end
+
+    test "the job runs the step" do
+      keys = tombstone_with_keys(1)
+
+      assert :ok = perform_job(ErasureBackfill, %{})
+      assert Enum.all?(keys, &revoked_at/1)
     end
   end
 
