@@ -440,6 +440,47 @@ defmodule KilnCMS.Backups.WorkerTest do
                Backups.get_run_by_stamp!("20200101-000000", actor: Backups.system())
     end
 
+    # A backup step's temporary files carry its job and attempt (#2819); they
+    # are grouped with their stamp like any partial, never swept by age alone.
+    @tag :pg_tools
+    test "a tagged .partial is its stamp's: kept until the Importer records it, then reclaimed",
+         %{dir: dir} do
+      stamp = "20200101-000000"
+      dump = Path.join([dir, "db", "kiln-db-#{stamp}.dump.48211-2.partial"])
+      sidecar = Path.join([dir, "db", "kiln-db-#{stamp}.sha256.48211-2.partial"])
+      File.mkdir_p!(Path.dirname(dump))
+
+      for f <- [dump, sidecar] do
+        File.write!(f, "abandoned")
+        File.touch!(f, System.os_time(:second) - 2 * 3600)
+      end
+
+      assert :ok = BackupChain.run()
+      assert File.exists?(dump)
+      assert File.exists?(sidecar)
+
+      for f <- [dump, sidecar], do: File.touch!(f, System.os_time(:second) - 4 * 3600)
+      assert :ok = BackupChain.run()
+
+      refute File.exists?(dump)
+      refute File.exists?(sidecar)
+
+      assert %{origin: :imported, status: :failed, error: "Interrupted: " <> _} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+    end
+
+    # What a node that stopped between moving something aside and deleting it
+    # leaves behind (#2818).
+    @tag :pg_tools
+    test "the start step clears .work/.trash", %{dir: dir} do
+      left = Path.join([dir, ".work", ".trash", "20200101-000000.7-1.work", "20200101-000000"])
+      File.mkdir_p!(left)
+      File.write!(Path.join(left, "state.json"), "{}")
+
+      assert :ok = BackupChain.run()
+      assert File.ls!(Path.join([dir, ".work", ".trash"])) == []
+    end
+
     @tag :pg_tools
     test "the partials of a stamp with a run go once every file of it is past the grace",
          %{dir: dir} do

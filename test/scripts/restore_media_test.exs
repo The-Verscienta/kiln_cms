@@ -288,6 +288,16 @@ defmodule KilnCMS.Scripts.RestoreMediaTest do
       assert nothing_extracted?(ctx)
     end
 
+    test "a part the app is still writing beside the set (#2819) is refused", ctx do
+      parts = build_set!(ctx, @stamp, 700)
+      File.write!(List.last(parts) <> ".48211-2.partial", "in flight")
+
+      assert {out, status} = restore(ctx, [hd(parts)])
+      assert status != 0
+      assert out =~ ".tar.gz.48211-2.partial is beside the set"
+      assert nothing_extracted?(ctx)
+    end
+
     test "no sidecar with RESTORE_REQUIRE_CHECKSUM=1 aborts", ctx do
       [p1 | _] = build_set!(ctx, @stamp, 700)
       File.rm!(Path.join(ctx.backups, "kiln-media-#{@stamp}.sha256"))

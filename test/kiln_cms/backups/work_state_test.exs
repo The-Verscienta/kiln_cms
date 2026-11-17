@@ -72,4 +72,67 @@ defmodule KilnCMS.Backups.WorkStateTest do
       assert {:error, :no_state} = WorkState.read(work)
     end
   end
+
+  describe "tagged writes (#2818)" do
+    setup %{tmp_dir: dir} do
+      work = WorkState.path(dir, @stamp)
+      File.mkdir_p!(work)
+      :ok = WorkState.write(work, WorkState.new(@stamp, %{"chain" => "theirs"}))
+      %{work: work}
+    end
+
+    test "a tag writes its own temporary file, and the rename function puts it in place",
+         %{work: work} do
+      parent = self()
+
+      rename = fn from, to ->
+        send(parent, {:rename, from, to, File.read!(from)})
+        File.rename(from, to)
+      end
+
+      staged = fn tmp ->
+        send(parent, {:staged, tmp, File.stat!(tmp).mode})
+        :ok
+      end
+
+      state = WorkState.new(@stamp, %{"chain" => "ours"})
+      assert :ok = WorkState.write(work, state, tag: "48211-2", rename: rename, staged: staged)
+
+      tmp = WorkState.file(work) <> ".48211-2.partial"
+      assert_received {:staged, ^tmp, mode}
+      assert Bitwise.band(mode, 0o777) == 0o600
+      assert_received {:rename, ^tmp, to, json}
+      assert to == WorkState.file(work)
+      assert Jason.decode!(json)["chain"] == "ours"
+
+      assert {:ok, %{"chain" => "ours"}} = WorkState.read(work)
+      assert File.ls!(work) == ["state.json"]
+    end
+
+    test "a refused rename leaves the state as it was and no temporary file", %{work: work} do
+      refuse = fn _from, _to -> {:error, :superseded} end
+      state = WorkState.new(@stamp, %{"chain" => "ours"})
+
+      assert {:error, :superseded} = WorkState.write(work, state, tag: "7-1", rename: refuse)
+      assert {:ok, %{"chain" => "theirs"}} = WorkState.read(work)
+      assert File.ls!(work) == ["state.json"]
+
+      assert {:error, :superseded} =
+               WorkState.update(work, @stamp, &Map.put(&1, "x", 1), tag: "7-1", rename: refuse)
+
+      assert File.ls!(work) == ["state.json"]
+    end
+
+    test "without options it writes state.json.partial and renames it, as before",
+         %{work: work} do
+      # The untagged temporary name is taken: the write fails, nothing lands.
+      File.mkdir!(WorkState.file(work) <> ".partial")
+      assert {:error, _} = WorkState.write(work, WorkState.new(@stamp, %{"chain" => "ours"}))
+      assert {:ok, %{"chain" => "theirs"}} = WorkState.read(work)
+
+      # A tagged write doesn't touch that name.
+      assert :ok = WorkState.write(work, WorkState.new(@stamp, %{"chain" => "ours"}), tag: 9)
+      assert {:ok, %{"chain" => "ours"}} = WorkState.read(work)
+    end
+  end
 end

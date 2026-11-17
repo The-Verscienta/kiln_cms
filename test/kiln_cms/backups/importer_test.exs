@@ -797,6 +797,18 @@ defmodule KilnCMS.Backups.ImporterTest do
       assert Importer.interrupted_after_s() == 3 * 3600
     end
 
+    test "a backup step's tagged partials (#2819) hold the stamp like any partial", %{dir: dir} do
+      put_named(dir, "media", Artifact.part_name(@stamp, 1), 200)
+      put_named(dir, "media", "kiln-media-#{@stamp}.sha256.48211-2.partial", 200)
+      put_named(dir, "media", "kiln-media-#{@stamp}.part02.tar.gz.48211-2.partial", 200)
+
+      assert {:ok, %{imported: 1, pending: 0}} = Importer.run()
+      run = run!(@stamp)
+      assert run.error == @interrupted
+      assert [%{parts: [%{"name" => "kiln-media-#{@stamp}.part01.tar.gz"}]}] = run.artifacts
+      assert Enum.any?(run.log, &(&1.message =~ "kiln-media-#{@stamp}.sha256.48211-2.partial"))
+    end
+
     test "judged on the newest of all its files: a part finished 10 minutes ago keeps it " <>
            "pending however old the marker",
          %{dir: dir} do

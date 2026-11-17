@@ -210,6 +210,18 @@ defmodule KilnCMS.Backups.RetentionRunTest do
       assert {:ok, %{deleted: []}} = Retention.run(dir)
     end
 
+    test "a fresh tagged .partial, a backup step's (#2819), keeps its unit in flight too",
+         %{dir: dir} do
+      newest(dir)
+      media_set(dir, @old, [365, 365])
+      put(dir, "media", Artifact.partial_name(Artifact.part_name(@old, 3), "48211-2"), 0)
+      dump(dir, @older, 365)
+      put(dir, "db", Artifact.partial_name("kiln-db-#{@older}.sha256", 7), 0)
+
+      assert {:ok, %{deleted: [], plan: plan}} = Retention.run(dir)
+      assert Enum.find(plan.keep, &(&1.stamp == @older)).reason == :in_flight
+    end
+
     test "a recovery point in either directory pins both components", %{dir: dir} do
       newest(dir)
       dump(dir, @old, 400)

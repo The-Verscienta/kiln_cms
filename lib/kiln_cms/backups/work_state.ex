@@ -7,7 +7,10 @@ defmodule KilnCMS.Backups.WorkState do
   lists (`MediaArchive`; `plan.json` is the plan's commit marker). The directory
   is 0700 and `state.json` is 0600, written atomically (`.partial`, then
   rename), so a crash leaves either the previous state or the next, never half
-  of one.
+  of one. A backup step writes it under a temporary name of its own
+  (`state.json.<job>-<attempt>.partial`) and renames it into place only while
+  it holds its lease (`write/3`'s `:tag` and `:rename`, #2818), so the writing
+  never holds the backup lock and a superseded step's state never lands.
 
   The file records which steps have completed and, for the database dump and for
   each finished media part, its `{name, bytes, sha256}`. **A recorded hash is the
@@ -122,17 +125,35 @@ defmodule KilnCMS.Backups.WorkState do
     end
   end
 
-  @doc "Write `state` atomically (`.partial` then rename), mode 0600."
+  @doc """
+  Write `state` atomically (a temporary file, then rename), mode 0600.
+
+  Options:
+
+    * `:tag` — the temporary file's tag (`Artifact.partial_name/2`): nil
+      writes `state.json.partial`, a tag writes `state.json.<tag>.partial`, a
+      name no other writer uses.
+    * `:rename` — `(from, to -> :ok | {:error, term})`, how the temporary file
+      is put into place; `&File.rename/2` by default. A backup step passes
+      `Chain.fenced_rename/3`, so a superseded step's state never lands.
+    * `:staged` — `(tmp -> :ok)`, called once the temporary file is written
+      and before the rename. A test seam; nil by default.
+
+  On any error the temporary file is removed (it is this writer's alone) and
+  the error, `{:error, :superseded}` included, is returned unchanged.
+  """
   # sobelow_skip ["Traversal.FileModule"]
-  @spec write(Path.t(), t()) :: :ok | {:error, term()}
-  def write(work_dir, state) do
+  @spec write(Path.t(), t(), keyword()) :: :ok | {:error, term()}
+  def write(work_dir, state, opts \\ []) do
     path = file(work_dir)
-    tmp = path <> ".partial"
+    tmp = Artifact.partial_name(path, opts[:tag])
+    rename = opts[:rename] || (&File.rename/2)
 
     with {:ok, json} <- Jason.encode(state),
          :ok <- File.write(tmp, json),
          :ok <- File.chmod(tmp, 0o600),
-         :ok <- File.rename(tmp, path) do
+         :ok <- staged(opts[:staged], tmp),
+         :ok <- rename.(tmp, path) do
       :ok
     else
       {:error, _} = error ->
@@ -141,19 +162,22 @@ defmodule KilnCMS.Backups.WorkState do
     end
   end
 
+  defp staged(nil, _tmp), do: :ok
+  defp staged(fun, tmp) when is_function(fun, 1), do: fun.(tmp)
+
   @doc """
   Read-modify-write: apply `fun` to the current state (a fresh one when the file
-  is missing) and write the result.
+  is missing) and write the result. `opts` are `write/3`'s.
   """
-  @spec update(Path.t(), String.t(), (t() -> t())) :: :ok | {:error, term()}
-  def update(work_dir, stamp, fun) do
+  @spec update(Path.t(), String.t(), (t() -> t()), keyword()) :: :ok | {:error, term()}
+  def update(work_dir, stamp, fun, opts \\ []) do
     state =
       case read(work_dir) do
         {:ok, state} -> state
         {:error, :no_state} -> new(stamp)
       end
 
-    write(work_dir, fun.(state))
+    write(work_dir, fun.(state), opts)
   end
 
   @doc "Mark `step` complete."

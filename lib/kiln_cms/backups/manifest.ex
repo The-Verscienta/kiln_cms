@@ -167,17 +167,23 @@ defmodule KilnCMS.Backups.Manifest do
   Best-effort — a failed manifest write must never fail the backup it
   describes. Losing the record of a good backup is bad; deleting a good backup
   because its record couldn't be written is worse.
+
+  `opts` are `KilnCMS.Backups.WorkState.write/3`'s `:tag` and `:rename`: a
+  backup step writes `manifest.json.<tag>.partial` and renames it under its
+  lease (#2818), so a superseded step's manifest is refused with
+  `{:error, :superseded}` and its temporary file removed.
   """
   # sobelow_skip ["Traversal.FileModule"]
-  @spec write(Path.t(), t()) :: :ok | {:error, term()}
-  def write(dir, %__MODULE__{} = manifest) when is_binary(dir) do
+  @spec write(Path.t(), t(), keyword()) :: :ok | {:error, term()}
+  def write(dir, %__MODULE__{} = manifest, opts \\ []) when is_binary(dir) do
     target = path(dir)
-    tmp = target <> ".partial"
+    tmp = KilnCMS.Backups.Artifact.partial_name(target, opts[:tag])
+    rename = opts[:rename] || (&File.rename/2)
 
     with :ok <- File.mkdir_p(dir),
          {:ok, json} <- Jason.encode(to_map(manifest), pretty: true),
          :ok <- File.write(tmp, json <> "\n"),
-         :ok <- File.rename(tmp, target) do
+         :ok <- rename.(tmp, target) do
       :ok
     else
       # Every step above returns `:ok` or `{:error, _}`, so there is no third

@@ -82,7 +82,7 @@ defmodule KilnCMS.Backups.ResumeTest do
     write_exe(bin, "tar", """
     for a in "$@"; do
       case "$a" in
-        *part03.tar.gz.partial*)
+        *part03.tar.gz.*partial*)
           if [ -f "#{gate}" ]; then echo "tar: stubbed failure" >&2; exit 2; fi ;;
       esac
     done
@@ -121,6 +121,13 @@ defmodule KilnCMS.Backups.ResumeTest do
   end
 
   defp mtime(path), do: File.stat!(path, time: :posix).mtime
+
+  # The temporary name the lock's current step writes `state.json` under on
+  # its `attempt`-th attempt (#2818).
+  defp state_temp(work, attempt) do
+    job_id = Backups.backup_lock!(actor: Backups.system()).step_job_id
+    Artifact.partial_name(WorkState.file(work), Artifact.tag(job_id, attempt))
+  end
 
   # Runs a backup that fails at part 3; returns what a resume builds on.
   defp fail_at_part_3(dir, tools) do
@@ -308,13 +315,14 @@ defmodule KilnCMS.Backups.ResumeTest do
       tools = stub_tools(base)
       %{stamp: stamp, work: work} = fail_at_part_3(dir, tools)
 
-      # The start step's state write fails once, after `Recorder.reopen/2`.
-      blocker = WorkState.file(work) <> ".partial"
-      File.mkdir!(blocker)
-
       BackupChain.listen(fn ->
         {:ok, %{status: :started, chain: chain}} =
           Backups.request([resume: stamp], Backups.system())
+
+        # The start step's state write fails once, after `Recorder.reopen/2`:
+        # its first attempt's temporary name is taken (#2818).
+        blocker = state_temp(work, 1)
+        File.mkdir!(blocker)
 
         assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
         assert [%{status: :running, chain_id: ^chain}] = runs()
@@ -1070,13 +1078,12 @@ defmodule KilnCMS.Backups.ResumeTest do
       tools = stub_tools(base)
       %{stamp: stamp, work: work} = fail_at_part_3(dir, tools)
 
-      # The first attempt re-opens the run, then can't write its state.
-      blocker = WorkState.file(work) <> ".partial"
-      File.mkdir!(blocker)
-
       BackupChain.listen(fn ->
         {:ok, %{status: :started, chain: chain}} =
           Backups.request([resume: stamp], Backups.system())
+
+        # The first attempt re-opens the run, then can't write its state.
+        File.mkdir!(state_temp(work, 1))
 
         assert %{failure: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
         assert [%{status: :running, chain_id: ^chain}] = runs()

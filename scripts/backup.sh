@@ -1602,14 +1602,16 @@ is_held() {
 }
 
 # Whether unit ($2 = kind, $3 = stamp) in $1 has a `.partial` younger than the
-# 60-minute grace. Fails closed: if `find` itself fails, the unit counts as in
-# flight.
+# 60-minute grace. A partial is `<name>.partial` (this script's) or
+# `<name>.<tag>.partial`, a temporary file the app's backup step tags with its
+# job and attempt (`48211-2`, #2819); both count. Fails closed: if `find`
+# itself fails, the unit counts as in flight.
 has_fresh_partial() {
   local ere found
   if [ "$2" = db ]; then
-    ere="^kiln-db-${3}\\.(dump|sha256)\\.partial\$"
+    ere="^kiln-db-${3}\\.(dump|sha256)(\\.[0-9]+(-[0-9]+)?)?\\.partial\$"
   else
-    ere="^kiln-media-${3}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)\\.partial\$"
+    ere="^kiln-media-${3}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)(\\.[0-9]+(-[0-9]+)?)?\\.partial\$"
   fi
   if ! found="$(find "$1" -maxdepth 1 -name "kiln-${2}-${3}.*.partial" -mmin -60 -print)"; then
     warn "could not look for partials of ${2} ${3} in $1; keeping it"
@@ -1636,7 +1638,8 @@ remove_unit() {
 }
 
 # The `.partial` files of abandoned runs ($1 = db names, $2 = media names; see
-# above). A stamp is judged by `find -mmin` over both directories; if that
+# above), untagged or tagged by the app (`<name>.<job>-<attempt>.partial`,
+# see has_fresh_partial). A stamp is judged by `find -mmin` over both directories; if that
 # fails, its partials are kept. Each removal is echoed; one that fails is
 # warned about and the rest go on.
 prune_abandoned_partials() {
@@ -1651,10 +1654,10 @@ prune_abandoned_partials() {
     dir="$BACKUP_DIR/$kind"
     if [ "$kind" = db ]; then
       names="$1"
-      ere="^kiln-db-[0-9]{8}-[0-9]{6}\\.(dump|sha256)\\.partial\$"
+      ere="^kiln-db-[0-9]{8}-[0-9]{6}\\.(dump|sha256)(\\.[0-9]+(-[0-9]+)?)?\\.partial\$"
     else
       names="$2"
-      ere="^kiln-media-[0-9]{8}-[0-9]{6}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)\\.partial\$"
+      ere="^kiln-media-[0-9]{8}-[0-9]{6}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)(\\.[0-9]+(-[0-9]+)?)?\\.partial\$"
     fi
     [ -n "$names" ] || continue
     for name in $(printf '%s\n' "$names" | grep -E "$ere" || true); do
