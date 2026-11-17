@@ -220,22 +220,56 @@ defmodule KilnCMS.Analytics do
   **When the split is still unique, the whole breakdown goes.** Some
   breakdowns have nowhere to hide — `direct: 3` with four genuine zeros is
   three views total, and no choice of partner makes three ambiguous. Those are
-  published as five `"hidden"` values, and they are exactly the breakdowns with
-  nothing worth reading in them anyway.
+  published as five `"hidden"` values, and so are the breakdowns of a handful
+  of views spread one or two to a category (below), whose partial form would
+  have been ambiguous: an all-hidden form needs company too.
 
-  `ambiguous?/3` decides which case this is by counting the assignments a
-  reader who knows this algorithm could construct. Knowing the rule gains them
-  nothing about a *partial* publication: one is only emitted when that count is
-  at least two (#2752 found a gap in that count, closed below).
+  `ambiguous?/3` decides between partial and whole by counting the assignments
+  a reader who knows this algorithm could construct. Knowing the rule gains
+  them nothing about a *partial* publication: one is only emitted when that
+  count is at least two (#2752 found a gap in that count, closed below).
 
-  > #### An all-hidden breakdown is not yet covered {: .warning}
+  ## An all-hidden breakdown (#2981)
+
+  Five `"hidden"` values are a publication too. The reader who knows this
+  algorithm holds the view total and the five labels, and their candidates are
+  every breakdown with that total the algorithm would also have hidden whole;
+  a category is recovered when it takes one value across all of them. Before
+  #2981, at a threshold of 5 a total of 5 was hidden whole only as five 1s —
+  one candidate, every category pinned.
+
+  So a breakdown is also hidden whole when every category but at most one is
+  naturally low **and** the view total is no more than the number of
+  categories. At a threshold of 5 and a total of 5 that adds the twenty
+  arrangements of `2, 1, 1, 1, 0`, and each category then takes 0, 1 or 2
+  across the 21 candidates.
+
+  This rule was **found by enumeration, not derived**. Searches run outside
+  the test suite while it was written (thresholds 2–20, view totals up to 50,
+  with five categories, and with four or six) found no all-hidden publication
+  that leaves any category a single value, and no partial publication that
+  leaves a suppressed category a single *nonzero* value. With three categories
+  it would not hold (`2, 2, 2` at a threshold of 3 is pinned), so a change to
+  `referrer_sources/0` means re-running a search that wide.
+  `test/kiln_cms/analytics/referrer_suppression_test.exs` checks the same
+  property over `referrer_sources/0` for thresholds 2, 3, 5 and 10 and totals
+  up to the threshold plus four. That bound caps the test's cost; it is not
+  where the tightest classes sit (at a threshold of 10 they sit below it), and
+  totals above it rest on the wider search, not on the test.
+
+  The cost falls on tiny days: simulating item-days that average one to ten
+  views over a typical mix of sources, 0.1–4.1% of them move from a partial
+  publication to hidden whole; at thirty views a day, none do.
+
+  > #### Two publications together are not covered {: .warning}
   >
-  > Five `"hidden"` values do not, on their own, leave the view total
-  > splittable every way it could be. A reader who knows this algorithm can
-  > discard every split it would have published partially, and for some small
-  > totals only one split is left — at a threshold of 5, a total of 5 is
-  > all-hidden only as five 1s. That is tracked separately (#2981); nothing
-  > here claims otherwise.
+  > Everything above protects a breakdown **on its own**. Kiln publishes
+  > several breakdowns of overlapping traffic — a span on the dashboard and one
+  > per day in the export, the site chart beside an item's bars, seven days
+  > beside thirty, today read twice as it fills — and a reader holding two of
+  > them can difference one against the other to recover a count both
+  > suppressed. That is tracked in #2989; short of turning referrer
+  > attribution off, nothing here prevents it.
 
   > #### What this still does not do {: .neutral}
   >
@@ -243,7 +277,9 @@ defmodule KilnCMS.Analytics do
   > determined*. A `"< n"` category still announces its own range, and where
   > the residual admits only the four values that range already published, the
   > breakdown is published as-is: nothing was learned that the label did not
-  > already say.
+  > already say. Likewise a `"hidden"` partner can be provably `0` when the
+  > lows already account for the residual, which tells the reader no more than
+  > a published `0` would: nobody arrived that way.
 
   ## The three display values
 
@@ -266,6 +302,12 @@ defmodule KilnCMS.Analytics do
       natural == [] ->
         Enum.map(raw, fn {source, hits} -> {source, hits, hits} end)
 
+      # A handful of views spread one or two apiece: hidden whole even when a
+      # partial form would be ambiguous, so the all-hidden form has company
+      # (#2981 — see "An all-hidden breakdown" above).
+      spread_thin?(raw, natural) ->
+        Enum.map(raw, fn {source, hits} -> {source, hits, "hidden"} end)
+
       ambiguous?(raw, natural ++ List.wrap(partner(raw, natural)), threshold) ->
         partial(raw, partner(raw, natural))
 
@@ -275,6 +317,15 @@ defmodule KilnCMS.Analytics do
       true ->
         Enum.map(raw, fn {source, hits} -> {source, hits, "hidden"} end)
     end
+  end
+
+  # Every category but at most one is naturally low, and the view total is no
+  # more than the number of categories. Found by enumeration, not derived — read
+  # "An all-hidden breakdown" in `suppress_referrer_group/1`'s doc before
+  # changing it.
+  defp spread_thin?(raw, natural) do
+    total = raw |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+    length(natural) >= length(raw) - 1 and total <= length(raw)
   end
 
   # The naturally-low ones by their own range, the partner as `"hidden"`,

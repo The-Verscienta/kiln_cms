@@ -153,18 +153,23 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
   #     earlier version let the partner be `0` or anything from the threshold
   #     up, a weaker reader than a real one, and it passed a file whose
   #     suppressed counts were pinned (#2752).
-  #   * **Whole breakdown** — every category `"hidden"`, the #1073 fallback.
-  #     Searched here only as a reader who does *not* know the algorithm, each
-  #     cell over the whole residual. A reader who does can discard every
-  #     breakdown the algorithm would have published partially, and for some
-  #     small totals that leaves one; that is tracked separately (#2981), and
-  #     these cases do not claim to cover it.
+  #   * **Whole breakdown** — every category `"hidden"`. The reader tries
+  #     every split of the view total over every category and keeps the ones
+  #     the algorithm would also have hidden whole — which discards every
+  #     split it would have published partially (#2981).
   #
-  # Lazy and truncated at two, because "more than one" is the entire question.
+  # The whole class, not the first two: the verdict is per category, and two
+  # candidates can still agree on one of them. Every case below has a small
+  # total or a single partner, so the class stays small.
   defp consistent({views, published}) do
     if Enum.all?(published, fn {_source, cell} -> cell == "hidden" end) do
       ranges = for {source, _cell} <- published, do: {source, 0..views//1}
-      views |> assignments(ranges) |> Enum.take(2)
+      file = Map.new(published)
+
+      views
+      |> assignments(ranges)
+      |> Stream.map(&Map.new/1)
+      |> Enum.filter(&(as_written(&1) == file))
     else
       readings(views, published)
     end
@@ -182,8 +187,7 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
     residual
     |> assignments(partner ++ lows)
     |> Stream.map(&Map.new(exact ++ &1))
-    |> Stream.filter(&(as_written(&1) == file))
-    |> Enum.take(2)
+    |> Enum.filter(&(as_written(&1) == file))
   end
 
   # The cells `suppress_referrer_group/1` would have written for a candidate.
@@ -224,7 +228,13 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
     {"two low counts with zeros ahead of the partner", %{search: 1, social: 5, other: 1}},
     # Every category naturally low: published partially with no `"hidden"`
     # partner at all, so the reader has only the lows to split the residual.
-    {"every category naturally low", %{direct: 1, internal: 1, search: 1, social: 1, other: 2}}
+    {"every category naturally low", %{direct: 1, internal: 1, search: 1, social: 1, other: 2}},
+    # #2981: hidden whole, and at a threshold of 5 once the only breakdown of
+    # five views hidden whole — every category read off the total.
+    {"five views, one per category", %{direct: 1, internal: 1, search: 1, social: 1, other: 1}},
+    # Hidden whole by the #2981 rule though its partial form was ambiguous, so
+    # five 1s have company.
+    {"five views spread over four categories", %{direct: 2, internal: 1, search: 1, social: 1}}
   ]
 
   for {name, breakdown} <- @cases do
@@ -246,13 +256,33 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
       assert Enum.any?(published, fn {_source, cell} -> Integer.parse(cell) == :error end),
              "nothing was suppressed, so this case tests nothing: #{inspect(published)}"
 
-      assert length(consistent(file)) >= 2,
+      candidates = consistent(file)
+
+      assert length(candidates) >= 2,
              """
              the export pins a suppressed referrer count exactly.
              breakdown: #{inspect(@breakdown)}
              views: #{views}
              published: #{inspect(published)}
              """
+
+      # Per category, across the whole class. Hidden whole, every category
+      # must stay open. Published partially, a `"hidden"` partner may be
+      # pinned to 0 — that says what a published 0 would — but nothing may be
+      # pinned to a count.
+      all_hidden? = Enum.all?(published, fn {_source, cell} -> cell == "hidden" end)
+
+      for {source, cell} <- published, Integer.parse(cell) == :error do
+        seen = candidates |> Enum.map(&Map.fetch!(&1, source)) |> Enum.uniq() |> Enum.sort()
+
+        if all_hidden? do
+          assert length(seen) >= 2,
+                 "#{source} is pinned to #{inspect(seen)}: #{inspect(published)}"
+        else
+          refute match?([n] when n > 0, seen),
+                 "#{source} is pinned to #{inspect(seen)}: #{inspect(published)}"
+        end
+      end
     end
   end
 end

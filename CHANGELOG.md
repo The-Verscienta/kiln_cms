@@ -88,8 +88,8 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Known issues
 
-- **An all-hidden referrer breakdown can still be recovered at a small view total (five 1s at the default threshold).**
-  ([#2981](https://github.com/The-Verscienta/kiln_cms/issues/2981) · [long form](docs/changelog/unreleased.md#all-hidden-referrer-breakdown-recoverable))
+- **Two referrer breakdowns of overlapping traffic (dashboard span vs. the export's days, site chart vs. item bars, 7 vs. 30 days, today read twice) can be differenced to recover a suppressed count. No workaround short of turning off `KILN_ANALYTICS_REFERRERS`.**
+  ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989) · [long form](docs/changelog/unreleased.md#referrer-breakdowns-differenced))
 
 ### Added
 
@@ -156,6 +156,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A referrer breakdown with `"< n"` and one `"hidden"` category no longer lets a reader who knows the rule recover the suppressed counts; such breakdowns now show every category hidden.**
   ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752) · [long form](docs/changelog/unreleased.md#referrer-suppression-partner-bounds))
+
+- **A referrer breakdown of 5 views or fewer over 4 sources or more, each below the threshold, now shows every category hidden, so an all-hidden breakdown on its own no longer gives its counts away.**
+  ([long form](docs/changelog/unreleased.md#referrer-breakdown-all-hidden))
 
 - **A backup schedule change made while a marker sync is running now reaches the `.hold` markers right after that sync, not at the next 15-minute slot.**
   ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932) · [long form](docs/changelog/unreleased.md#backup-hold-sync-after-change))
