@@ -941,7 +941,9 @@ as before.
 
 The in-app backup (`KilnCMS.Backups.Steps`) runs the same `pg_dump --format=custom --no-owner
 --no-privileges`, writes to the same `db/kiln-db-<stamp>.dump` under the same
-`$BACKUP_DIR`, uses the same `.partial`-then-rename discipline, and verifies with
+`$BACKUP_DIR`, uses the same `.partial`-then-rename discipline (the app's
+temporary names also carry its step's job and attempt,
+[below](#temporary-files-and-the-trash-directories)), and verifies with
 the same `pg_restore --list` / `tar -tzf`. `backup.sh verify` and `restore.sh`
 work on an app-made backup, and this page reports on a cron-made one, because
 the formats are the same family, not two.
@@ -985,6 +987,79 @@ That constraint is why the app shells out to `pg_dump` and `tar` rather than
 implementing them in Elixir: a hand-rolled export would be a second format
 with a second restore procedure, and the restore path is where a backup system
 earns its keep.
+
+### Temporary files and the trash directories
+
+Every file a backup writes goes to a temporary name first and is renamed into
+place once it is complete, so nothing half-written ever carries a real
+backup's name. The two writers name their temporary files differently:
+
+- **`backup.sh`** writes `<name>.partial`, as it always has:
+  `db/kiln-db-20261117-031700.dump.partial`.
+- **An in-app backup step** writes `<name>.<job>-<attempt>.partial`, where
+  `<job>` is the step's Oban job id and `<attempt>` its attempt (#2819):
+  `db/kiln-db-20261117-031700.dump.48211-2.partial`,
+  `media/kiln-media-20261117-031700.part02.tar.gz.48211-2.partial`,
+  `media/kiln-media-20261117-031700.sha256.48211-2.partial`. The same tag is on
+  the files in `.work/<stamp>/` (`state.json.48211-2.partial`,
+  `plan.json.48211-2.partial`, the media file lists `part01.48211-2.list` and
+  `part01.48211-2.run.list`) and on `manifest.json.48211-2.partial` at the top
+  of `BACKUP_DIR`.
+
+A step writes, checks (`pg_restore --list`, `tar -tzf`) and hashes its file
+under that name, outside the backup lock. Only the rename into place runs
+under the lock, and only while the step still holds the backup
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)). So
+two steps of the same backup, a resume and a step that outlived its Cancel,
+never write the same file, and the one that lost the lock can't rename its
+file over the resume's. Why is in
+[ADR 0067](decisions/0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md).
+
+Every reader takes both shapes as the same thing, a file still being written:
+retention's "in flight" rule, the importer, History, the start step's sweep,
+`backup.sh prune` and `verify`, and `restore.sh`. A media part or dump that
+fails on every attempt leaves a file already under its final name (from an
+earlier attempt) as it was, which can leave it without a matching sidecar.
+Nothing trusts such a file: a resume reuses a file only when its hash matches
+the one recorded in `state.json`, and retention deletes the incomplete unit
+once it ages out.
+
+**Deleting goes through a trash directory.** When a step has to delete
+something of the backup's (a leftover `.work/<stamp>/` at a fresh start, an
+earlier plan's media files under the same stamp, the work directory at the
+end, a dump whose sidecar couldn't be written), it moves it aside into a trash
+directory with one rename under the lock, and deletes it after the lock is
+released. The trash is on the same file system as what it holds, because a
+rename can't cross one:
+
+| Moved from | Into |
+|---|---|
+| `.work/<stamp>/` | `.work/.trash/<stamp>.<job>-<attempt>.work/` |
+| a file in `db/` | `db/.kiln-trash/<stamp>.<job>-<attempt>.db/` |
+| a file in `media/` | `media/.kiln-trash/<stamp>.<job>-<attempt>.media/` |
+
+These directories are normally empty. An entry stays only when a node stopped
+between moving something aside and deleting it, and the start of the next
+in-app backup removes it, whatever its age. The `.kiln-trash` directories
+themselves stay once created. Retention, the importer, History, `backup.sh`
+and `restore.sh` never look inside them. If a rename fails because the file
+is on another file system after all (a single file bind-mounted on its own),
+the step deletes that file in place, under the lock.
+
+**During a rolling upgrade**, update `scripts/backup.sh` on the host in the
+same rollout. A node still on an older release, or an older `backup.sh`, does
+not recognize a tagged name:
+
+- its retention and importer don't count it as in flight, and its start-step
+  sweep removes it as an unrecognized `.partial` once it is an hour old. The
+  backup it belongs to is still protected by its `.work/<stamp>/` directory;
+- an older `backup.sh prune` neither counts nor removes it;
+- History on an older node can show a media set as complete while one of its
+  parts is being rebuilt under a tagged name (display only);
+- an older node that plans the media removes the tagged file lists of an
+  earlier plan, which nothing needs once its own `plan.json` replaces them;
+- after a rollback, an older node reads a `plan.json` that names tagged lists,
+  and uses them as it would any list.
 
 ### Which database URL the backup tools accept (#2719)
 
@@ -1286,8 +1361,9 @@ What can go wrong:
 
 **Resume waits about two and a half minutes after a Cancel (#2538).** A node
 that lost the database misses the Cancel, and stops its step only once its
-heartbeat has failed for 90 seconds. A resume that started sooner could write
-the same files as that step. So for 150 seconds after the Cancel (counted from
+heartbeat has failed for 90 seconds. A resume that started sooner could run
+beside that step: its file writes are fenced, but an off-site copy or a prune
+is not ([below](#what-a-step-that-outlives-its-cancel-can-write)). So for 150 seconds after the Cancel (counted from
 the time the row was canceled), **Resume** on that row is refused with "That
 backup was canceled moments ago. Resume it again in N seconds: a step on a
 server that lost contact with the database may still be stopping." The button
@@ -1304,9 +1380,11 @@ to wait about two and a half minutes.
 
 The window is typically enough, not a guarantee. A heartbeat that hangs on a
 half-open database connection waits out the database timeouts first, and so
-stops its step later. The backup's `state.json` and its History row are
-protected from such a step either way; only its temporary `.partial` files
-depend on the window ([below](#what-a-step-that-outlives-its-cancel-can-write)).
+stops its step later. The backup's files and its History row are protected
+from such a step either way: it writes only under temporary names of its own,
+and its renames into place are refused (#2819). What still depends on the
+window is its off-site copy and its prune
+([below](#what-a-step-that-outlives-its-cancel-can-write)).
 
 ### Cancel a resume that is waiting to start
 
@@ -1490,7 +1568,8 @@ files back, wait for the give-up, or
 backups run.
 
 **The lock is a Postgres advisory lock.** Every decision about the chain
-(a request, a hand-over, a take-back, a Cancel, a `state.json` write) runs in
+(a request, a hand-over, a take-back, a Cancel, a step's rename of a file
+into place) runs in
 a transaction that first takes `pg_advisory_xact_lock` on one fixed key, then
 reads the single row of `backup_locks`. The advisory lock is what keeps two of
 them apart; the row records which chain, step and job hold the backup.
@@ -1509,21 +1588,39 @@ down.
 A step on a node that missed its Cancel or its take-back keeps running until
 its node stops it ([above](#several-nodes-and-the-backup-lock)). Until then:
 
-- **`state.json`**: it can't overwrite it. Each step writes it under the
-  cluster-wide backup lock, and only while its job still holds the lock, so a
-  step whose chain was canceled or taken back stops there and writes nothing
-  else.
+- **The backup's files**: it can't replace them. It writes `state.json`, the
+  dump, each media part, the checksum sidecars, the media plan and
+  `manifest.json` under temporary names tagged with its own job and attempt
+  ([Temporary files and the trash directories](#temporary-files-and-the-trash-directories)),
+  and renames each into place under the cluster-wide backup lock, only while
+  its job still holds the lock. A step whose backup was canceled or taken back
+  has its rename refused, removes its temporary file and stops there, writing
+  nothing else (#2818, #2819). It can't delete the backup's files either: a
+  step deletes only by moving the file aside under the same check.
 - **The History row**: it can't write it. A step's progress, success and
   failure land only on a `Running` run that is still on that step's chain,
   so it can't overwrite a Cancel or the progress of a resume of the same run. The fence is argued in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md), and why History writes stay out of the lock transaction in [ADR 0045](decisions/0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md).
-- **Its own temporary files** (`kiln-db-<stamp>.dump.partial`, a media part's
-  `.partial`): these are not fenced. A resume of the same backup could share
-  them, and only the wait after a Cancel
-  ([above](#cancel-a-running-backup)) keeps the two apart.
+- **Off-site and prune: not fenced yet.** An `offsite` step that outlived
+  its Cancel can still upload to its destination, and a `prune` step can
+  still delete what retention allows. Only the wait after a Cancel
+  ([above](#cancel-a-running-backup)) keeps them apart from a resume.
+- **A retry of the same job is not told apart from it.** A step's lease is
+  its job, so a later attempt of the same job (an Oban retry, or the job
+  rescued by Oban's Lifeline after about three hours) holds the same lease as
+  an earlier attempt that is somehow still running. Their temporary files are
+  still apart (the attempt is in the name), but the renames of both are
+  admitted.
 
-Because the `state.json` write holds the backup lock, a backup directory that
-stalls (a hung NFS mount) makes Cancel, new backup requests and the
-heartbeat's sweep wait behind it until their database query times out.
+**A stalled backup directory can still hold the lock.** The contents of every
+file are written outside the lock, so a hung NFS mount no longer holds the
+lock while a step writes its state or its manifest. But the renames into
+place, the moves into the trash, and the finish step's
+[marker sync](#the-last-good-marker) are file-system calls made inside the
+lock's transaction. A mount that stalls between a step's write and its rename
+still makes Cancel, new backup requests and the heartbeat's sweep wait behind
+it until their database query times out. The start step reads the
+directory's `.kiln-dir-id` before it takes the lock; only the very first
+start on a directory with no id creates one inside it.
 
 ### Start a backup from a release console
 
@@ -2454,7 +2551,9 @@ the fallback. The reasoning is in [ADR 0037](decisions/0037-a-resume-reuses-a-fi
 
 > **Operators who copy the backup directory with `rclone sync $BACKUP_DIR`:**
 > exclude `.work/**`. It holds lists of media file names (and is removed on
-> success), and has no value off-site.
+> success), and has no value off-site. Exclude `**/.kiln-trash/**` too: it
+> holds files on their way to being deleted
+> ([Temporary files and the trash directories](#temporary-files-and-the-trash-directories)).
 
 **Disk space.** There is no free-space check. Budget for the database dump, plus
 all finished media parts, plus one part being written, plus the file lists.
@@ -3099,7 +3198,10 @@ stamp first in the same way. It runs the importer, then removes the `.partial`
 files of a stamp that has a History row (the app's own run, or an imported
 one) once every file of the stamp is more than an hour old. A cron leftover
 with no row yet is left for the importer. A `.partial` whose name carries no
-backup stamp is removed once it is an hour old, as before.
+backup stamp is removed once it is an hour old, as before, and so is an
+in-app step's `manifest.json.<job>-<attempt>.partial` left at the top of
+`BACKUP_DIR` (cron's `manifest.json.partial` is left to `backup.sh`). It also
+empties the [trash directories](#temporary-files-and-the-trash-directories).
 
 **If the stamp was never read.** With the marker sync turned off
 (`KILN_BACKUP_MARKER_SYNC_CRON=false`) and nobody opening the Backups page, or
@@ -3623,8 +3725,10 @@ What the script checks **before it extracts anything** (a failure stops with
   contains `..`. That last rule also refuses a harmless `d/x -> ../y` link:
   extract such a set by hand once you have looked at it. The reasoning is in [ADR 0036](decisions/0036-restore-refuses-absolute-and-dot-dot-members-and-links-even-harmless-ones.md).
 
-It also refuses a set with a `kiln-media-<stamp>.*.partial` file beside it: a
-backup is still writing that stamp, or was killed while writing it.
+It also refuses a set with a `kiln-media-<stamp>.*.partial` file beside it,
+cron's (`kiln-media-<stamp>.sha256.partial`) or an in-app step's
+(`kiln-media-<stamp>.part02.tar.gz.48211-2.partial`): a backup is still
+writing that stamp, or was killed while writing it.
 
 Missing sidecar on a legacy single archive: the script prints a loud warning
 and continues, because backups from before checksums have none. Set

@@ -40,8 +40,9 @@
 # restore such a set by hand). Nothing is extracted unless every check passed.
 # The manifest is not consulted: the sidecar is the supported record. A set
 # with a `kiln-media-<stamp>.*.partial` beside it (backup.sh's in-progress
-# marker, or a part still being written) is refused: it is being written, or
-# its run was killed. A legacy single archive without a sidecar (backups from
+# marker, or a part still being written, untagged or tagged by the app as
+# `<name>.<job>-<attempt>.partial`) is refused: it is being written, or its
+# run was killed. A legacy single archive without a sidecar (backups from
 # before checksums) is restored with a warning, as before.
 #
 # `db` is destructive on the target (--clean drops existing objects first) —

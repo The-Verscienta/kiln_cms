@@ -131,6 +131,98 @@ defmodule KilnCMS.Backups.ArtifactTest do
     end
   end
 
+  describe "tagged temporary names (#2819)" do
+    test "a backup step's tagged partials parse like the untagged ones" do
+      assert {:ok, %{kind: :db, stamp: "20260805-031700", part: nil, partial?: true}} =
+               Artifact.parse_file("kiln-db-20260805-031700.dump.48211-2.partial")
+
+      assert {:ok, %{kind: :db, partial?: true}} =
+               Artifact.parse_file("kiln-db-20260805-031700.dump.48211.partial")
+
+      assert {:ok, %{kind: :media, part: 2, partial?: true}} =
+               Artifact.parse_file("kiln-media-20260805-031700.part02.tar.gz.48211-1.partial")
+
+      assert {:ok, %{kind: :media, part: nil, partial?: true}} =
+               Artifact.parse_file("kiln-media-20260805-031700.tar.gz.7-3.partial")
+
+      assert {:ok, %{kind: :media, stamp: "20260805-031700", partial?: true}} =
+               Artifact.parse_sidecar_name("kiln-media-20260805-031700.sha256.48211-2.partial")
+
+      assert {:ok, %{kind: :db, partial?: true}} =
+               Artifact.parse_sidecar_name("kiln-db-20260805-031700.sha256.48211.partial")
+    end
+
+    test "anything else around .partial is refused, by both parsers" do
+      for name <- [
+            # a tag without .partial
+            "kiln-db-20260805-031700.dump.48211",
+            "kiln-db-20260805-031700.dump.48211-2",
+            # not digits
+            "kiln-db-20260805-031700.dump.4a1.partial",
+            "kiln-db-20260805-031700.dump.-2.partial",
+            "kiln-db-20260805-031700.dump.48211-.partial",
+            "kiln-db-20260805-031700.dump..partial",
+            # two tags, or three numbers
+            "kiln-db-20260805-031700.dump.1.2.partial",
+            "kiln-db-20260805-031700.dump.1-2-3.partial",
+            # the tag after .partial
+            "kiln-db-20260805-031700.dump.partial.48211",
+            "kiln-media-20260805-031700.part01.tar.gz.partial.48211-2"
+          ] do
+        assert Artifact.parse_file(name) == :error, name
+      end
+
+      for name <- [
+            "kiln-db-20260805-031700.sha256.48211",
+            "kiln-db-20260805-031700.sha256.x.partial",
+            "kiln-db-20260805-031700.sha256.1.2.partial",
+            "kiln-db-20260805-031700.sha256.partial.48211"
+          ] do
+        assert Artifact.parse_sidecar_name(name) == :error, name
+      end
+    end
+
+    test "partial_name/2 builds what the parsers read" do
+      assert Artifact.partial_name("kiln-db-20260805-031700.dump", nil) ==
+               "kiln-db-20260805-031700.dump.partial"
+
+      assert Artifact.partial_name("kiln-db-20260805-031700.dump", 48_211) ==
+               "kiln-db-20260805-031700.dump.48211.partial"
+
+      tag = Artifact.tag(48_211, 2)
+      assert tag == "48211-2"
+
+      for name <- [
+            "kiln-db-20260805-031700.dump",
+            "kiln-media-20260805-031700.part03.tar.gz",
+            "kiln-media-20260805-031700.tar.gz"
+          ] do
+        assert {:ok, %{partial?: true}} = Artifact.parse_file(Artifact.partial_name(name, tag))
+      end
+
+      assert {:ok, %{partial?: true}} =
+               Artifact.parse_sidecar_name(
+                 Artifact.partial_name("kiln-media-20260805-031700.sha256", tag)
+               )
+
+      assert Artifact.partial_name("/w/state.json", tag) == "/w/state.json.48211-2.partial"
+    end
+
+    test "partial_name/2 refuses a tag that isn't one" do
+      for tag <- ["4a1", "1.2", "../x", "", "1-2-3", "-2"] do
+        assert_raise ArgumentError, fn -> Artifact.partial_name("x", tag) end
+        refute Artifact.tag?(tag)
+      end
+
+      for tag <- [0, -1] do
+        assert_raise FunctionClauseError, fn -> Artifact.partial_name("x", tag) end
+      end
+
+      assert Artifact.tag?("1-2")
+      assert Artifact.tag?("12")
+    end
+  end
+
   describe "naming (#2218)" do
     test "part_name/2 is two digits wide and widens past 99" do
       assert Artifact.part_name("20260805-031700", 1) ==

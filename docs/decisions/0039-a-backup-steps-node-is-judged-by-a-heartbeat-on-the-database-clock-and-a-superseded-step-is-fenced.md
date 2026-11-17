@@ -2,7 +2,12 @@
 
 - **Status** — accepted (2026-11-13). Records the choice that shipped with the
   backup step chain (#2537) in 1.9.0; the heartbeat's stop of a canceled step
-  (#2538) came after it.
+  (#2538) came after it. Amended 2026-11-17 by
+  [#2818](https://github.com/The-Verscienta/kiln_cms/issues/2818) and
+  [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819) (a step's
+  files are written outside the lock and only their rename is fenced; see
+  "Amendment" and
+  [ADR 0067](0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md)).
 - **References** — [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218)
   (owner decision 9 of 2026-11-09, in its comments; PR #2537),
   [#2538](https://github.com/The-Verscienta/kiln_cms/issues/2538),
@@ -120,3 +125,34 @@ a slow one.
   that stalls every beat for minutes), the thresholds, fixed in `Heartbeat`
   and `Chain` rather than configured, need revisiting together: the
   self-fence must stay below the reclaim.
+
+## Amendment (2026-11-17, #2818, #2819): a step's files are its own and only their rename is fenced
+
+Two Consequences above no longer hold, and the Decision's last point is
+narrowed. The reasoning is in
+[ADR 0067](0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md).
+
+- **"A step's own `.partial` files are not fenced."** They are now. Every
+  file a step writes goes to a temporary name tagged with its job and attempt
+  (`<name>.<job>-<attempt>.partial`, `Artifact.partial_name/2`), and is
+  renamed into place by `Chain.fenced_rename/3`, only while the lease holds.
+  A superseded step's rename is refused. The 150-second wait after a Cancel
+  stays, for what is still not fenced: the off-site uploads and the prune
+  step.
+- **"The fenced `state.json` write holds the cluster-wide advisory lock while
+  it writes the file."** The contents of `state.json`, of the failure and
+  finish manifests and of every other file are now written outside the lock;
+  only the rename runs inside it. A delete is a fenced rename into a trash
+  directory, followed by the delete after the lock is released. Renames, the
+  moves into the trash and the finish step's marker sync are still
+  file-system calls in the lock transaction, so a backup directory that
+  stalls between a step's write and its rename still makes Cancel, new
+  requests and the sweep wait until their query times out.
+- **"The step's `state.json` write goes through `while_holding/2`."** It goes
+  through `fenced_rename/3`, which is `while_holding/2` around the rename
+  alone.
+
+The fence itself (chain, epoch and job id) is unchanged. So is its gap: a
+later attempt of the same job, an Oban retry or a Lifeline rescue, holds the
+same lease as an earlier attempt still running, and the renames of both are
+admitted. Every other rule above is unchanged.

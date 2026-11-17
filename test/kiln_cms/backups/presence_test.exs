@@ -210,7 +210,9 @@ defmodule KilnCMS.Backups.PresenceTest do
       File.rm!(Path.join([dir, "db", "kiln-db-#{@newer}.dump"]))
       assert state(imported(30), dir, cron_keep_days: 3) == :missing
 
-      # A newer dump still being written is not complete.
+      # A newer dump still being written is not complete, whoever writes it.
+      touch(dir, "db", "kiln-db-#{@newer}.dump.48211-2.partial")
+      assert state(imported(30), dir, cron_keep_days: 3) == :missing
       touch(dir, "db", "kiln-db-#{@newer}.dump.partial")
       assert state(imported(30), dir, cron_keep_days: 3) == :missing
 

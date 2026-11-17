@@ -84,6 +84,9 @@ Every summary line below that was shortened links to its own entry there.
 - **About 10 minutes after boot and daily, a job drops form submission data and automation payloads from finished jobs (`KILN_PRIVATE_ARGS_SCRUB_CRON`). No migration. Drain the `mail` queue before rolling back: form mail queued by this release fails on the previous one and is lost.**
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#private-job-args-upgrade))
 
+- **In-app backups name their temporary files `<name>.<job>-<attempt>.partial`. No migration; update the host's `scripts/backup.sh` in the same rollout, since an older copy doesn't recognize the new names. Rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#backup-step-files-fenced-upgrade))
+
 - **Workflow and task mail jobs now carry ids (no migration). Drain the `mail` queue before rolling back: those queued by this release fail eight times on the previous one and are discarded. Upgrading straight from 1.9.x, old-shape mail still waiting is not sent.**
   ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-ids-upgrade))
 
@@ -206,6 +209,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A backup's finish step syncs the `.good` and `.hold` markers only while it still holds the backup lock.**
   ([long form](docs/changelog/unreleased.md#backup-finish-marker-sync-fenced))
+
+- **A backup step that outlives its Cancel can no longer replace the backup's files: each file is written under the step's own temporary name, outside the backup lock, and only renamed into place while the step holds it.**
+  ([long form](docs/changelog/unreleased.md#backup-step-files-fenced))
 
 - **Erasure now deletes the account's linked newsletter subscriptions on every site, so the person's real address stops receiving newsletters, and Export my data lists them (without tokens).**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-deletes-newsletter-subscriptions))

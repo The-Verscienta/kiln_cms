@@ -447,8 +447,9 @@ defmodule KilnCMS.Backups do
 
   # A Cancel reaches the step's node through Oban's notifier, which a node cut
   # off from the database misses; that node stops the step itself, by its
-  # heartbeat, within `Heartbeat.settled_after_ms/0` (#2538). A resume before
-  # then could share the step's files with it. A nil `finished_at` (a row
+  # heartbeat, within `Heartbeat.settled_after_ms/0` (#2538). Its file writes
+  # are fenced (#2818, #2819), but its off-site copies and prune are not, so a
+  # resume waits until then. A nil `finished_at` (a row
   # canceled before it was recorded) is not evidence of a recent Cancel.
   defp check_settled(%Run{status: :canceled, finished_at: %DateTime{} = at}, now) do
     %{canceled: cutoff} = resume_cutoffs(now)

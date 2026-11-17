@@ -598,6 +598,148 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
     end
   end
 
+  # -- tagged writes (#2818, #2819) ------------------------------------------
+
+  describe "a backup step's tagged writes" do
+    test "plan/3 with a tag writes tagged lists, named in plan.json, and commits it by rename",
+         ctx do
+      for n <- 1..3, do: put(ctx.media, "f#{n}", String.duplicate("q", 400))
+
+      # An earlier, untagged plan: its lists are not removed by a tagged one.
+      _old = plan!(ctx, part_bytes: 500)
+      old_lists = Path.wildcard(Path.join(ctx.work, "part*.list"))
+      parent = self()
+
+      rename = fn from, to ->
+        send(parent, {:rename, from, to})
+        File.rename(from, to)
+      end
+
+      plan = plan!(ctx, part_bytes: 500, tag: "48211-2", rename: rename)
+
+      assert Enum.map(plan.parts, & &1.list) ==
+               ["part01.48211-2.list", "part02.48211-2.list", "part03.48211-2.list"]
+
+      plan_json = Path.join(ctx.work, "plan.json")
+      assert_received {:rename, from, ^plan_json}
+      assert from == plan_json <> ".48211-2.partial"
+      assert {:ok, loaded} = MediaArchive.load_plan(ctx.media, ctx.work)
+      assert Enum.map(loaded.parts, & &1.list) == Enum.map(plan.parts, & &1.list)
+      assert Enum.all?(old_lists, &File.regular?/1)
+      assert partials(ctx.tmp) == []
+
+      parts = archive!(loaded, ctx)
+      assert length(parts) == 3
+    end
+
+    test "a refused plan commit leaves the committed plan and no lists or temporary file", ctx do
+      for n <- 1..3, do: put(ctx.media, "f#{n}", String.duplicate("q", 400))
+      theirs = plan!(ctx, part_bytes: 500, tag: "1-1")
+      plan_json = File.read!(Path.join(ctx.work, "plan.json"))
+
+      put(ctx.media, "f4", String.duplicate("q", 400))
+
+      assert {:error, :superseded} =
+               MediaArchive.plan(ctx.media, ctx.work,
+                 stamp: @stamp,
+                 part_bytes: 500,
+                 exclude: [],
+                 tag: "2-1",
+                 rename: fn _from, _to -> {:error, :superseded} end
+               )
+
+      assert File.read!(Path.join(ctx.work, "plan.json")) == plan_json
+      assert Path.wildcard(Path.join(ctx.work, "*.2-1.*")) == []
+      assert partials(ctx.tmp) == []
+      assert {:ok, loaded} = MediaArchive.load_plan(ctx.media, ctx.work)
+      assert loaded.parts == theirs.parts
+    end
+
+    test "load_plan/2 joins only list names it could have written", ctx do
+      put(ctx.media, "f", "1")
+      plan!(ctx, tag: "3-1")
+      path = Path.join(ctx.work, "plan.json")
+      File.write!(Path.join(ctx.work, "x.list"), "")
+
+      for bad <- ["../part01.3-1.list", "x.list", "part01.3-1.list/..", "part01.a.list"] do
+        json = path |> File.read!() |> Jason.decode!()
+        [part] = json["parts"]
+        File.write!(path, Jason.encode!(%{json | "parts" => [%{part | "list" => bad}]}))
+        assert {:error, :no_plan} = MediaArchive.load_plan(ctx.media, ctx.work), bad
+      end
+    end
+
+    test "a part is verified and hashed under its tagged name, then renamed last", ctx do
+      for n <- 1..2, do: put(ctx.media, "f#{n}", String.duplicate("q", 400))
+      plan = plan!(ctx, part_bytes: 500)
+      parent = self()
+
+      rename = fn from, to ->
+        send(parent, {:rename, from, to, sha(File.read!(from)), File.stat!(from).mode})
+        File.rename(from, to)
+      end
+
+      assert {:ok, finished} =
+               MediaArchive.archive_part(plan, 2, ctx.out, tag: "48211-2", rename: rename)
+
+      final = Path.join(ctx.out, Artifact.part_name(@stamp, 2))
+      assert_received {:rename, from, ^final, hashed, mode}
+      assert from == final <> ".48211-2.partial"
+      assert hashed == finished.sha256
+      assert Bitwise.band(mode, 0o777) == 0o600
+      assert finished.verified
+      assert {:ok, _, _} = Checksum.file(final)
+      assert partials(ctx.tmp) == []
+      assert Path.wildcard(Path.join(ctx.work, "*.run.list")) == []
+    end
+
+    test "a refused rename leaves the part already in place, no temporary file, no retry",
+         ctx do
+      for n <- 1..2, do: put(ctx.media, "f#{n}", String.duplicate("q", 400))
+      plan = plan!(ctx, part_bytes: 500)
+      File.mkdir_p!(ctx.out)
+      final = Path.join(ctx.out, Artifact.part_name(@stamp, 2))
+      File.write!(final, "theirs")
+      parent = self()
+
+      refuse = fn from, _to ->
+        send(parent, {:refused, from})
+        {:error, :superseded}
+      end
+
+      assert {:error, :superseded} =
+               MediaArchive.archive_part(plan, 2, ctx.out, tag: "7-1", rename: refuse)
+
+      assert_received {:refused, _}
+      refute_received {:refused, _}
+      assert File.read!(final) == "theirs"
+      assert partials(ctx.tmp) == []
+      assert Path.wildcard(Path.join(ctx.work, "*.run.list")) == []
+    end
+
+    test "a failed part leaves a file already under its final name as it was", ctx do
+      put(ctx.media, "a.bin", "aaaa")
+      plan = plan!(ctx)
+      File.mkdir_p!(ctx.out)
+      final = Path.join(ctx.out, hd(MediaArchive.names(plan)))
+      File.write!(final, "older attempt")
+
+      tar =
+        stub_tar(ctx.tmp, "tar-badlist2", """
+        if [ "$1" = "-czf" ]; then printf 'not a tarball' > "$2"; exit 0; fi
+        exec "#{real_tar()}" "$@"
+        """)
+
+      capture_log(fn ->
+        assert {:error, {:exit_status, "tar", _, _}} =
+                 MediaArchive.archive_part(plan, 1, ctx.out, tar: tar, tag: "9-1")
+      end)
+
+      assert File.read!(final) == "older attempt"
+      assert partials(ctx.tmp) == []
+    end
+  end
+
   # -- checksums -------------------------------------------------------------
 
   describe "checksum/3" do

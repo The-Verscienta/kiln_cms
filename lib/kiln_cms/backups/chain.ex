@@ -44,10 +44,26 @@ defmodule KilnCMS.Backups.Chain do
   reclaimed, canceled or otherwise superseded meanwhile gets
   `{:error, :superseded}` and its results are discarded.
 
-  Work that must not outlive the lease runs inside `while_holding/2`: a
-  `state.json` write, and the finish step's marker sync (#3013), so a
-  superseded finish writes no `.good` or `.hold` marker and leaves them to the
-  step that took over. A resume's start checks its lease after it reads the
+  Work that must not outlive the lease runs inside `while_holding/2`, and is
+  kept to what cannot be done outside it. A step writes the contents of its
+  files (`state.json`, the dump, a media part, a checksum sidecar, a manifest)
+  outside the lock, under temporary names of its own
+  (`KilnCMS.Backups.Artifact.partial_name/2`, tagged with its job and attempt,
+  #2818, #2819), and only the rename into place runs under the lease
+  (`fenced_rename/3`). A superseded step's rename is refused, so its files never
+  replace the chain's that took over, and its temporary file is its alone to
+  remove. A step that must delete something of the chain's (a work directory, a
+  stale plan's media) moves it aside into a trash directory on its own file
+  system with one fenced rename and deletes it after the lock is released
+  (`fenced/2`). The finish step's
+  marker sync (#3013) still runs under the lease, so a superseded finish writes
+  no `.good` or `.hold` marker and leaves them to the step that took over.
+
+  Renames and that marker sync are file-system calls inside the lock
+  transaction: a backup directory that stalls between a step's write and its
+  rename still holds Cancel, new requests and the sweep back until their query
+  times out. What moved out is the writing of contents, which is where a
+  stalled mount usually hangs. A resume's start checks its lease after it reads the
   run and before it re-opens it (#2816), and the re-open is pinned to that
   read (`KilnCMS.Backups.Run.Changes.Resume`), so a resume canceled before it
   started (`Run`'s `:cancel_resume`, which releases the lock in its own
@@ -118,6 +134,7 @@ defmodule KilnCMS.Backups.Chain do
           chain: String.t(),
           epoch: integer(),
           job_id: integer(),
+          attempt: pos_integer() | nil,
           step: String.t(),
           part: pos_integer() | nil,
           stamp: String.t() | nil,
@@ -419,18 +436,27 @@ defmodule KilnCMS.Backups.Chain do
   `dump` (`advance/3`), with its `state.json` written, so a start that failed
   before that and is retried on a node with another `BACKUP_DIR` writes its
   files there and binds that one. The chain's files are never split.
+
+  The directory's id is read before the lock is taken (#2818): reading a file
+  on a stalled mount must not hold the lock. Only a directory with no id yet
+  (the first start on it) has one created, inside the lock and only once the
+  job is known to be current, so a superseded start never creates it. A
+  directory whose id can't be read fails the start, again only once it is
+  known to be current.
   """
   @spec begin_step(Oban.Job.t()) :: {:ok, lease()} | {:error, term()}
   def begin_step(%Oban.Job{id: id, args: args} = job) do
+    dir_id = if args["step"] == "start", do: DirId.current(), else: :not_start
+
     with_lock(fn row ->
       if current?(row, args, id),
-        do: claim_step(row, job),
+        do: claim_step(row, job, dir_id),
         else: {:error, :superseded}
     end)
   end
 
-  defp claim_step(row, %Oban.Job{id: job_id, attempt: attempt, args: %{"step" => step}}) do
-    with {:ok, fields, dir_id} <- start_fields(row, step) do
+  defp claim_step(row, %Oban.Job{id: job_id, attempt: attempt, args: %{"step" => step}}, dir_id) do
+    with {:ok, fields, dir_id} <- start_fields(row, step, dir_id) do
       fields =
         Map.merge(fields, %{
           executing_boot_id: Backups.boot_id(),
@@ -439,7 +465,7 @@ defmodule KilnCMS.Backups.Chain do
         })
 
       row = write!(&Backups.mark_backup_lock_executing!/3, row, fields)
-      {:ok, %{lease(row, job_id) | dir_id: dir_id}}
+      {:ok, %{lease(row, job_id) | dir_id: dir_id, attempt: attempt}}
     end
   end
 
@@ -449,13 +475,20 @@ defmodule KilnCMS.Backups.Chain do
       row.step_job_id == job_id
   end
 
-  defp start_fields(row, "start") do
-    with {:ok, dir_id} <- DirId.local() do
+  defp start_fields(row, "start", dir_id) do
+    with {:ok, dir_id} <- start_dir_id(dir_id) do
       {:ok, %{stamp: row.stamp || row.resume_stamp || fresh_stamp()}, dir_id}
     end
   end
 
-  defp start_fields(row, _step), do: {:ok, %{}, row.dir_id}
+  defp start_fields(row, _step, _dir_id), do: {:ok, %{}, row.dir_id}
+
+  # The id read before the lock (`begin_step/1`). A directory without one is
+  # given one here, the only file this transaction may write: the first start
+  # on a fresh backup directory.
+  defp start_dir_id({:ok, dir_id}), do: {:ok, dir_id}
+  defp start_dir_id({:error, :enoent}), do: DirId.local()
+  defp start_dir_id({:error, _} = error), do: error
 
   # Two chains a second apart would share a stamp, and so a Run and file names:
   # step forward past any stamp already used.
@@ -477,6 +510,7 @@ defmodule KilnCMS.Backups.Chain do
       chain: row.chain_id,
       epoch: row.epoch,
       job_id: job_id,
+      attempt: nil,
       step: to_string(row.step),
       part: row.part,
       stamp: row.stamp,
@@ -587,6 +621,32 @@ defmodule KilnCMS.Backups.Chain do
       if holds?(row, lease), do: {:ok, fun.()}, else: {:error, :superseded}
     end)
   end
+
+  @doc """
+  `while_holding/2` for a file-system call that answers `:ok` or
+  `{:error, reason}`: `:ok`, the call's own `{:error, reason}`, or
+  `{:error, :superseded}` when the lease no longer holds the lock (the call
+  was not made). Keep `fun` to one rename, or a few: it holds the lock
+  transaction.
+  """
+  @spec fenced(map(), (-> :ok | {:error, term()})) :: :ok | {:error, term()}
+  def fenced(lease, fun) do
+    case while_holding(lease, fun) do
+      {:ok, :ok} -> :ok
+      {:ok, {:error, _} = error} -> error
+      {:error, _} = error -> error
+    end
+  end
+
+  @doc """
+  Rename `from` to `to` only while `lease` holds the lock (`fenced/2`): how a
+  step puts a file it wrote under a temporary name of its own into place
+  (#2819). A superseded step's rename is refused with `{:error, :superseded}`
+  and leaves `to` as it was.
+  """
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec fenced_rename(map(), Path.t(), Path.t()) :: :ok | {:error, term()}
+  def fenced_rename(lease, from, to), do: fenced(lease, fn -> File.rename(from, to) end)
 
   defp holds?(row, lease) do
     row.chain_id == lease.chain and row.epoch == lease.epoch and row.step_job_id == lease.job_id

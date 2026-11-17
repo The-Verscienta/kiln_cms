@@ -139,7 +139,6 @@ defmodule KilnCMS.Backups.Importer do
   @logged_partials 5
   @max_trigger 64
   @max_sidecar_bytes 4 * 1024 * 1024
-  @sidecar ~r/\Akiln-(db|media)-(\d{8}-\d{6})\.sha256(\.partial)?\z/
 
   # The import backoff (#2417): `%{{dir, stamp} => %{failures, retry_at,
   # first_error}}`, `retry_at` in Unix milliseconds.
@@ -358,19 +357,17 @@ defmodule KilnCMS.Backups.Importer do
     do: Map.update(partials, stamp, [{sub, name}], &[{sub, name} | &1])
 
   defp classify_sidecar(sub, name, files, partials, sidecars) do
-    case Regex.run(@sidecar, name) do
-      [_, _kind, stamp, ".partial"] ->
+    case Artifact.parse_sidecar_name(name) do
+      {:ok, %{stamp: stamp, partial?: true}} ->
         {files, add_partial(partials, stamp, sub, name), sidecars}
 
-      [_, kind, stamp] ->
-        kind = String.to_existing_atom(kind)
-
+      {:ok, %{kind: kind, stamp: stamp, partial?: false}} ->
         if Artifact.subdir(kind) == sub,
           do:
             {files, partials, Map.update(sidecars, stamp, [{kind, name}], &[{kind, name} | &1])},
           else: {files, partials, sidecars}
 
-      _ ->
+      :error ->
         {files, partials, sidecars}
     end
   end
