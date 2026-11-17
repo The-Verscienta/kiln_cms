@@ -216,6 +216,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
 
+- **`/embed.js` builds the iframe from the parsed `data-kiln-origin` URL, and resize messages now work when that URL has a path. `kiln-types` can no longer emit code from a hostile schema's format version or type names. Third-party Actions are pinned to commit SHAs.**
+  ([long form](docs/changelog/unreleased.md#codeql-second-pass))
+
 - **A referrer breakdown with `"< n"` and one `"hidden"` category no longer lets a reader who knows the rule recover the suppressed counts; such breakdowns now show every category hidden.**
   ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752) · [long form](docs/changelog/unreleased.md#referrer-suppression-partner-bounds))
 

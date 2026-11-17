@@ -93,6 +93,25 @@ describe("emitTypes", () => {
     expect(output).toContain("// Artifact format version: 3");
   });
 
+  // The document comes off the network and the output is a .ts file someone
+  // compiles, so nothing in it may escape a comment or a type name.
+  it("keeps a hostile schema document from emitting code", () => {
+    const hostile = emitTypes({
+      "x-kiln": { artifact_format_version: "1\nexport const pwned = 1;" as unknown as number },
+      $defs: {
+        "content_x{}; export const pwned2 = 1; type Y": {
+          type: "object",
+          properties: { a: { type: "string" } },
+        },
+      },
+    });
+
+    expect(hostile).toContain("// Artifact format version: 1 export const pwned = 1;");
+    expect(hostile).not.toMatch(/^export const pwned/m);
+    expect(hostile).toContain("export interface X");
+    expect(hostile).not.toContain("pwned2 = 1");
+  });
+
   it("marks non-required properties optional and closes sealed objects", () => {
     // Sealed (additionalProperties: false): no index signature.
     expect(output).toContain(
