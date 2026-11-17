@@ -9,6 +9,7 @@ defmodule KilnCMS.Accounts do
   use Ash.Domain,
     otp_app: :kiln_cms
 
+  require Ash.Query
   require Logger
 
   resources do
@@ -454,8 +455,10 @@ defmodule KilnCMS.Accounts do
 
   @doc """
   A JSON-serializable snapshot of a user's own data for an access/portability
-  request (GDPR Art. 15/20, #212): profile fields and notification preferences.
-  No secrets (password hash, tokens) are included.
+  request (GDPR Art. 15/20, #212): profile fields and notification preferences,
+  paid memberships, and the newsletter subscriptions linked to the account
+  (#2991). No secrets (password hash, tokens, the subscriber's confirm and
+  unsubscribe tokens) are included.
   """
   @spec export_user_data(KilnCMS.Accounts.User.t()) :: map()
   def export_user_data(%KilnCMS.Accounts.User{} = user) do
@@ -481,7 +484,71 @@ defmodule KilnCMS.Accounts do
       # identifiers a subprocessor holds about this person, so GDPR Art. 15/20
       # covers them, and having them lets the subject exercise their rights
       # against the provider directly. They are not credentials.
-      memberships: membership_export(user)
+      memberships: membership_export(user),
+      newsletter_subscriptions: newsletter_export(user)
+    }
+  end
+
+  # The subscriber rows linked to the account (#2991), on every site, with the
+  # names of the segments each is on. Read org by org as the newsletter's own
+  # actor (`KilnCMS.Newsletter.system/0`, admitted for the plain `:read` and
+  # the segment reads), because `:for_user`, the one cross-org read, is the
+  # member's own. `authorize_with: :error`, as `membership_export/1`: a refusal
+  # is logged, not mistaken for "no subscriptions". Only the linked rows: a
+  # row added by hand at the same address was not given through the account.
+  # The confirm and unsubscribe tokens are left out; they are working links,
+  # not data about the person. The org list is read without raising, for the
+  # same reason: one refused read must not take down the rest of the export.
+  defp newsletter_export(user) do
+    case list_organizations(actor: system(), authorize_with: :error, query: [select: [:id]]) do
+      {:ok, orgs} ->
+        Enum.flat_map(orgs, &newsletter_export(user, &1.id))
+
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not list sites for newsletter subscriptions of " <>
+            "#{user.id}: " <> Exception.message(error)
+        )
+
+        []
+    end
+  end
+
+  defp newsletter_export(user, org_id) do
+    query =
+      KilnCMS.Newsletter.Subscriber
+      |> Ash.Query.filter(user_id == ^user.id)
+      |> Ash.Query.load(:segments)
+
+    case KilnCMS.Newsletter.list_subscribers(
+           query: query,
+           actor: KilnCMS.Newsletter.system(),
+           authorize_with: :error,
+           tenant: org_id
+         ) do
+      {:ok, subscribers} ->
+        Enum.map(subscribers, &subscription_entry/1)
+
+      {:error, error} ->
+        Logger.error(
+          "data-subject export could not read newsletter subscriptions for #{user.id} " <>
+            "on org #{org_id}: " <> Exception.message(error)
+        )
+
+        []
+    end
+  end
+
+  defp subscription_entry(subscriber) do
+    %{
+      org_id: subscriber.org_id,
+      email: to_string(subscriber.email),
+      name: subscriber.name,
+      status: subscriber.status,
+      confirmed_at: subscriber.confirmed_at,
+      unsubscribed_at: subscriber.unsubscribed_at,
+      subscribed_at: subscriber.inserted_at,
+      segments: subscriber.segments |> Enum.map(& &1.name) |> Enum.sort()
     }
   end
 

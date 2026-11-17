@@ -15,6 +15,7 @@ config :kiln_cms, :occurrence_backfill_on_boot, false
 config :kiln_cms, :legacy_audiences_migration_on_boot, false
 config :kiln_cms, :sync_exposure_backfill_on_boot, false
 config :kiln_cms, :totp_secret_backfill_on_boot, false
+config :kiln_cms, :erasure_backfill_on_boot, false
 
 # Keep DNS checks and the port-25 preflight off the network in tests; explicit
 # `dns:`/`tcp:` opts in DnsCheck tests still override these.

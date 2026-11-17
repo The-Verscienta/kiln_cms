@@ -224,6 +224,71 @@ own consent (`:resubscribe` / `:unsubscribe`). Those two actions plus `:for_user
 are a **`bypass`** on the resource, not ordinary policies — Ash AND-combines
 policies, so as a policy the self-grant was narrowed to nothing by the blanket
 admin policy and every member-driven call came back forbidden. A failing bypass
-falls through, so admin management is unaffected.
+falls through, so admin management of `:resubscribe` and `:unsubscribe` is
+unaffected. `:for_user` stops there instead (#2991): it is the member's lookup
+of their own rows on every site, it ignores the tenant, and so it is refused
+to everyone else, site and platform admins included.
 
 See [Paid memberships](memberships.md).
+
+## When a member account is erased
+
+Erasing an account (GDPR Art. 17, the `:anonymize` action; see
+[Data flows](data-flows.md#subject-rights-workflows)) deletes every
+subscriber row **linked** to it (#2991): the rows the billing sync tied to the
+account through `user_id`, on every site, whatever their status. Their segment
+memberships go with them. A campaign keeps its counts, which name nobody, and
+a delivery that was already queued to one of those rows is canceled when it
+comes to run instead of mailing the address. After the erasure, the billing
+sync never links the account to a list again, even if a late payment webhook
+or the nightly reconcile still finds an entitlement for it.
+
+A row that was never linked to the account is kept, even at the same
+address. Linking happens on a site where the account held a paid membership:
+the billing sync links the row already at the member's address there (one
+added by hand or through the public sign-up) rather than adding a second.
+So the rows erasure keeps are on sites where the account never held a paid
+membership. Erasure works on the account, and matching on the address would
+delete a stranger's row wherever an address was reused. If the person asks for
+such a row to go too, remove it by hand.
+
+### Remove a subscriber by hand
+
+You need the admin tier on the site the subscriber is on: a site admin, or a
+platform admin.
+
+1. On that site, open **Newsletter** (`/editor/newsletter`).
+2. Under **Subscribers**, find the address. The list shows the 100 most
+   recently added subscribers.
+3. Click the trash icon on its row, and confirm **Remove this subscriber?**.
+   You see "Subscriber removed." and the row is gone, with its segment
+   memberships.
+
+If you see "Couldn't remove that subscriber." instead, the row was already
+gone (reload the page) or your account is not an admin of this site.
+
+### Accounts erased before this release
+
+Erasure did not delete newsletter rows before #2991, so a confirmed
+subscription linked to an account erased earlier kept receiving newsletters.
+A background job, `KilnCMS.Accounts.ErasureBackfill`, deletes those rows: each
+boot queues it to run about 10 minutes later, at most once a day. It finds
+every erased account (`anonymized_at` set) that still has linked rows and
+deletes them the same way erasure now does. A second run finds nothing to do.
+
+- To run it by hand:
+
+  ```bash
+  bin/kiln_cms rpc "KilnCMS.Accounts.ErasureBackfill.run()"
+  ```
+
+  `run/0` returns what it did, for example
+  `%{newsletter_accounts: 2, newsletter_subscribers: 3, failed: 0}` (two erased
+  accounts had three rows between them). Wrap the call in `IO.inspect/1` to
+  print it.
+- To stop the boot from queuing it, set
+  `config :kiln_cms, :erasure_backfill_on_boot, false`.
+- An account whose rows could not be deleted is logged at warning
+  (`erasure backfill could not forget newsletter rows for <id>`) and counted
+  under `failed`. The job then ends in error and Oban retries it, up to three
+  attempts in all; each retry only finds what is still left.

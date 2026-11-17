@@ -215,6 +215,12 @@ defmodule KilnCMS.Newsletter.TierSync do
   # strategy does not require confirmation to sign in, so this is checked here
   # rather than assumed — adding an unverified address would let someone sign up
   # with a stranger's email and subscribe them to mail.
+  #
+  # An erased account is never linked either (#2991): its address is a
+  # tombstone, and erasure deleted the rows it had. A late webhook or the
+  # nightly reconcile reaching it with a stale entitlement must not put a row
+  # back.
+  defp verified?(%{anonymized_at: %DateTime{}}), do: false
   defp verified?(%{confirmed_at: nil}), do: false
   defp verified?(_user), do: true
 
