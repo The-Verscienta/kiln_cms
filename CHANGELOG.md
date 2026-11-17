@@ -72,6 +72,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
   ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
 
+### Breaking
+
+- **Field sync import refuses a non-default `"sections"` entry no field carries (a hand-edited file that imported before now fails, nothing written). An entry at the default deletes the stored layout, and a section the import empties loses its layout, without `--prune`.**
+  ([long form](docs/changelog/unreleased.md#field-sync-section-entries-stricter))
+
 ### Added
 
 - **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
@@ -108,6 +113,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
 
 ### Fixed
+
+- **A section's layout is deleted with its last field by every route (rename, cleared section, delete, join graduation, sync), so a later field no longer inherits it; a section rename in the fields admin decides from the fields as they are at Save.**
+  ([#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) · [long form](docs/changelog/unreleased.md#section-layouts-kept-in-step))
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))

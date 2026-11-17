@@ -1747,8 +1747,17 @@ What to know before relying on it:
   tab selected; look for the icon.
 - **Renaming a section.** Rename it on each of its fields. When you rename
   the last field still carrying the old name, the layout moves to the new
-  name, unless the new name has one already. Deleting a section's last field
-  deletes its layout.
+  name, unless the new name has a layout of its own already, which is kept;
+  either way the old name's layout is gone. The move is decided when you
+  click **Save**, from the type's fields as they are then, not as the page
+  showed them.
+- **A section without fields loses its layout.** Deleting a section's last
+  field, clearing its **Section**, or moving it to another section deletes
+  the section's layout in the same save, by any route: this page, a field
+  sync import, or code. If a field is later filed under that name, the
+  section starts as a default accordion. A layout left behind by a release
+  before this change stays until you next change a layout in the
+  **Sections of** panel (shown while some field of the type has a section).
 - **Width is per section.** A narrow field shares a row only with the
   fields of its own section, and with neighbours in `position` order. A
   conditional field that is hidden leaves no gap.
@@ -1757,7 +1766,10 @@ What to know before relying on it:
   layouts to the compiled type together.
 - **Two admins at once.** The **Sections of** panel saves the row you
   change, then deletes layouts no field names any more, reading both fresh,
-  so a section another admin has just added keeps its layout.
+  so a section another admin has just added keeps its layout. A field
+  **Save** or **Delete** reads the field's current section the same way, so
+  a page loaded before another admin moved fields still keeps the right
+  layouts.
 
 Why a layout is its own row, keyed by the section name: [ADR 0046](decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md).
 
@@ -1766,7 +1778,8 @@ If something does not save, the page shows one of these:
 | Message | Meaning |
 |---|---|
 | `You can't change custom fields.` | You are no longer an admin of this site (the role was changed after the page loaded). Nothing was written. |
-| `Couldn't save the section layout.` | The layout write failed, typically because another admin saved the same section's layout at the same moment. Reload the page and set it again. The same message after a field **Save** or **Delete** means the field was saved but its section's layout did not follow the rename or the delete. |
+| `Couldn't save the section layout.` | In the **Sections of** panel: the layout write failed, typically because another admin saved the same section's layout at the same moment. Reload the page and set it again. After a field **Save**: the section's layout could not be moved or deleted with the field's new section, so the field was **not** saved either and the form stays open. Reload the page and try again. |
+| `Couldn't delete that field.` | The field was not deleted. Among other causes, the layout of the section it was the last field of could not be deleted with it. Reload the page and try again. |
 
 The page lists the sections as they were when it loaded. A layout you set for
 a section another admin has since emptied (by renaming or deleting its last

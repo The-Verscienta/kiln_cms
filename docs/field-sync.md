@@ -91,14 +91,20 @@ must fail on a refused import.
 ### What is never done without being asked
 
 - **Fields absent from the file are kept.** They are listed as `?`; `--prune`
-  deletes them. Deleting the last field of a section also deletes that
-  section's layout, as deleting it in the console does.
-- **Section layouts are left alone by a file that does not mention them.** An
-  owner with no `"sections"` key (a file written before layouts existed)
-  changes none of that type's layouts, even with `--prune`. An owner with the
-  key, `[]` included, declares all of them: a layout it does not list is `?`,
-  or deleted with `--prune`. A layout holds no values, so its delete is never
-  blocked.
+  deletes them.
+- **A section's layout goes with its last field.** When the import deletes
+  the last field of a section, or moves it to another section, that
+  section's layout is deleted too, as the same edit in the console does. The
+  diff lists it as `- type/section/Name`. This happens without `--prune`,
+  and also for an owner with no `"sections"` key. A layout is kept while any
+  top-level field still carries the name after the import, including a
+  field the file does not list, unless `--prune` deletes it.
+- **Other section layouts are left alone by a file that does not mention
+  them.** An owner with no `"sections"` key (a file written before layouts
+  existed) changes no other layout of that type, even with `--prune`. An
+  owner with the key, `[]` included, declares all of them: a layout it does
+  not list is `?`, or deleted with `--prune`. A layout holds no values, so
+  its delete is never blocked.
 - **Types are never deleted or archived** by an import. A dynamic type in the
   file is created, or has its settings updated; the type's `name` never changes.
 - **Dropping stored values is blocked.** A field is *blocked* when records hold
@@ -180,9 +186,15 @@ release `rpc` is **not** recorded there.
   (`KilnCMS.CMS.FieldSection`): `name` (the `section` its fields carry),
   `display` (`accordion`, `fieldset` or `tab`) and `initially` (`auto`,
   `expanded` or `collapsed`). The export writes only the layouts that are
-  stored and that some field of the owner still carries; a section with no
-  entry is a default accordion. On import, a section name may appear once per
-  owner, and the same unknown-key rule applies as for fields. See
+  stored, differ from the default (`accordion` opening `auto`), and that
+  some field of the owner still carries; a section with no entry is a
+  default accordion. On import, a section name may appear once per owner,
+  and the same unknown-key rule applies as for fields. An entry at the
+  default stores nothing: it deletes the section's stored layout, if there
+  is one, with or without `--prune`, as setting it back in the console does.
+  An entry for a section that no top-level field of the owner carries once
+  the import is done (no field in the file, nor a stored one the import
+  keeps) is refused, and nothing is written; see below. See
   [Lay out custom fields as tabs, fieldsets or columns](extending-content.md#lay-out-custom-fields-as-tabs-fieldsets-or-columns),
   and [ADR 0046](decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md)
   for why a layout is keyed by the section name and when it is pruned.
@@ -203,6 +215,27 @@ release `rpc` is **not** recorded there.
   reads and writes the same version-1 keys, `width`, `widget` and `sections`
   included; [ADR 0047](decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
   records why the file is still version 1.
+
+### A section entry no field carries
+
+The export never writes a layout for a section with no field, so such an
+entry comes from a file edited by hand: a section added before its fields, a
+typo in a name, or a field moved out of a section whose entry was left in.
+The import refuses it, with one error per entry, rather than storing a layout
+that would lie unused until a later field of that name took it on:
+
+```text
+ERROR post/section/Clinical: no field of post is in this section, so its layout lays nothing out
+```
+
+Nothing is written, in a dry run or with `--apply`; the console's preview
+lists the same line under *This file cannot be imported*. To fix the file,
+put a field in the section (`"section": "Clinical"` on one of the owner's
+fields), correct the name, or remove the entry. A stored field the file does
+not list counts as a carrier, unless `--prune` would delete it. An entry at
+the default layout is never refused: it stores nothing.
+
+Releases up to 1.10.1 accepted such a file and stored the layout.
 
 ### Moving a file to an older build
 
