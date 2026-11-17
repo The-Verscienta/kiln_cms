@@ -618,6 +618,358 @@ defmodule KilnCMS.CMS.ReleasesTest do
     end
   end
 
+  defp system, do: [actor: KilnCMS.CMS.Housekeeping.system(:releases)]
+
+  defp stale?(result),
+    do:
+      match?({:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}}, result)
+
+  defp published_count do
+    CMS.recent_webhook_deliveries!(authorize?: false)
+    |> Enum.count(&(&1.event == "release.published"))
+  end
+
+  describe "every transition is a compare-and-swap on the row (#2745)" do
+    # Each test holds a struct, moves the row out from under it by another
+    # path, then hands the stale struct to the transition. The state machine
+    # only judges the struct, so without the filter in the UPDATE's WHERE
+    # clause each of these would write over the move.
+
+    test "rescheduling from a stale page does not resurrect a published release" do
+      # The issue's scenario: the page was loaded while the release was
+      # `:scheduled`, the cron shipped it, then the admin clicked Reschedule.
+      admin = user(:admin)
+
+      {:ok, _endpoint} =
+        CMS.create_webhook_endpoint(
+          %{url: "https://example.com/once-2745", events: ["release.published"], active: true},
+          actor: admin
+        )
+
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+
+      {:ok, stale} =
+        CMS.schedule_release(rel, %{scheduled_at: DateTime.add(DateTime.utc_now(), -60)},
+          actor: admin
+        )
+
+      AshOban.schedule_and_run_triggers(KilnCMS.CMS.ContentRelease)
+      KilnCMS.DataCase.drain_oban()
+      published = reload(rel)
+      assert published.state == :published
+
+      tomorrow = DateTime.add(DateTime.utc_now(), 86_400)
+      assert stale?(CMS.schedule_release(stale, %{scheduled_at: tomorrow}, actor: admin))
+
+      # Nothing for the cron to pick up again, so no second go-live.
+      AshOban.schedule_and_run_triggers(KilnCMS.CMS.ContentRelease)
+      KilnCMS.DataCase.drain_oban()
+
+      after_click = reload(rel)
+      assert after_click.state == :published
+      assert after_click.published_at == published.published_at
+      assert after_click.scheduled_at == stale.scheduled_at
+      assert published_count() == 1
+    end
+
+    test "unschedule and archive from a stale page do not cancel a claimed go-live" do
+      admin = user(:admin)
+      rel = release(admin)
+      p = page()
+      {:ok, _} = add(rel, p, admin)
+
+      {:ok, stale} =
+        CMS.schedule_release(rel, %{scheduled_at: DateTime.add(DateTime.utc_now(), 3600)},
+          actor: admin
+        )
+
+      {:ok, _claimed} = CMS.start_release(stale, %{}, actor: admin)
+
+      assert stale?(CMS.unschedule_release(stale, %{}, actor: admin))
+      assert stale?(CMS.archive_release(stale, %{}, actor: admin))
+      assert reload(rel).state == :publishing
+
+      # The worker the claim enqueued still owns the release, and finishes it.
+      KilnCMS.DataCase.drain_oban()
+      assert reload(rel).state == :published
+      assert reload_page(p).state == :published
+    end
+
+    test "reopen from a stale struct does not undo a retry already under way" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, claimed} = CMS.start_release(rel, %{}, actor: admin)
+      {:ok, failed} = CMS.abandon_release(claimed, %{}, actor: admin)
+
+      {:ok, reopened} = CMS.reopen_release(failed, %{}, actor: admin)
+      {:ok, _} = CMS.start_release(reopened, %{}, actor: admin)
+
+      assert stale?(CMS.reopen_release(failed, %{}, actor: admin))
+      assert reload(rel).state == :publishing
+
+      KilnCMS.DataCase.drain_oban()
+      assert reload(rel).state == :published
+    end
+
+    test "deleting from a stale page cannot take a shipped release's items with it" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, _published} = go_live(rel, admin)
+
+      # `rel` still says `:open` with no `published_at`, so `ReleaseDeletable`
+      # passes it; only the row knows it shipped.
+      assert stale?(CMS.destroy_release(rel, actor: admin))
+      assert reload(rel).state == :published
+      assert [_item] = CMS.list_release_items_for!(rel.id, authorize?: false)
+    end
+
+    test "the worker's outcome writes do not overwrite an abandon" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, claimed} = CMS.start_release(rel, %{}, actor: admin)
+      {:ok, _} = CMS.abandon_release(claimed, %{}, actor: admin)
+
+      assert stale?(CMS.mark_release_published(claimed, %{}, system()))
+      assert stale?(CMS.mark_release_failed(claimed, %{failure_reason: "late"}, system()))
+
+      failed = reload(rel)
+      assert failed.state == :failed
+      assert failed.failure_reason =~ "Abandoned"
+      assert is_nil(failed.published_at)
+
+      KilnCMS.DataCase.drain_oban()
+    end
+
+    test "the rollback's outcome writes do not overwrite an abandon" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, published} = go_live(rel, admin)
+      {:ok, rolling} = CMS.start_release_rollback(published, %{}, actor: admin)
+      {:ok, _} = CMS.abandon_release(rolling, %{}, actor: admin)
+
+      assert stale?(CMS.mark_release_rolled_back(rolling, %{}, system()))
+
+      assert stale?(
+               CMS.mark_release_rollback_failed(rolling, %{failure_reason: "late"}, system())
+             )
+
+      back = reload(rel)
+      assert back.state == :published
+      assert is_nil(back.rolled_back_at)
+
+      KilnCMS.DataCase.drain_oban()
+    end
+
+    test "a go-live abandoned mid-flight publishes nothing and reports the failure once" do
+      # The worker's struct says `:publishing`; an admin abandons the claim
+      # while it runs. Its `mark_published` misses the row, so the whole
+      # go-live rolls back, and recording the failure misses too — the abandon
+      # already did. That second miss is not the "stuck in a claim state" case,
+      # so it is not logged as an error, and `release.failed` goes out once.
+      admin = user(:admin)
+
+      {:ok, _endpoint} =
+        CMS.create_webhook_endpoint(
+          %{
+            url: "https://example.com/abandoned-2745",
+            events: ["release.published", "release.failed"],
+            active: true
+          },
+          actor: admin
+        )
+
+      rel = release(admin)
+      p = page()
+      {:ok, _} = add(rel, p, admin)
+      {:ok, claimed} = CMS.start_release(rel, %{}, actor: admin)
+      {:ok, _} = CMS.abandon_release(claimed, %{}, actor: admin)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, _} = Releases.publish(claimed)
+        end)
+
+      refute log =~ "could not record"
+
+      after_run = reload(rel)
+      assert after_run.state == :failed
+      assert after_run.failure_reason =~ "Abandoned"
+      assert reload_page(p).state == :draft
+
+      events = CMS.recent_webhook_deliveries!(authorize?: false) |> Enum.map(& &1.event)
+      refute "release.published" in events
+      assert Enum.count(events, &(&1 == "release.failed")) == 1
+
+      # The claim's own job finds the release `:failed` and does nothing.
+      KilnCMS.DataCase.drain_oban()
+      assert reload(rel).state == :failed
+    end
+  end
+
+  # A test seam for the #2740 window: `fun` runs in THIS process when the
+  # `[:ash, :cms, kind]` span for `resource`'s `action` starts — after the
+  # changeset was built (and its build-time validations ran), before the
+  # action's transaction and its `before_action` hooks. Exactly once, and only
+  # in this process, so no other test's write can trip it.
+  defp on_action_start(kind, resource, action, fun) do
+    id = "release-seam-#{System.unique_integer([:positive])}"
+    Process.put(id, :armed)
+
+    :ok =
+      :telemetry.attach(
+        id,
+        [:ash, :cms, kind, :start],
+        &__MODULE__.run_seam/4,
+        {self(), id, resource, action, fun}
+      )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  @doc false
+  def run_seam(_event, _measurements, %{resource: resource, action: action}, config)
+      when elem(config, 2) == resource and elem(config, 3) == action do
+    {pid, id, _resource, _action, fun} = config
+
+    if self() == pid and Process.get(id) == :armed do
+      Process.put(id, :fired)
+      fun.()
+    end
+  end
+
+  def run_seam(_event, _measurements, _metadata, _config), do: :ok
+
+  defp pending_on(release),
+    do: CMS.list_release_items_with_status!(release.id, :pending, authorize?: false)
+
+  describe "an item write and the go-live claim serialize (#2740)" do
+    test "an add whose release is claimed after the add was built is refused" do
+      # The window: the add read the release as `:open`, the claim committed,
+      # then the add inserted a `:pending` item the worker never saw. The check
+      # now runs inside the add's transaction, under a lock on the release row.
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      late = page()
+
+      on_action_start(:create, KilnCMS.CMS.ReleaseItem, :add, fn ->
+        {:ok, _} = CMS.start_release(rel, %{}, actor: admin)
+      end)
+
+      assert {:error, %Ash.Error.Invalid{} = error} = add(rel, late, admin)
+      assert Exception.message(error) =~ "no longer open for changes"
+      assert reload(rel).state == :publishing
+
+      KilnCMS.DataCase.drain_oban()
+
+      assert reload(rel).state == :published
+      assert pending_on(rel) == []
+
+      # Nothing stranded, so the record is free for the next release.
+      assert {:ok, _} = add(release(admin, %{name: "Next"}), late, admin)
+    end
+
+    test "an item added before the claim is published by it" do
+      admin = user(:admin)
+      rel = release(admin)
+      first = page()
+      last = page()
+      {:ok, _} = add(rel, first, admin)
+      {:ok, _} = add(rel, last, admin)
+
+      {:ok, published} = go_live(rel, admin)
+
+      assert published.state == :published
+      assert reload_page(last).state == :published
+      assert pending_on(rel) == []
+    end
+
+    test "cancel and set_action are refused once the release is claimed" do
+      admin = user(:admin)
+      rel = release(admin)
+      p = page()
+      {:ok, item} = add(rel, p, admin)
+
+      on_action_start(:update, KilnCMS.CMS.ReleaseItem, :cancel, fn ->
+        {:ok, _} = CMS.start_release(rel, %{}, actor: admin)
+      end)
+
+      assert {:error, %Ash.Error.Invalid{}} = CMS.cancel_release_item(item, %{}, actor: admin)
+      # The flip reads the release under the same lock, and finds it claimed.
+      assert {:error, %Ash.Error.Invalid{}} =
+               CMS.set_release_item_action(item, %{action: :unpublish}, actor: admin)
+
+      KilnCMS.DataCase.drain_oban()
+
+      assert reload(rel).state == :published
+      assert reload_page(p).state == :published
+      assert CMS.get_release_item!(item.id, authorize?: false).status == :applied
+    end
+
+    test "a pending item the go-live never read fails the release loudly, not silently" do
+      # The backstop behind the lock: an item that is `:pending` on the release
+      # when the go-live is about to mark it published was never in this run.
+      # Shipping past it would strand it; the release fails as a whole instead.
+      admin = user(:admin)
+      rel = release(admin)
+      p = page()
+      unseen = page()
+      {:ok, _} = add(rel, p, admin)
+      {:ok, claimed} = CMS.start_release(rel, %{}, actor: admin)
+
+      on_action_start(:update, KilnCMS.CMS.ReleaseItem, :mark_applied, fn ->
+        Ash.Seed.seed!(KilnCMS.CMS.ReleaseItem, %{
+          release_id: rel.id,
+          org_id: rel.org_id,
+          content_type: "page",
+          content_id: unseen.id,
+          action: :publish,
+          status: :pending
+        })
+      end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, _} = Releases.publish(claimed)
+      end)
+
+      failed = reload(rel)
+      assert failed.state == :failed
+      assert failed.failure_reason =~ "added after this go-live read its list"
+      assert reload_page(p).state == :draft
+
+      # The retry ships everything, and leaves nothing pending behind.
+      {:ok, reopened} = CMS.reopen_release(failed, %{}, actor: admin)
+      {:ok, published} = go_live(reopened, admin)
+      assert published.state == :published
+      assert pending_on(rel) == []
+    end
+
+    test "an item no longer pending is not applied or skipped by the worker" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, item} = add(rel, page(), admin)
+      {:ok, _} = CMS.cancel_release_item(item, %{}, actor: admin)
+
+      assert stale?(CMS.mark_release_item_applied(item, %{prior_state: :draft}, system()))
+      assert stale?(CMS.mark_release_item_skipped(item, %{prior_state: :draft}, system()))
+      assert CMS.get_release_item!(item.id, authorize?: false).status == :cancelled
+    end
+
+    test "a viewer's add is still Forbidden" do
+      admin = user(:admin)
+      viewer = user(:viewer)
+      rel = release(admin)
+
+      assert {:error, %Ash.Error.Forbidden{}} = add(rel, page(), viewer)
+      assert pending_on(rel) == []
+    end
+  end
+
   describe "release.published event" do
     test "is selectable as a webhook subscription and dispatched on go-live" do
       admin = user(:admin)

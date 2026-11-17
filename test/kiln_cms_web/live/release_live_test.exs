@@ -380,6 +380,86 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
     assert CMS.get_release!(rel.id, authorize?: false).state == :open
   end
 
+  test "a transition from a stale page is refused, reloads and says why (#2745)",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin, "Moved underneath")
+    page = CMS.create_page!(%{title: "Claimed meanwhile", slug: slug()}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    at = DateTime.add(DateTime.utc_now(), 3600)
+    {:ok, scheduled} = CMS.schedule_release(rel, %{scheduled_at: at}, actor: admin)
+
+    {:ok, view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+
+    # The cron claims it after the page was drawn. A claim broadcasts nothing,
+    # so the page still holds the `:scheduled` release.
+    {:ok, _} = CMS.start_release(scheduled, %{}, actor: admin)
+
+    html = render_click(view, "unschedule", %{})
+    assert html =~ "This release changed since you opened it. It&#39;s been reloaded."
+    # Reloaded: the page now shows the claim, not the schedule it was drawn with.
+    assert html =~ "Publishing"
+    refute html =~ "That didn&#39;t work"
+
+    KilnCMS.DataCase.drain_oban()
+    assert CMS.get_release!(rel.id, authorize?: false).state == :published
+  end
+
+  test "deleting from a stale page cannot take a claimed release's items (#2745)",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin, "Claimed meanwhile")
+    page = CMS.create_page!(%{title: "About to go live", slug: slug()}, actor: admin)
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    {:ok, view, _html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+
+    # Claimed by another tab after this page was drawn: the page's release
+    # still says `:open`, which `ReleaseDeletable` would let through.
+    {:ok, _} = CMS.start_release(rel, %{}, actor: admin)
+
+    html = render_click(view, "delete", %{})
+    assert html =~ "This release changed since you opened it."
+    assert CMS.get_release!(rel.id, authorize?: false).state == :publishing
+
+    KilnCMS.DataCase.drain_oban()
+    assert CMS.get_release!(rel.id, authorize?: false).state == :published
+  end
+
+  test "removing an item from a release claimed meanwhile is refused and reloads (#2740)",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin, "Claimed under the editor")
+    page = CMS.create_page!(%{title: "Stays in", slug: slug()}, actor: admin)
+
+    {:ok, item} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    {:ok, view, _html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+    {:ok, _} = CMS.start_release(rel, %{}, actor: admin)
+
+    html = render_click(view, "remove_item", %{"id" => item.id})
+    assert html =~ "This release changed since you opened it."
+    assert CMS.get_release_item!(item.id, authorize?: false).status == :pending
+
+    KilnCMS.DataCase.drain_oban()
+    assert CMS.get_release_item!(item.id, authorize?: false).status == :applied
+  end
+
   test "an empty release is not offered a go-live that would ship nothing", %{conn: conn} do
     admin = authed_user(:admin)
     rel = release(admin)

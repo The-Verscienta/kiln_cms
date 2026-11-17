@@ -113,7 +113,9 @@ defmodule KilnCMS.CMS.ReleaseItem do
       # Without it, "add to release" is a hole straight through the type scope,
       # and the release preview link renders whatever went through it.
       validate KilnCMS.CMS.Validations.EditableReleaseContent
-      validate KilnCMS.CMS.Validations.ReleaseOpenForEdit
+      # Inside the write's transaction, with the release row locked, so a
+      # go-live claim can't commit between the check and the insert (#2740).
+      validate KilnCMS.CMS.Validations.ReleaseOpenForEdit, before_action?: true
       # A stale/bogus content_id would otherwise sit :pending until go-live,
       # where a single unresolvable item aborts the whole atomic release
       # (`Releases.apply_all/4` rolls back on the first `fetch_record` miss).
@@ -135,7 +137,7 @@ defmodule KilnCMS.CMS.ReleaseItem do
       # writes another release can legitimately claim the record and the re-add
       # fails — leaving the item out of the release an editor was only trying to
       # correct. One update never drops the reservation.
-      validate KilnCMS.CMS.Validations.ReleaseOpenForEdit
+      validate KilnCMS.CMS.Validations.ReleaseOpenForEdit, before_action?: true
 
       # Only while the item is still a plan. An `:applied` item's action is the
       # historical record of what the release DID, and rollback reads its
@@ -155,7 +157,7 @@ defmodule KilnCMS.CMS.ReleaseItem do
       accept []
       require_atomic? false
 
-      validate KilnCMS.CMS.Validations.ReleaseOpenForEdit
+      validate KilnCMS.CMS.Validations.ReleaseOpenForEdit, before_action?: true
       change set_attribute(:status, :cancelled)
     end
 
@@ -170,6 +172,11 @@ defmodule KilnCMS.CMS.ReleaseItem do
       argument :prior_state, :atom
       argument :prior_version_id, :uuid
 
+      # Compare-and-swap (#2740): only a still-pending item is applied. The
+      # release-row lock in `ReleaseOpenForEdit` already refuses a cancel once
+      # the release is claimed; this keeps the item row honest on its own. A
+      # miss is a `StaleRecord`, which aborts the go-live as a whole.
+      change filter(expr(status == :pending))
       change set_attribute(:status, :applied)
       change set_attribute(:prior_state, arg(:prior_state))
       change set_attribute(:prior_version_id, arg(:prior_version_id))
@@ -183,6 +190,7 @@ defmodule KilnCMS.CMS.ReleaseItem do
 
       argument :prior_state, :atom
 
+      change filter(expr(status == :pending))
       change set_attribute(:status, :skipped)
       change set_attribute(:prior_state, arg(:prior_state))
       change set_attribute(:applied_at, &DateTime.utc_now/0)

@@ -24938,6 +24938,12 @@ msgstr "Cet enregistrement n'est pas accepté par %{field} ; les enregistrements
 msgid "This record was updated by someone else. Please reload and try again."
 msgstr "Cet enregistrement a été modifié par quelqu’un d’autre. Rechargez et réessayez."
 
+#: lib/kiln_cms_web/live/calendar_live.ex
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "This release changed since you opened it. It's been reloaded."
+msgstr "Ce lancement a changé depuis que vous l’avez ouvert. Il a été rechargé."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "This release did not ship. Nothing went live."

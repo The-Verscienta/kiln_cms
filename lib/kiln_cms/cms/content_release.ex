@@ -211,6 +211,12 @@ defmodule KilnCMS.CMS.ContentRelease do
       require_atomic? false
 
       validate present(:scheduled_at)
+      # Compare-and-swap (#2745), like every transition here: the state
+      # machine judges only the struct it was handed, so a console page loaded
+      # while the release was `:scheduled` would otherwise write `:scheduled`
+      # and a new date over a release the cron has since published — and the
+      # cron would then ship it a second time. See `:start`.
+      change filter(expr(state in [:open, :scheduled]))
       change transition_state(:scheduled)
       change KilnCMS.CMS.Changes.StampReleaseTrigger
     end
@@ -220,6 +226,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      change filter(expr(state == :scheduled))
       change set_attribute(:scheduled_at, nil)
       change transition_state(:open)
     end
@@ -247,6 +254,11 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      # The worker's outcome writes are compare-and-swaps too (#2745): an
+      # admin who abandoned the claim while the worker ran has already said
+      # what the release is, and a stale `:publishing` struct must not
+      # overwrite that. `KilnCMS.CMS.Releases` handles the miss.
+      change filter(expr(state == :publishing))
       change transition_state(:published)
       change set_attribute(:published_at, &DateTime.utc_now/0)
       change set_attribute(:failure_reason, nil)
@@ -261,6 +273,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       argument :failure_reason, :string
       argument :failed_item_id, :uuid
 
+      change filter(expr(state == :publishing))
       change set_attribute(:failure_reason, arg(:failure_reason))
       change set_attribute(:failed_item_id, arg(:failed_item_id))
       change transition_state(:failed)
@@ -271,6 +284,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      change filter(expr(state == :failed))
       change transition_state(:open)
       change set_attribute(:failure_reason, nil)
       change set_attribute(:failed_item_id, nil)
@@ -325,6 +339,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      change filter(expr(state == :rolling_back))
       change transition_state(:rolled_back)
       change set_attribute(:rolled_back_at, &DateTime.utc_now/0)
       change set_attribute(:failure_reason, nil)
@@ -339,6 +354,7 @@ defmodule KilnCMS.CMS.ContentRelease do
       argument :failure_reason, :string
       argument :failed_item_id, :uuid
 
+      change filter(expr(state == :rolling_back))
       change set_attribute(:failure_reason, arg(:failure_reason))
       change set_attribute(:failed_item_id, arg(:failed_item_id))
       change transition_state(:published)
@@ -349,6 +365,9 @@ defmodule KilnCMS.CMS.ContentRelease do
       accept []
       require_atomic? false
 
+      # The `transitions` block's from-states, in the UPDATE's WHERE clause: a
+      # stale page must not archive a release a worker now owns.
+      change filter(expr(state in [:open, :scheduled, :failed, :published, :rolled_back]))
       change transition_state(:archived)
       change KilnCMS.CMS.Changes.CancelPendingReleaseItems
     end
@@ -358,6 +377,11 @@ defmodule KilnCMS.CMS.ContentRelease do
       primary? true
       require_atomic? false
       validate KilnCMS.CMS.Validations.ReleaseDeletable
+
+      # `ReleaseDeletable` judges the struct; this judges the row (#2745). A
+      # page loaded while the release was open must not delete it once a worker
+      # has claimed or shipped it — its items are rollback's only record.
+      change filter(expr(state not in [:publishing, :rolling_back] and is_nil(published_at)))
     end
 
     read :editable do

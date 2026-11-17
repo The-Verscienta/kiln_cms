@@ -648,6 +648,42 @@ defmodule KilnCMSWeb.CalendarLiveTest do
                ~T[09:30:00]
     end
 
+    # `:schedule` is a compare-and-swap (#2745): a go-live claimed after the
+    # grid loaded is refused, and said as that, not as the state machine's
+    # "Attempted to change state …" text.
+    test "a release claimed since the grid loaded is not rescheduled", %{conn: conn} do
+      admin = authed_admin()
+      day = soon()
+      at = DateTime.new!(day, ~T[09:00:00])
+
+      release =
+        CMS.create_release!(%{name: "Claimed launch #{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+        |> CMS.schedule_release!(%{scheduled_at: at}, actor: admin)
+
+      {:ok, lv, _html} = open_calendar_on(conn, admin, day, %{title: release.name})
+
+      {:ok, _} = CMS.start_release(release, %{}, actor: admin)
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => release.id,
+          "type" => "release",
+          "kind" => "release_scheduled",
+          "date" => Date.to_iso8601(Date.add(day, 1))
+        })
+
+      assert html =~ "This release changed since you opened it."
+      refute html =~ "Attempted to change state"
+
+      claimed = CMS.get_release!(release.id, authorize?: false)
+      assert claimed.state == :publishing
+      assert claimed.scheduled_at == release.scheduled_at
+
+      KilnCMS.DataCase.drain_oban()
+    end
+
     test "moves an embargo end, whatever its expiry action", %{conn: conn} do
       admin = authed_admin()
       day = soon()

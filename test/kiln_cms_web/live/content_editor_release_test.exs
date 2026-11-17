@@ -201,6 +201,30 @@ defmodule KilnCMSWeb.ContentEditorReleaseTest do
     assert [] = CMS.list_release_items_for!(mine.id, authorize?: false)
   end
 
+  # The add is checked under a lock on the release row (#2740), so a release
+  # claimed for go-live after the panel was drawn refuses it, and the panel
+  # re-reads rather than offering the same release again.
+  test "an add to a release that went live meanwhile is refused and the picker refreshed",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+    editor = authed_user(:editor)
+    rel = CMS.create_release!(%{name: "Going live meanwhile"}, actor: admin)
+    page = page!(editor)
+
+    {:ok, lv, html} = open(conn, editor, page)
+    assert html =~ "Going live meanwhile"
+
+    {:ok, _} = CMS.start_release(rel, %{}, actor: admin)
+
+    html = render_click(lv, "release_add")
+
+    assert html =~ "no longer open for changes"
+    assert html =~ "No open releases"
+    assert [] = CMS.list_release_items_for!(rel.id, authorize?: false)
+
+    KilnCMS.DataCase.drain_oban()
+  end
+
   test "a type-scoped editor never reaches the panel for out-of-scope content", %{conn: conn} do
     # Containment is one level earlier than the panel: granular RBAC (#332)
     # already hides the record from this editor's read, so the editor route

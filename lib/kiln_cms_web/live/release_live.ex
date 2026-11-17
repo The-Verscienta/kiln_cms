@@ -295,8 +295,10 @@ defmodule KilnCMSWeb.ReleaseLive do
          |> put_flash(:info, gettext("Release deleted."))
          |> push_navigate(to: ~p"/editor/releases")}
 
-      {:error, _error} ->
-        {:noreply, put_flash(socket, :error, gettext("That release can't be deleted."))}
+      {:error, error} ->
+        if Releases.stale?(error),
+          do: {:noreply, changed_since_opened(socket)},
+          else: {:noreply, put_flash(socket, :error, gettext("That release can't be deleted."))}
     end
   end
 
@@ -312,7 +314,7 @@ defmodule KilnCMSWeb.ReleaseLive do
        |> reload()
        |> put_flash(:info, gettext("Change updated."))}
     else
-      _ -> {:noreply, put_flash(socket, :error, gettext("Couldn't change that item."))}
+      error -> {:noreply, item_refused(socket, error, gettext("Couldn't change that item."))}
     end
   end
 
@@ -329,7 +331,7 @@ defmodule KilnCMSWeb.ReleaseLive do
        |> reload()
        |> put_flash(:info, gettext("Removed from the release."))}
     else
-      _ -> {:noreply, put_flash(socket, :error, gettext("Couldn't remove that item."))}
+      error -> {:noreply, item_refused(socket, error, gettext("Couldn't remove that item."))}
     end
   end
 
@@ -377,8 +379,49 @@ defmodule KilnCMSWeb.ReleaseLive do
     {:noreply, put_flash(socket, :error, gettext("Shipping a release needs admin access."))}
   end
 
-  defp respond({:error, _error}, socket, _message) do
-    {:noreply, put_flash(socket, :error, gettext("That didn't work — try again."))}
+  defp respond({:error, error}, socket, _message) do
+    if Releases.stale?(error),
+      do: {:noreply, changed_since_opened(socket)},
+      else: {:noreply, put_flash(socket, :error, gettext("That didn't work — try again."))}
+  end
+
+  # An item write refused because the release moved since this page was drawn
+  # (#2740: it is checked under a lock on the release row now, so a go-live
+  # claimed meanwhile refuses it) is the same story as a stale transition, and
+  # gets the same answer. Any other refusal keeps its own message.
+  defp item_refused(socket, error, message) do
+    if Releases.stale?(error) or release_moved?(socket),
+      do: changed_since_opened(socket),
+      else: put_flash(socket, :error, message)
+  end
+
+  defp release_moved?(socket) do
+    case CMS.get_release(socket.assigns.release.id, act(socket)) do
+      {:ok, fresh} -> fresh.state != socket.assigns.release.state
+      _gone -> true
+    end
+  end
+
+  # Every transition is a compare-and-swap on the row (#2745), so a page held
+  # open while the cron, the worker or another admin moved the release is
+  # refused rather than allowed to write over them. "Try again" would be the
+  # wrong advice — the same click on the same stale page is refused again — so
+  # the page re-reads the release and says why it changed under the editor.
+  defp changed_since_opened(socket) do
+    case CMS.get_release(socket.assigns.release.id, act(socket)) do
+      {:ok, fresh} ->
+        socket
+        |> load_release(fresh)
+        |> put_flash(
+          :error,
+          gettext("This release changed since you opened it. It's been reloaded.")
+        )
+
+      _gone ->
+        socket
+        |> put_flash(:error, gettext("That release no longer exists."))
+        |> push_navigate(to: ~p"/editor/releases")
+    end
   end
 
   # The go-live worker runs off-request, so the record we just claimed is
