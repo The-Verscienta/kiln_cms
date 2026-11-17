@@ -633,16 +633,17 @@ defmodule KilnCMS.Notifications.QueuedMailTest do
 
   describe "a job holding neither shape" do
     # A legacy job whose keys `finishing/3` already dropped, re-queued by
-    # Lifeline: the mail went out, so it cancels rather than crashing.
-    test "both workers cancel it and send nothing" do
-      assert {:cancel, _} =
+    # Lifeline: the mail went out, so it completes (not cancels: a cancelled
+    # mail job reads as a delivery failure on /editor/mail) and sends nothing.
+    test "both workers complete it and send nothing" do
+      assert :ok =
                perform_job(WorkflowMailWorker, %{
                  "event" => "submitted_for_review",
                  "kind" => "page",
                  "id" => Ecto.UUID.generate()
                })
 
-      assert {:cancel, _} =
+      assert :ok =
                perform_job(TaskMailWorker, %{
                  "kind" => "assigned",
                  "task_id" => Ecto.UUID.generate()

@@ -109,7 +109,11 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   # (`PrivateArgs.finishing/3` forgets before Oban acks the job, so a node
   # lost in between leaves it executing without them, and Lifeline re-queues
   # it). The mail went out; nothing is left to send.
-  def perform(%Oban.Job{}), do: {:cancel, "notification no longer in the job"}
+  def perform(%Oban.Job{id: id}) do
+    # `:ok`, not `{:cancel, _}`: see `WorkflowMailWorker`'s catch-all.
+    Logger.info("task mail job #{id}: notification no longer in the job, nothing sent")
+    :ok
+  end
 
   defp deliver_assigned(args, %Oban.Job{id: id}) do
     args

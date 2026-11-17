@@ -167,7 +167,12 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   # (`PrivateArgs.finishing/3` forgets before Oban acks the job, so a node
   # lost in between leaves it executing without them, and Lifeline re-queues
   # it). The mail went out; nothing is left to send.
-  def perform(%Oban.Job{}), do: {:cancel, "notification no longer in the job"}
+  def perform(%Oban.Job{id: id}) do
+    # `:ok`, not `{:cancel, _}`: a cancelled `mail` job is listed as a delivery
+    # failure on /editor/mail, and nothing failed here.
+    Logger.info("workflow mail job #{id}: notification no longer in the job, nothing sent")
+    :ok
+  end
 
   defp deliver(args, %Oban.Job{id: id}) do
     args
@@ -211,9 +216,11 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
       {:error, error} -> {:error, error}
     end
   rescue
-    # `ContentTypes.get_record/3` raises for a type the registry cannot
-    # resolve to a resource (see `TaskMailWorker.content_title/3`).
-    _unknown_type -> {:skip, :content_gone}
+    # A type the registry knows but can no longer resolve to a compiled
+    # interface raises `ArgumentError` (see `TaskMailWorker.content_title/3`).
+    # Only that: any other raise fails the job, which retries, as an error
+    # tuple does above.
+    _unknown_type in ArgumentError -> {:skip, :content_gone}
   end
 
   # The comment's excerpt now, read as the notifier's system actor, which
