@@ -169,7 +169,13 @@ raising "invalid input syntax" in the middle of a report. For dates use
 - **References are `{id, type}` only.** The stored title and slug are not
   exposed, because they were captured whatever state the target was in and
   can name a draft. The target ids are visible, and a view does not check
-  that the target is public. Join `<table>.id` to resolve a title.
+  that the target is public. Join `<table>.id` to resolve a title. This holds
+  for a reference nested inside a group's rows or a flexible field's items
+  too: those two fields are exposed as raw JSON, with every reference
+  snapshot in them cut to `{id, type}`, at any depth. A snapshot is an object
+  with `id`, `type`, `slug` and `title` and no `url` (media) and no `_id` /
+  `_type` (an item); the cut is done by a SQL function,
+  `public.kiln_reporting_strip_snapshots`, that the views call as their owner.
 - **Media is exposed as stored.** A media field carries the snapshot a
   published page already links to: `id`, `url`, `alt`, `width`, `height`,
   `mime_type`, `focal` and `variants` with their urls.

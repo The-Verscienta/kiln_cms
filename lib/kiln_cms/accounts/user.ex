@@ -197,6 +197,7 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_comment,
       :notify_on_registration,
       :notify_on_security_alert,
+      :notify_on_webhook_failure,
       :nav_preset,
       :status_marks,
       :content_list_columns
@@ -314,7 +315,8 @@ defmodule KilnCMS.Accounts.User do
         :notify_on_return_to_draft,
         :notify_on_comment,
         :notify_on_registration,
-        :notify_on_security_alert
+        :notify_on_security_alert,
+        :notify_on_webhook_failure
       ]
 
       # The validation below compares the actor with the row being changed.
@@ -1810,6 +1812,16 @@ defmodule KilnCMS.Accounts.User do
       public? true
     end
 
+    # Webhook health: email me when a webhook on a site I administer stops
+    # getting its deliveries through, or is switched off for it
+    # (`KilnCMS.Webhooks.HealthNotice`). Mutes the email only — the bell row is
+    # always written. One flag for every site the account administers.
+    attribute :notify_on_webhook_failure, :boolean do
+      default true
+      allow_nil? false
+      public? true
+    end
+
     # How much of the console the sidebar shows (`KilnCMSWeb.ConsoleNav.sidebar/3`):
     # the daily author screens, or every screen. Per user and server-side, so it
     # follows them across devices and the first paint is already right.
@@ -1928,8 +1940,14 @@ defmodule KilnCMS.Accounts.User do
 
     # The `api_key` strategy trusts this relationship to be *valid* keys only, so
     # revoked/expired keys are filtered out here (not at sign-in time).
+    #
+    # An erased account's API key never signs in, revoked or not: an account
+    # erased before erasure revoked keys can still hold live ones
+    # (`ErasureBackfill` revokes them). Filtering here, rather
+    # than on the sign-in read, makes such a key take the same path as a
+    # revoked one, so the refusal cannot be told apart from any other.
     has_many :valid_api_keys, KilnCMS.Accounts.ApiKey do
-      filter expr(is_nil(revoked_at) and expires_at > now())
+      filter expr(is_nil(revoked_at) and expires_at > now() and is_nil(user.anonymized_at))
     end
 
     # Org memberships (epic #336): which organizations this (global) user belongs

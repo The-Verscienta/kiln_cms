@@ -729,6 +729,44 @@ endpoint leaves it auto-disabled, and so does an edit that leaves **Active**
 unticked (fixing the URL before you ping it, say). Tick **Active** to turn it
 back on. To stop an auto-disabled endpoint receiving retractions, delete it.
 
+### Failure alerts
+
+The site's admins are told when an endpoint stops getting through, at two
+points:
+
+- **"A webhook is failing"**: the first delivery in a row that exhausts its
+  retries (`consecutive_failures` goes from 0 to 1). Content changes may not
+  be reaching the receiver from this point on.
+- **"A webhook was switched off"**: the failure that auto-disables it.
+
+Each one is a notice in the console bell and `/editor/inbox`, linking to
+`/editor/webhooks`, and an email to the same effect. The failures in between
+raise nothing. While a notice about an endpoint is still unread, another of
+the same kind is not sent, so a flapping receiver is one notice and one email,
+not one per publish. Opening `/editor/webhooks` marks your notices about the
+site's endpoints read, so the next failure is news again. A successful
+delivery resets the count, so a failure after it is a new "failing" notice.
+
+**Who is told:** a standing platform admin, and anyone whose active
+membership on the site is admin. A temporary platform admin is not, nor is
+an erased account. The notice and the email name the endpoint by its
+[masked URL](#see-or-change-an-endpoint-url), and never
+carry the delivery's error: open the webhooks page for that.
+
+**Turn the email off.** Open **Your settings** (`/editor/settings`), and under
+**Email notifications** untick **Webhook failures — email me when a webhook
+on a site I administer stops delivering, or is switched off**, then click
+**Save preferences**. This mutes the email only: the bell notice still
+appears. The switch is one for your whole account, across every site you
+administer.
+
+Retractions are not part of this: they never count toward auto-disable, and
+a lost one has its own notice (below).
+
+**If new content stops appearing on a site that a webhook rebuilds**, check
+`/editor/webhooks` for a **Disabled** badge first. Fix the receiver, tick
+**Active**, send a **Ping**, and **Redeliver** the deliveries it missed.
+
 ### Retractions are exempt
 
 Three verbs take a document *off* a consumer: `<type>.unpublished`,

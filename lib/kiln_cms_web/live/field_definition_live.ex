@@ -78,6 +78,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.DynamicDefaults
+  alias KilnCMS.CMS.Errors.SectionLayoutNotKept
   alias KilnCMS.CMS.FieldConstraints
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldSection
@@ -283,18 +284,20 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     conds = ConditionsBuilder.apply_params(old.conds, params["conditions"], old.cond_siblings)
 
+    # A field renamed out of a section it was the last of takes the
+    # section's layout to the new name (#2652): the admin renamed the
+    # section, one field at a time. The write decides it from a fresh read in
+    # its own transaction (`Changes.KeepSectionLayouts`), not from this page.
     submitted =
       params
       |> normalize(nil, old.form.source.data, socket.assigns.selection_catalog)
       |> put_rules(conds, params["field_type"], old.cond_siblings)
+      |> Map.put("carry_section_layout?", "true")
 
     case AshPhoenix.Form.submit(old.form, params: submitted) do
-      {:ok, definition} ->
-        before = Enum.find(socket.assigns.definitions, &(&1.id == definition.id))
-
+      {:ok, _definition} ->
         {:noreply,
          socket
-         |> carry_section_layout(before, definition)
          |> assign(:edit, nil)
          |> load_definitions()
          |> put_flash(:info, gettext("Saved."))}
@@ -303,7 +306,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         {:noreply,
          socket
          |> assign(:edit, %{old | form: form, builder: builder, conds: conds})
-         |> assign_edit_builder()}
+         |> assign_edit_builder()
+         |> flash_layout_not_kept(form)}
     end
   end
 
@@ -323,7 +327,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
            :ok <- refuse_if_read(definition, org),
            :ok <- CMS.destroy_field_definition(definition, actor: actor, tenant: org) do
         socket
-        |> drop_section_layout(definition)
         |> load_definitions()
         |> put_flash(:info, gettext("Field deleted."))
       else
@@ -757,75 +760,41 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   end
 
   defp write_section_layout(rows, owner, name, display, initially, opts) do
-    case {Enum.find(rows, &(&1.name == name)), display, initially} do
-      {nil, :accordion, :auto} ->
+    layout = %{display: display, initially: initially}
+
+    case {Enum.find(rows, &(&1.name == name)), FieldSection.default?(layout)} do
+      {nil, true} ->
         :ok
 
-      {nil, display, initially} ->
+      {nil, false} ->
         owner
         |> owner_attrs()
-        |> Map.merge(%{name: name, display: display, initially: initially})
+        |> Map.merge(Map.put(layout, :name, name))
         |> CMS.create_field_section(opts)
 
-      {row, :accordion, :auto} ->
+      {row, true} ->
         CMS.destroy_field_section(row, opts)
 
-      {row, display, initially} ->
-        CMS.update_field_section(row, %{display: display, initially: initially}, opts)
+      {row, false} ->
+        CMS.update_field_section(row, layout, opts)
     end
   end
 
-  # A field renamed out of a section it was the last field of takes the
-  # section's layout to its new name, unless that name already has one: the
-  # admin renamed the section, one field at a time.
-  defp carry_section_layout(socket, %{section: old} = before, %{section: new})
-       when is_binary(old) and is_binary(new) and old != new do
-    owner = scope_key(before)
-    rows = Map.get(socket.assigns.field_sections, owner, [])
-    row = Enum.find(rows, &(&1.name == old))
+  # The field write rolled back because its section layout could not be kept
+  # in step (`Errors.SectionLayoutNotKept`): the form shows no field error
+  # for it, so say what failed.
+  defp flash_layout_not_kept(socket, form) do
+    not_kept? =
+      form
+      |> AshPhoenix.Form.raw_errors(for_path: :all)
+      |> Map.values()
+      |> List.flatten()
+      |> Enum.any?(&match?(%SectionLayoutNotKept{}, &1))
 
-    left_behind? =
-      Enum.any?(
-        socket.assigns.definitions,
-        &(&1.id != before.id and scope_key(&1) == owner and &1.section == old)
-      )
-
-    if row && !left_behind? && !Enum.any?(rows, &(&1.name == new)) do
-      opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
-
-      carried =
-        with {:ok, _} <-
-               owner
-               |> owner_attrs()
-               |> Map.merge(%{name: new, display: row.display, initially: row.initially})
-               |> CMS.create_field_section(opts) do
-          CMS.destroy_field_section(row, opts)
-        end
-
-      if written?(carried),
-        do: socket,
-        else: put_flash(socket, :error, gettext("Couldn't save the section layout."))
-    else
-      socket
-    end
+    if not_kept?,
+      do: put_flash(socket, :error, gettext("Couldn't save the section layout.")),
+      else: socket
   end
-
-  defp carry_section_layout(socket, _before, _after), do: socket
-
-  # The last field of a section takes the section's layout with it: nothing
-  # is left for it to lay out, and the export would otherwise carry it.
-  defp drop_section_layout(socket, %{section: section} = definition) when is_binary(section) do
-    opts = [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
-
-    with owner when not is_nil(owner) <- SectionLayouts.owner_of(definition),
-         {:error, _error} <- SectionLayouts.prune(owner, [only: [section]] ++ opts) do
-      put_flash(socket, :error, gettext("Couldn't save the section layout."))
-    else
-      _pruned -> socket
-    end
-  end
-
-  defp drop_section_layout(socket, _definition), do: socket
 
   defp written?(:ok), do: true
   defp written?({:ok, _}), do: true
@@ -1537,7 +1506,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         socket
         |> assign(:delete_confirm, nil)
         |> assign(:edit, nil)
-        |> drop_section_layout(definition)
         |> load_definitions()
         |> put_flash(
           :info,

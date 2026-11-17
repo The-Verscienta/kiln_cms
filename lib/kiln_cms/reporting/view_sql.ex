@@ -32,6 +32,10 @@ defmodule KilnCMS.Reporting.ViewSql do
       keys on the field's type and also on the snapshot's shape, so a snapshot
       left under a field that was retyped is cut down too. The target ids are
       still visible; a view does not check whether the target is public.
+      The same holds for a reference snapshot nested in a `:group` field's
+      rows or a `:flexible` field's items (#2282): every snapshot-shaped
+      object in any other field's value, at any depth, is cut to
+      `{"id", "type"}` by `strip_function/0`.
     * **Media fields** pass through as stored: the `KilnCMS.Media.Snapshot`
       shape (`id`, `url`, `alt`, `width`, `height`, `mime_type`, `focal`,
       `variants` with their urls), which is the same data a published page
@@ -49,9 +53,17 @@ defmodule KilnCMS.Reporting.ViewSql do
 
   @schema "kiln_reporting_v1"
 
+  # `ReferenceSnapshots.max_depth/0`, written out: this module is read while
+  # the content resources compile, so it cannot call a resource. A test pins it.
+  @strip_depth 8
+
   # Every column pins a base column (Postgres refuses to alter or drop one a
   # view references): `kiln.migrations.check` reads this list.
   @core_columns ~w(id org_id title slug locale audience state published_at inserted_at updated_at)
+
+  @doc "How many levels the strip helper descends; equals `ReferenceSnapshots.max_depth/0`."
+  @spec strip_depth() :: pos_integer()
+  def strip_depth, do: @strip_depth
 
   @doc "The schema the views live in."
   @spec schema() :: String.t()
@@ -142,28 +154,61 @@ defmodule KilnCMS.Reporting.ViewSql do
     do: " CROSS JOIN LATERAL (SELECT t.custom_fields -> fd.name AS v) val"
 
   @snapshot_keys "ARRAY['id', 'type', 'slug', 'title']"
+  @strip_fn "public.kiln_reporting_strip_snapshots"
+
+  @doc """
+  The helper the views call on a value that is not a reference field's: it cuts
+  every reference snapshot found at any depth (inside a group's rows or a
+  flexible field's items, to the same depth the snapshot walks reach) down to
+  `{id, type}`. A snapshot is an object with `id`, `type`, `slug` and `title`
+  and no `url` (a media snapshot) and no `_id` / `_type` (an item). It is
+  schema-qualified and recursive, so the reporting role's `search_path` never
+  matters; the views run it as their owner.
+  """
+  @spec strip_function() :: String.t()
+  def strip_function do
+    "CREATE OR REPLACE FUNCTION #{@strip_fn}(v jsonb, depth integer) RETURNS jsonb " <>
+      "LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $fn$ BEGIN " <>
+      "IF depth <= 0 THEN RETURN v; END IF; " <>
+      "IF jsonb_typeof(v) = 'object' THEN " <>
+      "IF v ?& #{@snapshot_keys} AND NOT v ? 'url' AND NOT v ? '_id' AND NOT v ? '_type' THEN " <>
+      "RETURN jsonb_build_object('id', v -> 'id', 'type', v -> 'type'); END IF; " <>
+      "RETURN COALESCE((SELECT jsonb_object_agg(e.key, #{@strip_fn}(e.value, depth - 1)) " <>
+      "FROM jsonb_each(v) AS e), '{}'::jsonb); END IF; " <>
+      "IF jsonb_typeof(v) = 'array' THEN " <>
+      "RETURN COALESCE((SELECT jsonb_agg(#{@strip_fn}(e.x, depth - 1) ORDER BY e.n) " <>
+      "FROM jsonb_array_elements(v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb); END IF; " <>
+      "RETURN v; END $fn$"
+  end
+
+  @doc "The no-op `down` of `strip_function/0`: the views that call it are removed one by one."
+  @spec keep_function() :: String.t()
+  def keep_function, do: "SELECT 1"
 
   # The stored `:reference` snapshot is `{id, type, slug, title}`, taken
   # whatever state the target was in: its slug and title can name a draft. A
   # view keeps `{id, type}` only. A reference field's objects are cut down
-  # whatever their shape; for any other field only a value shaped like a
-  # snapshot is (the leftover of a retype), and a media snapshot, which has
-  # a `url`, is not one. Every branch is guarded by `jsonb_typeof`, so a value
-  # of the wrong type passes through instead of raising.
+  # whatever their shape. Any other value that holds a snapshot-shaped object
+  # at any depth (the leftover of a retype, or a reference inside a group's
+  # rows or a flexible field's items) goes through `strip_function/0`; a media
+  # snapshot, which has a `url`, is not one. Every branch is guarded by
+  # `jsonb_typeof`, so a value of the wrong type passes through instead of
+  # raising.
   defp projected do
     ref = "fd.field_type::text = 'reference'"
 
     "CASE " <>
-      "WHEN jsonb_typeof(val.v) = 'object' THEN #{id_and_type("val.v", ref)} " <>
-      "WHEN jsonb_typeof(val.v) = 'array' AND (#{ref} OR val.v @? '$[*].slug') THEN " <>
-      "COALESCE((SELECT jsonb_agg(#{id_and_type("e.x", ref)} ORDER BY e.n) " <>
+      "WHEN #{ref} AND jsonb_typeof(val.v) = 'object' THEN #{id_and_type("val.v")} " <>
+      "WHEN #{ref} AND jsonb_typeof(val.v) = 'array' THEN " <>
+      "COALESCE((SELECT jsonb_agg(#{id_and_type("e.x")} ORDER BY e.n) " <>
       "FROM jsonb_array_elements(val.v) WITH ORDINALITY AS e(x, n)), '[]'::jsonb) " <>
+      "WHEN jsonb_typeof(val.v) IN ('object', 'array') AND val.v @? '$.**.slug' THEN " <>
+      "#{@strip_fn}(val.v, #{@strip_depth}) " <>
       "ELSE val.v END"
   end
 
-  defp id_and_type(x, ref) do
-    "CASE WHEN jsonb_typeof(#{x}) = 'object' AND (#{ref} OR " <>
-      "(#{x} ?& #{@snapshot_keys} AND NOT #{x} ? 'url')) " <>
+  defp id_and_type(x) do
+    "CASE WHEN jsonb_typeof(#{x}) = 'object' " <>
       "THEN jsonb_build_object('id', #{x} -> 'id', 'type', #{x} -> 'type') ELSE #{x} END"
   end
 

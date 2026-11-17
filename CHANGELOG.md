@@ -102,6 +102,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Copy the new `scripts/backup.sh` and `scripts/restore.sh` to every host. `RESTORE_REQUIRE_CHECKSUM=1` now also makes `restore.sh db` and `drill` refuse a dump with no `kiln-db-<stamp>.sha256` (an old one, or a renamed one). No migration; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#backup-script-hardening-upgrade))
 
+- **Run `mix ash.migrate` (new `users.notify_on_webhook_failure`, default `true`). Rolling back is safe; 1.10 shows the new webhook notices as a neutral line.**
+  ([long form](docs/changelog/unreleased.md#webhook-failure-alerts-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -109,6 +112,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **`mix kiln.staging.scrub` and `Release.scrub_staging/0` now refuse, changing nothing, while an overlay or plugin domain owns a non-content table with no `staging_scrub/0` entry: add `{:purge, R}`, `{:rewrite, R, set: [...]}` or `{:keep, R, "reason"}` for each and require `{:kiln_plugin, "~> 1.5"}`.**
   ([long form](docs/changelog/unreleased.md#plugin-staging-scrub-refuses-undeclared))
+
+- **Field sync import refuses a non-default `"sections"` entry no field carries (a hand-edited file that imported before now fails, nothing written). An entry at the default deletes the stored layout, and a section the import empties loses its layout, without `--prune`.**
+  ([long form](docs/changelog/unreleased.md#field-sync-section-entries-stricter))
 
 ### Known issues
 
@@ -119,6 +125,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#automation-payload-plain-in-pending-jobs))
 
 ### Added
+
+- **Site admins are told when a webhook stops getting through: a bell notice and an email on the first delivery that exhausts its retries, and again when the endpoint is auto-disabled. The email can be turned off under Your settings.**
+  ([long form](docs/changelog/unreleased.md#webhook-failure-alerts))
 
 - **A new custom field type, Flexible content: an ordered list of items of different kinds (a hero, a quote), defined under Fields (Item types panel) and edited as cards in the content editor. Field-sync files now carry `item_types`, which 1.10 refuses.**
   ([long form](docs/changelog/unreleased.md#flexible-content))
@@ -201,11 +210,16 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The `kiln_reporting_v1` views show a reference inside a group row or a flexible item as `{id, type}` only, never the target's title or slug.** Hardening ahead of reference sub-fields inside items; a migration re-creates the six views with the same columns. ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282))
+
 - **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
   ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020) · [long form](docs/changelog/unreleased.md#staging-up-stops-on-a-failed-copy))
 
 - **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
   ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))
+
+- **A section's layout is deleted with its last field by every route (rename, cleared section, delete, join graduation, sync), so a later field no longer inherits it; a section rename in the fields admin decides from the fields as they are at Save.**
+  ([#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) · [long form](docs/changelog/unreleased.md#section-layouts-kept-in-step))
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
   ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
@@ -287,6 +301,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A `.kiln-dir-id.<uuid>.tmp` left by a node stopped mid-publish is removed after an hour, by the next in-app backup and by `backup.sh prune`.**
   ([#2849](https://github.com/The-Verscienta/kiln_cms/issues/2849) · [long form](docs/changelog/unreleased.md#backup-dir-id-temp-sweep))
+
+- **A deferred A/V strip retries a passing read failure (a timeout, a `5xx`) instead of leaving the upload for the quarantine reaper, which now deletes a file only after purging its row. The 1.10.0 known issue #2835 could not occur; nothing to repair.**
+  ([long form](docs/changelog/unreleased.md#av-strip-transient-read-retries))
 
 ### Security
 

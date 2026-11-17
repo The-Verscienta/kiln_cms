@@ -75,6 +75,54 @@ defmodule KilnCMSWeb.WebhookLiveTest do
     created.id
   end
 
+  describe "webhook health notices" do
+    defp health_notices(user) do
+      user
+      |> KilnCMS.Notifications.recent_unread(KilnCMS.Accounts.default_org_id(), 50)
+      |> Enum.filter(&(&1.event in KilnCMS.Webhooks.HealthNotice.events()))
+    end
+
+    test "opening the page marks the admin's unread notices read", %{conn: conn} do
+      admin = authed_user(:admin)
+      endpoint = seed_endpoint()
+
+      :ok = KilnCMS.Webhooks.HealthNotice.surface(endpoint, %{endpoint | consecutive_failures: 1})
+
+      :ok =
+        KilnCMS.Webhooks.HealthNotice.surface(endpoint, %{
+          endpoint
+          | active: false,
+            consecutive_failures: 10
+        })
+
+      assert length(health_notices(admin)) == 2
+
+      {:ok, _lv, _html} = conn |> log_in(admin) |> live(~p"/editor/webhooks")
+
+      assert health_notices(admin) == []
+    end
+
+    test "the settings page offers the email switch to an admin", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/settings")
+      assert html =~ "Webhook failures"
+
+      lv
+      |> form("#notification-prefs-form", user: %{"notify_on_webhook_failure" => "false"})
+      |> render_submit()
+
+      refute KilnCMS.Accounts.get_user!(admin.id, authorize?: false).notify_on_webhook_failure
+    end
+
+    test "an editor is not offered the switch", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/settings")
+      refute html =~ "Webhook failures"
+    end
+  end
+
   describe "authorization" do
     test "anonymous users are redirected to sign-in", %{conn: conn} do
       assert {:error, {:redirect, %{to: "/sign-in"}}} = live(conn, ~p"/editor/webhooks")
