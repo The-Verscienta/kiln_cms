@@ -1014,6 +1014,19 @@ carries the reasoning.
   address. Nothing else about the alert changed.
   ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035))
 
+<a id="factor-removed-notice-names-admin"></a>
+
+- **The email telling someone a platform admin removed their passkey or authenticator app names that admin by display name ("an administrator" when they have none) instead of their email address.**
+  The "A second factor was removed from your (site) account" email said
+  "It was removed by an administrator," followed by the admin's email
+  address, so the owner's mail held another person's contact data. It now
+  names the admin as invitations name their inviter: by display name,
+  escaped, or as "an administrator" alone when the admin has no name or has
+  been erased. The admin is still recorded in the security log's
+  `two_factor_disabled` event. A notice already queued keeps the wording it
+  was written with.
+  ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044))
+
 ## Fixed
 
 <a id="staging-up-stops-on-a-failed-copy"></a>
