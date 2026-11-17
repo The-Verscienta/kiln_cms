@@ -780,7 +780,11 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
       # cron's temporary file, complete, waiting for its rename.
       assert [cron_tmp] = Path.wildcard(Path.join(ctx.backups, "manifest.json.*.partial"))
-      assert Path.basename(cron_tmp) =~ ~r/\Amanifest\.json\.\d+-\d+\.partial\z/
+      # The random half is above any app attempt number.
+      assert [_, random] =
+               Regex.run(~r/\Amanifest\.json\.\d+-(\d+)\.partial\z/, Path.basename(cron_tmp))
+
+      assert String.to_integer(random) in 100_000..132_767
       assert %{"trigger" => "cron"} = cron_tmp |> File.read!() |> Jason.decode!()
 
       app = %KilnCMS.Backups.Manifest{trigger: "manual", ok: true, keep_days: 3}
@@ -823,7 +827,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       other = "another writer's"
 
       wrapper = ~S"""
-      set -- $("$BASH" -c 'RANDOM=42; echo $RANDOM $RANDOM')
+      set -- $("$BASH" -c 'RANDOM=42; echo $((RANDOM + 100000)) $((RANDOM + 100000))')
       ln -s "$VICTIM" "$BACKUP_DIR/manifest.json.$$-$1.partial"
       printf '%s' "$OTHER" > "$BACKUP_DIR/manifest.json.$$-$2.partial"
       echo "$$ $1 $2" > "$TAKEN"
@@ -858,6 +862,24 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
       assert Enum.sort(Path.wildcard(Path.join(ctx.backups, "*.partial"))) ==
                Enum.sort([link, file])
+    end
+
+    # Renamed into place, the name is no longer the run's: a file another
+    # writer creates under it before the script exits is that writer's.
+    test "a temporary name reused after the rename is not removed on exit", ctx do
+      real_mv = System.find_executable("mv")
+
+      stub!(ctx.bin, "mv", """
+      #!/bin/sh
+      for last in "$@"; do :; done
+      #{real_mv} "$@" || exit
+      case "$last" in */manifest.json) printf 'another writer' > "$1" ;; esac
+      """)
+
+      assert {_, 0} = backup(ctx, "all")
+      assert %{"ok" => true} = manifest!(ctx)
+      assert [reused] = Path.wildcard(Path.join(ctx.backups, "manifest.json.*.partial"))
+      assert File.read!(reused) == "another writer"
     end
 
     test "prune removes a manifest temporary file past the grace, and only that", ctx do

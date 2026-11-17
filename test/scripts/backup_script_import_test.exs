@@ -478,6 +478,82 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
       refute gone?(pid)
     end
 
+    # The PID was reused, inside the heartbeat's interval, by another process
+    # running the same program (here a `pg_dump` the test runner started):
+    # the name guard passes it, but its parent is alive and is not the
+    # heartbeat's, so it is left alone.
+    test "a PID reused by the same program under another parent is not stopped", ctx do
+      victim_script = Path.join(ctx.tmp, "other/pg_dump")
+      File.mkdir_p!(Path.dirname(victim_script))
+
+      File.write!(victim_script, """
+      #!/bin/sh
+      n=0
+      while [ "$n" -lt 600 ]; do #{@real_sleep} 0.05; n=$((n+1)); done
+      """)
+
+      File.chmod!(victim_script, 0o755)
+      port = Port.open({:spawn_executable, victim_script}, [:binary])
+      {:os_pid, os_pid} = Port.info(port, :os_pid)
+      victim = Integer.to_string(os_pid)
+
+      on_exit(fn ->
+        System.cmd("kill", ["-KILL", victim], stderr_to_stdout: true)
+      end)
+
+      # Once the script has recorded this stub, the child file names the
+      # other pg_dump instead, as though the dump had ended and its PID been
+      # taken.
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      for a in "$@"; do
+        case "$a" in --file=*) printf 'PGDMP half a dump' > "${a#--file=}" ;; esac
+      done
+      for f in "$TMPDIR"/kiln-backup-child.*; do :; done
+      n=0
+      while [ ! -s "$f" ] && [ "$n" -lt 1000 ]; do #{@real_sleep} 0.01; n=$((n+1)); done
+      printf '%s pg_dump\n' "#{victim}" > "$f"
+      #{await_heartbeat(ctx)}
+      exec >/dev/null 2>&1
+      kill -KILL "$KILN_TEST_SCRIPT_PID"
+      """)
+
+      assert {_, status} = backup(ctx)
+      assert status != 0
+      heartbeat_gone!(ctx)
+      refute gone?(victim)
+      Port.close(port)
+    end
+
+    # A stopped child that handles TERM (pg_dump and rclone do) runs its
+    # handler only once continued; on_exit sends CONT, so the run ends at once
+    # rather than after the 5 s wait for KILL.
+    test "SIGTERM with the dump stopped (SIGSTOP) still stops it at once", ctx do
+      child = Path.join(ctx.tmp, "child")
+
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      trap 'exit 143' TERM
+      echo $$ > "#{child}"
+      for a in "$@"; do
+        case "$a" in --file=*) printf 'PGDMP half a dump' > "${a#--file=}" ;; esac
+      done
+      exec >/dev/null 2>&1
+      (#{@real_sleep} 0.3; kill -TERM "$KILN_TEST_SCRIPT_PID") </dev/null >/dev/null 2>&1 &
+      kill -STOP $$
+      #{runs_on()}
+      """)
+
+      {elapsed, {out, status}} = :timer.tc(fn -> backup(ctx) end)
+      assert status == 143
+      assert elapsed < 4_500_000
+      assert gone?(read_child!(ctx))
+      assert out =~ "interrupted by SIGTERM"
+      assert Path.wildcard(Path.join(ctx.backups, "**/*.partial")) == []
+      assert File.ls!(ctx.scratch) == []
+      assert %Manifest{ok: false, error: "interrupted by SIGTERM"} = Manifest.read(ctx.backups)
+    end
+
     # A file the heartbeat can't trust names no process to stop: empty, a PID
     # with no program (torn mid-write), or a program cut short.
     test "a torn child file never stops a process", ctx do

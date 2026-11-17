@@ -63,6 +63,9 @@
 # and never needs confirmation.
 
 set -euo pipefail
+# An exported CDPATH makes `cd dir` print the directory it chose, which
+# `$(cd -- … && pwd -P)` would then capture as part of the path.
+unset CDPATH
 
 trap 'cleanup_tmp' EXIT
 
@@ -351,6 +354,11 @@ db_name_re='^kiln-db-([0-9]{8}-[0-9]{6})\.dump$'
 # failure dies before the caller touches a database. A dump with no sidecar,
 # or not named kiln-db-<stamp>.dump (so there is no stamp to find one by),
 # warns, or dies under RESTORE_REQUIRE_CHECKSUM=1.
+#
+# A symlink given as the dump is not resolved: the sidecar is looked for next
+# to the link, under the link's name, so a link to a Kiln dump under another
+# name has no stamp and takes the no-checksum path (warn, or refuse under
+# RESTORE_REQUIRE_CHECKSUM=1), as any dump not named kiln-db-<stamp>.dump does.
 verify_dump() {
   local dir base sidecar="" listed
   dir="$(cd -- "$(dirname -- "$1")" && pwd -P)"

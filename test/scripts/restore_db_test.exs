@@ -275,6 +275,43 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
       refute File.exists?(ctx.log)
     end
 
+    # An exported CDPATH makes `cd sub` print the directory it found, which
+    # used to end up in the path the sidecar was looked for under: the
+    # sidecar seemed missing and the dump was restored unverified.
+    test "an exported CDPATH and a relative dump path still verify", ctx do
+      sub = Path.join(ctx.tmp, "sub")
+      File.mkdir_p!(sub)
+      dump = Path.join(sub, "kiln-db-20261112-000000.dump")
+      File.cp!(ctx.dump, dump)
+
+      :ok =
+        Checksum.write_sidecar(Path.join(sub, "kiln-db-20261112-000000.sha256"), [
+          {"kiln-db-20261112-000000.dump", sha256(dump)}
+        ])
+
+      relative = "sub/kiln-db-20261112-000000.dump"
+      cdpath = [{"CDPATH", ctx.tmp}]
+
+      for command <- ["db", "drill"] do
+        File.rm(ctx.log)
+        assert {out, 0} = restore(ctx, [command, relative], drill_url(), cdpath, "bash", ctx.tmp)
+        assert out =~ "kiln-db-20261112-000000.dump: OK", command
+        refute out =~ "WARNING", command
+      end
+
+      File.rm!(ctx.log)
+      File.write!(dump, "PGDMP pretend dumq")
+
+      for command <- ["db", "drill"] do
+        assert {out, status} =
+                 restore(ctx, [command, relative], drill_url(), cdpath, "bash", ctx.tmp)
+
+        assert status != 0, command
+        assert out =~ "checksum verification FAILED", command
+        refute File.exists?(ctx.log), command
+      end
+    end
+
     # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
     unless ShellTools.bash32(),
       do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
@@ -314,7 +351,7 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
     |> Enum.map(&String.split(&1, "|"))
   end
 
-  defp restore(ctx, args, url, extra \\ [], bash \\ "bash") do
+  defp restore(ctx, args, url, extra \\ [], bash \\ "bash", cd \\ nil) do
     env =
       [
         {"RESTORE_DATABASE_URL", url},
@@ -328,7 +365,8 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
 
     env = Enum.reduce(extra, env, fn {k, v}, acc -> List.keystore(acc, k, 0, {k, v}) end)
 
-    System.cmd(bash, [@script | args], env: env, stderr_to_stdout: true)
+    opts = [env: env, stderr_to_stdout: true] ++ if(cd, do: [cd: cd], else: [])
+    System.cmd(bash, [@script | args], opts)
   end
 
   defp stub!(bin, name, body) do

@@ -87,6 +87,9 @@
 # (bash 3.2 or later; GNU or BSD tar, stat and xargs).
 
 set -euo pipefail
+# An exported CDPATH makes `cd dir` print the directory it chose, which
+# `$(cd -- … && pwd -P)` would then capture as part of the path.
+unset CDPATH
 
 # Set by `die` so a failure manifest can record what actually went wrong.
 LAST_ERROR=""
@@ -538,11 +541,15 @@ ping_ok() {
 # (#2832): a cron run and the in-app backup finishing together used to write
 # through one `manifest.json.partial` and could publish a mix of the two, or
 # fail a rename the other had already done. The PID alone is not unique (two
-# containers sharing BACKUP_DIR count PIDs separately), hence the $RANDOM, and
-# the file is created exclusively (noclobber) so a name already taken is never
-# written through. The name has the app's tag shape (`<digits>-<digits>`), so a
-# leftover is removed by the app's start sweep and by `prune`
-# (prune_manifest_partials) once it is PARTIAL_GRACE_MIN old.
+# containers sharing BACKUP_DIR count PIDs separately), hence the random half,
+# and the file is created exclusively (noclobber) so a name already taken is
+# never written through. The random half is $RANDOM + 100000 (100000-132767),
+# above any attempt number, so it never takes the name of an app step's
+# `manifest.json.<job>-<attempt>.partial`. The name has the app's tag shape
+# (`<digits>-<digits>`), so a leftover is removed by the app's start sweep and
+# by `prune` (prune_manifest_partials) once it is PARTIAL_GRACE_MIN old. Once
+# renamed into place the name is no longer tracked: another writer may create
+# it next, and on_exit must not remove that writer's file.
 MANIFEST_ARTIFACTS=""
 
 record_artifact() {
@@ -611,7 +618,7 @@ write_manifest() {
   # Created empty and exclusively first: only a file this run created is
   # tracked (and so removed by on_exit), never one another writer holds.
   for _ in 1 2 3 4 5; do
-    tmp="${out}.$$-${RANDOM}.partial"
+    tmp="${out}.$$-$((RANDOM + 100000)).partial"
     if [ ! -e "$tmp" ] && [ ! -L "$tmp" ] && (set -C && : > "$tmp") 2>/dev/null; then
       track_partial "$tmp"
       break
@@ -634,6 +641,7 @@ write_manifest() {
 }
 JSON
   mv "$tmp" "$out"
+  untrack_partial "$tmp"
 }
 
 # ONE exit trap for the whole script, installed once. It has to be one:
@@ -657,7 +665,8 @@ on_exit() {
   # A second signal must not cut the cleanup short: once a trap's `exit` runs
   # this, another TERM or INT would otherwise abort it halfway, leaving
   # `.partial` files and no failure manifest. Children started from here on
-  # inherit the ignore, which is harmless: they are short.
+  # inherit the ignore, which is harmless: they are short. (A child stuck in
+  # uninterruptible I/O can hold the cleanup; see stop_children.)
   trap '' HUP INT TERM
   # The script's own stdout and stderr, whatever call the trap interrupted
   # (see on_signal).
@@ -725,6 +734,15 @@ track_partial() {
   OWN_PARTIALS+=("$1")
 }
 
+# Forget $1 (blank its entry; on_exit skips blanks): it is no longer this
+# run's, and another writer may now hold the name.
+untrack_partial() {
+  local i
+  for i in ${OWN_PARTIALS[@]+"${!OWN_PARTIALS[@]}"}; do
+    if [ "${OWN_PARTIALS[$i]}" = "$1" ]; then OWN_PARTIALS[i]=""; fi
+  done
+}
+
 # Run a long command as a background child and wait for it, so that a trapped
 # signal interrupts the wait at once and on_exit can stop the child, and so
 # that the heartbeat knows which process to stop if this script is killed
@@ -746,10 +764,13 @@ run_child() {
 # Record child $1 running program $2: CHILD_PID for on_exit, and
 # `<pid> <program>` in CHILD_FILE for the heartbeat, which only sees variables
 # set before it forked. Writing the file is best-effort: a full TMPDIR must
-# not fail the backup, it only leaves the heartbeat nothing to stop.
+# not fail the backup, it only leaves the heartbeat nothing to stop. Only an
+# existing regular file is written: a heartbeat that gave up has removed it,
+# and recreating the name in a shared TMPDIR could write through a symlink
+# planted there since.
 track_child() {
   CHILD_PID="$1"
-  if [ -n "$CHILD_FILE" ]; then
+  if child_file_ok; then
     { printf '%s %s\n' "$1" "$2" > "$CHILD_FILE"; } 2>/dev/null || true
   fi
 }
@@ -759,27 +780,39 @@ wait_child() {
   local rc=0
   wait "$CHILD_PID" || rc=$?
   CHILD_PID=""
-  if [ -n "$CHILD_FILE" ]; then
+  if child_file_ok; then
     { : > "$CHILD_FILE"; } 2>/dev/null || true
   fi
   return "$rc"
 }
 
+# Whether CHILD_FILE is set and still the regular file mktemp created.
+child_file_ok() {
+  [ -n "$CHILD_FILE" ] && [ -f "$CHILD_FILE" ] && [ ! -L "$CHILD_FILE" ]
+}
+
 # Stop every child this script has not waited for (on_exit): the tracked one,
 # and as a backstop any other, such as a child forked just before a signal
-# arrived and not yet tracked. They are what `jobs -rp` lists: bash's own
-# record of its children still running, so a child that has ended (whose PID
-# may already belong to another process) is never signaled. The heartbeat is
-# disowned, so it is not among them. TERM first, so rclone can abort its
+# arrived and not yet tracked. They are what running_children lists: bash's
+# own record of its children still running or stopped, so a child that has
+# ended (whose PID may already belong to another process) is never signaled.
+# The heartbeat is disowned, so it is not among them. CONT first, so a stopped
+# child (kill -STOP, a SIGTSTP) acts on the TERM; TERM so rclone can abort its
 # uploads and pg_dump close its connection; whatever still runs after about 5
 # seconds gets KILL. Then each is reaped (the `2>/dev/null` keeps bash's
 # "Terminated" notice out of the log).
+#
+# A child stuck in uninterruptible I/O (a hung NFS mount) ignores TERM and
+# KILL alike until the I/O returns; the reaping `wait` then holds on_exit,
+# which ignores further signals, until it does. Only a SIGKILL of the script
+# itself ends that; the heartbeat then stops the child once it can.
 stop_children() {
   local pids p deadline
   pids="$(running_children)"
   CHILD_PID=""
   [ -n "$pids" ] || return 0
   for p in $pids; do
+    kill -CONT "$p" 2>/dev/null || true
     kill -TERM "$p" 2>/dev/null || true
   done
   deadline=$((SECONDS + 5))
@@ -794,9 +827,13 @@ stop_children() {
   done
 }
 
-# The PIDs of this script's background children still running, one per line.
+# The PIDs of this script's background children still running or stopped,
+# one per line. Not `jobs -p`, which also lists a child that has ended and not
+# yet been reported. Without job control (a script) bash does not see a child
+# stop and lists it under -r; -s covers a run with `set -m`.
 running_children() {
   jobs -rp 2>/dev/null || true
+  jobs -sp 2>/dev/null || true
 }
 
 # A signal must still run on_exit (bash runs the EXIT trap on `exit`, not when
@@ -887,12 +924,45 @@ child_runs() {
   esac
 }
 
+# The parent PID of process $1 ($2 = 1 when `ps` works here), from `ps`, else
+# from /proc/<pid>/stat; fails when neither answers. In stat the parent is the
+# second field after the command name, which is in parentheses and may itself
+# hold spaces and parentheses, so the line is read from after its LAST `)`.
+ppid_of() {
+  local out="" stat=""
+  if [ "$2" = 1 ] && out="$(ps -o ppid= -p "$1" 2>/dev/null)"; then
+    :
+  elif [ -r "/proc/$1/stat" ] && stat="$(cat -- "/proc/$1/stat" 2>/dev/null)"; then
+    read -r _ out _ <<<"${stat##*)}" || true
+  fi
+  # ps pads the number with spaces.
+  out="${out//[!0-9]/}"
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+# Whether process $1 has the heartbeat's own parent ($2 = 1 when `ps` works
+# here): 0 when it does, or when either parent can't be read; 1 when they
+# differ. After the script dies its child and the heartbeat are both
+# re-parented to the same reaper (init, or the nearest subreaper), so the
+# real orphan passes. A PID reused within the up-to-HEARTBEAT_S window by
+# another pg_dump, tar or rclone, which the name guard alone would pass, has
+# the parent that started it, still alive, and fails.
+shares_my_parent() {
+  local me mine theirs
+  me="$(exec sh -c 'echo "$PPID"')" || return 0
+  mine="$(ppid_of "$me" "$2")" || return 0
+  theirs="$(ppid_of "$1" "$2")" || return 0
+  [ "$theirs" = "$mine" ]
+}
+
 # The heartbeat's last job once the script is definitely gone ($1 = 1 when
 # `ps` works here): stop the child CHILD_FILE names, if it still runs that
-# program (child_runs). A line that is empty, torn (no program) or not a PID
+# program (child_runs) and is an orphan beside the heartbeat
+# (shares_my_parent). A line that is empty, torn (no program) or not a PID
 # above 1 stops nothing. TERM first, as on_exit does; KILL if it still runs
 # that program five sleeps later. Where neither `ps` nor /proc can name a
-# process, the PID alone decides.
+# process or its parent, the PID alone decides.
 stop_orphan() {
   local pid="" name="" rest="" n=0 state=0
   [ -n "$CHILD_FILE" ] || return 0
@@ -904,6 +974,7 @@ stop_orphan() {
   [ "$pid" -gt 1 ] && [ -n "$name" ] || return 0
   child_runs "$pid" "$name" "$1" || state=$?
   [ "$state" != 1 ] || return 0
+  shares_my_parent "$pid" "$1" || return 0
   kill -TERM "$pid" 2>/dev/null || return 0
   while [ "$n" -lt 5 ]; do
     sleep 1
@@ -913,6 +984,7 @@ stop_orphan() {
   state=0
   child_runs "$pid" "$name" "$1" || state=$?
   [ "$state" != 1 ] || return 0
+  shares_my_parent "$pid" "$1" || return 0
   kill -KILL "$pid" 2>/dev/null || true
 }
 
@@ -928,8 +1000,8 @@ stop_orphan() {
 # trap ran), the loop stops the script's child before it exits (stop_orphan,
 # #2847): run_child names it in CHILD_FILE, created here before the fork so
 # both sides know the path. While `ps` can't answer the loop goes on touching;
-# after three such answers in a row it stops without stopping anything, as it
-# always did when `ps` failed.
+# after three such answers in a row it removes CHILD_FILE and stops without
+# stopping anything, as it always did when `ps` failed.
 start_heartbeat() {
   local parent="$$" use_ps=0
   if ps -o ppid= -p "$$" >/dev/null 2>&1; then use_ps=1; fi
@@ -950,7 +1022,10 @@ start_heartbeat() {
         break
       elif [ "$state" = 2 ]; then
         unknown=$((unknown + 1))
-        [ "$unknown" -lt 3 ] || break
+        if [ "$unknown" -ge 3 ]; then
+          if [ -n "$CHILD_FILE" ]; then rm -f -- "$CHILD_FILE"; fi
+          break
+        fi
       else
         unknown=0
       fi

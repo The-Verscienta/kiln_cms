@@ -525,7 +525,7 @@ defmodule KilnCMS.Backups.WorkerTest do
       odd = Path.join(dir, "manifest.json.notatag.partial")
       # backup.sh's `<pid>-<random>` and an untagged Manifest.write's random
       # digits (#2832).
-      script = Path.join(dir, "manifest.json.12345-6789.partial")
+      script = Path.join(dir, "manifest.json.12345-106789.partial")
       random = Path.join(dir, "manifest.json.3141592653589793238.partial")
 
       for path <- [stale, fresh, cron, odd, script, random], do: File.write!(path, "{}")
