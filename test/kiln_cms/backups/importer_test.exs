@@ -219,8 +219,15 @@ defmodule KilnCMS.Backups.ImporterTest do
           })
         )
 
+      # An older backup.sh mid-write: the interruption's manifest goes through
+      # a name of its own (#2832).
+      cron = Manifest.path(dir) <> ".partial"
+      File.write!(cron, "cron, half written")
+
       assert :ok = KilnCMS.Backups.Steps.interrupt(stamp, chain, dir_id, "Interrupted")
       assert %Manifest{ok: false, stamp: ^stamp} = Manifest.read(dir)
+      assert File.read!(cron) == "cron, half written"
+      File.rm!(cron)
 
       assert {:ok, %{imported: 0}} = Importer.run()
       assert [%{stamp: ^stamp, status: :failed}] = all_runs()

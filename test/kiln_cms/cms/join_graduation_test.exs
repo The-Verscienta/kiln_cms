@@ -304,6 +304,32 @@ defmodule KilnCMS.CMS.JoinGraduationTest do
       assert length(rows(ctx.spec)) == 2
     end
 
+    test "drops the layout of the section the field was the last of (#2881)", ctx do
+      relations!(ctx)
+      copy!(ctx.spec)
+
+      assert {:ok, :retired, _reports} = JoinGraduation.retire(ctx.spec)
+
+      refute "Grad Relations" in layout_names()
+    end
+
+    test "a dry run keeps the section's layout", ctx do
+      relations!(ctx)
+      copy!(ctx.spec)
+
+      assert {:ok, :dry_run, _reports} = JoinGraduation.retire(ctx.spec, dry_run: true)
+
+      assert "Grad Relations" in layout_names()
+    end
+
+    test "a refused retire keeps the section's layout", ctx do
+      relations!(ctx)
+
+      assert {:error, %{}} = JoinGraduation.retire(ctx.spec)
+
+      assert "Grad Relations" in layout_names()
+    end
+
     test "refuses a join resource that is not compiled, or lacks a link column", ctx do
       assert {:error, message} =
                JoinGraduation.retire(%{ctx.spec | module: KilnCMS.CMS.NoSuchJoin})
@@ -355,6 +381,19 @@ defmodule KilnCMS.CMS.JoinGraduationTest do
       assert {:ok, _field} = find_field(ctx)
     end
   end
+
+  # The graduated field alone in a section with a layout of its own.
+  defp relations!(ctx) do
+    {:ok, field} = find_field(ctx)
+    CMS.update_field_definition!(field, %{section: "Grad Relations"}, actor: ctx.admin)
+
+    CMS.create_field_section!(%{content_type: :post, name: "Grad Relations", display: :tab},
+      actor: ctx.admin
+    )
+  end
+
+  defp layout_names,
+    do: :post |> CMS.field_sections_for!(authorize?: false) |> Enum.map(& &1.name)
 
   defp find_field(ctx) do
     case CMS.field_definitions_for!(:post, actor: ctx.admin)
