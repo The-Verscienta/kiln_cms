@@ -22,7 +22,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   It also deletes what belongs to the account alone and names or reaches the
   person (#2514): its Web Push subscriptions (a device endpoint), its private
   saved views (shared ones are the team's, kept like authored content), and
-  the notifications addressed to it.
+  the notifications addressed to it. Its newsletter subscriber rows go too
+  (#2991, `KilnCMS.Newsletter.forget_member/1`): the ones linked to the
+  account, on every site, so the address it was registered with stops
+  receiving newsletters. A row added by hand at the same address and never
+  linked is not the account's and is kept.
   """
   use Ash.Resource.Change
 
@@ -77,6 +81,9 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       clear_account_grant(user)
       clear_membership_grants(user)
       cancel_memberships(user)
+      # After the cancel above, so a membership transition it triggers cannot
+      # re-link a row this deletes (#2991).
+      :ok = KilnCMS.Newsletter.forget_member(user.id)
       remove_push_subscriptions(user)
       remove_private_saved_views(user)
       :ok = KilnCMS.Notifications.forget_recipient(user.id)

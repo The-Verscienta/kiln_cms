@@ -288,6 +288,7 @@ defmodule KilnCMS.Application do
       enqueue_legacy_audiences_migration()
       enqueue_sync_exposure_backfill()
       enqueue_totp_secret_backfill()
+      enqueue_erasure_backfill()
       {:ok, pid}
     end
   end
@@ -345,6 +346,15 @@ defmodule KilnCMS.Application do
   defp enqueue_totp_secret_backfill do
     if Application.get_env(:kiln_cms, :totp_secret_backfill_on_boot, true) do
       KilnCMS.Accounts.TotpSecretBackfill.enqueue()
+    end
+  end
+
+  # Accounts erased before a step of erasure existed get that step (#2991:
+  # their linked newsletter rows): see `KilnCMS.Accounts.ErasureBackfill`.
+  # Off in `:test` and `:e2e` for the committed-`oban_jobs` reason above.
+  defp enqueue_erasure_backfill do
+    if Application.get_env(:kiln_cms, :erasure_backfill_on_boot, true) do
+      KilnCMS.Accounts.ErasureBackfill.enqueue()
     end
   end
 

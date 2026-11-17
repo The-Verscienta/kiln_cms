@@ -75,6 +75,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new table `backup_notices`, for the backup warnings under Added). Nothing to backfill; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#backup-notices-upgrade))
 
+- **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release (`:erasure_backfill_on_boot`, default on). No migration; rolling back is safe, and what it deleted stays deleted.**
+  ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-backfill-newsletter-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -159,6 +162,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A backup schedule change made while a marker sync is running now reaches the `.hold` markers right after that sync, not at the next 15-minute slot.**
   ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932) · [long form](docs/changelog/unreleased.md#backup-hold-sync-after-change))
+
+- **Erasure now deletes the account's linked newsletter subscriptions on every site, so the person's real address stops receiving newsletters, and Export my data lists them (without tokens).**
+  ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-deletes-newsletter-subscriptions))
 
 ### Security
 

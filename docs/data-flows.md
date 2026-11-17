@@ -62,6 +62,7 @@ your deployment.
 | Saved views | `saved_views` | Pseudonymous | A named content-list filter and its owner's id. A private view is deleted on erasure (#2514); a shared one is the team's and stays, pointing at the anonymized account. |
 | Consumer audiences | `users.audiences`, `org_memberships.audiences` | No | Which gated content a reader may see. Granted by an admin or by an active paid membership. Cleared on erasure. |
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
+| Newsletter subscribers | `newsletter_subscribers`, `newsletter_segment_memberships` | Yes | One row per address on a site's list: the **email address**, an optional name, the opt-in status and when it was confirmed or unsubscribed, the tokens behind the confirm and unsubscribe links, and the segments it is on. A paying member's row is linked to their account (`user_id`) by the billing sync. Linked rows are in the account's self-export (without the tokens) and are deleted, with their segment memberships, when the account is erased (#2991). A row at the same address that was never linked is not the account's and stays. Purged by the staging scrub. See [Newsletter](newsletter.md#when-a-member-account-is-erased). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
 | Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Purged on retention and by the staging scrub. |
 | Idempotency keys | `idempotent_requests` | Pseudonymous (transient) | One row per `Idempotency-Key` a caller used on a write ([api.md](api.md)), holding the key, the acting user's id, a hash of the request and **the response that was sent** — so it carries whatever that response did. Pruned hourly, 24-hour lifetime. Purged by the staging scrub. |
@@ -409,8 +410,10 @@ so changing it needs a rebuild. The staging scrub purges the table.
 
 Any signed-in user can self-export their own data from **`/editor/settings` →
 "Export my data"** — and a member from **`/account` → "Export my data"** — which
-downloads `kiln-account-export.json` (profile, notification preferences, and paid
-memberships; no secrets). The export is deliberately **cross-organization**: it
+downloads `kiln-account-export.json` (profile, notification preferences, paid
+memberships, and the newsletter subscriptions linked to the account on every
+site, with their status, dates and segment names; no secrets, and none of the
+subscriptions' confirm or unsubscribe tokens). The export is deliberately **cross-organization**: it
 answers "what do you hold about me" for the whole instance, not just the site the
 request arrived on. Programmatically this is
 `KilnCMS.Accounts.export_user_data/1`, served by
@@ -477,12 +480,33 @@ Either way, it:
 13. **Deletes the notifications addressed to it** (#2514), on every site: its
     own inbox, which nobody can sign in to read any more. If any site's delete
     fails, the erasure raises so it can be retried.
+14. **Deletes the newsletter subscriptions linked to it** (#2991), on every
+    site and in any status (pending, confirmed or unsubscribed), with their
+    segment memberships. Before this, a confirmed subscription kept mailing the
+    person's real address after the erasure. A newsletter delivery already
+    queued to one of those rows is canceled when it comes to run, and the
+    billing sync never links an erased account to a list again. If any site's
+    delete fails, the erasure raises so it can be retried.
 
 Erasure works on an account, and an invitation is not one: an invitation to
 the person's address is left as it is. To remove one, revoke it on **Team**
 (`/editor/team`) on the invited site, or let it expire and be pruned. An
 invitation the erased user *sent* keeps pointing at their (now anonymous)
 account, and an admin-tier one can no longer be accepted.
+
+Newsletter subscriptions follow the same rule: erasure deletes the rows linked
+to the account (step 14), and a row at the same address that was never linked
+is left as it is. The billing sync links the row at a member's address on each
+site where they hold a paid membership, so such a row is on a site where the
+account never held one. Matching on the
+address instead would delete a stranger's row wherever the address was
+reused. To remove such a row, a site admin deletes it on **Newsletter**
+(`/editor/newsletter`) on that site.
+
+Accounts erased by a release before step 14 existed still have their linked
+rows. A background job, `KilnCMS.Accounts.ErasureBackfill`, deletes them
+about 10 minutes after the first boot of the release that added it; see
+[Newsletter](newsletter.md#when-a-member-account-is-erased).
 
 The account **row is retained** (with no personal data) so authorship links and
 referential integrity in content/version history are preserved. Membership rows
