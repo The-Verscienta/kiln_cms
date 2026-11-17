@@ -12,7 +12,10 @@
 #   STAGING_DATABASE_URL    throwaway target (required; name must look ephemeral)
 #                           Both: postgres://, postgresql:// or ecto://; each
 #                           password reaches pg_dump/psql through PGPASSWORD
-#                           only, never their argv (see pg_conn_split)
+#                           only, never their argv (see pg_conn_split). A
+#                           key=value string with a password is refused. Put
+#                           `sslmode=require` (or verify-full) in a URL to
+#                           require TLS: DATABASE_SSL does not reach this script
 #   STAGING_ADMIN_EMAIL     seed one usable admin (recommended)
 #   STAGING_ADMIN_PASSWORD  password for that admin
 #   KILN_BIN                how to run migrate + scrub. Default: "mix".
@@ -80,31 +83,54 @@ pg_conn_decode() {
 
 # $1 = a DATABASE_URL. Sets PG_CONN_URL (what goes in argv), PG_CONN_PASSWORD
 # and PG_CONN_HAS_PASSWORD (1 when PG_CONN_PASSWORD is to be exported as
-# PGPASSWORD, in a subshell around the one command that needs it):
-#   - `ecto://` (any case) becomes `postgres://`; nothing else is rewritten;
+# PGPASSWORD, in a subshell around the one command that needs it),
+# PG_CONN_DISPLAY_URL and PG_CONN_ERROR:
+#   - `ecto://` (any case) becomes `postgres://`, and a `postgres://` or
+#     `postgresql://` scheme is lower-cased (libpq reads only those as URIs);
+#   - Ecto's own query parameters are translated for libpq (#2833), keys and
+#     values compared percent-decoded: `ssl=false` becomes `sslmode=disable`,
+#     `pool_size`, `timeout` and `idle_interval` are dropped (and a `?` left
+#     with nothing after it); everything else is kept as written;
 #   - the userinfo password and every query `password` parameter (the key is
 #     decoded first, as libpq does: `pass%77ord=` is one) are removed and
 #     decoded. The query one wins, as in libpq. The userinfo ends where libpq
 #     ends it (fe-connect.c): at the first `@` before the first `/`, so a `?`
 #     or `#` before that `@` is part of the password; the password runs from
 #     the first `:` in it;
-#   - with no non-empty password the URL is left as written, so an inherited
-#     PGPASSWORD or ~/.pgpass still applies.
-# A string that is not a postgres:// or postgresql:// URI (a `key=value`
-# conninfo) is left unchanged.
+#   - with no non-empty password and nothing to translate the URL is left as
+#     written, so an inherited PGPASSWORD or ~/.pgpass still applies.
+# PG_CONN_DISPLAY_URL is the URL without its password but with the query NOT
+# translated: the one to print, or to hand the app as its DATABASE_URL (Ecto
+# reads `ssl=false` and `pool_size` itself).
+# A string that is not a postgres:// or postgresql:// URI is refused (#2831)
+# when it mentions `password` (any case) or holds `://`: PG_CONN_ERROR says
+# why, PG_CONN_URL is empty, and the caller dies with it. A passwordless
+# `key=value` conninfo or a bare database name is left unchanged.
 pg_conn_split() {
   local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
-  local query="" has_query=0 q seg kept="" sep="" qpw="" has_qpw=0
+  local query="" has_query=0 q seg key val kept="" sep="" shown="" ssep=""
+  local qpw="" has_qpw=0
   PG_CONN_URL="$url"
+  PG_CONN_DISPLAY_URL="$url"
   PG_CONN_PASSWORD=""
   PG_CONN_HAS_PASSWORD=0
+  PG_CONN_ERROR=""
 
   case "$url" in
     [Ee][Cc][Tt][Oo]://*) url="postgres://${url:7}" ;;
+    [Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]://*) url="postgres://${url:11}" ;;
+    [Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss][Qq][Ll]://*) url="postgresql://${url:13}" ;;
   esac
   PG_CONN_URL="$url"
+  PG_CONN_DISPLAY_URL="$url"
   case "$url" in
     postgres://* | postgresql://*) ;;
+    *://* | *[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]*)
+      PG_CONN_URL=""
+      PG_CONN_DISPLAY_URL=""
+      PG_CONN_ERROR="is not a postgres:// URL and holds a password or another URL, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read. Write it as a postgres:// URL, password included (postgres:///database?host=/socket/dir for a Unix socket), or put the password in PGPASSWORD or ~/.pgpass."
+      return 0
+      ;;
     *) return 0 ;;
   esac
 
@@ -136,24 +162,52 @@ pg_conn_split() {
     q="$query"
     while :; do
       seg="${q%%&*}"
-      PG_CONN_DECODED=""
+      key=""
+      val=""
       case "$seg" in
-        *=*) pg_conn_decode "${seg%%=*}" ;;
+        *=*)
+          pg_conn_decode "${seg%%=*}"
+          key="$PG_CONN_DECODED"
+          pg_conn_decode "${seg#*=}"
+          val="$PG_CONN_DECODED"
+          ;;
       esac
-      if [ "$PG_CONN_DECODED" = "password" ]; then
+      if [ "$key" = "password" ]; then
         qpw="${seg#*=}"
         has_qpw=1
       else
-        kept="${kept}${sep}${seg}"
-        sep="&"
+        shown="${shown}${ssep}${seg}"
+        ssep="&"
+        case "$key" in
+          pool_size | timeout | idle_interval) ;;
+          ssl)
+            if [ "$val" = "false" ]; then
+              kept="${kept}${sep}sslmode=disable"
+            else
+              kept="${kept}${sep}${seg}"
+            fi
+            sep="&"
+            ;;
+          *)
+            kept="${kept}${sep}${seg}"
+            sep="&"
+            ;;
+        esac
       fi
       [ "$seg" = "$q" ] && break
       q="${q#*&}"
     done
-    [ "$has_qpw" = 1 ] && query="$kept"
   fi
 
   if [ "$has_qpw" = 0 ] && { [ "$has_pw" = 0 ] || [ -z "$pw" ]; }; then
+    # No password to move: only a translated query changes the URL, and the
+    # userinfo stays as written.
+    if [ "$has_query" = 1 ] && [ "$kept" != "$query" ]; then
+      PG_CONN_URL="${url%%://*}://"
+      [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${userinfo}@"
+      PG_CONN_URL+="${host}"
+      [ -n "$kept" ] && PG_CONN_URL+="?${kept}"
+    fi
     return 0
   fi
   [ "$has_qpw" = 1 ] && pw="$qpw"
@@ -161,7 +215,9 @@ pg_conn_split() {
   PG_CONN_URL="${url%%://*}://"
   [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${user}@"
   PG_CONN_URL+="${host}"
-  [ -n "$query" ] && PG_CONN_URL+="?${query}"
+  PG_CONN_DISPLAY_URL="$PG_CONN_URL"
+  [ -n "$kept" ] && PG_CONN_URL+="?${kept}"
+  [ -n "$shown" ] && PG_CONN_DISPLAY_URL+="?${shown}"
 
   pg_conn_decode "$pw"
   PG_CONN_PASSWORD="$PG_CONN_DECODED"
@@ -199,6 +255,18 @@ cmd_up() {
   require PROD_DATABASE_URL
   require STAGING_DATABASE_URL
 
+  # Each side gets its own URL's password as PGPASSWORD, in its own subshell,
+  # and neither password is ever an argv element (#2726). Split first, so a
+  # refused string stops the run before anything is created.
+  local prod_url prod_pw prod_has staging_url staging_shown staging_pw staging_has
+  pg_conn_split "$PROD_DATABASE_URL"
+  [ -z "$PG_CONN_ERROR" ] || die "PROD_DATABASE_URL $PG_CONN_ERROR"
+  prod_url="$PG_CONN_URL" prod_pw="$PG_CONN_PASSWORD" prod_has="$PG_CONN_HAS_PASSWORD"
+  pg_conn_split "$STAGING_DATABASE_URL"
+  [ -z "$PG_CONN_ERROR" ] || die "STAGING_DATABASE_URL $PG_CONN_ERROR"
+  staging_url="$PG_CONN_URL" staging_pw="$PG_CONN_PASSWORD" staging_has="$PG_CONN_HAS_PASSWORD"
+  staging_shown="$PG_CONN_DISPLAY_URL"
+
   local name
   name="$(db_name "$STAGING_DATABASE_URL")"
   echo "==> Cloning production into throwaway database: ${name}"
@@ -206,14 +274,6 @@ cmd_up() {
   # createdb is best-effort: the target may already exist, or the URL user may
   # lack CREATEDB (then the operator pre-creates it). Restore still validates.
   createdb "$name" 2>/dev/null || echo "    (createdb skipped — assuming ${name} exists)"
-
-  # Each side gets its own URL's password as PGPASSWORD, in its own subshell,
-  # and neither password is ever an argv element (#2726).
-  local prod_url prod_pw prod_has staging_url staging_pw staging_has
-  pg_conn_split "$PROD_DATABASE_URL"
-  prod_url="$PG_CONN_URL" prod_pw="$PG_CONN_PASSWORD" prod_has="$PG_CONN_HAS_PASSWORD"
-  pg_conn_split "$STAGING_DATABASE_URL"
-  staging_url="$PG_CONN_URL" staging_pw="$PG_CONN_PASSWORD" staging_has="$PG_CONN_HAS_PASSWORD"
 
   echo "==> pg_dump PROD → psql STAGING"
   # Checked explicitly: bash 3.2 (Linux builds) does not apply `set -e` to a
@@ -245,7 +305,7 @@ cmd_up() {
 
 ==> Staging is ready.
     Serve it by pointing a Kiln instance at (password not shown):
-      DATABASE_URL=${staging_url}
+      DATABASE_URL=${staging_shown}
     with a FRESH SECRET_KEY_BASE and outbound integrations left off.
 
     Also set KILN_ENV_LABEL on that instance, e.g.:

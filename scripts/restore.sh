@@ -11,7 +11,10 @@
 #   RESTORE_DATABASE_URL  target database (required for `db`/`drill`):
 #                         postgres://, postgresql:// or ecto://; the password
 #                         reaches pg_restore/psql through PGPASSWORD only,
-#                         never their argv (see pg_conn_split)
+#                         never their argv (see pg_conn_split). A key=value
+#                         string with a password is refused. Put
+#                         `sslmode=require` (or verify-full) in it to require
+#                         TLS
 #   RESTORE_MEDIA_DIR     target uploads root (required for `media`)
 #   RESTORE_CONFIRM=yes   skip the interactive confirmation (for scripted drills)
 #   RESTORE_REQUIRE_CHECKSUM=1  `media`: abort when no checksum sidecar is found
@@ -111,31 +114,54 @@ pg_conn_decode() {
 
 # $1 = a DATABASE_URL. Sets PG_CONN_URL (what goes in argv), PG_CONN_PASSWORD
 # and PG_CONN_HAS_PASSWORD (1 when PG_CONN_PASSWORD is to be exported as
-# PGPASSWORD, in a subshell around the one command that needs it):
-#   - `ecto://` (any case) becomes `postgres://`; nothing else is rewritten;
+# PGPASSWORD, in a subshell around the one command that needs it),
+# PG_CONN_DISPLAY_URL and PG_CONN_ERROR:
+#   - `ecto://` (any case) becomes `postgres://`, and a `postgres://` or
+#     `postgresql://` scheme is lower-cased (libpq reads only those as URIs);
+#   - Ecto's own query parameters are translated for libpq (#2833), keys and
+#     values compared percent-decoded: `ssl=false` becomes `sslmode=disable`,
+#     `pool_size`, `timeout` and `idle_interval` are dropped (and a `?` left
+#     with nothing after it); everything else is kept as written;
 #   - the userinfo password and every query `password` parameter (the key is
 #     decoded first, as libpq does: `pass%77ord=` is one) are removed and
 #     decoded. The query one wins, as in libpq. The userinfo ends where libpq
 #     ends it (fe-connect.c): at the first `@` before the first `/`, so a `?`
 #     or `#` before that `@` is part of the password; the password runs from
 #     the first `:` in it;
-#   - with no non-empty password the URL is left as written, so an inherited
-#     PGPASSWORD or ~/.pgpass still applies.
-# A string that is not a postgres:// or postgresql:// URI (a `key=value`
-# conninfo) is left unchanged.
+#   - with no non-empty password and nothing to translate the URL is left as
+#     written, so an inherited PGPASSWORD or ~/.pgpass still applies.
+# PG_CONN_DISPLAY_URL is the URL without its password but with the query NOT
+# translated: the one to print, or to hand the app as its DATABASE_URL (Ecto
+# reads `ssl=false` and `pool_size` itself).
+# A string that is not a postgres:// or postgresql:// URI is refused (#2831)
+# when it mentions `password` (any case) or holds `://`: PG_CONN_ERROR says
+# why, PG_CONN_URL is empty, and the caller dies with it. A passwordless
+# `key=value` conninfo or a bare database name is left unchanged.
 pg_conn_split() {
   local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
-  local query="" has_query=0 q seg kept="" sep="" qpw="" has_qpw=0
+  local query="" has_query=0 q seg key val kept="" sep="" shown="" ssep=""
+  local qpw="" has_qpw=0
   PG_CONN_URL="$url"
+  PG_CONN_DISPLAY_URL="$url"
   PG_CONN_PASSWORD=""
   PG_CONN_HAS_PASSWORD=0
+  PG_CONN_ERROR=""
 
   case "$url" in
     [Ee][Cc][Tt][Oo]://*) url="postgres://${url:7}" ;;
+    [Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]://*) url="postgres://${url:11}" ;;
+    [Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss][Qq][Ll]://*) url="postgresql://${url:13}" ;;
   esac
   PG_CONN_URL="$url"
+  PG_CONN_DISPLAY_URL="$url"
   case "$url" in
     postgres://* | postgresql://*) ;;
+    *://* | *[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]*)
+      PG_CONN_URL=""
+      PG_CONN_DISPLAY_URL=""
+      PG_CONN_ERROR="is not a postgres:// URL and holds a password or another URL, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read. Write it as a postgres:// URL, password included (postgres:///database?host=/socket/dir for a Unix socket), or put the password in PGPASSWORD or ~/.pgpass."
+      return 0
+      ;;
     *) return 0 ;;
   esac
 
@@ -167,24 +193,52 @@ pg_conn_split() {
     q="$query"
     while :; do
       seg="${q%%&*}"
-      PG_CONN_DECODED=""
+      key=""
+      val=""
       case "$seg" in
-        *=*) pg_conn_decode "${seg%%=*}" ;;
+        *=*)
+          pg_conn_decode "${seg%%=*}"
+          key="$PG_CONN_DECODED"
+          pg_conn_decode "${seg#*=}"
+          val="$PG_CONN_DECODED"
+          ;;
       esac
-      if [ "$PG_CONN_DECODED" = "password" ]; then
+      if [ "$key" = "password" ]; then
         qpw="${seg#*=}"
         has_qpw=1
       else
-        kept="${kept}${sep}${seg}"
-        sep="&"
+        shown="${shown}${ssep}${seg}"
+        ssep="&"
+        case "$key" in
+          pool_size | timeout | idle_interval) ;;
+          ssl)
+            if [ "$val" = "false" ]; then
+              kept="${kept}${sep}sslmode=disable"
+            else
+              kept="${kept}${sep}${seg}"
+            fi
+            sep="&"
+            ;;
+          *)
+            kept="${kept}${sep}${seg}"
+            sep="&"
+            ;;
+        esac
       fi
       [ "$seg" = "$q" ] && break
       q="${q#*&}"
     done
-    [ "$has_qpw" = 1 ] && query="$kept"
   fi
 
   if [ "$has_qpw" = 0 ] && { [ "$has_pw" = 0 ] || [ -z "$pw" ]; }; then
+    # No password to move: only a translated query changes the URL, and the
+    # userinfo stays as written.
+    if [ "$has_query" = 1 ] && [ "$kept" != "$query" ]; then
+      PG_CONN_URL="${url%%://*}://"
+      [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${userinfo}@"
+      PG_CONN_URL+="${host}"
+      [ -n "$kept" ] && PG_CONN_URL+="?${kept}"
+    fi
     return 0
   fi
   [ "$has_qpw" = 1 ] && pw="$qpw"
@@ -192,7 +246,9 @@ pg_conn_split() {
   PG_CONN_URL="${url%%://*}://"
   [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${user}@"
   PG_CONN_URL+="${host}"
-  [ -n "$query" ] && PG_CONN_URL+="?${query}"
+  PG_CONN_DISPLAY_URL="$PG_CONN_URL"
+  [ -n "$kept" ] && PG_CONN_URL+="?${kept}"
+  [ -n "$shown" ] && PG_CONN_DISPLAY_URL+="?${shown}"
 
   pg_conn_decode "$pw"
   PG_CONN_PASSWORD="$PG_CONN_DECODED"
@@ -214,6 +270,8 @@ do_restore() {
   # $1 = dump file. createdb is best-effort (target may exist / role may lack
   # CREATEDB); pg_restore still validates the connection.
   local dump="$1" name
+  pg_conn_split "$RESTORE_DATABASE_URL"
+  [ -z "$PG_CONN_ERROR" ] || die "RESTORE_DATABASE_URL $PG_CONN_ERROR"
   name="$(db_name "$RESTORE_DATABASE_URL")"
   createdb "$name" 2>/dev/null || echo "    (createdb skipped — assuming ${name} exists)"
 
@@ -222,7 +280,6 @@ do_restore() {
   # --no-privileges mirrors how the dump was taken.
   # The password reaches pg_restore through PGPASSWORD only, in a subshell
   # (#2726).
-  pg_conn_split "$RESTORE_DATABASE_URL"
   (
     # shellcheck disable=SC2030,SC2031 # PGPASSWORD is meant for this subshell only
     if [ "$PG_CONN_HAS_PASSWORD" = 1 ]; then export PGPASSWORD="$PG_CONN_PASSWORD"; fi
@@ -234,6 +291,8 @@ do_restore() {
 
 cmd_db() {
   require RESTORE_DATABASE_URL
+  pg_conn_split "$RESTORE_DATABASE_URL"
+  [ -z "$PG_CONN_ERROR" ] || die "RESTORE_DATABASE_URL $PG_CONN_ERROR"
   local dump="${1:-}"
   [ -n "$dump" ] || die "usage: $0 db <dump-file>"
   [ -f "$dump" ] || die "no such file: $dump"
@@ -539,6 +598,8 @@ cmd_media() {
 
 cmd_drill() {
   require RESTORE_DATABASE_URL
+  pg_conn_split "$RESTORE_DATABASE_URL"
+  [ -z "$PG_CONN_ERROR" ] || die "RESTORE_DATABASE_URL $PG_CONN_ERROR"
   local dump="${1:-}" name
   [ -n "$dump" ] || die "usage: $0 drill <dump-file>"
   [ -f "$dump" ] || die "no such file: $dump"
@@ -577,7 +638,7 @@ cmd_drill() {
 
 ==> Drill restore looks sane.
     * To poke at it with a real instance, scrub it first (it holds prod PII):
-        STAGING_DATABASE_URL="${PG_CONN_URL}" ./scripts/staging.sh scrub
+        STAGING_DATABASE_URL="${PG_CONN_DISPLAY_URL}" ./scripts/staging.sh scrub
       (password not shown: put it back in the URL, or export PGPASSWORD)
     * Tear down when done:
         dropdb ${name}

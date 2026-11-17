@@ -1290,6 +1290,11 @@ defmodule KilnCMS.Backups.Steps do
           {:error, :superseded} ->
             {:result, {:cancel, :superseded}}
 
+          # The connection string itself is refused (#2831): no retry can
+          # change that, so the run fails now with the reason.
+          {:error, :refused_conninfo = reason} ->
+            {:fatal, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
+
           {:error, reason} ->
             {:retry, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
         end
@@ -2745,7 +2750,9 @@ defmodule KilnCMS.Backups.Steps do
          # .pgpass, libpq would prompt, and with no terminal it reads the
          # port's stdin, which never ends: the step hangs until its job
          # timeout. Failing at once reports the real cause.
-         {url, env} = split_credentials(Backups.database_url()),
+         # `--lock-wait-timeout`: a dump behind a migration's or VACUUM FULL's
+         # ACCESS EXCLUSIVE lock gives up instead of waiting for it (#2844).
+         {:ok, {url, env}} <- Backups.pg_connection(),
          :ok <-
            Command.cmd(
              "pg_dump",
@@ -2754,6 +2761,7 @@ defmodule KilnCMS.Backups.Steps do
                "--format=custom",
                "--no-owner",
                "--no-privileges",
+               "--lock-wait-timeout=#{Backups.lock_wait_ms()}",
                "--file=#{tmp}",
                url
              ],
@@ -3213,7 +3221,7 @@ defmodule KilnCMS.Backups.Steps do
 
   @doc """
   Splits a connection URL into a password-free URL plus a `PGPASSWORD`
-  environment entry.
+  environment entry, or refuses it (`{:error, :refused_conninfo}`, #2831).
 
   The password must not be an **argv** element. There is no injection risk
   (no shell) — but argv is not private: `/proc/<pid>/cmdline` is
@@ -3226,10 +3234,12 @@ defmodule KilnCMS.Backups.Steps do
   and a query `password=` is moved as well; see `KilnCMS.Backups.PgUrl.split/1`
   for the exact rules.
 
-  Returns the URL unchanged with an empty env when there is no password to
-  move — `pg_dump` then falls back to `PGPASSFILE`/peer auth as it always did.
+  Returns `{:ok, {url, []}}` when there is no password to move — `pg_dump`
+  then falls back to `PGPASSFILE`/peer auth as it always did. The TLS
+  settings are not added here; `KilnCMS.Backups.pg_connection/1` does both.
   """
-  @spec split_credentials(String.t() | nil) :: {String.t() | nil, [{String.t(), String.t()}]}
+  @spec split_credentials(String.t() | nil) ::
+          {:ok, {String.t() | nil, [{String.t(), String.t()}]}} | {:error, PgUrl.refusal()}
   defdelegate split_credentials(url), to: PgUrl, as: :split
 
   # 0700/0600 throughout. A `.dump` is a complete logical copy of the database
@@ -3246,8 +3256,17 @@ defmodule KilnCMS.Backups.Steps do
   # this is the only shape the `else` can see.
   defp fail_tuple({:error, reason}), do: {:error, reason}
 
-  defp describe({:exit_status, executable, status, output}),
-    do: "#{executable} exited #{status}: #{output}"
+  defp describe(:refused_conninfo), do: Backups.describe_refused_conninfo()
 
+  defp describe({:exit_status, "pg_dump", _status, output} = reason) do
+    if Backups.lock_timeout?(output),
+      do: Backups.describe_lock_timeout(output),
+      else: describe_exit(reason)
+  end
+
+  defp describe({:exit_status, _executable, _status, _output} = reason), do: describe_exit(reason)
   defp describe(reason), do: inspect(reason)
+
+  defp describe_exit({:exit_status, executable, status, output}),
+    do: "#{executable} exited #{status}: #{output}"
 end

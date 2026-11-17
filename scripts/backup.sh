@@ -20,7 +20,14 @@
 #   DATABASE_URL         source database (required for `db`/`all`; read-only).
 #                        postgres://, postgresql:// or ecto:// (the form the
 #                        app documents); the password reaches pg_dump through
-#                        PGPASSWORD only, never its argv (see pg_conn_split)
+#                        PGPASSWORD only, never its argv (see pg_conn_split).
+#                        A key=value string with a password is refused. Put
+#                        `sslmode=require` (or verify-full) in it to require
+#                        TLS: the app's DATABASE_SSL does not reach this script
+#   BACKUP_LOCK_WAIT_SECONDS how long pg_dump waits for each table lock before
+#                        giving up (1-3600, default 600; anything else keeps
+#                        600 and warns on stderr) — the same variable the app
+#                        reads
 #   BACKUP_DIR           where backups land (default: /var/backups/kiln)
 #   MEDIA_DIR            uploads root when using the Local storage adapter.
 #                        Leave unset on S3/R2 deployments (back up the bucket
@@ -273,31 +280,54 @@ pg_conn_decode() {
 
 # $1 = a DATABASE_URL. Sets PG_CONN_URL (what goes in argv), PG_CONN_PASSWORD
 # and PG_CONN_HAS_PASSWORD (1 when PG_CONN_PASSWORD is to be exported as
-# PGPASSWORD, in a subshell around the one command that needs it):
-#   - `ecto://` (any case) becomes `postgres://`; nothing else is rewritten;
+# PGPASSWORD, in a subshell around the one command that needs it),
+# PG_CONN_DISPLAY_URL and PG_CONN_ERROR:
+#   - `ecto://` (any case) becomes `postgres://`, and a `postgres://` or
+#     `postgresql://` scheme is lower-cased (libpq reads only those as URIs);
+#   - Ecto's own query parameters are translated for libpq (#2833), keys and
+#     values compared percent-decoded: `ssl=false` becomes `sslmode=disable`,
+#     `pool_size`, `timeout` and `idle_interval` are dropped (and a `?` left
+#     with nothing after it); everything else is kept as written;
 #   - the userinfo password and every query `password` parameter (the key is
 #     decoded first, as libpq does: `pass%77ord=` is one) are removed and
 #     decoded. The query one wins, as in libpq. The userinfo ends where libpq
 #     ends it (fe-connect.c): at the first `@` before the first `/`, so a `?`
 #     or `#` before that `@` is part of the password; the password runs from
 #     the first `:` in it;
-#   - with no non-empty password the URL is left as written, so an inherited
-#     PGPASSWORD or ~/.pgpass still applies.
-# A string that is not a postgres:// or postgresql:// URI (a `key=value`
-# conninfo) is left unchanged.
+#   - with no non-empty password and nothing to translate the URL is left as
+#     written, so an inherited PGPASSWORD or ~/.pgpass still applies.
+# PG_CONN_DISPLAY_URL is the URL without its password but with the query NOT
+# translated: the one to print, or to hand the app as its DATABASE_URL (Ecto
+# reads `ssl=false` and `pool_size` itself).
+# A string that is not a postgres:// or postgresql:// URI is refused (#2831)
+# when it mentions `password` (any case) or holds `://`: PG_CONN_ERROR says
+# why, PG_CONN_URL is empty, and the caller dies with it. A passwordless
+# `key=value` conninfo or a bare database name is left unchanged.
 pg_conn_split() {
   local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
-  local query="" has_query=0 q seg kept="" sep="" qpw="" has_qpw=0
+  local query="" has_query=0 q seg key val kept="" sep="" shown="" ssep=""
+  local qpw="" has_qpw=0
   PG_CONN_URL="$url"
+  PG_CONN_DISPLAY_URL="$url"
   PG_CONN_PASSWORD=""
   PG_CONN_HAS_PASSWORD=0
+  PG_CONN_ERROR=""
 
   case "$url" in
     [Ee][Cc][Tt][Oo]://*) url="postgres://${url:7}" ;;
+    [Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss]://*) url="postgres://${url:11}" ;;
+    [Pp][Oo][Ss][Tt][Gg][Rr][Ee][Ss][Qq][Ll]://*) url="postgresql://${url:13}" ;;
   esac
   PG_CONN_URL="$url"
+  PG_CONN_DISPLAY_URL="$url"
   case "$url" in
     postgres://* | postgresql://*) ;;
+    *://* | *[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]*)
+      PG_CONN_URL=""
+      PG_CONN_DISPLAY_URL=""
+      PG_CONN_ERROR="is not a postgres:// URL and holds a password or another URL, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read. Write it as a postgres:// URL, password included (postgres:///database?host=/socket/dir for a Unix socket), or put the password in PGPASSWORD or ~/.pgpass."
+      return 0
+      ;;
     *) return 0 ;;
   esac
 
@@ -329,24 +359,52 @@ pg_conn_split() {
     q="$query"
     while :; do
       seg="${q%%&*}"
-      PG_CONN_DECODED=""
+      key=""
+      val=""
       case "$seg" in
-        *=*) pg_conn_decode "${seg%%=*}" ;;
+        *=*)
+          pg_conn_decode "${seg%%=*}"
+          key="$PG_CONN_DECODED"
+          pg_conn_decode "${seg#*=}"
+          val="$PG_CONN_DECODED"
+          ;;
       esac
-      if [ "$PG_CONN_DECODED" = "password" ]; then
+      if [ "$key" = "password" ]; then
         qpw="${seg#*=}"
         has_qpw=1
       else
-        kept="${kept}${sep}${seg}"
-        sep="&"
+        shown="${shown}${ssep}${seg}"
+        ssep="&"
+        case "$key" in
+          pool_size | timeout | idle_interval) ;;
+          ssl)
+            if [ "$val" = "false" ]; then
+              kept="${kept}${sep}sslmode=disable"
+            else
+              kept="${kept}${sep}${seg}"
+            fi
+            sep="&"
+            ;;
+          *)
+            kept="${kept}${sep}${seg}"
+            sep="&"
+            ;;
+        esac
       fi
       [ "$seg" = "$q" ] && break
       q="${q#*&}"
     done
-    [ "$has_qpw" = 1 ] && query="$kept"
   fi
 
   if [ "$has_qpw" = 0 ] && { [ "$has_pw" = 0 ] || [ -z "$pw" ]; }; then
+    # No password to move: only a translated query changes the URL, and the
+    # userinfo stays as written.
+    if [ "$has_query" = 1 ] && [ "$kept" != "$query" ]; then
+      PG_CONN_URL="${url%%://*}://"
+      [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${userinfo}@"
+      PG_CONN_URL+="${host}"
+      [ -n "$kept" ] && PG_CONN_URL+="?${kept}"
+    fi
     return 0
   fi
   [ "$has_qpw" = 1 ] && pw="$qpw"
@@ -354,7 +412,9 @@ pg_conn_split() {
   PG_CONN_URL="${url%%://*}://"
   [ "$has_userinfo" = 1 ] && PG_CONN_URL+="${user}@"
   PG_CONN_URL+="${host}"
-  [ -n "$query" ] && PG_CONN_URL+="?${query}"
+  PG_CONN_DISPLAY_URL="$PG_CONN_URL"
+  [ -n "$kept" ] && PG_CONN_URL+="?${kept}"
+  [ -n "$shown" ] && PG_CONN_DISPLAY_URL+="?${shown}"
 
   pg_conn_decode "$pw"
   PG_CONN_PASSWORD="$PG_CONN_DECODED"
@@ -575,6 +635,9 @@ on_exit() {
   if [ -n "${WORK_DIR:-}" ]; then
     rm -rf -- "$WORK_DIR"
   fi
+  if [ -n "${PG_DUMP_ERRORS:-}" ]; then
+    rm -f -- "$PG_DUMP_ERRORS"
+  fi
 
   if [ "$status" -ne 0 ] && [ "${WRITE_MANIFEST:-0}" = "1" ]; then
     # `die` sets LAST_ERROR; a command that failed under `set -e` (pg_dump,
@@ -593,6 +656,8 @@ OWN_PARTIALS=()
 SET_FILES=()
 # Scratch directory for the media file lists (set by cmd_media).
 WORK_DIR=""
+# pg_dump's captured stderr while it runs (set by cmd_db).
+PG_DUMP_ERRORS=""
 
 track_partial() {
   OWN_PARTIALS+=("$1")
@@ -666,8 +731,11 @@ start_heartbeat() {
 
 cmd_db() {
   require DATABASE_URL
+  pg_conn_split "$DATABASE_URL"
+  [ -z "$PG_CONN_ERROR" ] || die "DATABASE_URL $PG_CONN_ERROR"
+  read_lock_wait
   mkdir -p "$BACKUP_DIR/db"
-  local out="$BACKUP_DIR/db/kiln-db-${STAMP}.dump"
+  local out="$BACKUP_DIR/db/kiln-db-${STAMP}.dump" status=0 errors
 
   track_partial "${out}.partial"
   echo "==> pg_dump → ${out}"
@@ -678,12 +746,23 @@ cmd_db() {
   # or unverified dump can never be picked up as a backup.
   # The password reaches pg_dump through PGPASSWORD only: `export` is a
   # builtin, and the subshell keeps it from every other command (#2726).
-  pg_conn_split "$DATABASE_URL"
+  # --lock-wait-timeout: a dump behind a migration's or VACUUM FULL's lock
+  # gives up instead of waiting for as long as it is held (#2844).
+  # stderr goes to a file first so a failure manifest can say why (under
+  # `set -e` the run would otherwise record only its exit status); it is
+  # copied to stderr either way.
+  PG_DUMP_ERRORS="$(mktemp "${TMPDIR:-/tmp}/kiln-pg_dump.XXXXXX")"
   (
     if [ "$PG_CONN_HAS_PASSWORD" = 1 ]; then export PGPASSWORD="$PG_CONN_PASSWORD"; fi
     pg_dump --format=custom --no-owner --no-privileges \
+      --lock-wait-timeout="$LOCK_WAIT_MS" \
       --file="${out}.partial" "$PG_CONN_URL"
-  )
+  ) 2>"$PG_DUMP_ERRORS" || status=$?
+  cat -- "$PG_DUMP_ERRORS" >&2
+  errors="$(tail -n 5 -- "$PG_DUMP_ERRORS")"
+  rm -f -- "$PG_DUMP_ERRORS"
+  PG_DUMP_ERRORS=""
+  [ "$status" -eq 0 ] || die "$(pg_dump_failure "$status" "$errors")"
 
   echo "==> Verifying dump (pg_restore --list)"
   pg_restore --list "${out}.partial" >/dev/null ||
@@ -698,6 +777,25 @@ cmd_db() {
   record_artifact db "$out" "$sha"
   offsite "$out" "$sha"
   offsite "$sidecar" "$sidecar_sha"
+}
+
+# $1 = pg_dump's exit status, $2 = the last lines of its stderr. Prints the
+# reason for the failure manifest: pg_dump's own words, the URL's password
+# removed wherever it appears literally, cut to 500 characters (the app's
+# Importer scrubs the text again). pg_dump reports its lock-wait timeout as a
+# statement timeout on `LOCK TABLE`, which reads as nothing to do with locks;
+# that one is said in plain words, as the app does.
+pg_dump_failure() {
+  local status="$1" text="$2" msg
+  if [ -n "$PG_CONN_PASSWORD" ]; then text="${text//"$PG_CONN_PASSWORD"/***}"; fi
+  text="${text//$'\n'/ / }"
+  case "$text" in
+    *[Ss][Tt][Aa][Tt][Ee][Mm][Ee][Nn][Tt]\ [Tt][Ii][Mm][Ee][Oo][Uu][Tt]*"LOCK TABLE"*)
+      msg="pg_dump waited longer than BACKUP_LOCK_WAIT_SECONDS (${LOCK_WAIT_S} s) for a table lock and gave up: another session held a conflicting lock (a migration, VACUUM FULL, a long transaction). pg_dump said: ${text}"
+      ;;
+    *) msg="pg_dump exited ${status}: ${text}" ;;
+  esac
+  printf '%s' "${msg:0:500}"
 }
 
 # --- media settings (mirror config/runtime/prod/backups.exs) ---------------
@@ -782,6 +880,32 @@ read_keep_days() {
     fi
   fi
   KEEP_DAYS="${days:-14}"
+}
+
+# LOCK_WAIT_S and LOCK_WAIT_MS from BACKUP_LOCK_WAIT_SECONDS, read like
+# Env.integer_in/3 with 1..3600 (config/runtime/prod/backups.exs): blank is
+# the default (600) silently; a whole number in range (an optional `+`,
+# leading zeros allowed) is used; anything else keeps 600 and warns. `0` is
+# not "no limit": pg_dump would read it as waiting forever (#2844).
+read_lock_wait() {
+  local raw="${BACKUP_LOCK_WAIT_SECONDS:-}" t digits seconds=""
+  t="$(trim_ws "$raw")"
+  if [ -n "$t" ]; then
+    if [[ "$t" =~ ^\+?[0-9]+$ ]]; then
+      digits="${t#+}"
+      while [ "${#digits}" -gt 1 ] && [ "${digits#0}" != "$digits" ]; do
+        digits="${digits#0}"
+      done
+      if [ "${#digits}" -le 4 ] && [ "$((10#$digits))" -ge 1 ] && [ "$((10#$digits))" -le 3600 ]; then
+        seconds="$((10#$digits))"
+      fi
+    fi
+    if [ -z "$seconds" ]; then
+      warn "BACKUP_LOCK_WAIT_SECONDS=${raw} is not a whole number of seconds from 1 to 3600; using 600"
+    fi
+  fi
+  LOCK_WAIT_S="${seconds:-600}"
+  LOCK_WAIT_MS=$((LOCK_WAIT_S * 1000))
 }
 
 # One BACKUP_MEDIA_EXCLUDE glob as an anchored POSIX ERE, the translation the

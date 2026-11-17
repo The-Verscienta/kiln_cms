@@ -5,11 +5,13 @@ defmodule KilnCMS.Test.PgUrlCases do
   so the app and cron read a `DATABASE_URL` the same way.
 
   Each case is `{label, input, url, password}`: the URL to give libpq and the
-  `PGPASSWORD` to give it (`nil` for none).
+  `PGPASSWORD` to give it (`nil` for none), or `url: :refused` for a string
+  that is refused (#2831). `test/kiln_cms/backups/pg_url_libpq_test.exs`
+  checks the table against libpq's own parser.
   """
 
   @doc "The shared cases."
-  @spec cases() :: [{String.t(), String.t(), String.t(), String.t() | nil}]
+  @spec cases() :: [{String.t(), String.t(), String.t() | :refused, String.t() | nil}]
   def cases do
     [
       {"postgres:// with a password", "postgres://kiln:hunter2@db:5432/kiln",
@@ -86,10 +88,143 @@ defmodule KilnCMS.Test.PgUrlCases do
       {"an empty password is left as written", "postgres://u:@h/db", "postgres://u:@h/db", nil},
       {"a socket directory in the query", "postgres:///db?host=/var/run/postgresql",
        "postgres:///db?host=/var/run/postgresql", nil},
-      {"a conninfo string is not touched", "host=db password=x dbname=kiln",
-       "host=db password=x dbname=kiln", nil},
-      {"another scheme is not touched", "mysql://u:pw@h/db", "mysql://u:pw@h/db", nil},
-      {"an empty string", "", "", nil}
+      {"an empty string", "", "", nil},
+      # Schemes (#2831): libpq reads only lower-case postgres:// and
+      # postgresql:// as URIs, and anything else as a database name, password
+      # and all.
+      {"POSTGRES:// in capitals", "POSTGRES://kiln:hunter2@db/kiln", "postgres://kiln@db/kiln",
+       "hunter2"},
+      {"PostgreSQL:// in mixed case", "PostgreSQL://kiln:hunter2@db/kiln",
+       "postgresql://kiln@db/kiln", "hunter2"},
+      {"another scheme is refused", "mysql://u:pw@h/db", :refused, nil},
+      {"a leading space is not a URI, and is refused", " postgres://u:pw@h/db", :refused, nil},
+      # key=value strings (#2831): refused when they mention a password or
+      # hold a URL; libpq keywords are case-sensitive and cannot be quoted.
+      {"a conninfo string with a password is refused", "host=db password=x dbname=kiln", :refused,
+       nil},
+      {"a quoted conninfo password is refused", "host=db password='a b\\'c' dbname=kiln",
+       :refused, nil},
+      {"a conninfo sslpassword is refused", "host=db sslpassword=x dbname=kiln", :refused, nil},
+      {"PASSWORD in capitals is refused", "host=db PASSWORD=x dbname=kiln", :refused, nil},
+      {"a dbname that libpq would expand into a URI is refused", "dbname='postgres://u:s@h/db'",
+       :refused, nil},
+      {"a passwordless conninfo string is kept", "host=/run/postgresql dbname=kiln_prod",
+       "host=/run/postgresql dbname=kiln_prod", nil},
+      {"a bare database name is kept", "kiln_prod", "kiln_prod", nil},
+      # Ecto's own query parameters (#2833), matched percent-decoded.
+      {"ssl=false becomes sslmode=disable", "ecto://kiln:pw@db/kiln?ssl=false",
+       "postgres://kiln@db/kiln?sslmode=disable", "pw"},
+      {"ssl=false in the middle",
+       "postgres://kiln:pw@db/kiln?connect_timeout=5&ssl=false&application_name=b",
+       "postgres://kiln@db/kiln?connect_timeout=5&sslmode=disable&application_name=b", "pw"},
+      {"ssl=false last", "postgres://kiln:pw@db/kiln?application_name=x&ssl=false",
+       "postgres://kiln@db/kiln?application_name=x&sslmode=disable", "pw"},
+      {"an encoded ssl=false", "postgres://kiln:pw@db/kiln?%73sl=%66alse",
+       "postgres://kiln@db/kiln?sslmode=disable", "pw"},
+      {"ssl=false without a password", "postgres://kiln@db/kiln?ssl=false",
+       "postgres://kiln@db/kiln?sslmode=disable", nil},
+      {"ssl=false and a query password", "postgres://kiln@db/kiln?ssl=false&password=hunter2",
+       "postgres://kiln@db/kiln?sslmode=disable", "hunter2"},
+      {"ssl=true is kept (libpq reads it)", "postgres://kiln:pw@db/kiln?ssl=true",
+       "postgres://kiln@db/kiln?ssl=true", "pw"},
+      {"ssl=1 is kept (libpq refuses it, by name)", "postgres://kiln:pw@db/kiln?ssl=1",
+       "postgres://kiln@db/kiln?ssl=1", "pw"},
+      {"ssl=FALSE is not Ecto's false, and is kept", "postgres://kiln@db/kiln?ssl=FALSE",
+       "postgres://kiln@db/kiln?ssl=FALSE", nil},
+      {"pool_size, timeout and idle_interval are dropped",
+       "ecto://kiln:pw@db/kiln?pool_size=10&sslmode=require&timeout=5000&idle_interval=1000",
+       "postgres://kiln@db/kiln?sslmode=require", "pw"},
+      {"a query of Ecto options alone goes, `?` and all",
+       "postgres://kiln:pw@db/kiln?pool_size=10", "postgres://kiln@db/kiln", "pw"},
+      {"an Ecto option without a password", "postgres://kiln@db/kiln?pool_size=10",
+       "postgres://kiln@db/kiln", nil},
+      {"an Ecto option beside an empty password keeps the userinfo",
+       "postgres://kiln:@db/kiln?pool_size=10", "postgres://kiln:@db/kiln", nil},
+      {"an encoded Ecto key is dropped", "postgres://kiln:pw@db/kiln?pool%5Fsize=10",
+       "postgres://kiln@db/kiln", "pw"},
+      {"socket_dir is kept: it changes which server is reached",
+       "ecto://kiln:pw@localhost/kiln?socket_dir=/run/postgresql",
+       "postgres://kiln@localhost/kiln?socket_dir=/run/postgresql", "pw"}
+    ]
+  end
+
+  @doc """
+  What the scripts' `PG_CONN_DISPLAY_URL` is where it differs from the URL
+  given to libpq: the query as written, untranslated, for printing or for an
+  app's `DATABASE_URL`. Everywhere else the two are the same.
+  """
+  @spec display_urls() :: %{String.t() => String.t()}
+  def display_urls do
+    %{
+      "ecto://kiln:pw@db/kiln?ssl=false" => "postgres://kiln@db/kiln?ssl=false",
+      "postgres://kiln:pw@db/kiln?connect_timeout=5&ssl=false&application_name=b" =>
+        "postgres://kiln@db/kiln?connect_timeout=5&ssl=false&application_name=b",
+      "postgres://kiln:pw@db/kiln?application_name=x&ssl=false" =>
+        "postgres://kiln@db/kiln?application_name=x&ssl=false",
+      "postgres://kiln:pw@db/kiln?%73sl=%66alse" => "postgres://kiln@db/kiln?%73sl=%66alse",
+      "postgres://kiln@db/kiln?ssl=false" => "postgres://kiln@db/kiln?ssl=false",
+      "postgres://kiln@db/kiln?ssl=false&password=hunter2" => "postgres://kiln@db/kiln?ssl=false",
+      "ecto://kiln:pw@db/kiln?pool_size=10&sslmode=require&timeout=5000&idle_interval=1000" =>
+        "postgres://kiln@db/kiln?pool_size=10&sslmode=require&timeout=5000&idle_interval=1000",
+      "postgres://kiln:pw@db/kiln?pool_size=10" => "postgres://kiln@db/kiln?pool_size=10",
+      "postgres://kiln@db/kiln?pool_size=10" => "postgres://kiln@db/kiln?pool_size=10",
+      "postgres://kiln:@db/kiln?pool_size=10" => "postgres://kiln:@db/kiln?pool_size=10",
+      "postgres://kiln:pw@db/kiln?pool%5Fsize=10" => "postgres://kiln@db/kiln?pool%5Fsize=10"
+    }
+  end
+
+  @doc """
+  For the cases whose input libpq cannot read as written (Ecto's own
+  parameters), the URL libpq should read the same way as the output, password
+  included: what the translation is meant to produce.
+  """
+  @spec libpq_equivalents() :: %{String.t() => String.t()}
+  def libpq_equivalents do
+    %{
+      "ecto://kiln:pw@db/kiln?ssl=false" => "postgres://kiln:pw@db/kiln?sslmode=disable",
+      "postgres://kiln:pw@db/kiln?connect_timeout=5&ssl=false&application_name=b" =>
+        "postgres://kiln:pw@db/kiln?connect_timeout=5&sslmode=disable&application_name=b",
+      "postgres://kiln:pw@db/kiln?application_name=x&ssl=false" =>
+        "postgres://kiln:pw@db/kiln?application_name=x&sslmode=disable",
+      "postgres://kiln:pw@db/kiln?%73sl=%66alse" => "postgres://kiln:pw@db/kiln?sslmode=disable",
+      "postgres://kiln@db/kiln?ssl=false" => "postgres://kiln@db/kiln?sslmode=disable",
+      "postgres://kiln@db/kiln?ssl=false&password=hunter2" =>
+        "postgres://kiln:hunter2@db/kiln?sslmode=disable",
+      "ecto://kiln:pw@db/kiln?pool_size=10&sslmode=require&timeout=5000&idle_interval=1000" =>
+        "postgres://kiln:pw@db/kiln?sslmode=require",
+      "postgres://kiln:pw@db/kiln?pool_size=10" => "postgres://kiln:pw@db/kiln",
+      "postgres://kiln@db/kiln?pool_size=10" => "postgres://kiln@db/kiln",
+      "postgres://kiln:@db/kiln?pool_size=10" => "postgres://kiln:@db/kiln",
+      "postgres://kiln:pw@db/kiln?pool%5Fsize=10" => "postgres://kiln:pw@db/kiln"
+    }
+  end
+
+  @doc """
+  `{url, sets_tls?}`: whether the string itself says how libpq uses TLS
+  (`KilnCMS.Backups.PgUrl.sets_tls?/1`), so the app adds no `PGSSLMODE`.
+  """
+  @spec tls_cases() :: [{String.t(), boolean()}]
+  def tls_cases do
+    [
+      {"postgres://u@h/db", false},
+      {"postgres://u@h/db?sslmode=require", true},
+      {"postgres://u@h/db?a=1&sslmode=disable", true},
+      {"postgres://u@h/db?%73slmode=verify-full", true},
+      {"postgres://u@h/db?requiressl=1", true},
+      {"postgres://u@h/db?sslrootcert=/ca.pem", true},
+      {"postgres://u@h/db?ssl=true", false},
+      {"postgres://u@h/db?sslcert=/c.pem&sslkey=/k.pem", false},
+      {"postgres://u@h/db?application_name=sslmode=x", false},
+      {"postgres://u@h/db?sslmode", false},
+      {"host=db dbname=kiln sslmode=require", true},
+      {"host=db sslmode = verify-full dbname=kiln", true},
+      {"host=db requiressl=1", true},
+      {"host=db sslrootcert='/etc/a b.pem'", true},
+      {"host=db application_name='x sslmode=disable' dbname=kiln", false},
+      {"host=db application_name=x\\ sslmode=disable dbname=kiln", false},
+      {"host=db dbname=kiln", false},
+      {"kiln_prod", false},
+      {"", false}
     ]
   end
 end

@@ -1,10 +1,13 @@
 defmodule KilnCMS.Backups.PgUrlTest do
   @moduledoc """
-  `KilnCMS.Backups.PgUrl` (#2719, #2726): a `DATABASE_URL` as libpq reads it,
-  with the password moved out of argv.
+  `KilnCMS.Backups.PgUrl` (#2719, #2726, #2830, #2831, #2833): a
+  `DATABASE_URL` as libpq reads it, with the password moved out of argv, a
+  secret-bearing `key=value` string refused, Ecto's own query parameters
+  translated, and TLS settings that follow the app's Repo.
 
   The same table drives the shell copy (`pg_conn_split`) in
-  `test/scripts/pg_conn_split_test.exs`, so the two cannot drift apart.
+  `test/scripts/pg_conn_split_test.exs`, so the two cannot drift apart, and
+  `pg_url_libpq_test.exs` checks it against libpq's own parser.
   """
   use ExUnit.Case, async: true
 
@@ -15,37 +18,167 @@ defmodule KilnCMS.Backups.PgUrlTest do
   describe "split/1" do
     for {label, input, url, password} <- @cases do
       @input input
-      @url url
-      @env if(password, do: [{"PGPASSWORD", password}], else: [])
+      @expected (if url == :refused do
+                   {:error, :refused_conninfo}
+                 else
+                   {:ok, {url, if(password, do: [{"PGPASSWORD", password}], else: [])}}
+                 end)
 
       test label do
-        assert PgUrl.split(@input) == {@url, @env}
+        assert PgUrl.split(@input) == @expected
       end
     end
 
     test "nil" do
-      assert PgUrl.split(nil) == {nil, []}
+      assert PgUrl.split(nil) == {:ok, {nil, []}}
     end
 
     test "never raises, whatever follows a `%`" do
       for tail <- ["%", "%z", "%zz", "%0", "%%", "%g0", "%00"] do
-        assert {"postgres://u@h/db", [{"PGPASSWORD", "p" <> ^tail}]} =
+        assert {:ok, {"postgres://u@h/db", [{"PGPASSWORD", "p" <> ^tail}]}} =
                  PgUrl.split("postgres://u:p#{tail}@h/db")
       end
+    end
+
+    test "a refusal never carries the string it refused" do
+      assert {:error, reason} = PgUrl.split("host=db password=hunter2 dbname=kiln")
+      refute inspect(reason) =~ "hunter2"
     end
   end
 
   describe "normalize/1" do
-    test "rewrites the ecto scheme, in any case, and nothing else" do
+    test "rewrites the ecto scheme, in any case, and lower-cases postgres schemes" do
       assert PgUrl.normalize("ecto://u:p%40@h/db?sslmode=require") ==
                "postgres://u:p%40@h/db?sslmode=require"
 
       assert PgUrl.normalize("Ecto://h/db") == "postgres://h/db"
+      assert PgUrl.normalize("POSTGRES://h/db") == "postgres://h/db"
+      assert PgUrl.normalize("postgreSQL://h/db") == "postgresql://h/db"
       assert PgUrl.normalize("postgresql://h/db") == "postgresql://h/db"
       assert PgUrl.normalize("host=db dbname=kiln") == "host=db dbname=kiln"
       assert PgUrl.normalize("ecto:/h/db") == "ecto:/h/db"
+      assert PgUrl.normalize("mysql://u:pw@h/db") == "mysql://u:pw@h/db"
       assert PgUrl.normalize("") == ""
       assert PgUrl.normalize(nil) == nil
+    end
+
+    test "translates Ecto's query parameters and keeps the password where it was" do
+      assert PgUrl.normalize("ecto://u:p%40@h/db?ssl=false&pool_size=5") ==
+               "postgres://u:p%40@h/db?sslmode=disable"
+
+      assert PgUrl.normalize("postgres://u@h/db?password=x&timeout=5&ssl=true") ==
+               "postgres://u@h/db?password=x&ssl=true"
+    end
+
+    test "leaves a URL with nothing to translate byte for byte, `?` and all" do
+      for url <- ["postgres://h/db?", "postgres://h/db?a=1&&b=2", "postgres://h/db?ssl"] do
+        assert PgUrl.normalize(url) == url
+      end
+    end
+  end
+
+  describe "sets_tls?/1" do
+    for {url, sets?} <- KilnCMS.Test.PgUrlCases.tls_cases() do
+      @url url
+      @sets sets?
+
+      test "#{inspect(url)} -> #{sets?}" do
+        assert PgUrl.sets_tls?(@url) == @sets
+      end
+    end
+
+    test "nil" do
+      refute PgUrl.sets_tls?(nil)
+    end
+  end
+
+  describe "tls_env/3" do
+    @url "postgres://kiln@db/kiln"
+    @none %{}
+
+    test "no TLS in the Repo adds nothing" do
+      for ssl <- [nil, false] do
+        assert PgUrl.tls_env(@url, ssl, @none) == {@url, []}
+      end
+    end
+
+    test "verify_none (DATABASE_SSL on, no CA file) requires TLS" do
+      assert PgUrl.tls_env(@url, [verify: :verify_none], @none) ==
+               {@url, [{"PGSSLMODE", "require"}]}
+    end
+
+    test "a CA file (DATABASE_SSL_CACERTFILE) verifies the server against it" do
+      ssl = [verify: :verify_peer, cacertfile: "/etc/kiln/ca.pem", depth: 3]
+
+      assert PgUrl.tls_env(@url, ssl, @none) ==
+               {@url, [{"PGSSLMODE", "verify-full"}, {"PGSSLROOTCERT", "/etc/kiln/ca.pem"}]}
+
+      assert PgUrl.tls_env(@url, [verify: :verify_peer, cacertfile: ~c"/ca.pem"], @none) ==
+               {@url, [{"PGSSLMODE", "verify-full"}, {"PGSSLROOTCERT", "/ca.pem"}]}
+    end
+
+    test "any other way of verifying fails closed: verify-full against the system store" do
+      system = {@url, [{"PGSSLMODE", "verify-full"}, {"PGSSLROOTCERT", "system"}]}
+
+      for ssl <- [
+            true,
+            [],
+            [verify: :verify_peer],
+            [verify: :verify_peer, cacerts: [<<1, 2, 3>>]],
+            [verify: :verify_peer, cacertfile: "  "],
+            :something_new
+          ] do
+        assert PgUrl.tls_env(@url, ssl, @none) == system, inspect(ssl)
+      end
+    end
+
+    test "a TLS key in the URL wins, and nothing is added" do
+      for {url, true} <- KilnCMS.Test.PgUrlCases.tls_cases(),
+          ssl <- [[verify: :verify_none], [verify: :verify_peer, cacertfile: "/ca.pem"]] do
+        assert PgUrl.tls_env(url, ssl, @none) == {url, []}, url
+      end
+    end
+
+    test "the operator's own PGSSLMODE or PGSSLROOTCERT wins, and nothing is added" do
+      ssl = [verify: :verify_peer, cacertfile: "/ca.pem"]
+
+      for ambient <- [%{"PGSSLMODE" => "disable"}, %{"PGSSLROOTCERT" => "/other.pem"}] do
+        assert PgUrl.tls_env(@url, ssl, ambient) == {@url, []}
+      end
+
+      for blank <- [%{"PGSSLMODE" => ""}, %{"PGSSLMODE" => "  ", "PGSSLROOTCERT" => nil}] do
+        assert {@url, [{"PGSSLMODE", "verify-full"} | _]} = PgUrl.tls_env(@url, ssl, blank)
+      end
+    end
+
+    test "ssl=true never makes it weaker than the Repo: dropped when the Repo verifies" do
+      url = "postgres://kiln@db/kiln?a=1&ssl=true&b=2"
+
+      assert PgUrl.tls_env(url, [verify: :verify_peer, cacertfile: "/ca.pem"], @none) ==
+               {"postgres://kiln@db/kiln?a=1&b=2",
+                [{"PGSSLMODE", "verify-full"}, {"PGSSLROOTCERT", "/ca.pem"}]}
+
+      assert PgUrl.tls_env("postgres://kiln@db/kiln?%73sl=%74rue", true, @none) ==
+               {"postgres://kiln@db/kiln",
+                [{"PGSSLMODE", "verify-full"}, {"PGSSLROOTCERT", "system"}]}
+    end
+
+    test "ssl=true stays when the Repo only requires TLS, or has none" do
+      url = "postgres://kiln@db/kiln?ssl=true"
+
+      assert PgUrl.tls_env(url, [verify: :verify_none], @none) == {url, []}
+      assert PgUrl.tls_env(url, false, @none) == {url, []}
+    end
+
+    test "a passwordless key=value string and a bare name get the derived mode" do
+      for url <- ["host=db dbname=kiln", "kiln_prod"] do
+        assert PgUrl.tls_env(url, [verify: :verify_none], @none) ==
+                 {url, [{"PGSSLMODE", "require"}]}
+      end
+    end
+
+    test "nil" do
+      assert PgUrl.tls_env(nil, true, @none) == {nil, []}
     end
   end
 end

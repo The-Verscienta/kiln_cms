@@ -33,6 +33,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   @moduletag :shell_portability
 
   @mb 1_048_576
+  @lock_parity_var "KILN_BACKUP_SCRIPT_LOCK_WAIT_PARITY"
   @script Path.expand("../../scripts/backup.sh", __DIR__)
   @restore Path.expand("../../scripts/restore.sh", __DIR__)
 
@@ -1702,7 +1703,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
 
   # --- helpers ---------------------------------------------------------------
 
-  describe "the database connection (#2719, #2726)" do
+  describe "the database connection (#2719, #2726, #2830, #2831, #2833, #2844)" do
     # `pg_dump` logs its argv and whether PGPASSWORD reached it. argv is
     # world-readable (/proc/<pid>/cmdline, `ps`); the environment is not.
     setup ctx do
@@ -1712,6 +1713,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       #!/bin/sh
       printf '%s\\n' "$@" > "#{log}.args"
       if [ -n "${PGPASSWORD+set}" ]; then printf 'set:%s' "$PGPASSWORD"; else printf unset; fi > "#{log}.env"
+      printf '%s|%s' "${PGSSLMODE-unset}" "${PGSSLROOTCERT-unset}" > "#{log}.tls"
       for a in "$@"; do
         case "$a" in --file=*) printf 'PGDMP pretend dump' > "${a#--file=}" ;; esac
       done
@@ -1801,6 +1803,219 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       refute manifest!(ctx)["ok"]
     end
 
+    test "Ecto's own query parameters are translated for pg_dump (#2833)", ctx do
+      assert {_out, 0} =
+               backup(ctx, "db", [
+                 {"DATABASE_URL", "ecto://kiln:hunter2@db/kiln_prod?ssl=false&pool_size=5"},
+                 {"PGPASSWORD", nil}
+               ])
+
+      args = File.read!(ctx.log <> ".args")
+
+      assert List.last(String.split(args, "\n", trim: true)) ==
+               "postgres://kiln@db/kiln_prod?sslmode=disable"
+    end
+
+    test "the script sets no TLS of its own: the URL's sslmode, or the operator's PGSSLMODE (#2830)",
+         ctx do
+      # DATABASE_SSL is the app's setting; cron is told to put sslmode in
+      # DATABASE_URL instead, and the script does not guess.
+      assert {_out, 0} =
+               backup(ctx, "db", [
+                 {"DATABASE_URL", "postgres://kiln@db/kiln_prod"},
+                 {"DATABASE_SSL", "true"},
+                 {"DATABASE_SSL_CACERTFILE", "/etc/ca.pem"}
+               ])
+
+      assert File.read!(ctx.log <> ".tls") == "unset|unset"
+
+      assert {_out, 0} =
+               backup(ctx, "db", [
+                 {"DATABASE_URL", "postgres://kiln@db/kiln_prod?sslmode=verify-full"},
+                 {"PGSSLMODE", "require"},
+                 {"PGSSLROOTCERT", "/etc/ca.pem"}
+               ])
+
+      assert File.read!(ctx.log <> ".tls") == "require|/etc/ca.pem"
+
+      assert File.read!(ctx.log <> ".args") =~
+               "\npostgres://kiln@db/kiln_prod?sslmode=verify-full\n"
+    end
+
+    test "a key=value string with a password is refused before pg_dump runs (#2831)", ctx do
+      for url <- [
+            "host=db user=kiln password=hunter2 dbname=kiln_prod",
+            "mysql://kiln:hunter2@db/x"
+          ] do
+        File.rm(ctx.log <> ".args")
+
+        assert {out, status} = backup(ctx, "all", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}])
+
+        assert status != 0, url
+        refute File.exists?(ctx.log <> ".args"), "pg_dump ran for #{url}"
+        assert out =~ "DATABASE_URL is not a postgres:// URL", url
+        refute out =~ "hunter2", url
+
+        manifest = manifest!(ctx)
+        refute manifest["ok"]
+        assert manifest["error"] =~ "DATABASE_URL is not a postgres:// URL"
+        refute manifest["error"] =~ "hunter2"
+      end
+    end
+
+    test "a passwordless key=value string still reaches pg_dump unchanged", ctx do
+      url = "host=/run/postgresql dbname=kiln_prod"
+
+      assert {_out, 0} = backup(ctx, "db", [{"DATABASE_URL", url}])
+      assert List.last(String.split(File.read!(ctx.log <> ".args"), "\n", trim: true)) == url
+    end
+
+    test "pg_dump gets --lock-wait-timeout from BACKUP_LOCK_WAIT_SECONDS (#2844)", ctx do
+      assert {_out, 0} = backup(ctx, "db")
+      assert "--lock-wait-timeout=600000" in String.split(File.read!(ctx.log <> ".args"), "\n")
+
+      assert {_out, 0} = backup(ctx, "db", [{"BACKUP_LOCK_WAIT_SECONDS", "5"}])
+      assert "--lock-wait-timeout=5000" in String.split(File.read!(ctx.log <> ".args"), "\n")
+    end
+
+    test "BACKUP_LOCK_WAIT_SECONDS is read like the app reads it", ctx do
+      on_exit(fn -> System.delete_env(@lock_parity_var) end)
+
+      for raw <- [
+            nil,
+            "",
+            " 30 ",
+            "+30",
+            "030",
+            "1",
+            "3600",
+            "0",
+            "-1",
+            "3601",
+            "abc",
+            "1.5",
+            "10s"
+          ] do
+        {seconds, warns?} = app_lock_wait(raw)
+
+        assert {out, 0} = backup(ctx, "db", [{"BACKUP_LOCK_WAIT_SECONDS", raw}])
+
+        assert "--lock-wait-timeout=#{seconds * 1000}" in String.split(
+                 File.read!(ctx.log <> ".args"),
+                 "\n"
+               ),
+               inspect(raw)
+
+        assert out =~ "is not a whole number of seconds from 1 to 3600; using 600" == warns?,
+               inspect(raw)
+      end
+    end
+
+    test "a dump that waited too long for a lock says so in the failure manifest", ctx do
+      # pg_dump's real words: it implements --lock-wait-timeout as a
+      # statement_timeout around each LOCK TABLE (checked with pg_dump 17).
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: query failed: ERROR:  canceling statement due to statement timeout" >&2
+      echo "pg_dump: detail: Query was: LOCK TABLE public.pages IN ACCESS SHARE MODE" >&2
+      exit 1
+      """)
+
+      assert {out, status} =
+               backup(ctx, "all", [
+                 {"DATABASE_URL", "ecto://kiln:hunter2@db/kiln_prod"},
+                 {"BACKUP_LOCK_WAIT_SECONDS", "30"},
+                 {"PGPASSWORD", nil}
+               ])
+
+      assert status != 0
+      # pg_dump's own stderr still reaches the log.
+      assert out =~ "canceling statement due to statement timeout"
+
+      manifest = manifest!(ctx)
+      refute manifest["ok"]
+
+      assert manifest["error"] =~
+               "pg_dump waited longer than BACKUP_LOCK_WAIT_SECONDS (30 s) for a table lock"
+
+      assert manifest["error"] =~ "LOCK TABLE public.pages"
+      refute manifest["error"] =~ "hunter2"
+      refute out =~ "hunter2"
+      assert Path.wildcard(Path.join(ctx.scratch, "kiln-pg_dump.*")) == []
+    end
+
+    test "any other failed dump records pg_dump's words, scrubbed of the password", ctx do
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: connection failed: password hunter2xyz rejected" >&2
+      echo "pg_dump: error: SSL was required" >&2
+      exit 2
+      """)
+
+      assert {_out, status} =
+               backup(ctx, "all", [
+                 {"DATABASE_URL", "ecto://kiln:hunter2xyz@db/kiln_prod"},
+                 {"PGPASSWORD", nil}
+               ])
+
+      assert status != 0
+      error = manifest!(ctx)["error"]
+      assert error =~ "pg_dump exited 2: pg_dump: error: connection failed: password *** rejected"
+      assert error =~ "SSL was required"
+      refute error =~ "hunter2xyz"
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
+
+    test "the refusal, the lock wait and the failure record also work under bash 3.2", ctx do
+      bash = ShellTools.bash32()
+
+      assert {out, status} =
+               backup(ctx, "db", [{"DATABASE_URL", "host=db password=hunter2"}], bash)
+
+      assert status != 0
+      assert out =~ "DATABASE_URL is not a postgres:// URL"
+
+      assert {_out, 0} =
+               backup(
+                 ctx,
+                 "db",
+                 [
+                   {"DATABASE_URL", "postgres://kiln@db/kiln?ssl=false"},
+                   {"BACKUP_LOCK_WAIT_SECONDS", "07"}
+                 ],
+                 bash
+               )
+
+      args = String.split(File.read!(ctx.log <> ".args"), "\n", trim: true)
+      assert "--lock-wait-timeout=7000" in args
+      assert List.last(args) == "postgres://kiln@db/kiln?sslmode=disable"
+
+      stub!(ctx.bin, "pg_dump", """
+      #!/bin/sh
+      echo "pg_dump: error: query failed: ERROR:  canceling statement due to statement timeout" >&2
+      echo "pg_dump: detail: Query was: LOCK TABLE public.t IN ACCESS SHARE MODE" >&2
+      printf '%s\\n' 'secret: hun\\ct*er2' >&2
+      exit 1
+      """)
+
+      assert {_out, status} =
+               backup(
+                 ctx,
+                 "all",
+                 [{"DATABASE_URL", "ecto://kiln:hun%5Cct*er2@db/kiln_prod"}, {"PGPASSWORD", nil}],
+                 bash
+               )
+
+      assert status != 0
+      error = manifest!(ctx)["error"]
+      assert error =~ "BACKUP_LOCK_WAIT_SECONDS (600 s)"
+      assert error =~ "secret: ***"
+      refute error =~ "hun\\ct"
+    end
+
     # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
     unless ShellTools.bash32(),
       do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
@@ -1822,6 +2037,22 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert args =~ "\npostgres://kiln@db/kiln_prod?sslmode=require\n"
       refute args =~ "hun"
       assert File.read!(ctx.log <> ".env") == "set:hun\\ct@er2\n"
+    end
+  end
+
+  # What the app makes of `raw` as BACKUP_LOCK_WAIT_SECONDS
+  # (config/runtime/prod/backups.exs): `{seconds, warned?}`.
+  defp app_lock_wait(raw) do
+    if raw, do: System.put_env(@lock_parity_var, raw), else: System.delete_env(@lock_parity_var)
+
+    {parsed, warning} =
+      ExUnit.CaptureIO.with_io(:stderr, fn ->
+        KilnCMS.Config.Env.integer_in(@lock_parity_var, 1, 3600)
+      end)
+
+    case parsed do
+      {:ok, seconds} -> {seconds, warning != ""}
+      _unset_or_unrecognized -> {600, warning != ""}
     end
   end
 
@@ -2184,6 +2415,11 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       {"S3_BUCKET", nil},
       {"BACKUP_MEDIA_PART_MB", nil},
       {"BACKUP_MEDIA_EXCLUDE", nil},
+      {"BACKUP_LOCK_WAIT_SECONDS", nil},
+      {"PGSSLMODE", nil},
+      {"PGSSLROOTCERT", nil},
+      {"DATABASE_SSL", nil},
+      {"DATABASE_SSL_CACERTFILE", nil},
       {"TMPDIR", ctx.scratch},
       {"COPYFILE_DISABLE", "1"},
       {"PATH", ctx.bin <> ":" <> System.get_env("PATH")}

@@ -647,6 +647,91 @@ defmodule KilnCMS.Backups do
   def media_exclude, do: config(:media_exclude, [])
 
   @doc """
+  How long, in **milliseconds**, `pg_dump` waits for each table lock before it
+  gives up (`BACKUP_LOCK_WAIT_SECONDS`, default 600 s; #2844), passed as
+  `--lock-wait-timeout`. `scripts/backup.sh` reads the same variable the same
+  way.
+
+  Without it a dump that starts behind a migration or a `VACUUM FULL` waits
+  for as long as that lock is held. The bound applies to each `LOCK TABLE`
+  separately, so a dump blocked on several tables can wait several times over.
+  Milliseconds internally so a test can use a fraction of a second.
+  """
+  @spec lock_wait_ms() :: pos_integer()
+  def lock_wait_ms, do: config(:lock_wait_ms, 600_000)
+
+  @doc """
+  The TLS option the database tools follow (#2830): the Repo's effective
+  `:ssl` (after Ecto merged the URL's `ssl=` into it). A test sets `:ssl` in
+  this module's config to stand in for a production Repo.
+  """
+  @spec pg_ssl() :: term()
+  def pg_ssl do
+    case config(:ssl, :repo) do
+      :repo -> KilnCMS.Repo.config()[:ssl]
+      ssl -> ssl
+    end
+  end
+
+  @doc """
+  What `pg_dump`, `pg_restore` and `psql` connect to `url` with
+  (default: `database_url/0`): `{:ok, {url, env}}`, the URL for argv and the
+  environment for the child alone.
+
+  The password moves from the URL to `PGPASSWORD`
+  (`KilnCMS.Backups.PgUrl.split/1`), and the TLS settings follow the app's own
+  connection (`KilnCMS.Backups.PgUrl.tls_env/3`): with `DATABASE_SSL` on (the
+  default) the tools require TLS, or verify the server against
+  `DATABASE_SSL_CACERTFILE` when one is set, unless the URL or the
+  operator's `PGSSLMODE`/`PGSSLROOTCERT` already decides.
+
+  `{:error, :refused_conninfo}` when the string is not a URL libpq reads as
+  one and would leave a password in argv (#2831).
+  """
+  @spec pg_connection(String.t() | nil) ::
+          {:ok, {String.t() | nil, [{String.t(), String.t()}]}} | {:error, PgUrl.refusal()}
+  def pg_connection(url \\ database_url()) do
+    with {:ok, {url, password_env}} <- PgUrl.split(url) do
+      ambient = Map.new(["PGSSLMODE", "PGSSLROOTCERT"], &{&1, System.get_env(&1)})
+      {url, tls_env} = PgUrl.tls_env(url, pg_ssl(), ambient)
+      {:ok, {url, password_env ++ tls_env}}
+    end
+  end
+
+  @doc "What to tell an operator when `pg_connection/1` refused the string."
+  @spec describe_refused_conninfo() :: String.t()
+  def describe_refused_conninfo do
+    "BACKUP_DATABASE_URL (or DATABASE_URL) is not a postgres:// URL and holds a password " <>
+      "or another URL, which would sit in the command line of pg_dump, pg_restore and psql " <>
+      "for every process on the host to read. Write it as a postgres:// URL, password " <>
+      "included (postgres:///database?host=/socket/dir for a Unix socket), or put the " <>
+      "password in PGPASSWORD or ~/.pgpass."
+  end
+
+  @doc """
+  Whether `pg_dump`'s output is its lock-wait timeout (#2844). pg_dump
+  implements `--lock-wait-timeout` as a `statement_timeout` around each
+  `LOCK TABLE`, so that is the error it reports.
+  """
+  @spec lock_timeout?(String.t()) :: boolean()
+  def lock_timeout?(output) when is_binary(output),
+    do: output =~ ~r/statement timeout/i and output =~ "LOCK TABLE"
+
+  @doc """
+  `pg_dump`'s lock-wait timeout as a sentence an operator can act on, with
+  pg_dump's own (already redacted) `output` after it.
+  """
+  @spec describe_lock_timeout(String.t()) :: String.t()
+  def describe_lock_timeout(output) when is_binary(output) do
+    "pg_dump waited longer than BACKUP_LOCK_WAIT_SECONDS (#{wait_label(lock_wait_ms())}) " <>
+      "for a table lock and gave up: another session held a conflicting lock (a migration, " <>
+      "VACUUM FULL, a long transaction). pg_dump said: #{String.trim(output)}"
+  end
+
+  defp wait_label(ms) when rem(ms, 1000) == 0, do: "#{div(ms, 1000)} s"
+  defp wait_label(ms), do: "#{ms} ms"
+
+  @doc """
   Whether running a backup **from the app** is possible here.
 
   Three things have to be true, and they fail independently, so the reason is
@@ -1674,7 +1759,11 @@ defmodule KilnCMS.Backups do
 
   Always a URI libpq reads as one (#2719): whichever source wins, a leading
   `ecto://` (the form `DATABASE_URL` is documented in) becomes `postgres://`,
-  and nothing else about the string changes (`KilnCMS.Backups.PgUrl.normalize/1`).
+  and the query parameters only Ecto reads are translated (`ssl=false`
+  becomes `sslmode=disable`, `pool_size`, `timeout` and `idle_interval` go;
+  #2833). Nothing else about the string changes
+  (`KilnCMS.Backups.PgUrl.normalize/1`). The password is still in it: connect
+  through `pg_connection/1`, which moves it out of argv.
   """
   @spec database_url() :: String.t() | nil
   def database_url do

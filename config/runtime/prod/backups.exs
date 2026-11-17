@@ -61,6 +61,19 @@ backup_opts =
     _unset_or_unrecognized -> backup_opts
   end
 
+# How long pg_dump waits for each table lock before giving up (#2844), in
+# seconds: a dump that starts behind a migration's or VACUUM FULL's ACCESS
+# EXCLUSIVE lock otherwise waits as long as that lock is held. 1 to 3600, kept
+# below the backup step's 2-hour job timeout so the lock, not the timeout, is
+# the error recorded; no 0, which pg_dump would read as "wait forever". Out of
+# range keeps the default (600) and warns, never clamps. Stored in
+# milliseconds, what `--lock-wait-timeout` takes.
+backup_opts =
+  case Env.integer_in("BACKUP_LOCK_WAIT_SECONDS", 1, 3600) do
+    {:ok, seconds} -> Keyword.put(backup_opts, :lock_wait_ms, seconds * 1000)
+    _unset_or_unrecognized -> backup_opts
+  end
+
 # Comma-separated globs, matched against the path relative to the media
 # directory. Unset (or blank) leaves exclusions off.
 backup_opts =

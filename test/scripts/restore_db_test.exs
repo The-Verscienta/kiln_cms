@@ -1,7 +1,7 @@
 defmodule KilnCMS.Scripts.RestoreDbTest do
   @moduledoc """
   `scripts/restore.sh db` and `drill` and the connection they hand libpq
-  (#2719, #2726): an `ecto://` `RESTORE_DATABASE_URL` reaches `pg_restore` and
+  (#2719, #2726, #2831, #2833): an `ecto://` `RESTORE_DATABASE_URL` reaches `pg_restore` and
   `psql` as a `postgres://` URI, and the password reaches them through
   `PGPASSWORD` only, never argv (world-readable through `/proc/<pid>/cmdline`
   and `ps`).
@@ -97,6 +97,51 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
     assert "--dbname=postgres://kiln@db/kiln_restore" in args
   end
 
+  test "a key=value string with a password is refused before any tool runs (#2831)", ctx do
+    for command <- ["db", "drill"] do
+      assert {out, status} =
+               restore(ctx, [command, ctx.dump], "host=db password=hunter2 dbname=kiln_drill")
+
+      assert status != 0, command
+      assert out =~ "RESTORE_DATABASE_URL is not a postgres:// URL", command
+      refute out =~ "hunter2", command
+      refute File.exists?(ctx.log), command
+    end
+  end
+
+  test "libpq gets Ecto's ssl=false as sslmode=disable; the printed hint keeps the URL as written (#2833)",
+       ctx do
+    url = "ecto://kiln:hunter2@db/kiln_drill?ssl=false&pool_size=5"
+
+    assert {out, 0} = restore(ctx, ["drill", ctx.dump], url)
+
+    assert [_createdb, ["pg_restore", "hunter2" | restore_args] | checks] = calls(ctx)
+    assert "--dbname=postgres://kiln@db/kiln_drill?sslmode=disable" in restore_args
+
+    for ["psql", "hunter2" | args] <- checks do
+      assert List.last(args) == "postgres://kiln@db/kiln_drill?sslmode=disable"
+    end
+
+    # The hint is an app's DATABASE_URL, which Ecto reads as written.
+    assert out =~ ~s(STAGING_DATABASE_URL="postgres://kiln@db/kiln_drill?ssl=false&pool_size=5")
+    refute out =~ "hunter2"
+  end
+
+  test "the script sets no TLS of its own (#2830)", ctx do
+    stub!(ctx.bin, "pg_restore", """
+    #!/bin/sh
+    printf '%s|%s\\n' "${PGSSLMODE-unset}" "${PGSSLROOTCERT-unset}" >> "#{ctx.log}"
+    """)
+
+    assert {_out, 0} =
+             restore(ctx, ["db", ctx.dump], "postgres://kiln@db/kiln_restore", [
+               {"DATABASE_SSL", "true"},
+               {"DATABASE_SSL_CACERTFILE", "/etc/ca.pem"}
+             ])
+
+    assert File.read!(ctx.log) =~ "unset|unset\n"
+  end
+
   defp calls(ctx) do
     ctx.log
     |> File.read!()
@@ -110,6 +155,8 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
         {"RESTORE_DATABASE_URL", url},
         {"RESTORE_CONFIRM", "yes"},
         {"PGPASSWORD", nil},
+        {"PGSSLMODE", nil},
+        {"PGSSLROOTCERT", nil},
         {"PATH", ctx.bin <> ":" <> System.get_env("PATH")}
       ]
 
