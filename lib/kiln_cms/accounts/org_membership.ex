@@ -172,7 +172,12 @@ defmodule KilnCMS.Accounts.OrgMembership do
     update :erase do
       description "Strip an erased account's membership of every grant (system-only)."
       accept []
-      # The membership validations have no atomic form.
+      # Runs atomically, as one UPDATE over every row the filter names, so a
+      # row removed meanwhile is simply not updated: the resource's
+      # validations exclude this action (see `validations`). Ash's
+      # compile-time check cannot see a `where:` exclusion, so the flag
+      # stays off; the erasure and the backfill ask for the atomic strategy
+      # first.
       require_atomic? false
       change set_attribute(:role, :viewer)
       change set_attribute(:granted_role, nil)
@@ -514,22 +519,37 @@ defmodule KilnCMS.Accounts.OrgMembership do
   end
 
   validations do
+    # None of these runs on `:erase` (#2774): it writes no column they check,
+    # and a stored value an earlier release let through (a malformed grant
+    # map, a role since moved) must not fail a GDPR erasure or the staging
+    # scrub. Excluding it also leaves `:erase` atomic: one UPDATE.
+
     # A malformed grant map must fail on the admin's write, not crash the
     # editor's next save (see the validation module).
-    validate KilnCMS.Accounts.Validations.FieldGrantsShape, on: [:create, :update]
+    validate KilnCMS.Accounts.Validations.FieldGrantsShape,
+      on: [:create, :update],
+      where: [negate(action_is(:erase))]
 
     validate {KilnCMS.Accounts.Validations.FieldGrantsShape, attribute: :field_read_grants},
-      on: [:create, :update]
+      on: [:create, :update],
+      where: [negate(action_is(:erase))]
 
-    validate KilnCMS.Accounts.Validations.ReadGrantsPrivate, on: [:create, :update]
+    validate KilnCMS.Accounts.Validations.ReadGrantsPrivate,
+      on: [:create, :update],
+      where: [negate(action_is(:erase))]
 
     # A client-supplied role_id must reference a role of THIS org.
-    validate KilnCMS.Accounts.Validations.RoleBelongsToOrg, on: [:create, :update]
+    validate KilnCMS.Accounts.Validations.RoleBelongsToOrg,
+      on: [:create, :update],
+      where: [negate(action_is(:erase))]
+
     # A temporary platform admin must not confer a site tier — on anyone, itself
     # included — that would outlast the grant that let it act. Covers create,
     # `:update` and `:grant_temporary_role`; the actorless sweep and billing sync
     # pass. See the validation module.
-    validate KilnCMS.Accounts.Validations.StandingAdminOnly, on: [:create, :update]
+    validate KilnCMS.Accounts.Validations.StandingAdminOnly,
+      on: [:create, :update],
+      where: [negate(action_is(:erase))]
   end
 
   attributes do

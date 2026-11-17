@@ -13,6 +13,8 @@ defmodule KilnCMS.Accounts.ErasureGrantsTest do
   use KilnCMS.DataCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
 
+  require Ash.Query
+
   import Ecto.Query, only: [from: 2]
   import KilnCMS.OrgFixtures, only: [org: 1]
 
@@ -137,6 +139,53 @@ defmodule KilnCMS.Accounts.ErasureGrantsTest do
 
       # No role-change audit events: erasure is not an admin's demotion.
       assert role_events() == events
+    end
+
+    # The validations of an admin's edit do not run on `:erase`: a stored value
+    # an earlier release let through must not fail the erasure.
+    test "a row with a malformed grant map and a foreign custom role is still demoted" do
+      site = org("erasure-grants-malformed")
+      elsewhere = org("erasure-grants-elsewhere")
+      person = user()
+
+      foreign_role =
+        Ash.Seed.seed!(KilnCMS.Accounts.Role, %{
+          org_id: elsewhere.id,
+          name: "Foreign #{System.unique_integer([:positive])}"
+        })
+
+      membership(person, site,
+        role: :admin,
+        audiences: [@gated],
+        field_grants: %{"post" => "not-a-list"},
+        field_read_grants: %{"post" => 42},
+        role_id: foreign_role.id
+      )
+
+      assert {:ok, _erased} = Accounts.anonymize_user(person, actor: user(:admin))
+      assert %{role: :viewer, audiences: []} = reload_membership(person, site)
+    end
+
+    test ":erase takes the atomic strategy: one UPDATE, malformed rows included" do
+      site = org("erasure-grants-atomic")
+      person = user()
+      membership(person, site, role: :admin, field_grants: %{"post" => "not-a-list"})
+      tombstone = pre_fix_tombstone(person)
+
+      query =
+        OrgMembership
+        |> Ash.Query.filter(user_id == ^tombstone.id)
+
+      # `strategy: [:atomic]` alone fails rather than fall back when the
+      # action cannot run as one statement.
+      assert %Ash.BulkResult{status: :success} =
+               Ash.bulk_update(query, :erase, %{},
+                 authorize?: false,
+                 strategy: [:atomic],
+                 return_errors?: true
+               )
+
+      assert %{role: :viewer} = reload_membership(person, site)
     end
 
     test "a paying member's audiences go, and a later recompute puts none back" do

@@ -6,6 +6,9 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
   enqueue the `membership.activated` / `membership.canceled` webhook
   (`KilnCMS.Billing.MembershipWebhooks`).
 
+  None of it happens for an erased account, whose transition
+  `KilnCMS.Billing.Changes.SettleErasedAccount` has made a no-op (#2774).
+
   All four happen in the action's `after_action`, i.e. **inside the same
   transaction** as the status write. If the recompute fails, the status change
   rolls back with it and Oban retries — an entitlement is not best-effort, so this
@@ -18,6 +21,7 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
   use Ash.Resource.Change
 
   alias KilnCMS.Billing
+  alias KilnCMS.Billing.Changes.SettleErasedAccount
   alias KilnCMS.Billing.Entitlements
   alias KilnCMS.Billing.MembershipWebhooks
 
@@ -27,19 +31,28 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
 
     changeset
     |> stamp_timestamps()
-    |> Ash.Changeset.after_action(fn _changeset, membership ->
-      with {:ok, delta} <- Entitlements.recompute(membership.user_id),
-           {:ok, event} <- append_event(changeset, membership, from_status, delta, context),
-           {:ok, _job} <- MembershipWebhooks.enqueue(from_status, membership, event.id) do
-        # Newsletter bookkeeping rides the same hook so it can't drift from the
-        # entitlement recompute. It returns `:ok` even on failure — a mailing-list
-        # write must never roll back the transaction that granted access; the
-        # nightly reconcile catches anything missed.
-        KilnCMS.Newsletter.TierSync.sync_user(membership.user_id, membership.org_id)
-
-        {:ok, membership}
-      end
+    |> Ash.Changeset.after_action(fn changeset_now, membership ->
+      # An erased account's transition was settled as a no-op
+      # (`SettleErasedAccount`, #2774): it changed nothing, so there is
+      # nothing to recompute, record, announce or sync.
+      if SettleErasedAccount.erased?(changeset_now),
+        do: {:ok, membership},
+        else: record(changeset, membership, from_status, context)
     end)
+  end
+
+  defp record(changeset, membership, from_status, context) do
+    with {:ok, delta} <- Entitlements.recompute(membership.user_id),
+         {:ok, event} <- append_event(changeset, membership, from_status, delta, context),
+         {:ok, _job} <- MembershipWebhooks.enqueue(from_status, membership, event.id) do
+      # Newsletter bookkeeping rides the same hook so it can't drift from the
+      # entitlement recompute. It returns `:ok` even on failure — a mailing-list
+      # write must never roll back the transaction that granted access; the
+      # nightly reconcile catches anything missed.
+      KilnCMS.Newsletter.TierSync.sync_user(membership.user_id, membership.org_id)
+
+      {:ok, membership}
+    end
   end
 
   # `activated_at` marks the first time a membership ever became entitling (so a

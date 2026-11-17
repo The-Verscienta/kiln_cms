@@ -19,9 +19,10 @@ defmodule KilnCMS.Accounts.AccountLock do
       it would put one back on the tombstone;
     * `Billing.Membership` `:start` and `:comp`, and the entitlement
       recompute's write in `KilnCMS.Billing.Entitlements`, first;
-    * `Billing.Membership` `:apply_provider_state` and `:uncomp`, first, for
-      the lock order only (`refuse_erased?: false`): the recompute they run
-      writes nothing to an erased account, so a late webhook settles;
+    * `Billing.Membership` `:apply_provider_state` and `:uncomp`, first
+      (`KilnCMS.Billing.Changes.SettleErasedAccount`): for an erased account
+      the transition is a successful no-op rather than a refusal, so a late
+      webhook settles without reviving the membership erasure cancelled;
     * `ApiKey` `:create`;
     * the three updates that confirm an unconfirmed account
       (`:confirm_new_user`, `:reset_password_with_token`,

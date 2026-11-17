@@ -1034,7 +1034,7 @@ defmodule KilnCMSWeb.TeamLive do
                   <p
                     :if={erased?(membership.user)}
                     id={"member-#{membership.id}-erased"}
-                    class="flex flex-wrap items-center gap-1 text-xs text-base-content/60"
+                    class="flex flex-wrap items-center gap-1 text-xs text-base-content/70"
                   >
                     <.badge variant="outline">{gettext("Erased")}</.badge>
                     <span>

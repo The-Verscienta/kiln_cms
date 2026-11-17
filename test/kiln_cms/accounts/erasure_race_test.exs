@@ -277,6 +277,9 @@ defmodule KilnCMS.Accounts.ErasureRaceTest do
       for org <- [ctx.site, ctx.other] do
         assert %{audiences: []} = membership(ctx.person, org)
       end
+
+      # The webhook read its row before the erasure; it writes nothing back.
+      assert paid_memberships(ctx.person) == [{:canceled, nil}, {:canceled, nil}]
     end
 
     test "committed first: the erasure waits, then cancels what it left", ctx do
@@ -288,14 +291,16 @@ defmodule KilnCMS.Accounts.ErasureRaceTest do
       assert {:ok, {:ok, _past_due}} = Task.await(webhook, 10_000)
       assert {:ok, _erased} = Task.await(erasure, 10_000)
 
-      statuses =
-        unboxed(fn ->
-          ctx.person.id
-          |> Billing.memberships_for_export!(authorize?: false)
-          |> Enum.map(& &1.status)
-        end)
+      assert paid_memberships(ctx.person) == [{:canceled, nil}, {:canceled, nil}]
+    end
 
-      assert statuses == [:canceled, :canceled]
+    # Each paid membership's status and provider subscription id.
+    defp paid_memberships(person) do
+      unboxed(fn ->
+        person.id
+        |> Billing.memberships_for_export!(authorize?: false)
+        |> Enum.map(&{&1.status, &1.provider_subscription_id})
+      end)
     end
   end
 
