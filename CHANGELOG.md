@@ -157,6 +157,12 @@ Every summary line below that was shortened links to its own entry there.
 - **A backup schedule change made while a marker sync is running now reaches the `.hold` markers right after that sync, not at the next 15-minute slot.**
   ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932) · [long form](docs/changelog/unreleased.md#backup-hold-sync-after-change))
 
+- **An in-app backup whose finish step was interrupted after it closed the run now completes and syncs its markers, instead of failing with "work state … missing".**
+  ([long form](docs/changelog/unreleased.md#backup-finish-after-interruption))
+
+- **A backup step run again after recording its work no longer lists its files twice, which made the off-site copy refuse the checksum file and fail the backup.**
+  ([long form](docs/changelog/unreleased.md#backup-retried-step-duplicate-outputs))
+
 ### Security
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
