@@ -17,8 +17,9 @@
 #                         TLS
 #   RESTORE_MEDIA_DIR     target uploads root (required for `media`)
 #   RESTORE_CONFIRM=yes   skip the interactive confirmation (for scripted drills)
-#   RESTORE_REQUIRE_CHECKSUM=1  `media`: abort when no checksum sidecar is found
-#                         (default: warn loudly on stderr and continue)
+#   RESTORE_REQUIRE_CHECKSUM=1  `db`, `drill` and `media`: abort when no
+#                         checksum sidecar is found (default: warn loudly on
+#                         stderr and continue)
 #   RESTORE_ALLOW_PARTS_WITHOUT_CHECKSUM=1  `media`: restore a .partNN set that
 #                         has no sidecar (refused by default: every complete
 #                         part set has one, so a set without it is most likely
@@ -48,12 +49,23 @@
 # run was killed. A legacy single archive without a sidecar (backups from
 # before checksums) is restored with a warning, as before.
 #
+# `db` and `drill` verify the dump against its sidecar kiln-db-<stamp>.sha256
+# next to it (#2877) before anything else: before the confirmation prompt,
+# createdb and pg_restore. The sidecar must list exactly the dump; a mismatch,
+# or a sidecar that is malformed or names another file, refuses the restore. A
+# dump with no sidecar (one from before checksums, or not named
+# kiln-db-<stamp>.dump) is restored with a warning, unless
+# RESTORE_REQUIRE_CHECKSUM=1.
+#
 # `db` is destructive on the target (--clean drops existing objects first) —
 # it refuses to run without confirmation. `drill` expects a throwaway target
 # (the database name must contain "drill", "staging", "scratch", or "tmp")
 # and never needs confirmation.
 
 set -euo pipefail
+# An exported CDPATH makes `cd dir` print the directory it chose, which
+# `$(cd -- … && pwd -P)` would then capture as part of the path.
+unset CDPATH
 
 trap 'cleanup_tmp' EXIT
 
@@ -302,6 +314,7 @@ cmd_db() {
   local dump="${1:-}"
   [ -n "$dump" ] || die "usage: $0 db <dump-file>"
   [ -f "$dump" ] || die "no such file: $dump"
+  verify_dump "$dump"
   confirm
   do_restore "$dump"
   cat <<'EOF'
@@ -316,14 +329,58 @@ cmd_db() {
 EOF
 }
 
+# $1 = the sidecar expected, $2 = "media" (the default) or "db".
 warn_no_checksum() {
+  local what="media backup" files="archive(s)" are="are"
+  if [ "${2:-media}" = db ]; then
+    what="database dump"
+    files="dump"
+    are="is"
+  fi
   {
     echo "################################################################"
-    echo "# WARNING: no checksum found for this media backup."
-    echo "# Expected ${1} next to the archive(s)."
-    echo "# The archive(s) are NOT verified against corruption or tampering."
+    echo "# WARNING: no checksum found for this ${what}."
+    echo "# Expected ${1} next to the ${files}."
+    echo "# The ${files} ${are} NOT verified against corruption or tampering."
     echo "################################################################"
   } >&2
+}
+
+db_name_re='^kiln-db-([0-9]{8}-[0-9]{6})\.dump$'
+
+# Verify dump $1 against its sidecar kiln-db-<stamp>.sha256 in the same
+# directory (#2877), as `media` verifies its parts: the sidecar must be well
+# formed, list exactly this dump and nothing else, and match its bytes. Any
+# failure dies before the caller touches a database. A dump with no sidecar,
+# or not named kiln-db-<stamp>.dump (so there is no stamp to find one by),
+# warns, or dies under RESTORE_REQUIRE_CHECKSUM=1.
+#
+# A symlink given as the dump is not resolved: the sidecar is looked for next
+# to the link, under the link's name, so a link to a Kiln dump under another
+# name has no stamp and takes the no-checksum path (warn, or refuse under
+# RESTORE_REQUIRE_CHECKSUM=1), as any dump not named kiln-db-<stamp>.dump does.
+verify_dump() {
+  local dir base sidecar="" listed
+  dir="$(cd -- "$(dirname -- "$1")" && pwd -P)"
+  base="$(basename -- "$1")"
+  if [[ "$base" =~ $db_name_re ]]; then
+    sidecar="kiln-db-${BASH_REMATCH[1]}.sha256"
+  fi
+  if [ -n "$sidecar" ] && { [ -e "${dir}/${sidecar}" ] || [ -L "${dir}/${sidecar}" ]; }; then
+    echo "==> Verifying checksum from ${sidecar}"
+    sidecar_well_formed "${dir}/${sidecar}" ||
+      die "${sidecar} has a missing or malformed checksum line — nothing was restored"
+    listed="$(sed -E 's/^[0-9a-fA-F]+ [ *]//' "${dir}/${sidecar}")"
+    [ "$listed" = "$base" ] ||
+      die "${sidecar} does not list exactly ${base} — nothing was restored"
+    sha_check "$dir" "$sidecar" ||
+      die "checksum verification FAILED for ${base} — nothing was restored"
+  else
+    warn_no_checksum "${sidecar:-a kiln-db-<stamp>.sha256 sidecar}" db
+    if [ "${RESTORE_REQUIRE_CHECKSUM:-}" = "1" ]; then
+      die "RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found — nothing was restored"
+    fi
+  fi
 }
 
 # Scratch files for the pre-extraction listings; removed on exit.
@@ -616,6 +673,7 @@ cmd_drill() {
     *) die "drill target '${name}' must look throwaway (contain drill/staging/scratch/tmp) — never drill against production" ;;
   esac
 
+  verify_dump "$dump"
   do_restore "$dump"
 
   echo "==> Sanity checks"
