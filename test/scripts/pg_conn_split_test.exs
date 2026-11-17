@@ -8,20 +8,19 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
   Each script has to run alone (hosts copy `backup.sh` by itself), so the
   function is copied rather than sourced. This holds the copies byte for byte
   identical, and runs the one in `backup.sh` against the table the Elixir
-  module is tested with, under `bash` and, where it is installed (macOS), under
-  `/bin/bash` 3.2. CI runs Linux, so the 3.2 case is only checked on a Mac.
+  module is tested with, under `bash` and under bash 3.2: macOS's `/bin/bash`,
+  or the one CI's `backup_scripts_portability` job builds (`KILN_BASH32`).
   """
   use ExUnit.Case, async: true
 
   alias KilnCMS.Backups.PgUrl
+  alias KilnCMS.Test.ShellTools
+
+  # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
+  # under bsdtar (`--only shell_portability`).
+  @moduletag :shell_portability
 
   @scripts ~w(backup restore staging) |> Enum.map(&Path.expand("../../scripts/#{&1}.sh", __DIR__))
-
-  @bash3? File.exists?("/bin/bash") and
-            match?(
-              {"3\n", 0},
-              System.cmd("/bin/bash", ["-c", "echo ${BASH_VERSINFO[0]}"], stderr_to_stdout: true)
-            )
 
   unless System.find_executable("bash"), do: @moduletag(skip: "needs bash on PATH")
 
@@ -38,10 +37,11 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
     assert_table!("bash")
   end
 
-  unless @bash3?, do: @tag(skip: "needs /bin/bash 3.x (macOS)")
+  unless ShellTools.bash32(),
+    do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
 
-  test "and so it does under /bin/bash 3.2" do
-    assert_table!("/bin/bash")
+  test "and so it does under bash 3.2" do
+    assert_table!(ShellTools.bash32())
   end
 
   defp assert_table!(bash) do
