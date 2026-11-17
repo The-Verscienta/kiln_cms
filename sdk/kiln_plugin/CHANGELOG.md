@@ -31,6 +31,17 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
   not override it is unchanged. A plugin using it should require
   `{:kiln_plugin, "~> 1.5"}`.
 
+- **`c:Kiln.Plugin.staging_scrub/0` and `t:Kiln.Plugin.staging_scrub_entry/0`
+  (kiln_cms#2975).** A plugin declares what the staging scrub does to each
+  table its domains own: `{:purge, Resource}`, `{:rewrite, Resource, set:
+  [attribute: value]}` or `{:keep, Resource, reason}`. Plain data, checked in
+  full before the scrub changes anything. Defaults to `[]`. The core now
+  refuses to scrub while a plugin or overlay owns a table no entry names,
+  other than a content-type table, its history or a graduated join with no
+  personal-looking column, so an overlay with such a table must declare it
+  (and require `{:kiln_plugin, "~> 1.5"}`). A dependency plugin owns no
+  tables and is unchanged.
+
 ## 1.4.0
 
 ### Added

@@ -35,6 +35,11 @@ defmodule Kiln.Plugin do
       the built-in Local and Rclone destinations. Installing one changes
       nothing until a platform admin adds a destination of its kind on the
       Backups page. Since 1.5.
+    * `staging_scrub/0` — what `mix kiln.staging.scrub` does to each table
+      the plugin's domains own when production is cloned into staging:
+      purge it, rewrite columns, or keep it with a reason (kiln_cms#2975). A
+      table it leaves out makes the scrub refuse to run; see
+      `t:staging_scrub_entry/0`. Since 1.5.
     * `nav_items/0` — links in the admin top nav
       (`%{label: "...", path: "/editor/...", role: :editor | :admin}`).
     * `admin_routes/0` — LiveViews mounted in the admin-gated live session
@@ -122,6 +127,31 @@ defmodule Kiln.Plugin do
            plug_opts :: term()}
           | {:forward, path :: String.t(), plug :: module(), plug_opts :: term()}
 
+  @typedoc """
+  One entry of `c:staging_scrub/0`, naming an Ash resource of one of the
+  plugin's own domains (`c:domains/0`) and what the staging scrub does to its
+  table:
+
+    * `{:purge, Resource}` — delete every row.
+    * `{:rewrite, Resource, set: [attribute: value, ...]}` — keep the rows and
+      set each listed attribute to the value on every row (`nil` to clear
+      one). Each value must cast to the attribute's type, and `nil` is only
+      allowed where the attribute allows it. A primary key, an attribute in an
+      identity, the tenant attribute and a `belongs_to` attribute cannot be
+      rewritten: purge the table instead.
+    * `{:keep, Resource, reason}` — keep the rows as they are; `reason` says
+      why a production clone may hold them (`"opening hours, no visitors"`).
+
+  An AshPaperTrail version table is a table of its own: declare
+  `Resource.Version` beside `Resource`, or its history keeps what the
+  rewrite cleared. Plain data only, no functions: the scrub checks every
+  entry before it changes anything.
+  """
+  @type staging_scrub_entry ::
+          {:purge, resource :: module()}
+          | {:rewrite, resource :: module(), [set: keyword()]}
+          | {:keep, resource :: module(), reason :: String.t()}
+
   @doc "Machine name (used in diagnostics). Defaults to the module's last segment."
   @callback name() :: String.t()
 
@@ -153,6 +183,16 @@ defmodule Kiln.Plugin do
   on the Backups page. Defaults to `[]`. Since 1.5.
   """
   @callback backup_destinations() :: [module()]
+
+  @doc """
+  What the staging scrub does to each table the plugin's domains own
+  (`t:staging_scrub_entry/0`). Defaults to `[]`, which is right for a plugin
+  that owns no tables: a plugin with a table it does not declare makes the
+  scrub refuse to run, since that table may hold personal data. Content-type
+  tables and their history are kept without an entry, unless a column name
+  looks personal (`email`, `ip`, `phone`, …). Since 1.5.
+  """
+  @callback staging_scrub() :: [staging_scrub_entry()]
   @callback nav_items() :: [nav_item()]
   @callback admin_routes() :: [admin_route()]
   @callback editor_routes() :: [admin_route()]
@@ -212,6 +252,9 @@ defmodule Kiln.Plugin do
       def backup_destinations, do: []
 
       @impl Kiln.Plugin
+      def staging_scrub, do: []
+
+      @impl Kiln.Plugin
       def nav_items, do: []
 
       @impl Kiln.Plugin
@@ -245,6 +288,7 @@ defmodule Kiln.Plugin do
                      challenge_providers: 0,
                      security_checks: 0,
                      backup_destinations: 0,
+                     staging_scrub: 0,
                      nav_items: 0,
                      admin_routes: 0,
                      editor_routes: 0,

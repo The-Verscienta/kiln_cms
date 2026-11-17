@@ -46,6 +46,10 @@ defmodule KilnCMS.Staging do
       re-scrubbing a node that is already a scrubbed clone, since jobs may
       have run before the pause.
     * `:shell` — 1-arity logger for human output (default `&IO.puts/1`).
+    * `:plugins` / `:ash_domains` — passed to `KilnCMS.Staging.Scrub.run/1`;
+      default to the installed plugins and `config :kiln_cms, :ash_domains`.
+      The scrub refuses, having changed nothing, while one of their tables
+      has no `c:Kiln.Plugin.staging_scrub/0` entry.
   """
   @spec scrub!(keyword()) :: Scrub.summary()
   def scrub!(opts \\ []) do
@@ -90,7 +94,13 @@ defmodule KilnCMS.Staging do
     guard_live_oban!(shell, Keyword.get(opts, :allow_live?, false), opts)
 
     shell.("Scrubbing #{database}@#{host} …")
-    summary = Scrub.run(admin_email: admin_email, admin_password: admin_password)
+
+    summary =
+      opts
+      |> Keyword.take([:plugins, :ash_domains])
+      |> Keyword.merge(admin_email: admin_email, admin_password: admin_password)
+      |> Scrub.run()
+
     report(shell, summary)
     warn_unlabelled(shell)
     summary
@@ -187,12 +197,12 @@ defmodule KilnCMS.Staging do
   end
 
   # Every count in the summary, by key, so a purge added to `Scrub` is
-  # reported without a change here.
+  # reported without a change here. A plugin's tables sort after the core's
+  # (a tuple after every atom).
   defp report(shell, summary) do
     counts = summary |> Map.delete(:admin_provisioned) |> Enum.sort()
 
-    labels =
-      Enum.map(counts, fn {key, _} -> key |> Atom.to_string() |> String.replace("_", " ") end)
+    labels = Enum.map(counts, fn {key, _} -> report_label(key) end)
 
     width = labels |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> max(13)
 
@@ -215,6 +225,12 @@ defmodule KilnCMS.Staging do
         shell.("  #{admin}#{email} (role :admin, pre-confirmed)")
     end
   end
+
+  @doc false
+  # The report line's label for a summary key. Public for its test.
+  @spec report_label(atom() | KilnCMS.Staging.PluginScrub.key()) :: String.t()
+  def report_label({:plugin, plugin_name, table}), do: "#{plugin_name} plugin, #{table}"
+  def report_label(key) when is_atom(key), do: key |> Atom.to_string() |> String.replace("_", " ")
 
   defp ephemeral_name?(database) do
     down = String.downcase(database)

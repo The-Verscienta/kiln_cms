@@ -589,8 +589,10 @@ defmodule KilnCMS.Staging.ScrubTest do
     # returns are the list the table must cover.
     @guide "docs/staging-environments.md"
 
+    # The core's keys: a plugin's tables (`{:plugin, name, table}`) are its
+    # own to document, not rows of the core's table.
     test "names every key of the scrub's summary" do
-      keys = Scrub.run([]) |> Map.keys() |> Enum.sort()
+      keys = Scrub.run([]) |> Map.keys() |> Enum.filter(&is_atom/1) |> Enum.sort()
       table = scrub_table!()
 
       missing = Enum.reject(keys, &String.contains?(table, "(`#{&1}`)"))
@@ -606,7 +608,7 @@ defmodule KilnCMS.Staging.ScrubTest do
     end
 
     test "names no key the scrub no longer returns" do
-      keys = Scrub.run([]) |> Map.keys() |> Enum.map(&to_string/1)
+      keys = Scrub.run([]) |> Map.keys() |> Enum.filter(&is_atom/1) |> Enum.map(&to_string/1)
 
       named =
         ~r/\(`([a-z_]+)`\)/
@@ -694,8 +696,8 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert_received {:shell, "Scrub complete:\n" <> report}
 
       for {key, _count} <- Map.delete(summary, :admin_provisioned) do
-        label = key |> Atom.to_string() |> String.replace("_", " ")
-        assert report =~ ~r/^  #{label}: +\d+$/m, "no line for #{key}"
+        label = Staging.report_label(key)
+        assert report =~ ~r/^  #{Regex.escape(label)}: +\d+$/m, "no line for #{inspect(key)}"
       end
 
       assert_received {:shell, "  staging admin:" <> admin_line}
