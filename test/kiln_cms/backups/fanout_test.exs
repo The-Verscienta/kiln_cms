@@ -464,6 +464,60 @@ defmodule KilnCMS.Backups.FanoutTest do
       assert %{status: :ok} = entry(run, "dest:" <> c.id)
     end
 
+    test "a permanent failure fails the destination on the first attempt; the others still " <>
+           "run (#2223)",
+         %{base: base} do
+      log = Path.join(base, "b.log")
+      b = fake!("Gone", 1, %{"put_mode" => "permanent", "log" => log})
+      c = fake!("Fine", 2, %{})
+
+      assert :ok = BackupChain.run()
+      run = run!()
+
+      # One file tried, once: no retry fixes it.
+      assert length(lines(log)) == 1
+      assert %{attempt: 1, state: "completed"} = offsite_job(1)
+
+      assert run.offsite_status == :partial
+      assert %{status: :failed, error: error} = entry(run, "dest:" <> b.id)
+      assert error =~ "the bucket is gone"
+      refute error =~ @secret
+      assert %{status: :ok} = entry(run, "dest:" <> c.id)
+    end
+
+    test "a file the destination already holds is recorded as sent, not a crash (#2223)" do
+      b = fake!("Holds it", 1, %{"put_mode" => "present"})
+
+      assert :ok = BackupChain.run()
+      run = run!()
+
+      assert run.offsite_status == :complete
+      assert %{status: :ok, files_ok: 6, files_total: 6} = entry(run, "dest:" <> b.id)
+
+      for artifact <- run.artifacts do
+        assert status(artifact.destinations, "dest:" <> b.id) == "ok"
+      end
+
+      assert Enum.count(
+               run.log,
+               &(&1.message =~ "was already on Holds it with the same checksum")
+             ) ==
+               6
+    end
+
+    test "any other {:ok, _} from a put is that destination's failure, not a crash (#2223)" do
+      b = fake!("Odd", 1, %{"put_mode" => "ok_weird"})
+      c = fake!("Fine", 2, %{})
+
+      assert :ok = BackupChain.run()
+      run = run!()
+
+      assert run.offsite_status == :partial
+      assert %{status: :failed, error: error} = entry(run, "dest:" <> b.id)
+      assert error =~ "returned an unexpected value"
+      assert %{status: :ok} = entry(run, "dest:" <> c.id)
+    end
+
     test "a hanging destination times out, fails, and the others still run", %{base: base} do
       call_timeout!(300)
       log = Path.join(base, "b.log")

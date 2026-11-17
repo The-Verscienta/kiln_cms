@@ -198,6 +198,28 @@ defmodule KilnCMS.Backups.Destination.LocalTest do
       assert File.read!(Path.join([root, "db", file.name])) == "new"
     end
 
+    test "a file already there with the same size and sha256 is not copied again (#2223)",
+         %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump")
+      assert Local.put(config(root), file, []) == :ok
+      target = Path.join([root, "db", file.name])
+      File.touch!(target, 1_600_000_000)
+
+      assert Local.put(config(root), file, deadline: 0) == {:ok, :already_present}
+      assert Destination.call(config(root), :put, [file, []]) == {:ok, :already_present}
+      # Not rewritten.
+      assert File.stat!(target, time: :posix).mtime == 1_600_000_000
+    end
+
+    test "a file there of the same size but other bytes is replaced", %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump", "same size, new")
+      File.mkdir_p!(Path.join(root, "db"))
+      File.write!(Path.join([root, "db", file.name]), "same size, old")
+
+      assert Local.put(config(root), file, []) == :ok
+      assert File.read!(Path.join([root, "db", file.name])) == "same size, new"
+    end
+
     test "refuses a copy that does not match, and keeps nothing of it",
          %{tmp_dir: tmp, root: root} do
       file = source!(tmp, "kiln-db-20260101-000000.dump", "the whole file")

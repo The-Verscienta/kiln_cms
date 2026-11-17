@@ -173,6 +173,26 @@ defmodule KilnCMS.Backups do
         args: [:kind, :scope],
         require_reference?: false
     end
+
+    resource KilnCMS.Backups.Upload do
+      # System-only (#2223): `KilnCMS.Backups.Uploads` reads and writes.
+      define :list_backup_uploads, action: :read
+      define :open_backup_upload, action: :open
+
+      define :get_open_backup_upload,
+        action: :open_for,
+        args: [:destination_key, :subdir, :name],
+        not_found_error?: false
+
+      define :list_owed_backup_uploads, action: :owed, args: [:destination_key, :idle_before]
+      define :claim_backup_upload, action: :claim, args: [:job_id, :attempt]
+      define :save_backup_upload_checkpoint, action: :save_checkpoint
+      define :note_backup_upload_error, action: :note_error
+      define :complete_backup_upload, action: :complete, args: [:job_id, :attempt]
+      define :abandon_backup_upload, action: :abandon
+      define :mark_backup_upload_aborted, action: :mark_aborted
+      define :purge_backup_uploads, action: :purge, args: [:before], require_reference?: false
+    end
   end
 
   # See `with_actor/2`.

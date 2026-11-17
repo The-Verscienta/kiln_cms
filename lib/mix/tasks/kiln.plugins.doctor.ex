@@ -23,7 +23,9 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     * backup destinations (#2220) implement `Kiln.BackupDestination` with a
       usable `kind/0` (lowercase letters, digits and `_`, at most 32
       characters) — it is stored on every destination of that adapter — that
-      is neither one of Kiln's own (`local`, `rclone`) nor another module's;
+      is neither one of Kiln's own (`local`, `rclone`) nor another module's,
+      and that implement `abort_upload/3` when `supports/0` declares
+      `:resume` (#2223);
     * human-verification providers (#2249) pass
       `Kiln.Challenge.Provider.conformance/1`, and their ids collide neither
       with a built-in (`turnstile`, `recaptcha`, which always win) nor with
@@ -686,7 +688,29 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
           ["backup destination kind #{inspect(kind)} is declared by more than one module"]
       end)
 
-    contract ++ kinds ++ taken ++ collisions
+    # #2223: without `abort_upload/3` an upload it started could never be
+    # freed, so the core never resumes it; the operator hears why here.
+    unabortable =
+      for {plugin, mod, {:ok, _kind}} <- kinded,
+          :resume in declared_supports(mod),
+          not function_exported?(mod, :abort_upload, 3) do
+        "#{plugin.name()}: backup destination #{inspect(mod)} declares :resume in supports/0 " <>
+          "but does not implement abort_upload/3, so its uploads are never resumed"
+      end
+
+    contract ++ kinds ++ taken ++ collisions ++ unabortable
+  end
+
+  # A plugin's `supports/0`, or `[]` when it has none or it misbehaves.
+  defp declared_supports(mod) do
+    with true <- function_exported?(mod, :supports, 0),
+         list when is_list(list) <- mod.supports() do
+      list
+    else
+      _ -> []
+    end
+  rescue
+    _error -> []
   end
 
   # ── staging scrub (#2975) ────────────────────────────────────────────────

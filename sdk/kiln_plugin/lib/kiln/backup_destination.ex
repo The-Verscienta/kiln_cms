@@ -64,6 +64,60 @@ defmodule Kiln.BackupDestination do
   Retention (deleting a destination's old backups) only runs on a
   destination whose `supports/0` includes both `:list` and `:delete`, and
   only ever deletes files Kiln recorded sending there.
+
+  ## What `put/3` answers
+
+    * `:ok` once the whole file is stored;
+    * `{:ok, :already_present}` when the destination already holds this very
+      file (same size and sha256) and nothing was sent. Kiln records it as
+      sent. Only answer it when the store can vouch for the content, not for
+      a name alone;
+    * `{:error, {:permanent, message}}` for a failure no retry fixes (the
+      bucket does not exist, the credentials are refused for good). Kiln
+      fails this destination at once, without spending the backup's
+      remaining attempts on it;
+    * `{:error, :deadline}` when the adapter stopped because `opts[:deadline]`
+      was near, having saved its progress (see below);
+    * `{:error, :superseded}` when a resumable upload's `save` answered it
+      (see below);
+    * `{:error, reason}` for anything else, which Kiln retries.
+
+  `opts[:deadline]`, passed to every adapter, is the
+  `System.monotonic_time(:millisecond)` instant by which the call must be
+  done. Kiln kills the call there anyway; an adapter that watches it can stop
+  cleanly first.
+
+  ## Resumable uploads
+
+  An adapter whose `supports/0` includes `:resume`, and which implements
+  `abort_upload/3`, gets `opts[:resume]`, a `Kiln.BackupDestination.Resume`,
+  on every `put/3`. Through it an upload interrupted by a timeout, a retry or
+  a node going away continues where it stopped instead of starting over:
+
+    * `resume.checkpoint` is what the adapter last saved for this file on
+      this destination, or `nil` for a fresh start. Kiln hands it back only
+      for the same file (same size and sha256): a file that changed starts
+      over, and its old upload is aborted;
+    * `resume.save.(checkpoint)` records progress. Call it right after the
+      store upload is created, before any data is sent (so it can be found
+      and aborted later), and after each part the store has acknowledged.
+      `save` runs in the adapter's process and writes to Kiln's database;
+    * a checkpoint is a map that survives a JSON round trip, at most 8 KiB
+      encoded. It comes back with **string keys**, whatever keys it was saved
+      with. Never put a secret in it: it is stored in the clear. An upload id
+      and part numbers and their store tags are what it is for. A
+      `bytes_done` key, a non-negative integer, is how far the upload got, as
+      the backup's log reports it when a later attempt resumes;
+    * when `save` answers `{:error, :superseded}`, a later attempt of the
+      backup owns this upload now: stop at once and return
+      `{:error, :superseded}`. An adapter that created a fresh store upload
+      in this very call aborts that one itself before returning. On any other
+      `{:error, reason}` from `save`, stop and return that error;
+    * trust nothing in a checkpoint the store does not confirm: verify what
+      the store already holds before sending only the rest.
+
+  Kiln aborts a recorded upload (through `abort_upload/3`) only when it failed
+  permanently, when the file changed, or when it lay unfinished for days.
   """
 
   defmodule Config do
@@ -93,6 +147,34 @@ defmodule Kiln.BackupDestination do
             kind: String.t(),
             settings: %{optional(String.t()) => term()},
             secrets: %{optional(String.t()) => String.t()}
+          }
+  end
+
+  defmodule Resume do
+    @moduledoc """
+    A resumable upload's state, as `c:Kiln.BackupDestination.put/3` gets it in
+    `opts[:resume]` (see "Resumable uploads" in `Kiln.BackupDestination`).
+
+      * `checkpoint` — what the adapter last saved for this file, with string
+        keys, or `nil` for a fresh start;
+      * `attempt` — which attempt of the upload this is, from 1;
+      * `save` — a function of one checkpoint map that records it:
+        `:ok`, `{:error, :superseded}` (a later attempt owns the upload:
+        stop) or `{:error, reason}` (stop, and return it).
+
+    `inspect/1` shows only `attempt`.
+    """
+
+    @derive {Inspect, only: [:attempt]}
+    @enforce_keys [:save]
+    defstruct checkpoint: nil, attempt: 1, save: nil
+
+    @type checkpoint :: %{optional(String.t() | atom()) => term()}
+
+    @type t :: %__MODULE__{
+            checkpoint: %{optional(String.t()) => term()} | nil,
+            attempt: pos_integer(),
+            save: (checkpoint() -> :ok | {:error, :superseded | term()})
           }
   end
 
@@ -138,6 +220,16 @@ defmodule Kiln.BackupDestination do
   @type ref :: %{subdir: String.t(), name: String.t()}
 
   @typedoc """
+  A recorded upload to abort, as `c:abort_upload/3` gets it: the file's
+  `subdir` and `name`, and the `checkpoint` the adapter last saved for it
+  (string keys).
+  """
+  @type upload :: %{subdir: String.t(), name: String.t(), checkpoint: map() | nil}
+
+  @typedoc "A capability `supports/0` may declare."
+  @type capability :: :list | :delete | :resume
+
+  @typedoc """
   Why a call failed. A string is shown to the admin, after Kiln has removed
   the destination's secrets from it, so make it a sentence they can act on.
   Any other term is shown `inspect`ed.
@@ -174,10 +266,22 @@ defmodule Kiln.BackupDestination do
 
   @doc """
   Copy `file` to the destination as `<subdir>/<name>`, replacing any file
-  there. `:ok` only once the whole file is stored. `opts` is empty today;
-  `:resume` is reserved for resumable uploads.
+  there. `:ok` only once the whole file is stored; `{:ok, :already_present}`
+  when the destination already holds this very file. See "What `put/3`
+  answers" for the errors Kiln tells apart.
+
+  `opts`:
+
+    * `:deadline` — the `System.monotonic_time(:millisecond)` instant the
+      call must be done by (since 1.5; every adapter gets it);
+    * `:resume` — a `Kiln.BackupDestination.Resume`, only for an adapter
+      that declares `:resume` in `supports/0` and implements
+      `abort_upload/3`. See "Resumable uploads".
+
+  Ignore any other option: later releases may add some.
   """
-  @callback put(Config.t(), file(), opts :: keyword()) :: :ok | {:error, reason()}
+  @callback put(Config.t(), file(), opts :: keyword()) ::
+              :ok | {:ok, :already_present} | {:error, reason()}
 
   @doc "Every file under the destination's `db` and `media` subdirectories."
   @callback list(Config.t()) :: {:ok, [entry()]} | {:error, reason()}
@@ -195,13 +299,23 @@ defmodule Kiln.BackupDestination do
   @callback describe(Config.t()) :: String.t()
 
   @doc """
-  Which of `:list` and `:delete` actually work. Retention runs only on a
-  destination that supports both. The default, `[]`, means neither, so
-  nothing is ever deleted from a destination that didn't say it can be.
+  Which of `:list`, `:delete` and `:resume` actually work. Retention runs
+  only on a destination that supports both `:list` and `:delete`; resumable
+  uploads only on one that supports `:resume` and implements
+  `abort_upload/3`. The default, `[]`, means none, so nothing is ever deleted
+  from a destination that didn't say it can be.
   """
-  @callback supports() :: [:list | :delete]
+  @callback supports() :: [capability()]
 
-  @optional_callbacks supports: 0
+  @doc """
+  Abort the store upload a resumable `put/3` started and recorded through
+  `Kiln.BackupDestination.Resume`, freeing what the store keeps of it. An
+  upload the store no longer knows is success. Required by an adapter that
+  declares `:resume`. `opts` carries `:deadline`, as `put/3`'s does.
+  """
+  @callback abort_upload(Config.t(), upload(), opts :: keyword()) :: :ok | {:error, reason()}
+
+  @optional_callbacks supports: 0, abort_upload: 3
 
   defmacro __using__(_opts) do
     quote do

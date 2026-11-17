@@ -15,7 +15,7 @@ defmodule KilnCMS.Backups.DestinationTest do
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups.{Destination, Redact}
   alias KilnCMS.Backups.Destination.{Local, Rclone}
-  alias KilnCMS.Test.BackupDestinations.Fake
+  alias KilnCMS.Test.BackupDestinations.{Fake, ResumableFake}
 
   @secret "fake-secret-token-123"
 
@@ -38,7 +38,7 @@ defmodule KilnCMS.Backups.DestinationTest do
       registry = Destination.registry()
 
       assert [Rclone, Local | rest] = registry
-      assert rest == [KilnDepFixture.BackupDestination, Fake]
+      assert rest == [KilnDepFixture.BackupDestination, Fake, ResumableFake]
       assert Destination.registry() == registry
     end
 
@@ -179,6 +179,47 @@ defmodule KilnCMS.Backups.DestinationTest do
       refute message =~ @secret
     end
 
+    test "a permanent failure keeps its tag, its message scrubbed (#2223)" do
+      assert {:error, {:permanent, message}} =
+               Destination.call(fake_config(%{"mode" => "permanent"}), :put, [%{}, []])
+
+      assert message == "the bucket is gone for token=***"
+      assert Destination.permanent?({:permanent, message})
+
+      # A term in place of the message is inspected and scrubbed, the tag kept.
+      assert {:error, {:permanent, inspected}} =
+               Destination.call(fake_config(%{"mode" => "permanent_term"}), :put, [%{}, []])
+
+      assert inspected =~ "no_such_bucket"
+      refute inspected =~ @secret
+      assert Destination.permanent?({:permanent, inspected})
+    end
+
+    test "a put may answer already present; any other {:ok, _} from it is an error" do
+      assert {:ok, :already_present} =
+               Destination.call(fake_config(%{"mode" => "present"}), :put, [%{}, []])
+
+      assert {:error, message} =
+               Destination.call(fake_config(%{"mode" => "ok_weird"}), :put, [%{}, []])
+
+      assert message == "KilnCMS.Test.BackupDestinations.Fake.put/3 returned an unexpected value"
+
+      # Other calls answer values as they always did.
+      assert {:ok, :weird} =
+               Destination.call(fake_config(%{"mode" => "ok_weird"}), :test, [])
+    end
+
+    test "the adapter's process carries the caller in $callers, so a Req.Test stub answers it" do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.text(conn, "pong") end)
+
+      assert {:ok, "pong"} =
+               Destination.call(
+                 fake_config(%{"mode" => "req", "req_stub" => __MODULE__}),
+                 :test,
+                 []
+               )
+    end
+
     test "a crashing process linked to the adapter is just that destination's error" do
       log =
         capture_log(fn ->
@@ -207,10 +248,13 @@ defmodule KilnCMS.Backups.DestinationTest do
     end
 
     test "the default bound comes from config" do
-      Application.put_env(:kiln_cms, Destination, extra_adapters: [Fake], call_timeout: 1000)
+      Application.put_env(:kiln_cms, Destination,
+        extra_adapters: [Fake, ResumableFake],
+        call_timeout: 1000
+      )
 
       on_exit(fn ->
-        Application.put_env(:kiln_cms, Destination, extra_adapters: [Fake])
+        Application.put_env(:kiln_cms, Destination, extra_adapters: [Fake, ResumableFake])
       end)
 
       config = fake_config(%{"mode" => "sleep", "sleep_ms" => 60_000})
@@ -220,11 +264,13 @@ defmodule KilnCMS.Backups.DestinationTest do
 
     test "a :deadline bounds the call by the time left, not by the default" do
       Application.put_env(:kiln_cms, Destination,
-        extra_adapters: [Fake],
+        extra_adapters: [Fake, ResumableFake],
         default_call_timeout: 50
       )
 
-      on_exit(fn -> Application.put_env(:kiln_cms, Destination, extra_adapters: [Fake]) end)
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, Destination, extra_adapters: [Fake, ResumableFake])
+      end)
 
       config = fake_config(%{"mode" => "sleep", "sleep_ms" => 300})
       deadline = System.monotonic_time(:millisecond) + :timer.minutes(10)
@@ -242,8 +288,14 @@ defmodule KilnCMS.Backups.DestinationTest do
       left = Destination.call_timeout(deadline: now + :timer.hours(2))
       assert left > :timer.minutes(119) and left <= :timer.hours(2)
 
-      Application.put_env(:kiln_cms, Destination, extra_adapters: [Fake], call_timeout: 300)
-      on_exit(fn -> Application.put_env(:kiln_cms, Destination, extra_adapters: [Fake]) end)
+      Application.put_env(:kiln_cms, Destination,
+        extra_adapters: [Fake, ResumableFake],
+        call_timeout: 300
+      )
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, Destination, extra_adapters: [Fake, ResumableFake])
+      end)
 
       assert Destination.call_timeout(deadline: now + :timer.hours(2)) == 300
       assert Destination.call_timeout() == 300
@@ -278,10 +330,37 @@ defmodule KilnCMS.Backups.DestinationTest do
                "Mod.put/3 timed out after 2 min"
     end
 
+    test "says the resumable-upload reasons (#2223)" do
+      assert Destination.format_reason({:permanent, "no such bucket"}) == "no such bucket"
+      assert Destination.format_reason(:deadline) =~ "resumes on the next attempt"
+      assert Destination.format_reason(:superseded) =~ "took over the upload"
+    end
+
+    test "permanent?/1 is the tagged reason with a message only" do
+      assert Destination.permanent?({:permanent, "gone"})
+      refute Destination.permanent?("permanent")
+      refute Destination.permanent?({:permanent, :gone})
+      refute Destination.permanent?(:deadline)
+    end
+
     test "timed_out?/1 matches the tagged reason only, never text that reads like it" do
+      assert Destination.timed_out?(:deadline)
       assert Destination.timed_out?({:timeout, "Mod.put/3", 50})
       refute Destination.timed_out?("Mod.put/3 timed out after 50 ms")
       refute Destination.timed_out?(:timeout)
+    end
+  end
+
+  describe "target_key/2" do
+    test "the env destination has none; a stored one's names its key and where it writes" do
+      config = fake_config(%{"bucket" => "a"})
+      assert Destination.target_key(%{"source" => "env", "key" => "rclone:x"}, config) == nil
+
+      key = Destination.target_key(%{"source" => "db", "key" => "dest:1"}, config)
+      assert key =~ ~r/\Adest:1\|[0-9a-f]{16}\z/
+
+      moved = fake_config(%{"bucket" => "b"})
+      refute Destination.target_key(%{"source" => "db", "key" => "dest:1"}, moved) == key
     end
   end
 

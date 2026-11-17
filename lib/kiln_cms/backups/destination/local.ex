@@ -27,6 +27,10 @@ defmodule KilnCMS.Backups.Destination.Local do
   verified with, and only then renamed into place. A copy that does not match
   is removed: nothing lands unverified. `list/1` and `delete/2` touch regular
   files only.
+
+  A file already in place with the same size and sha256 is not copied again:
+  `put/3` answers `{:ok, :already_present}` (#2223). The size is compared
+  first; only a file of the right size is read whole to hash it.
   """
 
   use Kiln.BackupDestination
@@ -135,10 +139,33 @@ defmodule KilnCMS.Backups.Destination.Local do
       target = Path.join(target_dir, name)
       partial = target <> ".partial"
 
-      with {:error, _reason} = error <- place(source, partial, target, file) do
-        File.rm(partial)
-        error
-      end
+      if present?(target, file),
+        do: {:ok, :already_present},
+        else: copy_in(source, partial, target, file)
+    end
+  end
+
+  # `partial` and `target` are `put/3`'s verified paths.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp copy_in(source, partial, target, file) do
+    with {:error, _reason} = error <- place(source, partial, target, file) do
+      File.rm(partial)
+      error
+    end
+  end
+
+  # The very file is already there: a regular file of the same size, then
+  # the same sha256 (read whole, only once the size matched).
+  # `target` is `put/3`'s verified target.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp present?(target, file) do
+    with bytes when is_integer(bytes) <- file[:bytes],
+         sha256 when is_binary(sha256) <- file[:sha256],
+         {:ok, %File.Stat{type: :regular, size: ^bytes}} <- File.lstat(target),
+         {:ok, digest, ^bytes} <- Checksum.file(target) do
+      digest == String.downcase(sha256)
+    else
+      _ -> false
     end
   end
 

@@ -146,6 +146,7 @@ defmodule KilnCMS.Backups.Steps do
     Retention,
     RunDestination,
     StepWorker,
+    Uploads,
     WorkState
   }
 
@@ -1851,18 +1852,28 @@ defmodule KilnCMS.Backups.Steps do
 
   defp copy_to(ctx, dest, config, state, rec) do
     key = dest.entry["key"]
-    sent_key = sent_key(dest.entry, config)
+    sent_key = Destination.target_key(dest.entry, config)
     artifacts = outputs(state)
     files = artifacts ++ expected_sidecars(artifacts)
     sent = if sent_key, do: Map.get(sent_map(state), sent_key, %{}), else: %{}
 
-    {results, sent} = put_files(ctx.dir, files, {config, dest.deadline}, sent)
+    # What a resumable upload is recorded under (#2223): the same key as the
+    # sends, owned by this step's job and attempt.
+    target = %{
+      key: sent_key,
+      owner: Uploads.owner(ctx.lease),
+      deadline: dest.deadline,
+      stamp: ctx.stamp
+    }
+
+    {results, sent, resumed} = put_files(ctx.dir, files, {config, target}, sent)
 
     state =
       if sent_key,
         do: Map.put(state, "sent", Map.put(sent_map(state), sent_key, sent)),
         else: state
 
+    rec = Enum.reduce(resumed, rec, &log_resumed(&2, &1, label_for(dest)))
     rec = Enum.reduce(results, rec, &record_put(&1, &2, key, label_for(dest)))
     counts = %{files_ok: Enum.count(results, &sent?/1), files_total: length(files)}
 
@@ -1880,12 +1891,22 @@ defmodule KilnCMS.Backups.Steps do
 
         {:fatal, {:offsite, problems}, state, rec}
 
-      problems when dest.last_attempt? ->
-        destination_failed(dest, {:offsite, problems}, state, rec, counts)
-
       problems ->
-        {:retry, {:offsite, problems}, state, Recorder.put_run_destination(rec, key, counts)}
+        # A failure the adapter says no retry fixes fails the destination
+        # now, whatever attempt this is (#2223); the chain moves on.
+        if dest.last_attempt? or Enum.any?(problems.failed, &permanent_failure?/1),
+          do: destination_failed(dest, {:offsite, problems}, state, rec, counts),
+          else:
+            {:retry, {:offsite, problems}, state, Recorder.put_run_destination(rec, key, counts)}
     end
+  end
+
+  defp permanent_failure?({_name, reason}), do: Destination.permanent?(reason)
+
+  # A put that continued an earlier attempt's upload (#2223).
+  defp log_resumed(rec, {name, from, total}, label) do
+    where = if from > 0, do: " at #{from} of #{total} bytes", else: " from its last checkpoint"
+    Recorder.log(rec, :info, "offsite", "Resumed #{name} on #{label || "off-site"}#{where}")
   end
 
   # One file after another, each re-checked immediately before its own copy
@@ -1894,15 +1915,19 @@ defmodule KilnCMS.Backups.Steps do
   # A stored destination skips a file it was sent in an earlier attempt with
   # the same digest; the env destination sends every file every time, as it
   # always did (critic change 5). A call that times out ends the attempt:
-  # the next file would only wait as long again.
+  # the next file would only wait as long again. So does a permanent
+  # failure (no retry fixes it), and losing a resumable upload to a newer
+  # step (#2223). A file the destination already holds, same size and
+  # digest, counts as sent (`:present`).
   defp put_files(dir, files, target, sent) do
-    {results, sent} =
-      Enum.reduce_while(files, {[], sent}, fn file, {acc, sent} ->
-        {step, result, sent} = send_one(dir, file, target, sent)
-        {step, {[{file, result} | acc], sent}}
+    {results, sent, resumed} =
+      Enum.reduce_while(files, {[], sent, []}, fn file, {acc, sent, resumed} ->
+        {step, result, sent, note} = send_one(dir, file, target, sent)
+        resumed = if note, do: [note | resumed], else: resumed
+        {step, {[{file, result} | acc], sent, resumed}}
       end)
 
-    {Enum.reverse(results), sent}
+    {Enum.reverse(results), sent, Enum.reverse(resumed)}
   end
 
   defp send_one(dir, file, target, sent) do
@@ -1910,17 +1935,34 @@ defmodule KilnCMS.Backups.Steps do
     digest = digest(file)
 
     if digest != nil and Map.get(sent, name) == digest do
-      {:cont, :skipped, sent}
+      {:cont, :skipped, sent, nil}
     else
-      case put_file(dir, file, target) do
-        :ok -> {:cont, :ok, put_sent(sent, name, digest)}
-        {:error, reason} = error -> {halt_on(reason), error, sent}
-        refused -> {:cont, refused, sent}
+      {result, note} = put_file(dir, file, target)
+
+      case result do
+        :ok ->
+          {:cont, :ok, put_sent(sent, name, digest), note}
+
+        {:ok, :already_present} ->
+          {:cont, :present, put_sent(sent, name, digest), note}
+
+        {:refused, _reason} = refused ->
+          {:cont, refused, sent, note}
+
+        {:error, reason} = error ->
+          {halt_on(reason), error, sent, note}
+
+        _unexpected ->
+          {:cont, {:error, "the destination returned an unexpected value"}, sent, note}
       end
     end
   end
 
-  defp halt_on(reason), do: if(Destination.timed_out?(reason), do: :halt, else: :cont)
+  defp halt_on(reason) do
+    if Destination.timed_out?(reason) or Destination.permanent?(reason) or reason == :superseded,
+      do: :halt,
+      else: :cont
+  end
 
   defp put_sent(sent, _name, nil), do: sent
   defp put_sent(sent, name, digest), do: Map.put(sent, name, digest)
@@ -1936,37 +1978,34 @@ defmodule KilnCMS.Backups.Steps do
 
   defp digest(file), do: file[:sha256]
 
-  # `"<key>|<location fingerprint>"` for a stored destination, so a record
-  # of a send never licenses a skip somewhere else; nil for the env
-  # destination, which never skips.
-  defp sent_key(%{"source" => "env"}, _config), do: nil
-
-  defp sent_key(%{"key" => key}, config) do
-    where =
-      case Destination.location(config) do
-        :unknown -> {:settings, config.kind, config.settings}
-        location -> location
-      end
-
-    fingerprint =
-      :sha256
-      |> :crypto.hash(:erlang.term_to_binary(where))
-      |> Base.encode16(case: :lower)
-      |> binary_part(0, 16)
-
-    key <> "|" <> fingerprint
-  end
-
-  defp put_file(dir, file, {config, deadline}) do
+  # The put itself, with what a resumable upload needs around it (#2223,
+  # `Uploads`): `{result, resumed}`, `resumed` the `{name, from_bytes,
+  # bytes}` of a put that continued an earlier upload, else nil. Every
+  # adapter gets the step's `:deadline`; only the env destination's key is
+  # nil, so it records nothing and never resumes.
+  defp put_file(dir, file, {config, target}) do
     path = Path.join(dir, file.path)
 
     with :ok <- precheck(path, file),
          {:ok, put} <- put_args(path, file) do
-      Destination.call(config, :put, [put, []], deadline: deadline)
+      case Uploads.handle(config, put, target) do
+        {:ok, opts, info} ->
+          result = Destination.call(config, :put, [put, opts], deadline: target.deadline)
+          Uploads.settle(config, info, result)
+          {result, resumed(info)}
+
+        {:error, :superseded} = superseded ->
+          {superseded, nil}
+      end
     else
-      {:error, reason} -> {:refused, reason}
+      {:error, reason} -> {{:refused, reason}, nil}
     end
   end
+
+  defp resumed(%{resumed?: true, put: put, resumed_from_bytes: from}),
+    do: {put.name, from, put.bytes}
+
+  defp resumed(_info), do: nil
 
   # `Kiln.BackupDestination.file`: a sidecar's size and digest are read
   # from it here, right after `precheck/2` found it holds what it must.
@@ -1982,7 +2021,7 @@ defmodule KilnCMS.Backups.Steps do
     end
   end
 
-  defp sent?({_file, result}), do: result in [:ok, :skipped]
+  defp sent?({_file, result}), do: result in [:ok, :skipped, :present]
 
   # nil: the env destination alone speaks as it always did ("off-site").
   defp label_for(%{solo?: true}), do: nil
@@ -1994,6 +2033,7 @@ defmodule KilnCMS.Backups.Steps do
     rec =
       rec
       |> Recorder.put_run_destination(key, Map.merge(counts, %{status: :ok, error: nil}))
+      |> sweep_uploads(dest, config)
       |> prune_destination(ctx, dest, config)
 
     # The env remote, redacted, for the manifest's `offsite` (cron's
@@ -2048,6 +2088,28 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   defp prune_destination(rec, _ctx, _dest, _config), do: rec
+
+  # The resumable uploads left behind on the destination just reached
+  # (#2223, `Uploads.sweep/4`), whatever its `prune`: abandoned ones, and
+  # ones untouched for days, are aborted; old closed records go.
+  defp sweep_uploads(rec, dest, config) do
+    key = Destination.target_key(dest.entry, config)
+
+    case Uploads.sweep(config, key, dest.deadline) do
+      %{aborted: 0, failed: 0} ->
+        rec
+
+      %{aborted: aborted, failed: failed} ->
+        left = if failed > 0, do: "; #{failed} couldn't be, and are tried again later", else: ""
+
+        Recorder.log(
+          rec,
+          :info,
+          "offsite",
+          "Aborted #{aborted} unfinished upload(s) on #{label_for(dest) || "off-site"}#{left}"
+        )
+    end
+  end
 
   # The row as it is now: an admin who turned `prune` off during the backup
   # is obeyed. A row that can't be read prunes nothing.
@@ -2221,6 +2283,7 @@ defmodule KilnCMS.Backups.Steps do
   defp destination_error({:offsite, %{failed: failed}}),
     do: "FAILED for #{count_files(failed)}: " <> named(failed, &short_destination_failure/1)
 
+  defp destination_error({:permanent, message}) when is_binary(message), do: message
   defp destination_error(:removed), do: "removed or disabled during this backup"
   defp destination_error(:unreadable), do: "couldn't be read"
   defp destination_error(reason), do: Destination.format_reason(reason)
@@ -2231,6 +2294,9 @@ defmodule KilnCMS.Backups.Steps do
   defp short_destination_failure(reason) when is_binary(reason),
     do: String.slice(reason, 0, 160)
 
+  defp short_destination_failure({:permanent, message}) when is_binary(message),
+    do: String.slice(message, 0, 160)
+
   defp short_destination_failure(reason), do: Destination.format_reason(reason)
 
   # The per-file outcome, on the Run log and the artifact's destination map
@@ -2240,6 +2306,20 @@ defmodule KilnCMS.Backups.Steps do
     name = Path.basename(file.path)
     rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, :ok)
     Recorder.log(rec, :info, "offsite", "#{name} was already copied to #{label}; not sent again")
+  end
+
+  # The destination already held it, same size and sha256 (#2223): as sent.
+  defp record_put({file, :present}, rec, key, label) do
+    name = Path.basename(file.path)
+    rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, :ok)
+
+    Recorder.log(
+      rec,
+      :info,
+      "offsite",
+      "#{name} was already on #{label || "the off-site destination"} with the same checksum; " <>
+        "not sent again"
+    )
   end
 
   defp record_put(result, rec, key, nil), do: record_offsite(result, rec, key)
@@ -2480,7 +2560,7 @@ defmodule KilnCMS.Backups.Steps do
   defp offsite_problems(results) do
     problems =
       Enum.reduce(results, %{refused: [], failed: []}, fn
-        {_file, result}, acc when result in [:ok, :skipped] ->
+        {_file, result}, acc when result in [:ok, :skipped, :present] ->
           acc
 
         {file, {:refused, reason}}, acc ->

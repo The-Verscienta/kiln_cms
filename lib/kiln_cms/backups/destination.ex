@@ -116,7 +116,7 @@ defmodule KilnCMS.Backups.Destination do
   something other than a list supports nothing: retention on a destination
   runs only on an adapter that opted in to `[:list, :delete]`.
   """
-  @spec supports?(Config.t() | String.t(), [:list | :delete]) :: boolean()
+  @spec supports?(Config.t() | String.t(), [Kiln.BackupDestination.capability()]) :: boolean()
   def supports?(%Config{kind: kind}, needed), do: supports?(kind, needed)
 
   def supports?(kind, needed) when is_list(needed) do
@@ -337,6 +337,22 @@ defmodule KilnCMS.Backups.Destination do
     }
   end
 
+  @doc """
+  Whether `config`'s adapter takes resumable uploads (#2223): it declares
+  `:resume` in `supports/0` and implements `abort_upload/3`. One that
+  declares `:resume` without `abort_upload/3` is treated as non-resumable,
+  since Kiln could never free an upload it started.
+  """
+  @spec resumable?(Config.t()) :: boolean()
+  def resumable?(%Config{kind: kind} = config) do
+    with true <- supports?(config, [:resume]),
+         {:ok, module} <- adapter(kind) do
+      Code.ensure_loaded?(module) and function_exported?(module, :abort_upload, 3)
+    else
+      _ -> false
+    end
+  end
+
   ## Files and locations
 
   @doc """
@@ -387,6 +403,32 @@ defmodule KilnCMS.Backups.Destination do
 
   defp nested?(a, b), do: List.starts_with?(a, b) or List.starts_with?(b, a)
 
+  @doc """
+  The key a send to `entry` is recorded against (the `"sent"` map of a
+  backup's `state.json`, and `KilnCMS.Backups.Upload`'s `destination_key`):
+  `"<key>|<location fingerprint>"` for a stored destination, so a record of
+  a send never licenses a skip, or resumes an upload, somewhere else; `nil`
+  for the env destination, which never skips and never resumes.
+  """
+  @spec target_key(entry(), Config.t()) :: String.t() | nil
+  def target_key(%{"source" => "env"}, _config), do: nil
+
+  def target_key(%{"key" => key}, %Config{} = config) do
+    where =
+      case location(config) do
+        :unknown -> {:settings, config.kind, config.settings}
+        location -> location
+      end
+
+    fingerprint =
+      :sha256
+      |> :crypto.hash(:erlang.term_to_binary(where))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 16)
+
+    key <> "|" <> fingerprint
+  end
+
   ## Calling an adapter
 
   @doc """
@@ -410,9 +452,16 @@ defmodule KilnCMS.Backups.Destination do
 
   Every error is scrubbed of `config.secrets` (literally and in `key=value`
   form) and cut to 500 characters. A string or `Command` error stays one; an
-  atom and a timeout stay themselves; anything else becomes its scrubbed
-  `inspect`. An
-  uninstalled kind is `{:error, :not_installed}`.
+  atom and a timeout stay themselves; `{:permanent, message}` keeps its tag,
+  its message scrubbed (`permanent?/1`); anything else becomes its scrubbed
+  `inspect`. An uninstalled kind is `{:error, :not_installed}`.
+
+  A `put` may answer `:ok` or `{:ok, :already_present}`; any other `{:ok, _}`
+  from it is `{:error, "<adapter>.put/3 returned an unexpected value"}`.
+
+  The adapter's process carries the caller in `$callers`, so a database
+  write it makes (a resumable upload's `save`) runs on the caller's sandbox
+  connection in tests, and a `Req.Test` stub the caller owns answers it.
   """
   @spec call(Config.t(), atom(), list(), keyword()) :: term()
   def call(%Config{} = config, fun, args, opts \\ []) when is_atom(fun) and is_list(args) do
@@ -453,6 +502,13 @@ defmodule KilnCMS.Backups.Destination do
     do: "credentials can't be decrypted (was SECRET_KEY_BASE changed?); re-enter them"
 
   def format_reason(:unreadable), do: "couldn't read the backup destinations"
+
+  def format_reason({:permanent, message}) when is_binary(message), do: message
+
+  def format_reason(:deadline),
+    do: "stopped before the step's time ran out; the upload resumes on the next attempt"
+
+  def format_reason(:superseded), do: "a later attempt of this backup took over the upload"
   def format_reason(reason), do: inspect(reason)
 
   @doc """
@@ -462,7 +518,17 @@ defmodule KilnCMS.Backups.Destination do
   """
   @spec timed_out?(term()) :: boolean()
   def timed_out?({:timeout, call, ms}) when is_binary(call) and is_integer(ms), do: true
+  def timed_out?(:deadline), do: true
   def timed_out?(_reason), do: false
+
+  @doc """
+  Whether `reason` is a failure the adapter says no retry fixes
+  (`{:permanent, message}`): the off-site step fails the destination at once
+  rather than spending the backup's remaining attempts on it.
+  """
+  @spec permanent?(term()) :: boolean()
+  def permanent?({:permanent, message}) when is_binary(message), do: true
+  def permanent?(_reason), do: false
 
   @doc """
   The bound on one `call/4` made with `opts`, in milliseconds:
@@ -511,10 +577,13 @@ defmodule KilnCMS.Backups.Destination do
   # no instant exists where the caller could die and leave it running.
   defp bounded(module, fun, args, timeout) do
     caller = self()
+    callers = [caller | Process.get(:"$callers", [])]
     tag = make_ref()
 
     {runner, ref} =
       spawn_monitor(fn ->
+        Process.put(:"$callers", callers)
+
         receive do
           {^tag, :go} -> send(caller, {tag, guarded(module, fun, args)})
         after
@@ -568,11 +637,13 @@ defmodule KilnCMS.Backups.Destination do
   # config is in what this returns: an exception's message is the adapter's
   # own text, and it is scrubbed below like any other error.
   defp guarded(module, fun, args) do
-    case apply(module, fun, args) do
-      :ok -> :ok
-      {:ok, _value} = ok -> ok
-      {:error, _reason} = error -> error
-      _other -> {:error, "#{name(module, fun, args)} returned an unexpected value"}
+    case {fun, apply(module, fun, args)} do
+      {_fun, :ok} -> :ok
+      {:put, {:ok, :already_present} = present} -> present
+      {:put, {:ok, _other}} -> {:error, "#{name(module, fun, args)} returned an unexpected value"}
+      {_fun, {:ok, _value} = ok} -> ok
+      {_fun, {:error, _reason} = error} -> error
+      {_fun, _other} -> {:error, "#{name(module, fun, args)} returned an unexpected value"}
     end
   rescue
     error -> {:error, "#{name(module, fun, args)} raised: #{Exception.message(error)}"}
@@ -605,6 +676,12 @@ defmodule KilnCMS.Backups.Destination do
 
   defp scrub_reason({:exit_status, executable, status, output}, env),
     do: {:exit_status, executable, status, Redact.text(output, env, 500)}
+
+  defp scrub_reason({:permanent, message}, env) when is_binary(message),
+    do: {:permanent, Redact.text(message, env, 500)}
+
+  defp scrub_reason({:permanent, other}, env),
+    do: {:permanent, Redact.text(inspect(other), env, 500)}
 
   defp scrub_reason(reason, _env) when is_atom(reason), do: reason
   defp scrub_reason({:timeout, call, _ms} = reason, _env) when is_binary(call), do: reason
