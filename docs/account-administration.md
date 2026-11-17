@@ -1667,7 +1667,10 @@ the row. No role-change event is written to the security log for the
 demotion. An erased account then has no tier and no audiences on any site,
 whatever a membership row says, and is on no roster: it can't be assigned a
 task, picked in a `:user` custom field or sent a review request, and it gets
-no workflow mail, in-app notification, task-assigned notice or task digest.
+no workflow mail, in-app notification, task-assigned notice or task digest,
+including workflow and task mail that was queued before the erasure (#3019).
+Account mail already queued to the old address, such as a sign-in alert, is
+still sent ([What erasure does not reach](data-flows.md#what-erasure-does-not-reach)).
 
 ### Remove an erased member from a site
 
