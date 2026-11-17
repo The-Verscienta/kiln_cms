@@ -172,12 +172,20 @@ defmodule KilnCMS.Backups.Manifest do
   backup step writes `manifest.json.<tag>.partial` and renames it under its
   lease (#2818), so a superseded step's manifest is refused with
   `{:error, :superseded}` and its temporary file removed.
+
+  Without a `:tag` the temporary name still carries one: a random positive
+  integer, `manifest.json.<digits>.partial` (#2832). Every writer has a temp
+  name of its own, so two writers finishing together (a cron `backup.sh`, the
+  in-app backup, a step recording an interruption) never write into one
+  file, and whichever renames last publishes its own complete JSON. Random
+  rather than `System.unique_integer/1`: the nodes of a cluster share the
+  backup directory. `backup.sh` writes `manifest.json.<pid>-<random>.partial`.
   """
   # sobelow_skip ["Traversal.FileModule"]
   @spec write(Path.t(), t(), keyword()) :: :ok | {:error, term()}
   def write(dir, %__MODULE__{} = manifest, opts \\ []) when is_binary(dir) do
     target = path(dir)
-    tmp = KilnCMS.Backups.Artifact.partial_name(target, opts[:tag])
+    tmp = KilnCMS.Backups.Artifact.partial_name(target, opts[:tag] || unique_tag())
     rename = opts[:rename] || (&File.rename/2)
 
     with :ok <- File.mkdir_p(dir),
@@ -186,6 +194,10 @@ defmodule KilnCMS.Backups.Manifest do
       put_in_place(tmp, target, rename)
     end
   end
+
+  # A positive integer, so `Artifact.tag?/1` holds and the start step's sweep
+  # removes a leftover once it is old (`Steps.sweep_manifest_partials/2`).
+  defp unique_tag, do: :rand.uniform(Bitwise.bsl(1, 62))
 
   # sobelow_skip ["Traversal.FileModule"]
   defp write_tmp(tmp, contents) do
@@ -197,9 +209,10 @@ defmodule KilnCMS.Backups.Manifest do
 
   # The temporary file is removed whenever the rename didn't put it in place,
   # including when the rename raises (a fenced rename's lock query timing out,
-  # #2818); a tagged leftover would otherwise sit at the directory's root until
-  # the start step's sweep. Not on success: an untagged name is `backup.sh`'s
-  # too, and a file under it by then is the script's.
+  # #2818); a leftover would otherwise sit at the directory's root until the
+  # start step's sweep. On success the rename has already moved it. Every temp
+  # name is this write's own (#2832), so the removal never touches another
+  # writer's file.
   # sobelow_skip ["Traversal.FileModule"]
   defp put_in_place(tmp, target, rename) do
     case rename.(tmp, target) do

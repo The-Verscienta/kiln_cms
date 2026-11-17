@@ -9,16 +9,25 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
   `pg_restore`, `psql` and `createdb` are stubs on `PATH` that log their argv
   and whether `PGPASSWORD` reached them. Skipped where bash is missing.
 
+  Both commands verify the dump against its `kiln-db-<stamp>.sha256` sidecar
+  before they touch a database (#2877): a mismatch refuses the restore with no
+  call logged, and a dump with no sidecar warns, or is refused under
+  `RESTORE_REQUIRE_CHECKSUM=1`.
+
   `async: false`: it spawns processes and rewrites `PATH` for the child only,
   but shares the tmp namespace with the other script tests.
   """
   use ExUnit.Case, async: false
+
+  alias KilnCMS.Backups.Checksum
+  alias KilnCMS.Test.ShellTools
 
   # CI's `backup_scripts_portability` job runs this file under bash 3.2 and
   # under bsdtar (`--only shell_portability`).
   @moduletag :shell_portability
 
   @script Path.expand("../../scripts/restore.sh", __DIR__)
+  @no_checksum "WARNING: no checksum found for this database dump"
 
   unless System.find_executable("bash"), do: @moduletag(skip: "needs bash on PATH")
 
@@ -142,6 +151,199 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
     assert File.read!(ctx.log) =~ "unset|unset\n"
   end
 
+  describe "the dump's checksum sidecar (#2877)" do
+    if !(System.find_executable("sha256sum") || System.find_executable("shasum")),
+      do: @describetag(skip: "needs sha256sum or shasum on PATH")
+
+    test "a matching sidecar is verified, then the dump is restored", ctx do
+      sidecar!(ctx)
+
+      for command <- ["db", "drill"] do
+        File.rm(ctx.log)
+        assert {out, 0} = restore(ctx, [command, ctx.dump], drill_url()), command
+        assert out =~ "==> Verifying checksum from kiln-db-20261112-000000.sha256", command
+        assert out =~ "kiln-db-20261112-000000.dump: OK", command
+        refute out =~ "WARNING", command
+        assert [["createdb" | _], ["pg_restore" | _] | _] = calls(ctx), command
+      end
+    end
+
+    test "a mismatch refuses the restore before any tool runs", ctx do
+      sidecar!(ctx)
+      File.write!(ctx.dump, "PGDMP pretend dumq")
+
+      for command <- ["db", "drill"] do
+        assert {out, status} = restore(ctx, [command, ctx.dump], drill_url())
+        assert status != 0, command
+        assert out =~ "checksum verification FAILED for kiln-db-20261112-000000.dump", command
+        assert out =~ "nothing was restored", command
+        refute File.exists?(ctx.log), command
+      end
+    end
+
+    test "without RESTORE_CONFIRM, a mismatch is refused before the prompt", ctx do
+      sidecar!(ctx)
+      File.write!(ctx.dump, "PGDMP pretend dumq")
+
+      assert {out, status} =
+               restore(ctx, ["db", ctx.dump], drill_url(), [{"RESTORE_CONFIRM", nil}])
+
+      assert status != 0
+      assert out =~ "checksum verification FAILED"
+      refute out =~ "Type the database name"
+      refute File.exists?(ctx.log)
+    end
+
+    test "no sidecar warns and restores", ctx do
+      for command <- ["db", "drill"] do
+        File.rm(ctx.log)
+        assert {out, 0} = restore(ctx, [command, ctx.dump], drill_url()), command
+        assert out =~ @no_checksum, command
+        assert out =~ "Expected kiln-db-20261112-000000.sha256 next to the dump.", command
+        assert [["createdb" | _], ["pg_restore" | _] | _] = calls(ctx), command
+      end
+    end
+
+    test "no sidecar is refused under RESTORE_REQUIRE_CHECKSUM=1", ctx do
+      for command <- ["db", "drill"] do
+        assert {out, status} =
+                 restore(ctx, [command, ctx.dump], drill_url(), [
+                   {"RESTORE_REQUIRE_CHECKSUM", "1"}
+                 ])
+
+        assert status != 0, command
+        assert out =~ @no_checksum, command
+        assert out =~ "RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found", command
+        refute File.exists?(ctx.log), command
+      end
+    end
+
+    test "a sidecar that lists another file, or more than the dump, is refused", ctx do
+      hex = sha256(ctx.dump)
+      sidecar = sidecar_path(ctx)
+
+      for entries <- [
+            [{"kiln-db-20261111-000000.dump", hex}],
+            [{"kiln-db-20261112-000000.dump", hex}, {"kiln-media-20261112-000000.tar.gz", hex}]
+          ] do
+        File.rm(sidecar)
+        :ok = Checksum.write_sidecar(sidecar, entries)
+
+        for command <- ["db", "drill"] do
+          assert {out, status} = restore(ctx, [command, ctx.dump], drill_url())
+          assert status != 0, command
+
+          assert out =~
+                   "kiln-db-20261112-000000.sha256 does not list exactly kiln-db-20261112-000000.dump",
+                 command
+
+          refute File.exists?(ctx.log), command
+        end
+      end
+    end
+
+    test "a malformed sidecar is refused", ctx do
+      for body <- ["", "deadbeef  kiln-db-20261112-000000.dump\n", "not a checksum\n"] do
+        File.write!(sidecar_path(ctx), body)
+
+        for command <- ["db", "drill"] do
+          assert {out, status} = restore(ctx, [command, ctx.dump], drill_url())
+          assert status != 0, command
+          assert out =~ "has a missing or malformed checksum line", command
+          refute File.exists?(ctx.log), command
+        end
+      end
+    end
+
+    test "a dump not named kiln-db-<stamp>.dump warns, or is refused under " <>
+           "RESTORE_REQUIRE_CHECKSUM=1",
+         ctx do
+      other = Path.join(ctx.tmp, "backup.dump")
+      File.cp!(ctx.dump, other)
+
+      assert {out, 0} = restore(ctx, ["db", other], drill_url())
+      assert out =~ @no_checksum
+      assert out =~ "Expected a kiln-db-<stamp>.sha256 sidecar next to the dump."
+
+      File.rm!(ctx.log)
+
+      assert {out, status} =
+               restore(ctx, ["db", other], drill_url(), [{"RESTORE_REQUIRE_CHECKSUM", "1"}])
+
+      assert status != 0
+      assert out =~ "RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found"
+      refute File.exists?(ctx.log)
+    end
+
+    # An exported CDPATH makes `cd sub` print the directory it found, which
+    # used to end up in the path the sidecar was looked for under: the
+    # sidecar seemed missing and the dump was restored unverified.
+    test "an exported CDPATH and a relative dump path still verify", ctx do
+      sub = Path.join(ctx.tmp, "sub")
+      File.mkdir_p!(sub)
+      dump = Path.join(sub, "kiln-db-20261112-000000.dump")
+      File.cp!(ctx.dump, dump)
+
+      :ok =
+        Checksum.write_sidecar(Path.join(sub, "kiln-db-20261112-000000.sha256"), [
+          {"kiln-db-20261112-000000.dump", sha256(dump)}
+        ])
+
+      relative = "sub/kiln-db-20261112-000000.dump"
+      cdpath = [{"CDPATH", ctx.tmp}]
+
+      for command <- ["db", "drill"] do
+        File.rm(ctx.log)
+        assert {out, 0} = restore(ctx, [command, relative], drill_url(), cdpath, "bash", ctx.tmp)
+        assert out =~ "kiln-db-20261112-000000.dump: OK", command
+        refute out =~ "WARNING", command
+      end
+
+      File.rm!(ctx.log)
+      File.write!(dump, "PGDMP pretend dumq")
+
+      for command <- ["db", "drill"] do
+        assert {out, status} =
+                 restore(ctx, [command, relative], drill_url(), cdpath, "bash", ctx.tmp)
+
+        assert status != 0, command
+        assert out =~ "checksum verification FAILED", command
+        refute File.exists?(ctx.log), command
+      end
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
+
+    test "under bash 3.2: a match restores, a mismatch is refused", ctx do
+      sidecar!(ctx)
+      assert {out, 0} = restore(ctx, ["db", ctx.dump], drill_url(), [], ShellTools.bash32())
+      assert out =~ "kiln-db-20261112-000000.dump: OK"
+      assert [_createdb, ["pg_restore" | _]] = calls(ctx)
+
+      File.rm!(ctx.log)
+      File.write!(ctx.dump, "PGDMP pretend dumq")
+      assert {out, status} = restore(ctx, ["db", ctx.dump], drill_url(), [], ShellTools.bash32())
+      assert status != 0
+      assert out =~ "checksum verification FAILED"
+      refute File.exists?(ctx.log)
+    end
+  end
+
+  defp drill_url, do: "postgres://kiln@db/kiln_drill"
+
+  defp sidecar_path(ctx), do: Path.join(ctx.tmp, "kiln-db-20261112-000000.sha256")
+
+  defp sidecar!(ctx) do
+    :ok =
+      Checksum.write_sidecar(sidecar_path(ctx), [
+        {"kiln-db-20261112-000000.dump", sha256(ctx.dump)}
+      ])
+  end
+
+  defp sha256(path), do: :crypto.hash(:sha256, File.read!(path)) |> Base.encode16(case: :lower)
+
   defp calls(ctx) do
     ctx.log
     |> File.read!()
@@ -149,11 +351,12 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
     |> Enum.map(&String.split(&1, "|"))
   end
 
-  defp restore(ctx, args, url, extra \\ []) do
+  defp restore(ctx, args, url, extra \\ [], bash \\ "bash", cd \\ nil) do
     env =
       [
         {"RESTORE_DATABASE_URL", url},
         {"RESTORE_CONFIRM", "yes"},
+        {"RESTORE_REQUIRE_CHECKSUM", nil},
         {"PGPASSWORD", nil},
         {"PGSSLMODE", nil},
         {"PGSSLROOTCERT", nil},
@@ -162,7 +365,8 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
 
     env = Enum.reduce(extra, env, fn {k, v}, acc -> List.keystore(acc, k, 0, {k, v}) end)
 
-    System.cmd("bash", [@script | args], env: env, stderr_to_stdout: true)
+    opts = [env: env, stderr_to_stdout: true] ++ if(cd, do: [cd: cd], else: [])
+    System.cmd(bash, [@script | args], opts)
   end
 
   defp stub!(bin, name, body) do

@@ -337,6 +337,34 @@ carries the reasoning.
   [#2833](https://github.com/The-Verscienta/kiln_cms/issues/2833),
   [#2844](https://github.com/The-Verscienta/kiln_cms/issues/2844))
 
+<a id="backup-script-hardening-upgrade"></a>
+
+- **Copy the new `scripts/backup.sh` and `scripts/restore.sh` to every host that runs them. With `RESTORE_REQUIRE_CHECKSUM=1`, `restore.sh db` and `drill` now refuse a dump with no `kiln-db-<stamp>.sha256` beside it. No migration; rolling back is safe.**
+  Three fixes in this release live in the scripts, not the app, so they
+  reach a host only when its copies are replaced: unique manifest
+  temporary names and their cleanup in `backup.sh prune` (#2832), a
+  `pg_dump`, `tar` or `rclone` that stops with the script (#2847), and the
+  checksum check in `restore.sh db` and `drill` (#2877). See the entries
+  under Fixed and Changed.
+
+  `RESTORE_REQUIRE_CHECKSUM=1` used to govern `restore.sh media` only. It
+  now also governs `db` and `drill`, so a scripted restore or drill that
+  sets it fails, before touching the database, on a dump from before
+  checksums, on a dump fetched without its sidecar, and on one renamed away
+  from `kiln-db-<stamp>.dump` (or reached through a symlink under another
+  name), with "RESTORE_REQUIRE_CHECKSUM=1 and no checksum was found —
+  nothing was restored". Fetch the sidecar next to the dump, keep the
+  dump's name, or drop the variable for that run. Without the variable such
+  a dump restores as before, after a warning banner.
+
+  An older `backup.sh` still running beside this release keeps writing
+  `manifest.json.partial`. Neither the app nor the new `prune` removes that
+  name, so after the last older run, delete a leftover by hand. Rolling the
+  pin back restores the old scripts' behavior; nothing is stored.
+  ([#2832](https://github.com/The-Verscienta/kiln_cms/issues/2832),
+  [#2847](https://github.com/The-Verscienta/kiln_cms/issues/2847),
+  [#2877](https://github.com/The-Verscienta/kiln_cms/issues/2877))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -1013,6 +1041,26 @@ carries the reasoning.
   none or are erased, so the mail queued to each admin holds nobody else's
   address. Nothing else about the alert changed.
   ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035))
+
+<a id="backup-sh-signals-stop-child"></a>
+
+- **`backup.sh` stops at once on `HUP`, `INT` or `TERM`: it stops the running `pg_dump`, `pg_restore --list`, `tar` or `rclone`, then cleans up, instead of waiting for it to finish.**
+  bash defers a trap while a foreground command runs, so a `TERM` sent
+  during an hour-long dump or upload did nothing until that command ended.
+  The script now runs those four programs in the background and waits for
+  them, which a trapped signal interrupts. Its cleanup sends the program
+  `TERM` (resuming it first if it was stopped), then `KILL` if it still runs
+  about 5 seconds later, and then removes the run's `.partial` files and
+  writes the failure manifest ("interrupted by SIGTERM"), as before. A second
+  signal during the cleanup is ignored, where it used to cut the cleanup
+  short and leave `.partial` files and no failure manifest. Ctrl-C at a
+  terminal reaches the program through the script's `TERM`. The programs
+  keep the script's stdin, so an rclone that prompts for its config
+  password still can. One case still waits: a program stuck in the kernel
+  on a hung mount ignores both signals until its I/O returns, and the
+  cleanup waits with it. See
+  [Cron backups in parts](../backups.md#cron-backups-in-parts), "When a run fails".
+  ([#2847](https://github.com/The-Verscienta/kiln_cms/issues/2847))
 
 <a id="factor-removed-notice-names-admin"></a>
 
@@ -1740,6 +1788,65 @@ carries the reasoning.
   `backup.sh exited <status> - see the backup log`. See
   [When pg_dump waits for a table lock](../backups.md#when-pg_dump-waits-for-a-table-lock-2844).
   ([#2844](https://github.com/The-Verscienta/kiln_cms/issues/2844))
+
+<a id="backup-manifest-temp-names"></a>
+
+- **A cron `backup.sh` and an in-app backup finishing together can no longer publish a mixed `manifest.json`: each writer now writes it through a temporary name of its own.**
+  Both used to write `manifest.json.partial` and rename it, so two writers
+  could interleave in one file, publish a truncated or mixed manifest, or
+  fail a rename the other had already made. Now `backup.sh` writes
+  `manifest.json.<pid>-<random>.partial` (random between 100000 and 132767,
+  created only if the name is free, another number tried if not), an
+  in-app step `manifest.json.<job>-<attempt>.partial` as before, and the
+  app's manifest for an interrupted backup recorded from outside its step
+  `manifest.json.<random digits>.partial`. `manifest.json` is always the
+  complete file of whichever renamed last. A leftover older than 60 minutes
+  is removed by the start of the next in-app backup and by `backup.sh
+  prune`; the plain `manifest.json.partial` of an older `backup.sh` is
+  removed by neither. See
+  [Temporary files and the trash directories](../backups.md#temporary-files-and-the-trash-directories)
+  and the amendment to
+  [ADR 0067](../decisions/0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md).
+  ([#2832](https://github.com/The-Verscienta/kiln_cms/issues/2832))
+
+<a id="backup-sh-orphaned-child"></a>
+
+- **A `pg_dump`, `tar` or `rclone` left running by a `backup.sh` killed with `kill -9` (or the OOM killer) is now stopped within 5 minutes, instead of running on and writing to a file `prune` may already have deleted.**
+  No trap runs on `SIGKILL`, so the child was adopted by init and kept
+  writing a `.partial` that nothing kept fresh; after 12 hours `prune`
+  deleted it and the child went on filling disk through the deleted file
+  until it ended. The script's heartbeat loop, which already outlives it,
+  now records which program the run is running (in a file under `TMPDIR`)
+  and, within one 5-minute beat of the script being certainly gone, sends
+  it `TERM`, then `KILL` about 5 seconds later. It acts only on a process
+  that still runs the same program and has the loop's own parent, so a PID
+  reused by an unrelated process is left alone; it reads both with `ps`, or
+  from `/proc` where `ps` has no `-p`, and goes by the PID alone where
+  neither works. Not covered: a child started in the instant before the
+  kill, the untracked `head | gzip` of an empty media part and the
+  read-only helpers, and every child when the record in `TMPDIR` could not
+  be created (the run warns). See
+  [When a cron run is killed outright](../backups.md#when-a-cron-run-is-killed-outright-2478).
+  ([#2847](https://github.com/The-Verscienta/kiln_cms/issues/2847))
+
+<a id="restore-db-verifies-checksum"></a>
+
+- **`restore.sh db` and `restore.sh drill` check the dump against its `kiln-db-<stamp>.sha256` sidecar before they touch the database, and refuse a dump that doesn't match.**
+  Only `restore.sh media` read its sidecar, so a truncated or altered dump
+  was restored unchecked. Now, before the confirmation prompt, `createdb`
+  and `pg_restore`, both commands print `==> Verifying checksum from
+  kiln-db-<stamp>.sha256` and run `sha256sum -c` (or `shasum -a 256 -c`).
+  The sidecar must be well formed and list exactly the dump. A mismatch
+  stops with "checksum verification FAILED for kiln-db-<stamp>.dump —
+  nothing was restored". A dump with no sidecar, or not named
+  `kiln-db-<stamp>.dump` (a symlink is not resolved), restores after a
+  warning banner, or is refused under `RESTORE_REQUIRE_CHECKSUM=1` (see
+  Upgrade notes). Both scripts also unset `CDPATH`, which made `cd` print
+  the directory and corrupt the paths they compute. See
+  [What can go wrong when restoring a dump](../backups.md#what-can-go-wrong-when-restoring-a-dump)
+  and the amendment to
+  [ADR 0035](../decisions/0035-the-per-stamp-sidecar-not-the-manifest-is-the-only-restore-time-checksum-authority.md).
+  ([#2877](https://github.com/The-Verscienta/kiln_cms/issues/2877))
 
 ## Security
 

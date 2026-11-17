@@ -41,7 +41,8 @@
 #                        of the media archive (same rules as the app: `*` and
 #                        `?` stay within one path segment, `**` crosses them,
 #                        a pattern without `/` matches a name at any depth)
-#   TMPDIR               where the media file lists are built (default: /tmp);
+#   TMPDIR               where the media file lists and the heartbeat's record
+#                        of the running child are kept (default: /tmp);
 #                        removed when the script exits
 #   BACKUP_KEEP_DAYS     local retention in days (1-2147483647, default: 14;
 #                        anything else keeps 14 and warns on stderr, as the
@@ -86,11 +87,18 @@
 # (bash 3.2 or later; GNU or BSD tar, stat and xargs).
 
 set -euo pipefail
+# An exported CDPATH makes `cd dir` print the directory it chose, which
+# `$(cd -- … && pwd -P)` would then capture as part of the path.
+unset CDPATH
 
 # Set by `die` so a failure manifest can record what actually went wrong.
 LAST_ERROR=""
 # The background heartbeat (start_heartbeat), stopped by on_exit.
 HEARTBEAT_PID=""
+# The long-running child in flight (pg_dump, pg_restore --list, tar, rclone;
+# see run_child), and the file that names it to the heartbeat (#2847).
+CHILD_PID=""
+CHILD_FILE=""
 
 # A run killed outright (kill -9, the OOM killer, power loss: no trap runs)
 # leaves its `.partial` files behind (#2478). While the run lives, a
@@ -102,8 +110,18 @@ HEARTBEAT_PID=""
 # so the Importer has had many chances to read the stamp first. The test suite
 # checks the two against the Importer's threshold. Not settings: changing one
 # without the other mislabels live runs.
+#
+# The same loop stops the run's child when the run is killed outright (#2847):
+# a pg_dump, tar or rclone orphaned by a SIGKILL would otherwise run on,
+# writing a `.partial` nothing keeps fresh, until `prune` unlinks it under
+# its feet. It notices within HEARTBEAT_S (see start_heartbeat).
 HEARTBEAT_S=300
 ABANDONED_PARTIAL_MIN=720
+# The app's partial grace (KilnCMS.Backups.Retention.partial_grace_s/0, in
+# minutes; the test suite checks the two agree): a `.partial` younger than this
+# may still be written. `prune` counts a unit with one as in flight, and
+# removes a leftover manifest temporary file only once it is older.
+PARTIAL_GRACE_MIN=60
 
 die() {
   LAST_ERROR="$*"
@@ -152,13 +170,19 @@ offsite() {
     refuse_offsite "$file" "$expected" "$found"
   fi
   rclone_split_remote "$BACKUP_RCLONE_REMOTE"
+  local dest
+  dest="${OFFSITE_REMOTE}/$(basename "$(dirname "$file")")"
   echo "==> Off-site copy → ${OFFSITE_REMOTE}"
   # The parameters reach rclone through its environment only: `export` is a
   # builtin, and the subshell keeps them from every other command (#2690).
+  # A tracked child (run_child), so it dies with the script (#2847); `exec`
+  # makes the subshell rclone itself.
   (
     if [ "${#OFFSITE_ENV[@]}" -gt 0 ]; then export "${OFFSITE_ENV[@]}"; fi
-    rclone copy "$file" "${OFFSITE_REMOTE}/$(basename "$(dirname "$file")")"
-  )
+    exec rclone copy "$file" "$dest"
+  ) <&0 7>&- 8>&- &
+  track_child "$!" rclone
+  wait_child
 }
 
 # Keep a connection-string remote's credentials out of rclone's argv (#2690),
@@ -512,6 +536,20 @@ ping_ok() {
 # keys, same relative paths. Written atomically (.partial then mv) for the same
 # reason the dumps are: a reader catching a half-written manifest would report
 # a backup that did not happen.
+#
+# The temporary name is this run's own, `manifest.json.<pid>-<random>.partial`
+# (#2832): a cron run and the in-app backup finishing together used to write
+# through one `manifest.json.partial` and could publish a mix of the two, or
+# fail a rename the other had already done. The PID alone is not unique (two
+# containers sharing BACKUP_DIR count PIDs separately), hence the random half,
+# and the file is created exclusively (noclobber) so a name already taken is
+# never written through. The random half is $RANDOM + 100000 (100000-132767),
+# above any attempt number, so it never takes the name of an app step's
+# `manifest.json.<job>-<attempt>.partial`. The name has the app's tag shape
+# (`<digits>-<digits>`), so a leftover is removed by the app's start sweep and
+# by `prune` (prune_manifest_partials) once it is PARTIAL_GRACE_MIN old. Once
+# renamed into place the name is no longer tracked: another writer may create
+# it next, and on_exit must not remove that writer's file.
 MANIFEST_ARTIFACTS=""
 
 record_artifact() {
@@ -562,8 +600,7 @@ json_escape() {
 
 write_manifest() {
   # $1 = "true"/"false" (did it succeed), $2 = error string (may be empty)
-  local out="$BACKUP_DIR/manifest.json"
-  track_partial "${out}.partial"
+  local out="$BACKUP_DIR/manifest.json" tmp="" _
   local err="null"
   [ -n "${2:-}" ] && err="\"$(json_escape "$2")\""
   local offsite="null"
@@ -578,7 +615,18 @@ write_manifest() {
   trigger="$(json_escape "${BACKUP_TRIGGER:-cron}")"
 
   mkdir -p "$BACKUP_DIR"
-  cat > "${out}.partial" <<JSON
+  # Created empty and exclusively first: only a file this run created is
+  # tracked (and so removed by on_exit), never one another writer holds.
+  for _ in 1 2 3 4 5; do
+    tmp="${out}.$$-$((RANDOM + 100000)).partial"
+    if [ ! -e "$tmp" ] && [ ! -L "$tmp" ] && (set -C && : > "$tmp") 2>/dev/null; then
+      track_partial "$tmp"
+      break
+    fi
+    tmp=""
+  done
+  [ -n "$tmp" ] || die "could not create a temporary manifest in $BACKUP_DIR"
+  cat > "$tmp" <<JSON
 {
   "version": 1,
   "stamp": "${STAMP}",
@@ -592,7 +640,8 @@ write_manifest() {
   "error": ${err}
 }
 JSON
-  mv "${out}.partial" "$out"
+  mv "$tmp" "$out"
+  untrack_partial "$tmp"
 }
 
 # ONE exit trap for the whole script, installed once. It has to be one:
@@ -613,12 +662,28 @@ JSON
 # `backup.sh db` would otherwise record "the last backup" as database-only.
 on_exit() {
   local status=$?
+  # A second signal must not cut the cleanup short: once a trap's `exit` runs
+  # this, another TERM or INT would otherwise abort it halfway, leaving
+  # `.partial` files and no failure manifest. Children started from here on
+  # inherit the ignore, which is harmless: they are short. (A child stuck in
+  # uninterruptible I/O can hold the cleanup; see stop_children.)
+  trap '' HUP INT TERM
+  # The script's own stdout and stderr, whatever call the trap interrupted
+  # (see on_signal).
+  exec 1>&7 2>&8
   umask "$ORIG_UMASK"
 
   # First, so nothing touches a file this trap is about to remove (the loop
   # only ever touches with -c, which never creates one).
   if [ -n "${HEARTBEAT_PID:-}" ]; then
     kill "$HEARTBEAT_PID" 2>/dev/null || true
+  fi
+
+  # Then the child, before its `.partial` is removed: a pg_dump or tar still
+  # running would go on writing to the unlinked file (#2847).
+  stop_children
+  if [ -n "$CHILD_FILE" ]; then
+    rm -f -- "$CHILD_FILE"
   fi
 
   # Only OUR OWN files, tracked as they are created — never a blanket
@@ -669,16 +734,130 @@ track_partial() {
   OWN_PARTIALS+=("$1")
 }
 
+# Forget $1 (blank its entry; on_exit skips blanks): it is no longer this
+# run's, and another writer may now hold the name.
+untrack_partial() {
+  local i
+  for i in ${OWN_PARTIALS[@]+"${!OWN_PARTIALS[@]}"}; do
+    if [ "${OWN_PARTIALS[$i]}" = "$1" ]; then OWN_PARTIALS[i]=""; fi
+  done
+}
+
+# Run a long command as a background child and wait for it, so that a trapped
+# signal interrupts the wait at once and on_exit can stop the child, and so
+# that the heartbeat knows which process to stop if this script is killed
+# outright (#2847). `"$@" &` forks once and execs the program, so `$!` is the
+# program itself. Its status, redirections and stdin (`<&0`: a non-interactive
+# shell would give it /dev/null, and rclone may prompt for a config password)
+# are the foreground command's; under `set -e` a failure ends the run as
+# before. It does not get fds 7 and 8 (on_signal's copies of the script's
+# stdout and stderr): an orphan, or anything it starts, must not hold the
+# caller's pipe open. A command that needs its own environment runs as
+# `( export …; exec prog … ) <&0 7>&- 8>&- & track_child "$!" prog;
+# wait_child`, the `exec` again making `$!` the program.
+run_child() {
+  "$@" <&0 7>&- 8>&- &
+  track_child "$!" "${1##*/}"
+  wait_child
+}
+
+# Record child $1 running program $2: CHILD_PID for on_exit, and
+# `<pid> <program>` in CHILD_FILE for the heartbeat, which only sees variables
+# set before it forked. Writing the file is best-effort: a full TMPDIR must
+# not fail the backup, it only leaves the heartbeat nothing to stop. Only an
+# existing regular file is written: a heartbeat that gave up has removed it,
+# and recreating the name in a shared TMPDIR could write through a symlink
+# planted there since.
+track_child() {
+  CHILD_PID="$1"
+  if child_file_ok; then
+    { printf '%s %s\n' "$1" "$2" > "$CHILD_FILE"; } 2>/dev/null || true
+  fi
+}
+
+# Wait for the tracked child; returns its status.
+wait_child() {
+  local rc=0
+  wait "$CHILD_PID" || rc=$?
+  CHILD_PID=""
+  if child_file_ok; then
+    { : > "$CHILD_FILE"; } 2>/dev/null || true
+  fi
+  return "$rc"
+}
+
+# Whether CHILD_FILE is set and still the regular file mktemp created.
+child_file_ok() {
+  [ -n "$CHILD_FILE" ] && [ -f "$CHILD_FILE" ] && [ ! -L "$CHILD_FILE" ]
+}
+
+# Stop every child this script has not waited for (on_exit): the tracked one,
+# and as a backstop any other, such as a child forked just before a signal
+# arrived and not yet tracked. They are what running_children lists: bash's
+# own record of its children still running or stopped, so a child that has
+# ended (whose PID may already belong to another process) is never signaled.
+# The heartbeat is disowned, so it is not among them. CONT first, so a stopped
+# child (kill -STOP, a SIGTSTP) acts on the TERM; TERM so rclone can abort its
+# uploads and pg_dump close its connection; whatever still runs after about 5
+# seconds gets KILL. Then each is reaped (the `2>/dev/null` keeps bash's
+# "Terminated" notice out of the log).
+#
+# A child stuck in uninterruptible I/O (a hung NFS mount) ignores TERM and
+# KILL alike until the I/O returns; the reaping `wait` then holds on_exit,
+# which ignores further signals, until it does. Only a SIGKILL of the script
+# itself ends that; the heartbeat then stops the child once it can.
+stop_children() {
+  local pids p deadline
+  pids="$(running_children)"
+  CHILD_PID=""
+  [ -n "$pids" ] || return 0
+  for p in $pids; do
+    kill -CONT "$p" 2>/dev/null || true
+    kill -TERM "$p" 2>/dev/null || true
+  done
+  deadline=$((SECONDS + 5))
+  while [ "$SECONDS" -lt "$deadline" ] && [ -n "$(running_children)" ]; do
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+  for p in $(running_children); do
+    kill -KILL "$p" 2>/dev/null || true
+  done
+  for p in $pids; do
+    wait "$p" 2>/dev/null || true
+  done
+}
+
+# The PIDs of this script's background children still running or stopped,
+# one per line. Not `jobs -p`, which also lists a child that has ended and not
+# yet been reported. Without job control (a script) bash does not see a child
+# stop and lists it under -r; -s covers a run with `set -m`.
+running_children() {
+  jobs -rp 2>/dev/null || true
+  jobs -sp 2>/dev/null || true
+}
+
 # A signal must still run on_exit (bash runs the EXIT trap on `exit`, not when
-# a signal kills it). bash defers a trap until the foreground child (pg_dump,
-# tar) exits, so cleanup happens after that child, not mid-write.
+# a signal kills it). The long-running children run in the background under
+# `wait` (run_child), which a trapped signal interrupts at once, so HUP, INT
+# and TERM stop the run without waiting for a dump or an upload to finish:
+# on_exit stops the child, then cleans up. A shell defers a trap only while a
+# FOREGROUND child runs; the short helpers still run that way.
+#
+# A background child of a script ignores INT and QUIT (bash does that when job
+# control is off), so a Ctrl-C at a terminal reaches it only through on_exit's
+# TERM, not straight from the terminal.
+#
+# The trap can now run inside a call with its own redirections (archive_part's
+# `run_child tar … 2>> "$err"`), so it writes to the script's own stdout and
+# stderr, which install_traps keeps open as fds 7 and 8.
 on_signal() {
   LAST_ERROR="interrupted by SIG$1"
-  echo "error: ${LAST_ERROR}" >&2
+  echo "error: ${LAST_ERROR}" >&8
   exit "$2"
 }
 
 install_traps() {
+  exec 7>&1 8>&2
   trap on_exit EXIT
   trap 'on_signal HUP 129' HUP
   trap 'on_signal INT 130' INT
@@ -686,9 +865,13 @@ install_traps() {
 }
 
 # Whether the heartbeat loop is still a child of this script ($1 = the
-# script's PID, $2 = 1 when `ps -o ppid= -p` works here). After a SIGKILL the
-# loop is re-parented, and the script's PID may be reused by another process,
-# so `kill -0` alone could keep a killed run's partials fresh for ever.
+# script's PID, $2 = 1 when `ps -o ppid= -p` works here): 0 when it is, 1 when
+# it definitely is not, 2 when it can't tell. After a SIGKILL the loop is
+# re-parented, and the script's PID may be reused by another process, so
+# `kill -0` alone could keep a killed run's partials fresh for ever. "Definitely
+# not" is `kill -0` failing, or `ps` answering with another parent; a `ps` that
+# fails says nothing, and the heartbeat stops a child only on a definite
+# answer (#2847).
 #
 # The loop's own PID: bash 3.2 has no $BASHPID, and a subshell's $$ is the
 # script's. `exec` makes sh replace the command substitution's process, so its
@@ -696,14 +879,113 @@ install_traps() {
 # this prints a PID that is gone. Keep the form exactly as it is.
 #
 # Without a usable `ps` (busybox without procps) only `kill -0` is left.
-still_my_parent() {
+parent_state() {
+  kill -0 "$1" 2>/dev/null || return 1
   [ "$2" = 1 ] || return 0
   local me parent
-  me="$(exec sh -c 'echo "$PPID"')"
-  parent="$(ps -o ppid= -p "$me" 2>/dev/null)" || return 1
+  me="$(exec sh -c 'echo "$PPID"')" || return 2
+  parent="$(ps -o ppid= -p "$me" 2>/dev/null)" || return 2
   # ps pads the number with spaces.
   parent="${parent//[!0-9]/}"
-  [ "$parent" = "$1" ]
+  [ -n "$parent" ] || return 2
+  [ "$parent" = "$1" ] || return 1
+}
+
+# Whether process $1 still runs program $2 ($3 = 1 when `ps` works here): 0
+# when it does, 1 when it does not or is gone, 2 when nothing here can tell.
+# The guard against a PID reused after the child ended: the first word of the
+# command line, as a base name, must be the program; or the second, when the
+# first is an interpreter running it as a script (Debian's pg_dump is a Perl
+# wrapper until it execs the real one). Whole words only, so `tar` never
+# matches `start`. The command line comes from `ps`, else from
+# /proc/<pid>/cmdline (busybox `ps` has no `-p`).
+child_runs() {
+  local pid="$1" name="$2" args="" first="" second="" rest=""
+  if [ "$3" = 1 ] && args="$(ps -o args= -p "$pid" 2>/dev/null)"; then
+    :
+  elif [ -r "/proc/$pid/cmdline" ]; then
+    args="$(tr '\000' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" || return 1
+  elif [ "$3" = 1 ]; then
+    # ps works here and does not list it.
+    return 1
+  elif kill -0 "$pid" 2>/dev/null; then
+    return 2
+  else
+    return 1
+  fi
+  read -r first second rest <<<"$args" || true
+  first="${first##*/}"
+  second="${second##*/}"
+  [ -n "$first" ] || return 1
+  [ "$first" = "$name" ] && return 0
+  case "$first" in
+    sh | bash | dash | ash | ksh | zsh | perl* | python*) [ "$second" = "$name" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+# The parent PID of process $1 ($2 = 1 when `ps` works here), from `ps`, else
+# from /proc/<pid>/stat; fails when neither answers. In stat the parent is the
+# second field after the command name, which is in parentheses and may itself
+# hold spaces and parentheses, so the line is read from after its LAST `)`.
+ppid_of() {
+  local out="" stat=""
+  if [ "$2" = 1 ] && out="$(ps -o ppid= -p "$1" 2>/dev/null)"; then
+    :
+  elif [ -r "/proc/$1/stat" ] && stat="$(cat -- "/proc/$1/stat" 2>/dev/null)"; then
+    read -r _ out _ <<<"${stat##*)}" || true
+  fi
+  # ps pads the number with spaces.
+  out="${out//[!0-9]/}"
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+# Whether process $1 has the heartbeat's own parent ($2 = 1 when `ps` works
+# here): 0 when it does, or when either parent can't be read; 1 when they
+# differ. After the script dies its child and the heartbeat are both
+# re-parented to the same reaper (init, or the nearest subreaper), so the
+# real orphan passes. A PID reused within the up-to-HEARTBEAT_S window by
+# another pg_dump, tar or rclone, which the name guard alone would pass, has
+# the parent that started it, still alive, and fails.
+shares_my_parent() {
+  local me mine theirs
+  me="$(exec sh -c 'echo "$PPID"')" || return 0
+  mine="$(ppid_of "$me" "$2")" || return 0
+  theirs="$(ppid_of "$1" "$2")" || return 0
+  [ "$theirs" = "$mine" ]
+}
+
+# The heartbeat's last job once the script is definitely gone ($1 = 1 when
+# `ps` works here): stop the child CHILD_FILE names, if it still runs that
+# program (child_runs) and is an orphan beside the heartbeat
+# (shares_my_parent). A line that is empty, torn (no program) or not a PID
+# above 1 stops nothing. TERM first, as on_exit does; KILL if it still runs
+# that program five sleeps later. Where neither `ps` nor /proc can name a
+# process or its parent, the PID alone decides.
+stop_orphan() {
+  local pid="" name="" rest="" n=0 state=0
+  [ -n "$CHILD_FILE" ] || return 0
+  read -r pid name rest < "$CHILD_FILE" 2>/dev/null || true
+  rm -f -- "$CHILD_FILE"
+  case "$pid" in
+    "" | *[!0-9]* | 0*) return 0 ;;
+  esac
+  [ "$pid" -gt 1 ] && [ -n "$name" ] || return 0
+  child_runs "$pid" "$name" "$1" || state=$?
+  [ "$state" != 1 ] || return 0
+  shares_my_parent "$pid" "$1" || return 0
+  kill -TERM "$pid" 2>/dev/null || return 0
+  while [ "$n" -lt 5 ]; do
+    sleep 1
+    kill -0 "$pid" 2>/dev/null || return 0
+    n=$((n + 1))
+  done
+  state=0
+  child_runs "$pid" "$name" "$1" || state=$?
+  [ "$state" != 1 ] || return 0
+  shares_my_parent "$pid" "$1" || return 0
+  kill -KILL "$pid" 2>/dev/null || true
 }
 
 # The heartbeat (see HEARTBEAT_S): touch every `.partial` of this stamp, both
@@ -713,14 +995,40 @@ still_my_parent() {
 # script's output from. on_exit stops it with TERM; the trap stops its sleep
 # too, so no `sleep` outlives the script. `disown`: the shell reports nothing
 # when it ends.
+#
+# When the script is definitely gone (parent_state; killed outright, so no
+# trap ran), the loop stops the script's child before it exits (stop_orphan,
+# #2847): run_child names it in CHILD_FILE, created here before the fork so
+# both sides know the path. While `ps` can't answer the loop goes on touching;
+# after three such answers in a row it removes CHILD_FILE and stops without
+# stopping anything, as it always did when `ps` failed.
 start_heartbeat() {
   local parent="$$" use_ps=0
   if ps -o ppid= -p "$$" >/dev/null 2>&1; then use_ps=1; fi
+  if ! CHILD_FILE="$(mktemp "${TMPDIR:-/tmp}/kiln-backup-child.XXXXXX" 2>/dev/null)"; then
+    CHILD_FILE=""
+    warn "could not create a file in ${TMPDIR:-/tmp}: a child of this run would outlive a kill -9"
+  fi
   (
     trap - EXIT HUP INT
     sleeper=""
     trap 'if [ -n "$sleeper" ]; then kill "$sleeper" 2>/dev/null || true; fi; exit 0' TERM
-    while kill -0 "$parent" 2>/dev/null && still_my_parent "$parent" "$use_ps"; do
+    unknown=0
+    while :; do
+      state=0
+      parent_state "$parent" "$use_ps" || state=$?
+      if [ "$state" = 1 ]; then
+        stop_orphan "$use_ps"
+        break
+      elif [ "$state" = 2 ]; then
+        unknown=$((unknown + 1))
+        if [ "$unknown" -ge 3 ]; then
+          if [ -n "$CHILD_FILE" ]; then rm -f -- "$CHILD_FILE"; fi
+          break
+        fi
+      else
+        unknown=0
+      fi
       for f in "$BACKUP_DIR"/db/kiln-db-"$STAMP".*.partial \
         "$BACKUP_DIR"/media/kiln-media-"$STAMP".*.partial; do
         if [ -f "$f" ]; then touch -c -- "$f" 2>/dev/null || true; fi
@@ -730,7 +1038,7 @@ start_heartbeat() {
       wait "$sleeper" || true
       sleeper=""
     done
-  ) </dev/null >/dev/null 2>&1 &
+  ) </dev/null >/dev/null 2>&1 7>&- 8>&- &
   HEARTBEAT_PID=$!
   disown "$HEARTBEAT_PID" 2>/dev/null || true
 }
@@ -757,13 +1065,17 @@ cmd_db() {
   # stderr goes to a file first so a failure manifest can say why (under
   # `set -e` the run would otherwise record only its exit status); it is
   # copied to stderr either way.
+  # A tracked child (run_child), so it dies with the script (#2847); `exec`
+  # makes the subshell pg_dump itself.
   PG_DUMP_ERRORS="$(mktemp "${TMPDIR:-/tmp}/kiln-pg_dump.XXXXXX")"
   (
     if [ "$PG_CONN_HAS_PASSWORD" = 1 ]; then export PGPASSWORD="$PG_CONN_PASSWORD"; fi
-    pg_dump --format=custom --no-owner --no-privileges \
+    exec pg_dump --format=custom --no-owner --no-privileges \
       --lock-wait-timeout="$LOCK_WAIT_MS" \
       --file="${out}.partial" "$PG_CONN_URL"
-  ) 2>"$PG_DUMP_ERRORS" || status=$?
+  ) <&0 2>"$PG_DUMP_ERRORS" 7>&- 8>&- &
+  track_child "$!" pg_dump
+  wait_child || status=$?
   cat -- "$PG_DUMP_ERRORS" >&2
   errors="$(tail -n 5 -- "$PG_DUMP_ERRORS")"
   rm -f -- "$PG_DUMP_ERRORS"
@@ -771,7 +1083,7 @@ cmd_db() {
   [ "$status" -eq 0 ] || die "$(pg_dump_failure "$status" "$errors")"
 
   echo "==> Verifying dump (pg_restore --list)"
-  pg_restore --list "${out}.partial" >/dev/null ||
+  run_child pg_restore --list "${out}.partial" >/dev/null ||
     die "dump failed verification and was removed — this backup did NOT succeed"
   mv "${out}.partial" "$out"
 
@@ -1260,16 +1572,19 @@ archive_part() {
     rm -f -- "$partial"
     : > "$err"
     ok=0
+    # tar runs as a tracked child (run_child), so it dies with the script
+    # (#2847). The empty tarball is a pipeline of milliseconds and stays in
+    # the foreground.
     if [ "$FILTER_KEPT" -eq 0 ]; then
       # A valid empty tarball, written directly because GNU tar refuses to
       # create an empty archive.
       if head -c 10240 /dev/zero | gzip -n -c > "$partial" 2>> "$err" &&
-        tar -tzf "$partial" > /dev/null 2>> "$err"; then
+        run_child tar -tzf "$partial" > /dev/null 2>> "$err"; then
         ok=1
       fi
     else
-      if tar -czf "$partial" --null -C "$MEDIA_DIR" -T "$run" 2>> "$err" &&
-        tar -tzf "$partial" > /dev/null 2>> "$err"; then
+      if run_child tar -czf "$partial" --null -C "$MEDIA_DIR" -T "$run" 2>> "$err" &&
+        run_child tar -tzf "$partial" > /dev/null 2>> "$err"; then
         ok=1
       fi
     fi
@@ -1558,7 +1873,7 @@ cmd_verify() {
 #     KEEP_DAYS), and removes it once they no longer do; prune never removes
 #     one.
 #   - it is in flight: `.work/<stamp>` exists, or one of its `.partial` files is
-#     younger than 60 minutes (the app's partial grace).
+#     younger than PARTIAL_GRACE_MIN (60 minutes, the app's partial grace).
 #   - it is the newest COMPLETE unit of its kind (see unit_complete) that is
 #     not in flight and whose stamp is a real date no later than tomorrow.
 #   - any of its regular files is not older than KEEP_DAYS (`-mtime +N`).
@@ -1580,6 +1895,9 @@ cmd_verify() {
 # `restore.sh` refuses a set with a `.partial` beside it, so keeping one would
 # make the pinned set unrestorable. The finished files of the stamp are not
 # touched here; they age as an incomplete unit like any other.
+#
+# Then the manifest temporary files at BACKUP_DIR's root that a writer stopped
+# between its write and its rename left behind (prune_manifest_partials).
 
 PART_NUM_ERE='(0[1-9]|[1-9][0-9]|[1-9][0-9]{2,})'
 
@@ -1734,8 +2052,8 @@ is_held() {
   fi
 }
 
-# Whether unit ($2 = kind, $3 = stamp) in $1 has a `.partial` younger than the
-# 60-minute grace. A partial is `<name>.partial` (this script's) or
+# Whether unit ($2 = kind, $3 = stamp) in $1 has a `.partial` younger than
+# PARTIAL_GRACE_MIN. A partial is `<name>.partial` (this script's) or
 # `<name>.<tag>.partial`, a temporary file the app's backup step tags with its
 # job and attempt (`48211-2`, #2819); both count. Fails closed: if `find`
 # itself fails, the unit counts as in flight.
@@ -1746,7 +2064,7 @@ has_fresh_partial() {
   else
     ere="^kiln-media-${3}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)(\\.[0-9]+(-[0-9]+)?)?\\.partial\$"
   fi
-  if ! found="$(find "$1" -maxdepth 1 -name "kiln-${2}-${3}.*.partial" -mmin -60 -print)"; then
+  if ! found="$(find "$1" -maxdepth 1 -name "kiln-${2}-${3}.*.partial" -mmin "-${PARTIAL_GRACE_MIN}" -print)"; then
     warn "could not look for partials of ${2} ${3} in $1; keeping it"
     return 0
   fi
@@ -1813,6 +2131,36 @@ prune_abandoned_partials() {
   done
 }
 
+# The manifest temporary files at BACKUP_DIR's root (#2832) older than
+# PARTIAL_GRACE_MIN: `manifest.json.<tag>.partial`, where the tag is digits or
+# `<digits>-<digits>` (this script's `<pid>-<random>`, an app step's
+# `<job>-<attempt>` or a random number). A manifest write lasts a moment, so
+# one that old was abandoned by a writer killed between its write and its
+# rename. Only regular files (never a symlink) of exactly that shape: the
+# untagged `manifest.json.partial` of an older backup.sh is left alone, as the
+# app leaves it. A file whose age `find` can't tell is kept; each removal is
+# echoed, and one that fails is warned about while the rest go on. A glob, not
+# a `find` listing: a file name holding a newline can't then name another path.
+prune_manifest_partials() {
+  local path old
+  for path in "$BACKUP_DIR"/manifest.json.*.partial; do
+    [[ "${path##*/}" =~ $MANIFEST_PARTIAL_ERE ]] || continue
+    if ! old="$(find "$path" -prune -type f -mmin "+${PARTIAL_GRACE_MIN}" -print)"; then
+      warn "could not check the age of $path; kept it"
+      continue
+    fi
+    [ -n "$old" ] || continue
+    if rm -f -- "$path"; then
+      echo "$path"
+    else
+      warn "could not remove $path"
+    fi
+  done
+}
+
+# In a variable: bash 3.2 reads a quoted right-hand side of `=~` literally.
+MANIFEST_PARTIAL_ERE='^manifest\.json\.[0-9]+(-[0-9]+)?\.partial$'
+
 cmd_prune() {
   echo "==> Pruning backups older than ${KEEP_DAYS} days"
   local kind dir names stamp members newest fresh name db_names="" media_names=""
@@ -1851,6 +2199,7 @@ cmd_prune() {
   fi
 
   prune_abandoned_partials "$db_names" "$media_names"
+  prune_manifest_partials
 
   for kind in db media; do
     dir="$BACKUP_DIR/$kind"

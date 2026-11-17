@@ -2907,10 +2907,12 @@ defmodule KilnCMS.Backups.Steps do
     sweep_manifest_partials(dir, cutoff)
   end
 
-  # A step's tagged `manifest.json.<tag>.partial` at the directory's root,
-  # left when its node stopped between the write and the rename
-  # (`Manifest.write/3`). The untagged `manifest.json.partial` is
-  # `backup.sh`'s, which removes its own.
+  # A tagged `manifest.json.<tag>.partial` at the directory's root, left when
+  # its writer stopped between the write and the rename: a step's (job tag),
+  # an untagged `Manifest.write/3`'s (random digits) or `backup.sh`'s
+  # (`<pid>-<random>`, #2832). Each name is its writer's own, and a live write
+  # lasts seconds, so one older than the grace is abandoned. The untagged
+  # `manifest.json.partial` of an older `backup.sh` is left alone.
   # sobelow_skip ["Traversal.FileModule"]
   defp sweep_manifest_partials(dir, cutoff) do
     for path <- Path.wildcard(Path.join(dir, "manifest.json.*.partial")),
