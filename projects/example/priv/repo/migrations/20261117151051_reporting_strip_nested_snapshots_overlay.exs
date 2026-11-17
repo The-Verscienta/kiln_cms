@@ -1,4 +1,4 @@
-defmodule KilnCMS.Repo.Migrations.ReportingStripNestedSnapshots do
+defmodule KilnCMS.Repo.Migrations.ReportingStripNestedSnapshotsOverlay do
   @moduledoc """
   Updates resources based on their most recent snapshots.
 
