@@ -180,6 +180,15 @@ Every summary line below that was shortened links to its own entry there.
 - **A backup step run again after recording its work no longer lists its files twice, which made the off-site copy refuse the checksum file and fail the backup.**
   ([long form](docs/changelog/unreleased.md#backup-retried-step-duplicate-outputs))
 
+- **A resume waiting to start (for the server with its files, or after a Cancel) shows on the Backups page with a Cancel for platform admins, so it no longer holds other backups back for up to an hour.**
+  ([long form](docs/changelog/unreleased.md#backup-cancel-waiting-resume))
+
+- **A finish step taken back from a stopped node stays finishing, so Cancel is refused until it completes (not yet when a node on an older release takes it back).**
+  ([long form](docs/changelog/unreleased.md#backup-reclaimed-finish-stays-finishing))
+
+- **A backup's finish step syncs the `.good` and `.hold` markers only while it still holds the backup lock.**
+  ([long form](docs/changelog/unreleased.md#backup-finish-marker-sync-fenced))
+
 - **Erasure now deletes the account's linked newsletter subscriptions on every site, so the person's real address stops receiving newsletters, and Export my data lists them (without tokens).**
   ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-deletes-newsletter-subscriptions))
 

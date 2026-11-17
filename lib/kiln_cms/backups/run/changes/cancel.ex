@@ -25,6 +25,13 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
 
   The run is logged as canceled by the actor, with the step it was on in the
   audit event's metadata (`changeset.context[:backup_step]`).
+
+  A resume that holds the lock but has not re-opened its run yet is not what
+  this action is for. While its start snoozes for the server with the run's
+  files, the lock holds a chain the run is not on and no stamp yet, so a stale
+  `running` row is just marked canceled and the resume carries on. Its own
+  Cancel is `Run`'s `:cancel_resume` (`Run.Changes.CancelResume`, #2816),
+  which the Backups page offers instead.
   """
   use Ash.Resource.Change
 

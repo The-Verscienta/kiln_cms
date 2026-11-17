@@ -874,6 +874,68 @@ carries the reasoning.
   [issue 2419](https://github.com/The-Verscienta/kiln_cms/issues/2419). No
   migration.
 
+<a id="backup-cancel-waiting-resume"></a>
+
+- **A resume waiting to start can now be canceled from the Backups page, so it no longer holds every other backup back for up to an hour.**
+  A resume holds the backup lock from its request, but its `start` step can
+  wait before it picks the backup up again: up to about an hour for the
+  server that has the backup's files, or up to three minutes after the
+  backup's own Cancel. New and scheduled backups queued behind it all that
+  time, and the page offered no Cancel, because the History row wasn't
+  `Running`. The in-flight strip now says what the resume is waiting for
+  ("Waiting for the server that has this backup's files", "Waiting for the
+  canceled backup's step to stop", or "Starting a resume") and, for a
+  platform admin, offers **Cancel**. It cancels the resume's start job,
+  releases the lock (a queued backup starts next) and leaves the backup as it
+  was: a `Failed` or `Canceled` row keeps its status and its **Resume**
+  button, and a row left `Running` by an attempt that stopped becomes
+  `Failed`. The row's error and log read "Resume canceled by a platform admin
+  before it started". It is the new `Run` action `:cancel_resume`
+  (`KilnCMS.Backups.cancel_run_resume/2`, platform admin only; the backup
+  system actor is refused), audited as `backup_canceled` with `step` `start`
+  and the new metadata key `resume` `true`. If the resume picks the backup up
+  before the Cancel lands, nothing changes and the page says "The resume
+  started meanwhile. Cancel it again to stop the backup."; if the Cancel lands
+  first, the start stops without re-opening the run. `Backups.await/2` on
+  the canceled resume's chain returns `{:error, :no_run}`, and
+  `Backups.in_flight/1` now reports `resume` (and, with `details: true`,
+  `waiting_for`). A fresh backup waiting at its start for a legacy
+  `Backups.Worker` job still has no Cancel. During a rolling upgrade, a
+  resume start running on a node still on an older release doesn't check its
+  lease before re-opening the run. No migration; rolling back removes the
+  button. See
+  [Cancel a resume that is waiting to start](../backups.md#cancel-a-resume-that-is-waiting-to-start)
+  and the amendment to
+  [ADR 0045](../decisions/0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md).
+  ([#2816](https://github.com/The-Verscienta/kiln_cms/issues/2816))
+
+<a id="backup-reclaimed-finish-stays-finishing"></a>
+
+- **A finish step taken back from a stopped node stays past the point of no return, so Cancel is refused until it completes.**
+  The heartbeat's take-back moved the lock to the replacement job and reset
+  its phase to running until that job marked it finishing again. A Cancel in
+  that gap was accepted, and could leave a `Canceled` run next to a manifest
+  that already said ok, and a leftover `.work/<stamp>/`. The take-back now
+  keeps the finishing phase, so Cancel says "Too late to cancel: the backup
+  is finishing." throughout. During a rolling upgrade a node still on an
+  older release that takes back a finish step still drops the phase, until
+  every node runs this release. No migration; rolling back brings the gap
+  back. ([#3012](https://github.com/The-Verscienta/kiln_cms/issues/3012))
+
+<a id="backup-finish-marker-sync-fenced"></a>
+
+- **A backup's finish step syncs the `.good` and `.hold` markers only while it still holds the backup lock.**
+  The finish step synced the markers and then released the lock without
+  checking that the lock was still its own. A finish that had stalled long
+  enough to be taken back, while the step that took over (or the next
+  backup) ran, could still move the markers, and two syncs for different
+  backups can remove each other's markers. The sync now runs only while the
+  step still holds the lock, with cron's backups imported first, outside it.
+  A finish that has lost the lock writes no marker, releases nothing and
+  leaves completing the backup to the step that took over, as the finish
+  that completes after an interruption already did. No migration.
+  ([#3013](https://github.com/The-Verscienta/kiln_cms/issues/3013))
+
 <a id="erasure-deletes-newsletter-subscriptions"></a>
 
 - **Erasure deletes the account's newsletter subscriptions, so the person's address stops receiving newsletters, and the self-service data export lists them.**

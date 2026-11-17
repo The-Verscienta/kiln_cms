@@ -356,7 +356,11 @@ When the app writes it:
 - **At the end of every successful in-app backup**, after the run is closed and
   its `.work/<stamp>/` is gone, while it still holds the backup lock. It imports
   cron's backups into History first, so the newest verified backup is chosen
-  from both.
+  from both. A finish step that has lost the lock by then (it stalled long
+  enough to be [taken back](#several-nodes-and-the-backup-lock)) writes no
+  marker: the step that took over finishes the backup and syncs them (#3013).
+  Two syncs for different backups could otherwise remove each other's
+  markers.
 - **Before every in-app prune deletes anything.** The prune runs during each
   in-app backup (the backup in progress is in flight, so the marker names the
   previous one at that point), and when you call
@@ -1304,6 +1308,76 @@ stops its step later. The backup's `state.json` and its History row are
 protected from such a step either way; only its temporary `.partial` files
 depend on the window ([below](#what-a-step-that-outlives-its-cancel-can-write)).
 
+### Cancel a resume that is waiting to start
+
+A resume holds the backup lock from the moment it is requested, but its
+`start` step can wait before it picks the backup up again: up to about an hour
+for [the server that has the backup's files](#several-nodes-and-the-backup-lock),
+or up to three minutes for a step of the canceled backup to stop
+([above](#cancel-a-running-backup)). New and scheduled backups queue behind it
+all that time. A platform admin can cancel it (#2816).
+
+1. Open **Backups** (`/editor/backups`) as a platform admin. The in-flight
+   strip shows the backup's stamp and what the resume waits for:
+
+   | Strip label | The resume is waiting for |
+   |---|---|
+   | "Waiting for the server that has this backup's files" | A node whose backup directory has the backup's `.work/<stamp>/`. Other nodes keep putting the step back. |
+   | "Waiting for the canceled backup's step to stop" | The window after the backup's Cancel to pass. |
+   | "Starting a resume" | Nothing the page can name: its start step is about to run, or is running. |
+
+2. Click **Cancel** on the strip. The History row has no **Cancel** while the
+   resume waits; the strip's is the one that stops it.
+3. Confirm "Cancel this resume? The backup stays as it was, so it can be
+   resumed later." (with "A queued backup will start next." when one is
+   waiting).
+4. The page says "Resume canceled. The backup stays as it was, so it can be
+   resumed later." The strip shows the queued backup, if there was one, or
+   disappears.
+
+What happens to the backup:
+
+- The resume's start job is canceled and the lock released, so a queued
+  backup starts next.
+- The History row keeps its status, `Failed` or `Canceled`, and its
+  **Resume** button. Its error reads "Resume canceled by a platform admin
+  before it started" above the original error, and its log gains the same
+  line. A second canceled or refused resume replaces that line rather than
+  adding another. A canceled backup's 150-second wait still counts from its
+  original Cancel.
+- A row still `Running` from an attempt that stopped (one the resume was
+  about to take over) becomes `Failed`, with the same line above
+  "Interrupted: the job was killed or the node stopped".
+- Nothing on disk changes: `.work/<stamp>/` and the files already written
+  stay.
+- The instance security log records a **Backup canceled** event with the
+  backup's stamp, `step` `start` and `resume` `true`
+  ([security-events.md](security-events.md#the-instance-log)). Your email is
+  in that event, not on the History row.
+- From a console, `KilnCMS.Backups.await(chain)` on the resume's chain
+  returns `{:error, :no_run}`: the chain ended without re-opening a run.
+
+What can go wrong:
+
+| Message | Meaning |
+|---|---|
+| "The resume started meanwhile. Cancel it again to stop the backup." | The resume picked the backup up before your click landed. It is a running backup now; its **Cancel** is on the strip and the row. |
+| "The backup changed meanwhile. Try again." | Something else wrote the backup's row between the page loading and the click. The page has been refreshed. |
+| "Only a platform admin can cancel a backup." | Your account is no longer a platform admin. |
+| "That resume can't be canceled." | Anything else, for example no resume of this backup is waiting any more. |
+
+The same action from a release console, as a platform admin (the backup
+system actor is refused):
+
+```bash
+bin/kiln_cms rpc 'admin = KilnCMS.Accounts.get_user_by_email!("admin@example.com", authorize?: false); {:ok, run} = KilnCMS.Backups.get_run_by_stamp("20260805-031700", actor: admin); {:ok, run} = KilnCMS.Backups.cancel_run_resume(run, actor: admin); IO.inspect(run.status)'
+```
+
+A fresh backup (not a resume) can also wait at its `start` step, for up to
+three hours, while a legacy `KilnCMS.Backups.Worker` job still runs on a node
+from an older release during an upgrade. The strip shows "Starting a backup"
+with no **Cancel**: it has no History row yet. Let the old job finish.
+
 ### Several nodes and the backup lock
 
 The lock is held by a step job on some node. If that node stops, its step must
@@ -1320,7 +1394,11 @@ looks at the lock:
   every file already finished. The server log says "Backup step `<step>` of
   `<stamp>` was on node `<node>`, which stopped responding: requeued (job
   `<id>`)". With no attempts left the backup fails as "Interrupted: node
-  `<node>` stopped responding".
+  `<node>` stopped responding". A `finish` step taken back stays finishing,
+  so **Cancel** is still refused ("Too late to cancel") until it completes
+  (#3012). During a rolling upgrade, a node still on an older release that
+  takes back a finish step drops that state until the replacement step marks
+  it finishing again, and a Cancel in that gap is accepted.
 - A step whose job ended without handing over (its last attempt timed out
   after 2 hours, or the job was discarded or deleted) fails the backup as
   "Interrupted: the backup's step job ended without finishing its step", and
@@ -1406,9 +1484,10 @@ waited too, the resume is given up:
 
 That is about an hour in which the resume holds the lock, and a backup asked
 for meanwhile [queues behind it](#back-up-while-another-backup-runs): the price of not refusing a resume just
-because the wrong nodes happened to pick it up first. Nothing on the page can
-cancel it while it waits, because **Cancel** appears only once the row is
-`Running` again. Bring the host with the files back, or wait for the give-up.
+because the wrong nodes happened to pick it up first. Bring the host with the
+files back, wait for the give-up, or
+[cancel the resume](#cancel-a-resume-that-is-waiting-to-start) to let other
+backups run.
 
 **The lock is a Postgres advisory lock.** Every decision about the chain
 (a request, a hand-over, a take-back, a Cancel, a `state.json` write) runs in
@@ -1475,7 +1554,8 @@ stored. Other calls:
 - **Only some components**: `KilnCMS.Backups.request([trigger: "console", components: [:db]], KilnCMS.Backups.system())`
   ([below](#back-up-only-the-database-or-only-the-media)).
 - **What is running**: `KilnCMS.Backups.in_flight()` returns `nil`, or the
-  chain, its stamp, trigger, step, part, `parts_total`, `components` (what the
+  chain, its stamp, `resume` (the stamp a resume continues, `nil` for a fresh
+  backup), trigger, step, part, `parts_total`, `components` (what the
   running backup covers, as `[:db]`, `[:media]` or `[:db, :media]`; `nil` on a
   node without the backup's directory, and until its start step has run),
   phase (`:running` or `:finishing`), `acquired_at` and the queued request
@@ -1483,7 +1563,9 @@ stored. Other calls:
   `nil` means everything, or `nil`).
 - **Wait for it**: `KilnCMS.Backups.await(chain)` returns `:ok` once that
   chain's backup succeeded, else `{:error, reason}`: the run's error,
-  `:canceled`, `{:skipped, error}`, `:no_run` or `:timeout`. It polls the
+  `:canceled`, `{:skipped, error}`, `:no_run` (the chain ended without a run,
+  as a resume refused or [canceled](#cancel-a-resume-that-is-waiting-to-start)
+  before it picked its backup up does) or `:timeout`. It polls the
   database (every 2 s, for up to 3 hours by default; `:interval` and
   `:timeout` in ms), so it works from any node. A timeout stops the wait, not
   the backup.

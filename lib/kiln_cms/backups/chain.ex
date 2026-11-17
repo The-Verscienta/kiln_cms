@@ -44,6 +44,19 @@ defmodule KilnCMS.Backups.Chain do
   reclaimed, canceled or otherwise superseded meanwhile gets
   `{:error, :superseded}` and its results are discarded.
 
+  Work that must not outlive the lease runs inside `while_holding/2`: a
+  `state.json` write, and the finish step's marker sync (#3013), so a
+  superseded finish writes no `.good` or `.hold` marker and leaves them to the
+  step that took over. A resume's start checks its lease after it reads the
+  run and before it re-opens it (#2816), and the re-open is pinned to that
+  read (`KilnCMS.Backups.Run.Changes.Resume`), so a resume canceled before it
+  started (`Run`'s `:cancel_resume`, which releases the lock in its own
+  transaction) never has its run re-opened.
+
+  A step taken back from a stopped node keeps `phase: :finishing` when it had
+  it (#3012): the replacement is past the point of no return too, so a Cancel
+  stays refused until it completes.
+
   ## A node that stopped
 
   `reclaim_stale/0` frees the lock from a step whose node stopped beating (or
