@@ -9,8 +9,8 @@ defmodule KilnCMS.Backups.Destination.S3.Client do
       credentials of the media store, and the host here is one an admin
       typed. No region-to-host lookup either, so any region a store names
       (`auto`, `us-west-004`) works.
-    * **Signed** with `ExAws.Auth.headers/6` (SigV4, the payload's sha256
-      signed too). ExAws's request layer is not used: it merges app config,
+    * **Signed** with ExAws.Auth.headers/6, internal to ExAws (SigV4, the
+      payload's sha256 signed too). ExAws's request layer is not used: it merges app config,
       retries with sleeps of its own past any deadline, and follows no rule
       of ours about redirects.
     * **Sent** through `KilnCMS.Storage.S3.ReqClient` to the address the
