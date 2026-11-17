@@ -19,6 +19,7 @@ defmodule KilnCMS.Staging do
   """
 
   alias KilnCMS.Repo
+  alias KilnCMS.Staging.PluginScrub
   alias KilnCMS.Staging.Scrub
 
   # A throwaway database's name must contain one of these, so the scrub can't be
@@ -91,6 +92,10 @@ defmodule KilnCMS.Staging do
       """
     end
 
+    # Before the queues are paused: a refusal here must leave a live node as
+    # it found it. `Scrub.run/1` checks again, so no caller can skip it.
+    _steps = PluginScrub.plan!(Keyword.take(opts, [:plugins, :ash_domains]))
+
     guard_live_oban!(shell, Keyword.get(opts, :allow_live?, false), opts)
 
     shell.("Scrubbing #{database}@#{host} …")
@@ -145,7 +150,8 @@ defmodule KilnCMS.Staging do
   end
 
   # `:oban_live?` in `opts` replaces the check, so a test can stand in for a
-  # live node without starting a second, executing Oban.
+  # live node without starting a second, executing Oban; `:pause_queues`
+  # replaces the pause, so a test can see whether it happened.
   defp guard_live_oban!(shell, allow_live?, opts) do
     live? = Keyword.get_lazy(opts, :oban_live?, fn -> oban_live?(Oban) end)
 
@@ -165,7 +171,7 @@ defmodule KilnCMS.Staging do
         """
 
       true ->
-        :ok = Oban.pause_all_queues(Oban)
+        :ok = Keyword.get(opts, :pause_queues, fn -> Oban.pause_all_queues(Oban) end).()
 
         shell.(
           "Oban is live on this node: every queue is now paused. " <>

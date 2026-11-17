@@ -37,13 +37,32 @@ defmodule KilnCMS.Staging.PluginScrub do
     * a rewrite names an attribute the resource lacks, its primary key, an
       identity's attribute, the tenant attribute or a `belongs_to` attribute,
       or a value that does not cast, or `nil` where `nil` is not allowed;
+    * a rewrite sets a column the database generates, a value on a column a
+      unique index covers (every row would get it), or `nil` on a column the
+      database holds `NOT NULL`;
     * a table the plugins own exists and no entry names it;
-    * a table the scrub keeps or rewrites has a foreign key that would block
-      a purge (`ON DELETE RESTRICT` / `NO ACTION`), or one purge would be
-      blocked by a table purged after it.
+    * a foreign key would block a purge (`ON DELETE RESTRICT` / `NO ACTION`):
+      from a table the scrub keeps or rewrites, from any table outside the
+      plugins' purges, or from a table purged after the one it references.
 
   A table that does not exist (a plugin installed but not migrated) is
-  skipped and counts 0.
+  skipped and counts 0. What the checks cannot see (a `CHECK` constraint, an
+  expression index, a trigger) can still fail a step: `KilnCMS.Staging.Scrub.run/1`
+  runs the plugin steps in one transaction, first, so that failure rolls them
+  back with nothing else changed.
+
+  ## In a plugin's own tests
+
+  `assert_covered!/2` holds one plugin to the declaration rules without a
+  database, the way `mix kiln.plugins.doctor` does:
+
+      defmodule MyPlugin.StagingScrubTest do
+        use ExUnit.Case, async: true
+
+        test "every table is declared for the staging scrub" do
+          assert :ok = KilnCMS.Staging.PluginScrub.assert_covered!(MyPlugin.Plugin)
+        end
+      end
 
   Raw-migration tables with no Ash resource are not seen here: the scrub
   cannot know of them.
@@ -138,6 +157,7 @@ defmodule KilnCMS.Staging.PluginScrub do
     refuse!(Enum.map(undeclared, &undeclared_problem/1), undeclared_heading())
 
     steps = Enum.map(analysis.steps, &Map.put(&1, :exists?, exists?.(&1)))
+    refuse!(column_problems(steps), "a rewrite would break a database constraint")
     refuse!(foreign_key_problems(steps, Enum.filter(analysis.defaults, exists?)), fk_heading())
 
     steps
@@ -219,6 +239,39 @@ defmodule KilnCMS.Staging.PluginScrub do
   @spec undeclared([module()], [module()]) :: [String.t()]
   def undeclared(plugins, ash_domains),
     do: Enum.map(analyze(plugins, ash_domains).undeclared, &undeclared_problem/1)
+
+  @doc """
+  `:ok` when `plugin`'s `c:Kiln.Plugin.staging_scrub/0` is usable and names
+  every table its domains own (content aside); raises listing what is wrong
+  otherwise. For a plugin's own test suite: see the moduledoc.
+
+  It needs no database, so it cannot check what `plan!/1` checks there
+  (foreign keys, unique indexes, generated columns). Pass `:ash_domains` to
+  check against a configuration other than the core's domains alone.
+  """
+  @spec assert_covered!(module(), keyword()) :: :ok
+  def assert_covered!(plugin, opts \\ []) do
+    analysis = analyze([plugin], Keyword.get(opts, :ash_domains, @core_domains))
+
+    undeclared =
+      for %{plugin: ^plugin} = table <- analysis.undeclared, do: undeclared_problem(table)
+
+    case analysis.problems ++ undeclared do
+      [] ->
+        :ok
+
+      problems ->
+        raise """
+        #{inspect(plugin)} is not ready for the staging scrub:
+
+          * #{Enum.join(problems, "\n  * ")}
+
+        Declare every table its domains own in staging_scrub/0, as
+        {:purge, Resource}, {:rewrite, Resource, set: [...]} or
+        {:keep, Resource, "reason"} (c:Kiln.Plugin.staging_scrub/0).
+        """
+    end
+  end
 
   @doc "The summary key `step`'s count is reported under."
   @spec key(step()) :: key()
@@ -465,7 +518,7 @@ defmodule KilnCMS.Staging.PluginScrub do
   defp owned_by(resource, plugin, name, owned, core_tables) do
     cond do
       Ash.Resource.Info.domain(resource) in @core_domains or
-          MapSet.member?(core_tables, table(resource)) ->
+          (schema(resource) == "public" and MapSet.member?(core_tables, table(resource))) ->
         {:error,
          "#{name}: #{inspect(resource)} is the core table #{table(resource)}; " <>
            "the core scrub decides what happens to its own tables"}
@@ -655,16 +708,78 @@ defmodule KilnCMS.Staging.PluginScrub do
     Enum.map(rows, fn [name] -> name end)
   end
 
+  # What the catalog says a rewrite would break: a generated column cannot
+  # be set, one value on every row collides under a unique index (NULLs do
+  # not), and nil fails a database NOT NULL that Ash's allow_nil? missed.
+  defp column_problems(steps) do
+    rewrites = for %{action: {:rewrite, set}, exists?: true} = step <- steps, do: {step, set}
+
+    case rewrites do
+      [] ->
+        []
+
+      rewrites ->
+        catalog = column_catalog(Enum.map(rewrites, fn {step, _set} -> qualified(step) end))
+
+        for {step, set} <- rewrites,
+            {column, value} <- set,
+            info = Map.get(catalog, {qualified(step), to_string(column)}),
+            problem = column_problem(step, column, value, info),
+            do: problem
+    end
+  end
+
+  defp column_problem(step, column, value, info) do
+    subject = "#{step.plugin_name}: #{inspect(step.resource)}.#{column} (#{display(step)})"
+
+    cond do
+      info.generated? ->
+        "#{subject} is a generated column, which cannot be set"
+
+      info.unique? and not is_nil(value) ->
+        "#{subject} is covered by a unique index, so one value on every row collides; " <>
+          "set nil or purge the table instead"
+
+      info.not_null? and is_nil(value) ->
+        "#{subject} is NOT NULL in the database, so it cannot be set to nil"
+
+      true ->
+        nil
+    end
+  end
+
+  defp column_catalog(tables) do
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT n.nspname || '.' || c.relname, a.attname, a.attgenerated <> '', a.attnotnull,
+               EXISTS (SELECT 1 FROM pg_index i
+                       WHERE i.indrelid = c.oid AND i.indisunique AND a.attnum = ANY(i.indkey))
+        FROM pg_attribute a
+        JOIN pg_class c ON c.oid = a.attrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname || '.' || c.relname = ANY($1) AND a.attnum > 0 AND NOT a.attisdropped
+        """,
+        [Enum.uniq(tables)]
+      )
+
+    Map.new(rows, fn [table, column, generated?, not_null?, unique?] ->
+      {{table, column}, %{generated?: generated?, not_null?: not_null?, unique?: unique?}}
+    end)
+  end
+
   # A purge that a foreign key blocks fails half-way through the scrub, with
   # some tables emptied and others not, so it is refused before anything runs.
   defp foreign_key_problems(steps, defaults) do
     existing_steps = Enum.filter(steps, & &1.exists?)
 
+    # A table's FIRST purge is when its rows go: two resources over one table
+    # purge it at the first of their entries.
     plugin_purges =
       existing_steps
       |> Enum.filter(&(&1.action == :purge))
       |> Enum.with_index()
-      |> Map.new(fn {step, index} -> {qualified(step), index} end)
+      |> Enum.reduce(%{}, fn {step, index}, acc -> Map.put_new(acc, qualified(step), index) end)
 
     kept =
       existing_steps
@@ -675,7 +790,10 @@ defmodule KilnCMS.Staging.PluginScrub do
     emptied_by_core = core_emptied_tables()
 
     for [child, parent, constraint] <-
-          blocking_foreign_keys(Map.keys(plugin_purges) ++ MapSet.to_list(kept)),
+          blocking_foreign_keys(
+            Map.keys(plugin_purges) ++ MapSet.to_list(kept),
+            Map.keys(plugin_purges)
+          ),
         child != parent,
         problem =
           foreign_key_problem(child, parent, constraint, kept, plugin_purges, emptied_by_core),
@@ -691,19 +809,30 @@ defmodule KilnCMS.Staging.PluginScrub do
           "empties, blocks the delete (ON DELETE RESTRICT / NO ACTION). Purge #{child} too, " <>
           "or make the key ON DELETE CASCADE or SET NULL"
 
-      Map.has_key?(plugin_purges, child) and Map.has_key?(plugin_purges, parent) and
-          plugin_purges[parent] < plugin_purges[child] ->
+      not Map.has_key?(plugin_purges, parent) ->
+        nil
+
+      Map.has_key?(plugin_purges, child) and plugin_purges[child] < plugin_purges[parent] ->
+        nil
+
+      Map.has_key?(plugin_purges, child) ->
         "#{child} is purged after #{parent}, and its foreign key #{constraint} blocks " <>
           "purging #{parent} first. Put {:purge, ...} for #{child} before #{parent}'s entry"
 
+      # A table no plugin purges (undeclared, a raw migration's, the core's)
+      # whose rows would stop the purge.
       true ->
-        nil
+        "#{child} references #{parent}, which a plugin purges, and its foreign key " <>
+          "#{constraint} blocks the delete (ON DELETE RESTRICT / NO ACTION). Purge #{child} " <>
+          "first, or make the key ON DELETE CASCADE or SET NULL"
     end
   end
 
-  defp blocking_foreign_keys([]), do: []
+  # Keys out of the plugin tables, and keys from anywhere into the ones a
+  # plugin purges.
+  defp blocking_foreign_keys([], []), do: []
 
-  defp blocking_foreign_keys(children) do
+  defp blocking_foreign_keys(children, parents) do
     %{rows: rows} =
       Repo.query!(
         """
@@ -714,10 +843,11 @@ defmodule KilnCMS.Staging.PluginScrub do
         JOIN pg_class f ON f.oid = con.confrelid
         JOIN pg_namespace fn ON fn.oid = f.relnamespace
         WHERE con.contype = 'f' AND con.confdeltype IN ('r', 'a')
-          AND cn.nspname || '.' || c.relname = ANY($1)
+          AND (cn.nspname || '.' || c.relname = ANY($1)
+               OR fn.nspname || '.' || f.relname = ANY($2))
         ORDER BY 1, 2, 3
         """,
-        [children]
+        [children, parents]
       )
 
     rows

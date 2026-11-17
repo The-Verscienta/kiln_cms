@@ -17,16 +17,48 @@ defmodule KilnCMS.PluginScrubFixtures do
   alias KilnCMS.Repo
 
   @doc "Create `table` (a `psf_*` table below) in the test's sandbox."
-  def create_table!(table, opts \\ []), do: Repo.query!(ddl(table, opts))
+  def create_table!(table, opts \\ [])
 
-  defp ddl("psf_bookings", _opts) do
+  # A plugin table in a schema of its own, named like a core table.
+  def create_table!("psf_crm.users", _opts) do
+    Repo.query!("CREATE SCHEMA psf_crm")
+    Repo.query!("CREATE TABLE psf_crm.users (id uuid PRIMARY KEY DEFAULT gen_random_uuid())")
+  end
+
+  def create_table!(table, opts), do: Repo.query!(ddl(table, opts))
+
+  # Options shape `guests` and `name` the way a plugin's own migration might,
+  # past what its Ash resource says: `guests: :check` (must be positive),
+  # `guests: :generated`, `name: :unique`, `email: :not_null`.
+  defp ddl("psf_bookings", opts) do
+    guests =
+      case Keyword.get(opts, :guests) do
+        :check -> "guests bigint CHECK (guests > 0)"
+        :generated -> "guests bigint GENERATED ALWAYS AS (4) STORED"
+        nil -> "guests bigint"
+      end
+
+    name = if opts[:name] == :unique, do: "name text NOT NULL UNIQUE", else: "name text NOT NULL"
+    email = if opts[:email] == :not_null, do: "email text NOT NULL", else: "email text"
+
     """
     CREATE TABLE psf_bookings (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       code text NOT NULL UNIQUE,
-      email text,
-      name text NOT NULL,
-      guests bigint
+      #{email},
+      #{name},
+      #{guests}
+    )
+    """
+  end
+
+  # A table no resource describes (a raw migration's), referencing a plugin's.
+  defp ddl("psf_foreign", _opts) do
+    """
+    CREATE TABLE psf_foreign (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      booking_id uuid CONSTRAINT psf_foreign_booking_fkey
+        REFERENCES psf_bookings(id) ON DELETE RESTRICT
     )
     """
   end
@@ -81,6 +113,7 @@ defmodule KilnCMS.PluginScrubFixtures do
     resources do
       resource KilnCMS.PluginScrubFixtures.Booking
       resource KilnCMS.PluginScrubFixtures.Booking.Version
+      resource KilnCMS.PluginScrubFixtures.BookingAlias
       resource KilnCMS.PluginScrubFixtures.BookingNote
       resource KilnCMS.PluginScrubFixtures.Venue
       resource KilnCMS.PluginScrubFixtures.Undeclared
@@ -122,6 +155,28 @@ defmodule KilnCMS.PluginScrubFixtures do
 
     identities do
       identity :unique_code, [:code]
+    end
+  end
+
+  # A second resource over psf_bookings (a read model, say).
+  defmodule BookingAlias do
+    @moduledoc false
+    use Ash.Resource,
+      domain: KilnCMS.PluginScrubFixtures.Domain,
+      data_layer: AshPostgres.DataLayer
+
+    postgres do
+      table "psf_bookings"
+      repo KilnCMS.Repo
+    end
+
+    actions do
+      defaults [:read]
+    end
+
+    attributes do
+      uuid_primary_key :id
+      attribute :code, :string, allow_nil?: false, public?: true
     end
   end
 
@@ -347,6 +402,37 @@ defmodule KilnCMS.PluginScrubFixtures do
 
     multitenancy do
       strategy :context
+    end
+
+    actions do
+      defaults [:read]
+    end
+
+    attributes do
+      uuid_primary_key :id
+    end
+  end
+
+  defmodule CrmDomain do
+    @moduledoc false
+    use Ash.Domain, validate_config_inclusion?: false
+
+    resources do
+      resource KilnCMS.PluginScrubFixtures.CrmUser
+    end
+  end
+
+  # `users`, but in the plugin's own schema: not the core's table.
+  defmodule CrmUser do
+    @moduledoc false
+    use Ash.Resource,
+      domain: KilnCMS.PluginScrubFixtures.CrmDomain,
+      data_layer: AshPostgres.DataLayer
+
+    postgres do
+      table "users"
+      schema "psf_crm"
+      repo KilnCMS.Repo
     end
 
     actions do

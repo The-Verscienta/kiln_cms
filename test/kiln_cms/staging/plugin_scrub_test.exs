@@ -120,6 +120,37 @@ defmodule KilnCMS.Staging.PluginScrubTest do
       ]
   end
 
+  # Built against kiln_plugin before 1.5, by hand: no `use Kiln.Plugin`, so
+  # no staging_scrub/0 at all.
+  defmodule PreSdkPlugin do
+    def name, do: "pre_sdk"
+    def domains, do: [F.Domain]
+  end
+
+  # Two resources over psf_bookings, purged either side of the notes that
+  # reference it: the table's rows go at the first.
+  defmodule AliasPurgePlugin do
+    use Kiln.Plugin
+    def name, do: "alias_purge"
+    def domains, do: [F.Domain]
+
+    def staging_scrub,
+      do: [
+        {:purge, F.Booking},
+        {:purge, F.BookingNote},
+        {:purge, F.BookingAlias},
+        {:purge, F.Booking.Version},
+        {:keep, F.Venue, "opening hours"}
+      ]
+  end
+
+  defmodule CrmPlugin do
+    use Kiln.Plugin
+    def name, do: "crm"
+    def domains, do: [F.CrmDomain]
+    def staging_scrub, do: [{:purge, F.CrmUser}]
+  end
+
   defmodule ContextPlugin do
     use Kiln.Plugin
     def name, do: "context"
@@ -152,8 +183,8 @@ defmodule KilnCMS.Staging.PluginScrubTest do
     id
   end
 
-  defp booking_tables!(notes_on_delete \\ "NO ACTION") do
-    create_table!("psf_bookings")
+  defp booking_tables!(notes_on_delete \\ "NO ACTION", bookings \\ []) do
+    create_table!("psf_bookings", bookings)
     create_table!("psf_bookings_versions")
     create_table!("psf_booking_notes", on_delete: notes_on_delete)
     create_table!("psf_venues")
@@ -334,6 +365,23 @@ defmodule KilnCMS.Staging.PluginScrubTest do
                Repo.query!("SELECT email FROM psf_bookings WHERE id = $1", [booking])
     end
 
+    test "a hand-written plugin with no staging_scrub/0 has its tables undeclared" do
+      create_table!("psf_venues")
+      assert_refused(opts([PreSdkPlugin]), "pre_sdk: KilnCMS.PluginScrubFixtures.Venue")
+    end
+
+    test "a plugin table named like a core table, in its own schema, is the plugin's" do
+      assert PluginScrub.problems([CrmPlugin], PluginScrub.core_domains()) == []
+
+      create_table!("psf_crm.users")
+      Repo.query!("INSERT INTO psf_crm.users DEFAULT VALUES")
+
+      summary = Scrub.run(opts([CrmPlugin]))
+
+      assert summary[{:plugin, "crm", "psf_crm.users"}] == 1
+      assert %{rows: [[0]]} = Repo.query!("SELECT count(*) FROM psf_crm.users")
+    end
+
     test "a plugin built before 1.5 declares nothing, so its tables are undeclared" do
       create_table!("psf_venues")
       assert_refused(opts([SilentPlugin]), "silent: KilnCMS.PluginScrubFixtures.Venue")
@@ -401,6 +449,70 @@ defmodule KilnCMS.Staging.PluginScrubTest do
         opts([F.DeclaringPlugin]),
         "booking: KilnCMS.PluginScrubFixtures.Contact (table psf_contacts)"
       )
+    end
+  end
+
+  describe "assert_covered!/2, for a plugin's own tests" do
+    test "passes for a plugin that declares every table its domains own" do
+      assert PluginScrub.assert_covered!(CrmPlugin) == :ok
+    end
+
+    test "raises listing each undeclared table and each unusable entry" do
+      error = assert_raise RuntimeError, fn -> PluginScrub.assert_covered!(F.DeclaringPlugin) end
+      assert error.message =~ "KilnCMS.PluginScrubFixtures.DeclaringPlugin is not ready"
+
+      assert error.message =~
+               "booking: KilnCMS.PluginScrubFixtures.Undeclared (table psf_undeclared)"
+
+      refute error.message =~ "psf_events"
+
+      error = assert_raise RuntimeError, fn -> PluginScrub.assert_covered!(RaisingPlugin) end
+      assert error.message =~ "raising: staging_scrub/0 raised: no declaration today"
+    end
+  end
+
+  describe "scrub!/1 on a live node" do
+    test "a refusal comes before the queues are paused" do
+      create_table!("psf_venues")
+      test = self()
+
+      assert_raise RuntimeError, ~r/Refusing to scrub/, fn ->
+        Staging.scrub!(
+          opts([SilentPlugin],
+            confirm?: true,
+            force?: true,
+            oban_live?: true,
+            allow_live?: true,
+            pause_queues: fn ->
+              send(test, :paused)
+              :ok
+            end,
+            shell: fn _ -> :ok end
+          )
+        )
+      end
+
+      refute_received :paused
+    end
+
+    test "without a refusal, the queues are paused as before" do
+      test = self()
+
+      Staging.scrub!(
+        opts([F.DeclaringPlugin],
+          confirm?: true,
+          force?: true,
+          oban_live?: true,
+          allow_live?: true,
+          pause_queues: fn ->
+            send(test, :paused)
+            :ok
+          end,
+          shell: fn _ -> :ok end
+        )
+      )
+
+      assert_received :paused
     end
   end
 
@@ -514,6 +626,28 @@ defmodule KilnCMS.Staging.PluginScrubTest do
       assert count("psf_bookings") == 0
     end
 
+    test "a table outside the plugins' purges that references a purged one is refused" do
+      booking_tables!("CASCADE")
+      create_table!("psf_foreign")
+
+      assert_refused(
+        opts([KeepsReferrerPlugin]),
+        "public.psf_foreign references public.psf_bookings, which a plugin purges, and its " <>
+          "foreign key psf_foreign_booking_fkey blocks the delete"
+      )
+
+      assert count("psf_bookings") == 1
+    end
+
+    test "a table purged by two resources goes at the first, before a child purged between" do
+      booking_tables!()
+
+      assert_refused(
+        opts([AliasPurgePlugin]),
+        "public.psf_booking_notes is purged after public.psf_bookings"
+      )
+    end
+
     test "a parent purged before its child is refused, with the order to use" do
       booking_tables!()
 
@@ -523,6 +657,56 @@ defmodule KilnCMS.Staging.PluginScrubTest do
       )
 
       assert count("psf_booking_notes") == 1
+    end
+  end
+
+  describe "what the database holds a rewrite to" do
+    test "a value on a uniquely indexed column is refused before anything changes" do
+      booking_tables!("NO ACTION", name: :unique)
+
+      assert_refused(
+        opts([F.DeclaringPlugin]),
+        "booking: KilnCMS.PluginScrubFixtures.Booking.name (psf_bookings) is covered by a unique index"
+      )
+
+      assert count("psf_booking_notes") == 1
+      assert count("psf_bookings_versions") == 1
+    end
+
+    test "a generated column is refused" do
+      create_table!("psf_bookings", guests: :generated)
+
+      assert_refused(
+        opts([F.DeclaringPlugin]),
+        "booking: KilnCMS.PluginScrubFixtures.Booking.guests (psf_bookings) is a generated column"
+      )
+    end
+
+    test "nil on a column the database holds NOT NULL is refused" do
+      create_table!("psf_bookings", email: :not_null)
+
+      assert_refused(
+        opts([F.DeclaringPlugin]),
+        "Booking.email (psf_bookings) is NOT NULL in the database"
+      )
+    end
+
+    # A CHECK constraint is past what the catalog checks read: the step fails,
+    # and the transaction takes back the purge that ran before it.
+    test "a constraint the checks cannot see rolls the plugin steps back, before any core row" do
+      booking_tables!("NO ACTION", guests: :check)
+      user = seed_core!()
+      before = core_state(user)
+
+      assert_raise Postgrex.Error, ~r/check_violation|violates check constraint/, fn ->
+        Scrub.run(opts([F.DeclaringPlugin]))
+      end
+
+      assert core_state(user) == before
+      assert count("psf_booking_notes") == 1
+      assert count("psf_bookings_versions") == 1
+
+      assert %{rows: [["guest@example.com"]]} = Repo.query!("SELECT email FROM psf_bookings")
     end
   end
 

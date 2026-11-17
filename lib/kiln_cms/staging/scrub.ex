@@ -24,8 +24,9 @@ defmodule KilnCMS.Staging.Scrub do
   ## Plugin tables
 
   A table an installed plugin's (or the overlay's) Ash domains own is scrubbed
-  as the plugin declares in `c:Kiln.Plugin.staging_scrub/0`, before the
-  accounts are anonymized and the core's tables purged. If one of them is
+  as the plugin declares in `c:Kiln.Plugin.staging_scrub/0`. That runs first,
+  in one transaction: a constraint the checks could not foresee rolls every
+  plugin table back, before any core table is touched. If a table is
   undeclared, or a declaration is unusable, `run/1` refuses before it changes
   anything: see `KilnCMS.Staging.PluginScrub`.
 
@@ -104,7 +105,8 @@ defmodule KilnCMS.Staging.Scrub do
           admin_provisioned: String.t() | nil
         }
 
-  # Payment credentials go FIRST, before anything else touches billing rows.
+  # Payment credentials go FIRST of the core's tables, before anything else
+  # touches billing rows (only plugin tables, which hold none, go earlier).
   # Nothing in this module contacts the provider today — GDPR erasure cancels
   # memberships locally only — but a clone that holds live API keys is one
   # careless change away from acting on a real payment account, so the keys are
@@ -240,16 +242,19 @@ defmodule KilnCMS.Staging.Scrub do
     # half-way would leave a clone neither production's nor scrubbed.
     plugin_steps = PluginScrub.plan!(Keyword.take(opts, [:plugins, :ash_domains]))
 
+    # The plugin tables go next, all or nothing. The checks above cannot see
+    # every constraint (a CHECK, an expression index, a trigger), and one that
+    # fails here rolls the plugin tables back with nothing else changed yet.
+    # They also go before the core's purges and anonymization, so a plugin
+    # row that references a core row the scrub empties is gone first.
+    {:ok, plugin_counts} = Repo.transaction(fn -> PluginScrub.execute(plugin_steps) end)
+
     {credentials_key, credentials} = @credentials_first
     {credentials_purged, _} = Repo.delete_all(credentials)
 
-    # Queued jobs go before anything else runs, so none of production's work
-    # is left to pick up while the scrub is under way.
+    # Queued jobs go before anything else in the core runs, so none of
+    # production's work is left to pick up while the scrub is under way.
     jobs_purged_first = purge_oban_jobs()
-
-    # Before the core's purges and anonymization, so a plugin row that
-    # references a core row the scrub empties is gone first.
-    plugin_counts = PluginScrub.execute(plugin_steps)
 
     users_anonymized = anonymize_users()
 
