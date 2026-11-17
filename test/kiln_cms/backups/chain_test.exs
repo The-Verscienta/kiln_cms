@@ -502,6 +502,57 @@ defmodule KilnCMS.Backups.ChainTest do
       assert {:error, :superseded} = Chain.while_holding(stale, fn -> flunk("ran") end)
     end
 
+    test "fenced_rename moves a file only while the lease holds (#2819)" do
+      {:ok, %{status: :started}} = request()
+      {:ok, lease} = Chain.begin_step(current_job())
+      dir = Backups.dir()
+      File.mkdir_p!(dir)
+      [ours, final] = for name <- ["f.1-1.partial", "f"], do: Path.join(dir, name)
+      File.write!(ours, "ours")
+
+      assert :ok = Chain.fenced_rename(lease, ours, final)
+      assert File.read!(final) == "ours"
+      refute File.exists?(ours)
+
+      # Its own error is returned as it is.
+      assert {:error, :enoent} = Chain.fenced_rename(lease, ours, final)
+
+      # The chain moved on: the rename is refused and both files stay.
+      :ok = Chain.advance(lease, "dump")
+      File.write!(ours, "late")
+      assert {:error, :superseded} = Chain.fenced_rename(lease, ours, final)
+      assert File.read!(final) == "ours"
+      assert File.read!(ours) == "late"
+    end
+
+    test "fenced_rename is refused once a Cancel released the lock (#2819)" do
+      {:ok, %{status: :started}} = request()
+      {:ok, lease} = Chain.begin_step(current_job())
+      %{stamp: stamp} = lock()
+      dir = Backups.dir()
+      File.mkdir_p!(dir)
+      [ours, final] = for name <- ["g.2-1.partial", "g"], do: Path.join(dir, name)
+      File.write!(ours, "late")
+      File.write!(final, "theirs")
+
+      run =
+        Backups.start_run!(%{stamp: stamp, trigger: "manual", chain_id: lease.chain},
+          actor: Backups.system()
+        )
+
+      admin = %KilnCMS.Accounts.User{
+        id: Ash.UUID.generate(),
+        role: :admin,
+        email: "a@example.com"
+      }
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run, actor: admin)
+
+      assert {:error, :superseded} = Chain.fenced_rename(lease, ours, final)
+      assert File.read!(final) == "theirs"
+      assert {:error, :superseded} = Chain.fenced(lease, fn -> flunk("ran") end)
+    end
+
     test "an advance whose next job already exists rolls back and leaves the lock alone" do
       {:ok, %{status: :started, chain: chain}} = request()
       {:ok, lease} = Chain.begin_step(current_job())

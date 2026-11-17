@@ -172,6 +172,34 @@ defmodule KilnCMS.Backups.ChecksumTest do
       end
     end
 
+    test "a tagged write uses its own temporary name and its rename function (#2819)",
+         %{tmp_dir: dir} do
+      path = Path.join(dir, "kiln-db-20260805-031700.sha256")
+      theirs = [{"kiln-db-20260805-031700.dump", sha("theirs")}]
+      :ok = Checksum.write_sidecar(path, theirs)
+      parent = self()
+
+      refuse = fn from, to ->
+        send(parent, {:rename, from, to})
+        {:error, :superseded}
+      end
+
+      ours = [{"kiln-db-20260805-031700.dump", sha("ours")}]
+
+      assert {:error, :superseded} =
+               Checksum.write_sidecar(path, ours, tag: "3-1", rename: refuse)
+
+      assert_received {:rename, from, ^path}
+      assert from == path <> ".3-1.partial"
+      refute File.exists?(from)
+      assert {:ok, [{_hex, _name}]} = Checksum.parse_sidecar(path)
+      assert File.read!(path) =~ sha("theirs")
+
+      assert :ok = Checksum.write_sidecar(path, ours, tag: "3-1")
+      assert File.read!(path) =~ sha("ours")
+      assert File.ls!(dir) == ["kiln-db-20260805-031700.sha256"]
+    end
+
     test "a missing sidecar is the read error", %{tmp_dir: dir} do
       assert {:error, :enoent} = Checksum.parse_sidecar(Path.join(dir, "gone.sha256"))
     end

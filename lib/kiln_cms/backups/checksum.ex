@@ -249,11 +249,19 @@ defmodule KilnCMS.Backups.Checksum do
   names: anything with a path separator, a newline, or that is empty is
   `{:error, :invalid_name}`, because a sidecar line is `hex  name` and a name
   containing a newline would forge a second line.
+
+  `opts` are `KilnCMS.Backups.WorkState.write/3`'s `:tag` and `:rename`: a
+  backup step writes `<sidecar>.<tag>.partial` and renames it under its lease
+  (#2819); a refused rename returns `{:error, :superseded}` and removes the
+  temporary file.
   """
+  @spec write_sidecar(Path.t(), [{String.t(), hex()}], keyword()) :: :ok | {:error, term()}
+  def write_sidecar(path, entries, opts \\ [])
+
   # sobelow_skip ["Traversal.FileModule"]
-  @spec write_sidecar(Path.t(), [{String.t(), hex()}]) :: :ok | {:error, term()}
-  def write_sidecar(path, [_ | _] = entries) when is_binary(path) do
-    tmp = path <> ".partial"
+  def write_sidecar(path, [_ | _] = entries, opts) when is_binary(path) do
+    tmp = KilnCMS.Backups.Artifact.partial_name(path, opts[:tag])
+    rename = opts[:rename] || (&File.rename/2)
 
     with :ok <- validate(entries),
          :ok <-
@@ -262,7 +270,7 @@ defmodule KilnCMS.Backups.Checksum do
              Enum.map_join(entries, fn {name, hex} -> "#{String.downcase(hex)}  #{name}\n" end)
            ),
          :ok <- File.chmod(tmp, 0o600),
-         :ok <- File.rename(tmp, path) do
+         :ok <- rename.(tmp, path) do
       :ok
     else
       {:error, _} = error ->
@@ -271,7 +279,7 @@ defmodule KilnCMS.Backups.Checksum do
     end
   end
 
-  def write_sidecar(_path, _entries), do: {:error, :invalid_name}
+  def write_sidecar(_path, _entries, _opts), do: {:error, :invalid_name}
 
   defp validate(entries) do
     if Enum.all?(entries, &valid_entry?/1), do: :ok, else: {:error, :invalid_name}

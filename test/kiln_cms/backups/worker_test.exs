@@ -13,7 +13,7 @@ defmodule KilnCMS.Backups.WorkerTest do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Checksum, Manifest}
-  alias KilnCMS.Backups.Worker
+  alias KilnCMS.Backups.{Steps, Worker}
   alias KilnCMS.Test.BackupChain
 
   @moduletag :capture_log
@@ -440,6 +440,80 @@ defmodule KilnCMS.Backups.WorkerTest do
                Backups.get_run_by_stamp!("20200101-000000", actor: Backups.system())
     end
 
+    # A backup step's temporary files carry its job and attempt (#2819); they
+    # are grouped with their stamp like any partial, never swept by age alone.
+    @tag :pg_tools
+    test "a tagged .partial is its stamp's: kept until the Importer records it, then reclaimed",
+         %{dir: dir} do
+      stamp = "20200101-000000"
+      dump = Path.join([dir, "db", "kiln-db-#{stamp}.dump.48211-2.partial"])
+      sidecar = Path.join([dir, "db", "kiln-db-#{stamp}.sha256.48211-2.partial"])
+      File.mkdir_p!(Path.dirname(dump))
+
+      for f <- [dump, sidecar] do
+        File.write!(f, "abandoned")
+        File.touch!(f, System.os_time(:second) - 2 * 3600)
+      end
+
+      assert :ok = BackupChain.run()
+      assert File.exists?(dump)
+      assert File.exists?(sidecar)
+
+      for f <- [dump, sidecar], do: File.touch!(f, System.os_time(:second) - 4 * 3600)
+      assert :ok = BackupChain.run()
+
+      refute File.exists?(dump)
+      refute File.exists?(sidecar)
+
+      assert %{origin: :imported, status: :failed, error: "Interrupted: " <> _} =
+               Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+    end
+
+    # What a node that stopped between moving something aside and deleting it
+    # leaves behind (#2818).
+    @tag :pg_tools
+    test "the start step clears .work/.trash and the .kiln-trash of db/ and media/", %{dir: dir} do
+      left = Path.join([dir, ".work", ".trash", "20200101-000000.7-1.work", "20200101-000000"])
+      File.mkdir_p!(left)
+      File.write!(Path.join(left, "state.json"), "{}")
+
+      for {sub, name} <- [
+            {"db", "kiln-db-20200101-000000.dump"},
+            {"media", "kiln-media-20200101-000000.part01.tar.gz"}
+          ] do
+        entry = Path.join([dir, sub, ".kiln-trash", "20200101-000000.7-1.#{sub}"])
+        File.mkdir_p!(entry)
+        File.write!(Path.join(entry, name), "moved aside")
+      end
+
+      assert :ok = BackupChain.run()
+      assert File.ls!(Path.join([dir, ".work", ".trash"])) == []
+      assert File.ls!(Path.join([dir, "db", ".kiln-trash"])) == []
+      assert File.ls!(Path.join([dir, "media", ".kiln-trash"])) == []
+    end
+
+    # What a node that stopped between writing the manifest and renaming it
+    # into place leaves at the directory's root (#2818).
+    @tag :pg_tools
+    test "the start step removes a tagged manifest partial past the grace, and only that",
+         %{dir: dir} do
+      File.mkdir_p!(dir)
+      old = System.os_time(:second) - 2 * 3600
+      stale = Path.join(dir, "manifest.json.48211-2.partial")
+      fresh = Path.join(dir, "manifest.json.48212-1.partial")
+      cron = Path.join(dir, "manifest.json.partial")
+      odd = Path.join(dir, "manifest.json.notatag.partial")
+
+      for path <- [stale, fresh, cron, odd], do: File.write!(path, "{}")
+      for path <- [stale, cron, odd], do: File.touch!(path, old)
+
+      assert :ok = BackupChain.run()
+      refute File.exists?(stale)
+      assert File.exists?(fresh)
+      assert File.exists?(cron)
+      assert File.exists?(odd)
+    end
+
     @tag :pg_tools
     test "the partials of a stamp with a run go once every file of it is past the grace",
          %{dir: dir} do
@@ -542,6 +616,48 @@ defmodule KilnCMS.Backups.WorkerTest do
   defmodule RaisingImporter do
     @moduledoc false
     def run(_dir), do: raise("importer crashed")
+  end
+
+  # The rename `discard/4` makes under the lease (#2818), and its fallback for
+  # a rename that can't cross a file system.
+  describe "moving aside" do
+    setup %{dir: dir} do
+      file = Path.join([dir, "media", "kiln-media-20200101-000000.part01.tar.gz"])
+      entry = Path.join([dir, "media", ".kiln-trash", "20200101-000000.7-1.media"])
+      File.mkdir_p!(entry)
+      File.write!(file, "x")
+      %{part: file, entry: entry}
+    end
+
+    test "renames each path into its entry; a vanished one is skipped", %{
+      part: file,
+      entry: entry
+    } do
+      gone = Path.join(Path.dirname(file), "kiln-media-20200101-000000.part02.tar.gz")
+
+      assert :ok = Steps.move_aside([{file, entry}, {gone, entry}])
+      refute File.exists?(file)
+      assert File.read!(Path.join(entry, Path.basename(file))) == "x"
+    end
+
+    test "a rename across file systems deletes the path in place instead", %{
+      part: file,
+      entry: entry
+    } do
+      exdev = fn _from, _to -> {:error, :exdev} end
+
+      assert :ok = Steps.move_aside([{file, entry}], exdev)
+      refute File.exists?(file)
+      assert File.ls!(entry) == []
+    end
+
+    test "any other failure stops at that path, naming it", %{part: file, entry: entry} do
+      eacces = fn _from, _to -> {:error, :eacces} end
+
+      assert {:error, {:move_aside, name, :eacces}} = Steps.move_aside([{file, entry}], eacces)
+      assert name == Path.basename(file)
+      assert File.exists?(file)
+    end
   end
 
   describe "an importer that fails before the partial sweep" do

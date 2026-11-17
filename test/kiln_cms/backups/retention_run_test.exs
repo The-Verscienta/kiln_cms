@@ -202,12 +202,49 @@ defmodule KilnCMS.Backups.RetentionRunTest do
       assert Enum.find(plan.keep, &(&1.stamp == @old)).reason == :in_flight
     end
 
+    # Where a backup step moves a file aside before deleting it (#2818): not a
+    # unit, not a stray, never touched.
+    test "a .kiln-trash directory is left alone", %{dir: dir} do
+      newest(dir)
+
+      inside =
+        for {sub, name} <- [
+              {"db", "kiln-db-#{@old}.dump"},
+              {"media", Artifact.part_name(@old, 1)}
+            ] do
+          entry = Path.join([dir, sub, ".kiln-trash", "#{@old}.7-1.#{sub}"])
+          File.mkdir_p!(entry)
+          path = Path.join(entry, name)
+          File.write!(path, "x")
+          File.touch!(path, System.os_time(:second) - 400 * @day)
+          path
+        end
+
+      assert {:ok, %{deleted: [], plan: plan}} = Retention.run(dir)
+      for path <- inside, do: assert(File.exists?(path))
+      assert {:ok, inventory} = Retention.scan(dir)
+      assert inventory.strays == []
+      refute Enum.any?(plan.keep ++ plan.delete, &(&1.stamp == @old))
+    end
+
     test "a fresh .partial keeps its unit in flight", %{dir: dir} do
       newest(dir)
       media_set(dir, @old, [365, 365])
       put(dir, "media", Artifact.part_name(@old, 3) <> ".partial", 0)
 
       assert {:ok, %{deleted: []}} = Retention.run(dir)
+    end
+
+    test "a fresh tagged .partial, a backup step's (#2819), keeps its unit in flight too",
+         %{dir: dir} do
+      newest(dir)
+      media_set(dir, @old, [365, 365])
+      put(dir, "media", Artifact.partial_name(Artifact.part_name(@old, 3), "48211-2"), 0)
+      dump(dir, @older, 365)
+      put(dir, "db", Artifact.partial_name("kiln-db-#{@older}.sha256", 7), 0)
+
+      assert {:ok, %{deleted: [], plan: plan}} = Retention.run(dir)
+      assert Enum.find(plan.keep, &(&1.stamp == @older)).reason == :in_flight
     end
 
     test "a recovery point in either directory pins both components", %{dir: dir} do

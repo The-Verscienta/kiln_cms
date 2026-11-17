@@ -360,4 +360,179 @@ defmodule KilnCMS.Backups.ChainRaceTest do
       assert Enum.all?(outcomes, &(&1 in [:canceled, :started]))
     end
   end
+
+  # #2818: a step writes its state outside the lock, so a write that hangs (a
+  # stalled mount) holds nothing back. A FIFO stands in for the stalled file:
+  # opening it for writing blocks until someone opens it for reading. While it
+  # blocks, so does the VM's file server (a non-raw open goes through it), so
+  # nothing between the block and its release may call `File`.
+  describe "#2818: a step's file writes run outside the lock transaction" do
+    test "a state write that blocks doesn't hold a Cancel back, and its rename is refused" do
+      dir = Backups.dir()
+      media = Path.join(Path.dirname(dir), Path.basename(dir) <> "_media")
+      File.mkdir_p!(media)
+      File.write!(Path.join(media, "a.bin"), "a")
+      on_exit(fn -> File.rm_rf!(media) end)
+      put_backups_env(media_dir: media)
+
+      admin = %User{id: Ash.UUID.generate(), email: "fifo-admin@example.com", role: :admin}
+      on_exit(fn -> delete_events_of(admin) end)
+
+      # Media only: the dump step does nothing but write its state.
+      {:ok, %{status: :started}} =
+        unboxed(fn ->
+          Backups.request([trigger: "manual", components: [:media]], Backups.system())
+        end)
+
+      :ok = unboxed(fn -> StepWorker.perform(lock_job()) end)
+      dump_job = %{unboxed(&lock_job/0) | attempt: 1}
+      assert dump_job.args["step"] == "dump"
+      stamp = unboxed(fn -> Backups.backup_lock!(actor: Backups.system()).stamp end)
+      work = WorkState.path(dir, stamp)
+      before = File.read!(WorkState.file(work))
+
+      fifo = WorkState.file(work) <> ".#{dump_job.id}-1.partial"
+      {_, 0} = System.cmd("mkfifo", [fifo])
+      on_exit(fn -> unblock(fifo) end)
+
+      zombie = Task.async(fn -> unboxed(fn -> StepWorker.perform(dump_job) end) end)
+      wait_until_opening_a_fifo!()
+
+      run = unboxed(fn -> Backups.get_run_by_stamp!(stamp, actor: Backups.system()) end)
+      cancel = Task.async(fn -> unboxed(fn -> Backups.cancel_run(run, actor: admin) end) end)
+
+      # First, so a write back under the lock fails here rather than hanging:
+      # the write is let go before the test fails, so nothing is left blocked.
+      case Task.yield(cancel, 5_000) do
+        {:ok, canceled} ->
+          assert {:ok, %{status: :canceled}} = canceled
+
+        nil ->
+          unblock(fifo)
+          Task.shutdown(zombie, :brutal_kill)
+          Task.shutdown(cancel, :brutal_kill)
+          flunk("the Cancel waited for the blocked state write")
+      end
+
+      assert Process.alive?(zombie.pid)
+
+      {:ok, reader} = :file.open(fifo, [:read, :write, :raw, :binary])
+      assert {:cancel, :superseded} = Task.await(zombie, 10_000)
+      :file.close(reader)
+
+      assert File.read!(WorkState.file(work)) == before
+      assert Path.wildcard(WorkState.file(work) <> ".*") == []
+    end
+
+    # The start step reads its backup directory's id before it takes the lock;
+    # only a directory with none yet gets one, inside it.
+    test "begin_step reads the directory id before the lock" do
+      dir = Backups.dir()
+      File.mkdir_p!(dir)
+      {:ok, old_id} = DirId.local(dir)
+
+      {:ok, %{status: :started}} =
+        unboxed(fn -> Backups.request([trigger: "manual"], Backups.system()) end)
+
+      start_job = unboxed(&lock_job/0)
+      parent = self()
+
+      holder =
+        Task.async(fn ->
+          unboxed(fn ->
+            Repo.transaction(fn ->
+              Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+                Chain.lock_key()
+              ])
+
+              send(parent, {:holding, self()})
+
+              receive do
+                :go -> :ok
+              end
+            end)
+          end)
+        end)
+
+      assert_receive {:holding, pid}, 10_000
+      begin = Task.async(fn -> unboxed(fn -> Chain.begin_step(start_job) end) end)
+      assert Task.yield(begin, 500) == nil
+
+      # Read already: a new id written while it waits for the lock is not the
+      # one it binds.
+      File.write!(DirId.path(dir), Ash.UUID.generate() <> "\n")
+
+      send(pid, :go)
+      assert {:ok, :ok} = Task.await(holder, 10_000)
+      assert {:ok, %{dir_id: ^old_id}} = Task.await(begin, 10_000)
+    end
+
+    test "a start creates a directory id only once it is known to be current" do
+      dir = Backups.dir()
+
+      {:ok, %{status: :started}} =
+        unboxed(fn -> Backups.request([trigger: "manual"], Backups.system()) end)
+
+      start_job = unboxed(&lock_job/0)
+      refute File.exists?(DirId.path(dir))
+
+      stale = %{start_job | args: Map.put(start_job.args, "chain", Ash.UUID.generate())}
+      assert {:error, :superseded} = unboxed(fn -> Chain.begin_step(stale) end)
+      refute File.exists?(DirId.path(dir))
+
+      assert {:ok, %{dir_id: id}} = unboxed(fn -> Chain.begin_step(start_job) end)
+      assert {:ok, ^id} = DirId.current(dir)
+    end
+  end
+
+  defp lock_job,
+    do: Repo.get!(Oban.Job, Backups.backup_lock!(actor: Backups.system()).step_job_id)
+
+  defp put_backups_env(opts) do
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Backups,
+      Keyword.merge(Application.get_env(:kiln_cms, KilnCMS.Backups, []), opts)
+    )
+  end
+
+  defp delete_events_of(admin) do
+    unboxed(fn ->
+      Repo.delete_all(
+        from(e in "instance_security_events", where: e.actor_id == type(^admin.id, :binary_id))
+      )
+    end)
+  end
+
+  # A process blocked opening a file: the zombie's state write on the FIFO.
+  defp wait_until_opening_a_fifo!(tries \\ 400) do
+    blocked? =
+      Enum.any?(Process.list(), fn pid ->
+        Process.info(pid, :current_function) == {:current_function, {:prim_file, :open_nif, 2}}
+      end)
+
+    cond do
+      blocked? ->
+        :ok
+
+      tries == 0 ->
+        flunk("the state write never reached the FIFO")
+
+      true ->
+        Process.sleep(25)
+        wait_until_opening_a_fifo!(tries - 1)
+    end
+  end
+
+  # Open for reading and writing: never blocks, and lets a blocked writer go.
+  # Raw calls only: a non-raw open of the FIFO blocks the VM's file server
+  # with it, so `File.lstat/1` would wait behind the very write it releases.
+  defp unblock(fifo) do
+    with {:ok, info} <- :file.read_link_info(fifo, [:raw]),
+         :other <- elem(info, 2),
+         {:ok, io} <- :file.open(fifo, [:read, :write, :raw, :binary]) do
+      Process.sleep(200)
+      :file.close(io)
+    end
+  end
 end

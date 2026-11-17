@@ -161,6 +161,44 @@ carries the reasoning.
   [Rolling back past form mail jobs that carry ids](../releasing.md#rolling-back-past-form-mail-jobs-that-carry-ids).
   Refs #2992.
 
+<a id="backup-step-files-fenced-upgrade"></a>
+
+- **In-app backups now name their temporary files `<name>.<job>-<attempt>.partial`. No migration; update the host's `scripts/backup.sh` in the same rollout. Rolling back is safe.**
+  An in-app backup step writes each file under a temporary name tagged with
+  its Oban job id and attempt, for example
+  `db/kiln-db-20261117-031700.dump.48211-2.partial` (see *A backup step
+  that outlives its Cancel can no longer replace the backup's files* under
+  Fixed). `backup.sh` keeps writing `<name>.partial`, and this release's
+  copy of the script recognizes both names in `prune` and `verify`. Copy it
+  to every host that runs it, in the same rollout as the app. (`restore.sh`
+  already refused a set with either name beside it; only its comments
+  changed.) Operators will also see trash
+  directories, `db/.kiln-trash/`, `media/.kiln-trash/` and
+  `.work/.trash/`. They are normally empty; if you copy `BACKUP_DIR` with
+  `rclone sync`, exclude `**/.kiln-trash/**` as well as `.work/**`.
+
+  While nodes or scripts of an older release are still running beside this
+  one, an in-app backup stays safe, but the older code does not parse a
+  tagged name:
+
+  - an older node's retention and importer don't count it as in flight, and
+    its start step removes one older than an hour as an unrecognized
+    `.partial`. A backup being written is still protected from retention by
+    its `.work/<stamp>/` directory;
+  - an older `backup.sh prune` neither counts nor removes it;
+  - History on an older node can show a media set as complete while one of
+    its parts is being rebuilt under a tagged name (display only);
+  - an older node that plans a backup's media removes the tagged file lists
+    of an earlier plan, which nothing needs once its own `plan.json` is
+    written;
+  - after a rollback, an older node reads a `plan.json` that names tagged
+    lists, and uses them like any other.
+
+  See
+  [Temporary files and the trash directories](../backups.md#temporary-files-and-the-trash-directories).
+  ([#2818](https://github.com/The-Verscienta/kiln_cms/issues/2818),
+  [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819))
+
 <a id="workflow-task-mail-ids-upgrade"></a>
 
 - **Workflow and task mail jobs now carry ids. No migration. Drain the `mail` queue before rolling back: those queued by this release fail eight times on the previous one and are discarded. Upgrading straight from 1.9.x, old-shape mail still waiting is not sent.**
@@ -1139,6 +1177,51 @@ carries the reasoning.
   leaves completing the backup to the step that took over, as the finish
   that completes after an interruption already did. No migration.
   ([#3013](https://github.com/The-Verscienta/kiln_cms/issues/3013))
+
+<a id="backup-step-files-fenced"></a>
+
+- **A backup step that outlives its Cancel can no longer replace the backup's files, and writing a backup's state no longer holds the backup lock.**
+  A step on a node that missed its Cancel or its take-back keeps running
+  until its heartbeat stops it. Its `state.json` write was already fenced,
+  but it held the cluster-wide backup lock while it wrote: on a backup
+  directory that stalls (a hung NFS mount), Cancel, new requests and the
+  heartbeat's sweep waited behind it until their database query timed out
+  (#2818). Its dump and media parts were not fenced at all: they were
+  written to the same `.partial` names a resume of the same backup uses and
+  renamed into place unconditionally, so only the 150-second wait after a
+  Cancel kept such a step from overwriting the resume's files (#2819).
+
+  Every file a step writes (the dump, each media part, the checksum
+  sidecars, `state.json`, the media plan and its file lists, `manifest.json`)
+  now goes to a temporary name of its own, `<name>.<job>-<attempt>.partial`,
+  and is written, checked and hashed there outside the lock. Only the rename
+  into place runs under the lock, and only while the step still holds the
+  backup: a superseded step's rename is refused, and it removes its
+  temporary file and stops. A step that must delete something of the
+  backup's moves it into a trash directory on the same file system with one
+  rename under the lock and deletes it after the lock is released; the start
+  of every in-app backup empties the trash. The start step also reads the
+  backup directory's `.kiln-dir-id` before taking the lock.
+
+  What this does not do: the renames, the moves into the trash and the
+  finish step's marker sync are still file-system calls inside the lock's
+  transaction, so a mount that stalls between a step's write and its rename
+  can still hold Cancel back. The off-site copies and the prune step are not
+  fenced yet, and still rely on the wait after a Cancel. A later attempt of
+  the same job (an Oban retry or a Lifeline rescue) shares its lease with
+  an earlier attempt that is still running, so both attempts' renames are
+  admitted. A media part or dump that fails on every attempt now leaves a
+  file from an earlier attempt under its final name as it was, possibly
+  without a matching sidecar, until retention ages the stamp out; nothing
+  trusts it, since a resume reuses a file only on a recorded hash match.
+  See
+  [What a step that outlives its Cancel can write](../backups.md#what-a-step-that-outlives-its-cancel-can-write)
+  and
+  [ADR 0067](../decisions/0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md),
+  which amends ADR 0039. No migration; see Upgrade notes for the host
+  scripts.
+  ([#2818](https://github.com/The-Verscienta/kiln_cms/issues/2818),
+  [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819))
 
 <a id="erasure-deletes-newsletter-subscriptions"></a>
 

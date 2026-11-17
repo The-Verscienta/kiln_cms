@@ -21,7 +21,8 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
   longer `running` and the lock moved on (its advance is superseded). Its Run
   writes get a `StaleRecord` error before and after a Resume: they are
   filtered to `running` and to its own chain (`Changes.OwnChain`, #2538), and
-  its `state.json` write to its lease (`Chain.while_holding/2`).
+  its `state.json` write to its lease (its rename into place is
+  `Chain.fenced_rename/3`, #2818).
 
   The run is logged as canceled by the actor, with the step it was on in the
   audit event's metadata (`changeset.context[:backup_step]`).

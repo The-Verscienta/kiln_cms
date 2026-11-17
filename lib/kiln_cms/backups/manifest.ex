@@ -167,25 +167,53 @@ defmodule KilnCMS.Backups.Manifest do
   Best-effort — a failed manifest write must never fail the backup it
   describes. Losing the record of a good backup is bad; deleting a good backup
   because its record couldn't be written is worse.
+
+  `opts` are `KilnCMS.Backups.WorkState.write/3`'s `:tag` and `:rename`: a
+  backup step writes `manifest.json.<tag>.partial` and renames it under its
+  lease (#2818), so a superseded step's manifest is refused with
+  `{:error, :superseded}` and its temporary file removed.
   """
   # sobelow_skip ["Traversal.FileModule"]
-  @spec write(Path.t(), t()) :: :ok | {:error, term()}
-  def write(dir, %__MODULE__{} = manifest) when is_binary(dir) do
+  @spec write(Path.t(), t(), keyword()) :: :ok | {:error, term()}
+  def write(dir, %__MODULE__{} = manifest, opts \\ []) when is_binary(dir) do
     target = path(dir)
-    tmp = target <> ".partial"
+    tmp = KilnCMS.Backups.Artifact.partial_name(target, opts[:tag])
+    rename = opts[:rename] || (&File.rename/2)
 
     with :ok <- File.mkdir_p(dir),
          {:ok, json} <- Jason.encode(to_map(manifest), pretty: true),
-         :ok <- File.write(tmp, json <> "\n"),
-         :ok <- File.rename(tmp, target) do
-      :ok
-    else
-      # Every step above returns `:ok` or `{:error, _}`, so there is no third
-      # shape to catch — a defensive clause here would be unreachable.
-      {:error, reason} ->
-        File.rm(tmp)
-        {:error, reason}
+         :ok <- write_tmp(tmp, json <> "\n") do
+      put_in_place(tmp, target, rename)
     end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_tmp(tmp, contents) do
+    with {:error, _} = error <- File.write(tmp, contents) do
+      File.rm(tmp)
+      error
+    end
+  end
+
+  # The temporary file is removed whenever the rename didn't put it in place,
+  # including when the rename raises (a fenced rename's lock query timing out,
+  # #2818); a tagged leftover would otherwise sit at the directory's root until
+  # the start step's sweep. Not on success: an untagged name is `backup.sh`'s
+  # too, and a file under it by then is the script's.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp put_in_place(tmp, target, rename) do
+    case rename.(tmp, target) do
+      :ok ->
+        :ok
+
+      {:error, _} = error ->
+        File.rm(tmp)
+        error
+    end
+  catch
+    kind, reason ->
+      File.rm(tmp)
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   @doc "Total bytes across every artifact — what the panel shows as the backup's size."

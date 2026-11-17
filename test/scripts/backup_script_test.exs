@@ -134,6 +134,28 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "sha256: ok (kiln-media-#{stamp}.sha256)"
     end
 
+    # A newer set moved aside by the app (#2818) is not the newest set.
+    test "never reads into .kiln-trash", ctx do
+      stamp = "20260805-031700"
+      app_set!(ctx, stamp)
+      dump!(ctx, stamp)
+
+      newer = "20260806-031700"
+
+      for {sub, name} <- [
+            {"db", "kiln-db-#{newer}.dump"},
+            {"media", "kiln-media-#{newer}.part01.tar.gz"}
+          ] do
+        entry = Path.join([ctx.backups, sub, ".kiln-trash", "#{newer}.48211-2.#{sub}"])
+        File.mkdir_p!(entry)
+        File.write!(Path.join(entry, name), "garbage")
+      end
+
+      assert {out, 0} = backup(ctx, "verify")
+      assert out =~ "Newest media backup: #{stamp}"
+      refute out =~ newer
+    end
+
     test "catches a corrupted part that is not the newest file", ctx do
       stamp = "20260805-031700"
       [p1, p2 | _] = app_set!(ctx, stamp)
@@ -226,6 +248,20 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "sha256: ok (kiln-media-#{old}.sha256)"
     end
 
+    test "a set with a part the app is still writing (#2819) is skipped too", ctx do
+      old = "20260101-000000"
+      new = "20260805-031700"
+      app_set!(ctx, old)
+      dump!(ctx, old)
+      [_p1, p2 | _] = app_set!(ctx, new)
+      dump!(ctx, new)
+      File.rename!(p2, p2 <> ".48211-2.partial")
+
+      assert {out, 0} = backup(ctx, "verify")
+      assert out =~ "Skipping media set #{new}: still being written, or interrupted"
+      assert out =~ "Newest media backup: #{old}"
+    end
+
     test "fails when the only media set is an interrupted one", ctx do
       stamp = "20260805-031700"
       app_set!(ctx, stamp)
@@ -299,6 +335,32 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert {_out, 0} = backup(ctx, "prune")
       assert Enum.all?([other, stray, notes, manifest], &File.exists?/1)
       assert {:ok, %{type: :symlink}} = File.lstat(link)
+    end
+
+    # Where the app's backup step moves a file aside before deleting it
+    # (#2818): prune never lists into it, so what is in it is no unit of its.
+    test "leaves a .kiln-trash directory and what is in it alone", ctx do
+      old = "20260101-000000"
+      newest = "20260301-000000"
+      age!(set_files!(ctx, newest), 400)
+
+      inside =
+        for {sub, name} <- [
+              {"db", "kiln-db-#{old}.dump"},
+              {"media", "kiln-media-#{old}.part01.tar.gz.48211-2.partial"}
+            ] do
+          entry = Path.join([ctx.backups, sub, ".kiln-trash", "#{old}.48211-2.#{sub}"])
+          File.mkdir_p!(entry)
+          path = Path.join(entry, name)
+          File.write!(path, "moved aside")
+          path
+        end
+
+      age!(inside, 400)
+
+      assert {out, 0} = backup(ctx, "prune")
+      refute out =~ ".kiln-trash"
+      assert Enum.all?(inside, &File.exists?/1)
     end
 
     test "the newest complete unit of each kind is kept however old", ctx do
@@ -444,6 +506,40 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert File.exists?(fresh)
       # Every file of its stamp is days old: a killed run's leftover (#2478).
       refute File.exists?(old)
+    end
+
+    test "the app's tagged partials (#2819) keep their unit while fresh and go when abandoned",
+         ctx do
+      [writing_db, writing_media, stale, newest] =
+        ~w(20260101-000000 20260201-000000 20260301-000000 20260401-000000)
+
+      files = Map.new([writing_db, writing_media, stale, newest], &{&1, set_files!(ctx, &1)})
+      age!(Enum.flat_map(Map.values(files), & &1), 400)
+      fresh_db = Path.join(ctx.backups, "db/kiln-db-#{writing_db}.dump.48211-2.partial")
+      fresh_media = Path.join(ctx.backups, "media/kiln-media-#{writing_media}.sha256.7.partial")
+      old = Path.join(ctx.backups, "media/kiln-media-#{stale}.part09.tar.gz.48211-1.partial")
+
+      # Not a partial of either shape: never counted, never removed.
+      untagged_tail = Path.join(ctx.backups, "db/kiln-db-#{stale}.dump.48211")
+      not_digits = Path.join(ctx.backups, "db/kiln-db-#{stale}.dump.4a1.partial")
+
+      for f <- [fresh_db, fresh_media, old, untagged_tail, not_digits], do: File.write!(f, "")
+      age!([old, untagged_tail, not_digits], 2)
+
+      assert {_out, 0} = backup(ctx, "prune")
+
+      {db, media} = Enum.split_with(files[writing_db], &String.contains?(&1, "/db/"))
+      assert Enum.all?(db, &File.exists?/1)
+      assert Enum.all?(media, &(not File.exists?(&1)))
+      {db, media} = Enum.split_with(files[writing_media], &String.contains?(&1, "/db/"))
+      assert Enum.all?(media, &File.exists?/1)
+      assert Enum.all?(db, &(not File.exists?(&1)))
+      assert Enum.all?(files[stale], &(not File.exists?(&1)))
+      assert File.exists?(fresh_db)
+      assert File.exists?(fresh_media)
+      refute File.exists?(old)
+      assert File.exists?(untagged_tail)
+      assert File.exists?(not_digits)
     end
 
     test "a run in flight never takes the newest-complete slot from the last finished one",
@@ -633,7 +729,12 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       # The one intended difference: cron removes an abandoned run's partials
       # (#2478); the app's plan never deletes a `.partial` (its start step
       # sweeps them, and only once the stamp has a run row).
-      cron_only = MapSet.new(["media/kiln-media-20250201-000000.part03.tar.gz.partial"])
+      cron_only =
+        MapSet.new([
+          "media/kiln-media-20250201-000000.part03.tar.gz.partial",
+          "media/kiln-media-20250201-000000.part02.tar.gz.48211-2.partial"
+        ])
+
       assert MapSet.subset?(cron_only, app_survivors)
       assert listing(ctx) == MapSet.difference(app_survivors, cron_only)
 
@@ -817,6 +918,8 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     for i <- 1..2, do: put.("media/kiln-media-20250201-000000.part0#{i}.tar.gz", 400, "p")
     put.("media/kiln-media-20250201-000000.sha256", 400, "s")
     put.("media/kiln-media-20250201-000000.part03.tar.gz.partial", 2, "p")
+    # The same, as the app's backup step names it (#2819).
+    put.("media/kiln-media-20250201-000000.part02.tar.gz.48211-2.partial", 2, "p")
     put.("db/kiln-db-20250201-000000.dump", 400, "d")
 
     # S3: a symlinked dump (never deleted) with a regular sidecar (goes); parts
@@ -864,6 +967,9 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     put.("db/kiln-db-20251001-000000.dump", 400, "")
     put.("db/kiln-db-20251101-000000.dump", 400, "")
     put.("db/kiln-db-20251101-000000.sha256.partial", 0, "")
+    # S16: a fresh tagged partial (#2819) keeps its unit like an untagged one.
+    put.("db/kiln-db-20251102-000000.dump", 400, "")
+    put.("db/kiln-db-20251102-000000.dump.48211-2.partial", 0, "")
     put.("db/kiln-db-20251001-000000.dump.partial", 400, "")
 
     # S13: a future-dated complete dump and an impossible-stamp (month 13)
